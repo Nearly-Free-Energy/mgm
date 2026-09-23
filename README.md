@@ -15,4 +15,4 @@ npm run dev     # start dev server at http://localhost:3000
 
 ## Related
 
-- [energy-iot/docker-openems](https://github.com/energy-iot/docker-openems) -- OpenEMS energy platform (Edge + Backend + UI)
+- [https://github.com/Nearly-Free-Energy/openems) -- OpenEMS energy platform (Edge + Backend + UI)
