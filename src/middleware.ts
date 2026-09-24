@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isMgmPilotRoute } from "@/lib/mgm/route-surface";
 
 // Paths that don't require an authenticated session. `/accept-invite`
 // is reached unauthenticated by users clicking the invite-email link
@@ -48,9 +49,20 @@ const PUBLIC_PATHS = [
   "/p/",
   "/api/v1/",
   "/api/payments/ipn",
+  "/api/mgm/health",
 ];
 
 export async function middleware(request: NextRequest) {
+  // This fork defaults to the narrow MGM surface. The legacy MBE application
+  // remains available only for local comparison when explicitly opted out.
+  // If new review routes are added, update this allowlist before deployment.
+  if (
+    process.env.MGM_PILOT_SURFACE !== "false" &&
+    !isMgmPilotRoute(request.nextUrl.pathname, request.method)
+  ) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });

@@ -61,9 +61,9 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { calculateTieredCost } from "@/lib/billing/calculations";
 import { roundKwh, roundAmount } from "@/lib/billing/precision";
-import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
-import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import type { DeviceConfig } from "@/lib/adapters/types";
+import { MeteringError } from "@/lib/metering/errors";
+import type { MeteringProvider } from "@/lib/metering/types";
 import type {
   BillingLineItem,
   BillingPeriod,
@@ -121,6 +121,7 @@ export type GenerationErrorCode =
   | "missing_openems_config"
   | "invalid_manual_reading"
   | "unmetered_no_manual"
+  | "meter_assignment_continuity"
   | "unknown_household"
   /**
    * #339. The device has no prior MBE `end_kwh` and no seed was supplied, so
@@ -152,6 +153,7 @@ export type PreviewHouseholdResult = {
   usageKwh: number;
   tierBreakdown: TierBreakdown[];
   totalAmount: number;
+  previousUsageKwh: number | null;
   previousTotalAmount: number | null;
   previousPaymentStatus: BillingLineItemPaymentStatus | null;
 };
@@ -201,6 +203,12 @@ export type RunGenerationParams = {
    *  source key (e.g. `'pesapal_ipn'`) for system. Required by DB CHECK
    *  whenever `actorKind != 'human'`. */
   actorRef?: string | null;
+  /**
+   * Explicit, request-scoped metering dependency. Billing never constructs a
+   * vendor client or resolves provider configuration itself. Manual-only runs
+   * do not need one.
+   */
+  meteringProvider?: MeteringProvider;
 };
 
 export type RunGenerationFatal =
@@ -221,6 +229,8 @@ type HouseholdRow = {
   display_name: string;
   household_devices: {
     role: string;
+    effective_from: string;
+    effective_to: string | null;
     devices: {
       id: string;
       openems_component_id: string | null;
@@ -335,6 +345,8 @@ export async function runGenerationFor(
       display_name,
       household_devices(
         role,
+        effective_from,
+        effective_to,
         devices(
           id,
           openems_component_id,
@@ -363,20 +375,41 @@ export async function runGenerationFor(
     householdsAll.map((h) => [h.id, h.display_name])
   );
 
-  // Map: householdId → primary device row (or null if un-metered).
+  // Map: householdId → the single primary device that covers the whole
+  // billing period. A period that crosses a replacement cannot be collapsed
+  // into one register: it must surface a continuity exception instead.
   type ResolvedDevice = {
     deviceId: string;
     edgeOpenemsId: string;
     componentId: string;
   };
   const householdToDevice = new Map<string, ResolvedDevice | null>();
+  const householdAssignmentErrors = new Map<string, string>();
 
   for (const h of householdsAll) {
-    const primaryHD = h.household_devices.find(
-      (hd) => hd.role === "primary_consumption_meter"
+    const primaryAssignments = h.household_devices.filter(
+      (hd) =>
+        hd.role === "primary_consumption_meter" &&
+        hd.effective_from <= billingPeriod.start_date &&
+        (hd.effective_to === null || hd.effective_to > billingPeriod.end_date)
     );
+    const primaryHD = primaryAssignments[0];
+    if (primaryAssignments.length > 1) {
+      householdToDevice.set(h.id, null);
+      householdAssignmentErrors.set(
+        h.id,
+        "More than one primary meter assignment covers this billing period."
+      );
+      continue;
+    }
     if (!primaryHD || !primaryHD.devices) {
       householdToDevice.set(h.id, null);
+      if (h.household_devices.some((hd) => hd.role === "primary_consumption_meter")) {
+        householdAssignmentErrors.set(
+          h.id,
+          "No single meter assignment covers the complete billing period; verify replacement boundaries and readings."
+        );
+      }
       continue;
     }
     const device = primaryHD.devices;
@@ -386,6 +419,10 @@ export async function runGenerationFor(
       // for the OpenEMS path. A `manualReadings` override still wins and
       // routes the household through the manual path.
       householdToDevice.set(h.id, null);
+      householdAssignmentErrors.set(
+        h.id,
+        "The active meter assignment is missing its OpenEMS edge or component mapping."
+      );
       continue;
     }
     householdToDevice.set(h.id, {
@@ -496,77 +533,61 @@ export async function runGenerationFor(
     }
   }
 
-  // ── 6. Resolve OpenEMS readings — only when at least one household needs them
-  const householdsNeedingOpenems: string[] = [];
+  // ── 6. Resolve metering readings — only when at least one household needs them
+  const householdsNeedingMetering: string[] = [];
   for (const hid of processedSet) {
     if (manualByHousehold.has(hid)) continue;
     const dev = householdToDevice.get(hid);
-    if (dev) householdsNeedingOpenems.push(hid);
+    if (dev) householdsNeedingMetering.push(hid);
   }
 
   let usageMap = new Map<string, number | null>();
-  let openemsConfigMissing = false;
-  let openemsFatal: RunGenerationFatal | null = null;
-  if (householdsNeedingOpenems.length > 0) {
-    let emsConfig;
+  if (householdsNeedingMetering.length > 0) {
+    if (!params.meteringProvider) {
+      return {
+        kind: "fatal",
+        status: 503,
+        body: {
+          error: "No metering provider was supplied for this billing request",
+          code: "METERING_CONFIGURATION",
+        },
+      };
+    }
+
+    const deviceConfigs: DeviceConfig[] = householdsNeedingMetering
+      .map((hid) => householdToDevice.get(hid))
+      .filter((d): d is ResolvedDevice => Boolean(d))
+      .map((d) => ({
+        id: d.deviceId,
+        edgeOpenemsId: d.edgeOpenemsId,
+        componentId: d.componentId,
+      }));
     try {
-      emsConfig = await getMicrogridEmsConfig(
-        supabase,
-        billingPeriod.microgrid_id
-      );
+      // #355: the window's timezone is the PERIOD's stamped value
+      // (`billing_periods.timezone`, written once by the BEFORE INSERT
+      // trigger from #354) — never `microgrids.timezone`, which the
+      // operator can change later. Regenerating a closed period after a
+      // microgrid timezone change must reproduce the identical window and
+      // therefore byte-identical line items; if the stamp trigger ever
+      // starts re-stamping on UPDATE, revisit this guarantee.
+      const readings = await params.meteringProvider.getReadings({
+        microgridId: billingPeriod.microgrid_id,
+        devices: deviceConfigs,
+        startDate: billingPeriod.start_date,
+        endDate: billingPeriod.end_date,
+        timezone: billingPeriod.timezone,
+      });
+      usageMap = new Map(readings.map((reading) => [reading.deviceId, reading.usageKwh]));
     } catch (err) {
-      if (err instanceof OpenEmsError) {
-        // Per-household error — fall through, mark each metered household
-        // missing_openems_config below.
-        openemsConfigMissing = true;
-      } else {
-        throw err;
+      if (err instanceof MeteringError) {
+        return {
+          kind: "fatal",
+          status: err.statusCode,
+          body: { error: err.message, code: err.code },
+        };
       }
+      throw err;
     }
-    if (!emsConfig && !openemsConfigMissing) {
-      openemsConfigMissing = true;
-    }
-
-    if (emsConfig) {
-      try {
-        const client = createOpenEmsClient(emsConfig);
-        const deviceConfigs: DeviceConfig[] = householdsNeedingOpenems
-          .map((hid) => householdToDevice.get(hid))
-          .filter((d): d is ResolvedDevice => Boolean(d))
-          .map((d) => ({
-            id: d.deviceId,
-            edgeOpenemsId: d.edgeOpenemsId,
-            componentId: d.componentId,
-          }));
-        // #355: the window's timezone is the PERIOD's stamped value
-        // (`billing_periods.timezone`, written once by the BEFORE INSERT
-        // trigger from #354) — never `microgrids.timezone`, which the
-        // operator can change later. Regenerating a closed period after a
-        // microgrid timezone change must reproduce the identical window and
-        // therefore byte-identical line items; if the stamp trigger ever
-        // starts re-stamping on UPDATE, revisit this guarantee.
-        const readings = await client.getReadings(
-          deviceConfigs,
-          billingPeriod.start_date,
-          billingPeriod.end_date,
-          billingPeriod.timezone
-        );
-        usageMap = new Map<string, number | null>();
-        for (const r of readings) usageMap.set(r.deviceId, r.usageKwh);
-      } catch (err) {
-        if (err instanceof OpenEmsError) {
-          openemsFatal = {
-            kind: "fatal",
-            status: err.statusCode,
-            body: { error: err.message, code: err.code },
-          };
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    if (openemsFatal) return openemsFatal;
   }
 
   // ── 7. Per-household processing loop ──────────────────────────────────────
@@ -577,6 +598,7 @@ export async function runGenerationFor(
     const prior = existingByHousehold.get(hid) ?? null;
     const dev = householdToDevice.get(hid);
     const manual = manualByHousehold.get(hid);
+    const assignmentError = householdAssignmentErrors.get(hid);
 
     // Q5: bulk-regenerate hit a manual row without a manual override → skip.
     if (
@@ -646,19 +668,17 @@ export async function runGenerationFor(
       // is one — informational only; the manual reading is authoritative.
       deviceId = dev?.deviceId ?? null;
       manualReason = manual.reason ?? null;
+    } else if (assignmentError) {
+      results.push({
+        kind: "error",
+        householdId: hid,
+        householdName,
+        error: assignmentError,
+        code: "meter_assignment_continuity",
+      });
+      continue;
     } else if (dev) {
-      // Edge path — needs OpenEMS reading.
-      if (openemsConfigMissing) {
-        results.push({
-          kind: "error",
-          householdId: hid,
-          householdName,
-          error:
-            "OpenEMS Backend not configured for this microgrid. Configure it on the OpenEMS Backend tab first.",
-          code: "missing_openems_config",
-        });
-        continue;
-      }
+      // Metered path — the injected provider supplied the reading above.
       const u = usageMap.get(dev.deviceId);
       if (u === null || u === undefined) {
         results.push({
@@ -760,6 +780,10 @@ export async function runGenerationFor(
         usageKwh: usageKwhRounded,
         tierBreakdown: calc.tierBreakdown,
         totalAmount: calc.totalAmount,
+        previousUsageKwh:
+          prior && prior.usage_kwh !== null
+            ? roundKwh(Number(prior.usage_kwh))
+            : null,
         previousTotalAmount,
         previousPaymentStatus: prior?.payment_status ?? null,
       });
