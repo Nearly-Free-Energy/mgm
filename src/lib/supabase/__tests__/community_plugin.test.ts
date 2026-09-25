@@ -238,26 +238,70 @@ describe("mgm plugin state + enforcement", () => {
     expect(writeError).toBeNull();
   });
 
-  it("bootstrap RPC refuses a second organization", async () => {
+  it("bootstrap RPC is not executable by authenticated clients", async () => {
     if (shouldSkip()) return;
-    // The fixture orgs already exist, so the first-organization invariant
-    // must reject. userD is authenticated, satisfying the auth check.
+    // EXECUTE is granted to service_role only: the token guard lives in the
+    // Next.js route, so direct PostgREST calls must be denied even for a
+    // super_admin. Either grant-layer denial (42501) or schema-cache
+    // filtering (PGRST202) is the same secure outcome.
     const { error } = await userD.client.rpc(
       "fn_mgm_bootstrap_first_organization",
       {
+        _operator_user_id: userD.userId,
         _name: "Second Org",
-        _address_line1: null,
-        _address_line2: null,
         _address_city: "Kampala",
-        _address_region: null,
         _address_country: "Uganda",
-        _address_postal_code: null,
         _organization_directory_version: "0.1.0",
         _community_management_version: "0.1.0",
       }
     );
-    expect(error?.code).toBe("P0001");
-    expect(error?.message).toContain("already exists");
+    expect(error).not.toBeNull();
+    expect(
+      error?.code === "42501" ||
+        error?.code === "PGRST202" ||
+        (error?.message ?? "").toLowerCase().includes("permission denied")
+    ).toBe(true);
+
+    const svc = await serviceClient();
+    const { data: orgs } = await svc
+      .from("organizations")
+      .select("id")
+      .eq("name", "Second Org");
+    expect(orgs ?? []).toEqual([]);
+  });
+
+  it("denies direct plugin-state writes even for the owning org manager", async () => {
+    if (shouldSkip()) return;
+    // State changes are exposed only through fn_mgm_set_plugin_enabled.
+    const { error: insertError } = await userA.client
+      .from("mgm_plugins")
+      .insert({
+        org_id: FIXTURE.orgA,
+        plugin_name: "community-management",
+        version: "9.9.9",
+        enabled: false,
+      });
+    expect(insertError).not.toBeNull();
+
+    const { error: updateError } = await userA.client
+      .from("mgm_plugins")
+      .update({ enabled: false })
+      .eq("org_id", FIXTURE.orgA)
+      .eq("plugin_name", "community-management");
+    expect(updateError).not.toBeNull();
+
+    // Forged audit history is denied as well.
+    const { error: auditError } = await userA.client
+      .from("mgm_plugin_audit_log")
+      .insert({
+        org_id: FIXTURE.orgA,
+        plugin_name: "community-management",
+        action: "disabled",
+        previous_enabled: true,
+        new_enabled: false,
+        actor_user_id: userA.userId,
+      });
+    expect(auditError).not.toBeNull();
   });
 
   it("anonymous callers cannot resolve plugin state", async () => {

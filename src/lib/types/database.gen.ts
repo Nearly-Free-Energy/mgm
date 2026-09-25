@@ -1234,6 +1234,7 @@ export type Database = {
           _address_region?: string
           _community_management_version: string
           _name: string
+          _operator_user_id: string
           _organization_directory_version: string
         }
         Returns: {

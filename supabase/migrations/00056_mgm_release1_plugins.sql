@@ -85,29 +85,31 @@ DROP POLICY IF EXISTS mgm_plugins_select ON mgm_plugins;
 CREATE POLICY mgm_plugins_select ON mgm_plugins FOR SELECT
   USING (is_super_admin() OR user_can_access_org(org_id));
 
-DROP POLICY IF EXISTS mgm_plugins_insert ON mgm_plugins;
-CREATE POLICY mgm_plugins_insert ON mgm_plugins FOR INSERT
-  WITH CHECK (is_super_admin() OR user_can_access_org(org_id));
-
-DROP POLICY IF EXISTS mgm_plugins_update ON mgm_plugins;
-CREATE POLICY mgm_plugins_update ON mgm_plugins FOR UPDATE
-  USING (is_super_admin() OR user_can_access_org(org_id))
-  WITH CHECK (is_super_admin() OR user_can_access_org(org_id));
-
--- No DELETE policy. Plugin rows are configuration history anchors; disabling
--- preserves the row. Organization deletion cascades through the FK.
-GRANT SELECT, INSERT, UPDATE ON mgm_plugins TO authenticated;
+-- No INSERT, UPDATE, or DELETE policy. All state changes go through
+-- `fn_mgm_set_plugin_enabled` (SECURITY DEFINER, bypasses RLS), which
+-- validates bundled-plugin identity, dependency order, and the
+-- organization-directory core lock, and writes the audit row atomically.
+-- A direct table write could otherwise disable the core plugin, store an
+-- arbitrary version, or skip audit history entirely. There is deliberately
+-- no permissive policy to pair with the grants below: with RLS enabled and
+-- no policy for a verb, the write is denied even if a grant exists.
+--
+-- No DELETE policy either. Plugin rows are configuration history anchors;
+-- disabling preserves the row. Organization deletion cascades through the FK.
+--
+-- Authenticated clients get SELECT only (reads for Settings/plugins UI).
+GRANT SELECT ON mgm_plugins TO authenticated;
 
 DROP POLICY IF EXISTS mgm_plugin_audit_log_select ON mgm_plugin_audit_log;
 CREATE POLICY mgm_plugin_audit_log_select ON mgm_plugin_audit_log FOR SELECT
   USING (is_super_admin() OR user_can_access_org(org_id));
 
-DROP POLICY IF EXISTS mgm_plugin_audit_log_insert ON mgm_plugin_audit_log;
-CREATE POLICY mgm_plugin_audit_log_insert ON mgm_plugin_audit_log FOR INSERT
-  WITH CHECK (is_super_admin() OR user_can_access_org(org_id));
-
--- No UPDATE or DELETE policy: plugin changes are append-only history.
-GRANT SELECT, INSERT ON mgm_plugin_audit_log TO authenticated;
+-- No INSERT, UPDATE, or DELETE policy: plugin changes are append-only
+-- history written only by `fn_mgm_set_plugin_enabled` (SECURITY DEFINER)
+-- with the actor bound to `auth.uid()`. A direct insert could forge history
+-- with an arbitrary actor, action, previous state, or timestamp.
+-- Authenticated clients get SELECT only.
+GRANT SELECT ON mgm_plugin_audit_log TO authenticated;
 
 -- ── 4. Plugin-state helper ──────────────────────────────────────────────────
 
@@ -341,13 +343,19 @@ GRANT EXECUTE ON FUNCTION fn_mgm_set_plugin_enabled(UUID, TEXT, TEXT, BOOLEAN) T
 
 -- ── 7. First-organization bootstrap ─────────────────────────────────────────
 --
--- Creates the initial organization and grants the calling authenticated user
--- the organization-manager role. The table lock plus existence check make
+-- Creates the initial organization and grants the given operator user the
+-- organization-manager role. The table lock plus existence check make
 -- concurrent first-run calls safe: only the first transaction creates the org.
--- The application additionally requires MGM_BOOTSTRAP_TOKEN; this function
--- enforces the complementary database invariant (exactly one first org).
+--
+-- EXECUTE is granted to service_role ONLY (not authenticated). The Next.js
+-- bootstrap route enforces the caller session plus MGM_BOOTSTRAP_TOKEN and
+-- then invokes this function with its service-role client, passing the
+-- session's user id explicitly. Granting it to authenticated would let any
+-- signed-in user call the RPC directly via PostgREST, bypass the token
+-- guard, and win the first-organization race on a fresh deployment.
 
 CREATE OR REPLACE FUNCTION fn_mgm_bootstrap_first_organization(
+  _operator_user_id UUID,
   _name TEXT,
   _address_city TEXT,
   _address_country TEXT,
@@ -366,8 +374,8 @@ AS $$
 DECLARE
   v_org organizations%ROWTYPE;
 BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'Authentication required'
+  IF _operator_user_id IS NULL THEN
+    RAISE EXCEPTION 'Operator user id is required'
       USING ERRCODE = '42501';
   END IF;
 
@@ -412,7 +420,7 @@ BEGIN
   RETURNING * INTO v_org;
 
   INSERT INTO user_roles (user_id, role, scope_type, scope_id)
-  VALUES (auth.uid(), 'org_manager', 'org', v_org.id)
+  VALUES (_operator_user_id, 'org_manager', 'org', v_org.id)
   ON CONFLICT DO NOTHING;
 
   INSERT INTO mgm_plugins (org_id, plugin_name, version, enabled)
@@ -425,5 +433,5 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION fn_mgm_bootstrap_first_organization(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION fn_mgm_bootstrap_first_organization(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION fn_mgm_bootstrap_first_organization(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_mgm_bootstrap_first_organization(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO service_role;

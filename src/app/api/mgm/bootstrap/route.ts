@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
 import {
   COMMUNITY_MANAGEMENT_PLUGIN_VERSION,
@@ -37,6 +38,11 @@ function tokenMatches(provided: string): boolean {
  *
  * After the first organization exists the endpoint is inert (409). Remove
  * `MGM_BOOTSTRAP_TOKEN` from the environment once bootstrap is complete.
+ *
+ * The RPC itself is executable by service_role only (see migration 00056):
+ * this route verifies the session + token first, then invokes it with the
+ * service-role client, passing the session's user id as the operator. No
+ * authenticated client can reach the RPC directly.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const ip =
@@ -126,9 +132,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { data, error } = await supabase.rpc(
+  const { data, error } = await createServiceClient().rpc(
     "fn_mgm_bootstrap_first_organization",
     {
+      _operator_user_id: user.id,
       _name: name,
       _address_line1: readOptionalString(org.address_line1) ?? undefined,
       _address_line2: readOptionalString(org.address_line2) ?? undefined,

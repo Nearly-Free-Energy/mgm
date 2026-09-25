@@ -8,6 +8,11 @@ const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: currentUser } }) },
+  }),
+}));
+
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceClient: () => ({
     rpc: (...args: unknown[]) => mockRpc(...args),
   }),
 }));
@@ -101,6 +106,7 @@ describe("POST /api/mgm/bootstrap", () => {
     expect(mockRpc).toHaveBeenCalledWith(
       "fn_mgm_bootstrap_first_organization",
       expect.objectContaining({
+        _operator_user_id: "user-1",
         _name: "New Frontiers Energy",
         _address_city: "Kampala",
         _address_country: "Uganda",
