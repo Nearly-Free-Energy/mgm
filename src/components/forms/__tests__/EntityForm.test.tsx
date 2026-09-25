@@ -190,6 +190,8 @@ describe("EntityForm", () => {
         name: "Kisakye MG-1",
         community_id: "c-a",
         currency: "UGX",
+        // Release 1 (issue #3): new microgrids default to Africa/Kampala.
+        timezone: "Africa/Kampala",
       });
     });
 

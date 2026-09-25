@@ -19,4 +19,3 @@ export type MeteringReadRequest = {
 export interface MeteringProvider {
   getReadings(request: MeteringReadRequest): Promise<DeviceReading[]>;
 }
-

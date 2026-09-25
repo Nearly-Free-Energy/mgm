@@ -28,7 +28,6 @@ vi.mock("@supabase/ssr", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   getUserMock.mockReset();
-  process.env.MGM_PILOT_SURFACE = "false";
   // Provide minimal env for the middleware to construct a client.
   process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
@@ -44,22 +43,47 @@ function makeRequest(pathname: string) {
 }
 
 describe("middleware PUBLIC_PATHS", () => {
-  it("MGM deployment blocks inherited mutation routes before authentication", async () => {
-    process.env.MGM_PILOT_SURFACE = "true";
-    const middleware = await loadMiddleware();
-    const res = await middleware(new NextRequest("http://localhost/api/billing/generate", { method: "POST" }));
-    expect(res.status).toBe(404);
-    expect(getUserMock).not.toHaveBeenCalled();
-  });
-
-  it("MGM health remains available without a session", async () => {
-    process.env.MGM_PILOT_SURFACE = "true";
+  it("keeps the health endpoint available without a session", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest("/api/mgm/health"));
     expect(res.status).toBe(200);
   });
+  it.each([
+    "/api/billing/generate",
+    "/api/v1/billing/generate",
+    "/api/openems/energy",
+    "/api/microgrids/grid-1/openems-backend",
+    "/microgrids/grid-1/billing",
+    "/microgrids/grid-1/setup/edges",
+    "/communities/community-1/payment",
+  ])("returns 404 for unreleased route %s even when signed in", async (path) => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path));
+    expect(res.status).toBe(404);
+  });
 
+  it.each([
+    "/api/communities",
+    "/api/microgrids/grid-1",
+    "/api/households/with-meter",
+    "/settings/plugins",
+    "/microgrids/grid-1/setup/households",
+  ])("permits released management route %s", async (path) => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path));
+    expect(res.status).toBe(200);
+  });
+
+  it("redirects microgrid detail away from the legacy OpenEMS overview", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/microgrids/grid-1/setup/households");
+  });
   it("allows unauthenticated GET on /forgot-password (no redirect)", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
@@ -101,11 +125,11 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.status).toBe(200);
   });
 
-  it("redirects unauthenticated GET on a private path to /login", async () => {
+  it("redirects unauthenticated GET on an available private path to /login", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
-    const res = await middleware(makeRequest("/dashboard"));
+    const res = await middleware(makeRequest("/communities"));
 
     // NextResponse.redirect sets a 3xx and a Location header.
     expect(res.status).toBeGreaterThanOrEqual(300);
@@ -116,17 +140,16 @@ describe("middleware PUBLIC_PATHS", () => {
   // #223: /p/<slug> is the consumer-facing payment-link indirection.
   // Customers arrive with no MBE session; the middleware MUST pass-through
   // (the route's service-role SELECT is the access-control gate).
-  it("allows unauthenticated GET on /p/<slug> (consumer payment link — #223)", async () => {
+  it("blocks inherited public payment links in Release 1", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/p/Kp9XrA"));
 
-    expect(res.headers.get("location")).toBeNull();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
   });
 
-  it("authenticated GET on /p/<slug> is also pass-through (no redirect to /)", async () => {
+  it("blocks inherited payment links for authenticated users too", async () => {
     getUserMock.mockResolvedValue({
       data: { user: { id: "u1" } },
       error: null,
@@ -137,8 +160,7 @@ describe("middleware PUBLIC_PATHS", () => {
 
     // No redirect — neither to /login nor to / (the authenticated-on-/login
     // branch is the only place a logged-in user gets redirected to root).
-    expect(res.headers.get("location")).toBeNull();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
   });
 
   // #294: /api/payments/ipn is Pesapal's IPN webhook — an unauthenticated
@@ -146,7 +168,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // pass it through, otherwise it 401s ("Authentication required") before
   // the route handler runs and payments never auto-mark. Same class as the
   // /api/v1/ hotfix (#267).
-  it("allows unauthenticated request on /api/payments/ipn (Pesapal IPN webhook — #294)", async () => {
+  it("blocks inherited payment webhooks in Release 1", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
@@ -154,7 +176,7 @@ describe("middleware PUBLIC_PATHS", () => {
 
     // Pass-through (NextResponse.next), NOT the 401 JSON that API routes get
     // when unauthenticated and non-public.
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
   });
 
@@ -162,14 +184,14 @@ describe("middleware PUBLIC_PATHS", () => {
   // payment routes (auth-gated payment-status mutations) must still 401 an
   // unauthenticated API request. Guards against a broad /api/payments/
   // prefix silently exposing them.
-  it("still 401s unauthenticated request on a sibling /api/payments/* route (#294 scoping)", async () => {
+  it("blocks inherited payment-status routes", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/api/payments/status"));
 
     // API routes return 401 JSON (not a redirect) when non-public.
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
   });
 });

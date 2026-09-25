@@ -1,10 +1,16 @@
 /**
  * POST /api/communities & PATCH /api/communities/[id] — route tests (#76).
  *
+ * Released mutations route through the community-management Cordis
+ * capability. These tests exercise the HTTP boundary with the composition
+ * module's auth/role/plugin checks mocked, plus mocked Supabase chains for
+ * parent resolution and persistence.
+ *
  * Covers:
- *   - POST: 403 when org_id is outside the caller's accessible orgs
+ *   - POST: 403 when the caller has no role for the org
  *   - POST: 400 on malformed org_id
  *   - POST: 422 on missing name
+ *   - POST: 409 when the community plugin is disabled
  *   - PATCH: dirty-fields (address_city only → no name/geography_notes sent)
  */
 
@@ -14,42 +20,60 @@ import { NextRequest } from "next/server";
 const mockRevalidatePath = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 
-let canAccessOrgReturn = true;
-let canAccessCommunityReturn = true;
+let roleRows: unknown[] = [];
+let pluginEnabled = true;
+let currentUser: { id: string } | null = { id: "user-1" };
 
 const mockInsert = vi.fn();
 const mockUpdate = vi.fn();
 const mockSingleAfterInsertSelect = vi.fn();
 const mockMaybeSingleAfterUpdateSelect = vi.fn();
+const mockParentMaybeSingle = vi.fn();
 
-const mockFrom = vi.fn(() => ({
-  insert: (row: unknown) => {
-    mockInsert(row);
-    return {
-      select: () => ({
-        single: () => mockSingleAfterInsertSelect(),
-      }),
-    };
-  },
-  update: (patch: unknown) => {
-    mockUpdate(patch);
-    return {
-      eq: () => ({
+const mockFrom = vi.fn((table: string) => {
+  if (table !== "communities") throw new Error(`Unexpected table: ${table}`);
+  return {
+    insert: (row: unknown) => {
+      mockInsert(row);
+      return {
         select: () => ({
-          maybeSingle: () => mockMaybeSingleAfterUpdateSelect(),
+          single: () => mockSingleAfterInsertSelect(),
         }),
+      };
+    },
+    update: (patch: unknown) => {
+      mockUpdate(patch);
+      return {
+        eq: () => ({
+          select: () => ({
+            maybeSingle: () => mockMaybeSingleAfterUpdateSelect(),
+          }),
+        }),
+      };
+    },
+    select: () => ({
+      eq: () => ({
+        maybeSingle: () => mockParentMaybeSingle(),
       }),
-    };
-  },
-}));
+    }),
+  };
+});
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mockFrom }),
+  createClient: async () => ({
+    from: mockFrom,
+    auth: { getUser: async () => ({ data: { user: currentUser } }) },
+  }),
 }));
 
 vi.mock("@/lib/auth/access", () => ({
-  currentUserCanAccessOrg: async () => canAccessOrgReturn,
-  currentUserCanAccessCommunity: async () => canAccessCommunityReturn,
+  getCurrentUserRoles: async () => roleRows,
+  currentUserCanAccessOrg: async () => roleRows.length > 0,
+  currentUserCanAccessCommunity: async () => roleRows.length > 0,
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
 }));
 
 const VALID_ORG = "550e8400-e29b-41d4-a716-446655440000";
@@ -76,9 +100,18 @@ function makePatch(id: string, body: unknown): NextRequest {
 describe("POST /api/communities", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    canAccessOrgReturn = true;
-    canAccessCommunityReturn = true;
+    currentUser = { id: "user-1" };
+    roleRows = [
+      {
+        user_id: "user-1",
+        role: "org_manager",
+        scope_type: "org",
+        scope_id: VALID_ORG,
+      },
+    ];
+    pluginEnabled = true;
     mockSingleAfterInsertSelect.mockReset();
+    mockParentMaybeSingle.mockReset();
   });
 
   it("returns 400 when org_id is not a UUID", async () => {
@@ -99,13 +132,23 @@ describe("POST /api/communities", () => {
     expect(json.field).toBe("name");
   });
 
-  it("returns 403 when currentUserCanAccessOrg is false (cross-org)", async () => {
-    canAccessOrgReturn = false;
+  it("returns 403 when the caller has no role for the org (cross-org)", async () => {
+    roleRows = [];
     const { POST } = await import("../route");
     const res = await POST(
       makePost({ org_id: VALID_ORG, name: "Unauthorized C" })
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 when community management is disabled for the org", async () => {
+    pluginEnabled = false;
+    const { POST } = await import("../route");
+    const res = await POST(makePost({ org_id: VALID_ORG, name: "C1" }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe("community_management_disabled");
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("returns 201 with the inserted row on happy path", async () => {
@@ -138,8 +181,21 @@ describe("POST /api/communities", () => {
 describe("PATCH /api/communities/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    canAccessCommunityReturn = true;
+    currentUser = { id: "user-1" };
+    roleRows = [
+      {
+        user_id: "user-1",
+        role: "org_manager",
+        scope_type: "org",
+        scope_id: VALID_ORG,
+      },
+    ];
+    pluginEnabled = true;
     mockMaybeSingleAfterUpdateSelect.mockReset();
+    mockParentMaybeSingle.mockReset().mockResolvedValue({
+      data: { org_id: VALID_ORG },
+      error: null,
+    });
   });
 
   it("dirty-fields: only {address_city} sent when only city changed", async () => {
@@ -164,7 +220,7 @@ describe("PATCH /api/communities/[id]", () => {
   });
 
   it("returns 403 when the caller cannot access the community", async () => {
-    canAccessCommunityReturn = false;
+    roleRows = [];
     const { PATCH } = await import("../[id]/route");
     const res = await PATCH(
       makePatch(VALID_COMMUNITY, { name: "X" }),

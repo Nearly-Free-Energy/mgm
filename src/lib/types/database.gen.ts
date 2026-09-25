@@ -610,6 +610,85 @@ export type Database = {
           },
         ]
       }
+      mgm_plugin_audit_log: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          created_at: string
+          id: string
+          new_enabled: boolean
+          org_id: string
+          plugin_name: string
+          previous_enabled: boolean | null
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          new_enabled: boolean
+          org_id: string
+          plugin_name: string
+          previous_enabled?: boolean | null
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          new_enabled?: boolean
+          org_id?: string
+          plugin_name?: string
+          previous_enabled?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mgm_plugin_audit_log_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mgm_plugins: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          org_id: string
+          plugin_name: string
+          updated_at: string
+          version: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          org_id: string
+          plugin_name: string
+          updated_at?: string
+          version: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          org_id?: string
+          plugin_name?: string
+          updated_at?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mgm_plugins_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       microgrids: {
         Row: {
           address_city: string | null
@@ -1210,6 +1289,61 @@ export type Database = {
           user_id: string
         }[]
       }
+      fn_mgm_bootstrap_first_organization: {
+        Args: {
+          _address_city: string
+          _address_country: string
+          _address_line1?: string
+          _address_line2?: string
+          _address_postal_code?: string
+          _address_region?: string
+          _community_management_version: string
+          _name: string
+          _operator_user_id: string
+          _organization_directory_version: string
+        }
+        Returns: {
+          address_city: string | null
+          address_country: string | null
+          address_line1: string | null
+          address_line2: string | null
+          address_postal_code: string | null
+          address_region: string | null
+          created_at: string
+          customerapp_enabled: boolean
+          id: string
+          name: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organizations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_mgm_set_plugin_enabled: {
+        Args: {
+          _enabled: boolean
+          _org_id: string
+          _plugin_name: string
+          _plugin_version: string
+        }
+        Returns: {
+          created_at: string
+          enabled: boolean
+          id: string
+          org_id: string
+          plugin_name: string
+          updated_at: string
+          version: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "mgm_plugins"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       fn_next_invoice_number: {
         Args: { p_community_id: string; p_year: number }
         Returns: number
@@ -1264,6 +1398,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      mgm_plugin_enabled_for_org: {
+        Args: { _org_id: string; _plugin_name: string }
+        Returns: boolean
       }
       is_super_admin: { Args: never; Returns: boolean }
       user_can_access_community: {

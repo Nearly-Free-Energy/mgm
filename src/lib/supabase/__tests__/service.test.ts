@@ -2,28 +2,33 @@
  * service.test.ts
  *
  * Asserts the env-var guard on `createServiceClient()`:
- *   - Client creation throws if SUPABASE_SERVICE_ROLE_KEY is unset.
- *   - Module returns a client when both URL + key are present.
+ *   - The module loads without the key (so `next build` page-data
+ *     collection succeeds for routes that merely import it).
+ *   - The factory throws when SUPABASE_SERVICE_ROLE_KEY is unset.
+ *   - The factory returns a client when both URL + key are present.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 const ORIGINAL_ENV = { ...process.env };
 
 afterEach(() => {
-  // Restore env + reset the ESM module cache between cases.
+  // Restore env + reset the ESM module cache so the next `await import(...)`
+  // re-evaluates the module against fresh env.
   process.env = { ...ORIGINAL_ENV };
   vi.resetModules();
 });
 
 describe("createServiceClient (env-var guard)", () => {
-  it("throws when a privileged client is requested without a service key", async () => {
+  it("loads without the key but throws from the factory when unset", async () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
 
     vi.resetModules();
 
     const mod = await import("../service");
-    expect(() => mod.createServiceClient()).toThrow(/SUPABASE_SERVICE_ROLE_KEY is not set/);
+    expect(() => mod.createServiceClient()).toThrow(
+      /SUPABASE_SERVICE_ROLE_KEY is not set/
+    );
   });
 
   it("returns a client when URL + service-role key are present", async () => {

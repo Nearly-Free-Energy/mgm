@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { organizationExists } from "@/lib/mgm/organization-exists";
 import { LogoutButton } from "./logout-button";
 import { SidebarNav } from "./sidebar-nav";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
@@ -18,12 +19,13 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  // Invitation acceptance and older bookmarks can land on `/`. In the MGM
-  // deployment, send authenticated users to the review surface before the
-  // inherited MBE role gate runs; pilot reviewers are allowlisted separately
-  // and do not need MBE user_roles rows.
-  if (process.env.MGM_PILOT_SURFACE !== "false") {
-    redirect("/review");
+  // Release 1 (issue #3) — first-run bootstrap. When no organization exists
+  // yet, the signed-in user is eligible to become the initial operator, so
+  // send them to /setup instead of /no-access. Once the first organization
+  // exists, unassigned users fall through to the revoked-user gate below
+  // and /no-access is retained for them.
+  if (!(await organizationExists())) {
+    redirect("/setup");
   }
 
   // UX5 (#79) — gate revoked users. A logged-in auth.users row with no

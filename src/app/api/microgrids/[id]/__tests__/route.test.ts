@@ -17,6 +17,9 @@ import { NextRequest } from "next/server";
 // ── Mocks ───────────────────────────────────────────────────────────────
 
 let canAccessMicrogridReturn = true;
+let pluginEnabled = true;
+
+const ORG_ID = "770e8400-e29b-41d4-a716-446655440099";
 
 // Captures the object passed to .update() so tests can assert exactly what
 // would be written.
@@ -24,8 +27,32 @@ const mockUpdate = vi.fn();
 const mockMaybeSingle = vi.fn();
 
 const mockFrom = vi.fn((table: string) => {
+  if (table === "communities") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: { org_id: ORG_ID },
+            error: null,
+          }),
+        }),
+      }),
+    };
+  }
   if (table === "microgrids") {
     return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: {
+              id: MG_UUID,
+              community_id: COMMUNITY_ID,
+              communities: { org_id: ORG_ID },
+            },
+            error: null,
+          }),
+        }),
+      }),
       update: (updates: Record<string, unknown>) => {
         mockUpdate(updates);
         return {
@@ -49,7 +76,23 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 vi.mock("@/lib/auth/access", () => ({
+  getCurrentUserRoles: async () =>
+    canAccessMicrogridReturn
+      ? [
+          {
+            user_id: "u1",
+            role: "org_manager",
+            scope_type: "org",
+            scope_id: ORG_ID,
+          },
+        ]
+      : [],
+  currentUserCanAccessOrg: async () => canAccessMicrogridReturn,
   currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
 }));
 
 vi.mock("next/cache", () => ({
@@ -59,6 +102,7 @@ vi.mock("next/cache", () => ({
 import { PATCH } from "../route";
 
 const MG_UUID = "770e8400-e29b-41d4-a716-446655440001";
+const COMMUNITY_ID = "770e8400-e29b-41d4-a716-446655440010";
 
 function makePatch(body: unknown): NextRequest {
   return new NextRequest(`http://localhost/api/microgrids/${MG_UUID}`, {
@@ -78,6 +122,7 @@ describe("PATCH /api/microgrids/[id] — timezone (#357)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     canAccessMicrogridReturn = true;
+    pluginEnabled = true;
     mockMaybeSingle.mockResolvedValue({
       data: { id: MG_UUID, timezone: "Africa/Kampala" },
       error: null,

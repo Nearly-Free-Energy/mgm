@@ -1,7 +1,4 @@
 import { NoAccessLogout } from "./no-access-logout";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { isMgmReviewer } from "@/lib/mgm/access";
 
 /**
  * /no-access — account exists but has no user_roles rows.
@@ -15,14 +12,6 @@ import { isMgmReviewer } from "@/lib/mgm/access";
  *     and cleanup also failed).
  */
 export default async function NoAccessPage() {
-  // An invited MGM reviewer can arrive here through the inherited MBE root
-  // layout. Recover that session without granting any additional data access.
-  if (process.env.MGM_PILOT_SURFACE !== "false") {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user && isMgmReviewer(user)) redirect("/review");
-  }
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted p-6">
       <div className="w-full max-w-md rounded-md border border-border bg-card p-8 shadow-elev-1">

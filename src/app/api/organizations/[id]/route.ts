@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserIsSuperAdmin } from "@/lib/auth/access";
+import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import {
   errorBody,
@@ -189,6 +190,18 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("You do not have permission to delete this organization."),
       { status: 403 }
+    );
+  }
+
+  // A disabled community-management plugin preserves the organization's
+  // domain rows: the database trigger would roll the cascade back anyway,
+  // so fail here with an actionable message instead.
+  if (!(await isCommunityManagementEnabled(supabase, id))) {
+    return NextResponse.json(
+      errorBody(
+        "Community management is disabled for this organization. Enable it in Settings → Plugins before deleting; existing records are preserved."
+      ),
+      { status: 409 }
     );
   }
 

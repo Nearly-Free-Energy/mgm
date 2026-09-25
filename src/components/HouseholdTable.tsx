@@ -18,7 +18,9 @@
  *       Change/Link billing dev. → opens HouseholdEditDialog
  *       View detail →            → Link to detail page
  *       — separator —
- *       Delete household         → existing destructive flow
+ *       Delete household         → DELETE /api/households/[id] via the
+ *                                   community-management capability
+ *                                   (refuses households with billing history)
  *   - Click-to-edit chip column:
  *       Assigned   → <button> wrapping <Chip tone="success" dot>
  *       Unassigned → <button> wrapping <Chip tone="warn" dot>
@@ -40,7 +42,6 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { createClient } from "@/lib/supabase/client";
 import type { Device, Household } from "@/lib/types/domain";
 import { Chip } from "@/components/ui/chip";
 import { StatusChip } from "@/components/ui/status-chip";
@@ -98,7 +99,6 @@ export function HouseholdTable({
   microgridEdgesSetupHref,
 }: Props) {
   const router = useRouter();
-  const supabase = createClient();
 
   // Edit dialog
   const [editing, setEditing] = React.useState<Household | null>(null);
@@ -194,16 +194,21 @@ export function HouseholdTable({
 
   async function handleDelete() {
     if (!householdToDelete) return;
-    const { error: deleteError } = await supabase
-      .from("households")
-      .delete()
-      .eq("id", householdToDelete.id);
-
-    if (deleteError) {
-      throw new Error(deleteError.message);
+    const res = await fetch(`/api/households/${householdToDelete.id}`, {
+      method: "DELETE",
+    });
+    if (res.status === 204) {
+      router.refresh();
+      return;
     }
-
-    router.refresh();
+    let message = "Could not delete household.";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // body wasn't JSON — use the default message.
+    }
+    throw new Error(message);
   }
 
   return (

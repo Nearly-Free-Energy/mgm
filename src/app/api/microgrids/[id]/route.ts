@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
-import { validateCurrency } from "@/lib/validation/currency";
 import {
-  validateTimezone,
-  canonicalTimezone,
-} from "@/lib/validation/timezone";
+  composeCommunityManagement,
+  type CommunityManagementError,
+} from "@/lib/community-management";
 import { countEntityDescendants } from "@/lib/entity-descendants";
+import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import {
   errorBody,
   mapPgError,
@@ -15,7 +15,20 @@ import {
   UUID_RE,
   type EntityDeleteLogPayload,
 } from "@/lib/entity-deletion/shared";
-import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
+
+function mapError(error: CommunityManagementError): NextResponse {
+  const { ok, status, code, message, field, reason } = error;
+  void ok;
+  return NextResponse.json(
+    {
+      error: message,
+      code,
+      ...(field !== undefined ? { field } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+    },
+    { status }
+  );
+}
 
 /**
  * PATCH /api/microgrids/[id] — update a microgrid (#76).
@@ -24,8 +37,10 @@ import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
  * Re-parenting via `community_id` is NOT supported through this endpoint —
  * ignored if present (would be a "move" feature, deferred).
  *
- * Authorization: `currentUserCanAccessMicrogrid()` — super_admin or the
- * org_manager of the microgrid's parent org (via community → org).
+ * Released mutations route through the community-management Cordis
+ * capability. The route resolves the parent organization needed for the
+ * request-scoped composition; the capability re-validates scope, plugin
+ * state, and organization access before writing.
  *
  * Validation: currency (if sent) must be valid ISO 4217 (422 on RangeError).
  * timezone (if sent) must be a valid IANA zone id — literal 'UTC' or an
@@ -54,145 +69,38 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
-
-  if (!(await currentUserCanAccessMicrogrid(supabase, id))) {
+  const { data: microgrid } = await supabase
+    .from("microgrids")
+    .select("id, community_id, communities!inner(org_id)")
+    .eq("id", id)
+    .maybeSingle<{
+      id: string;
+      community_id: string;
+      communities: { org_id: string };
+    }>();
+  if (!microgrid) {
     return NextResponse.json(
       { error: "Not authorized to update this microgrid." },
       { status: 403 }
     );
   }
 
-  const updates: Record<string, string | number | null> = {};
+  const composed = await composeCommunityManagement({
+    supabase,
+    organizationId: microgrid.communities.org_id,
+  });
+  if (!composed.ok) return mapError(composed);
 
-  if ("name" in body) {
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      return NextResponse.json(
-        { error: "Name is required.", field: "name" },
-        { status: 422 }
-      );
-    }
-    updates.name = body.name.trim();
-  }
-
-  if ("currency" in body) {
-    const c = typeof body.currency === "string" ? body.currency.trim() : "";
-    const err = validateCurrency(c);
-    if (err) {
-      return NextResponse.json(
-        { error: err, field: "currency" },
-        { status: 422 }
-      );
-    }
-    updates.currency = c;
-  }
-
-  if ("timezone" in body) {
-    const tz = typeof body.timezone === "string" ? body.timezone.trim() : "";
-    const err = validateTimezone(tz);
-    if (err) {
-      return NextResponse.json(
-        { error: err, field: "timezone" },
-        { status: 422 }
-      );
-    }
-    // Forward-only semantics (#357): this UPDATE touches only
-    // microgrids.timezone. Existing billing_periods rows (open or closed)
-    // keep the zone stamped at their INSERT by
-    // trg_billing_period_stamp_timezone (migration 00055) — nothing here
-    // rewrites them, and the next created period inherits the new zone via
-    // that trigger. If the trigger is ever dropped or per-period overrides
-    // are introduced, revisit this route's contract.
-    // Stored canonically (case-folded, alias-resolved) so the column never
-    // accumulates variants of the same zone.
-    updates.timezone = canonicalTimezone(tz) as string;
-  }
-
-  const OPTIONAL_STRING_FIELDS = [
-    "address_line1",
-    "address_line2",
-    "address_city",
-    "address_region",
-    "address_country",
-    "address_postal_code",
-  ] as const;
-
-  for (const f of OPTIONAL_STRING_FIELDS) {
-    if (f in body) {
-      const v = body[f];
-      updates[f] = typeof v === "string" && v.trim() ? v.trim() : null;
-    }
-  }
-
-  for (const f of ["lat", "lng"] as const) {
-    if (f in body) {
-      const v = body[f];
-      if (v === null || v === "") {
-        updates[f] = null;
-      } else if (typeof v === "number" && Number.isFinite(v)) {
-        updates[f] = v;
-      } else if (typeof v === "string" && v.trim()) {
-        const parsed = Number(v);
-        if (!Number.isFinite(parsed)) {
-          return NextResponse.json(
-            { error: `Invalid ${f} value.`, field: f },
-            { status: 422 }
-          );
-        }
-        updates[f] = parsed;
-      } else {
-        updates[f] = null;
-      }
-    }
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json(
-      { error: "No fields to update." },
-      { status: 400 }
+  try {
+    const result = await composed.data.communityManagement.updateMicrogrid(
+      id,
+      body
     );
+    if (!result.ok) return mapError(result);
+    return NextResponse.json({ microgrid: result.data }, { status: 200 });
+  } finally {
+    await composed.data.dispose();
   }
-
-  const { data, error } = await supabase
-    .from("microgrids")
-    .update(updates)
-    .eq("id", id)
-    .select(MICROGRID_PUBLIC_COLUMNS)
-    .maybeSingle();
-
-  if (error) {
-    if (
-      error.code === "23505" &&
-      error.message.includes("microgrids_community_name_unique")
-    ) {
-      const name = typeof updates.name === "string" ? updates.name : "";
-      return NextResponse.json(
-        {
-          error: `A microgrid named '${name}' already exists in this community.`,
-          field: "name",
-        },
-        { status: 409 }
-      );
-    }
-    if (error.code === "42501" || error.message.includes("row-level security")) {
-      return NextResponse.json(
-        { error: "Not authorized to update this microgrid." },
-        { status: 403 }
-      );
-    }
-    return NextResponse.json(
-      { error: `Failed to update microgrid: ${error.message}` },
-      { status: 500 }
-    );
-  }
-
-  if (!data) {
-    return NextResponse.json(
-      { error: "Microgrid not found." },
-      { status: 404 }
-    );
-  }
-
-  return NextResponse.json({ microgrid: data }, { status: 200 });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -251,6 +159,22 @@ export async function DELETE(
   }
   if (!microgrid) {
     return NextResponse.json(errorBody("Microgrid not found."), { status: 404 });
+  }
+  const { data: parent } = await supabase
+    .from("communities")
+    .select("org_id")
+    .eq("id", microgrid.community_id)
+    .maybeSingle<{ org_id: string }>();
+  if (
+    parent &&
+    !(await isCommunityManagementEnabled(supabase, parent.org_id))
+  ) {
+    return NextResponse.json(
+      errorBody(
+        "Community management is disabled for this organization. Enable it in Settings → Plugins before deleting; existing records are preserved."
+      ),
+      { status: 409 }
+    );
   }
   if (!microgrid.name || !microgrid.name.trim()) {
     return NextResponse.json(

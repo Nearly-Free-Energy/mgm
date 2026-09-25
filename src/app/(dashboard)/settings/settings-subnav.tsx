@@ -11,9 +11,11 @@
  *   - Longest-prefix active-tab match — future nested routes under
  *     /settings/<tab>/... keep the parent tab highlighted.
  *
- * Two tabs ship for MVP: Profile (self), Users (admin-side). Both
- * visible for both MVP roles (super_admin + org_manager can both
- * invite). Future `microgrid_manager` may need per-role visibility —
+ * Four tabs ship for Release 1: Profile (self), Users (admin-side),
+ * API tokens (org-side), and Plugins (org-side). Profile, Users, and API
+ * tokens are visible for both MVP roles (super_admin + org_manager can both
+ * invite); plugin toggles are further gated per organization by the plugin
+ * service. Future `microgrid_manager` may need per-role visibility —
  * not now.
  *
  * Copy-paste-adapted per ticket Dev Notes ("don't extract a shared
@@ -28,6 +30,7 @@ const TABS: SubTab[] = [
   { label: "Profile", segment: "profile" },
   { label: "Users", segment: "users" },
   { label: "API tokens", segment: "api-tokens" },
+  { label: "Plugins", segment: "plugins" },
 ];
 
 export function SettingsSubNav() {

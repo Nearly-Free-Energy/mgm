@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 // ── Mocks ───────────────────────────────────────────────────────────────
 
 let isSuperAdminReturn = true;
+let pluginEnabled = true;
 let getUserReturn: { user: { id: string } | null } = {
   user: { id: "user-1" },
 };
@@ -49,6 +50,10 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
 }));
 
 // Small helper: build a .from() chain that resolves to the given entity
@@ -119,6 +124,7 @@ describe("DELETE /api/organizations/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isSuperAdminReturn = true;
+    pluginEnabled = true;
     getUserReturn = { user: { id: "user-1" } };
   });
 
@@ -190,6 +196,22 @@ describe("DELETE /api/organizations/[id]", () => {
     expect(logged.at).toMatch(/\d{4}-\d{2}-\d{2}T/);
 
     infoSpy.mockRestore();
+  });
+
+  it("returns 409 when community management is disabled — records are preserved", async () => {
+    configureEntityLookup({
+      data: { id: VALID_UUID, name: "NFE" },
+      error: null,
+    });
+    pluginEnabled = false;
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(makeRequest(), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("Community management is disabled");
+    expect(mockRpcImpl).not.toHaveBeenCalled();
   });
 
   it("returns 404 on repeat delete (idempotency per AC-ROUTE-7)", async () => {

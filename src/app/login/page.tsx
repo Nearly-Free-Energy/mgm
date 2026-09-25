@@ -29,7 +29,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/review");
+    router.replace("/");
     router.refresh();
   }
 

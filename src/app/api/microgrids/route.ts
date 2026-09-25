@@ -1,23 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { currentUserCanAccessCommunity } from "@/lib/auth/access";
-import { validateCurrency } from "@/lib/validation/currency";
 import {
-  validateTimezone,
-  canonicalTimezone,
-} from "@/lib/validation/timezone";
-import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
+  composeCommunityManagement,
+  type CommunityManagementError,
+} from "@/lib/community-management";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function mapError(error: CommunityManagementError): NextResponse {
+  const { ok, status, code, message, field, reason } = error;
+  void ok;
+  return NextResponse.json(
+    {
+      error: message,
+      code,
+      ...(field !== undefined ? { field } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+    },
+    { status }
+  );
+}
+
 /**
  * POST /api/microgrids — create a new microgrid under a parent community (#76).
  *
- * Authorization: `currentUserCanAccessCommunity()` — resolves community → org.
- * Prevents an org_manager in Org A from creating a microgrid under a community
- * that belongs to Org B.
+ * Released mutations route through the community-management Cordis
+ * capability. The route resolves the parent organization needed for the
+ * request-scoped composition; the capability re-validates scope, plugin
+ * state, and organization access before writing.
  *
  * Validation:
  *   - `name` required (422 with field='name').
@@ -37,6 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const supabase = await createClient();
   const communityId =
     typeof body.community_id === "string" ? body.community_id : "";
   if (!UUID_RE.test(communityId)) {
@@ -48,117 +61,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 400 }
     );
   }
-
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!name) {
-    return NextResponse.json(
-      { error: "Name is required.", field: "name" },
-      { status: 422 }
-    );
-  }
-
-  const currencyInput =
-    typeof body.currency === "string" ? body.currency.trim() : "";
-  const currencyErr = validateCurrency(currencyInput);
-  if (currencyErr) {
-    return NextResponse.json(
-      { error: currencyErr, field: "currency" },
-      { status: 422 }
-    );
-  }
-
-  // Optional timezone (#357): validate when supplied; omitted → column
-  // DEFAULT 'UTC' (migration 00055). The billing-period stamp trigger
-  // inherits from this column, so an invalid value here would poison every
-  // future period on the microgrid — hence server-side rejection.
-  let timezoneInput: string | null = null;
-  if ("timezone" in body) {
-    timezoneInput =
-      typeof body.timezone === "string" ? body.timezone.trim() : "";
-    const tzErr = validateTimezone(timezoneInput);
-    if (tzErr) {
-      return NextResponse.json(
-        { error: tzErr, field: "timezone" },
-        { status: 422 }
-      );
-    }
-    // Stored canonically (case-folded, alias-resolved).
-    timezoneInput = canonicalTimezone(timezoneInput);
-  }
-
-  const supabase = await createClient();
-
-  if (!(await currentUserCanAccessCommunity(supabase, communityId))) {
+  const { data: parent } = await supabase
+    .from("communities")
+    .select("org_id")
+    .eq("id", communityId)
+    .maybeSingle<{ org_id: string }>();
+  if (!parent) {
     return NextResponse.json(
       { error: "Not authorized to add microgrids to this community." },
       { status: 403 }
     );
   }
 
-  const row = {
-    community_id: communityId,
-    name,
-    currency: currencyInput,
-    address_line1: readOptionalString(body.address_line1),
-    address_line2: readOptionalString(body.address_line2),
-    address_city: readOptionalString(body.address_city),
-    address_region: readOptionalString(body.address_region),
-    address_country: readOptionalString(body.address_country),
-    address_postal_code: readOptionalString(body.address_postal_code),
-    lat: readOptionalNumber(body.lat),
-    lng: readOptionalNumber(body.lng),
-    ...(timezoneInput !== null ? { timezone: timezoneInput } : {}),
-  };
+  const composed = await composeCommunityManagement({
+    supabase,
+    organizationId: parent.org_id,
+  });
+  if (!composed.ok) return mapError(composed);
 
-  const { data, error } = await supabase
-    .from("microgrids")
-    .insert(row)
-    .select(MICROGRID_PUBLIC_COLUMNS)
-    .single();
+  try {
+    const result =
+      await composed.data.communityManagement.createMicrogrid(body);
+    if (!result.ok) return mapError(result);
 
-  if (error) {
-    if (
-      error.code === "23505" &&
-      error.message.includes("microgrids_community_name_unique")
-    ) {
-      return NextResponse.json(
-        {
-          error: `A microgrid named '${name}' already exists in this community.`,
-          field: "name",
-        },
-        { status: 409 }
-      );
-    }
-    if (error.code === "42501" || error.message.includes("row-level security")) {
-      return NextResponse.json(
-        { error: "Not authorized to add microgrids to this community." },
-        { status: 403 }
-      );
-    }
-    return NextResponse.json(
-      { error: `Failed to create microgrid: ${error.message}` },
-      { status: 500 }
-    );
+    revalidatePath("/microgrids", "layout");
+    revalidatePath(`/communities/${communityId}`, "layout");
+
+    return NextResponse.json({ microgrid: result.data }, { status: 201 });
+  } finally {
+    await composed.data.dispose();
   }
-
-  revalidatePath("/microgrids", "layout");
-  revalidatePath(`/communities/${communityId}`, "layout");
-
-  return NextResponse.json({ microgrid: data }, { status: 201 });
-}
-
-function readOptionalString(v: unknown): string | null {
-  if (typeof v !== "string") return null;
-  const trimmed = v.trim();
-  return trimmed ? trimmed : null;
-}
-
-function readOptionalNumber(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim()) {
-    const parsed = Number(v);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
 }
 

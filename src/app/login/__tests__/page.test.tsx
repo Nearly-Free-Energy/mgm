@@ -38,11 +38,11 @@ describe("LoginPage", () => {
     expect(link.getAttribute("href")).toBe("/forgot-password");
   });
 
-  it("redirects straight to /review after successful sign-in", async () => {
+  it("redirects to the management dashboard after successful sign-in", async () => {
     signInWithPassword.mockResolvedValue({ error: null });
     const { default: LoginPage } = await import("../page");
     render(<LoginPage />);
     fireEvent.submit(screen.getByRole("button", { name: /sign in/i }).closest("form")!);
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/review"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/"));
   });
 });

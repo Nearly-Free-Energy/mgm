@@ -1,68 +1,25 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isMgmPilotRoute } from "@/lib/mgm/route-surface";
+import { isRelease1Route } from "@/lib/mgm/release1-routes";
 
-// Paths that don't require an authenticated session. `/accept-invite`
-// is reached unauthenticated by users clicking the invite-email link
-// — verifyOtp on the page installs the session cookie (UX5c / #189).
-// `/forgot-password` is the request side of the password-recovery flow;
-// `/reset-password` is the consumption side reached by the recovery
-// email link — verifyOtp on that page installs the session cookie
-// (UX5d / #190).
-// `/p/<slug>` is the consumer-facing payment-link indirection (#223) —
-// customers click from WhatsApp with no MBE session; the slug is the
-// access token (6-8 chars base62 entropy + DB lookup, with IP rate-limit
-// applied downstream by the legacy /api/billing-line-items/<id>/pay route).
-// Trailing slash is intentional — avoids prefix-matching any future top-
-// level `/page` or `/profile` route.
-//
-// `/api/v1/` is the customerapp internal-API surface (#249 umbrella, Wave
-// A-D). Per-org token auth via `resolveOrgFromToken` in
-// `@/lib/internal-auth` is the authoritative auth boundary for these
-// routes — customerapp sends an `x-api-key` header, not a cookie session,
-// so `supabase.auth.getUser()` here would always return null and the
-// middleware would 401 every request before the route handler can run.
-// Each route handler calls `resolveOrgFromToken` first thing and rejects
-// with structured 401/403 codes (`missing_header`, `invalid_format`,
-// `not_found`, `revoked`, `customerapp_not_enabled`) that are deliberately
-// distinct from this middleware's "Authentication required" string.
-// Trailing slash is intentional (same reason as `/p/`).
-// Discovered 2026-05-27 during Wave A-D activation smoke test.
-//
-// `/api/payments/ipn` is Pesapal's IPN (Instant Payment Notification)
-// webhook — an unauthenticated server-to-server POST/GET from Pesapal
-// with no MBE session cookie, so `supabase.auth.getUser()` here always
-// returns null and the middleware would 401 every IPN before the route
-// handler runs (payments never auto-mark). Same class as the `/api/v1/`
-// entry above (#267). The route handler verifies the callback itself
-// (order-tracking-id lookup against Pesapal) — that is the auth boundary.
-// Scoped to the exact `/api/payments/ipn` path (no trailing slash, no
-// broad `/api/payments/` prefix) so sibling payment routes (e.g.
-// auth-gated payment-status mutations) stay non-public. `startsWith`
-// still matches `/api/payments/ipn` and any subpath. Discovered 2026-07
-// (#294).
+// Only authentication pages are public in the first MGM release. Inherited
+// MBE payment links, customer APIs, and webhooks are blocked by the route
+// allowlist before this session check runs.
 const PUBLIC_PATHS = [
   "/login",
   "/accept-invite",
   "/forgot-password",
   "/reset-password",
-  "/p/",
-  "/api/v1/",
-  "/api/payments/ipn",
   "/api/mgm/health",
 ];
 
 export async function middleware(request: NextRequest) {
-  // This fork defaults to the narrow MGM surface. The legacy MBE application
-  // remains available only for local comparison when explicitly opted out.
-  // If new review routes are added, update this allowlist before deployment.
-  if (
-    process.env.MGM_PILOT_SURFACE !== "false" &&
-    !isMgmPilotRoute(request.nextUrl.pathname, request.method)
-  ) {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  // This fork deploys the first MGM slice. Inherited MBE billing, payment,
+  // OpenEMS, and device handlers must not become callable through deep links
+  // or direct API requests before their Cordis plugins are released.
+  if (!isRelease1Route(request.nextUrl.pathname)) {
+    return new NextResponse("Not available in MGM Release 1", { status: 404 });
   }
-
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -116,7 +73,15 @@ export async function middleware(request: NextRequest) {
 
   if (user && request.nextUrl.pathname.startsWith("/login")) {
     const url = request.nextUrl.clone();
-    url.pathname = "/review";
+    url.pathname = "/";
+    return NextResponse.redirect(url);
+  }
+
+  // Existing management links target the old microgrid overview, which
+  // renders OpenEMS and billing widgets. Land on the household list instead.
+  if (/^\/microgrids\/[^/]+\/?$/.test(request.nextUrl.pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = `${request.nextUrl.pathname.replace(/\/$/, "")}/setup/households`;
     return NextResponse.redirect(url);
   }
 
