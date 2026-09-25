@@ -79,6 +79,14 @@ export type OpenemsBackendShellProps = {
    * is wrong and needs rewriting.
    */
   emsOperators: { userId: string; name: string }[];
+  /**
+   * Organization-level metering plugin state (issue #4). Plugin-enabled and
+   * connection-ready are separate states: the toggle gates the metering
+   * surface, while readiness below derives from the stored configuration
+   * plus a successful test or discovery run. Defaults true so existing
+   * callers (and tests) keep working; the page passes the real value.
+   */
+  meteringPluginEnabled?: boolean;
 };
 
 type FormType = "cloud_aws" | "direct_url";
@@ -109,6 +117,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
     secretLast4,
     canConfigure,
     emsOperators,
+    meteringPluginEnabled = true,
   } = props;
 
   const router = useRouter();
@@ -169,6 +178,15 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   const [saving, setSaving] = React.useState(false);
   const [testingAgain, setTestingAgain] = React.useState(false);
 
+  // Test-without-save outcome (issue #4). Independent from the save outcome
+  // so a failed probe never looks like a saved configuration.
+  const [testOutcome, setTestOutcome] = React.useState<
+    | { kind: "success"; edgeCount: number }
+    | { kind: "failure"; message: string }
+    | null
+  >(null);
+  const [testing, setTesting] = React.useState(false);
+
   // Type-to-confirm dialog (closed-period bypass).
   const [typedConfirmOpen, setTypedConfirmOpen] = React.useState(false);
   const [pendingPayload, setPendingPayload] =
@@ -176,6 +194,63 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
 
   const putUrl = `/api/microgrids/${microgrid.id}/openems-backend`;
   const discoverUrl = `/api/microgrids/${microgrid.id}/openems-backend/discover`;
+  const testUrl = `/api/microgrids/${microgrid.id}/openems-backend/test`;
+
+  // Test the form's candidate configuration WITHOUT persisting anything
+  // (issue #4). Secrets travel in this single request only: built into an
+  // in-memory client server-side, never logged, never stored, never
+  // returned.
+  async function handleTestWithoutSave() {
+    const payload = buildPayload();
+    if (!payload) return;
+    setTesting(true);
+    setTestOutcome(null);
+    try {
+      const res = await fetch(testUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        edgeCount?: number;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setTestOutcome({
+          kind: "failure",
+          message:
+            typeof json.error === "string" && json.error
+              ? json.error
+              : `Test failed (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      if (json.ok) {
+        setTestOutcome({
+          kind: "success",
+          edgeCount:
+            typeof json.edgeCount === "number" ? json.edgeCount : 0,
+        });
+      } else {
+        setTestOutcome({
+          kind: "failure",
+          message:
+            typeof json.message === "string" && json.message
+              ? json.message
+              : "Connection test failed.",
+        });
+      }
+    } catch {
+      setTestOutcome({
+        kind: "failure",
+        message: "Network error. Please retry.",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   // ── Reconfigure click flow ─────────────────────────────────────────────
   function handleReconfigureClick() {
@@ -492,6 +567,19 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       <h3 className="text-lg font-semibold text-foreground">
         Connect this microgrid to OpenEMS
       </h3>
+      {/* Release 2 (issue #4): plugin-enabled and connection-ready are
+          separate states. The toggle gates the metering surface; readiness
+          derives from the stored configuration plus a successful test or
+          discovery run. */}
+      <p className="mt-1 text-xs text-muted-foreground">
+        Metering plugin: {meteringPluginEnabled ? "Enabled" : "Disabled"} ·{" "}
+        Connection:{" "}
+        {health === "healthy"
+          ? "Ready"
+          : health === "failing"
+            ? "Failing — test again or reconfigure"
+            : "Not configured"}
+      </p>
     </div>
   );
 
@@ -861,6 +949,17 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
         <OutcomeBanner outcome={outcome} />
       )}
 
+      {testOutcome && testOutcome.kind === "success" && (
+        <Banner tone="success" title="Connection test passed">
+          Reached the backend{testOutcome.edgeCount > 0 ? ` — ${testOutcome.edgeCount} edge${testOutcome.edgeCount === 1 ? "" : "s"} responded` : ""}. Nothing was saved.
+        </Banner>
+      )}
+      {testOutcome && testOutcome.kind === "failure" && (
+        <Banner tone="destructive" title="Connection test failed">
+          {testOutcome.message} Nothing was saved.
+        </Banner>
+      )}
+
       <div className="flex items-center justify-end gap-2">
         <button
           type="button"
@@ -868,6 +967,14 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
         >
           Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleTestWithoutSave}
+          disabled={testing || saving}
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {testing ? "Testing…" : "Test without saving"}
         </button>
         <button
           type="submit"

@@ -146,30 +146,48 @@ export function createSupabaseCommunityRepository(
     },
 
     async findDeviceLink(deviceId: string, excludeHouseholdId: string) {
+      // Only OPEN links steal: closed historical links (effective_to set)
+      // are replacement history, not live claims.
       const { data } = await supabase
         .from("household_devices")
         .select("household_id")
         .eq("device_id", deviceId)
         .eq("role", "primary_consumption_meter")
         .neq("household_id", excludeHouseholdId)
+        .is("effective_to", null)
         .maybeSingle<{ household_id: string }>();
       return data ?? null;
     },
 
-    async clearDeviceLinks(householdId: string) {
+    async getOpenDeviceLink(householdId: string) {
+      const { data } = await supabase
+        .from("household_devices")
+        .select("id, device_id")
+        .eq("household_id", householdId)
+        .eq("role", "primary_consumption_meter")
+        .is("effective_to", null)
+        .maybeSingle<{ id: string; device_id: string }>();
+      return data ?? null;
+    },
+
+    async closeDeviceLink(linkId: string, effectiveTo: string) {
       const { error } = await supabase
         .from("household_devices")
-        .delete()
-        .eq("household_id", householdId)
-        .eq("role", "primary_consumption_meter");
+        .update({ effective_to: effectiveTo })
+        .eq("id", linkId);
       return error ? toError(error) : null;
     },
 
-    async insertDeviceLink(householdId: string, deviceId: string) {
+    async openDeviceLink(
+      householdId: string,
+      deviceId: string,
+      effectiveFrom: string
+    ) {
       const { error } = await supabase.from("household_devices").insert({
         household_id: householdId,
         device_id: deviceId,
         role: "primary_consumption_meter",
+        effective_from: effectiveFrom,
       });
       return error ? toError(error) : null;
     },

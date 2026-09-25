@@ -103,10 +103,22 @@ export interface CommunityManagementRepository {
     deviceId: string,
     excludeHouseholdId: string
   ): Promise<{ household_id: string } | null>;
-  clearDeviceLinks(householdId: string): Promise<RepositoryError | null>;
-  insertDeviceLink(
+  /**
+   * Currently open primary link (effective_to IS NULL), if any. Release 2
+   * (issue #4): replacements close and open links instead of deleting them,
+   * so history survives meter swaps.
+   */
+  getOpenDeviceLink(
+    householdId: string
+  ): Promise<{ id: string; device_id: string } | null>;
+  closeDeviceLink(
+    linkId: string,
+    effectiveTo: string
+  ): Promise<RepositoryError | null>;
+  openDeviceLink(
     householdId: string,
-    deviceId: string
+    deviceId: string,
+    effectiveFrom: string
   ): Promise<RepositoryError | null>;
   refetchHousehold(id: string): Promise<RepositoryResult<Household>>;
   countBillingLineItems(

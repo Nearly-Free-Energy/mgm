@@ -906,3 +906,85 @@ describe("OpenemsBackendShell — #327 Basic credentials", () => {
     expect(body.basicAuthPassword).toBe("s3cret");
   });
 });
+
+// ── Release 2 (issue #4): plugin/connection states + test without saving ──
+describe("OpenemsBackendShell — metering plugin and test-without-save", () => {
+  function openDirectForm() {
+    render(
+      <OpenemsBackendShell
+        microgrid={BASE_MG}
+        health="not_configured"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4={null}
+        canConfigure={true}
+        emsOperators={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /direct url/i }));
+  }
+
+  it("shows plugin-enabled and connection-ready as separate states", () => {
+    render(
+      <OpenemsBackendShell
+        microgrid={CONFIGURED_CLOUD}
+        health="healthy"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4={null}
+        canConfigure={true}
+        emsOperators={[]}
+        meteringPluginEnabled={false}
+      />
+    );
+    expect(screen.getByText(/metering plugin: disabled/i)).toBeDefined();
+    expect(screen.getByText(/connection: ready/i)).toBeDefined();
+  });
+
+  it("tests the candidate without saving and shows the result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, edgeCount: 2, edges: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    openDirectForm();
+    fireEvent.change(screen.getByLabelText(/backend url/i), {
+      target: { value: "https://ems.example/rest" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /test without saving/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/microgrids/mg-abc/openems-backend/test");
+    await waitFor(() =>
+      expect(screen.getByText(/connection test passed/i)).toBeDefined()
+    );
+    expect(screen.getByText(/nothing was saved/i)).toBeDefined();
+  });
+
+  it("surfaces test failures without saving", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: false,
+        code: "auth_failed",
+        message: "Authentication failed.",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    openDirectForm();
+    fireEvent.change(screen.getByLabelText(/backend url/i), {
+      target: { value: "https://ems.example/rest" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /test without saving/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/connection test failed/i)).toBeDefined()
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

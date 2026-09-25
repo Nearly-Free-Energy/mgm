@@ -24,6 +24,7 @@ const { notFoundMock } = vi.hoisted(() => {
 
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock("next/link", () => ({
   // Render as plain anchor for static markup serialization.
@@ -137,7 +138,9 @@ function buildFlexQuery(data: unknown[] = [], count = 0) {
   chain.select = () => chain;
   chain.eq = () => chain;
   chain.in = () => chain;
+  chain.is = () => chain;
   chain.not = () => resolve;
+  chain.order = () => chain;
   chain.returns = () => Promise.resolve({ data, error: null });
   chain.maybeSingle = () => Promise.resolve({ data: data[0] ?? null, error: null });
   chain.single = () => Promise.resolve({ data: data[0] ?? null, error: null });
@@ -372,5 +375,57 @@ describe("HouseholdDetailPage", () => {
     expect(html).toContain("Primary meter");
     // Role chip label for secondary
     expect(html).toContain("Secondary meter");
+  });
+
+  // Meter assignment history (issue #4): effective-dated links render with
+  // gaps called out, plus the opening-register CTA when the current meter
+  // has no readings.
+  it("renders assignment history with gaps and the opening-register CTA", async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "households") {
+        return buildHouseholdQuery({
+          ...HOUSEHOLD_BASE,
+          household_devices: [
+            { role: "primary_consumption_meter", devices: DEVICE_ROW },
+          ],
+        });
+      }
+      if (table === "household_users") {
+        return buildCountQuery(0);
+      }
+      if (table === "billing_line_items") {
+        return buildLineItemsQuery([]);
+      }
+      if (table === "household_devices") {
+        return buildFlexQuery([
+          {
+            device_id: "dev-1",
+            effective_from: "2026-01-01",
+            effective_to: "2026-03-01",
+            devices: { id: "dev-1", name: "Chint Meter 01" },
+          },
+          {
+            device_id: "dev-2",
+            effective_from: "2026-04-01",
+            effective_to: null,
+            devices: { id: "dev-2", name: "Chint Meter 02" },
+          },
+        ]);
+      }
+      // meter_readings count → 0 readings: CTA shows.
+      return buildFlexQuery([], 0);
+    });
+
+    const jsx = await HouseholdDetailPage({
+      params: Promise.resolve({ id: "mg-1", householdId: "hh-1" }),
+    });
+    const html = renderToStaticMarkup(jsx as React.ReactElement);
+
+    expect(html).toContain("Meter assignment history");
+    expect(html).toContain("Chint Meter 01");
+    expect(html).toContain("2026-01-01");
+    expect(html).toContain("Assignment gaps need attention");
+    expect(html).toContain("2026-03-01");
+    expect(html).toContain("Record opening register");
   });
 });
