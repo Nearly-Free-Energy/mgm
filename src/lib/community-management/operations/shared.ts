@@ -1,15 +1,19 @@
+/**
+ * shared.ts — pure helpers for community-management operations.
+ *
+ * Import boundary: this module (and every module under `operations/`) may
+ * import only pure modules — sibling files, `../types`, validation helpers,
+ * and domain types. It must NOT import database clients, auth helpers,
+ * plugin state, or framework modules. See
+ * `__tests__/import-boundary.test.ts`. All persistence flows through the
+ * `CommunityManagementRepository` interface.
+ */
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  currentUserCanAccessCommunity,
-  currentUserCanAccessMicrogrid,
-  currentUserCanAccessOrg,
-} from "@/lib/auth/access";
-import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import {
   communityFailure,
   type CommunityManagementError,
+  type CommunityManagementRepository,
   type OrganizationScope,
 } from "../types";
 
@@ -44,11 +48,19 @@ export function isMissingScope(
   return null;
 }
 
-export async function requirePluginEnabled(
-  supabase: SupabaseClient,
+export async function requireScopedAccess(
+  repo: CommunityManagementRepository,
+  scope: OrganizationScope | undefined,
   organizationId: string
 ): Promise<CommunityManagementError | null> {
-  if (!(await isCommunityManagementEnabled(supabase, organizationId))) {
+  const scopeError = isMissingScope(scope, organizationId);
+  if (scopeError) return scopeError;
+
+  // Organization access was established when the Cordis composition was
+  // created; RLS remains the final authority at write time. Re-check the
+  // plugin gate here because an operator can flip it between composition
+  // and the write.
+  if (!(await repo.isPluginEnabled(organizationId))) {
     return communityFailure({
       status: 409,
       code: "community_management_disabled",
@@ -59,80 +71,13 @@ export async function requirePluginEnabled(
   return null;
 }
 
-export async function requireScopedAccess(
-  supabase: SupabaseClient,
-  scope: OrganizationScope | undefined,
-  organizationId: string,
-  message: string
-): Promise<CommunityManagementError | null> {
-  const scopeError = isMissingScope(scope, organizationId);
-  if (scopeError) return scopeError;
-
-  // The Cordis composition already established organization access. Re-check
-  // here because role rows can change between composition and the write; RLS
-  // remains the final authority and maps to the same 403 below.
-  if (!(await currentUserCanAccessOrg(supabase, organizationId))) {
-    return communityFailure({
-      status: 403,
-      code: "community_forbidden",
-      message,
-      reason: "forbidden",
-    });
-  }
-
-  return requirePluginEnabled(supabase, organizationId);
-}
-
-export async function resolveCommunityOrganizationId(
-  supabase: SupabaseClient,
-  communityId: string
-): Promise<string | null> {
-  const { data } = await supabase
-    .from("communities")
-    .select("org_id")
-    .eq("id", communityId)
-    .maybeSingle<{ org_id: string }>();
-  return data?.org_id ?? null;
-}
-
-export async function resolveMicrogridOrganizationId(
-  supabase: SupabaseClient,
-  microgridId: string
-): Promise<{ microgridId: string; communityId: string; orgId: string } | null> {
-  const { data: microgrid } = await supabase
-    .from("microgrids")
-    .select("id, community_id")
-    .eq("id", microgridId)
-    .maybeSingle<{ id: string; community_id: string }>();
-  if (!microgrid) return null;
-  const orgId = await resolveCommunityOrganizationId(
-    supabase,
-    microgrid.community_id
-  );
-  if (!orgId) return null;
-  return { microgridId: microgrid.id, communityId: microgrid.community_id, orgId };
-}
-
-export async function requireCommunityAccess(
-  supabase: SupabaseClient,
-  communityId: string,
-  message: string
-): Promise<CommunityManagementError | null> {
-  if (!(await currentUserCanAccessCommunity(supabase, communityId))) {
-    return communityFailure({ status: 403, code: "community_forbidden", message });
-  }
-  return null;
-}
-
-export async function requireMicrogridAccess(
-  supabase: SupabaseClient,
-  microgridId: string,
-  message: string
-): Promise<CommunityManagementError | null> {
-  if (!(await currentUserCanAccessMicrogrid(supabase, microgridId))) {
-    return communityFailure({ status: 403, code: "community_forbidden", message });
-  }
-  return null;
+export function accessDenied(message: string): CommunityManagementError {
+  return communityFailure({
+    status: 403,
+    code: "community_forbidden",
+    message,
+    reason: "forbidden",
+  });
 }
 
 export function mapRlsError(
@@ -140,7 +85,12 @@ export function mapRlsError(
   message: string
 ): CommunityManagementError | null {
   if (error.code === "42501" || (error.message ?? "").includes("row-level security")) {
-    return communityFailure({ status: 403, code: "community_forbidden", message });
+    return communityFailure({
+      status: 403,
+      code: "community_forbidden",
+      message,
+      reason: "forbidden",
+    });
   }
   return null;
 }

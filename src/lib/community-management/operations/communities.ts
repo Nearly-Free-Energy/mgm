@@ -1,23 +1,29 @@
+/**
+ * Community create/update operations for the community-management plugin.
+ *
+ * Domain logic only: validation, organization-scope enforcement, and result
+ * mapping. All persistence flows through `CommunityManagementRepository` —
+ * see `../types` and the import-boundary test.
+ */
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Community } from "@/lib/types/domain";
+import {
+  accessDenied,
+  mapRlsError,
+  readOptionalString,
+  requireScopedAccess,
+  UUID_RE,
+} from "./shared";
 import {
   communityFailure,
   type CommunityCreateInput,
   type CommunityManagementError,
+  type CommunityManagementRepository,
   type CommunityManagementResult,
   type CommunityUpdateInput,
   type OrganizationScope,
 } from "../types";
-import {
-  readOptionalString,
-  requirePluginEnabled,
-  requireScopedAccess,
-  resolveCommunityOrganizationId,
-  mapRlsError,
-  UUID_RE,
-} from "./shared";
 
 const OPTIONAL_STRING_FIELDS = [
   "address_line1",
@@ -118,27 +124,17 @@ function parseUpdateInput(
 }
 
 export async function createCommunityOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   body: unknown
 ): Promise<CommunityManagementResult<Community>> {
   const parsed = parseCreateInput(body);
   if (!parsed.ok) return parsed;
 
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    parsed.data.org_id,
-    "Not authorized to add communities to this organization."
-  );
+  const accessError = await requireScopedAccess(repo, scope, parsed.data.org_id);
   if (accessError) return accessError;
 
-  const { data, error } = await supabase
-    .from("communities")
-    .insert(parsed.data)
-    .select("*")
-    .single();
-
+  const { data, error } = await repo.insertCommunity(parsed.data);
   if (error) {
     const rlsError = mapRlsError(
       error,
@@ -151,12 +147,19 @@ export async function createCommunityOperation(
       message: `Failed to create community: ${error.message}`,
     });
   }
+  if (!data) {
+    return communityFailure({
+      status: 500,
+      code: "community_create_failed",
+      message: "Failed to create community.",
+    });
+  }
 
-  return { ok: true, data: data as Community };
+  return { ok: true, data };
 }
 
 export async function updateCommunityOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   id: string,
   body: unknown
@@ -173,31 +176,16 @@ export async function updateCommunityOperation(
   if (!parsed.ok) return parsed;
 
   // Preserve the route contract: an inaccessible or missing community is a
-  // 403 here because the access helper cannot distinguish the two cases.
-  const orgId = await resolveCommunityOrganizationId(supabase, id);
+  // 403 here because organization resolution cannot distinguish the two.
+  const orgId = await repo.getCommunityOrganizationId(id);
   if (!orgId) {
-    return communityFailure({
-      status: 403,
-      code: "community_forbidden",
-      message: "Not authorized to update this community.",
-    });
+    return accessDenied("Not authorized to update this community.");
   }
 
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    orgId,
-    "Not authorized to update this community."
-  );
+  const accessError = await requireScopedAccess(repo, scope, orgId);
   if (accessError) return accessError;
 
-  const { data, error } = await supabase
-    .from("communities")
-    .update(parsed.data)
-    .eq("id", id)
-    .select("*")
-    .maybeSingle();
-
+  const { data, error } = await repo.updateCommunity(id, parsed.data);
   if (error) {
     const rlsError = mapRlsError(
       error,
@@ -218,12 +206,20 @@ export async function updateCommunityOperation(
     });
   }
 
-  return { ok: true, data: data as Community };
+  return { ok: true, data };
 }
 
 export async function assertCommunityPluginForOrganization(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   organizationId: string
 ): Promise<CommunityManagementError | null> {
-  return requirePluginEnabled(supabase, organizationId);
+  if (!(await repo.isPluginEnabled(organizationId))) {
+    return communityFailure({
+      status: 409,
+      code: "community_management_disabled",
+      message:
+        "Community management is disabled for this organization. Enable it in Settings → Plugins; existing records are preserved.",
+    });
+  }
+  return null;
 }

@@ -1,6 +1,12 @@
+/**
+ * CommunityManagementCapability — typed entry point for the
+ * community-management plugin's domain operations.
+ *
+ * Import boundary: consumes operations and the repository interface only —
+ * never a database client. See `__tests__/import-boundary.test.ts`.
+ */
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createCommunityOperation,
   updateCommunityOperation,
@@ -18,25 +24,19 @@ import {
   communityFailure,
   type CommunityManagementCapabilityContract,
   type CommunityManagementError,
+  type CommunityManagementRepository,
   type CommunityManagementResult,
+  type HierarchyLevel,
+  type HierarchyScope,
   type OrganizationScope,
 } from "./types";
 import type { Community, Household, Microgrid } from "@/lib/types/domain";
-import type { HierarchyLevel } from "@/components/ui/hierarchy-nav";
-import {
-  getHierarchyLevels,
-  type HierarchyScope,
-} from "@/lib/hierarchy";
-import {
-  resolveCommunityOrganizationId,
-  resolveMicrogridOrganizationId,
-} from "./operations/shared";
 
 export class CommunityManagementCapability
   implements CommunityManagementCapabilityContract
 {
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly repo: CommunityManagementRepository,
     private readonly scope: OrganizationScope,
     private readonly isActive: () => boolean
   ) {}
@@ -55,7 +55,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<Community>> {
     return (
       this.ensureActive() ??
-      createCommunityOperation(this.supabase, this.scope, input)
+      createCommunityOperation(this.repo, this.scope, input)
     );
   }
 
@@ -65,7 +65,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<Community>> {
     return (
       this.ensureActive() ??
-      updateCommunityOperation(this.supabase, this.scope, id, input)
+      updateCommunityOperation(this.repo, this.scope, id, input)
     );
   }
 
@@ -74,7 +74,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<Microgrid>> {
     return (
       this.ensureActive() ??
-      createMicrogridOperation(this.supabase, this.scope, input)
+      createMicrogridOperation(this.repo, this.scope, input)
     );
   }
 
@@ -84,7 +84,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<Microgrid>> {
     return (
       this.ensureActive() ??
-      updateMicrogridOperation(this.supabase, this.scope, id, input)
+      updateMicrogridOperation(this.repo, this.scope, id, input)
     );
   }
 
@@ -93,7 +93,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<{ household_id: string }>> {
     return (
       this.ensureActive() ??
-      createHouseholdOperation(this.supabase, this.scope, input)
+      createHouseholdOperation(this.repo, this.scope, input)
     );
   }
 
@@ -103,7 +103,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<Household>> {
     return (
       this.ensureActive() ??
-      updateHouseholdOperation(this.supabase, this.scope, id, input)
+      updateHouseholdOperation(this.repo, this.scope, id, input)
     );
   }
 
@@ -112,7 +112,7 @@ export class CommunityManagementCapability
   ): Promise<CommunityManagementResult<{ id: string }>> {
     return (
       this.ensureActive() ??
-      deleteHouseholdOperation(this.supabase, this.scope, id)
+      deleteHouseholdOperation(this.repo, this.scope, id)
     );
   }
 
@@ -143,16 +143,14 @@ export class CommunityManagementCapability
     }
 
     if ("communityId" in hierarchyScope && hierarchyScope.communityId) {
-      const orgId = await resolveCommunityOrganizationId(
-        this.supabase,
+      const orgId = await this.repo.getCommunityOrganizationId(
         hierarchyScope.communityId
       );
       if (!orgId || orgId !== this.scope.organizationId) return mismatch;
     }
 
     if ("microgridId" in hierarchyScope && hierarchyScope.microgridId) {
-      const resolved = await resolveMicrogridOrganizationId(
-        this.supabase,
+      const resolved = await this.repo.getMicrogridOrganization(
         hierarchyScope.microgridId
       );
       if (!resolved || resolved.orgId !== this.scope.organizationId) {
@@ -161,14 +159,11 @@ export class CommunityManagementCapability
     }
 
     if ("householdId" in hierarchyScope && hierarchyScope.householdId) {
-      const { data: household } = await this.supabase
-        .from("households")
-        .select("microgrid_id")
-        .eq("id", hierarchyScope.householdId)
-        .maybeSingle<{ microgrid_id: string }>();
+      const { data: household } = await this.repo.findHousehold(
+        hierarchyScope.householdId
+      );
       if (!household) return mismatch;
-      const resolved = await resolveMicrogridOrganizationId(
-        this.supabase,
+      const resolved = await this.repo.getMicrogridOrganization(
         household.microgrid_id
       );
       if (!resolved || resolved.orgId !== this.scope.organizationId) {
@@ -178,7 +173,7 @@ export class CommunityManagementCapability
 
     return {
       ok: true,
-      data: await getHierarchyLevels(this.supabase, hierarchyScope),
+      data: await this.repo.resolveHierarchyLevels(hierarchyScope),
     };
   }
 }

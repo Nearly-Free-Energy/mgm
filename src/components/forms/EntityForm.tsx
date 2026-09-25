@@ -154,7 +154,10 @@ function initialStateFor(props: EntityFormProps): FormState {
   if (props.entity === "microgrid") {
     const mgIv = props.initialValues ?? {};
     base.currency = mgIv.currency ?? "UGX";
-    base.timezone = mgIv.timezone ?? "UTC";
+    // Release 1 (issue #3): new microgrids default to Africa/Kampala.
+    // Editable during setup and afterwards; existing rows keep their stored
+    // value via initialValues, so this default only affects creation.
+    base.timezone = mgIv.timezone ?? "Africa/Kampala";
     base.lat = mgIv.lat != null ? String(mgIv.lat) : "";
     base.lng = mgIv.lng != null ? String(mgIv.lng) : "";
   }
@@ -184,7 +187,7 @@ function buildCreatePayload(
     // parentCommunityId is set in locked mode; selectedCommunityId is used in picker mode.
     payload.community_id = props.parentCommunityId ?? state.selectedCommunityId;
     payload.currency = state.currency ?? "UGX";
-    payload.timezone = state.timezone ?? "UTC";
+    payload.timezone = state.timezone ?? "Africa/Kampala";
     payload.lat = state.lat?.trim() ? state.lat.trim() : null;
     payload.lng = state.lng?.trim() ? state.lng.trim() : null;
   }

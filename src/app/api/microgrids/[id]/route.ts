@@ -15,7 +15,6 @@ import {
   UUID_RE,
   type EntityDeleteLogPayload,
 } from "@/lib/entity-deletion/shared";
-import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 
 function mapError(error: CommunityManagementError): NextResponse {
   const { ok, status, code, message, field, reason } = error;

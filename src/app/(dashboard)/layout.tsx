@@ -18,6 +18,18 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Release 1 (issue #3) — first-run bootstrap. When no organization exists
+  // yet, the signed-in user is eligible to become the initial operator, so
+  // send them to /setup instead of /no-access. Once the first organization
+  // exists, unassigned users fall through to the revoked-user gate below
+  // and /no-access is retained for them.
+  const { count: orgCount } = await supabase
+    .from("organizations")
+    .select("id", { head: true, count: "exact" });
+  if ((orgCount ?? 0) === 0) {
+    redirect("/setup");
+  }
+
   // UX5 (#79) — gate revoked users. A logged-in auth.users row with no
   // user_roles rows has had their access revoked (or was never granted).
   // Send them to /no-access (outside this route group) so they get a

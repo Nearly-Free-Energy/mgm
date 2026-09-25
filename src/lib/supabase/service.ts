@@ -17,8 +17,11 @@ import "server-only";
  *     static service-role JWT.
  *   - URL: prefers SUPABASE_INTERNAL_URL (Docker mode) over
  *     NEXT_PUBLIC_SUPABASE_URL — mirrors `server.ts:10`.
- *   - Throws at MODULE LOAD if SUPABASE_SERVICE_ROLE_KEY is unset. Fail
- *     fast at boot beats silent 401s in production.
+ *   - Throws from `createServiceClient()` (not at module load) when
+ *     SUPABASE_SERVICE_ROLE_KEY is unset. Module-load throws would fail
+ *     `next build` page-data collection for every route that imports this
+ *     module — including inherited surfaces a deployment may never call.
+ *     Fail fast at first privileged use instead, with the same message.
  *
  * Two-client pattern — see ../../app/api/users/invite/route.ts for the
  * canonical caller shape. Reserved for: admin auth operations, future
@@ -26,31 +29,25 @@ import "server-only";
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Module-load-time guard. Importing this module in an environment
-// without the service-role key is a configuration error.
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SERVICE_ROLE_KEY) {
-  throw new Error(
-    "SUPABASE_SERVICE_ROLE_KEY is not set. This key is required for " +
-      "privileged auth operations (invite, admin deletions). Set it in " +
-      ".env.local for local dev and in the Vercel project env vars for " +
-      "Production / Preview / Development."
-  );
-}
-
-const SUPABASE_URL =
-  process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-if (!SUPABASE_URL) {
-  throw new Error(
-    "Supabase URL is not set. Expected NEXT_PUBLIC_SUPABASE_URL or " +
-      "SUPABASE_INTERNAL_URL (Docker mode)."
-  );
-}
-
 export function createServiceClient(): SupabaseClient {
-  // SERVICE_ROLE_KEY is guaranteed non-null by the module-load check
-  // above, but TypeScript needs help seeing that narrowing.
-  return createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is not set. This key is required for " +
+        "privileged auth operations (invite, admin deletions). Set it in " +
+        ".env.local for local dev and in the Vercel project env vars for " +
+        "Production / Preview / Development."
+    );
+  }
+  const supabaseUrl =
+    process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error(
+      "Supabase URL is not set. Expected NEXT_PUBLIC_SUPABASE_URL or " +
+        "SUPABASE_INTERNAL_URL (Docker mode)."
+    );
+  }
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

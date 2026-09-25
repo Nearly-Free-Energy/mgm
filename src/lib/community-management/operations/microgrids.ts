@@ -1,7 +1,12 @@
+/**
+ * Microgrid create/update operations for the community-management plugin.
+ *
+ * Domain logic only: validation, organization-scope enforcement, and result
+ * mapping. All persistence flows through `CommunityManagementRepository` —
+ * see `../types` and the import-boundary test.
+ */
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 import type { Microgrid } from "@/lib/types/domain";
 import { validateCurrency } from "@/lib/validation/currency";
 import {
@@ -9,19 +14,20 @@ import {
   validateTimezone,
 } from "@/lib/validation/timezone";
 import {
+  accessDenied,
+  mapRlsError,
+  readOptionalString,
+  requireScopedAccess,
+  UUID_RE,
+} from "./shared";
+import {
   communityFailure,
+  type CommunityManagementRepository,
   type CommunityManagementResult,
   type MicrogridCreateInput,
   type MicrogridUpdateInput,
   type OrganizationScope,
 } from "../types";
-import {
-  mapRlsError,
-  readOptionalString,
-  requireScopedAccess,
-  resolveCommunityOrganizationId,
-  UUID_RE,
-} from "./shared";
 
 const OPTIONAL_STRING_FIELDS = [
   "address_line1",
@@ -210,41 +216,24 @@ function parseUpdateInput(
 }
 
 export async function createMicrogridOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   body: unknown
 ): Promise<CommunityManagementResult<Microgrid>> {
   const parsed = parseCreateInput(body);
   if (!parsed.ok) return parsed;
 
-  // Preserve the route contract: a missing/inaccessible parent community is a
-  // 403 because the access helper cannot distinguish the two cases.
-  const orgId = await resolveCommunityOrganizationId(
-    supabase,
-    parsed.data.communityId
-  );
+  // Preserve the route contract: a missing/inaccessible parent community is
+  // a 403 because organization resolution cannot distinguish the two cases.
+  const orgId = await repo.getCommunityOrganizationId(parsed.data.communityId);
   if (!orgId) {
-    return communityFailure({
-      status: 403,
-      code: "microgrid_forbidden",
-      message: "Not authorized to add microgrids to this community.",
-    });
+    return accessDenied("Not authorized to add microgrids to this community.");
   }
 
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    orgId,
-    "Not authorized to add microgrids to this community."
-  );
+  const accessError = await requireScopedAccess(repo, scope, orgId);
   if (accessError) return accessError;
 
-  const { data, error } = await supabase
-    .from("microgrids")
-    .insert(parsed.data.input)
-    .select(MICROGRID_PUBLIC_COLUMNS)
-    .single();
-
+  const { data, error } = await repo.insertMicrogrid(parsed.data.input);
   if (error) {
     if (
       error.code === "23505" &&
@@ -268,12 +257,19 @@ export async function createMicrogridOperation(
       message: `Failed to create microgrid: ${error.message}`,
     });
   }
+  if (!data) {
+    return communityFailure({
+      status: 500,
+      code: "microgrid_create_failed",
+      message: "Failed to create microgrid.",
+    });
+  }
 
-  return { ok: true, data: data as Microgrid };
+  return { ok: true, data };
 }
 
 export async function updateMicrogridOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   id: string,
   body: unknown
@@ -288,45 +284,15 @@ export async function updateMicrogridOperation(
   const parsed = parseUpdateInput(body);
   if (!parsed.ok) return parsed;
 
-  const { data: microgrid } = await supabase
-    .from("microgrids")
-    .select("id, community_id")
-    .eq("id", id)
-    .maybeSingle<{ id: string; community_id: string }>();
-  if (!microgrid) {
-    return communityFailure({
-      status: 403,
-      code: "microgrid_forbidden",
-      message: "Not authorized to update this microgrid.",
-    });
-  }
-  const orgId = await resolveCommunityOrganizationId(
-    supabase,
-    microgrid.community_id
-  );
-  if (!orgId) {
-    return communityFailure({
-      status: 403,
-      code: "microgrid_forbidden",
-      message: "Not authorized to update this microgrid.",
-    });
+  const resolved = await repo.getMicrogridOrganization(id);
+  if (!resolved) {
+    return accessDenied("Not authorized to update this microgrid.");
   }
 
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    orgId,
-    "Not authorized to update this microgrid."
-  );
+  const accessError = await requireScopedAccess(repo, scope, resolved.orgId);
   if (accessError) return accessError;
 
-  const { data, error } = await supabase
-    .from("microgrids")
-    .update(parsed.data)
-    .eq("id", id)
-    .select(MICROGRID_PUBLIC_COLUMNS)
-    .maybeSingle();
-
+  const { data, error } = await repo.updateMicrogrid(id, parsed.data);
   if (error) {
     if (
       error.code === "23505" &&
@@ -359,5 +325,5 @@ export async function updateMicrogridOperation(
       message: "Microgrid not found.",
     });
   }
-  return { ok: true, data: data as Microgrid };
+  return { ok: true, data };
 }

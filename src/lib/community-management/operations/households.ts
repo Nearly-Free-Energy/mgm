@@ -1,19 +1,28 @@
+/**
+ * Household create/update/delete operations for the community-management
+ * plugin.
+ *
+ * Domain logic only: validation, organization-scope enforcement, device-link
+ * reconciliation, and result mapping. All persistence flows through
+ * `CommunityManagementRepository` — see `../types` and the
+ * import-boundary test.
+ */
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Household } from "@/lib/types/domain";
 import {
+  accessDenied,
+  mapRlsError,
+  requireScopedAccess,
+  UUID_RE,
+} from "./shared";
+import {
   communityFailure,
+  type CommunityManagementRepository,
   type CommunityManagementResult,
   type HouseholdCreateInput,
   type OrganizationScope,
 } from "../types";
-import {
-  mapRlsError,
-  requireScopedAccess,
-  resolveMicrogridOrganizationId,
-  UUID_RE,
-} from "./shared";
 
 const ACCOUNT_NUMBER_MAX_LENGTH = 30;
 const METER_SERIAL_MAX_LENGTH = 50;
@@ -235,7 +244,7 @@ function parseCreateInput(
 }
 
 export async function createHouseholdOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   body: unknown
 ): Promise<CommunityManagementResult<{ household_id: string }>> {
@@ -244,27 +253,15 @@ export async function createHouseholdOperation(
 
   // Preserve the route contract: RLS decides cross-microgrid access, so an
   // invisible parent microgrid surfaces as 403 here.
-  const resolved = await resolveMicrogridOrganizationId(
-    supabase,
-    parsed.data.microgridId
-  );
+  const resolved = await repo.getMicrogridOrganization(parsed.data.microgridId);
   if (!resolved) {
-    return communityFailure({
-      status: 403,
-      code: "household_forbidden",
-      message: "Not authorized to create a household on this microgrid.",
-    });
+    return accessDenied("Not authorized to create a household on this microgrid.");
   }
 
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    resolved.orgId,
-    "Not authorized to create a household on this microgrid."
-  );
+  const accessError = await requireScopedAccess(repo, scope, resolved.orgId);
   if (accessError) return accessError;
 
-  const rpcArgs = {
+  const rpcArgs: Record<string, unknown> = {
     p_microgrid_id: parsed.data.input.microgrid_id,
     p_display_name: parsed.data.input.display_name,
     p_primary_phone: parsed.data.input.primary_phone,
@@ -282,15 +279,13 @@ export async function createHouseholdOperation(
     p_meter_type: parsed.data.input.meter_type ?? undefined,
     p_customer_type: parsed.data.input.customer_type ?? undefined,
   };
-  const { data, error } = parsed.data.input.device_id
-    ? await supabase.rpc("fn_create_household_with_meter", {
-        ...rpcArgs,
-        p_device_id: parsed.data.input.device_id,
-      })
-    : await supabase.rpc("fn_create_household", {
-        ...rpcArgs,
-        p_device_id: null,
-      });
+  const withMeter = parsed.data.input.device_id != null;
+  const { data, error } = await repo.createHousehold(
+    withMeter
+      ? { ...rpcArgs, p_device_id: parsed.data.input.device_id }
+      : { ...rpcArgs, p_device_id: null },
+    withMeter
+  );
 
   if (error) {
     const rlsError = mapRlsError(
@@ -521,7 +516,7 @@ function parseUpdateInput(
 }
 
 export async function updateHouseholdOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   id: string,
   body: unknown
@@ -536,65 +531,26 @@ export async function updateHouseholdOperation(
   const parsed = parseUpdateInput(body);
   if (!parsed.ok) return parsed;
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("households")
-    .select("id, microgrid_id")
-    .eq("id", id)
-    .maybeSingle<{ id: string; microgrid_id: string }>();
-  if (fetchError) {
-    if (fetchError.code === "PGRST116") {
-      return communityFailure({
-        status: 404,
-        code: "household_not_found",
-        message: "Household not found",
-      });
-    }
+  // RLS-filtered fetch: a missing or hidden household is a 404, preserving
+  // the route contract.
+  const { data: existing, error: fetchError } = await repo.findHousehold(id);
+  if (fetchError || !existing) {
     return communityFailure({
       status: 404,
       code: "household_not_found",
-      message: fetchError.message ?? "Household not found",
-    });
-  }
-  if (!existing) {
-    return communityFailure({
-      status: 404,
-      code: "household_not_found",
-      message: "Household not found",
+      message: fetchError?.message ?? "Household not found",
     });
   }
 
-  const resolved = await resolveMicrogridOrganizationId(
-    supabase,
-    existing.microgrid_id
-  );
+  const resolved = await repo.getMicrogridOrganization(existing.microgrid_id);
   if (!resolved) {
-    return communityFailure({
-      status: 403,
-      code: "household_forbidden",
-      message: "You do not have permission to update this household.",
-      reason: "forbidden",
-    });
+    return accessDenied("You do not have permission to update this household.");
   }
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    resolved.orgId,
-    "You do not have permission to update this household."
-  );
-  if (accessError) {
-    return accessError.ok
-      ? accessError
-      : { ...accessError, reason: accessError.reason ?? "forbidden" };
-  }
+  const accessError = await requireScopedAccess(repo, scope, resolved.orgId);
+  if (accessError) return accessError;
 
   if (parsed.data.deviceProvided && parsed.data.deviceValue) {
-    const { data: existingLink } = await supabase
-      .from("household_devices")
-      .select("household_id")
-      .eq("device_id", parsed.data.deviceValue)
-      .eq("role", "primary_consumption_meter")
-      .neq("household_id", id)
-      .maybeSingle();
+    const existingLink = await repo.findDeviceLink(parsed.data.deviceValue, id);
     if (existingLink) {
       return communityFailure({
         status: 409,
@@ -608,12 +564,10 @@ export async function updateHouseholdOperation(
 
   let updatedHousehold: Record<string, unknown> | null = null;
   if (Object.keys(parsed.data.update).length > 0) {
-    const { data, error } = await supabase
-      .from("households")
-      .update(parsed.data.update)
-      .eq("id", id)
-      .select("*")
-      .single();
+    const { data, error } = await repo.updateHouseholdFields(
+      id,
+      parsed.data.update
+    );
     if (error) {
       const rlsError = mapRlsError(error, "Not authorized to update this household.");
       if (rlsError) {
@@ -625,15 +579,11 @@ export async function updateHouseholdOperation(
         message: `Failed to update household: ${error.message}`,
       });
     }
-    updatedHousehold = data as Record<string, unknown>;
+    updatedHousehold = data as Record<string, unknown> | null;
   }
 
   if (parsed.data.deviceProvided) {
-    const { error: deleteError } = await supabase
-      .from("household_devices")
-      .delete()
-      .eq("household_id", id)
-      .eq("role", "primary_consumption_meter");
+    const deleteError = await repo.clearDeviceLinks(id);
     if (deleteError) {
       const rlsError = mapRlsError(
         deleteError,
@@ -647,13 +597,7 @@ export async function updateHouseholdOperation(
       });
     }
     if (parsed.data.deviceValue) {
-      const { error: insertError } = await supabase
-        .from("household_devices")
-        .insert({
-          household_id: id,
-          device_id: parsed.data.deviceValue,
-          role: "primary_consumption_meter",
-        });
+      const insertError = await repo.insertDeviceLink(id, parsed.data.deviceValue);
       if (insertError) {
         const rlsError = mapRlsError(insertError, "Not authorized to assign this device.");
         if (rlsError) return { ...rlsError, reason: "rls_denied" };
@@ -675,24 +619,18 @@ export async function updateHouseholdOperation(
   }
 
   if (!updatedHousehold) {
-    const { data, error } = await supabase
-      .from("households")
-      .select("*")
-      .eq("id", id)
-      .single();
-    if (error) {
+    const { data, error } = await repo.refetchHousehold(id);
+    if (error || !data) {
       return communityFailure({
         status: 500,
         code: "household_read_failed",
-        message: `Failed to read updated household: ${error.message}`,
+        message: `Failed to read updated household: ${error?.message ?? "not found"}`,
       });
     }
-    updatedHousehold = data as Record<string, unknown>;
+    updatedHousehold = data as unknown as Record<string, unknown>;
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const actorUserId = await repo.getAuthenticatedUserId();
   console.info(
     JSON.stringify({
       event: "household.update",
@@ -705,7 +643,7 @@ export async function updateHouseholdOperation(
           ? "link"
           : "clear"
         : "none",
-      actor_user_id: user?.id ?? null,
+      actor_user_id: actorUserId,
       at: new Date().toISOString(),
     })
   );
@@ -714,7 +652,7 @@ export async function updateHouseholdOperation(
 }
 
 export async function deleteHouseholdOperation(
-  supabase: SupabaseClient,
+  repo: CommunityManagementRepository,
   scope: OrganizationScope | undefined,
   id: string
 ): Promise<CommunityManagementResult<{ id: string }>> {
@@ -726,11 +664,7 @@ export async function deleteHouseholdOperation(
     });
   }
 
-  const { data: existing, error: fetchError } = await supabase
-    .from("households")
-    .select("id, display_name, microgrid_id")
-    .eq("id", id)
-    .maybeSingle<{ id: string; display_name: string; microgrid_id: string }>();
+  const { data: existing, error: fetchError } = await repo.findHousehold(id);
   if (fetchError || !existing) {
     return communityFailure({
       status: 404,
@@ -739,37 +673,18 @@ export async function deleteHouseholdOperation(
     });
   }
 
-  const resolved = await resolveMicrogridOrganizationId(
-    supabase,
-    existing.microgrid_id
-  );
+  const resolved = await repo.getMicrogridOrganization(existing.microgrid_id);
   if (!resolved) {
-    return communityFailure({
-      status: 403,
-      code: "household_forbidden",
-      message: "You do not have permission to delete this household.",
-      reason: "forbidden",
-    });
+    return accessDenied("You do not have permission to delete this household.");
   }
-  const accessError = await requireScopedAccess(
-    supabase,
-    scope,
-    resolved.orgId,
-    "You do not have permission to delete this household."
-  );
-  if (accessError) {
-    return accessError.ok
-      ? accessError
-      : { ...accessError, reason: accessError.reason ?? "forbidden" };
-  }
+  const accessError = await requireScopedAccess(repo, scope, resolved.orgId);
+  if (accessError) return accessError;
 
   // Deletion safeguard: billing history cascades off households, so refuse
   // to delete a household that has ever been billed. Meter links and portal
   // users cascade harmlessly and need no guard.
-  const { count: lineItemCount, error: countError } = await supabase
-    .from("billing_line_items")
-    .select("id", { count: "exact", head: true })
-    .eq("household_id", id);
+  const { count: lineItemCount, error: countError } =
+    await repo.countBillingLineItems(id);
   if (countError) {
     return communityFailure({
       status: 500,
@@ -787,17 +702,13 @@ export async function deleteHouseholdOperation(
     });
   }
 
-  const { data: deleted, error: deleteError } = await supabase
-    .from("households")
-    .delete()
-    .eq("id", id)
-    .select("id");
+  const { data: deleted, error: deleteError } = await repo.deleteHousehold(id);
   if (deleteError) {
     const rlsError = mapRlsError(
       deleteError,
       "You do not have permission to delete this household."
     );
-    if (rlsError) return { ...rlsError, reason: "forbidden" };
+    if (rlsError) return rlsError;
     return communityFailure({
       status: 500,
       code: "household_delete_failed",
@@ -812,15 +723,13 @@ export async function deleteHouseholdOperation(
     });
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const actorUserId = await repo.getAuthenticatedUserId();
   console.info(
     JSON.stringify({
       event: "household.delete",
       household_id: id,
       microgrid_id: existing.microgrid_id,
-      actor_user_id: user?.id ?? null,
+      actor_user_id: actorUserId,
       at: new Date().toISOString(),
     })
   );

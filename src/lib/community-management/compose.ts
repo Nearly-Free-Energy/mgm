@@ -7,6 +7,7 @@ import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import { COMMUNITY_MANAGEMENT_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { CommunityManagementCapability } from "./capability";
+import { createSupabaseCommunityRepository } from "./infrastructure/supabase-repository";
 import "./scope";
 import {
   communityFailure,
@@ -102,8 +103,12 @@ export async function composeCommunityManagement(options: {
   const context = new Context();
   const fibers: Fiber[] = [];
   let active = true;
+  // The capability consumes the repository interface — never the raw
+  // client. Query, auth-plumbing, and RLS details stay behind the
+  // infrastructure boundary.
+  const repository = createSupabaseCommunityRepository(options.supabase);
   const capability = new CommunityManagementCapability(
-    options.supabase,
+    repository,
     scope,
     () => active
   );
