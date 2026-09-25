@@ -14,6 +14,7 @@ import {
   type FixtureReading,
   type MeteringProviderName,
 } from "@/lib/metering";
+import { resolveReviewOnlySeedReadings } from "./review-seeds";
 
 declare module "cordis" {
   interface Context {
@@ -48,13 +49,41 @@ export class BillingReviewCapability {
   ) {}
 
   async preview(request: BillingReviewRequest): Promise<RunGenerationOutput> {
+    let seedReadings;
+    try {
+      seedReadings = await resolveReviewOnlySeedReadings(
+        this.supabase,
+        request.periodId,
+        request.householdIds
+      );
+    } catch {
+      return {
+        kind: "fatal",
+        status: 500,
+        body: {
+          error: "Unable to resolve imported starting registers for review",
+          code: "METERING_UNAVAILABLE",
+        },
+      };
+    }
+    let meteringProvider;
+    try {
+      meteringProvider = this.registry.resolve(request.provider);
+    } catch {
+      return {
+        kind: "fatal",
+        status: 503,
+        body: { error: "Metering provider is not available", code: "METERING_CONFIGURATION" },
+      };
+    }
     return runGenerationFor({
       supabase: this.supabase,
       periodId: request.periodId,
       householdIds: request.householdIds,
       mode: "preview",
       actorUserId: null,
-      meteringProvider: this.registry.resolve(request.provider),
+      seedReadings,
+      meteringProvider,
     });
   }
 }
@@ -76,25 +105,32 @@ export async function composeBillingReview(
   const registry = new MeteringRegistry();
   const fibers: Fiber[] = [];
 
-  fibers.push(await context.plugin(meteringRegistryPlugin, registry));
-  fibers.push(await context.plugin(openEmsProviderPlugin, {
-    registry,
-    supabase: options.supabase,
-  }));
-  if (options.fixtureReadings) {
-    fibers.push(await context.plugin(fixtureProviderPlugin, {
+  let billingReview: BillingReviewCapability;
+  try {
+    fibers.push(await context.plugin(meteringRegistryPlugin, registry));
+    fibers.push(await context.plugin(openEmsProviderPlugin, {
       registry,
-      readings: options.fixtureReadings,
+      supabase: options.supabase,
     }));
+    if (options.fixtureReadings) {
+      fibers.push(await context.plugin(fixtureProviderPlugin, {
+        registry,
+        readings: options.fixtureReadings,
+      }));
+    }
+    fibers.push(
+      await context.plugin(
+        billingReviewPlugin,
+        new BillingReviewCapability(options.supabase, registry)
+      )
+    );
+    if (!context.billingReview) throw new Error("Cordis billing-review capability did not register");
+    billingReview = context.billingReview;
+  } catch (error) {
+    await Promise.allSettled([...fibers].reverse().map((fiber) => fiber.dispose()));
+    registry.clear();
+    throw error;
   }
-  fibers.push(
-    await context.plugin(
-      billingReviewPlugin,
-      new BillingReviewCapability(options.supabase, registry)
-    )
-  );
-  const billingReview = context.billingReview;
-  if (!billingReview) throw new Error("Cordis billing-review capability did not register");
 
   return {
     billingReview,

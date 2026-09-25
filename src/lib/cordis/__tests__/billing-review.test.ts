@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../review-seeds", () => ({
+  resolveReviewOnlySeedReadings: vi.fn(async () => []),
+}));
+
 import { composeBillingReview } from "../billing-review";
 
 describe("Cordis billing-review composition", () => {
@@ -26,7 +31,11 @@ describe("Cordis billing-review composition", () => {
         householdIds: [],
         provider: "fixture",
       })
-    ).rejects.toThrow('Metering provider "fixture" is not registered');
+    ).resolves.toEqual({
+      kind: "fatal",
+      status: 503,
+      body: { error: "Metering provider is not available", code: "METERING_CONFIGURATION" },
+    });
   });
 
   it("does not silently fall back when a requested provider is absent", async () => {
@@ -38,7 +47,11 @@ describe("Cordis billing-review composition", () => {
           householdIds: [],
           provider: "fixture",
         })
-      ).rejects.toThrow('Metering provider "fixture" is not registered');
+      ).resolves.toEqual({
+        kind: "fatal",
+        status: 503,
+        body: { error: "Metering provider is not available", code: "METERING_CONFIGURATION" },
+      });
     } finally {
       await composition.dispose();
     }

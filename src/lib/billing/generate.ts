@@ -229,8 +229,6 @@ type HouseholdRow = {
   display_name: string;
   household_devices: {
     role: string;
-    effective_from: string;
-    effective_to: string | null;
     devices: {
       id: string;
       openems_component_id: string | null;
@@ -345,8 +343,6 @@ export async function runGenerationFor(
       display_name,
       household_devices(
         role,
-        effective_from,
-        effective_to,
         devices(
           id,
           openems_component_id,
@@ -375,41 +371,23 @@ export async function runGenerationFor(
     householdsAll.map((h) => [h.id, h.display_name])
   );
 
-  // Map: householdId → the single primary device that covers the whole
-  // billing period. A period that crosses a replacement cannot be collapsed
-  // into one register: it must surface a continuity exception instead.
+  // Map: householdId → primary device. This query deliberately stays on the
+  // legacy MBE relation shape: production invoice routes run against schemas
+  // that do not yet have effective-dated assignments. MGM review-only seed
+  // resolution refuses ambiguous replacement assignments separately.
   type ResolvedDevice = {
     deviceId: string;
     edgeOpenemsId: string;
     componentId: string;
   };
   const householdToDevice = new Map<string, ResolvedDevice | null>();
-  const householdAssignmentErrors = new Map<string, string>();
 
   for (const h of householdsAll) {
-    const primaryAssignments = h.household_devices.filter(
-      (hd) =>
-        hd.role === "primary_consumption_meter" &&
-        hd.effective_from <= billingPeriod.start_date &&
-        (hd.effective_to === null || hd.effective_to > billingPeriod.end_date)
+    const primaryHD = h.household_devices.find(
+      (hd) => hd.role === "primary_consumption_meter"
     );
-    const primaryHD = primaryAssignments[0];
-    if (primaryAssignments.length > 1) {
-      householdToDevice.set(h.id, null);
-      householdAssignmentErrors.set(
-        h.id,
-        "More than one primary meter assignment covers this billing period."
-      );
-      continue;
-    }
     if (!primaryHD || !primaryHD.devices) {
       householdToDevice.set(h.id, null);
-      if (h.household_devices.some((hd) => hd.role === "primary_consumption_meter")) {
-        householdAssignmentErrors.set(
-          h.id,
-          "No single meter assignment covers the complete billing period; verify replacement boundaries and readings."
-        );
-      }
       continue;
     }
     const device = primaryHD.devices;
@@ -419,10 +397,6 @@ export async function runGenerationFor(
       // for the OpenEMS path. A `manualReadings` override still wins and
       // routes the household through the manual path.
       householdToDevice.set(h.id, null);
-      householdAssignmentErrors.set(
-        h.id,
-        "The active meter assignment is missing its OpenEMS edge or component mapping."
-      );
       continue;
     }
     householdToDevice.set(h.id, {
@@ -598,7 +572,6 @@ export async function runGenerationFor(
     const prior = existingByHousehold.get(hid) ?? null;
     const dev = householdToDevice.get(hid);
     const manual = manualByHousehold.get(hid);
-    const assignmentError = householdAssignmentErrors.get(hid);
 
     // Q5: bulk-regenerate hit a manual row without a manual override → skip.
     if (
@@ -668,15 +641,6 @@ export async function runGenerationFor(
       // is one — informational only; the manual reading is authoritative.
       deviceId = dev?.deviceId ?? null;
       manualReason = manual.reason ?? null;
-    } else if (assignmentError) {
-      results.push({
-        kind: "error",
-        householdId: hid,
-        householdName,
-        error: assignmentError,
-        code: "meter_assignment_continuity",
-      });
-      continue;
     } else if (dev) {
       // Metered path — the injected provider supplied the reading above.
       const u = usageMap.get(dev.deviceId);
@@ -719,7 +683,7 @@ export async function runGenerationFor(
           householdId: hid,
           householdName,
           error:
-            "This meter was billed before it was connected to OpenEMS, so its starting reading is unknown.",
+            "A trusted starting register is unavailable for this meter and billing period.",
           code: "needs_seed_reading",
         });
         continue;

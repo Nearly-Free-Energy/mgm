@@ -1,12 +1,87 @@
 -- MGM review/import essentials for a new project.
 --
--- Apply only after the base migrations 00001..00015. This is intentionally
--- outside supabase/migrations: the regular migration chain includes 00016,
--- whose broad privilege grants have not been approved for this deployment.
--- This script does not restore default privileges or install legacy mutators.
+-- Apply only after the reviewed base migration files through 00015. This is intentionally
+-- outside supabase/migrations because the MGM pilot uses a curated schema
+-- surface rather than the full inherited application migration chain.
 --
--- Safe to re-run. It only adds columns, types, indexes, a metadata table,
--- constraints, and a read policy. It does not import any customer data.
+-- It only adds columns, types, indexes, a metadata table, constraints, and a
+-- read policy. It does not import any customer data.
+
+-- Fail closed unless this database is exactly at the reviewed base version.
+-- Also avoid stamping existing billing periods with an assumed UTC zone.
+DO $$
+DECLARE
+  v_timezone_column_exists BOOLEAN;
+BEGIN
+  IF to_regclass('supabase_migrations.schema_migrations') IS NULL THEN
+    RAISE EXCEPTION 'MGM pilot schema requires the reviewed base migration history';
+  END IF;
+
+  -- The repository has no 00005/00006 files; 00003 is a seed template and
+  -- is deliberately omitted from the empty cloud project. Supabase CLI and
+  -- the management API record different version formats, so check the
+  -- reviewed migration identities rather than assuming a five-digit version.
+  IF EXISTS (
+    SELECT required.version
+    FROM (VALUES
+      ('00001'), ('00002'), ('00004'), ('00007'), ('00008'), ('00009'),
+      ('00010'), ('00011'), ('00012'), ('00013'), ('00014'), ('00015')
+    ) AS required(version)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM supabase_migrations.schema_migrations AS applied
+      WHERE applied.version::text = required.version
+         OR applied.name LIKE 'mgm_' || required.version || '_%'
+    )
+  ) THEN
+    RAISE EXCEPTION 'MGM pilot schema requires the reviewed base migrations through 00015';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM supabase_migrations.schema_migrations AS applied
+    WHERE (applied.version::text ~ '^[0-9]{5}$' AND applied.version::text > '00015')
+       OR applied.name ~ '^mgm_000(1[6-9]|[2-9][0-9])'
+  ) THEN
+    RAISE EXCEPTION 'MGM pilot schema cannot run after later inherited migrations';
+  END IF;
+
+  IF to_regclass('public.billing_periods') IS NULL
+    OR to_regclass('public.billing_line_items') IS NULL
+    OR to_regclass('public.household_devices') IS NULL THEN
+    RAISE EXCEPTION 'MGM pilot schema is missing required base billing tables';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'billing_periods'
+      AND column_name = 'timezone'
+  ) INTO v_timezone_column_exists;
+
+  IF NOT v_timezone_column_exists
+    AND EXISTS (SELECT 1 FROM public.billing_periods LIMIT 1) THEN
+    RAISE EXCEPTION 'MGM pilot migration will not assign UTC to existing billing periods';
+  END IF;
+END;
+$$;
+
+-- The MGM pilot does not expose inherited mutation RPCs. Trigger functions
+-- remain attached to their triggers; revoking direct EXECUTE does not disable
+-- trigger execution.
+REVOKE EXECUTE ON FUNCTION public.fn_change_user_role(UUID, public.user_role, UUID)
+  FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.fn_create_household_with_meter(
+  UUID, TEXT, UUID, TEXT, TEXT, TEXT, TEXT, TEXT
+) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.fn_finalize_user_invitation(
+  UUID, TEXT, TEXT, TEXT, public.user_role, UUID
+) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.fn_device_openems_component_valid()
+  FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.fn_set_updated_at()
+  FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.fn_user_roles_before_delete_guard()
+  FROM PUBLIC, anon, authenticated;
 
 -- The billing review route reads these values from persisted line items.
 DO $$
@@ -70,8 +145,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_line_items_period_household
 -- Preserve the effective period of each currently recorded device assignment.
 -- The existing primary-meter uniqueness guard is left intact.
 ALTER TABLE public.household_devices
-  ADD COLUMN IF NOT EXISTS effective_from DATE NOT NULL DEFAULT CURRENT_DATE,
+  ADD COLUMN IF NOT EXISTS effective_from DATE,
   ADD COLUMN IF NOT EXISTS effective_to DATE;
+
+UPDATE public.household_devices
+SET effective_from = created_at::date
+WHERE effective_from IS NULL;
+
+ALTER TABLE public.household_devices
+  ALTER COLUMN effective_from SET DEFAULT CURRENT_DATE,
+  ALTER COLUMN effective_from SET NOT NULL;
 
 DO $$
 BEGIN
@@ -155,8 +238,7 @@ END;
 $$;
 
 -- MGM's isolated review deployment is read-only through the authenticated
--- client. The 00001..00015 base setup may grant table privileges to anon and
--- authenticated, so remove those grants from this exact base-table allowlist.
+-- client. Establish that access explicitly on this exact base-table allowlist.
 -- service_role is untouched on these tables for a separately controlled
 -- server-side import path. No schema-wide or default privileges are changed.
 REVOKE ALL ON TABLE
@@ -193,8 +275,7 @@ GRANT SELECT ON TABLE
   public.user_roles
 TO authenticated;
 
--- The base setup also grants these two legacy views to anon and
--- authenticated. Neither is part of the MGM review surface.
+-- These legacy views are outside the MGM review surface.
 REVOKE ALL ON TABLE
   public.microgrid_recent_activity,
   public.microgrid_shared_devices

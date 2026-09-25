@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_HOUSEHOLD_IDS = 500;
 
 type PreviewBody = { periodId: string; householdIds?: string[] };
 
@@ -16,6 +17,7 @@ function parseBody(raw: unknown): PreviewBody | null {
   if (record.householdIds === undefined) return { periodId: record.periodId };
   if (
     !Array.isArray(record.householdIds) ||
+    record.householdIds.length > MAX_HOUSEHOLD_IDS ||
     !record.householdIds.every((id) => typeof id === "string" && UUID_RE.test(id))
   ) {
     return null;
@@ -38,7 +40,7 @@ export async function POST(request: NextRequest) {
   const body = parseBody(raw);
   if (!body) {
     return NextResponse.json(
-      { error: "invalid_body", details: "periodId and householdIds must be UUIDs" },
+      { error: "invalid_body", details: "periodId and householdIds must be UUIDs; householdIds is limited to 500 entries" },
       { status: 400 }
     );
   }
@@ -53,12 +55,43 @@ export async function POST(request: NextRequest) {
   // This RLS-governed lookup also supplies period provenance for the review.
   const { data: period, error: periodError } = await supabase
     .from("billing_periods")
-    .select("id, start_date, end_date, timezone")
+    .select("id, microgrid_id, start_date, end_date, timezone")
     .eq("id", body.periodId)
     .maybeSingle();
   if (periodError || !period) {
     return NextResponse.json({ error: "billing_period_not_found" }, { status: 404 });
   }
+
+  let householdIds = body.householdIds;
+  if (householdIds === undefined) {
+    const { data: households, error: householdsError } = await supabase
+      .from("households")
+      .select("id")
+      .eq("microgrid_id", period.microgrid_id)
+      .limit(MAX_HOUSEHOLD_IDS + 1);
+    if (householdsError) {
+      return NextResponse.json({ error: "households_unavailable" }, { status: 500 });
+    }
+    if ((households ?? []).length > MAX_HOUSEHOLD_IDS) {
+      return NextResponse.json(
+        { error: "too_many_households", details: "Select at most 500 households for one review" },
+        { status: 413 },
+      );
+    }
+    householdIds = (households ?? []).map((household) => household.id);
+  }
+
+  // This optional pilot ledger is not present in older databases. When it is
+  // available, expose only the baseline timestamp, never batch/source data.
+  const { data: baselineBatch } = await supabase
+    .from("pilot_import_batches")
+    .select("applied_at")
+    .eq("billing_period_id", body.periodId)
+    .eq("is_baseline", true)
+    .eq("status", "applied")
+    .order("applied_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
   const composition = await composeBillingReview({ supabase });
   const calculatedAt = new Date().toISOString();
@@ -67,7 +100,7 @@ export async function POST(request: NextRequest) {
     // from this production composition, so a request cannot switch providers.
     const generated = await composition.billingReview.preview({
       periodId: body.periodId,
-      householdIds: body.householdIds,
+      householdIds,
       provider: "openems",
     });
     if (isRunGenerationFatal(generated)) {
@@ -142,7 +175,7 @@ export async function POST(request: NextRequest) {
         endDate: period.end_date,
         timezone: period.timezone,
         tariffName: null,
-        baselineImportedAt: null,
+        baselineImportedAt: baselineBatch?.applied_at ?? null,
       },
       rows,
       calculatedAt,

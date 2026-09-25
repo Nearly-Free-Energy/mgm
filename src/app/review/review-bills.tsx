@@ -29,9 +29,12 @@ function value(value: number | null, unit = ""): string {
   return value === null || !Number.isFinite(value) ? "—" : `${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}${unit}`;
 }
 
-function csvCell(value: string | number | null): string {
-  let text = value === null ? "" : String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = `\u0027${text}`;
+export function csvCell(value: string | number | null): string {
+  if (value === null) return "\"\"";
+  let text = String(value);
+  // A numeric negative is data, not a spreadsheet formula. Text beginning
+  // with formula operators is escaped before it is exported.
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `\u0027${text}`;
   return `"${text.replaceAll('"', '""')}"`;
 }
 
@@ -51,11 +54,16 @@ function exportComparison(data: Comparison) {
   const link = document.createElement("a");
   link.href = url;
   link.download = `mgm-bill-review-${data.period.id}.csv`;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // Safari may not have started consuming the Blob URL by the time click()
+  // returns. Revoke on the next task to keep the download alive.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ReviewBills({ periods, households }: { periods: Period[]; households: Household[] }) {
+export function ReviewBills({ periods, households, householdLimitExceeded = false }: { periods: Period[]; households: Household[]; householdLimitExceeded?: boolean }) {
   const [periodId, setPeriodId] = useState(periods[0]?.id ?? "");
   const [selected, setSelected] = useState<string[]>([]);
   const [comparison, setComparison] = useState<Comparison | null>(null);
@@ -73,7 +81,9 @@ export function ReviewBills({ periods, households }: { periods: Period[]; househ
       const response = await fetch("/api/billing-review/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ periodId, ...(selected.length ? { householdIds: selected } : {}) }),
+        // The page query is capped at 500 households; always send the bounded
+        // list so an unfiltered review cannot expand to every row in the DB.
+        body: JSON.stringify({ periodId, householdIds: selected.length ? selected : householdLimitExceeded ? undefined : available.map((item) => item.id) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "Review failed");
@@ -111,7 +121,9 @@ export function ReviewBills({ periods, households }: { periods: Period[]; househ
           </label>)}
         </div>
       </details>}
-      <button className="mt-5 rounded-md bg-slate-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-50" disabled={!periodId || busy} onClick={review}>{busy ? "Calculating…" : "Compare bills"}</button>
+      {periods.length >= 100 && <p className="mt-3 text-xs text-slate-500">Showing the 100 most recent billing periods.</p>}
+      {householdLimitExceeded && <p className="mt-1 text-xs text-slate-500">Only the first 500 accessible households are listed. Choose households explicitly to run a bounded review.</p>}
+      <button className="mt-5 rounded-md bg-slate-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-50" disabled={!periodId || busy || (householdLimitExceeded && selected.length === 0)} onClick={review}>{busy ? "Calculating…" : "Compare bills"}</button>
       {periods.length === 0 && <p className="mt-4 text-sm text-slate-600">No imported billing periods are available yet.</p>}
       {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
     </section>

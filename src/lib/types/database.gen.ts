@@ -850,15 +850,15 @@ export type Database = {
       pilot_import_batches: {
         Row: {
           applied_at: string | null
+          billing_period_id: string
           conflict_count: number
           created_at: string
           duplicate_source_row_count: number
           household_count: number
           id: string
-          initiated_by: string
+          initiated_by: string | null
           inserted_reading_count: number
           is_baseline: boolean
-          microgrid_id: string
           reading_count: number
           source_label: string
           status: string
@@ -866,15 +866,15 @@ export type Database = {
         }
         Insert: {
           applied_at?: string | null
+          billing_period_id: string
           conflict_count?: number
           created_at?: string
           duplicate_source_row_count?: number
           household_count?: number
           id?: string
-          initiated_by: string
+          initiated_by?: string | null
           inserted_reading_count?: number
           is_baseline?: boolean
-          microgrid_id: string
           reading_count?: number
           source_label: string
           status?: string
@@ -882,15 +882,15 @@ export type Database = {
         }
         Update: {
           applied_at?: string | null
+          billing_period_id?: string
           conflict_count?: number
           created_at?: string
           duplicate_source_row_count?: number
           household_count?: number
           id?: string
-          initiated_by?: string
+          initiated_by?: string | null
           inserted_reading_count?: number
           is_baseline?: boolean
-          microgrid_id?: string
           reading_count?: number
           source_label?: string
           status?: string
@@ -898,10 +898,10 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "pilot_import_batches_microgrid_id_fkey"
-            columns: ["microgrid_id"]
+            foreignKeyName: "pilot_import_batches_billing_period_id_fkey"
+            columns: ["billing_period_id"]
             isOneToOne: false
-            referencedRelation: "microgrids"
+            referencedRelation: "billing_periods"
             referencedColumns: ["id"]
           },
         ]
@@ -1494,4 +1494,3 @@ export const Constants = {
     },
   },
 } as const
-

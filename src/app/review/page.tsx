@@ -4,6 +4,10 @@ import { isMgmReviewer } from "@/lib/mgm/access";
 import { ReviewBills } from "./review-bills";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const MAX_REVIEW_PERIODS = 100;
+const MAX_REVIEW_HOUSEHOLDS = 500;
 
 export default async function ReviewPage() {
   const supabase = await createClient();
@@ -15,9 +19,12 @@ export default async function ReviewPage() {
     await Promise.all([
       supabase.from("billing_periods")
         .select("id,microgrid_id,start_date,end_date,timezone")
-        .order("start_date", { ascending: false }),
+        .order("start_date", { ascending: false })
+        .limit(MAX_REVIEW_PERIODS),
       supabase.from("households")
-        .select("id,microgrid_id"),
+        .select("id,microgrid_id")
+        .order("id", { ascending: true })
+        .limit(MAX_REVIEW_HOUSEHOLDS + 1),
     ]);
 
   if (periodError || householdError) {
@@ -33,7 +40,11 @@ export default async function ReviewPage() {
           Compare saved bills with a fresh calculation from live meter readings. This review does not issue or change bills.
         </p>
       </header>
-      <ReviewBills periods={periods ?? []} households={households ?? []} />
+      <ReviewBills
+        periods={periods ?? []}
+        households={(households ?? []).slice(0, MAX_REVIEW_HOUSEHOLDS)}
+        householdLimitExceeded={(households?.length ?? 0) > MAX_REVIEW_HOUSEHOLDS}
+      />
     </main>
   );
 }
