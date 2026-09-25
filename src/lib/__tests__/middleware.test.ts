@@ -49,6 +49,13 @@ describe("middleware PUBLIC_PATHS", () => {
     const res = await middleware(makeRequest("/api/mgm/health"));
     expect(res.status).toBe(200);
   });
+
+  it("allows the old review bookmark to reach its dashboard redirect", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/review"));
+    expect(res.status).toBe(200);
+  });
   it.each([
     "/api/billing/generate",
     "/api/v1/billing/generate",

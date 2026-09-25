@@ -2,6 +2,7 @@
 const PAGE_ROUTES = [
   /^\/$/,
   /^\/(?:login|accept-invite|forgot-password|reset-password|no-access|setup)$/,
+  /^\/review$/,
   /^\/organizations(?:\/[^/]+)?$/,
   /^\/communities(?:\/[^/]+)?$/,
   /^\/microgrids(?:\/[^/]+)?$/,
