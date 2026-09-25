@@ -25,7 +25,7 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
         throw new MeteringError(
           "Metering provider is not configured for this microgrid",
           "METERING_CONFIGURATION",
-          409,
+          503,
           { microgridId: request.microgridId }
         );
       }
