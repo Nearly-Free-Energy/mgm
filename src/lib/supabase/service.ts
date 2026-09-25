@@ -17,8 +17,9 @@ import "server-only";
  *     static service-role JWT.
  *   - URL: prefers SUPABASE_INTERNAL_URL (Docker mode) over
  *     NEXT_PUBLIC_SUPABASE_URL — mirrors `server.ts:10`.
- *   - Throws at MODULE LOAD if SUPABASE_SERVICE_ROLE_KEY is unset. Fail
- *     fast at boot beats silent 401s in production.
+ *   - Throws when a privileged operation requests a client if the service
+ *     key is unset. MGM's pilot build has no service-role key because its
+ *     deployed route surface contains no privileged auth operations.
  *
  * Two-client pattern — see ../../app/api/users/invite/route.ts for the
  * canonical caller shape. Reserved for: admin auth operations, future
@@ -26,31 +27,16 @@ import "server-only";
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Module-load-time guard. Importing this module in an environment
-// without the service-role key is a configuration error.
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SERVICE_ROLE_KEY) {
-  throw new Error(
-    "SUPABASE_SERVICE_ROLE_KEY is not set. This key is required for " +
-      "privileged auth operations (invite, admin deletions). Set it in " +
-      ".env.local for local dev and in the Vercel project env vars for " +
-      "Production / Preview / Development."
-  );
-}
-
-const SUPABASE_URL =
-  process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-if (!SUPABASE_URL) {
-  throw new Error(
-    "Supabase URL is not set. Expected NEXT_PUBLIC_SUPABASE_URL or " +
-      "SUPABASE_INTERNAL_URL (Docker mode)."
-  );
-}
-
 export function createServiceClient(): SupabaseClient {
-  // SERVICE_ROLE_KEY is guaranteed non-null by the module-load check
-  // above, but TypeScript needs help seeing that narrowing.
-  return createClient(SUPABASE_URL!, SERVICE_ROLE_KEY!, {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set for privileged auth operations.");
+  }
+  const supabaseUrl = process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not set for privileged auth operations.");
+  }
+  return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,

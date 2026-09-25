@@ -28,52 +28,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runGenerationFor, isRunGenerationFatal } from "@/lib/billing/generate";
+import type { MeteringReadRequest } from "@/lib/metering/types";
 
 const MICROGRID_ID = "aaaaaaaa-aaaa-4000-8000-000000000355";
 const PERIOD_ID = "aaaaaaaa-aaaa-4000-8006-000000000355";
 const HH_METERED = "aaaaaaaa-aaaa-4000-8005-000000000355";
 const DEVICE_ID = "aaaaaaaa-aaaa-4000-8004-000000000355";
 
-// Captured (devices, startDate, endDate, timezone) tuples, one per
-// getReadings invocation. Reset in beforeEach.
-type GetReadingsArgs = [
-  { id: string }[],
-  string,
-  string,
-  string,
-];
-const getReadingsCalls: GetReadingsArgs[] = [];
-
-vi.mock("@/lib/openems", async () => {
-  const actual =
-    await vi.importActual<typeof import("@/lib/openems")>("@/lib/openems");
-  return {
-    ...actual,
-    createOpenEmsClient: () => ({
-      getReadings: async (
-        devices: { id: string }[],
-        startDate: string,
-        endDate: string,
-        timezone: string
-      ) => {
-        getReadingsCalls.push([devices, startDate, endDate, timezone]);
-        return devices.map((d) => ({
-          deviceId: d.id,
-          usageKwh: 178.35,
-          startDate,
-          endDate,
-        }));
-      },
-    }),
-  };
-});
-
-vi.mock("@/lib/openems/config", () => ({
-  getMicrogridEmsConfig: async () => ({
-    emsType: "direct_url",
-    backendUrl: "https://ems.invalid/rest",
-  }),
-}));
+// Captured provider-neutral requests, one per metering invocation. Reset in
+// beforeEach. Billing's contract is deliberately independent of OpenEMS.
+const getReadingsCalls: MeteringReadRequest[] = [];
+const meteringProvider = {
+  getReadings: async (request: MeteringReadRequest) => {
+    getReadingsCalls.push(request);
+    return request.devices.map((device) => ({
+      deviceId: device.id,
+      usageKwh: 178.35,
+      startDate: request.startDate,
+      endDate: request.endDate,
+    }));
+  },
+};
 
 /**
  * Minimal chainable + thenable Supabase stub (same shape as
@@ -144,6 +119,8 @@ function makeSupabase(opts: {
             household_devices: [
               {
                 role: "primary_consumption_meter",
+                effective_from: "2020-01-01",
+                effective_to: null,
                 devices: {
                   id: DEVICE_ID,
                   openems_component_id: "meter0",
@@ -216,6 +193,7 @@ async function generatePreview(supabase: SupabaseClient) {
         startKwh: 1000,
       },
     ],
+    meteringProvider,
   });
   if (isRunGenerationFatal(out)) {
     throw new Error(
@@ -239,14 +217,14 @@ describe("runGenerationFor: period-stamped timezone threading (#355)", () => {
     const out = await generatePreview(supabase);
 
     expect(getReadingsCalls).toHaveLength(1);
-    const [devices, startDate, endDate, timezone] = getReadingsCalls[0];
-    expect(devices.map((d) => d.id)).toEqual([DEVICE_ID]);
-    expect(startDate).toBe("2026-04-01");
-    expect(endDate).toBe("2026-04-30");
+    const meteringRequest = getReadingsCalls[0];
+    expect(meteringRequest.devices.map((d) => d.id)).toEqual([DEVICE_ID]);
+    expect(meteringRequest.startDate).toBe("2026-04-01");
+    expect(meteringRequest.endDate).toBe("2026-04-30");
     // The stamped value, verbatim. "Africa/Kampala" here means the code
     // re-read the microgrid's current timezone — the exact bug this pins.
-    expect(timezone).toBe("Pacific/Auckland");
-    expect(timezone).not.toBe("Africa/Kampala");
+    expect(meteringRequest.timezone).toBe("Pacific/Auckland");
+    expect(meteringRequest.timezone).not.toBe("Africa/Kampala");
 
     // And the reading actually flowed into a preview row.
     const preview = out.results.find((r) => r.kind === "preview");
@@ -279,7 +257,7 @@ describe("runGenerationFor: period-stamped timezone threading (#355)", () => {
     // Window params byte-identical — serialised comparison so any added,
     // removed, or re-derived argument fails loudly.
     expect(JSON.stringify(callAfter)).toBe(JSON.stringify(callBefore));
-    expect(callAfter[3]).toBe("UTC");
+    expect(callAfter.timezone).toBe("UTC");
 
     // Line items byte-identical.
     expect(JSON.stringify(outAfter.results)).toBe(

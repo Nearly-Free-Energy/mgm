@@ -397,6 +397,8 @@ export type Database = {
         Row: {
           created_at: string
           device_id: string
+          effective_from: string
+          effective_to: string | null
           household_id: string
           id: string
           role: Database["public"]["Enums"]["household_device_role"]
@@ -404,6 +406,8 @@ export type Database = {
         Insert: {
           created_at?: string
           device_id: string
+          effective_from?: string
+          effective_to?: string | null
           household_id: string
           id?: string
           role: Database["public"]["Enums"]["household_device_role"]
@@ -411,6 +415,8 @@ export type Database = {
         Update: {
           created_at?: string
           device_id?: string
+          effective_from?: string
+          effective_to?: string | null
           household_id?: string
           id?: string
           role?: Database["public"]["Enums"]["household_device_role"]
@@ -837,6 +843,65 @@ export type Database = {
             columns: ["line_item_id"]
             isOneToOne: false
             referencedRelation: "billing_line_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pilot_import_batches: {
+        Row: {
+          applied_at: string | null
+          billing_period_id: string
+          conflict_count: number
+          created_at: string
+          duplicate_source_row_count: number
+          household_count: number
+          id: string
+          initiated_by: string | null
+          inserted_reading_count: number
+          is_baseline: boolean
+          reading_count: number
+          source_label: string
+          status: string
+          unchanged_reading_count: number
+        }
+        Insert: {
+          applied_at?: string | null
+          billing_period_id: string
+          conflict_count?: number
+          created_at?: string
+          duplicate_source_row_count?: number
+          household_count?: number
+          id?: string
+          initiated_by?: string | null
+          inserted_reading_count?: number
+          is_baseline?: boolean
+          reading_count?: number
+          source_label: string
+          status?: string
+          unchanged_reading_count?: number
+        }
+        Update: {
+          applied_at?: string | null
+          billing_period_id?: string
+          conflict_count?: number
+          created_at?: string
+          duplicate_source_row_count?: number
+          household_count?: number
+          id?: string
+          initiated_by?: string | null
+          inserted_reading_count?: number
+          is_baseline?: boolean
+          reading_count?: number
+          source_label?: string
+          status?: string
+          unchanged_reading_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pilot_import_batches_billing_period_id_fkey"
+            columns: ["billing_period_id"]
+            isOneToOne: false
+            referencedRelation: "billing_periods"
             referencedColumns: ["id"]
           },
         ]
@@ -1429,4 +1494,3 @@ export const Constants = {
     },
   },
 } as const
-

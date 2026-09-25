@@ -169,7 +169,7 @@ describe("AcceptInvitePage — OTP token-hash flow (query string)", () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByText(/welcome to metering & billing engine/i)
+        screen.getByText(/welcome to micro grid manager/i)
       ).toBeDefined();
     });
     expect(replaceSpy).toHaveBeenCalledWith("/accept-invite");
@@ -219,7 +219,7 @@ describe("AcceptInvitePage — OTP token-hash flow (query string)", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/welcome to metering & billing engine/i)
+        screen.getByText(/welcome to micro grid manager/i)
       ).toBeDefined();
     });
 
@@ -256,7 +256,7 @@ describe("AcceptInvitePage — OTP token-hash flow (query string)", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/welcome to metering & billing engine/i)
+        screen.getByText(/welcome to micro grid manager/i)
       ).toBeDefined();
     });
 
@@ -296,7 +296,7 @@ describe("AcceptInvitePage — implicit flow (URL fragment)", () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByText(/welcome to metering & billing engine/i)
+        screen.getByText(/welcome to micro grid manager/i)
       ).toBeDefined();
     });
     expect(verifyOtpSpy).not.toHaveBeenCalled();
@@ -378,7 +378,7 @@ describe("AcceptInvitePage — implicit flow (URL fragment)", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/welcome to metering & billing engine/i)
+        screen.getByText(/welcome to micro grid manager/i)
       ).toBeDefined();
     });
 

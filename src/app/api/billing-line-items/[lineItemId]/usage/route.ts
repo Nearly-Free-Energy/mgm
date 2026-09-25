@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import {
   isRunGenerationFatal,
@@ -291,6 +292,7 @@ export async function PATCH(
     ],
     mode: "write",
     actorUserId: user.id,
+    meteringProvider: createOpenEmsMeteringProvider(supabase),
   });
 
   if (isRunGenerationFatal(out)) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import {
   isRunGenerationFatal,
   runGenerationFor,
@@ -267,6 +268,7 @@ export async function POST(request: NextRequest) {
     seedReadings: parsed.seedReadings,
     mode: "write",
     actorUserId: user.id,
+    meteringProvider: createOpenEmsMeteringProvider(supabase),
   });
 
   if (isRunGenerationFatal(out)) {

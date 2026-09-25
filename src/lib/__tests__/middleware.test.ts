@@ -28,6 +28,7 @@ vi.mock("@supabase/ssr", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   getUserMock.mockReset();
+  process.env.MGM_PILOT_SURFACE = "false";
   // Provide minimal env for the middleware to construct a client.
   process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
@@ -43,6 +44,22 @@ function makeRequest(pathname: string) {
 }
 
 describe("middleware PUBLIC_PATHS", () => {
+  it("MGM deployment blocks inherited mutation routes before authentication", async () => {
+    process.env.MGM_PILOT_SURFACE = "true";
+    const middleware = await loadMiddleware();
+    const res = await middleware(new NextRequest("http://localhost/api/billing/generate", { method: "POST" }));
+    expect(res.status).toBe(404);
+    expect(getUserMock).not.toHaveBeenCalled();
+  });
+
+  it("MGM health remains available without a session", async () => {
+    process.env.MGM_PILOT_SURFACE = "true";
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/api/mgm/health"));
+    expect(res.status).toBe(200);
+  });
+
   it("allows unauthenticated GET on /forgot-password (no redirect)", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();

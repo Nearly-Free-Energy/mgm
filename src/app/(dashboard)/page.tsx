@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { Organization, Microgrid } from "@/lib/types/domain";
+import { redirect } from "next/navigation";
 
 type MicrogridWithHouseholdCount = {
   id: string;
@@ -11,6 +12,9 @@ type MicrogridWithHouseholdCount = {
 };
 
 export default async function DashboardPage() {
+  if (process.env.MGM_PILOT_SURFACE !== "false") {
+    redirect("/review");
+  }
   const supabase = await createClient();
 
   const { data: organizations, error: orgError } = await supabase

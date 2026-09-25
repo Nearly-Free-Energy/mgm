@@ -18,6 +18,14 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // Invitation acceptance and older bookmarks can land on `/`. In the MGM
+  // deployment, send authenticated users to the review surface before the
+  // inherited MBE role gate runs; pilot reviewers are allowlisted separately
+  // and do not need MBE user_roles rows.
+  if (process.env.MGM_PILOT_SURFACE !== "false") {
+    redirect("/review");
+  }
+
   // UX5 (#79) — gate revoked users. A logged-in auth.users row with no
   // user_roles rows has had their access revoked (or was never granted).
   // Send them to /no-access (outside this route group) so they get a

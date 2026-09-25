@@ -30,7 +30,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (explicit: templates like .env.pilot.example stay committable)
+.env
 .env.local
 .env*.local
 .env.local.*
