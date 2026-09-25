@@ -84,6 +84,7 @@ export class BillingReviewCapability {
       actorUserId: null,
       seedReadings,
       meteringProvider,
+      requireEffectiveDatedAssignments: true,
     });
   }
 }

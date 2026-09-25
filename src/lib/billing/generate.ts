@@ -209,6 +209,10 @@ export type RunGenerationParams = {
    * do not need one.
    */
   meteringProvider?: MeteringProvider;
+  /** MGM review databases record meter-assignment dates. Fail closed when a
+   *  single assignment does not cover the entire period. Legacy MBE schemas
+   *  do not have these columns, so this check is opt-in. */
+  requireEffectiveDatedAssignments?: boolean;
 };
 
 export type RunGenerationFatal =
@@ -229,6 +233,8 @@ type HouseholdRow = {
   display_name: string;
   household_devices: {
     role: string;
+    effective_from?: string;
+    effective_to?: string | null;
     devices: {
       id: string;
       openems_component_id: string | null;
@@ -343,6 +349,7 @@ export async function runGenerationFor(
       display_name,
       household_devices(
         role,
+        ${params.requireEffectiveDatedAssignments ? "effective_from, effective_to," : ""}
         devices(
           id,
           openems_component_id,
@@ -371,21 +378,31 @@ export async function runGenerationFor(
     householdsAll.map((h) => [h.id, h.display_name])
   );
 
-  // Map: householdId → primary device. This query deliberately stays on the
-  // legacy MBE relation shape: production invoice routes run against schemas
-  // that do not yet have effective-dated assignments. MGM review-only seed
-  // resolution refuses ambiguous replacement assignments separately.
+  // The legacy path uses only its original relation columns. MGM review opts
+  // into effective-date checks before using a primary meter for a period.
   type ResolvedDevice = {
     deviceId: string;
     edgeOpenemsId: string;
     componentId: string;
   };
   const householdToDevice = new Map<string, ResolvedDevice | null>();
+  const householdAssignmentErrors = new Map<string, string>();
 
   for (const h of householdsAll) {
-    const primaryHD = h.household_devices.find(
+    const primaryAssignments = h.household_devices.filter(
       (hd) => hd.role === "primary_consumption_meter"
     );
+    const primaryHD = primaryAssignments[0];
+    if (params.requireEffectiveDatedAssignments && primaryAssignments.length > 0 &&
+      (primaryAssignments.length !== 1 || !primaryHD.effective_from ||
+        primaryHD.effective_from > billingPeriod.start_date ||
+        (primaryHD.effective_to !== null &&
+          (!primaryHD.effective_to || primaryHD.effective_to <= billingPeriod.end_date)))) {
+      householdToDevice.set(h.id, null);
+      householdAssignmentErrors.set(h.id,
+        "No single meter assignment covers the complete billing period; verify replacement boundaries and readings.");
+      continue;
+    }
     if (!primaryHD || !primaryHD.devices) {
       householdToDevice.set(h.id, null);
       continue;
@@ -572,6 +589,7 @@ export async function runGenerationFor(
     const prior = existingByHousehold.get(hid) ?? null;
     const dev = householdToDevice.get(hid);
     const manual = manualByHousehold.get(hid);
+    const assignmentError = householdAssignmentErrors.get(hid);
 
     // Q5: bulk-regenerate hit a manual row without a manual override → skip.
     if (
@@ -641,6 +659,15 @@ export async function runGenerationFor(
       // is one — informational only; the manual reading is authoritative.
       deviceId = dev?.deviceId ?? null;
       manualReason = manual.reason ?? null;
+    } else if (assignmentError) {
+      results.push({
+        kind: "error",
+        householdId: hid,
+        householdName,
+        error: assignmentError,
+        code: "meter_assignment_continuity",
+      });
+      continue;
     } else if (dev) {
       // Metered path — the injected provider supplied the reading above.
       const u = usageMap.get(dev.deviceId);
