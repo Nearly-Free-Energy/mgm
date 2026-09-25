@@ -35,7 +35,7 @@ const HH_UNMETERED = "aaaaaaaa-aaaa-4000-8005-000000000001";
  * same builder; the terminal `.single()` / `.maybeSingle()` and `await`
  * (thenable) resolve to a per-table canned response.
  */
-function makeSupabase() {
+function makeSupabase(householdDevices: unknown[] = []) {
   const rpc = vi.fn(async () => ({ data: null, error: null }));
 
   const responses: Record<
@@ -78,7 +78,7 @@ function makeSupabase() {
           {
             id: HH_UNMETERED,
             display_name: "Unmetered Household",
-            household_devices: [],
+            household_devices: householdDevices,
           },
         ],
         error: null,
@@ -131,6 +131,36 @@ function makeSupabase() {
 }
 
 describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
+  it("MGM review rejects a primary assignment that starts inside the period", async () => {
+    const { supabase, rpc } = makeSupabase([{
+      role: "primary_consumption_meter",
+      effective_from: "2026-04-15",
+      effective_to: null,
+      devices: {
+        id: "aaaaaaaa-aaaa-4000-8004-000000000001",
+        openems_component_id: "meter0",
+        edges: { openems_edge_id: "edge0" },
+      },
+    }]);
+
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "preview",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+    });
+
+    expect(isRunGenerationFatal(out)).toBe(false);
+    if (isRunGenerationFatal(out)) return;
+    expect(out.results).toMatchObject([{
+      kind: "error",
+      code: "meter_assignment_continuity",
+      householdId: HH_UNMETERED,
+    }]);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("write mode, householdIds undefined, un-metered household → skips with unmetered_no_manual and writes NO row", async () => {
     const { supabase, rpc } = makeSupabase();
 

@@ -16,8 +16,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Metering & Billing Engine",
-  description: "Microgrid metering and billing management",
+  title: "Micro Grid Manager",
+  description: "Pilot microgrid bill review",
 };
 
 export default async function RootLayout({

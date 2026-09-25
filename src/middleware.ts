@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/accept-invite",
   "/forgot-password",
   "/reset-password",
+  "/api/mgm/health",
 ];
 
 export async function middleware(request: NextRequest) {

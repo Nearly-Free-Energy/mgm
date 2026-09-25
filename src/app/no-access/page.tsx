@@ -11,7 +11,7 @@ import { NoAccessLogout } from "./no-access-logout";
  *     possible if the invite RPC failed after the auth row was created
  *     and cleanup also failed).
  */
-export default function NoAccessPage() {
+export default async function NoAccessPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted p-6">
       <div className="w-full max-w-md rounded-md border border-border bg-card p-8 shadow-elev-1">

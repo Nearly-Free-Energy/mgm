@@ -8,18 +8,6 @@
 -- unqualified names against; `public, pg_temp` is the safe default
 -- for our codebase.
 
-ALTER FUNCTION public.fn_entity_delete_org(UUID)
-  SET search_path = public, pg_temp;
-
-ALTER FUNCTION public.fn_entity_delete_community(UUID)
-  SET search_path = public, pg_temp;
-
-ALTER FUNCTION public.fn_entity_delete_microgrid(UUID)
-  SET search_path = public, pg_temp;
-
-ALTER FUNCTION public.fn_entity_delete_edge(UUID)
-  SET search_path = public, pg_temp;
-
 ALTER FUNCTION public.fn_device_openems_component_valid()
   SET search_path = public, pg_temp;
 

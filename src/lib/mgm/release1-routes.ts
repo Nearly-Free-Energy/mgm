@@ -11,6 +11,7 @@ const PAGE_ROUTES = [
 
 const API_ROUTES = [
   /^\/api\/mgm\/bootstrap$/,
+  /^\/api\/mgm\/health$/,
   /^\/api\/organizations(?:\/[^/]+(?:\/(?:plugins|delete-preview))?)?$/,
   /^\/api\/communities(?:\/[^/]+(?:\/delete-preview)?)?$/,
   /^\/api\/microgrids(?:\/[^/]+(?:\/delete-preview)?)?$/,

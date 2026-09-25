@@ -33,6 +33,8 @@ export function errorCodeCopy(err: PartialFailureError): string {
       return `${name} has an invalid manual reading.`;
     case "unmetered_no_manual":
       return `${name} has no meter and no manual reading provided.`;
+    case "meter_assignment_continuity":
+      return `${name}'s meter assignment changed during this period — verify the replacement boundary readings before billing.`;
     case "needs_seed_reading":
       // #339. This message decides whether the operator walks to the meter or
       // types a zero to clear a block, so it must not read as a validation

@@ -6,11 +6,16 @@
  *   - "Forgot password?" link is visible and points to /forgot-password.
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+const { replace, signInWithPassword } = vi.hoisted(() => ({
+  replace: vi.fn(),
+  signInWithPassword: vi.fn(),
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),
+    replace,
     refresh: vi.fn(),
   }),
 }));
@@ -18,7 +23,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     auth: {
-      signInWithPassword: vi.fn(),
+      signInWithPassword,
     },
   }),
 }));
@@ -31,5 +36,13 @@ describe("LoginPage", () => {
     const link = screen.getByRole("link", { name: /forgot password/i });
     expect(link).toBeDefined();
     expect(link.getAttribute("href")).toBe("/forgot-password");
+  });
+
+  it("redirects to the management dashboard after successful sign-in", async () => {
+    signInWithPassword.mockResolvedValue({ error: null });
+    const { default: LoginPage } = await import("../page");
+    render(<LoginPage />);
+    fireEvent.submit(screen.getByRole("button", { name: /sign in/i }).closest("form")!);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/"));
   });
 });

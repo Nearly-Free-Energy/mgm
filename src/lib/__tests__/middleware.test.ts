@@ -43,6 +43,12 @@ function makeRequest(pathname: string) {
 }
 
 describe("middleware PUBLIC_PATHS", () => {
+  it("keeps the health endpoint available without a session", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/api/mgm/health"));
+    expect(res.status).toBe(200);
+  });
   it.each([
     "/api/billing/generate",
     "/api/v1/billing/generate",
