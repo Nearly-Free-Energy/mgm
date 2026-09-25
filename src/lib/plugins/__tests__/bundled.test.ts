@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+  METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   resolvePluginStatuses,
   validatePluginToggle,
@@ -14,7 +15,29 @@ describe("MGM bundled plugins", () => {
     ).toEqual([
       [ORGANIZATION_DIRECTORY_PLUGIN_NAME, true, true],
       [COMMUNITY_MANAGEMENT_PLUGIN_NAME, true, true],
+      [METERING_PLUGIN_NAME, true, true],
     ]);
+  });
+
+  it("metering depends on community management, not the reverse", () => {
+    // Disabling metering never blocks community management.
+    expect(
+      validatePluginToggle({
+        pluginName: METERING_PLUGIN_NAME,
+        enabled: false,
+      })
+    ).toEqual({ ok: true });
+    // Disabling community management is blocked while metering is enabled.
+    expect(
+      validatePluginToggle({
+        pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+        enabled: false,
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Metering"),
+    });
   });
 
   it("marks community management not ready when its dependency is disabled", () => {
@@ -73,6 +96,7 @@ describe("MGM bundled plugins", () => {
       validatePluginToggle({
         pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
         enabled: false,
+        states: { [METERING_PLUGIN_NAME]: { enabled: false } },
       })
     ).toEqual({ ok: true });
   });

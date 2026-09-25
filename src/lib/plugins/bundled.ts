@@ -11,13 +11,16 @@ export const ORGANIZATION_DIRECTORY_PLUGIN_NAME =
   "organization-directory" as const;
 export const COMMUNITY_MANAGEMENT_PLUGIN_NAME =
   "community-management" as const;
+export const METERING_PLUGIN_NAME = "metering" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
-  | typeof COMMUNITY_MANAGEMENT_PLUGIN_NAME;
+  | typeof COMMUNITY_MANAGEMENT_PLUGIN_NAME
+  | typeof METERING_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
+export const METERING_PLUGIN_VERSION = "0.1.0";
 
 export interface BundledPlugin {
   name: MgmPluginName;
@@ -82,9 +85,36 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
   tables: ["communities", "microgrids", "households"],
 };
 
+export const METERING_PLUGIN: BundledPlugin = {
+  name: METERING_PLUGIN_NAME,
+  version: METERING_PLUGIN_VERSION,
+  displayName: "Metering",
+  description:
+    "OpenEMS connection testing, meter discovery and registration, meter-to-household assignments, and consumption reads for one organization.",
+  dependencies: [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+  core: false,
+  // Plugin-enabled and connection-ready are separate states (issue #4): the
+  // toggle below gates the metering surface, while per-microgrid readiness
+  // is derived from the stored OpenEMS configuration plus a successful
+  // connection test or discovery run. Disabling preserves all stored
+  // configuration, assignments, and readings.
+  provides: [
+    "connection testing",
+    "meter discovery and registration",
+    "meter assignments",
+    "consumption reads",
+  ],
+  routes: [
+    "/api/microgrids/[id]/openems-backend",
+    "/api/meter-readings",
+  ],
+  tables: ["devices", "edges", "household_devices", "meter_readings"],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
+  METERING_PLUGIN,
 ] as const;
 
 export function getBundledPlugin(

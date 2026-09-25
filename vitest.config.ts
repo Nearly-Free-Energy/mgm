@@ -31,6 +31,7 @@ export default defineConfig({
           exclude: [
             "src/lib/supabase/__tests__/rls.test.ts",
             "src/lib/supabase/__tests__/community_plugin.test.ts",
+            "src/lib/supabase/__tests__/metering.test.ts",
             "src/lib/supabase/__tests__/fn_list_visible_users.test.ts",
             "src/lib/supabase/__tests__/user_profiles_rls.test.ts",
             "src/lib/supabase/__tests__/dek-bootstrap.test.ts",
@@ -60,6 +61,7 @@ export default defineConfig({
           include: [
             "src/lib/supabase/__tests__/rls.test.ts",
             "src/lib/supabase/__tests__/community_plugin.test.ts",
+            "src/lib/supabase/__tests__/metering.test.ts",
             "src/lib/supabase/__tests__/fn_list_visible_users.test.ts",
             "src/lib/supabase/__tests__/user_profiles_rls.test.ts",
             "src/lib/supabase/__tests__/dek-bootstrap.test.ts",

@@ -361,3 +361,8 @@ GRANT INSERT, UPDATE, DELETE ON household_devices TO authenticated;
 -- (00002 base) already scope all four verbs to the caller's organizations.
 GRANT INSERT, UPDATE, DELETE ON edges TO authenticated;
 GRANT INSERT, UPDATE, DELETE ON devices TO authenticated;
+-- meter_readings: operators record explicit opening registers (issue #4)
+-- through the validated server endpoint. RLS (00002 base, via the device →
+-- edge → microgrid chain) already scopes writes to the caller's
+-- organizations; restore the write grants the pilot overlay removed.
+GRANT INSERT, UPDATE, DELETE ON meter_readings TO authenticated;
