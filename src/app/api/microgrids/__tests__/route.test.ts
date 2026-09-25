@@ -1,10 +1,15 @@
 /**
  * POST /api/microgrids & PATCH /api/microgrids/[id] — route tests (#76).
  *
- * All Supabase + auth helpers mocked. Covers:
+ * Released mutations route through the community-management Cordis
+ * capability. Auth/role/plugin checks are mocked; Supabase chains cover
+ * parent resolution and persistence.
+ *
+ * Covers:
  *   - POST: 422 invalid currency (Intl.NumberFormat RangeError)
  *   - POST: 409 duplicate microgrid name in same community (Postgres 23505)
- *   - POST: 403 when currentUserCanAccessCommunity returns false
+ *   - POST: 403 when the caller has no role for the parent org
+ *   - POST: 409 when community management is disabled
  *   - PATCH: dirty-fields — sending {address_city} does NOT clobber name/currency
  *   - PATCH: 422 invalid currency on update
  */
@@ -12,49 +17,80 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ── Mocks ───────────────────────────────────────────────────────────────
+// ── Mocks ─────────────────────────────────────────────────────────────────
 
 const mockRevalidatePath = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 
-let canAccessCommunityReturn = true;
-let canAccessMicrogridReturn = true;
+let roleRows: unknown[] = [];
+let pluginEnabled = true;
+let currentUser: { id: string } | null = { id: "user-1" };
 
 const mockInsert = vi.fn();
 const mockUpdate = vi.fn();
 const mockSingleAfterInsertSelect = vi.fn();
 const mockMaybeSingleAfterUpdateSelect = vi.fn();
+const mockParentMaybeSingle = vi.fn();
 
-const mockFrom = vi.fn(() => ({
-  insert: (row: unknown) => {
-    mockInsert(row);
+const mockFrom = vi.fn((table: string) => {
+  if (table === "communities") {
     return {
       select: () => ({
-        single: () => mockSingleAfterInsertSelect(),
-      }),
-    };
-  },
-  update: (patch: unknown) => {
-    mockUpdate(patch);
-    return {
-      eq: () => ({
-        select: () => ({
-          maybeSingle: () => mockMaybeSingleAfterUpdateSelect(),
+        eq: () => ({
+          maybeSingle: () => mockParentMaybeSingle(),
         }),
       }),
     };
-  },
-}));
+  }
+  if (table === "microgrids") {
+    return {
+      insert: (row: unknown) => {
+        mockInsert(row);
+        return {
+          select: () => ({
+            single: () => mockSingleAfterInsertSelect(),
+          }),
+        };
+      },
+      update: (patch: unknown) => {
+        mockUpdate(patch);
+        return {
+          eq: () => ({
+            select: () => ({
+              maybeSingle: () => mockMaybeSingleAfterUpdateSelect(),
+            }),
+          }),
+        };
+      },
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () => mockParentMaybeSingle(),
+        }),
+      }),
+    };
+  }
+  throw new Error(`Unexpected table: ${table}`);
+});
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mockFrom }),
+  createClient: async () => ({
+    from: mockFrom,
+    auth: { getUser: async () => ({ data: { user: currentUser } }) },
+  }),
 }));
 
 vi.mock("@/lib/auth/access", () => ({
-  currentUserCanAccessCommunity: async () => canAccessCommunityReturn,
-  currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
+  getCurrentUserRoles: async () => roleRows,
+  currentUserCanAccessOrg: async () => roleRows.length > 0,
+  currentUserCanAccessCommunity: async () => roleRows.length > 0,
+  currentUserCanAccessMicrogrid: async () => roleRows.length > 0,
 }));
 
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
+}));
+
+const VALID_ORG = "550e8400-e29b-41d4-a716-446655440000";
 const VALID_COMMUNITY = "550e8400-e29b-41d4-a716-446655440000";
 const VALID_MICROGRID = "550e8400-e29b-41d4-a716-446655440001";
 
@@ -74,14 +110,30 @@ function makePatch(id: string, body: unknown): NextRequest {
   });
 }
 
+function seedRole() {
+  roleRows = [
+    {
+      user_id: "user-1",
+      role: "org_manager",
+      scope_type: "org",
+      scope_id: VALID_ORG,
+    },
+  ];
+}
+
 // ── POST tests ──────────────────────────────────────────────────────────
 
 describe("POST /api/microgrids", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    canAccessCommunityReturn = true;
-    canAccessMicrogridReturn = true;
+    currentUser = { id: "user-1" };
+    seedRole();
+    pluginEnabled = true;
     mockSingleAfterInsertSelect.mockReset();
+    mockParentMaybeSingle.mockReset().mockResolvedValue({
+      data: { org_id: VALID_ORG },
+      error: null,
+    });
   });
 
   it("returns 422 with field='currency' when currency is invalid", async () => {
@@ -111,8 +163,8 @@ describe("POST /api/microgrids", () => {
     expect(json.field).toBe("currency");
   });
 
-  it("returns 403 when currentUserCanAccessCommunity is false", async () => {
-    canAccessCommunityReturn = false;
+  it("returns 403 when the caller has no role for the parent org", async () => {
+    roleRows = [];
     const { POST } = await import("../route");
     const res = await POST(
       makePost({
@@ -122,6 +174,20 @@ describe("POST /api/microgrids", () => {
       })
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 when community management is disabled", async () => {
+    pluginEnabled = false;
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({
+        community_id: VALID_COMMUNITY,
+        name: "New MG",
+        currency: "UGX",
+      })
+    );
+    expect(res.status).toBe(409);
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("returns 409 with the exact duplicate-name message on Postgres 23505", async () => {
@@ -192,9 +258,31 @@ describe("POST /api/microgrids", () => {
 describe("PATCH /api/microgrids/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    canAccessCommunityReturn = true;
-    canAccessMicrogridReturn = true;
+    currentUser = { id: "user-1" };
+    seedRole();
+    pluginEnabled = true;
     mockMaybeSingleAfterUpdateSelect.mockReset();
+    // Route prefetch and operation resolution share this mock. Calls in
+    // order: route parent prefetch, operation microgrid fetch, operation
+    // community-org fetch.
+    mockParentMaybeSingle.mockReset();
+    mockParentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: VALID_MICROGRID,
+          community_id: VALID_COMMUNITY,
+          communities: { org_id: VALID_ORG },
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { id: VALID_MICROGRID, community_id: VALID_COMMUNITY },
+        error: null,
+      })
+      .mockResolvedValue({
+        data: { org_id: VALID_ORG },
+        error: null,
+      });
   });
 
   it("dirty-fields: sending {address_city} does NOT clobber name/currency", async () => {
@@ -229,8 +317,8 @@ describe("PATCH /api/microgrids/[id]", () => {
     expect(json.field).toBe("currency");
   });
 
-  it("returns 403 when currentUserCanAccessMicrogrid is false", async () => {
-    canAccessMicrogridReturn = false;
+  it("returns 403 when the caller has no role for the parent org", async () => {
+    roleRows = [];
     const { PATCH } = await import("../[id]/route");
     const res = await PATCH(makePatch(VALID_MICROGRID, { name: "X" }), {
       params: Promise.resolve({ id: VALID_MICROGRID }),

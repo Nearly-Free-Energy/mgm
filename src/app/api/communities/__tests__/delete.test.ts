@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 let canAccessReturn = true;
+let pluginEnabled = true;
 let getUserReturn: { user: { id: string } | null } = {
   user: { id: "user-1" },
 };
@@ -36,6 +37,10 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
 }));
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {
@@ -86,6 +91,7 @@ describe("DELETE /api/communities/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     canAccessReturn = true;
+    pluginEnabled = true;
     getUserReturn = { user: { id: "user-1" } };
   });
 
@@ -132,6 +138,20 @@ describe("DELETE /api/communities/[id]", () => {
       p_id: VALID_UUID,
     });
     infoSpy.mockRestore();
+  });
+
+  it("409 when community management is disabled — records are preserved", async () => {
+    configureEntityLookup({
+      data: { id: VALID_UUID, name: "Kisakye", org_id: "org-1" },
+      error: null,
+    });
+    pluginEnabled = false;
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(makeDelete(VALID_UUID), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(res.status).toBe(409);
+    expect(mockRpcImpl).not.toHaveBeenCalled();
   });
 });
 

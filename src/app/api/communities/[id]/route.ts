@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessCommunity } from "@/lib/auth/access";
+import {
+  composeCommunityManagement,
+  type CommunityManagementError,
+} from "@/lib/community-management";
 import { countEntityDescendants } from "@/lib/entity-descendants";
+import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import {
   errorBody,
   mapPgError,
@@ -11,14 +16,30 @@ import {
   type EntityDeleteLogPayload,
 } from "@/lib/entity-deletion/shared";
 
+function mapError(error: CommunityManagementError): NextResponse {
+  const { ok, status, code, message, field, reason } = error;
+  void ok;
+  return NextResponse.json(
+    {
+      error: message,
+      code,
+      ...(field !== undefined ? { field } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+    },
+    { status }
+  );
+}
+
 /**
  * PATCH /api/communities/[id] — update a community (#76).
  *
  * Dirty-fields semantics: only keys present in body are applied. Re-parenting
  * via `org_id` is NOT supported through this endpoint — ignored if present.
  *
- * Authorization: `currentUserCanAccessCommunity()` — super_admin or the
- * org_manager of the community's parent org.
+ * Released mutations route through the community-management Cordis
+ * capability. The route resolves the parent organization needed for the
+ * request-scoped composition; the capability re-validates scope, plugin
+ * state, and organization access before writing.
  */
 export async function PATCH(
   request: NextRequest,
@@ -41,78 +62,34 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
-
-  if (!(await currentUserCanAccessCommunity(supabase, id))) {
+  const { data: parent } = await supabase
+    .from("communities")
+    .select("org_id")
+    .eq("id", id)
+    .maybeSingle<{ org_id: string }>();
+  if (!parent) {
     return NextResponse.json(
       { error: "Not authorized to update this community." },
       { status: 403 }
     );
   }
 
-  const updates: Record<string, string | null> = {};
+  const composed = await composeCommunityManagement({
+    supabase,
+    organizationId: parent.org_id,
+  });
+  if (!composed.ok) return mapError(composed);
 
-  if ("name" in body) {
-    if (typeof body.name !== "string" || !body.name.trim()) {
-      return NextResponse.json(
-        { error: "Name is required.", field: "name" },
-        { status: 422 }
-      );
-    }
-    updates.name = body.name.trim();
-  }
-
-  const OPTIONAL_STRING_FIELDS = [
-    "address_line1",
-    "address_line2",
-    "address_city",
-    "address_region",
-    "address_country",
-    "address_postal_code",
-    "geography_notes",
-  ] as const;
-
-  for (const f of OPTIONAL_STRING_FIELDS) {
-    if (f in body) {
-      const v = body[f];
-      updates[f] = typeof v === "string" && v.trim() ? v.trim() : null;
-    }
-  }
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json(
-      { error: "No fields to update." },
-      { status: 400 }
+  try {
+    const result = await composed.data.communityManagement.updateCommunity(
+      id,
+      body
     );
+    if (!result.ok) return mapError(result);
+    return NextResponse.json({ community: result.data }, { status: 200 });
+  } finally {
+    await composed.data.dispose();
   }
-
-  const { data, error } = await supabase
-    .from("communities")
-    .update(updates)
-    .eq("id", id)
-    .select("*")
-    .maybeSingle();
-
-  if (error) {
-    if (error.code === "42501" || error.message.includes("row-level security")) {
-      return NextResponse.json(
-        { error: "Not authorized to update this community." },
-        { status: 403 }
-      );
-    }
-    return NextResponse.json(
-      { error: `Failed to update community: ${error.message}` },
-      { status: 500 }
-    );
-  }
-
-  if (!data) {
-    return NextResponse.json(
-      { error: "Community not found." },
-      { status: 404 }
-    );
-  }
-
-  return NextResponse.json({ community: data }, { status: 200 });
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -175,6 +152,14 @@ export async function DELETE(
   }
   if (!community) {
     return NextResponse.json(errorBody("Community not found."), { status: 404 });
+  }
+  if (!(await isCommunityManagementEnabled(supabase, community.org_id))) {
+    return NextResponse.json(
+      errorBody(
+        "Community management is disabled for this organization. Enable it in Settings → Plugins before deleting; existing records are preserved."
+      ),
+      { status: 409 }
+    );
   }
   if (!community.name || !community.name.trim()) {
     return NextResponse.json(

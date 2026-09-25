@@ -1,13 +1,17 @@
 /**
  * PATCH /api/households/[id] — route tests (#145 + #146).
  *
+ * Released mutations route through the community-management Cordis
+ * capability. Auth/role/plugin checks are mocked; Supabase chains cover
+ * household resolution, device reconciliation, and persistence.
+ *
  * Covers:
  *   - 400: bad UUID, invalid JSON, empty diff, unsupported field, invalid display_name
  *   - 200: happy path (display_name only, no device touch)
  *   - 200: happy path (device_id link via delete-then-insert)
  *   - 200: happy path (device_id: null → unlink only, no field update)
  *   - 200: #146 — address_city, address_region, address_country, address_postal_code, geography_notes accepted
- *   - 403: forbidden via currentUserCanAccessMicrogrid
+ *   - 403: forbidden when the caller has no role for the parent org
  *   - 404: not found (household missing or RLS-hidden)
  *   - 409: device_id partial-unique-index conflict (23505)
  */
@@ -15,12 +19,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ── Mocks ───────────────────────────────────────────────────────────────
+// ── Mocks ─────────────────────────────────────────────────────────────────
 
-let canAccessMicrogridReturn = true;
+let roleRows: unknown[] = [];
+let pluginEnabled = true;
+let currentUser: { id: string } | null = { id: "user-1" };
 
-// Per-test handlers for each Supabase chain entry-point. Chain-callability is
-// emulated via thenable chains that return a fresh stub per entry.
+const ORG_ID = "660e8400-e29b-41d4-a716-446655440099";
+
+// Per-test handlers for each Supabase chain entry-point.
 const mockHouseholdsFetchSingle = vi.fn();
 const mockHouseholdsUpdateSingle = vi.fn();
 const mockHouseholdsRefetchSingle = vi.fn();
@@ -28,45 +35,32 @@ const mockHouseholdDevicesDeleteEq2 = vi.fn();
 const mockHouseholdDevicesInsert = vi.fn();
 // Steal-check: SELECT household_id FROM household_devices WHERE device_id=? AND role=? AND household_id != ?
 const mockHouseholdDevicesStealCheckMaybeSingle = vi.fn();
-
-// Track call counts to dispatch successive .from("households") calls.
-let householdsCalls = 0;
+const mockUpdatePayload = vi.fn();
+const mockHouseholdsDeleteSingle = vi.fn();
+let billingLineItemCount: number | null = 0;
 
 const mockFrom = vi.fn((table: string) => {
   if (table === "households") {
-    householdsCalls += 1;
-    if (householdsCalls === 1) {
-      // Initial fetch: select(...).eq(...).maybeSingle()
-      return {
-        select: () => ({
-          eq: () => ({
-            maybeSingle: () => mockHouseholdsFetchSingle(),
-          }),
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () => mockHouseholdsFetchSingle(),
+          single: () => mockHouseholdsRefetchSingle(),
         }),
-      };
-    }
-    if (householdsCalls === 2) {
-      // The update or refetch path. Detect by what's called first.
-      return {
-        update: () => ({
+      }),
+      update: (payload: unknown) => {
+        mockUpdatePayload(payload);
+        return {
           eq: () => ({
             select: () => ({
               single: () => mockHouseholdsUpdateSingle(),
             }),
           }),
-        }),
-        select: () => ({
-          eq: () => ({
-            single: () => mockHouseholdsRefetchSingle(),
-          }),
-        }),
-      };
-    }
-    // 3rd+ call → refetch after device-only update
-    return {
-      select: () => ({
+        };
+      },
+      delete: () => ({
         eq: () => ({
-          single: () => mockHouseholdsRefetchSingle(),
+          select: () => mockHouseholdsDeleteSingle(),
         }),
       }),
     };
@@ -91,22 +85,58 @@ const mockFrom = vi.fn((table: string) => {
       insert: (row: unknown) => mockHouseholdDevicesInsert(row),
     };
   }
+  if (table === "microgrids") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: {
+              id: MG_UUID,
+              communities: { org_id: ORG_ID },
+            },
+            error: null,
+          }),
+        }),
+      }),
+    };
+  }
+  if (table === "communities") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: { org_id: ORG_ID },
+            error: null,
+          }),
+        }),
+      }),
+    };
+  }
+  if (table === "billing_line_items") {
+    return {
+      select: () => ({
+        eq: async () => ({ count: billingLineItemCount, error: null }),
+      }),
+    };
+  }
   throw new Error(`Unexpected table: ${table}`);
 });
-
-const mockGetUser = vi.fn(async () => ({
-  data: { user: { id: "user-1" } },
-}));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: mockFrom,
-    auth: { getUser: mockGetUser },
+    auth: { getUser: async () => ({ data: { user: currentUser } }) },
   }),
 }));
 
 vi.mock("@/lib/auth/access", () => ({
-  currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
+  getCurrentUserRoles: async () => roleRows,
+  currentUserCanAccessOrg: async () => roleRows.length > 0,
+  currentUserCanAccessMicrogrid: async () => roleRows.length > 0,
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
 }));
 
 const HH_UUID = "660e8400-e29b-41d4-a716-446655440001";
@@ -126,8 +156,16 @@ function makePatchRequest(id: string, body: unknown): NextRequest {
 describe("PATCH /api/households/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    canAccessMicrogridReturn = true;
-    householdsCalls = 0;
+    currentUser = { id: "user-1" };
+    roleRows = [
+      {
+        user_id: "user-1",
+        role: "org_manager",
+        scope_type: "org",
+        scope_id: ORG_ID,
+      },
+    ];
+    pluginEnabled = true;
 
     mockHouseholdsFetchSingle.mockReset().mockResolvedValue({
       data: { id: HH_UUID, microgrid_id: MG_UUID },
@@ -294,8 +332,8 @@ describe("PATCH /api/households/[id]", () => {
     expect(mockHouseholdsUpdateSingle).toHaveBeenCalledTimes(1);
   });
 
-  it("403: currentUserCanAccessMicrogrid returns false", async () => {
-    canAccessMicrogridReturn = false;
+  it("403: caller has no role for the parent org", async () => {
+    roleRows = [];
     const { PATCH } = await import("../route");
     const res = await PATCH(
       makePatchRequest(HH_UUID, { display_name: "x" }),
@@ -432,5 +470,98 @@ describe("PATCH /api/households/[id]", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.reason).toBe("rls_denied");
+  });
+});
+
+function makeDeleteRequest(id: string): NextRequest {
+  return new NextRequest(`http://localhost/api/households/${id}`, {
+    method: "DELETE",
+  });
+}
+
+describe("DELETE /api/households/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentUser = { id: "user-1" };
+    roleRows = [
+      {
+        user_id: "user-1",
+        role: "org_manager",
+        scope_type: "org",
+        scope_id: ORG_ID,
+      },
+    ];
+    pluginEnabled = true;
+    billingLineItemCount = 0;
+    mockHouseholdsFetchSingle.mockReset().mockResolvedValue({
+      data: { id: HH_UUID, display_name: "Household A", microgrid_id: MG_UUID },
+      error: null,
+    });
+    mockHouseholdsDeleteSingle.mockReset().mockResolvedValue({
+      data: [{ id: HH_UUID }],
+      error: null,
+    });
+  });
+
+  it("400: bad UUID", async () => {
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(BAD_ID), {
+      params: Promise.resolve({ id: BAD_ID }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("404: household not found", async () => {
+    mockHouseholdsFetchSingle.mockResolvedValueOnce({
+      data: null,
+      error: null,
+    });
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(HH_UUID), {
+      params: Promise.resolve({ id: HH_UUID }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("403: caller has no role for the parent org", async () => {
+    roleRows = [];
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(HH_UUID), {
+      params: Promise.resolve({ id: HH_UUID }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("409: community management disabled — records are preserved", async () => {
+    pluginEnabled = false;
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(HH_UUID), {
+      params: Promise.resolve({ id: HH_UUID }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe("community_management_disabled");
+    expect(mockHouseholdsDeleteSingle).not.toHaveBeenCalled();
+  });
+
+  it("409: household with billing history is refused", async () => {
+    billingLineItemCount = 3;
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(HH_UUID), {
+      params: Promise.resolve({ id: HH_UUID }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("household_has_billing_history");
+    expect(mockHouseholdsDeleteSingle).not.toHaveBeenCalled();
+  });
+
+  it("204: happy path deletes through the capability", async () => {
+    const { DELETE } = await import("../route");
+    const res = await DELETE(makeDeleteRequest(HH_UUID), {
+      params: Promise.resolve({ id: HH_UUID }),
+    });
+    expect(res.status).toBe(204);
+    expect(mockHouseholdsDeleteSingle).toHaveBeenCalledTimes(1);
   });
 });

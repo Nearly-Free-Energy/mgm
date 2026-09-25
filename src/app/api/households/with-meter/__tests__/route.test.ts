@@ -1,7 +1,11 @@
 /**
  * POST /api/households/with-meter — route tests (#155).
  *
- * Coverage focus: phone-required validation. The route validates phone
+ * Released mutations route through the community-management Cordis
+ * capability. Auth/role/plugin checks are mocked; Supabase chains cover
+ * parent resolution and the household RPCs.
+ *
+ * Coverage focus: phone-required validation. The capability validates phone
  * BEFORE calling the RPC (defense-in-depth) so non-form callers (bulk
  * imports, scripts) get a structured 400 without a DB round-trip.
  *
@@ -14,22 +18,73 @@
  *   - 422: missing microgrid_id / display_name / device_id
  *   - 201: happy path with valid phone
  *   - 400: RPC raises 'household_phone_required' (defense-in-depth path)
+ *   - 403: caller has no role for the parent org
+ *   - 409: community management disabled for the parent org
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ── Mocks ───────────────────────────────────────────────────────────────
+// ── Mocks ─────────────────────────────────────────────────────────────────
 
 const mockRpc = vi.fn();
+let roleRows: unknown[] = [];
+let pluginEnabled = true;
+let currentUser: { id: string } | null = { id: "user-1" };
+
+const ORG_ID = "660e8400-e29b-41d4-a716-446655440099";
+
+const mockFrom = vi.fn((table: string) => {
+  if (table === "microgrids") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: {
+              id: MG_UUID,
+              community_id: COMMUNITY_ID,
+              communities: { org_id: ORG_ID },
+            },
+            error: null,
+          }),
+        }),
+      }),
+    };
+  }
+  if (table === "communities") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: { org_id: ORG_ID },
+            error: null,
+          }),
+        }),
+      }),
+    };
+  }
+  throw new Error(`Unexpected table: ${table}`);
+});
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
+    from: mockFrom,
+    auth: { getUser: async () => ({ data: { user: currentUser } }) },
     rpc: (...args: unknown[]) => mockRpc(...args),
   }),
 }));
 
+vi.mock("@/lib/auth/access", () => ({
+  getCurrentUserRoles: async () => roleRows,
+  currentUserCanAccessOrg: async () => roleRows.length > 0,
+}));
+
+vi.mock("@/lib/plugins/state", () => ({
+  isCommunityManagementEnabled: async () => pluginEnabled,
+}));
+
 const MG_UUID = "660e8400-e29b-41d4-a716-446655440000";
+const COMMUNITY_ID = "660e8400-e29b-41d4-a716-446655440010";
 const DEVICE_UUID = "660e8400-e29b-41d4-a716-44665544aaaa";
 const NEW_HH_UUID = "660e8400-e29b-41d4-a716-446655440111";
 
@@ -51,6 +106,16 @@ const VALID_BODY = {
 describe("POST /api/households/with-meter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    currentUser = { id: "user-1" };
+    roleRows = [
+      {
+        user_id: "user-1",
+        role: "org_manager",
+        scope_type: "org",
+        scope_id: ORG_ID,
+      },
+    ];
+    pluginEnabled = true;
     mockRpc.mockResolvedValue({ data: NEW_HH_UUID, error: null });
   });
 
@@ -78,6 +143,24 @@ describe("POST /api/households/with-meter", () => {
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.field).toBe("display_name");
+  });
+
+  it("403: caller has no role for the parent org", async () => {
+    roleRows = [];
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(VALID_BODY));
+    expect(res.status).toBe(403);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("409: community management disabled for the parent org", async () => {
+    pluginEnabled = false;
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(VALID_BODY));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe("community_management_disabled");
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it("201: empty device_id routes to fn_create_household (manual billing) (#158)", async () => {
@@ -156,7 +239,7 @@ describe("POST /api/households/with-meter", () => {
   });
 
   it("400: #155 — RPC raises household_phone_required → 400 (defense-in-depth)", async () => {
-    // Should be unreachable in practice (route guards first) but this path
+    // Should be unreachable in practice (capability guards first) but this path
     // protects against direct RPC callers if anyone bypasses the route.
     mockRpc.mockResolvedValueOnce({
       data: null,

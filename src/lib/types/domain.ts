@@ -41,6 +41,9 @@ export type UserRoleRecord = Database["public"]["Tables"]["user_roles"]["Row"];
 export type UserProfile = Database["public"]["Tables"]["user_profiles"]["Row"];
 export type OrgApiToken =
   Database["public"]["Tables"]["org_api_tokens"]["Row"];
+export type MgmPlugin = Database["public"]["Tables"]["mgm_plugins"]["Row"];
+export type MgmPluginAuditLog =
+  Database["public"]["Tables"]["mgm_plugin_audit_log"]["Row"];
 
 /**
  * A row from the `fn_list_visible_users` RPC — the joined return shape over
