@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { organizationExists } from "@/lib/mgm/organization-exists";
 import { LogoutButton } from "./logout-button";
 import { SidebarNav } from "./sidebar-nav";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
@@ -23,10 +24,7 @@ export default async function DashboardLayout({
   // send them to /setup instead of /no-access. Once the first organization
   // exists, unassigned users fall through to the revoked-user gate below
   // and /no-access is retained for them.
-  const { count: orgCount } = await supabase
-    .from("organizations")
-    .select("id", { head: true, count: "exact" });
-  if ((orgCount ?? 0) === 0) {
+  if (!(await organizationExists())) {
     redirect("/setup");
   }
 

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { organizationExists } from "@/lib/mgm/organization-exists";
 import { SetupForm } from "./setup-form";
 
 /**
@@ -18,10 +19,7 @@ export default async function SetupPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { count } = await supabase
-    .from("organizations")
-    .select("id", { count: "exact", head: true });
-  if ((count ?? 0) > 0) redirect("/");
+  if (await organizationExists()) redirect("/");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted p-6">
