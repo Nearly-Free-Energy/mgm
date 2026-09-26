@@ -226,6 +226,7 @@ describe("BillingCapability", () => {
       ok: false,
       status: 409,
       code: "billing_unresolved_households",
+      unresolved: [{ householdId: "hh-1", householdName: "No Bill", reason: "No bill generated." }],
     });
     expect(close).not.toHaveBeenCalled();
 
@@ -275,7 +276,7 @@ describe("BillingCapability", () => {
       status: 404,
       body: { error: "Billing period not found" },
     }));
-    const { capability } = setup({}, { run });
+    const { capability } = setup({ isPluginEnabled: async () => false }, { run });
     const result = await capability.previewBills({ billingPeriodId: PERIOD_ID });
     expect(result).toMatchObject({ ok: false, status: 404 });
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview" }));

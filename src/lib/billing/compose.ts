@@ -53,6 +53,7 @@ function billingCapabilityPlugin(
 export async function composeBilling(options: {
   supabase: SupabaseClient;
   organizationId: string;
+  readOnly?: boolean;
 }): Promise<BillingResult<BillingComposition>> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
     options.organizationId
@@ -95,7 +96,7 @@ export async function composeBilling(options: {
   }
 
   const repository = createSupabaseBillingRepository(options.supabase);
-  if (!(await repository.isPluginEnabled(options.organizationId))) {
+  if (!options.readOnly && !(await repository.isPluginEnabled(options.organizationId))) {
     return billingFailure({
       status: 409,
       code: "billing_disabled",

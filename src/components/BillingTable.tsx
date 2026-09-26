@@ -451,12 +451,14 @@ export function BillingTable({
         code?: string;
         message?: string;
         error?: string;
+        unresolved?: { householdName: string; reason: string }[];
       };
       if (res.status === 409 && body.code === "billing_unresolved_households") {
         closeConfirmedRef.current = true;
         throw new Error(
-          body.message ??
-            "Period has unresolved households. Retry to close anyway."
+          [body.message ?? "Period has unresolved households. Retry to close anyway.",
+            ...(body.unresolved ?? []).map((household) => `${household.householdName}: ${household.reason}`)
+          ].join("\n")
         );
       }
       if (!res.ok) {

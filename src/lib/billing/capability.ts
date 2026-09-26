@@ -499,6 +499,7 @@ export class BillingCapability implements BillingCapabilityContract {
         status: 409 as const,
         code: "billing_unresolved_households",
         message: `Period has ${summary.unresolved.length} unresolved household(s). Confirm explicitly to close anyway.`,
+        unresolved: summary.unresolved,
       };
     }
     const { row, error } = await this.repo.closeBillingPeriod(periodId);
@@ -538,7 +539,7 @@ export class BillingCapability implements BillingCapabilityContract {
     if (!resolved || resolved.orgId !== this.scope.organizationId) {
       return this.scopeMismatch();
     }
-    const gated = await this.requirePlugin();
+    const gated = mode === "write" ? await this.requirePlugin() : null;
     if (gated) return gated;
 
     const out = await this.generation.run({

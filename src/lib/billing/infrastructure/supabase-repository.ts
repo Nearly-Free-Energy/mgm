@@ -221,7 +221,9 @@ export function createSupabaseBillingRepository(
         _source: "manual",
         _actor_user_id: input.actorUserId,
         _raw_payload: {
-          notes: input.notes,
+          ...(input.notes !== null || input.status === "unpaid"
+            ? { payment_notes: input.notes }
+            : {}),
           recorded_via: "mgm-billing",
         },
       });

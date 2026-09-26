@@ -29,6 +29,7 @@ export type BillingResult<T> =
       message: string;
       field?: string;
       reason?: string;
+      unresolved?: PeriodSummary["unresolved"];
     };
 
 export function billingFailure(

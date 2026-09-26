@@ -33,6 +33,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { ZodError } from "zod";
 
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
@@ -229,7 +230,9 @@ export async function GET(
   let lineItemPesapalUrl = (scoped.pesapal_redirect_url as string | null) ?? null;
   let shortSlug = (scoped.short_slug as string | null) ?? null;
 
-  if (hasPaymentProvider) {
+  // Never create or embed a payment session while its customer routes are gated.
+  if (hasPaymentProvider && isReleasedRoute("/p/payment") &&
+      isReleasedRoute(`/api/billing-line-items/${lineItemId}/pay`)) {
     if (!lineItemPesapalUrl) {
       try {
         await ensurePaymentLinkForLineItem(supabase, lineItemId, {

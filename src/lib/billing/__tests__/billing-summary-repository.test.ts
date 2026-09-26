@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseBillingRepository } from "../infrastructure/supabase-repository";
 
@@ -25,5 +25,14 @@ describe("billing summary read failures", () => {
   });
   it("distinguishes a missing period from query failure", async () => {
     expect(await repository(undefined, "billing_periods").getPeriodSummary("period")).toBeNull();
+  });
+});
+
+describe("manual payment notes RPC contract", () => {
+  it.each([ ["paid", "receipt", { payment_notes: "receipt" }], ["unpaid", null, { payment_notes: null }], ["paid", null, {}] ] as const)("maps %s notes %s", async (status, notes, payload) => {
+    const rpc = vi.fn(async () => ({ data: {}, error: null }));
+    const repo = createSupabaseBillingRepository({ rpc } as unknown as SupabaseClient);
+    await repo.recordManualPayment({ lineItemId: "item", actorUserId: "user", status, notes });
+    expect(rpc).toHaveBeenCalledWith("fn_apply_payment_event", expect.objectContaining({ _raw_payload: { ...payload, recorded_via: "mgm-billing" } }));
   });
 });

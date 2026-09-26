@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
   }
 
-  const composed = await composeBilling({ supabase, organizationId: orgId });
+  const composed = await composeBilling({ supabase, organizationId: orgId, readOnly: true });
   if (!composed.ok) return mapError(composed);
 
   try {

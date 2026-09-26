@@ -75,6 +75,13 @@ describe("composeBilling", () => {
     });
   });
 
+  it("allows read-only composition when disabled", async () => {
+    pluginEnabled = false;
+    const result = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID, readOnly: true });
+    expect(result.ok).toBe(true);
+    if (result.ok) await result.data.dispose();
+  });
+
   it("provides a scoped capability and deactivates it on dispose", async () => {
     const result = await composeBilling({
       supabase: makeSupabase(),
