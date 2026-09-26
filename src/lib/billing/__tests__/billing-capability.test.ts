@@ -234,6 +234,21 @@ describe("BillingCapability", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it.each([undefined, { confirmed: true }])("blocks closure on summary failure even with confirmation %j", async (input) => {
+    const close = vi.fn();
+    const { capability } = setup({
+      getPeriodSummary: async () => { throw new Error("query failed"); },
+      closeBillingPeriod: close,
+    });
+    expect(await capability.closePeriod(PERIOD_ID, input)).toMatchObject({
+      ok: false, status: 503, code: "billing_summary_unavailable",
+    });
+    expect(close).not.toHaveBeenCalled();
+    expect(await capability.getPeriodSummary(PERIOD_ID)).toMatchObject({
+      ok: false, status: 503, code: "billing_summary_unavailable",
+    });
+  });
+
   it("refuses to close an already-closed period", async () => {
     const { capability } = setup({
       getPeriodSummary: async () => ({

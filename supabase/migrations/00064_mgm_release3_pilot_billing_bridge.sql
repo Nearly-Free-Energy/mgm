@@ -351,26 +351,64 @@ CREATE INDEX IF NOT EXISTS idx_billing_audit_log_period_created_at
 
 ALTER TABLE billing_audit_log ENABLE ROW LEVEL SECURITY;
 
+-- Converge the 00043 dual-scope schema and policies as well as billing.
+-- 2a. Relax billing_period_id.
+ALTER TABLE billing_audit_log
+  ALTER COLUMN billing_period_id DROP NOT NULL;
+
+-- 2b. Add org_id (NULL — populated only for non-period-scoped events).
+ALTER TABLE billing_audit_log
+  ADD COLUMN IF NOT EXISTS org_id UUID NULL
+    REFERENCES organizations(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_billing_audit_log_org_created_at
+  ON billing_audit_log (org_id, created_at DESC)
+  WHERE org_id IS NOT NULL;
+
+-- 2c. Exactly-one-scope invariant. DROP+ADD for re-runnability.
+ALTER TABLE billing_audit_log
+  DROP CONSTRAINT IF EXISTS billing_audit_log_scope_consistency;
+ALTER TABLE billing_audit_log
+  ADD CONSTRAINT billing_audit_log_scope_consistency CHECK (
+    (billing_period_id IS NOT NULL AND org_id IS NULL)
+    OR
+    (billing_period_id IS NULL     AND org_id IS NOT NULL)
+  );
+
+COMMENT ON CONSTRAINT billing_audit_log_scope_consistency ON billing_audit_log IS
+  'Scope invariant (#256): every audit row is reachable from EXACTLY ONE of (billing_period_id, org_id). Period-scoped events (line_item_*, billing_period_created, period_closed) carry billing_period_id; org-scoped events (token_generated, token_revoked, token_regenerated) carry org_id.';
+
+COMMENT ON COLUMN billing_audit_log.org_id IS
+  'Org scope for non-period audit events (token_generated/revoked/regenerated). NULL for period-scoped events; mutually exclusive with billing_period_id per billing_audit_log_scope_consistency.';
+
+-- 2d. Replace the read/write policies so org-scoped rows are visible.
+
 DROP POLICY IF EXISTS "Authorized users can read billing_audit_log" ON billing_audit_log;
 CREATE POLICY "Authorized users can read billing_audit_log"
   ON billing_audit_log FOR SELECT
   USING (
-    user_can_access_microgrid((
+    -- Period-scoped rows: visible iff caller can access the period's microgrid.
+    (billing_period_id IS NOT NULL AND user_can_access_microgrid((
       SELECT bp.microgrid_id
       FROM billing_periods bp
       WHERE bp.id = billing_audit_log.billing_period_id
-    ))
+    )))
+    OR
+    -- Org-scoped rows: visible iff caller can access the org.
+    (org_id IS NOT NULL AND (is_super_admin() OR user_can_access_org(org_id)))
   );
 
 DROP POLICY IF EXISTS "Authorized users can write billing_audit_log" ON billing_audit_log;
 CREATE POLICY "Authorized users can write billing_audit_log"
   ON billing_audit_log FOR INSERT
   WITH CHECK (
-    user_can_access_microgrid((
+    (billing_period_id IS NOT NULL AND user_can_access_microgrid((
       SELECT bp.microgrid_id
       FROM billing_periods bp
       WHERE bp.id = billing_audit_log.billing_period_id
-    ))
+    )))
+    OR
+    (org_id IS NOT NULL AND (is_super_admin() OR user_can_access_org(org_id)))
   );
 
 GRANT SELECT, INSERT ON billing_audit_log TO authenticated;

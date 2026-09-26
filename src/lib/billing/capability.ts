@@ -20,6 +20,7 @@ import type {
   GenerationFatal,
   GenerationOutput,
   ManualPaymentStatus,
+  PeriodSummary,
   TierInput,
 } from "./repository";
 
@@ -421,6 +422,22 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: row };
   }
 
+  private async loadPeriodSummary(periodId: string): Promise<BillingResult<PeriodSummary>> {
+    try {
+      const summary = await this.repo.getPeriodSummary(periodId);
+      if (!summary) return {
+        ok: false, status: 404, code: "billing_period_not_found",
+        message: "Billing period not found.",
+      };
+      return { ok: true, data: summary };
+    } catch {
+      return {
+        ok: false, status: 503, code: "billing_summary_unavailable",
+        message: "Could not verify period completeness. Retry before closing the period.",
+      };
+    }
+  }
+
   async getPeriodSummary(periodId: string) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
@@ -437,15 +454,9 @@ export class BillingCapability implements BillingCapabilityContract {
       return this.scopeMismatch();
     }
     // Reads stay available while the plugin is disabled — only scope applies.
-    const summary = await this.repo.getPeriodSummary(periodId);
-    if (!summary) {
-      return {
-        ok: false as const,
-        status: 404 as const,
-        code: "billing_period_not_found",
-        message: "Billing period not found.",
-      };
-    }
+    const loaded = await this.loadPeriodSummary(periodId);
+    if (!loaded.ok) return loaded;
+    const summary = loaded.data;
     return { ok: true as const, data: summary };
   }
 
@@ -467,15 +478,9 @@ export class BillingCapability implements BillingCapabilityContract {
     const gated = await this.requirePlugin();
     if (gated) return gated;
 
-    const summary = await this.repo.getPeriodSummary(periodId);
-    if (!summary) {
-      return {
-        ok: false as const,
-        status: 404 as const,
-        code: "billing_period_not_found",
-        message: "Billing period not found.",
-      };
-    }
+    const loaded = await this.loadPeriodSummary(periodId);
+    if (!loaded.ok) return loaded;
+    const summary = loaded.data;
     if (summary.period.status === "closed") {
       return {
         ok: false as const,

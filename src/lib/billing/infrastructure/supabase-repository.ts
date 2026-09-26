@@ -151,21 +151,27 @@ export function createSupabaseBillingRepository(
     },
 
     async getPeriodSummary(periodId: string): Promise<PeriodSummary | null> {
-      const { data: period } = await supabase
+      const { data: period, error: periodError } = await supabase
         .from("billing_periods")
         .select("id, microgrid_id, start_date, end_date, status, timezone")
         .eq("id", periodId)
         .maybeSingle<BillingPeriodRow>();
+      if (periodError) throw new Error("Could not load billing period summary.");
       if (!period) return null;
 
-      const { data: households } = await supabase
+      const { data: households, error: householdsError } = await supabase
         .from("households")
         .select("id, display_name")
         .eq("microgrid_id", period.microgrid_id);
-      const { data: items } = await supabase
+      const { data: items, error: itemsError } = await supabase
         .from("billing_line_items")
         .select("id, household_id, total_amount")
         .eq("billing_period_id", periodId);
+
+      // A failed read is not evidence of an empty, complete period.
+      if (householdsError || itemsError || !households || !items) {
+        throw new Error("Could not verify billing period completeness.");
+      }
 
       const billedIds = new Set((items ?? []).map((i) => i.household_id as string));
       const unresolved: UnresolvedHousehold[] = ((households ?? []) as {
