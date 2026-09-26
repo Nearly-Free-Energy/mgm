@@ -99,4 +99,67 @@ describe("obtainKeycloakToken", () => {
       code: "OPENEMS_RPC_ERROR",
     });
   });
+
+  // ── P1 (PR #8 re-review): the token request carries the client secret,
+  // so the endpoint is validated at the sink and redirects are never
+  // followed. Each test asserts fetch was never reached (plaintext URL)
+  // or reached exactly once (redirect) — the secret cannot be forwarded.
+
+  it("rejects a plaintext http endpoint without contacting it", async () => {
+    await expect(
+      obtainKeycloakToken({ ...CREDS, tokenUrl: "http://kc.example/token" }, 0)
+    ).rejects.toMatchObject({ code: "OPENEMS_INVALID_BACKEND_URL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an endpoint with embedded credentials without contacting it", async () => {
+    await expect(
+      obtainKeycloakToken(
+        { ...CREDS, tokenUrl: "https://user:pass@kc.example/token" },
+        0
+      )
+    ).rejects.toMatchObject({ code: "OPENEMS_INVALID_BACKEND_URL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a literal private-address endpoint without contacting it", async () => {
+    await expect(
+      obtainKeycloakToken({ ...CREDS, tokenUrl: "https://10.0.0.5/token" }, 0)
+    ).rejects.toMatchObject({ code: "OPENEMS_INVALID_BACKEND_URL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a redirect without following it", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 307,
+      headers: { get: (name: string) => (name === "location" ? "https://evil.example/token" : null) },
+      json: async () => ({}),
+    } as unknown as Response);
+    await expect(obtainKeycloakToken(CREDS, 0)).rejects.toMatchObject({
+      code: "OPENEMS_REDIRECT",
+      statusCode: 502,
+    });
+    // Exactly one request left the process — the redirect target was never
+    // contacted, so the secret reached only the validated endpoint.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, options] = fetchSpy.mock.calls[0] as [
+      string,
+      { redirect?: string },
+    ];
+    expect(options?.redirect).toBe("manual");
+  });
+
+  it("rejects an opaque redirect without following it", async () => {
+    fetchSpy.mockResolvedValue({
+      type: "opaqueredirect",
+      status: 0,
+      headers: { get: () => null },
+      json: async () => ({}),
+    } as unknown as Response);
+    await expect(obtainKeycloakToken(CREDS, 0)).rejects.toMatchObject({
+      code: "OPENEMS_REDIRECT",
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 });

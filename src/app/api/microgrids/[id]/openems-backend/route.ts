@@ -412,6 +412,21 @@ export async function PUT(
         { status: 400 }
       );
     }
+    // Write-time token-endpoint validation (P1, PR #8 re-review): the
+    // token request body carries the client secret, so the endpoint must
+    // pass the same checks as a backend URL — https, no embedded
+    // credentials, no literal private/loopback hosts — before anything is
+    // persisted. The request sink in `keycloak.ts` re-validates, which is
+    // what protects rows stored before this check existed.
+    if (type === "direct_url" && keycloakTokenUrl && keycloakClientId) {
+      const tokenUrlCheck = validateBackendUrl(keycloakTokenUrl);
+      if (!tokenUrlCheck.ok) {
+        return NextResponse.json(
+          { error: `Invalid Keycloak token endpoint: ${tokenUrlCheck.error}` },
+          { status: 422 }
+        );
+      }
+    }
   }
   const wantsKeycloak =
     type === "direct_url" &&

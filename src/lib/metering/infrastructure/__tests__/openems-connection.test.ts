@@ -208,4 +208,28 @@ describe("OpenEmsConnection.testCandidate", () => {
     });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("reports an IdP redirect as invalid_config without following it", async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 308,
+      headers: { get: () => "https://idp-mirror.example/token" },
+      json: async () => ({}),
+    });
+    const connection = createOpenEmsConnection({} as never, stubRepo());
+    const result = await connection.testCandidate(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+      keycloakClientSecret: "s3cret",
+    });
+    expect(result.ok).toBe(false);
+    expect(result).toMatchObject({ code: "invalid_config" });
+    expect(String((result as { message: string }).message)).toMatch(
+      /redirects are not followed/i
+    );
+    // The redirect target was never contacted.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 });

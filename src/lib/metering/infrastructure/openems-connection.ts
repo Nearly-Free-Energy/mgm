@@ -50,7 +50,11 @@ function translateTestError(error: OpenEmsError): ConnectionTestResult {
   }
   if (
     error.code === "OPENEMS_INVALID_BACKEND_URL" ||
-    error.code === "OPENEMS_INVALID_CONFIG"
+    error.code === "OPENEMS_INVALID_CONFIG" ||
+    // A redirect is a configuration problem, not a transport detail
+    // (same rule as `client.ts`): the saved endpoint must be updated to
+    // the final address.
+    error.code === "OPENEMS_REDIRECT"
   ) {
     return { ok: false, code: "invalid_config", message: error.message };
   }

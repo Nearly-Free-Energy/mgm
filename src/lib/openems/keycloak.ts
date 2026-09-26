@@ -1,6 +1,7 @@
 import "server-only";
 
 import { OpenEmsError } from "./errors";
+import { validateBackendUrl } from "./backend-url";
 
 /**
  * Keycloak token acquisition for `direct_url` backends (issue #4).
@@ -41,7 +42,10 @@ function cacheKey(creds: KeycloakCredentials): string {
 /**
  * Return a valid access token, fetching (and caching) one if needed.
  * Throws OpenEmsError: AUTH_FAILED on IdP rejection, UNREACHABLE on
- * transport failure, HTTP_ERROR/RPC_ERROR on malformed IdP behavior.
+ * transport failure, HTTP_ERROR/RPC_ERROR on malformed IdP behavior,
+ * INVALID_BACKEND_URL when the token endpoint fails sink-side validation
+ * (thrown before fetch is reachable — the secret never leaves), REDIRECT
+ * when the endpoint answers with a 3xx (never followed).
  */
 export async function obtainKeycloakToken(
   creds: KeycloakCredentials,
@@ -53,9 +57,33 @@ export async function obtainKeycloakToken(
     return cached.accessToken;
   }
 
+  // Sink-side endpoint validation (P1, PR #8 re-review): the token URL is
+  // operator-supplied and the request body carries the client secret, so
+  // the exact string handed to fetch must pass the same checks as a
+  // backend URL — https (http only for localhost), no embedded
+  // credentials, no literal private/loopback/link-local hosts. Validating
+  // here rather than only at save time also covers rows stored before any
+  // write-time check existed. A rejected endpoint throws before fetch is
+  // reachable, so the secret cannot leave the process.
+  const checked = validateBackendUrl(creds.tokenUrl);
+  if (!checked.ok) {
+    throw new OpenEmsError(
+      `The Keycloak token endpoint was not contacted because it is not valid: ${checked.error} ` +
+        `Open the microgrid's OpenEMS Backend setup and save a valid token endpoint URL.`,
+      "OPENEMS_INVALID_BACKEND_URL",
+      503,
+      { tokenUrl: creds.tokenUrl }
+    );
+  }
+
   let response: Response;
   try {
-    response = await fetch(creds.tokenUrl, {
+    // `redirect: "manual"` — redirects are NOT followed. fetch defaults to
+    // `follow`, which would re-send the POST — body included, i.e. the
+    // client secret — to a host that never passed the checks above (a
+    // 307/308 at request time preserves method and body). Same rule as
+    // `client.ts`: a control a redirect can sidestep is not a control.
+    response = await fetch(checked.url, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -63,6 +91,7 @@ export async function obtainKeycloakToken(
         client_id: creds.clientId,
         client_secret: creds.clientSecret,
       }).toString(),
+      redirect: "manual",
     });
   } catch (err) {
     throw new OpenEmsError(
@@ -70,6 +99,29 @@ export async function obtainKeycloakToken(
       "OPENEMS_UNREACHABLE",
       503,
       err
+    );
+  }
+
+  // A redirect is a configuration problem, not a rejection. Checked before
+  // the auth branch — a 3xx has no token body to parse, and parsing it as
+  // one would be the wrong error at best. With `redirect: "manual"` the
+  // runtime surfaces either the raw 3xx or an opaque redirect (type
+  // "opaqueredirect", status 0); handle both, and never follow.
+  if (
+    (response.status >= 300 && response.status < 400) ||
+    response.type === "opaqueredirect"
+  ) {
+    const location =
+      typeof response.headers?.get === "function"
+        ? response.headers.get("location")
+        : null;
+    throw new OpenEmsError(
+      `Keycloak token endpoint responded with a redirect` +
+        (location ? ` to ${location}` : "") +
+        `. Redirects are not followed — update the saved token endpoint URL to the final address.`,
+      "OPENEMS_REDIRECT",
+      502,
+      { status: response.status, location }
     );
   }
 

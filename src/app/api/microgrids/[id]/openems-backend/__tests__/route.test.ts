@@ -1057,6 +1057,26 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
       expect((await res.json()).error).toMatch(/both the token URL and the client id/i);
     });
 
+    it("rejects a plaintext http token endpoint (422, nothing persisted)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+      registerFrom(billingPeriodsHandler([]));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          ...KEYCLOAK_BODY,
+          keycloakTokenUrl: "http://kc.example/token",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatch(/invalid keycloak token endpoint/i);
+      // Write-time rejection precedes the periods read, the IdP call, and
+      // the persist — from() was consumed only by the row read.
+      expect(fromCallIndex).toBe(1);
+    });
+
     it("rejects Keycloak mixed with a bearer token (400)", async () => {
       registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
 
