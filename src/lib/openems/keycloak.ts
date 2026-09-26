@@ -51,12 +51,13 @@ export async function obtainKeycloakToken(
   creds: KeycloakCredentials,
   now: number = Date.now()
 ): Promise<string> {
-  const key = cacheKey(creds);
-  const cached = cache.get(key);
-  if (cached && cached.expiresAt - now > EXPIRY_SKEW_MS) {
-    return cached.accessToken;
-  }
-
+  // Operators select an endpoint approved by the deployment administrator.
+  // Fetch uses the trusted configuration value, never the submitted URL.
+  const approvedEndpoint = (process.env.OPENEMS_KEYCLOAK_TOKEN_URLS ?? "")
+    .split(",")
+    .map((endpoint) => endpoint.trim())
+    .filter(Boolean)
+    .find((endpoint) => endpoint === creds.tokenUrl.trim());
   // Sink-side endpoint validation (P1, PR #8 re-review): the token URL is
   // operator-supplied and the request body carries the client secret, so
   // the exact string handed to fetch must pass the same checks as a
@@ -76,6 +77,28 @@ export async function obtainKeycloakToken(
     );
   }
 
+  if (!approvedEndpoint) {
+    throw new OpenEmsError(
+      "This Keycloak token endpoint is not approved. Ask the deployment administrator to add its exact HTTPS URL to OPENEMS_KEYCLOAK_TOKEN_URLS.",
+      "OPENEMS_INVALID_BACKEND_URL",
+      503
+    );
+  }
+  // Token endpoints carry secrets and must use HTTPS even in development.
+  if (new URL(approvedEndpoint).protocol !== "https:") {
+    throw new OpenEmsError(
+      "Keycloak token endpoints must use HTTPS.",
+      "OPENEMS_INVALID_BACKEND_URL",
+      503
+    );
+  }
+
+  const key = cacheKey(creds);
+  const cached = cache.get(key);
+  if (cached && cached.expiresAt - now > EXPIRY_SKEW_MS) {
+    return cached.accessToken;
+  }
+
   let response: Response;
   try {
     // `redirect: "manual"` — redirects are NOT followed. fetch defaults to
@@ -83,7 +106,7 @@ export async function obtainKeycloakToken(
     // client secret — to a host that never passed the checks above (a
     // 307/308 at request time preserves method and body). Same rule as
     // `client.ts`: a control a redirect can sidestep is not a control.
-    response = await fetch(checked.url, {
+    response = await fetch(approvedEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({

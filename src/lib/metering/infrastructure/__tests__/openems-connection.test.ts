@@ -51,11 +51,13 @@ describe("OpenEmsConnection.testCandidate", () => {
   const fetchSpy = vi.fn();
 
   beforeEach(() => {
+    vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "https://kc.example/token");
     vi.clearAllMocks();
     vi.stubGlobal("fetch", fetchSpy);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 

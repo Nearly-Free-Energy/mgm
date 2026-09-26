@@ -29,13 +29,28 @@ describe("obtainKeycloakToken", () => {
   const fetchSpy = vi.fn();
 
   beforeEach(() => {
+    vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "https://keycloak.example/realms/energy/protocol/openid-connect/token");
     vi.clearAllMocks();
     vi.stubGlobal("fetch", fetchSpy);
     _resetKeycloakTokenCacheForTests();
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("rejects an unapproved public endpoint before sending credentials", async () => {
+    await expect(obtainKeycloakToken({ ...CREDS, tokenUrl: "https://attacker.example/token" }))
+      .rejects.toMatchObject({ code: "OPENEMS_INVALID_BACKEND_URL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no token endpoints are approved", async () => {
+    vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "");
+    await expect(obtainKeycloakToken(CREDS))
+      .rejects.toMatchObject({ code: "OPENEMS_INVALID_BACKEND_URL" });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("posts client_credentials and caches until near expiry", async () => {
