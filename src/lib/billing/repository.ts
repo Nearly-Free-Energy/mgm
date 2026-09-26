@@ -12,6 +12,7 @@
  * vendor client or resolves provider configuration itself.
  */
 import type { UserRoleRecord } from "@/lib/types/domain";
+import type { GenerationResult, RunGenerationFatal } from "./generate";
 
 export type BillingScope = {
   organizationId: string;
@@ -77,25 +78,9 @@ export type SeedReadingInput = {
   startKwh: number;
 };
 
-export type GenerationHouseholdResult =
-  | { kind: "written" | "preview"; householdId: string; householdName: string }
-  | {
-      kind: "error";
-      householdId: string;
-      householdName: string;
-      error: string;
-      code: string;
-    };
+export type GenerationOutput = GenerationResult;
 
-export type GenerationOutput = {
-  results: GenerationHouseholdResult[];
-};
-
-export type GenerationFatal = {
-  kind: "fatal";
-  status: number;
-  body: { error: string; code?: string };
-};
+export type GenerationFatal = RunGenerationFatal;
 
 /**
  * Bill generation delegate, wired in `compose.ts` to the MBE engine

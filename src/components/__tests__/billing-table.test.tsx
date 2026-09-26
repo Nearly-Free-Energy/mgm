@@ -13,7 +13,7 @@
 //     (e) Gate banner rendered when isPaymentConfigured=false with role-branched copy
 //     (f) Gate banner absent when isPaymentConfigured=true
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BillingTable } from "../BillingTable";
 import { LocaleProvider } from "../format/locale-context";
@@ -25,8 +25,9 @@ import type {
 } from "@/lib/types/domain";
 
 // Mock next/navigation (BillingTable calls useRouter inside)
+const refreshSpy = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), refresh: refreshSpy }),
 }));
 
 // Mock Supabase client (BillingTable calls createClient() on render)
@@ -836,5 +837,106 @@ describe("BillingTable — per-period timezone label (#358)", () => {
     const kiriDates = kiriText.replace("Pacific/Kiritimati (UTC+14)", "").trim();
     expect(utcDates.length).toBeGreaterThan(0);
     expect(kiriDates).toBe(utcDates);
+  });
+});
+
+describe("BillingTable — close via capability API (issue #5, review P1)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    refreshSpy.mockClear();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderTable() {
+    return render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+  }
+
+  async function openDialogAndConfirm() {
+    // Header "Close Period" opens the ClosePeriodDialog.
+    fireEvent.click(screen.getByRole("button", { name: /^Close Period$/i }));
+    // The dialog requires ticking the URA-copy checkbox first.
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /Close period/i }));
+  }
+
+  it("POSTs to the close API unconfirmed and refreshes on 200", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
+    });
+    renderTable();
+    await openDialogAndConfirm();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/billing-periods/period-1/close");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({});
+    await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
+  });
+
+  it("409 unresolved → error banner → Retry escalates to confirmed:true", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          code: "billing_unresolved_households",
+          message: "Period has 1 unresolved household(s). Confirm explicitly to close anyway.",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
+      });
+    renderTable();
+    await openDialogAndConfirm();
+
+    // First attempt goes out unconfirmed (fixture has no unfilled rows).
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({});
+
+    // Dialog error state surfaces the server message with a Retry affordance.
+    await waitFor(() =>
+      expect(screen.getByText(/Couldn't close period\./i)).toBeTruthy()
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Retry close/i }));
+
+    // Retry escalates to an explicit close-anyway and succeeds.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      confirmed: true,
+    });
+    await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
+  });
+
+  it("409 billing_disabled surfaces the disabled message", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: "billing_disabled",
+        error: "Billing is disabled for this organization.",
+      }),
+    });
+    renderTable();
+    await openDialogAndConfirm();
+
+    await waitFor(() =>
+      expect(screen.getByText(/Billing is disabled/i)).toBeTruthy()
+    );
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 });

@@ -115,6 +115,12 @@ export function BillingTable({
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
+  // Release 3 (issue #5, review P1): the server is the source of truth for
+  // unresolved households. The first confirm goes out unconfirmed; a 409
+  // `billing_unresolved_households` escalates the dialog's Retry into an
+  // explicit close-anyway. Reset whenever the dialog closes.
+  const closeConfirmedRef = useRef(false);
+
   // Phase B (#157) — toast queue for IPN-driven paid transitions. Pollable
   // because Supabase Realtime is not yet wired into this repo; polling every
   // 30s is well under the pilot's traffic profile (Aaron + a handful of
@@ -423,21 +429,54 @@ export function BillingTable({
     setError(null);
     setClosing(true);
 
-    const { error: updateError } = await supabase
-      .from("billing_periods")
-      .update({
-        status: "closed",
-        closed_at: new Date().toISOString(),
-      })
-      .eq("id", period.id);
-
-    if (updateError) {
+    // Release 3 (issue #5, review P1): closing runs through the billing
+    // capability (POST /api/billing-periods/[id]/close) — org-scoped,
+    // plugin-gated, with the unresolved-household safeguard — never a
+    // direct table update, so disabling Billing stops closure with a 409.
+    // The client already warns on unfilled rows; start unconfirmed unless
+    // the operator's own warning banner made the intent explicit, and
+    // escalate after a server 409.
+    const firstAttemptConfirmed = unfilledHouseholdNames.length > 0;
+    try {
+      const res = await fetch(`/api/billing-periods/${period.id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          closeConfirmedRef.current || firstAttemptConfirmed
+            ? { confirmed: true }
+            : {}
+        ),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+        error?: string;
+      };
+      if (res.status === 409 && body.code === "billing_unresolved_households") {
+        closeConfirmedRef.current = true;
+        throw new Error(
+          body.message ??
+            "Period has unresolved households. Retry to close anyway."
+        );
+      }
+      if (!res.ok) {
+        throw new Error(
+          body.message ?? body.error ?? "Could not close the period."
+        );
+      }
+    } catch (err) {
       setClosing(false);
-      throw new Error(updateError.message);
+      throw err instanceof Error ? err : new Error("Network error.");
     }
 
+    closeConfirmedRef.current = false;
     setClosing(false);
     router.refresh();
+  }
+
+  function handleCloseDialogChange(open: boolean) {
+    if (!open) closeConfirmedRef.current = false;
+    setClosePeriodOpen(open);
   }
 
   // Build period label for ClosePeriodDialog
@@ -724,7 +763,7 @@ export function BillingTable({
       {/* Close Period Dialog */}
       <ClosePeriodDialog
         open={closePeriodOpen}
-        onOpenChange={setClosePeriodOpen}
+        onOpenChange={handleCloseDialogChange}
         periodLabel={periodLabel}
         summaryRows={closePeriodSummaryRows}
         grandTotal={grandTotal}
