@@ -32,6 +32,8 @@ const ORG_ID = "550e8400-e29b-41d4-a716-446655440004";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
+const releasedRouteMock = vi.fn();
+vi.mock("@/lib/mgm/released-routes", () => ({ isReleasedRoute: releasedRouteMock }));
 const ensurePaymentLinkMock = vi.fn();
 const renderInvoicePdfMock = vi.fn();
 const mintShortSlugMock = vi.fn();
@@ -270,6 +272,7 @@ const RATE_SCHEDULE_ROW = {
 };
 
 beforeEach(() => {
+  releasedRouteMock.mockReturnValue(true);
   vi.clearAllMocks();
   canAccessMicrogridReturn = true;
   capturedUpdates.length = 0;
@@ -356,6 +359,18 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const cd = res.headers.get("Content-Disposition") ?? "";
     expect(cd).toMatch(/^attachment; filename="NFE-2026-\d{5}\.pdf"$/);
+  });
+
+  it.each([null, "existing-slug"])("omits gated payment links, including cached slug %s", async (slug) => {
+    const { isReleasedRoute } = await vi.importActual<typeof import("@/lib/mgm/released-routes")>("@/lib/mgm/released-routes");
+    releasedRouteMock.mockImplementation(isReleasedRoute);
+    fromState.lineItem = { data: lineItemRow({ short_slug: slug }), error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    expect(ensurePaymentLinkMock).not.toHaveBeenCalled();
+    expect(mintShortSlugMock).not.toHaveBeenCalled();
+    expect(renderInvoicePdfMock.mock.calls[0][0].paymentRedirectUrl).toBeNull();
   });
 
   it("ensure-link succeeds → helper invoked once, paymentRedirectUrl threaded as /p/<slug> (#223)", async () => {

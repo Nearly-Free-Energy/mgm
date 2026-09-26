@@ -7,8 +7,8 @@
 //     (a) PeriodPicker trigger button is rendered (aria-haspopup="listbox").
 //     (b) Selecting an option calls router.push with the correct URL.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { LocaleProvider } from "../format/locale-context";
 import type { BillingPeriod } from "@/lib/types/domain";
 
@@ -359,5 +359,80 @@ describe("BillingPeriodList — CTA collapse (#171)", () => {
 
     // List still rendered — column header still in DOM
     expect(screen.getByText(/Date Range/i)).toBeTruthy();
+  });
+});
+
+describe("BillingPeriodList — create via capability API (issue #5, review P1)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    pushSpy.mockClear();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function openForm() {
+    render(
+      <Wrapper>
+        <BillingPeriodList
+          microgridId={MICROGRID_ID}
+          periods={[]}
+          summaries={{}}
+          currency="UGX"
+          canManage={true}
+        />
+      </Wrapper>
+    );
+    fireEvent.click(screen.getByRole("button", { name: /\+ Create period/i }));
+  }
+
+  it("submitting the form POSTs to /api/billing-periods and navigates to the new period", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ period: { id: "new-period" } }),
+    });
+    openForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Create Period$/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/billing-periods");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(init.body as string);
+    expect(body.microgrid_id).toBe(MICROGRID_ID);
+    expect(body.start_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(body.end_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await waitFor(() =>
+      expect(pushSpy).toHaveBeenCalledWith(
+        `/microgrids/${MICROGRID_ID}/billing/new-period`
+      )
+    );
+  });
+
+  it("surfaces 409 billing_disabled in the banner and does not navigate", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: "billing_disabled",
+        error: "Billing is disabled for this organization.",
+      }),
+    });
+    openForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Create Period$/i }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Billing is disabled for this organization.")
+      ).toBeTruthy()
+    );
+    expect(pushSpy).not.toHaveBeenCalled();
   });
 });

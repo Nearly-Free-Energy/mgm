@@ -16,9 +16,11 @@
  *   - bulk-regenerate of a manual-source household without manualReadings
  *     surfaces in errors[] with code='currently_manual' (AC3 Q5).
  *
- * Test pattern: the route is mocked at the supabase + auth + runGenerationFor
- * boundaries — the runGenerationFor *internals* are exercised end-to-end by
- * the live-DB suite at `src/lib/supabase/__tests__/billing_audit_log.test.ts`.
+ * Test pattern: the route is mocked at the supabase + auth + composeBilling
+ * boundaries — the capability internals are unit-tested at
+ * `src/lib/billing/__tests__/billing-capability.test.ts`, and the engine
+ * internals end-to-end by the live-DB suite at
+ * `src/lib/supabase/__tests__/billing_audit_log.test.ts`.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -29,21 +31,38 @@ import { NextRequest } from "next/server";
 let mockUserOverride: { id: string } | null = {
   id: "11111111-1111-4111-8111-111111111111",
 };
-let mockGenerateResult: { kind?: "fatal"; status?: number; body?: unknown; results?: unknown[] } = {
-  results: [],
+let mockCapabilityResult: { ok: boolean; status?: number; code?: string; message?: string; data?: { results: unknown[] } } = {
+  ok: true,
+  data: { results: [] },
 };
-let lastGenerateCall: {
-  periodId?: string;
+let lastCapabilityCall: {
+  billingPeriodId?: string;
   householdIds?: string[];
   manualReadings?: unknown[];
   seedReadings?: unknown[];
-  mode?: string;
-  actorUserId?: string | null;
 } | null = null;
+let periodRow: { id: string; microgrid_id: string } | null = {
+  id: "660e8400-e29b-41d4-a716-446655441000",
+  microgrid_id: "660e8400-e29b-41d4-a716-446655440000",
+};
+let microgridRow: { id: string; communities: { org_id: string } } | null = {
+  id: "660e8400-e29b-41d4-a716-446655440000",
+  communities: { org_id: "550e8400-e29b-41d4-a716-446655440000" },
+};
+let composeResult: { ok: boolean; status?: number; code?: string; message?: string } | null = null;
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
-    from: vi.fn(),
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: table === "billing_periods" ? periodRow : microgridRow,
+            error: null,
+          }),
+        }),
+      }),
+    }),
     auth: {
       getUser: async () => ({
         data: { user: mockUserOverride },
@@ -53,26 +72,31 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-vi.mock("@/lib/billing/generate", async () => ({
-  isRunGenerationFatal: (out: { kind?: string }) =>
-    Boolean(out && out.kind === "fatal"),
-  runGenerationFor: vi.fn(async (params: {
-    periodId: string;
-    householdIds?: string[];
-    manualReadings?: unknown[];
-    seedReadings?: unknown[];
-    mode: string;
-    actorUserId: string | null;
-  }) => {
-    lastGenerateCall = {
-      periodId: params.periodId,
-      householdIds: params.householdIds,
-      manualReadings: params.manualReadings,
-      seedReadings: params.seedReadings,
-      mode: params.mode,
-      actorUserId: params.actorUserId,
+vi.mock("@/lib/billing/compose", () => ({
+  composeBilling: vi.fn(async () => {
+    if (composeResult) return composeResult;
+    return {
+      ok: true,
+      data: {
+        billing: {
+          generateBills: vi.fn(async (input: {
+            billingPeriodId: string;
+            householdIds?: string[];
+            manualReadings?: unknown[];
+            seedReadings?: unknown[];
+          }) => {
+            lastCapabilityCall = {
+              billingPeriodId: input.billingPeriodId,
+              householdIds: input.householdIds,
+              manualReadings: input.manualReadings,
+              seedReadings: input.seedReadings,
+            };
+            return mockCapabilityResult;
+          }),
+        },
+        dispose: async () => {},
+      },
     };
-    return mockGenerateResult;
   }),
 }));
 
@@ -87,12 +111,21 @@ function makePostRequest(body: unknown): NextRequest {
   });
 }
 
-describe("POST /api/billing/generate (#173 BC1)", () => {
+describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUserOverride = { id: "11111111-1111-4111-8111-111111111111" };
-    mockGenerateResult = { results: [] };
-    lastGenerateCall = null;
+    mockCapabilityResult = { ok: true, data: { results: [] } };
+    lastCapabilityCall = null;
+    periodRow = {
+      id: "660e8400-e29b-41d4-a716-446655441000",
+      microgrid_id: "660e8400-e29b-41d4-a716-446655440000",
+    };
+    microgridRow = {
+      id: "660e8400-e29b-41d4-a716-446655440000",
+      communities: { org_id: "550e8400-e29b-41d4-a716-446655440000" },
+    };
+    composeResult = null;
   });
 
   it("401 when no auth user", async () => {
@@ -138,19 +171,22 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("happy bulk: delegates to runGenerationFor with mode='write' + actorUserId", async () => {
-    mockGenerateResult = {
-      results: [
-        {
-          kind: "written",
-          householdId: HH_A,
-          householdName: "HH A",
-          lineItem: { id: "li-x" },
-          previousTotalAmount: null,
-          previousPaymentStatus: null,
-          previousReadingSource: null,
-        },
-      ],
+  it("happy bulk: delegates to the billing capability with the parsed body", async () => {
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          {
+            kind: "written",
+            householdId: HH_A,
+            householdName: "HH A",
+            lineItem: { id: "li-x" },
+            previousTotalAmount: null,
+            previousPaymentStatus: null,
+            previousReadingSource: null,
+          },
+        ],
+      },
     };
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
@@ -158,28 +194,30 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
     const json = await res.json();
     expect(json.lineItems).toBe(1);
     expect(json.errors).toEqual([]);
-    expect(lastGenerateCall?.mode).toBe("write");
-    expect(lastGenerateCall?.actorUserId).toBe(
-      "11111111-1111-4111-8111-111111111111"
-    );
-    expect(lastGenerateCall?.periodId).toBe(PERIOD_ID);
-    expect(lastGenerateCall?.householdIds).toBeUndefined();
-    expect(lastGenerateCall?.manualReadings).toBeUndefined();
+    // The route passes the request through to generateBills — mode='write',
+    // actor, and assignment-date enforcement are capability-owned (the UI
+    // must never be able to switch them off per-call).
+    expect(lastCapabilityCall?.billingPeriodId).toBe(PERIOD_ID);
+    expect(lastCapabilityCall?.householdIds).toBeUndefined();
+    expect(lastCapabilityCall?.manualReadings).toBeUndefined();
   });
 
-  it("forwards manualReadings (with reason) to runGenerationFor", async () => {
-    mockGenerateResult = {
-      results: [
-        {
-          kind: "written",
-          householdId: HH_A,
-          householdName: "HH A",
-          lineItem: { id: "li-x" },
-          previousTotalAmount: null,
-          previousPaymentStatus: null,
-          previousReadingSource: null,
-        },
-      ],
+  it("forwards manualReadings (with reason) to the billing capability", async () => {
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          {
+            kind: "written",
+            householdId: HH_A,
+            householdName: "HH A",
+            lineItem: { id: "li-x" },
+            previousTotalAmount: null,
+            previousPaymentStatus: null,
+            previousReadingSource: null,
+          },
+        ],
+      },
     };
     const { POST } = await import("../route");
     const res = await POST(
@@ -196,7 +234,7 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
       })
     );
     expect(res.status).toBe(200);
-    expect(lastGenerateCall?.manualReadings).toEqual([
+    expect(lastCapabilityCall?.manualReadings).toEqual([
       {
         householdId: HH_A,
         startKwh: 100,
@@ -207,18 +245,21 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
   });
 
   it("manualReadings.endKwh === startKwh succeeds (zero-usage edge case)", async () => {
-    mockGenerateResult = {
-      results: [
-        {
-          kind: "written",
-          householdId: HH_A,
-          householdName: "HH A",
-          lineItem: { id: "li-x" },
-          previousTotalAmount: null,
-          previousPaymentStatus: null,
-          previousReadingSource: null,
-        },
-      ],
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          {
+            kind: "written",
+            householdId: HH_A,
+            householdName: "HH A",
+            lineItem: { id: "li-x" },
+            previousTotalAmount: null,
+            previousPaymentStatus: null,
+            previousReadingSource: null,
+          },
+        ],
+      },
     };
     const { POST } = await import("../route");
     const res = await POST(
@@ -233,32 +274,35 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
   });
 
   it("response shape splits results into lineItems count + errors[] (with code field)", async () => {
-    mockGenerateResult = {
-      results: [
-        {
-          kind: "written",
-          householdId: HH_A,
-          householdName: "HH A",
-          lineItem: { id: "li-x" },
-          previousTotalAmount: null,
-          previousPaymentStatus: null,
-          previousReadingSource: null,
-        },
-        {
-          kind: "error",
-          householdId: "660e8400-e29b-41d4-a716-446655442002",
-          householdName: "HH B",
-          error: "Currently set to manual entry — use per-row regenerate to change.",
-          code: "currently_manual",
-        },
-        {
-          kind: "error",
-          householdId: "660e8400-e29b-41d4-a716-446655442003",
-          householdName: "660e8400-e29b-41d4-a716-446655442003",
-          error: "Household 660e8400-e29b-41d4-a716-446655442003 is not in this microgrid.",
-          code: "unknown_household",
-        },
-      ],
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          {
+            kind: "written",
+            householdId: HH_A,
+            householdName: "HH A",
+            lineItem: { id: "li-x" },
+            previousTotalAmount: null,
+            previousPaymentStatus: null,
+            previousReadingSource: null,
+          },
+          {
+            kind: "error",
+            householdId: "660e8400-e29b-41d4-a716-446655442002",
+            householdName: "HH B",
+            error: "Currently set to manual entry — use per-row regenerate to change.",
+            code: "currently_manual",
+          },
+          {
+            kind: "error",
+            householdId: "660e8400-e29b-41d4-a716-446655442003",
+            householdName: "660e8400-e29b-41d4-a716-446655442003",
+            error: "Household 660e8400-e29b-41d4-a716-446655442003 is not in this microgrid.",
+            code: "unknown_household",
+          },
+        ],
+      },
     };
     const { POST } = await import("../route");
     const res = await POST(
@@ -275,17 +319,41 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
     expect(json.errors[1].code).toBe("unknown_household");
   });
 
-  it("propagates fatal status from runGenerationFor", async () => {
-    mockGenerateResult = {
-      kind: "fatal",
+  it("propagates capability failures (engine fatal mapped by the capability)", async () => {
+    mockCapabilityResult = {
+      ok: false,
       status: 404,
-      body: { error: "Billing period not found" },
+      code: "billing_generation_failed",
+      message: "Billing period not found",
     };
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toBe("Billing period not found");
+    expect(json.message).toBe("Billing period not found");
+  });
+
+  it("404 when the period is RLS-hidden or missing", async () => {
+    periodRow = null;
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+    expect(res.status).toBe(404);
+    expect(lastCapabilityCall).toBeNull();
+  });
+
+  it("409 when billing is disabled (composition fails closed)", async () => {
+    composeResult = {
+      ok: false,
+      status: 409,
+      code: "billing_disabled",
+      message: "Billing is disabled for this organization.",
+    };
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.code).toBe("billing_disabled");
+    expect(lastCapabilityCall).toBeNull();
   });
 
   // #339 — seedReadings validation. The validator shipped with no tests, and
@@ -305,10 +373,10 @@ describe("POST /api/billing/generate (#173 BC1)", () => {
       return POST(makePostRequest({ billingPeriodId: PERIOD_ID, seedReadings }));
     }
 
-    it("passes a well-formed array through to runGenerationFor", async () => {
+    it("passes a well-formed array through to the billing capability", async () => {
       const res = await post([ok]);
       expect(res.status).toBe(200);
-      expect(lastGenerateCall?.seedReadings).toEqual([ok]);
+      expect(lastCapabilityCall?.seedReadings).toEqual([ok]);
     });
 
     it("400 when seedReadings is not an array", async () => {
