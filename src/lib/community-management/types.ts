@@ -110,16 +110,23 @@ export interface CommunityManagementRepository {
    */
   getOpenDeviceLink(
     householdId: string
-  ): Promise<{ id: string; device_id: string } | null>;
+  ): Promise<{ id: string; device_id: string; effective_from: string } | null>;
   closeDeviceLink(
     linkId: string,
     effectiveTo: string
   ): Promise<RepositoryError | null>;
-  openDeviceLink(
+  /**
+   * Atomic close-and-open replacement (fn_replace_household_device):
+   * closes open primary links at the date and opens the new one in a single
+   * transaction, so a failed insert cannot leave the household meterless.
+   * Same-day links are deleted rather than zero-length closed.
+   */
+  replaceDeviceLink(
     householdId: string,
     deviceId: string,
-    effectiveFrom: string
-  ): Promise<RepositoryError | null>;
+    effectiveDate: string
+  ): Promise<{ id: string | null; error: RepositoryError | null }>;
+  deleteDeviceLink(linkId: string): Promise<RepositoryError | null>;
   refetchHousehold(id: string): Promise<RepositoryResult<Household>>;
   countBillingLineItems(
     householdId: string

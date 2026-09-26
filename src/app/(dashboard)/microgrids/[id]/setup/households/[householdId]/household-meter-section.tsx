@@ -30,11 +30,13 @@ export function HouseholdMeterSection({
   gaps,
   hasReadings,
   canManage,
+  timezone,
 }: {
   entries: AssignmentEntryView[];
   gaps: AssignmentGapView[];
   hasReadings: boolean;
   canManage: boolean;
+  timezone: string;
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const current = entries.find((e) => e.current) ?? null;
@@ -131,6 +133,7 @@ export function HouseholdMeterSection({
         <OpeningRegisterDialog
           deviceId={current.deviceId}
           deviceName={current.deviceName}
+          timezone={timezone}
           open={dialogOpen}
           onOpenChange={setDialogOpen}
         />

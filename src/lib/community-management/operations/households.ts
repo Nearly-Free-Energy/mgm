@@ -583,11 +583,12 @@ export async function updateHouseholdOperation(
   }
 
   if (parsed.data.deviceProvided) {
-    // Release 2 (issue #4): replacements close the open link and open a new
-    // one on the same date instead of deleting history. The half-open
-    // [effective_from, effective_to) overlap trigger rejects concurrent
-    // double-opens with 23505. Dates are server UTC days; sub-day precision
-    // is intentionally not modeled — replacements take effect for the day.
+    // Release 2 (issue #4): replacements are atomic close-and-open swaps
+    // through fn_replace_household_device, so a failed insert cannot leave
+    // the household meterless. Same-day links never covered a day, so they
+    // are deleted rather than closed as a zero-length interval (which the
+    // period CHECK would reject). Dates are server UTC days; sub-day
+    // precision is intentionally not modeled.
     const today = new Date().toISOString().slice(0, 10);
     const openLink = await repo.getOpenDeviceLink(id);
     const wantsLink = parsed.data.deviceValue;
@@ -595,8 +596,63 @@ export async function updateHouseholdOperation(
     if (wantsLink && openLink && openLink.device_id === wantsLink) {
       // No-op: the requested meter is already the open link. Skip the write
       // so history rows are not churned.
-    } else {
-      if (openLink) {
+    } else if (wantsLink) {
+      const { error: replaceError } = await repo.replaceDeviceLink(
+        id,
+        wantsLink,
+        today
+      );
+      if (replaceError) {
+        const rlsError = mapRlsError(
+          replaceError,
+          "Not authorized to assign this device."
+        );
+        if (rlsError) return { ...rlsError, reason: "rls_denied" };
+        if (
+          replaceError.code === "23P01" ||
+          (replaceError.code === "23505" &&
+            replaceError.message.includes("overlaps"))
+        ) {
+          return communityFailure({
+            status: 409,
+            code: "household_device_overlap",
+            message:
+              "Meter assignment overlaps an existing assignment for this household. Retry the replacement.",
+            reason: "device_assignment_overlap",
+          });
+        }
+        if (replaceError.code === "23505") {
+          return communityFailure({
+            status: 409,
+            code: "household_device_already_linked",
+            message: "Meter is already assigned to another household.",
+            reason: "device_already_linked",
+          });
+        }
+        return communityFailure({
+          status: 500,
+          code: "household_device_link_failed",
+          message: `Failed to link device to household: ${replaceError.message}`,
+        });
+      }
+    } else if (openLink) {
+      // Unlink: same-day links are corrections (delete); older links are
+      // history (close at today).
+      if (openLink.effective_from === today) {
+        const deleteError = await repo.deleteDeviceLink(openLink.id);
+        if (deleteError) {
+          const rlsError = mapRlsError(
+            deleteError,
+            "Not authorized to update the household device link."
+          );
+          if (rlsError) return { ...rlsError, reason: "rls_denied" };
+          return communityFailure({
+            status: 500,
+            code: "household_device_unlink_failed",
+            message: `Failed to remove device link: ${deleteError.message}`,
+          });
+        }
+      } else {
         const closeError = await repo.closeDeviceLink(openLink.id, today);
         if (closeError) {
           const rlsError = mapRlsError(
@@ -608,38 +664,6 @@ export async function updateHouseholdOperation(
             status: 500,
             code: "household_device_unlink_failed",
             message: `Failed to close existing device link: ${closeError.message}`,
-          });
-        }
-      }
-      if (wantsLink) {
-        const openError = await repo.openDeviceLink(id, wantsLink, today);
-        if (openError) {
-          const rlsError = mapRlsError(openError, "Not authorized to assign this device.");
-          if (rlsError) return { ...rlsError, reason: "rls_denied" };
-          if (
-            openError.code === "23505" &&
-            openError.message.includes("overlaps")
-          ) {
-            return communityFailure({
-              status: 409,
-              code: "household_device_overlap",
-              message:
-                "Meter assignment overlaps an existing assignment for this household. Close the open link first.",
-              reason: "device_assignment_overlap",
-            });
-          }
-          if (openError.code === "23505") {
-            return communityFailure({
-              status: 409,
-              code: "household_device_already_linked",
-              message: "Meter is already assigned to another household.",
-              reason: "device_already_linked",
-            });
-          }
-          return communityFailure({
-            status: 500,
-            code: "household_device_link_failed",
-            message: `Failed to link device to household: ${openError.message}`,
           });
         }
       }

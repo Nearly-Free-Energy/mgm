@@ -1399,6 +1399,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fn_replace_household_device: {
+        Args: {
+          p_device_id: string
+          p_effective_date: string
+          p_household_id: string
+        }
+        Returns: string
+      }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }
         Returns: boolean

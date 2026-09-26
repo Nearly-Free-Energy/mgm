@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import {
   composeMetering,
   type MeteringResult,
@@ -70,28 +71,45 @@ export async function POST(
   });
   if (!composed.ok) return mapError(composed);
 
+  // The form omits stored secrets ("blank means keep"). Fill omitted
+  // secrets from the stored configuration of the same type so testing an
+  // edited-but-not-retyped config works. Explicitly typed values always
+  // win; without a stored config of the same type the capability rejects
+  // the incomplete candidate. Secrets stay server-side: the merged object
+  // is built into an in-memory client, never logged, never returned.
+  const type = body.type as "cloud_aws" | "direct_url";
+  let stored: Awaited<ReturnType<typeof getMicrogridEmsConfig>> = null;
+  try {
+    stored = await getMicrogridEmsConfig(supabase, microgridId);
+  } catch {
+    stored = null;
+  }
+  const asText = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
+  // Secrets merge only within the same type: a direct_url candidate never
+  // inherits AWS fields (and vice versa), so cross-type stored values cannot
+  // leak into an unrelated configuration.
+  const storedAws =
+    stored?.type === "cloud_aws" && type === "cloud_aws" ? stored : null;
+  const storedDirect =
+    stored?.type === "direct_url" && type === "direct_url" ? stored : null;
+  const candidate = {
+    type,
+    backendUrl: typeof body.backendUrl === "string" ? body.backendUrl : "",
+    region: asText(body.region) ?? storedAws?.region ?? null,
+    accessKeyId: asText(body.accessKeyId) ?? storedAws?.accessKeyId ?? null,
+    secretAccessKey:
+      asText(body.secretAccessKey) ?? storedAws?.secretAccessKey ?? null,
+    basicAuthUsername:
+      asText(body.basicAuthUsername) ?? storedDirect?.username ?? null,
+    basicAuthPassword:
+      asText(body.basicAuthPassword) ?? storedDirect?.password ?? null,
+  };
+
   try {
     const result = await composed.data.metering.testConnection(
       microgridId,
-      {
-        type: body.type as "cloud_aws" | "direct_url",
-        backendUrl: typeof body.backendUrl === "string" ? body.backendUrl : "",
-        region: typeof body.region === "string" ? body.region : null,
-        accessKeyId:
-          typeof body.accessKeyId === "string" ? body.accessKeyId : null,
-        secretAccessKey:
-          typeof body.secretAccessKey === "string"
-            ? body.secretAccessKey
-            : null,
-        basicAuthUsername:
-          typeof body.basicAuthUsername === "string"
-            ? body.basicAuthUsername
-            : null,
-        basicAuthPassword:
-          typeof body.basicAuthPassword === "string"
-            ? body.basicAuthPassword
-            : null,
-      }
+      candidate
     );
     if (!result.ok) return mapError(result);
     return NextResponse.json(result.data, { status: 200 });

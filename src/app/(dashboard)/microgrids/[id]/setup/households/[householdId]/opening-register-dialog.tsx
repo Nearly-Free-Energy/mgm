@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Banner } from "@/components/ui/banner";
+import { zonedDateTimeToUtcIso } from "@/lib/timezone/wall-clock";
 
 /**
  * OpeningRegisterDialog — record an explicit opening register for a meter
@@ -14,11 +15,15 @@ import { Banner } from "@/components/ui/banner";
 export function OpeningRegisterDialog({
   deviceId,
   deviceName,
+  timezone,
   open,
   onOpenChange,
 }: {
   deviceId: string;
   deviceName: string;
+  /** Microgrid IANA zone: the wall-clock input is resolved in this zone,
+      not the browser's, so period boundaries land correctly. */
+  timezone: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -49,6 +54,15 @@ export function OpeningRegisterDialog({
       setError("Choose the date and time the register was read.");
       return;
     }
+    // Resolve the wall-clock input in the microgrid's zone — never the
+    // browser's — so billing-period boundaries land on the right instant.
+    const readAtIso = zonedDateTimeToUtcIso(readAt, timezone);
+    if (!readAtIso) {
+      setError(
+        "That date and time is not valid. Check the microgrid timezone and try again."
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/meter-readings/opening", {
@@ -57,7 +71,7 @@ export function OpeningRegisterDialog({
         body: JSON.stringify({
           device_id: deviceId,
           reading_kwh: readingKwh,
-          read_at: new Date(readAt).toISOString(),
+          read_at: readAtIso,
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -89,8 +103,9 @@ export function OpeningRegisterDialog({
           </Dialog.Title>
           <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
             {deviceName} — the meter&apos;s register at the start of its first
-            billable period. This becomes the baseline every later reading is
-            compared against.
+            billable period. Times are interpreted in {timezone}, the
+            microgrid&apos;s timezone. This becomes the baseline every later
+            reading is compared against.
           </Dialog.Description>
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             {error && (

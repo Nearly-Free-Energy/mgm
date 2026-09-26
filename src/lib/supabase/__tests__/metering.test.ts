@@ -260,4 +260,56 @@ describe("metering organization isolation + assignment integrity", () => {
       expect(error.code).toBe("42501");
     }
   });
+
+  it("metering is toggleable through the RPC with audit history", async () => {
+    if (shouldSkip()) return;
+    const { error: disableError } = await userA.client.rpc(
+      "fn_mgm_set_plugin_enabled",
+      {
+        _org_id: FIXTURE.orgA,
+        _plugin_name: "metering",
+        _plugin_version: "0.1.0",
+        _enabled: false,
+      }
+    );
+    expect(disableError).toBeNull();
+
+    const { data: enabled, error: helperError } = await userA.client.rpc(
+      "mgm_plugin_enabled_for_org",
+      { _org_id: FIXTURE.orgA, _plugin_name: "metering" }
+    );
+    expect(helperError).toBeNull();
+    expect(enabled).toBe(false);
+
+    const { data: audit, error: auditError } = await userA.client
+      .from("mgm_plugin_audit_log")
+      .select("action, new_enabled")
+      .eq("org_id", FIXTURE.orgA)
+      .eq("plugin_name", "metering")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    expect(auditError).toBeNull();
+    expect(audit?.[0]).toMatchObject({ action: "disabled", new_enabled: false });
+
+    const { error: enableError } = await userA.client.rpc(
+      "fn_mgm_set_plugin_enabled",
+      {
+        _org_id: FIXTURE.orgA,
+        _plugin_name: "metering",
+        _plugin_version: "0.1.0",
+        _enabled: true,
+      }
+    );
+    expect(enableError).toBeNull();
+  });
+
+  it("duplicate (device_id, read_at) readings are rejected atomically", async () => {
+    if (shouldSkip()) return;
+    const { error } = await userA.client.from("meter_readings").insert({
+      device_id: FIXTURE.deviceA1,
+      reading_kwh: 1500.5,
+      read_at: "2026-09-01T00:00:00Z",
+    });
+    expect(error?.code).toBe("23505");
+  });
 });

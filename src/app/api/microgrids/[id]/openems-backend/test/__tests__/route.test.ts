@@ -6,10 +6,14 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   testConnection: vi.fn(),
   from: vi.fn(),
+  getEmsConfig: vi.fn(async (): Promise<unknown> => null),
 }));
 
 vi.mock("@/lib/metering/compose", () => ({
   composeMetering: (...args: unknown[]) => mocks.compose(...args),
+}));
+vi.mock("@/lib/openems/config", () => ({
+  getMicrogridEmsConfig: mocks.getEmsConfig,
 }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mocks.from }),
@@ -138,5 +142,61 @@ describe("POST openems-backend/test", () => {
     });
     expect(res.status).toBe(422);
     expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("fills omitted secrets from the stored config of the same type", async () => {
+    mocks.getEmsConfig.mockResolvedValue({
+      type: "direct_url",
+      url: "http://localhost:8075",
+      username: "openems",
+      password: "stored-secret",
+    });
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: true, edgeCount: 1, edges: [] },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.testConnection).toHaveBeenCalledWith(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      region: null,
+      accessKeyId: null,
+      secretAccessKey: null,
+      basicAuthUsername: "openems",
+      basicAuthPassword: "stored-secret",
+    });
+  });
+
+  it("does not merge secrets across types", async () => {
+    mocks.getEmsConfig.mockResolvedValue({
+      type: "cloud_aws",
+      url: "https://x",
+      region: "us-east-1",
+      accessKeyId: "AKIA",
+      secretAccessKey: "stored-aws-secret",
+    });
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: true, edgeCount: 0, edges: [] },
+    });
+    const { POST } = await import("../route");
+    await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(mocks.testConnection).toHaveBeenCalledWith(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      region: null,
+      accessKeyId: null,
+      secretAccessKey: null,
+      basicAuthUsername: null,
+      basicAuthPassword: null,
+    });
   });
 });

@@ -162,11 +162,11 @@ export function createSupabaseCommunityRepository(
     async getOpenDeviceLink(householdId: string) {
       const { data } = await supabase
         .from("household_devices")
-        .select("id, device_id")
+        .select("id, device_id, effective_from")
         .eq("household_id", householdId)
         .eq("role", "primary_consumption_meter")
         .is("effective_to", null)
-        .maybeSingle<{ id: string; device_id: string }>();
+        .maybeSingle<{ id: string; device_id: string; effective_from: string }>();
       return data ?? null;
     },
 
@@ -178,17 +178,28 @@ export function createSupabaseCommunityRepository(
       return error ? toError(error) : null;
     },
 
-    async openDeviceLink(
+    async replaceDeviceLink(
       householdId: string,
       deviceId: string,
-      effectiveFrom: string
+      effectiveDate: string
     ) {
-      const { error } = await supabase.from("household_devices").insert({
-        household_id: householdId,
-        device_id: deviceId,
-        role: "primary_consumption_meter",
-        effective_from: effectiveFrom,
-      });
+      const { data, error } = await supabase.rpc(
+        "fn_replace_household_device",
+        {
+          p_household_id: householdId,
+          p_device_id: deviceId,
+          p_effective_date: effectiveDate,
+        }
+      );
+      if (error) return { id: null, error: toError(error) };
+      return { id: data as string, error: null };
+    },
+
+    async deleteDeviceLink(linkId: string) {
+      const { error } = await supabase
+        .from("household_devices")
+        .delete()
+        .eq("id", linkId);
       return error ? toError(error) : null;
     },
 

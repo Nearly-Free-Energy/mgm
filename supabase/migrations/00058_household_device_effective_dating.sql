@@ -47,6 +47,39 @@ ALTER TABLE household_devices
   CHECK (effective_to IS NULL OR effective_to > effective_from);
 
 -- ── 2. Overlap guard replaces the partial unique index ──────────────────────
+--
+-- Two changes, both required for replacement history:
+--
+--   (a) DROP the table-level UNIQUE (household_id, device_id, role) from
+--       00001. It forbids reopening a previously used meter (A→B→A): the
+--       closed A row plus the new A row violate it even though their
+--       effective periods never overlap. The overlap machinery below is the
+--       correct uniqueness for effective-dated history. Resolved by column
+--       set rather than by (possibly renamed) constraint name.
+--
+--   (b) DROP the partial unique index household_one_primary_consumption_meter
+--       (00001), which forbade a household from ever holding two primary
+--       links over time.
+
+DO $$
+DECLARE
+  v_conname TEXT;
+BEGIN
+  SELECT c.conname INTO v_conname
+  FROM pg_constraint c
+  JOIN pg_class t ON t.oid = c.conrelid
+    AND t.relnamespace = 'public'::regnamespace
+    AND t.relname = 'household_devices'
+  JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+  WHERE c.contype = 'u'
+  GROUP BY c.conname
+  HAVING array_agg(a.attname ORDER BY k.ord) = ARRAY['household_id', 'device_id', 'role']::name[];
+  IF FOUND THEN
+    EXECUTE format('ALTER TABLE household_devices DROP CONSTRAINT %I', v_conname);
+  END IF;
+END;
+$$;
 
 DROP INDEX IF EXISTS household_one_primary_consumption_meter;
 
@@ -88,3 +121,94 @@ CREATE TRIGGER trg_household_device_no_overlap
   BEFORE INSERT OR UPDATE ON household_devices
   FOR EACH ROW
   EXECUTE FUNCTION fn_household_device_no_overlap();
+
+-- ── 3. Exclusion constraint: atomic overlap protection ──────────────────────
+--
+-- The trigger above gives a clear 23505 message in the common case, but
+-- under READ COMMITTED two concurrent transactions can both see no
+-- conflicting committed row and both insert, defeating it. The exclusion
+-- constraint serializes on the index: exactly one concurrent double-open
+-- wins, the other gets 23P01 (exclusion_violation), which application
+-- layers map to 409 exactly like the trigger's 23505. Keep both: the
+-- trigger explains, the constraint guarantees.
+--
+-- btree_gist supplies the UUID equality operator class; daterange gist is
+-- built-in. Half-open '[)' bounds match the trigger semantics, and the
+-- partial predicate scopes the index to the billable role.
+
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
+
+ALTER TABLE household_devices
+  DROP CONSTRAINT IF EXISTS household_devices_primary_no_overlap;
+ALTER TABLE household_devices
+  ADD CONSTRAINT household_devices_primary_no_overlap
+  EXCLUDE USING gist (
+    household_id WITH =,
+    daterange(effective_from, effective_to, '[)') WITH &&
+  )
+  WHERE (role = 'primary_consumption_meter');
+
+-- ── 4. Atomic close-and-open replacement RPC ────────────────────────────────
+--
+-- Closing the old link and inserting the new one as two round trips leaves
+-- a failure window: if the insert fails after the close, the household has
+-- no open meter. This RPC performs both steps in one transaction —
+-- serializing concurrent swaps on the household's primary links — so a
+-- failed replacement rolls back to the previous open link instead of a
+-- meterless household.
+--
+-- Same-day links never covered a day, so they are deleted rather than
+-- closed as a zero-length interval (which the period CHECK would reject).
+-- SECURITY INVOKER: RLS on household_devices applies to the caller.
+
+CREATE OR REPLACE FUNCTION fn_replace_household_device(
+  p_household_id UUID,
+  p_device_id UUID,
+  p_effective_date DATE
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_new_id UUID;
+BEGIN
+  -- Serialize concurrent swaps: lock the household's primary links. A swap
+  -- on a currently meterless household locks nothing; the overlap
+  -- trigger + exclusion constraint still reject a concurrent double-open.
+  PERFORM 1
+  FROM household_devices
+  WHERE household_id = p_household_id
+    AND role = 'primary_consumption_meter'
+  FOR UPDATE;
+
+  -- Same-day links are corrections, not history: remove rather than close.
+  DELETE FROM household_devices
+  WHERE household_id = p_household_id
+    AND role = 'primary_consumption_meter'
+    AND effective_to IS NULL
+    AND effective_from = p_effective_date;
+
+  -- Close remaining open links at the boundary.
+  UPDATE household_devices
+  SET effective_to = p_effective_date
+  WHERE household_id = p_household_id
+    AND role = 'primary_consumption_meter'
+    AND effective_to IS NULL;
+
+  INSERT INTO household_devices (
+    household_id, device_id, role, effective_from, effective_to
+  )
+  VALUES (
+    p_household_id, p_device_id, 'primary_consumption_meter',
+    p_effective_date, NULL
+  )
+  RETURNING id INTO v_new_id;
+
+  RETURN v_new_id;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION fn_replace_household_device(UUID, UUID, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION fn_replace_household_device(UUID, UUID, DATE) TO authenticated, service_role;

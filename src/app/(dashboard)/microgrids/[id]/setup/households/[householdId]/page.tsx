@@ -166,6 +166,16 @@ export default async function HouseholdDetailPage({
     (li) => li.billing_periods?.status === "closed",
   );
 
+  // Microgrid timezone for the opening-register dialog (issue #4): the
+  // operator's wall-clock input is resolved in this zone, never the
+  // browser's. Falls back to UTC when unreadable.
+  const { data: microgridRow } = await supabase
+    .from("microgrids")
+    .select("timezone")
+    .eq("id", microgridId)
+    .maybeSingle<{ timezone: string }>();
+  const microgridTimezone = microgridRow?.timezone ?? "UTC";
+
   // Resolve role + available unlinked consumption meters for P7 empty state (#139).
   const canManage = await currentUserCanAccessMicrogrid(supabase, microgridId);
 
@@ -372,6 +382,7 @@ export default async function HouseholdDetailPage({
         gaps={assignmentGaps}
         hasReadings={currentMeterHasReadings}
         canManage={canManage}
+        timezone={microgridTimezone}
       />
 
       {/* ── Section 5: Billing history ──────────────────────────────────────── */}
