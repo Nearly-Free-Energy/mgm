@@ -288,7 +288,17 @@ describe("mgm plugin state + enforcement", () => {
       .update({ enabled: false })
       .eq("org_id", FIXTURE.orgA)
       .eq("plugin_name", "community-management");
-    expect(updateError).not.toBeNull();
+    // RLS may silently filter an UPDATE. Verify the protected state.
+    void updateError;
+    const svc = await serviceClient();
+    const { data: plugin, error: readError } = await svc
+      .from("mgm_plugins")
+      .select("enabled")
+      .eq("org_id", FIXTURE.orgA)
+      .eq("plugin_name", "community-management")
+      .single();
+    expect(readError).toBeNull();
+    expect(plugin?.enabled).toBe(true);
 
     // Forged audit history is denied as well.
     const { error: auditError } = await userA.client

@@ -18,7 +18,7 @@
  * the merge gate does NOT set that flag — these run on every PR.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   assertEnvironmentReady,
   shouldSkip,
@@ -29,32 +29,6 @@ import {
 import { isRunGenerationFatal } from "../generate";
 
 const USAGE_KWH = 214;
-
-// The edge path calls getEdgesStatus + a usage query through this factory.
-// Mocked at module scope: the subject is which `start_kwh` is chosen, not how
-// usage is obtained.
-vi.mock("@/lib/openems", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/openems")>(
-    "@/lib/openems"
-  );
-  return {
-    ...actual,
-    createOpenEmsClient: () => ({
-      getReadings: async (
-        devices: { id: string }[],
-        startDate: string,
-        endDate: string,
-        _timezone: string
-      ) =>
-        devices.map((d) => ({
-          deviceId: d.id,
-          usageKwh: USAGE_KWH,
-          startDate,
-          endDate,
-        })),
-    }),
-  };
-});
 
 const skip = shouldSkip();
 const desc = skip ? describe.skip : describe;
@@ -166,6 +140,12 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
       mode: "preview",
       actorUserId: sa.userId,
       seedReadings,
+      meteringProvider: {
+        getReadings: async ({ devices, startDate, endDate }) =>
+          devices.map((device) => ({
+            deviceId: device.id, usageKwh: USAGE_KWH, startDate, endDate,
+          })),
+      },
     });
     // A fatal here means the fixture is wrong, not that the behaviour under
     // test failed — surface it as such rather than as a confusing assertion
