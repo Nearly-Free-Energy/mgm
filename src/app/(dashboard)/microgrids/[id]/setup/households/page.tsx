@@ -58,7 +58,10 @@ export default async function SetupHouseholdsPage({
     supabase
       .from("household_devices")
       .select("household_id, device_id")
-      .eq("role", "primary_consumption_meter"),
+      .eq("role", "primary_consumption_meter")
+      // Open links only: closed replacement history must not reserve the
+      // device (issue #4). A replaced meter is assignable again.
+      .is("effective_to", null),
     supabase
       .from("edges")
       .select("id, name, openems_edge_id")

@@ -9,6 +9,7 @@ name: CodeQL
 # beyond the language list.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -34,11 +35,6 @@ jobs:
       actions: read            # required for private repos (cheap to grant)
       contents: read
 
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,7 +42,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ${{ matrix.language }}
+          languages: javascript-typescript
           # `security-extended` adds queries beyond the default security set
           # (e.g. broken-authentication, sensitive-data-exposure). Worth the
           # ~30-60s extra runtime for an app handling payments + auth.
@@ -55,4 +51,4 @@ jobs:
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
         with:
-          category: "/language:${{ matrix.language }}"
+          category: "/language:javascript-typescript"

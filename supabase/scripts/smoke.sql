@@ -183,23 +183,23 @@ DECLARE
   caught BOOLEAN := FALSE;
 BEGIN
   BEGIN
-    -- Attempt a second primary_consumption_meter for household 1 (already has one from seed).
-    -- Use a different device_id so the UNIQUE(household_id, device_id, role) row-constraint
-    -- doesn't fire first — only the partial unique index should fire.
-    INSERT INTO household_devices (household_id, device_id, role)
-    VALUES (
-      'f0000000-0000-0000-0000-000000000001',  -- household 1 (Block A, Unit 1)
-      'd0000000-0000-0000-0000-000000000002',  -- different device (Meter 02)
-      'primary_consumption_meter'
-    );
-  EXCEPTION
-    WHEN unique_violation THEN
-      caught := TRUE;
-  END;
+  -- Attempt a second primary_consumption_meter for household 1 (already has one from seed).
+  -- Use a different device_id so the UNIQUE(household_id, device_id, role) row-constraint
+  -- doesn't fire first — only the overlap guard should fire.
+  INSERT INTO household_devices (household_id, device_id, role)
+  VALUES (
+    'f0000000-0000-0000-0000-000000000001',  -- household 1 (Block A, Unit 1)
+    'd0000000-0000-0000-0000-000000000002',  -- different device (Meter 02)
+    'primary_consumption_meter'
+  );
+EXCEPTION
+  WHEN unique_violation THEN
+    caught := TRUE;
+END;
 
-  ASSERT caught,
-    'Partial unique index household_one_primary_consumption_meter did NOT fire — duplicate primary_consumption_meter was accepted';
-  RAISE NOTICE 'OK: partial unique index fired correctly (second primary_consumption_meter rejected)';
+ASSERT caught,
+  'Overlap guard fn_household_device_no_overlap did NOT fire — overlapping primary_consumption_meter was accepted';
+RAISE NOTICE 'OK: overlap guard fired correctly (overlapping primary_consumption_meter rejected)';
 END;
 $$;
 ROLLBACK;

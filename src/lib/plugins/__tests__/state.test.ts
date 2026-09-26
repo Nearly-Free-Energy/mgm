@@ -96,6 +96,29 @@ describe("setOrganizationPluginEnabled", () => {
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
+  it("rejects disabling community management while metering is enabled", async () => {
+    pluginRows = [
+      {
+        org_id: ORG_ID,
+        plugin_name: "community-management",
+        version: "0.1.0",
+        enabled: true,
+      },
+    ];
+    await expect(
+      setOrganizationPluginEnabled(
+        makeSupabase(),
+        ORG_ID,
+        "community-management",
+        false
+      )
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "plugin_dependency_required",
+    });
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
   it("persists a valid toggle through the atomic RPC", async () => {
     pluginRows = [
       {
@@ -103,6 +126,12 @@ describe("setOrganizationPluginEnabled", () => {
         plugin_name: "community-management",
         version: "0.1.0",
         enabled: true,
+      },
+      {
+        org_id: ORG_ID,
+        plugin_name: "metering",
+        version: "0.1.0",
+        enabled: false,
       },
     ];
     rpcImpl = async () => {

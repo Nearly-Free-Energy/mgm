@@ -103,11 +103,30 @@ export interface CommunityManagementRepository {
     deviceId: string,
     excludeHouseholdId: string
   ): Promise<{ household_id: string } | null>;
-  clearDeviceLinks(householdId: string): Promise<RepositoryError | null>;
-  insertDeviceLink(
-    householdId: string,
-    deviceId: string
+  /**
+   * Currently open primary link (effective_to IS NULL), if any. Release 2
+   * (issue #4): replacements close and open links instead of deleting them,
+   * so history survives meter swaps.
+   */
+  getOpenDeviceLink(
+    householdId: string
+  ): Promise<{ id: string; device_id: string; effective_from: string } | null>;
+  closeDeviceLink(
+    linkId: string,
+    effectiveTo: string
   ): Promise<RepositoryError | null>;
+  /**
+   * Atomic close-and-open replacement (fn_replace_household_device):
+   * closes open primary links at the date and opens the new one in a single
+   * transaction, so a failed insert cannot leave the household meterless.
+   * Same-day links are deleted rather than zero-length closed.
+   */
+  replaceDeviceLink(
+    householdId: string,
+    deviceId: string,
+    effectiveDate: string
+  ): Promise<{ id: string | null; error: RepositoryError | null }>;
+  deleteDeviceLink(linkId: string): Promise<RepositoryError | null>;
   refetchHousehold(id: string): Promise<RepositoryResult<Household>>;
   countBillingLineItems(
     householdId: string

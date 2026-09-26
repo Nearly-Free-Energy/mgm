@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isRelease1Route } from "@/lib/mgm/release1-routes";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 
 // Only authentication pages are public in the first MGM release. Inherited
 // MBE payment links, customer APIs, and webhooks are blocked by the route
@@ -14,11 +14,12 @@ const PUBLIC_PATHS = [
 ];
 
 export async function middleware(request: NextRequest) {
-  // This fork deploys the first MGM slice. Inherited MBE billing, payment,
-  // OpenEMS, and device handlers must not become callable through deep links
-  // or direct API requests before their Cordis plugins are released.
-  if (!isRelease1Route(request.nextUrl.pathname)) {
-    return new NextResponse("Not available in MGM Release 1", { status: 404 });
+  // This fork deploys released MGM slices. Inherited MBE billing, payment,
+  // and unreleased handlers must not become callable through deep links
+  // or direct API requests before their Cordis plugins are released —
+  // see src/lib/mgm/released-routes.ts for the explicit allowlist.
+  if (!isReleasedRoute(request.nextUrl.pathname)) {
+    return new NextResponse("Not available in this MGM release", { status: 404 });
   }
   let supabaseResponse = NextResponse.next({
     request,

@@ -46,6 +46,18 @@ type MicrogridProps = {
    * needs to know whether "leave blank to keep" is a meaningful offer.
    */
   ems_has_basic_auth_password: boolean;
+  /**
+   * Whether a Keycloak bearer token is on record. Deliberately a boolean —
+   * same rule as the Basic password above: the form only needs to know
+   * whether "leave blank to keep" is a meaningful offer. Optional so
+   * existing callers keep working; the page passes the real value.
+   */
+  ems_has_bearer_token?: boolean;
+  /**
+   * Whether a complete Keycloak client triple is on record. Deliberately a
+   * boolean — same rule as the other secrets.
+   */
+  ems_has_keycloak?: boolean;
   ems_known_edge_ids: string[];
   ems_last_discover_at: string | null;
   ems_last_discover_status: string | null;
@@ -79,6 +91,14 @@ export type OpenemsBackendShellProps = {
    * is wrong and needs rewriting.
    */
   emsOperators: { userId: string; name: string }[];
+  /**
+   * Organization-level metering plugin state (issue #4). Plugin-enabled and
+   * connection-ready are separate states: the toggle gates the metering
+   * surface, while readiness below derives from the stored configuration
+   * plus a successful test or discovery run. Defaults true so existing
+   * callers (and tests) keep working; the page passes the real value.
+   */
+  meteringPluginEnabled?: boolean;
 };
 
 type FormType = "cloud_aws" | "direct_url";
@@ -109,6 +129,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
     secretLast4,
     canConfigure,
     emsOperators,
+    meteringPluginEnabled = true,
   } = props;
 
   const router = useRouter();
@@ -143,6 +164,15 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   );
   const [basicAuthPassword, setBasicAuthPassword] = React.useState<string>("");
   const hasStoredBasicAuthPassword = microgrid.ems_has_basic_auth_password;
+  // Bearer token (issue #4): typed value only, never the stored secret.
+  const [bearerToken, setBearerToken] = React.useState<string>("");
+  const hasStoredBearerToken = microgrid.ems_has_bearer_token ?? false;
+  const hasStoredKeycloak = microgrid.ems_has_keycloak ?? false;
+  // Keycloak client-credentials (issue #4 follow-up): identifiers retyped
+  // with a blank secret preserve the stored secret; all three blank clears.
+  const [keycloakTokenUrl, setKeycloakTokenUrl] = React.useState<string>("");
+  const [keycloakClientId, setKeycloakClientId] = React.useState<string>("");
+  const [keycloakClientSecret, setKeycloakClientSecret] = React.useState<string>("");
 
   // Known edge IDs input state.
   // Prefill logic (3 cases, pinned in #112):
@@ -169,6 +199,15 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   const [saving, setSaving] = React.useState(false);
   const [testingAgain, setTestingAgain] = React.useState(false);
 
+  // Test-without-save outcome (issue #4). Independent from the save outcome
+  // so a failed probe never looks like a saved configuration.
+  const [testOutcome, setTestOutcome] = React.useState<
+    | { kind: "success"; edgeCount: number }
+    | { kind: "failure"; message: string }
+    | null
+  >(null);
+  const [testing, setTesting] = React.useState(false);
+
   // Type-to-confirm dialog (closed-period bypass).
   const [typedConfirmOpen, setTypedConfirmOpen] = React.useState(false);
   const [pendingPayload, setPendingPayload] =
@@ -176,6 +215,63 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
 
   const putUrl = `/api/microgrids/${microgrid.id}/openems-backend`;
   const discoverUrl = `/api/microgrids/${microgrid.id}/openems-backend/discover`;
+  const testUrl = `/api/microgrids/${microgrid.id}/openems-backend/test`;
+
+  // Test the form's candidate configuration WITHOUT persisting anything
+  // (issue #4). Secrets travel in this single request only: built into an
+  // in-memory client server-side, never logged, never stored, never
+  // returned.
+  async function handleTestWithoutSave() {
+    const payload = buildPayload();
+    if (!payload) return;
+    setTesting(true);
+    setTestOutcome(null);
+    try {
+      const res = await fetch(testUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        edgeCount?: number;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setTestOutcome({
+          kind: "failure",
+          message:
+            typeof json.error === "string" && json.error
+              ? json.error
+              : `Test failed (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      if (json.ok) {
+        setTestOutcome({
+          kind: "success",
+          edgeCount:
+            typeof json.edgeCount === "number" ? json.edgeCount : 0,
+        });
+      } else {
+        setTestOutcome({
+          kind: "failure",
+          message:
+            typeof json.message === "string" && json.message
+              ? json.message
+              : "Connection test failed.",
+        });
+      }
+    } catch {
+      setTestOutcome({
+        kind: "failure",
+        message: "Network error. Please retry.",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   // ── Reconfigure click flow ─────────────────────────────────────────────
   function handleReconfigureClick() {
@@ -193,6 +289,10 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
     setSecretAccessKey("");
     setBasicAuthUsername(microgrid.ems_basic_auth_username ?? "");
     setBasicAuthPassword("");
+    setBearerToken("");
+    setKeycloakTokenUrl("");
+    setKeycloakClientId("");
+    setKeycloakClientSecret("");
     // Prefill known edge IDs from the saved list (case 2 + 3 above).
     setKnownEdgeIds(microgrid.ems_known_edge_ids.join(", "));
     setIsEditing(true);
@@ -233,6 +333,22 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       // blank field means "keep the stored one" rather than "clear it".
       if (basicAuthPassword && basicAuthPassword.length > 0) {
         base.basicAuthPassword = basicAuthPassword;
+      }
+      // Same rule for the bearer token (issue #4): typed values only.
+      if (bearerToken && bearerToken.trim().length > 0) {
+        base.bearerToken = bearerToken;
+      }
+      // Same rule for the Keycloak fields: typed values only. Retyped
+      // identifiers with a blank secret preserve the stored secret; blank
+      // identifiers clear the Keycloak identity (explicit switch).
+      if (keycloakTokenUrl.trim().length > 0) {
+        base.keycloakTokenUrl = keycloakTokenUrl.trim();
+      }
+      if (keycloakClientId.trim().length > 0) {
+        base.keycloakClientId = keycloakClientId.trim();
+      }
+      if (keycloakClientSecret && keycloakClientSecret.length > 0) {
+        base.keycloakClientSecret = keycloakClientSecret;
       }
       return base;
     }
@@ -492,6 +608,19 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       <h3 className="text-lg font-semibold text-foreground">
         Connect this microgrid to OpenEMS
       </h3>
+      {/* Release 2 (issue #4): plugin-enabled and connection-ready are
+          separate states. The toggle gates the metering surface; readiness
+          derives from the stored configuration plus a successful test or
+          discovery run. */}
+      <p className="mt-1 text-xs text-muted-foreground">
+        Metering plugin: {meteringPluginEnabled ? "Enabled" : "Disabled"} ·{" "}
+        Connection:{" "}
+        {health === "healthy"
+          ? "Ready"
+          : health === "failing"
+            ? "Failing — test again or reconfigure"
+            : "Not configured"}
+      </p>
     </div>
   );
 
@@ -618,6 +747,22 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                   : "—"}
               </p>
             </div>
+            {microgrid.ems_type === "direct_url" && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Authentication
+                </p>
+                <p className="mt-1 font-mono text-xs text-foreground">
+                  {hasStoredKeycloak
+                    ? "Keycloak"
+                    : microgrid.ems_has_bearer_token
+                      ? "Bearer token"
+                      : microgrid.ems_basic_auth_username
+                        ? `Username (basic): ${microgrid.ems_basic_auth_username}`
+                        : "None"}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Right column */}
@@ -833,6 +978,103 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 </p>
               )}
             </div>
+            {/* Bearer token (issue #4): Keycloak token for the dedicated MGM
+                account. Mutually exclusive with the Basic pair above — the
+                save route rejects a request naming both. */}
+            <div>
+              <label htmlFor="bearer-token" className="mb-1 block text-xs font-medium text-foreground">
+                Bearer token
+              </label>
+              <Input
+                id="bearer-token"
+                type="password"
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={
+                  hasStoredBearerToken
+                    ? "Leave blank to keep the current token"
+                    : ""
+                }
+                className="font-mono text-xs"
+              />
+              {hasStoredBearerToken ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A token is on record — leave blank to keep it. Typing a
+                  username above switches to Basic and clears it.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  For backends behind Keycloak: the dedicated account&apos;s
+                  token. Leave blank for Basic or unauthenticated access.
+                </p>
+              )}
+            </div>
+            {/* Keycloak client-credentials (issue #4 follow-up): the server
+                obtains and refreshes access tokens itself, so the dedicated
+                account keeps working without retyping. Mutually exclusive
+                with both fields above — the save route rejects a mix. */}
+            <div>
+              <label htmlFor="keycloak-token-url" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak token URL
+              </label>
+              <Input
+                id="keycloak-token-url"
+                type="text"
+                value={keycloakTokenUrl}
+                onChange={(e) => setKeycloakTokenUrl(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://keycloak.example/realms/energy/protocol/openid-connect/token"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label htmlFor="keycloak-client-id" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak client ID
+              </label>
+              <Input
+                id="keycloak-client-id"
+                type="text"
+                value={keycloakClientId}
+                onChange={(e) => setKeycloakClientId(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label htmlFor="keycloak-client-secret" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak client secret
+              </label>
+              <Input
+                id="keycloak-client-secret"
+                type="password"
+                value={keycloakClientSecret}
+                onChange={(e) => setKeycloakClientSecret(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={
+                  hasStoredKeycloak
+                    ? "Leave blank to keep the current secret"
+                    : ""
+                }
+                className="font-mono text-xs"
+              />
+              {hasStoredKeycloak ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A Keycloak client is on record — leave blank to keep its
+                  secret. Naming a bearer token or username above switches
+                  away and clears it.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Retype the URL and client ID with a blank secret to keep a
+                  stored one; leave all three blank to clear Keycloak.
+                </p>
+              )}
+            </div>
           </fieldset>
         </>
       )}
@@ -861,6 +1103,17 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
         <OutcomeBanner outcome={outcome} />
       )}
 
+      {testOutcome && testOutcome.kind === "success" && (
+        <Banner tone="success" title="Connection test passed">
+          Reached the backend{testOutcome.edgeCount > 0 ? ` — ${testOutcome.edgeCount} edge${testOutcome.edgeCount === 1 ? "" : "s"} responded` : ""}. Nothing was saved.
+        </Banner>
+      )}
+      {testOutcome && testOutcome.kind === "failure" && (
+        <Banner tone="destructive" title="Connection test failed">
+          {testOutcome.message} Nothing was saved.
+        </Banner>
+      )}
+
       <div className="flex items-center justify-end gap-2">
         <button
           type="button"
@@ -868,6 +1121,14 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           className="rounded-md px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
         >
           Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleTestWithoutSave}
+          disabled={testing || saving}
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {testing ? "Testing…" : "Test without saving"}
         </button>
         <button
           type="submit"

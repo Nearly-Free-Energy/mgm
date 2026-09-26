@@ -707,6 +707,10 @@ export type Database = {
           ems_backend_url: string | null
           ems_basic_auth_password_encrypted: string | null
           ems_basic_auth_username: string | null
+          ems_bearer_token_encrypted: string | null
+          ems_keycloak_client_id: string | null
+          ems_keycloak_client_secret_encrypted: string | null
+          ems_keycloak_token_url: string | null
           ems_known_edge_ids: string[]
           ems_last_discover_at: string | null
           ems_last_discover_count: number | null
@@ -736,6 +740,10 @@ export type Database = {
           ems_backend_url?: string | null
           ems_basic_auth_password_encrypted?: string | null
           ems_basic_auth_username?: string | null
+          ems_bearer_token_encrypted?: string | null
+          ems_keycloak_client_id?: string | null
+          ems_keycloak_client_secret_encrypted?: string | null
+          ems_keycloak_token_url?: string | null
           ems_known_edge_ids?: string[]
           ems_last_discover_at?: string | null
           ems_last_discover_count?: number | null
@@ -765,6 +773,10 @@ export type Database = {
           ems_backend_url?: string | null
           ems_basic_auth_password_encrypted?: string | null
           ems_basic_auth_username?: string | null
+          ems_bearer_token_encrypted?: string | null
+          ems_keycloak_client_id?: string | null
+          ems_keycloak_client_secret_encrypted?: string | null
+          ems_keycloak_token_url?: string | null
           ems_known_edge_ids?: string[]
           ems_last_discover_at?: string | null
           ems_last_discover_count?: number | null
@@ -1265,6 +1277,10 @@ export type Database = {
         Args: { _microgrid_id: string }
         Returns: string
       }
+      fn_get_ems_bearer_token: {
+        Args: { _microgrid_id: string }
+        Returns: string
+      }
       fn_get_ems_secret: { Args: { _microgrid_id: string }; Returns: string }
       fn_list_ems_operators: {
         Args: { _microgrid_id: string }
@@ -1398,6 +1414,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      fn_replace_household_device: {
+        Args: {
+          p_device_id: string
+          p_effective_date: string
+          p_household_id: string
+        }
+        Returns: string
       }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }

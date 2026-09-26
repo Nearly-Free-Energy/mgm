@@ -6,6 +6,8 @@ import { Currency } from "@/components/format/currency";
 import { Kwh } from "@/components/format/kwh";
 import { EmptyState } from "@/components/ui/empty-state";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import { computeAssignmentGaps } from "@/lib/metering/assignment-gaps";
+import { HouseholdMeterSection } from "./household-meter-section";
 
 // Setup > Households > [householdId] — Household detail page (D3 / #54).
 //
@@ -120,11 +122,59 @@ export default async function HouseholdDetailPage({
     .order("billing_periods(end_date)", { ascending: false })
     .limit(3)
     .returns<BillingLineItemRow[]>();
+  // Query 4 — effective-dated primary assignment history (issue #4) with
+  // device names, plus whether the current meter has any readings (for the
+  // opening-register affordance).
+  const { data: primaryLinks } = await supabase
+    .from("household_devices")
+    .select("device_id, effective_from, effective_to, devices(id, name)")
+    .eq("household_id", householdId)
+    .eq("role", "primary_consumption_meter")
+    .order("effective_from", { ascending: true })
+    .returns<
+      {
+        device_id: string;
+        effective_from: string;
+        effective_to: string | null;
+        devices: { id: string; name: string } | null;
+      }[]
+    >();
+  const { sorted: assignmentLinks, gaps: assignmentGaps } =
+    computeAssignmentGaps(
+      (primaryLinks ?? []).map((link) => ({
+        deviceId: link.device_id,
+        deviceName: link.devices?.name ?? link.device_id,
+        effectiveFrom: link.effective_from,
+        effectiveTo: link.effective_to,
+      }))
+    );
+  const currentLink = [...assignmentLinks]
+    .reverse()
+    .find((link) => link.effectiveTo === null)
+    ?? null;
+  let currentMeterHasReadings = false;
+  if (currentLink) {
+    const { count: readingCount } = await supabase
+      .from("meter_readings")
+      .select("id", { count: "exact", head: true })
+      .eq("device_id", currentLink.deviceId);
+    currentMeterHasReadings = (readingCount ?? 0) > 0;
+  }
 
   const devices = household.household_devices ?? [];
   const closedLineItems = (lineItems ?? []).filter(
     (li) => li.billing_periods?.status === "closed",
   );
+
+  // Microgrid timezone for the opening-register dialog (issue #4): the
+  // operator's wall-clock input is resolved in this zone, never the
+  // browser's. Falls back to UTC when unreadable.
+  const { data: microgridRow } = await supabase
+    .from("microgrids")
+    .select("timezone")
+    .eq("id", microgridId)
+    .maybeSingle<{ timezone: string }>();
+  const microgridTimezone = microgridRow?.timezone ?? "UTC";
 
   // Resolve role + available unlinked consumption meters for P7 empty state (#139).
   const canManage = await currentUserCanAccessMicrogrid(supabase, microgridId);
@@ -136,7 +186,10 @@ export default async function HouseholdDetailPage({
     supabase
       .from("household_devices")
       .select("device_id")
-      .eq("role", "primary_consumption_meter"),
+      .eq("role", "primary_consumption_meter")
+      // Open links only: closed replacement history must not reserve the
+      // device (issue #4).
+      .is("effective_to", null),
   ]);
   const microgridEdgeIds = (edgesResult.data ?? []).map((e) => e.id);
   const assignedDeviceIds = (assignedResult.data ?? []).map((r) => r.device_id);
@@ -315,7 +368,24 @@ export default async function HouseholdDetailPage({
         )}
       </section>
 
-      {/* ── Section 4: Billing history ──────────────────────────────────────── */}
+      {/* ── Section 4: Meter assignment history ─────────────────────────────── */}
+      <HouseholdMeterSection
+        entries={assignmentLinks.map((link, index, all) => ({
+          deviceId: link.deviceId,
+          deviceName: link.deviceName,
+          role: "primary_consumption_meter",
+          effectiveFrom: link.effectiveFrom,
+          effectiveTo: link.effectiveTo,
+          current:
+            link.effectiveTo === null && index === all.length - 1,
+        }))}
+        gaps={assignmentGaps}
+        hasReadings={currentMeterHasReadings}
+        canManage={canManage}
+        timezone={microgridTimezone}
+      />
+
+      {/* ── Section 5: Billing history ──────────────────────────────────────── */}
       <section aria-labelledby="billing-heading">
         <h4
           id="billing-heading"

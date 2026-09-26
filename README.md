@@ -16,3 +16,13 @@ npm run dev     # start dev server at http://localhost:3000
 ## Related
 
 - [https://github.com/Nearly-Free-Energy/openems) -- OpenEMS energy platform (Edge + Backend + UI)
+
+### OpenEMS Keycloak configuration
+
+Before enabling Keycloak client credentials, set the server-only
+`OPENEMS_KEYCLOAK_TOKEN_URLS` environment variable to a comma-separated list of
+exact approved HTTPS token endpoint URLs. The URL entered in each microgrid's
+OpenEMS configuration must match an entry. Unlisted endpoints fail closed;
+redirects are rejected. Add the pilot's actual token endpoint during deployment.
+This setting contains URLs only, never client secrets. Client IDs and encrypted
+client secrets remain configured per microgrid in MGM.

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import { isMeteringEnabled } from "@/lib/plugins/state";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { getEmsSecretForMicrogrid } from "@/lib/openems/config";
@@ -111,6 +112,8 @@ export default async function OpenemsBackendPage({
   // no gain, and #106 keeps the ciphertext off the page entirely — so this is
   // derived from a COUNT on the column rather than from its value.
   let hasBasicAuthPassword = false;
+  let hasBearerToken = false;
+  let hasKeycloak = false;
   if (mg.ems_type === "direct_url" && canConfigure) {
     const { count } = await supabase
       .from("microgrids")
@@ -118,6 +121,23 @@ export default async function OpenemsBackendPage({
       .eq("id", id)
       .not("ems_basic_auth_password_encrypted", "is", null);
     hasBasicAuthPassword = (count ?? 0) > 0;
+    // Same presence probe for the Keycloak bearer token (issue #4).
+    const { count: tokenCount } = await supabase
+      .from("microgrids")
+      .select("id", { count: "exact", head: true })
+      .eq("id", id)
+      .not("ems_bearer_token_encrypted", "is", null);
+    hasBearerToken = (tokenCount ?? 0) > 0;
+    // Same presence probe for a complete Keycloak client triple. All three
+    // must be set — a partial triple is treated as unconfigured everywhere.
+    const { count: keycloakCount } = await supabase
+      .from("microgrids")
+      .select("id", { count: "exact", head: true })
+      .eq("id", id)
+      .not("ems_keycloak_token_url", "is", null)
+      .not("ems_keycloak_client_id", "is", null)
+      .not("ems_keycloak_client_secret_encrypted", "is", null);
+    hasKeycloak = (keycloakCount ?? 0) > 0;
   }
 
   // Attributability line. `fn_list_ems_operators` carries its own access gate
@@ -147,6 +167,27 @@ export default async function OpenemsBackendPage({
 
   const health = deriveOpenemsBackendHealth(mg);
 
+  // Release 2 (issue #4): plugin-enabled and connection-ready are separate
+  // states. Resolve the parent org for the metering-plugin toggle; the
+  // connection readiness above derives from stored config + test/discover
+  // outcomes. A missing plugin row means enabled (no backfill needed).
+  const { data: community } = await supabase
+    .from("microgrids")
+    .select("community_id")
+    .eq("id", id)
+    .maybeSingle<{ community_id: string }>();
+  let meteringPluginEnabled = true;
+  if (community) {
+    const { data: org } = await supabase
+      .from("communities")
+      .select("org_id")
+      .eq("id", community.community_id)
+      .maybeSingle<{ org_id: string }>();
+    if (org) {
+      meteringPluginEnabled = await isMeteringEnabled(supabase, org.org_id);
+    }
+  }
+
   const levels = await getHierarchyLevels(supabase, {
     kind: "edges-listing",
     microgridId: id,
@@ -165,6 +206,8 @@ export default async function OpenemsBackendPage({
           ems_aws_access_key_id: mg.ems_aws_access_key_id,
           ems_basic_auth_username: mg.ems_basic_auth_username,
           ems_has_basic_auth_password: hasBasicAuthPassword,
+          ems_has_bearer_token: hasBearerToken,
+          ems_has_keycloak: hasKeycloak,
           ems_known_edge_ids: mg.ems_known_edge_ids ?? [],
           ems_last_discover_at: mg.ems_last_discover_at,
           ems_last_discover_status: mg.ems_last_discover_status,
@@ -177,6 +220,7 @@ export default async function OpenemsBackendPage({
         secretLast4={secretLast4}
         canConfigure={canConfigure}
         emsOperators={emsOperators}
+        meteringPluginEnabled={meteringPluginEnabled}
       />
     </div>
   );

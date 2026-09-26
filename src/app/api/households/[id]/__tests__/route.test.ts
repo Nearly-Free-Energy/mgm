@@ -31,13 +31,25 @@ const ORG_ID = "660e8400-e29b-41d4-a716-446655440099";
 const mockHouseholdsFetchSingle = vi.fn();
 const mockHouseholdsUpdateSingle = vi.fn();
 const mockHouseholdsRefetchSingle = vi.fn();
-const mockHouseholdDevicesDeleteEq2 = vi.fn();
 const mockHouseholdDevicesInsert = vi.fn();
-// Steal-check: SELECT household_id FROM household_devices WHERE device_id=? AND role=? AND household_id != ?
+const mockLinkCloseUpdate = vi.fn();
+const mockLinkCloseResult = vi.fn(async () => ({ error: null }));
+// Steal-check: SELECT household_id ... WHERE device_id=? AND role=? AND household_id != ? AND effective_to IS NULL
 const mockHouseholdDevicesStealCheckMaybeSingle = vi.fn();
+// Open-link lookup: SELECT id, device_id, effective_from ... WHERE household_id=? AND role=? AND effective_to IS NULL
+const mockOpenLinkMaybeSingle = vi.fn();
 const mockUpdatePayload = vi.fn();
 const mockHouseholdsDeleteSingle = vi.fn();
+const mockLinkDelete = vi.fn(async () => ({ error: null }));
+const mockReplaceRpc = vi.fn(
+  async (): Promise<{
+    data: string | null;
+    error: { code: string; message: string } | null;
+  }> => ({ data: "link-new", error: null })
+);
 let billingLineItemCount: number | null = 0;
+
+const OLD_DEVICE_UUID = "660e8400-e29b-41d4-a716-44665544bbbb";
 
 const mockFrom = vi.fn((table: string) => {
   if (table === "households") {
@@ -67,20 +79,30 @@ const mockFrom = vi.fn((table: string) => {
   }
   if (table === "household_devices") {
     return {
-      // Steal-check path: select().eq().eq().neq().maybeSingle()
+      // Steal-check path: select().eq().eq().neq().is().maybeSingle()
+      // Open-link path:   select().eq().eq().is().maybeSingle()
       select: () => ({
         eq: () => ({
           eq: () => ({
             neq: () => ({
-              maybeSingle: () => mockHouseholdDevicesStealCheckMaybeSingle(),
+              is: () => ({
+                maybeSingle: () => mockHouseholdDevicesStealCheckMaybeSingle(),
+              }),
+            }),
+            is: () => ({
+              maybeSingle: () => mockOpenLinkMaybeSingle(),
             }),
           }),
         }),
       }),
+      // Link close: update({ effective_to }).eq("id")
+      update: (patch: unknown) => {
+        mockLinkCloseUpdate(patch);
+        return { eq: () => mockLinkCloseResult() };
+      },
+      // Same-day correction: delete().eq("id")
       delete: () => ({
-        eq: () => ({
-          eq: () => mockHouseholdDevicesDeleteEq2(),
-        }),
+        eq: () => mockLinkDelete(),
       }),
       insert: (row: unknown) => mockHouseholdDevicesInsert(row),
     };
@@ -125,6 +147,7 @@ const mockFrom = vi.fn((table: string) => {
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: mockFrom,
+    rpc: mockReplaceRpc,
     auth: { getUser: async () => ({ data: { user: currentUser } }) },
   }),
 }));
@@ -197,10 +220,15 @@ describe("PATCH /api/households/[id]", () => {
       },
       error: null,
     });
-    mockHouseholdDevicesDeleteEq2.mockReset().mockResolvedValue({
+    mockLinkCloseUpdate.mockReset();
+    mockLinkCloseResult.mockReset().mockResolvedValue({ error: null });
+    mockHouseholdDevicesInsert.mockReset().mockResolvedValue({
       error: null,
     });
-    mockHouseholdDevicesInsert.mockReset().mockResolvedValue({
+    // Default: an open link to a different device, opened in the past
+    // (replacement path)
+    mockOpenLinkMaybeSingle.mockReset().mockResolvedValue({
+      data: { id: "link-1", device_id: OLD_DEVICE_UUID, effective_from: "2026-01-01" },
       error: null,
     });
     // Default: no existing cross-household link (steal check passes)
@@ -280,38 +308,74 @@ describe("PATCH /api/households/[id]", () => {
     const json = await res.json();
     expect(json.household).toBeDefined();
     expect(mockHouseholdsUpdateSingle).toHaveBeenCalledTimes(1);
-    expect(mockHouseholdDevicesDeleteEq2).not.toHaveBeenCalled();
+    expect(mockLinkCloseUpdate).not.toHaveBeenCalled();
     expect(mockHouseholdDevicesInsert).not.toHaveBeenCalled();
   });
 
-  it("200: happy path — device link (delete-then-insert)", async () => {
+  it("200: happy path — device link (atomic close-and-open preserves history)", async () => {
     const { PATCH } = await import("../route");
     const res = await PATCH(
       makePatchRequest(HH_UUID, { device_id: DEVICE_UUID }),
       { params: Promise.resolve({ id: HH_UUID }) }
     );
     expect(res.status).toBe(200);
-    expect(mockHouseholdDevicesDeleteEq2).toHaveBeenCalledTimes(1);
-    expect(mockHouseholdDevicesInsert).toHaveBeenCalledTimes(1);
-    expect(mockHouseholdDevicesInsert).toHaveBeenCalledWith({
-      household_id: HH_UUID,
-      device_id: DEVICE_UUID,
-      role: "primary_consumption_meter",
+    const today = new Date().toISOString().slice(0, 10);
+    // Single atomic swap — no separate close update or direct insert.
+    expect(mockReplaceRpc).toHaveBeenCalledWith("fn_replace_household_device", {
+      p_household_id: HH_UUID,
+      p_device_id: DEVICE_UUID,
+      p_effective_date: today,
     });
+    expect(mockLinkCloseUpdate).not.toHaveBeenCalled();
+    expect(mockHouseholdDevicesInsert).not.toHaveBeenCalled();
   });
 
-  it("200: happy path — device unlink (device_id: null) → delete only, no insert, no household update", async () => {
+  it("200: relinking the already-open device is a no-op (no history churn)", async () => {
+    mockOpenLinkMaybeSingle.mockReset().mockResolvedValue({
+      data: { id: "link-1", device_id: DEVICE_UUID, effective_from: "2026-01-01" },
+      error: null,
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(HH_UUID, { device_id: DEVICE_UUID }),
+      { params: Promise.resolve({ id: HH_UUID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(mockReplaceRpc).not.toHaveBeenCalled();
+    expect(mockLinkCloseUpdate).not.toHaveBeenCalled();
+    expect(mockHouseholdDevicesInsert).not.toHaveBeenCalled();
+  });
+
+  it("200: happy path — device unlink (device_id: null) → close only, no insert, no household update", async () => {
     const { PATCH } = await import("../route");
     const res = await PATCH(
       makePatchRequest(HH_UUID, { device_id: null }),
       { params: Promise.resolve({ id: HH_UUID }) }
     );
     expect(res.status).toBe(200);
-    expect(mockHouseholdDevicesDeleteEq2).toHaveBeenCalledTimes(1);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(mockLinkCloseUpdate).toHaveBeenCalledWith({ effective_to: today });
     expect(mockHouseholdDevicesInsert).not.toHaveBeenCalled();
+    expect(mockReplaceRpc).not.toHaveBeenCalled();
     // No household-field update — refetch path
     expect(mockHouseholdsUpdateSingle).not.toHaveBeenCalled();
     expect(mockHouseholdsRefetchSingle).toHaveBeenCalledTimes(1);
+  });
+
+  it("200: same-day unlink deletes the link instead of zero-length closing", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    mockOpenLinkMaybeSingle.mockReset().mockResolvedValue({
+      data: { id: "link-1", device_id: OLD_DEVICE_UUID, effective_from: today },
+      error: null,
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(HH_UUID, { device_id: null }),
+      { params: Promise.resolve({ id: HH_UUID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(mockLinkDelete).toHaveBeenCalledTimes(1);
+    expect(mockLinkCloseUpdate).not.toHaveBeenCalled();
   });
 
   it("200: #146 — address fields accepted (address_city, region, country, postal_code, geography_notes)", async () => {
@@ -358,7 +422,8 @@ describe("PATCH /api/households/[id]", () => {
   });
 
   it("409: device link conflict (Postgres 23505)", async () => {
-    mockHouseholdDevicesInsert.mockResolvedValueOnce({
+    mockReplaceRpc.mockResolvedValueOnce({
+      data: null,
       error: { code: "23505", message: "duplicate key value violates unique constraint" },
     });
     const { PATCH } = await import("../route");
@@ -369,6 +434,24 @@ describe("PATCH /api/households/[id]", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.reason).toBe("device_already_linked");
+  });
+
+  it("409: exclusion-conflict on concurrent replacement maps to overlap", async () => {
+    mockReplaceRpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23P01",
+        message: 'conflicting key value violates exclusion constraint "household_devices_primary_no_overlap"',
+      },
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(HH_UUID, { device_id: DEVICE_UUID }),
+      { params: Promise.resolve({ id: HH_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("device_assignment_overlap");
   });
 
   it("409: cross-household device steal blocked before any mutation", async () => {
@@ -392,10 +475,30 @@ describe("PATCH /api/households/[id]", () => {
     expect(json.error).toMatch(/already linked to another household/);
 
     // Steal check fires BEFORE any mutation — no household-row update,
-    // no delete, no insert on household_devices.
+    // no close, no insert, no replace RPC on household_devices.
     expect(mockHouseholdsUpdateSingle).not.toHaveBeenCalled();
-    expect(mockHouseholdDevicesDeleteEq2).not.toHaveBeenCalled();
+    expect(mockLinkCloseUpdate).not.toHaveBeenCalled();
     expect(mockHouseholdDevicesInsert).not.toHaveBeenCalled();
+    expect(mockReplaceRpc).not.toHaveBeenCalled();
+  });
+
+  it("409: overlapping replacement rejected by the effective-period guard", async () => {
+    mockReplaceRpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23505",
+        message:
+          "primary meter assignment for household overlaps an existing assignment",
+      },
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(HH_UUID, { device_id: DEVICE_UUID }),
+      { params: Promise.resolve({ id: HH_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("device_assignment_overlap");
   });
 
   it("400: #155 — clearing primary_phone via empty string is rejected", async () => {
