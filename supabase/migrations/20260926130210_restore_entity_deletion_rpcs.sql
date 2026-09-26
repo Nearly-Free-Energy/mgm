@@ -12,10 +12,10 @@ BEGIN
   -- Only an actual referential cascade may revoke the deleting manager's
   -- role. No user-controlled GUC can turn off the direct self-revoke guard.
   IF pg_trigger_depth() > 1 AND (
-    (OLD.scope_type = 'org' AND NOT EXISTS (
+    (OLD.scope_type::text = 'org' AND NOT EXISTS (
       SELECT 1 FROM organizations WHERE id = OLD.scope_id
     )) OR
-    (OLD.scope_type = 'microgrid' AND NOT EXISTS (
+    (OLD.scope_type::text = 'microgrid' AND NOT EXISTS (
       SELECT 1 FROM microgrids WHERE id = OLD.scope_id
     ))
   ) THEN
