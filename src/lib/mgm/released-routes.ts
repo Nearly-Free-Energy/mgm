@@ -6,8 +6,10 @@
  *
  * Release 1: organization, community, microgrid, and household management.
  * Release 2 (issue #4): OpenEMS connection setup, meter discovery and
- * registration, household meter detail, and the metering APIs. Billing,
- * payments, customerapp, and rate surfaces stay gated for Release 3.
+ * registration, household meter detail, and the metering APIs.
+ * Release 3 (issue #5): tariffs, billing periods, bill generation, invoice
+ * exports, and manual payments. Online payment gateways, payment links,
+ * customer portals, and automated notifications stay gated for future work.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -56,12 +58,41 @@ const RELEASE_2_API_ROUTES = [
   /^\/api\/meter-readings\/opening$/,
 ];
 
+const RELEASE_3_PAGE_ROUTES = [
+  // Billing period list, detail, and history.
+  /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/history)?)?$/,
+  // Tariff setup.
+  /^\/microgrids\/[^/]+\/setup\/rates$/,
+  // Invoice branding for PDF exports.
+  /^\/communities\/[^/]+\/invoice$/,
+];
+
+const RELEASE_3_API_ROUTES = [
+  // Tariffs.
+  /^\/api\/rate-schedules(?:\/[^/]+)?$/,
+  // Bill generation (write) and regeneration preview (compute).
+  /^\/api\/billing\/generate$/,
+  /^\/api\/billing\/regenerate-preview$/,
+  // Read-only review preview.
+  /^\/api\/billing-review\/preview$/,
+  // Billing periods: manual create + operator close; audit + CSV export.
+  /^\/api\/billing-periods(?:\/[^/]+(?:\/(?:audit-log|export-csv|close))?)?$/,
+  // Line items: manual paid/unpaid, PDF invoice, usage corrections.
+  /^\/api\/billing-line-items\/[^/]+(?:\/(?:payment-status|pdf|usage))?$/,
+  // Invoice branding backing the PDF renderer.
+  /^\/api\/communities\/[^/]+\/invoice-config$/,
+  /^\/api\/communities\/[^/]+\/invoice-preview$/,
+  /^\/api\/communities\/[^/]+\/invoice-logo$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
     ...RELEASE_1_PAGE_ROUTES,
     ...RELEASE_2_PAGE_ROUTES,
+    ...RELEASE_3_PAGE_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
+    ...RELEASE_3_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

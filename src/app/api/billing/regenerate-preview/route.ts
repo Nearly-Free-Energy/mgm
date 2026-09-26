@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { billingWriteGateForPeriod } from "@/lib/billing/guard";
 import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import {
   isRunGenerationFatal,
@@ -171,6 +172,10 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  // Release 3 (issue #5): billing reads fail closed while billing is disabled.
+  const gate = await billingWriteGateForPeriod(supabase, parsed.billingPeriodId);
+  if (gate) return gate;
 
   const out = await runGenerationFor({
     supabase,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { billingWriteGateForRateSchedule } from "@/lib/billing/guard";
 import type { TierConfig } from "@/lib/types/domain";
 import { validatePayload } from "../route";
 
@@ -45,6 +46,10 @@ export async function PUT(
   }
 
   const supabase = await createClient();
+
+  // Release 3 (issue #5): tariff writes fail closed while billing is disabled.
+  const gate = await billingWriteGateForRateSchedule(supabase, id);
+  if (gate) return gate;
 
   const { data, error } = await supabase
     .from("rate_schedules")
