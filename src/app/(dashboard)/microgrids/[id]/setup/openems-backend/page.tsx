@@ -113,6 +113,7 @@ export default async function OpenemsBackendPage({
   // derived from a COUNT on the column rather than from its value.
   let hasBasicAuthPassword = false;
   let hasBearerToken = false;
+  let hasKeycloak = false;
   if (mg.ems_type === "direct_url" && canConfigure) {
     const { count } = await supabase
       .from("microgrids")
@@ -127,6 +128,16 @@ export default async function OpenemsBackendPage({
       .eq("id", id)
       .not("ems_bearer_token_encrypted", "is", null);
     hasBearerToken = (tokenCount ?? 0) > 0;
+    // Same presence probe for a complete Keycloak client triple. All three
+    // must be set — a partial triple is treated as unconfigured everywhere.
+    const { count: keycloakCount } = await supabase
+      .from("microgrids")
+      .select("id", { count: "exact", head: true })
+      .eq("id", id)
+      .not("ems_keycloak_token_url", "is", null)
+      .not("ems_keycloak_client_id", "is", null)
+      .not("ems_keycloak_client_secret_encrypted", "is", null);
+    hasKeycloak = (keycloakCount ?? 0) > 0;
   }
 
   // Attributability line. `fn_list_ems_operators` carries its own access gate
@@ -196,6 +207,7 @@ export default async function OpenemsBackendPage({
           ems_basic_auth_username: mg.ems_basic_auth_username,
           ems_has_basic_auth_password: hasBasicAuthPassword,
           ems_has_bearer_token: hasBearerToken,
+          ems_has_keycloak: hasKeycloak,
           ems_known_edge_ids: mg.ems_known_edge_ids ?? [],
           ems_last_discover_at: mg.ems_last_discover_at,
           ems_last_discover_status: mg.ems_last_discover_status,

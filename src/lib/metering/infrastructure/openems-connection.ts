@@ -61,9 +61,9 @@ function translateTestError(error: OpenEmsError): ConnectionTestResult {
   };
 }
 
-function candidateToConfig(
+async function candidateToConfig(
   candidate: StoredConnectionCandidate
-): OpenEmsClientConfig {
+): Promise<OpenEmsClientConfig> {
   const urlCheck = validateBackendUrl(candidate.backendUrl);
   if (!urlCheck.ok) {
     throw new MeteringError(urlCheck.error, "METERING_CONFIGURATION", 422);
@@ -113,6 +113,54 @@ function candidateToConfig(
       "METERING_CONFIGURATION",
       422
     );
+  }
+  // Keycloak client-credentials (issue #4 follow-up): all-or-nothing, and
+  // mutually exclusive with the static identities — same rule as the save
+  // route, so a passing test never precedes a rejected save.
+  const asText = (value: string | null | undefined): string | null =>
+    typeof value === "string" && value.trim().length > 0
+      ? value.trim()
+      : null;
+  const keycloakTokenUrl = asText(candidate.keycloakTokenUrl);
+  const keycloakClientId = asText(candidate.keycloakClientId);
+  const keycloakClientSecret = asText(candidate.keycloakClientSecret);
+  const keycloakParts = [
+    keycloakTokenUrl,
+    keycloakClientId,
+    keycloakClientSecret,
+  ].filter(Boolean).length;
+  if (keycloakParts > 0 && keycloakParts < 3) {
+    throw new MeteringError(
+      "keycloakTokenUrl, keycloakClientId, and keycloakClientSecret must be set together.",
+      "METERING_CONFIGURATION",
+      422
+    );
+  }
+  if (
+    keycloakParts === 3 &&
+    (bearerToken || candidate.basicAuthUsername || candidate.basicAuthPassword)
+  ) {
+    throw new MeteringError(
+      "Use one identity only: Keycloak, a bearer token, or a username/password pair — not a mix.",
+      "METERING_CONFIGURATION",
+      422
+    );
+  }
+  if (keycloakParts === 3) {
+    // A candidate that names Keycloak proves itself against the real IdP:
+    // the obtained token is built into the in-memory client below, never
+    // logged, never persisted. IdP failures surface as test results via
+    // translateTestError, not exceptions.
+    const { obtainKeycloakToken } = await import("@/lib/openems/keycloak");
+    return {
+      type: "direct_url",
+      url: candidate.backendUrl.trim(),
+      token: await obtainKeycloakToken({
+        tokenUrl: keycloakTokenUrl as string,
+        clientId: keycloakClientId as string,
+        clientSecret: keycloakClientSecret as string,
+      }),
+    };
   }
   return {
     type: "direct_url",
@@ -193,11 +241,15 @@ export function createOpenEmsConnection(
       // outcomes uniformly.
       let config: OpenEmsClientConfig;
       try {
-        config = candidateToConfig(candidate);
+        config = await candidateToConfig(candidate);
       } catch (error) {
         if (error instanceof MeteringError) {
           return { ok: false, code: "invalid_config", message: error.message };
         }
+        // A Keycloak candidate proves itself against the IdP while building
+        // the config: a rejection or an unreachable token endpoint is a test
+        // outcome, not a crash — translate it like any probe failure.
+        if (error instanceof OpenEmsError) return translateTestError(error);
         throw error;
       }
       const knownEdgeIds = await repo.getKnownEdgeIds(microgridId);

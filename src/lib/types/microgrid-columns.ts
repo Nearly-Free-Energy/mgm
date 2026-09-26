@@ -18,7 +18,7 @@ import type { Microgrid } from "./domain";
 //
 // Enforced by `src/lib/__tests__/no-microgrid-star-select.test.ts`.
 export const MICROGRID_PUBLIC_COLUMNS =
-  "id, community_id, name, currency, address_line1, address_line2, address_city, address_region, address_country, address_postal_code, lat, lng, created_at, created_by, ems_type, ems_backend_url, ems_aws_region, ems_aws_access_key_id, ems_basic_auth_username, ems_known_edge_ids, ems_last_discover_at, ems_last_discover_count, ems_last_discover_error, ems_last_discover_status, timezone" as const;
+  "id, community_id, name, currency, address_line1, address_line2, address_city, address_region, address_country, address_postal_code, lat, lng, created_at, created_by, ems_type, ems_backend_url, ems_aws_region, ems_aws_access_key_id, ems_basic_auth_username, ems_keycloak_token_url, ems_keycloak_client_id, ems_known_edge_ids, ems_last_discover_at, ems_last_discover_count, ems_last_discover_error, ems_last_discover_status, timezone" as const;
 
 // The row type this projection yields. Declared here, beside the column list,
 // because the two must exclude the same columns and previously did not have to:
@@ -41,6 +41,7 @@ export type MicrogridPublic = Omit<
   | "ems_aws_secret_access_key_encrypted"
   | "ems_basic_auth_password_encrypted"
   | "ems_bearer_token_encrypted"
+  | "ems_keycloak_client_secret_encrypted"
 >;
 
 // Customerapp-boundary subset (#257). The full `MICROGRID_PUBLIC_COLUMNS`

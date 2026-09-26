@@ -7,6 +7,7 @@ import {
   getEmsSecretForMicrogrid,
   getEmsBasicAuthPasswordForMicrogrid,
   getEmsBearerTokenForMicrogrid,
+  getEmsKeycloakClientSecretForMicrogrid,
 } from "@/lib/openems/config";
 import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
@@ -24,6 +25,8 @@ const UUID_RE =
  *     region?, accessKeyId?, secretAccessKey?  // cloud_aws only
  *     basicAuthUsername?, basicAuthPassword?   // direct_url only (#327)
  *     bearerToken?                             // direct_url only (issue #4)
+ *     keycloakTokenUrl?, keycloakClientId?,
+ *     keycloakClientSecret?                    // direct_url only (issue #4)
  *     confirmed_name?: string                  // closed-period bypass
  *   }
  *
@@ -194,6 +197,9 @@ export async function PUT(
   let basicAuthUsername: string | undefined;
   let basicAuthPassword: string | undefined;
   let bearerToken: string | undefined;
+  let keycloakTokenUrl: string | undefined;
+  let keycloakClientId: string | undefined;
+  let keycloakClientSecret: string | undefined;
 
   if (type === "direct_url") {
     basicAuthUsername =
@@ -211,6 +217,22 @@ export async function PUT(
       typeof body.bearerToken === "string" && body.bearerToken.trim()
         ? body.bearerToken
         : undefined;
+    // Keycloak client-credentials (issue #4 follow-up): the token URL and
+    // client id are identifiers (retyping them with a blank secret preserves
+    // the stored secret, mirroring Basic). All-or-nothing — validated below.
+    keycloakTokenUrl =
+      typeof body.keycloakTokenUrl === "string" && body.keycloakTokenUrl.trim()
+        ? body.keycloakTokenUrl.trim()
+        : undefined;
+    keycloakClientId =
+      typeof body.keycloakClientId === "string" && body.keycloakClientId.trim()
+        ? body.keycloakClientId.trim()
+        : undefined;
+    keycloakClientSecret =
+      typeof body.keycloakClientSecret === "string" &&
+      body.keycloakClientSecret.length > 0
+        ? body.keycloakClientSecret
+        : undefined;
   }
 
   const supabase = await createClient();
@@ -222,7 +244,7 @@ export async function PUT(
   const { data: mgRow, error: mgErr } = await supabase
     .from("microgrids")
     .select(
-      "id, name, ems_type, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted, ems_bearer_token_encrypted"
+      "id, name, ems_type, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted, ems_bearer_token_encrypted, ems_keycloak_token_url, ems_keycloak_client_id, ems_keycloak_client_secret_encrypted"
     )
     .eq("id", microgridId)
     .maybeSingle<{
@@ -232,6 +254,9 @@ export async function PUT(
       ems_aws_secret_access_key_encrypted: string | null;
       ems_basic_auth_password_encrypted: string | null;
       ems_bearer_token_encrypted: string | null;
+      ems_keycloak_token_url: string | null;
+      ems_keycloak_client_id: string | null;
+      ems_keycloak_client_secret_encrypted: string | null;
     }>();
 
   if (mgErr) {
@@ -281,8 +306,25 @@ export async function PUT(
     type === "direct_url" &&
     !bearerToken &&
     !basicAuthUsername &&
+    !keycloakTokenUrl &&
+    !keycloakClientId &&
     mgRow.ems_bearer_token_encrypted !== null &&
     mgRow.ems_bearer_token_encrypted !== undefined;
+
+  // Keycloak preserve gate: identifiers retyped + secret blank + a stored
+  // triple on record means "keep the stored secret". A blank-everything
+  // save clears Keycloak (mirroring Basic) — preserving an identity the
+  // operator did not name would make switches silent.
+  const storedKeycloakComplete =
+    mgRow.ems_keycloak_token_url != null &&
+    mgRow.ems_keycloak_client_id != null &&
+    mgRow.ems_keycloak_client_secret_encrypted != null;
+  const preserveExistingKeycloakSecret =
+    type === "direct_url" &&
+    !!keycloakTokenUrl &&
+    !!keycloakClientId &&
+    !keycloakClientSecret &&
+    storedKeycloakComplete;
 
   // Reject the half-filled form. Checked after the row read so that "username
   // present, password blank, ciphertext on record" is a preserve rather than
@@ -310,33 +352,92 @@ export async function PUT(
         { status: 400 }
       );
     }
-    // Bearer and Basic are mutually exclusive identities: a request naming
-    // both cannot say which account the backend will see, so it says
-    // neither. (Read-time precedence prefers the token, but that path
-    // exists only for states predating this validation.)
+    // The three direct_url identities — bearer token, Basic pair, Keycloak
+    // client — are mutually exclusive: a request naming more than one
+    // cannot say which account the backend will see, so it says none.
+    // (Read-time precedence prefers Keycloak-auto, then the token, but
+    // that path exists only for states predating this validation.)
     //
-    // Switching identities is explicit, never silent: typing a username
-    // clears a stored bearer token (and vice versa), because the operator
-    // named the new identity. Blank-everything keeps a stored bearer but
-    // clears Basic — matching the pre-existing Basic behavior where blank
-    // fields with no stored ciphertext mean "unauthenticated".
+    // Switching identities is explicit, never silent: naming a new
+    // identity clears the stored ones, because the operator named the new
+    // identity. Blank-everything keeps a stored bearer or Keycloak triple
+    // but clears Basic — matching the pre-existing Basic behavior where
+    // blank fields with no stored ciphertext mean "unauthenticated".
+    const namedIdentities = [
+      bearerToken ? "bearer" : null,
+      basicAuthUsername ? "basic" : null,
+      keycloakTokenUrl && keycloakClientId ? "keycloak" : null,
+    ].filter((identity): identity is string => identity !== null);
+    if (namedIdentities.length > 1) {
+      return NextResponse.json(
+        {
+          error:
+            "Use a bearer token, a username/password pair, or Keycloak — not more than one. Clear the others to proceed.",
+        },
+        { status: 400 }
+      );
+    }
+    // Keycloak triple is all-or-nothing for identifiers: a URL without a
+    // client id (or vice versa) names half an identity the server could
+    // resolve against the wrong stored half. The secret alone is never an
+    // identity — without identifiers it is rejected, not preserved.
     if (
-      bearerToken &&
-      (basicAuthUsername || basicAuthPassword || preserveExistingBasicAuthPassword)
+      type === "direct_url" &&
+      (keycloakTokenUrl || keycloakClientId || keycloakClientSecret) &&
+      !(keycloakTokenUrl && keycloakClientId)
     ) {
       return NextResponse.json(
         {
           error:
-            "Use either a bearer token or a username/password pair, not both. Clear one to proceed.",
+            "Keycloak needs both the token URL and the client id. Enter both, or clear both to connect another way.",
+        },
+        { status: 400 }
+      );
+    }
+    // A lone secret with no identifiers and no stored triple to preserve
+    // into is likely a paste into the wrong field — reject rather than
+    // silently drop a credential the operator thinks was saved.
+    if (
+      type === "direct_url" &&
+      keycloakClientSecret &&
+      !keycloakTokenUrl &&
+      !keycloakClientId &&
+      !storedKeycloakComplete
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "A client secret was provided with no token URL or client id. Enter the Keycloak details, or clear the secret.",
         },
         { status: 400 }
       );
     }
   }
+  const wantsKeycloak =
+    type === "direct_url" &&
+    !!keycloakTokenUrl &&
+    !!keycloakClientId &&
+    !basicAuthUsername &&
+    !bearerToken;
   const wantsBearer =
     type === "direct_url" &&
     !basicAuthUsername &&
+    !wantsKeycloak &&
     (!!bearerToken || preserveExistingBearerToken);
+
+  // Keycloak secret required-ness mirrors cloud_aws: a named triple with a
+  // blank secret and no stored triple to preserve is incomplete, not
+  // "unauthenticated" — silently saving it would store an identity that
+  // authenticates as nobody.
+  if (wantsKeycloak && !keycloakClientSecret && !preserveExistingKeycloakSecret) {
+    return NextResponse.json(
+      {
+        error:
+          "Keycloak requires the token URL, client id, and client secret.",
+      },
+      { status: 400 }
+    );
+  }
   // Configuration gate. Since #321 this is the same permission as reaching
   // the microgrid at all: an org manager configures any microgrid in their own
   // org and nothing else. It is a preview of what the BEFORE UPDATE trigger on
@@ -499,6 +600,57 @@ export async function PUT(
     effectiveBearerToken = decrypted;
   }
 
+  // Same treatment for the Keycloak client secret: when the operator retyped
+  // the identifiers but left the secret blank and a complete triple is on
+  // record, decrypt the stored secret so the pre-save test uses the
+  // credentials that will actually be in force after the save. Then obtain
+  // an access token immediately — a Keycloak config whose IdP rejects the
+  // client must fail here, before anything is persisted.
+  let effectiveKeycloakToken: string | undefined;
+  let effectiveKeycloakClientSecret: string | undefined = keycloakClientSecret;
+  if (wantsKeycloak) {
+    if (!effectiveKeycloakClientSecret && preserveExistingKeycloakSecret) {
+      let decrypted: string | null = null;
+      let decryptErr: unknown = null;
+      try {
+        decrypted = await getEmsKeycloakClientSecretForMicrogrid(
+          supabase,
+          microgridId
+        );
+      } catch (err) {
+        decryptErr = err;
+      }
+      if (decryptErr || !decrypted) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not retrieve the existing client secret to test the connection. Re-enter the client secret to proceed.",
+          },
+          { status: 500 }
+        );
+      }
+      effectiveKeycloakClientSecret = decrypted;
+    }
+    if (effectiveKeycloakClientSecret && keycloakTokenUrl && keycloakClientId) {
+      const { obtainKeycloakToken } = await import("@/lib/openems/keycloak");
+      try {
+        effectiveKeycloakToken = await obtainKeycloakToken({
+          tokenUrl: keycloakTokenUrl,
+          clientId: keycloakClientId,
+          clientSecret: effectiveKeycloakClientSecret,
+        });
+      } catch (err) {
+        if (err instanceof OpenEmsError) {
+          return NextResponse.json(
+            { error: err.message, code: err.code },
+            { status: err.statusCode }
+          );
+        }
+        throw err;
+      }
+    }
+  }
+
   const candidateConfig: OpenEmsClientConfig =
     type === "cloud_aws"
       ? {
@@ -513,7 +665,7 @@ export async function PUT(
           url: backendUrl.trim(),
           username: basicAuthUsername ?? null,
           password: effectiveBasicAuthPassword ?? null,
-          token: effectiveBearerToken ?? null,
+          token: effectiveKeycloakToken ?? effectiveBearerToken ?? null,
         };
 
   // ── Step 5: Edge-ID validation (#112) ─────────────────────────────────────
@@ -670,6 +822,24 @@ export async function PUT(
     encryptedBearerToken = data as string;
   }
 
+  // Same for the Keycloak client secret. Encrypted through the same DEK
+  // path. Only when the operator typed one and we are not preserving.
+  let encryptedKeycloakClientSecret: string | null = null;
+  if (wantsKeycloak && keycloakClientSecret && !preserveExistingKeycloakSecret) {
+    const { data, error } = await supabase.rpc("fn_ems_encrypt_secret", {
+      p_plaintext: keycloakClientSecret,
+    });
+    if (error || !data) {
+      return NextResponse.json(
+        {
+          error: `Failed to encrypt client secret: ${error?.message ?? "no data"}`,
+        },
+        { status: 500 }
+      );
+    }
+    encryptedKeycloakClientSecret = data as string;
+  }
+
   // Build the UPDATE payload. When preserving the secret we OMIT the
   // ems_aws_secret_access_key_encrypted column entirely so the existing
   // ciphertext is left untouched. Omitting the column also prevents a
@@ -705,6 +875,20 @@ export async function PUT(
     updatePayload.ems_bearer_token_encrypted =
       wantsBearer && bearerToken ? encryptedBearerToken : null;
   }
+  // Keycloak triple: identifiers are set when named, cleared otherwise;
+  // the secret follows the preserve/encrypt/clear rules like every other
+  // stored secret. Naming any identity other than Keycloak clears the
+  // whole triple — a credential left behind a form that no longer shows
+  // it is how an operator ends up unable to explain what their microgrid
+  // sends.
+  updatePayload.ems_keycloak_token_url =
+    wantsKeycloak ? (keycloakTokenUrl as string) : null;
+  updatePayload.ems_keycloak_client_id =
+    wantsKeycloak ? (keycloakClientId as string) : null;
+  if (!preserveExistingKeycloakSecret) {
+    updatePayload.ems_keycloak_client_secret_encrypted =
+      wantsKeycloak && keycloakClientSecret ? encryptedKeycloakClientSecret : null;
+  }
 
   const { error: updErr } = await supabase
     .from("microgrids")
@@ -728,7 +912,9 @@ export async function PUT(
           {
             secretAccessKey,
             password: effectiveBasicAuthPassword,
-            extra: effectiveBearerToken ? [effectiveBearerToken] : undefined,
+            extra: [effectiveBearerToken, effectiveKeycloakClientSecret, effectiveKeycloakToken].filter(
+              (value): value is string => typeof value === "string"
+            ),
           }
         ),
       },
@@ -890,7 +1076,9 @@ export async function PUT(
         {
           secretAccessKey,
           password: effectiveBasicAuthPassword,
-          extra: effectiveBearerToken ? [effectiveBearerToken] : undefined,
+          extra: [effectiveBearerToken, effectiveKeycloakClientSecret, effectiveKeycloakToken].filter(
+            (value): value is string => typeof value === "string"
+          ),
         }
       )
     )

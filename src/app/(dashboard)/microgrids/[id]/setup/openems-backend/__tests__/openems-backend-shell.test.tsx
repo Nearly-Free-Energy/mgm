@@ -156,6 +156,7 @@ const BASE_MG = {
   ems_aws_access_key_id: null,
   ems_basic_auth_username: null,
   ems_has_basic_auth_password: false,
+  ems_has_keycloak: false,
   ems_known_edge_ids: [] as string[],
   ems_last_discover_at: null,
   ems_last_discover_status: null,
@@ -685,7 +686,6 @@ describe("OpenemsBackendShell — Known edge IDs (#112)", () => {
         microgrid={{
           ...CONFIGURED_CLOUD,
           ems_basic_auth_username: null,
-          ems_has_basic_auth_password: false,
           ems_known_edge_ids: [],
         }}
         health="healthy"
@@ -1049,5 +1049,69 @@ describe("OpenemsBackendShell — bearer token", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.bearerToken).toBe("keycloak-abc");
     expect(body).not.toHaveProperty("basicAuthPassword");
+  });
+});
+
+// ── Issue #4 follow-up: Keycloak client-credentials fields ──────────────────
+describe("OpenemsBackendShell — Keycloak client", () => {
+  function openDirectForm(microgrid = BASE_MG) {
+    render(
+      <OpenemsBackendShell
+        microgrid={microgrid}
+        health="not_configured"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4={null}
+        canConfigure={true}
+        emsOperators={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /direct url/i }));
+  }
+
+  it("renders the three Keycloak fields", () => {
+    openDirectForm();
+    expect(screen.getByLabelText(/keycloak token url/i)).toBeDefined();
+    expect(screen.getByLabelText(/keycloak client id/i)).toBeDefined();
+    expect(screen.getByLabelText(/keycloak client secret/i)).toBeDefined();
+  });
+
+  it("shows the stored-secret copy when a client is on record", () => {
+    openDirectForm({ ...BASE_MG, ems_has_keycloak: true });
+    expect(screen.getByText(/a keycloak client is on record/i)).toBeDefined();
+    expect(
+      screen.getByPlaceholderText(/keep the current secret/i)
+    ).toBeDefined();
+  });
+
+  it("posts the typed triple and omits blank identifiers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "success", edgeCount: 0, edges: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    openDirectForm();
+    fireEvent.change(screen.getByLabelText(/backend url/i), {
+      target: { value: "https://ems.example/rest" },
+    });
+    fireEvent.change(screen.getByLabelText(/keycloak token url/i), {
+      target: { value: "https://kc.example/token" },
+    });
+    fireEvent.change(screen.getByLabelText(/keycloak client id/i), {
+      target: { value: "ems-backend" },
+    });
+    fireEvent.change(screen.getByLabelText(/keycloak client secret/i), {
+      target: { value: "s3cret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /test without saving/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.keycloakTokenUrl).toBe("https://kc.example/token");
+    expect(body.keycloakClientId).toBe("ems-backend");
+    expect(body.keycloakClientSecret).toBe("s3cret");
+    expect(body).not.toHaveProperty("bearerToken");
   });
 });

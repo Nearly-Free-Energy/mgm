@@ -160,4 +160,13 @@ export type StoredConnectionCandidate = {
   basicAuthPassword?: string | null;
   /** Keycloak bearer token (issue #4). Mutually exclusive with Basic. */
   bearerToken?: string | null;
+  /**
+   * Keycloak client-credentials (issue #4 follow-up). All-or-nothing, and
+   * mutually exclusive with both `bearerToken` and Basic: the connection
+   * obtains a fresh access token from the IdP at test time. Secrets stay
+   * in memory for the call only.
+   */
+  keycloakTokenUrl?: string | null;
+  keycloakClientId?: string | null;
+  keycloakClientSecret?: string | null;
 };

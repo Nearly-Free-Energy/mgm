@@ -112,4 +112,100 @@ describe("OpenEmsConnection.testCandidate", () => {
     });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("rejects a partial Keycloak triple without network access", async () => {
+    const connection = createOpenEmsConnection({} as never, stubRepo());
+    const result = await connection.testCandidate(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "invalid_config",
+      message:
+        "keycloakTokenUrl, keycloakClientId, and keycloakClientSecret must be set together.",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects Keycloak mixed with a static bearer token without network access", async () => {
+    const connection = createOpenEmsConnection({} as never, stubRepo());
+    const result = await connection.testCandidate(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      bearerToken: "stale-manual-token",
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+      keycloakClientSecret: "s3cret",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "invalid_config",
+      message:
+        "Use one identity only: Keycloak, a bearer token, or a username/password pair — not a mix.",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("mints a Keycloak token for the candidate and probes with it", async () => {
+    fetchSpy
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "fresh-idp-token", expires_in: 300 }),
+      })
+      .mockResolvedValueOnce(mockEdgesStatusResponse());
+    const connection = createOpenEmsConnection({} as never, stubRepo());
+    const result = await connection.testCandidate(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+      keycloakClientSecret: "s3cret",
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // First call is the IdP token request carrying the client secret.
+    const [tokenUrl, tokenOptions] = fetchSpy.mock.calls[0] as [
+      string,
+      { body?: URLSearchParams | string },
+    ];
+    expect(tokenUrl).toBe("https://kc.example/token");
+    // Second call is the EMS probe carrying the minted token — and only it.
+    const [, probeOptions] = fetchSpy.mock.calls[1] as [
+      string,
+      { headers?: Record<string, string> },
+    ];
+    expect(probeOptions?.headers).toMatchObject({
+      Authorization: "Bearer fresh-idp-token",
+    });
+    const serialized = JSON.stringify(fetchSpy.mock.calls[1]);
+    expect(serialized).not.toMatch(/s3cret/);
+    void tokenOptions;
+  });
+
+  it("reports an IdP rejection as auth_failed, not a crash", async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    });
+    const connection = createOpenEmsConnection({} as never, stubRepo());
+    const result = await connection.testCandidate(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+      keycloakClientSecret: "wrong",
+    });
+    expect(result).toEqual({
+      ok: false,
+      code: "auth_failed",
+      message:
+        "Authentication failed or the identity is not authorized for reads. Verify the credentials and that the identity has read access.",
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 });

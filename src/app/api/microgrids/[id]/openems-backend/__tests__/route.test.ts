@@ -927,7 +927,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
       );
 
       expect(res.status).toBe(400);
-      expect((await res.json()).error).toMatch(/either a bearer token or/i);
+      expect((await res.json()).error).toMatch(/not more than one/i);
     });
 
     it("persists the ENCRYPTED token and clears Basic columns", async () => {
@@ -1025,6 +1025,147 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
       // Typing the new identity clears the old one — never silent.
       expect(sink.payload?.ems_bearer_token_encrypted).toBeNull();
       expect(sink.payload?.ems_basic_auth_username).toBe("openems");
+    });
+  });
+
+  // ── Issue #4 follow-up: Keycloak client-credentials on direct_url ────────
+  describe("direct_url Keycloak client", () => {
+    const KEYCLOAK_BODY = {
+      type: "direct_url",
+      backendUrl: "https://ems.example/rest",
+      known_edge_ids: [],
+      keycloakTokenUrl:
+        "https://keycloak.example/realms/energy/protocol/openid-connect/token",
+      keycloakClientId: "mgm-client",
+      keycloakClientSecret: "shhh",
+    };
+
+    it("rejects a half-named triple (URL without client id)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          ...KEYCLOAK_BODY,
+          keycloakClientId: undefined,
+          keycloakClientSecret: undefined,
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/both the token URL and the client id/i);
+    });
+
+    it("rejects Keycloak mixed with a bearer token (400)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({ ...KEYCLOAK_BODY, bearerToken: "keycloak-abc" }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/not more than one/i);
+    });
+
+    it("rejects Keycloak mixed with Basic (400)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          ...KEYCLOAK_BODY,
+          basicAuthUsername: "openems",
+          basicAuthPassword: "s3cret",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/not more than one/i);
+    });
+
+    it("rejects a named triple with no secret and nothing stored (400)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          ...KEYCLOAK_BODY,
+          keycloakClientSecret: undefined,
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/requires the token URL, client id, and client secret/i);
+    });
+
+    it("persists identifiers + ENCRYPTED secret and clears other identities", async () => {
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      // Stub the Keycloak token endpoint: the save path obtains an access
+      // token BEFORE persisting, so an IdP rejection fails the save.
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "fresh-access", expires_in: 300 }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(makePutRequest(KEYCLOAK_BODY), {
+        params: Promise.resolve({ id: MG_ID }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(sink.payload?.ems_keycloak_token_url).toBe(
+        "https://keycloak.example/realms/energy/protocol/openid-connect/token"
+      );
+      expect(sink.payload?.ems_keycloak_client_id).toBe("mgm-client");
+      // Ciphertext from fn_ems_encrypt_secret, never the plaintext.
+      expect(sink.payload?.ems_keycloak_client_secret_encrypted).toBe("\\x01020304");
+      expect(JSON.stringify(sink.payload)).not.toContain("shhh");
+      // Naming Keycloak clears the other identities.
+      expect(sink.payload?.ems_basic_auth_username).toBeNull();
+      expect(sink.payload?.ems_bearer_token_encrypted).toBeNull();
+      vi.unstubAllGlobals();
+    });
+
+    it("fails the save when the IdP rejects the client (nothing persisted)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+      registerFrom(billingPeriodsHandler([]));
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({}),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          ...KEYCLOAK_BODY,
+          // Distinct credentials: the token cache is per-process, and the
+          // earlier test already cached this triple's credentials.
+          keycloakClientSecret: "wrong-secret",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toMatch(/rejected the client credentials/i);
+      // No persist occurred — from() was consumed only by row read + periods.
+      expect(fromCallIndex).toBe(2);
+      vi.unstubAllGlobals();
     });
   });
 });

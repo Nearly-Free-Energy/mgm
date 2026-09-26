@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   testConnection: vi.fn(),
   from: vi.fn(),
   getEmsConfig: vi.fn(async (): Promise<unknown> => null),
+  resolveKeycloak: vi.fn(async (): Promise<unknown> => null),
 }));
 
 vi.mock("@/lib/metering/compose", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/metering/compose", () => ({
 }));
 vi.mock("@/lib/openems/config", () => ({
   getMicrogridEmsConfig: mocks.getEmsConfig,
+  resolveKeycloakConfig: mocks.resolveKeycloak,
 }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mocks.from }),
@@ -229,5 +231,64 @@ describe("POST openems-backend/test", () => {
       basicAuthPassword: null,
       bearerToken: "stored-bearer",
     });
+  });
+
+  it("attaches a typed Keycloak triple to the candidate", async () => {
+    mocks.getEmsConfig.mockResolvedValue(null);
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: true, edgeCount: 1, edges: [] },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({
+        type: "direct_url",
+        backendUrl: "http://localhost:8075",
+        keycloakTokenUrl: "https://kc.example/token",
+        keycloakClientId: "ems-backend",
+        keycloakClientSecret: "s3cret",
+      }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.testConnection).toHaveBeenCalledWith(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      region: null,
+      accessKeyId: null,
+      secretAccessKey: null,
+      basicAuthUsername: null,
+      basicAuthPassword: null,
+      bearerToken: null,
+      keycloakTokenUrl: "https://kc.example/token",
+      keycloakClientId: "ems-backend",
+      keycloakClientSecret: "s3cret",
+    });
+  });
+
+  it("reuses the stored Keycloak triple when the fields are blank", async () => {
+    mocks.getEmsConfig.mockResolvedValue(null);
+    mocks.resolveKeycloak.mockResolvedValue({
+      tokenUrl: "https://kc.example/token",
+      clientId: "ems-backend",
+      clientSecret: "stored-secret",
+    });
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: true, edgeCount: 1, edges: [] },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    const candidate = mocks.testConnection.mock.calls[0][1] as Record<
+      string,
+      unknown
+    >;
+    expect(candidate.keycloakTokenUrl).toBe("https://kc.example/token");
+    expect(candidate.keycloakClientId).toBe("ems-backend");
+    expect(candidate.keycloakClientSecret).toBe("stored-secret");
   });
 });

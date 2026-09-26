@@ -708,6 +708,9 @@ export type Database = {
           ems_basic_auth_password_encrypted: string | null
           ems_basic_auth_username: string | null
           ems_bearer_token_encrypted: string | null
+          ems_keycloak_client_id: string | null
+          ems_keycloak_client_secret_encrypted: string | null
+          ems_keycloak_token_url: string | null
           ems_known_edge_ids: string[]
           ems_last_discover_at: string | null
           ems_last_discover_count: number | null
@@ -738,6 +741,9 @@ export type Database = {
           ems_basic_auth_password_encrypted?: string | null
           ems_basic_auth_username?: string | null
           ems_bearer_token_encrypted?: string | null
+          ems_keycloak_client_id?: string | null
+          ems_keycloak_client_secret_encrypted?: string | null
+          ems_keycloak_token_url?: string | null
           ems_known_edge_ids?: string[]
           ems_last_discover_at?: string | null
           ems_last_discover_count?: number | null
@@ -768,6 +774,9 @@ export type Database = {
           ems_basic_auth_password_encrypted?: string | null
           ems_basic_auth_username?: string | null
           ems_bearer_token_encrypted?: string | null
+          ems_keycloak_client_id?: string | null
+          ems_keycloak_client_secret_encrypted?: string | null
+          ems_keycloak_token_url?: string | null
           ems_known_edge_ids?: string[]
           ems_last_discover_at?: string | null
           ems_last_discover_count?: number | null

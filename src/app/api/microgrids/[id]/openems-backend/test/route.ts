@@ -93,6 +93,36 @@ export async function POST(
     stored?.type === "cloud_aws" && type === "cloud_aws" ? stored : null;
   const storedDirect =
     stored?.type === "direct_url" && type === "direct_url" ? stored : null;
+  // Keycloak client-credentials (issue #4 follow-up): same blank-means-keep
+  // rule as the save route. Retyped identifiers with a blank secret reuse
+  // the stored secret; a newly typed secret requires retyped identifiers
+  // (no silent pairing with stored ones); all blank tests the stored triple.
+  let storedKeycloak: {
+    tokenUrl: string;
+    clientId: string;
+    clientSecret: string;
+  } | null = null;
+  if (type === "direct_url") {
+    try {
+      const { resolveKeycloakConfig } = await import("@/lib/openems/config");
+      storedKeycloak = await resolveKeycloakConfig(supabase, microgridId);
+    } catch {
+      storedKeycloak = null;
+    }
+  }
+  const typedKeycloakSecret = asText(body.keycloakClientSecret);
+  const typedKeycloakUrl = asText(body.keycloakTokenUrl);
+  const typedKeycloakId = asText(body.keycloakClientId);
+  const candidateKeycloakSecret =
+    typedKeycloakSecret ?? storedKeycloak?.clientSecret ?? null;
+  // Strictness mirrors the save route: a new secret is only paired with
+  // retyped identifiers, never silently with stored ones.
+  const candidateKeycloakUrl =
+    typedKeycloakUrl ??
+    (typedKeycloakSecret ? null : (storedKeycloak?.tokenUrl ?? null));
+  const candidateKeycloakId =
+    typedKeycloakId ??
+    (typedKeycloakSecret ? null : (storedKeycloak?.clientId ?? null));
   const candidate = {
     type,
     backendUrl: typeof body.backendUrl === "string" ? body.backendUrl : "",
@@ -105,6 +135,15 @@ export async function POST(
     basicAuthPassword:
       asText(body.basicAuthPassword) ?? storedDirect?.password ?? null,
     bearerToken: asText(body.bearerToken) ?? storedDirect?.token ?? null,
+    // Attached only when the Keycloak identity is in play (typed or
+    // stored): keeps the candidate shape stable for the other identities.
+    ...((candidateKeycloakUrl ?? candidateKeycloakId ?? candidateKeycloakSecret)
+      ? {
+          keycloakTokenUrl: candidateKeycloakUrl,
+          keycloakClientId: candidateKeycloakId,
+          keycloakClientSecret: candidateKeycloakSecret,
+        }
+      : {}),
   };
 
   try {

@@ -69,6 +69,19 @@ export async function getMicrogridEmsConfig(
   }
 
   if (mg.ems_type === "direct_url") {
+    // Keycloak client-credentials (issue #4 follow-up) first: a live token
+    // minted seconds ago always beats a manually pasted one that may have
+    // expired silently. Acquisition failures are loud; stale tokens are not.
+    const keycloak = await resolveKeycloakConfig(supabase, microgridId);
+    if (keycloak) {
+      const { obtainKeycloakToken } = await import("./keycloak");
+      return {
+        type: "direct_url",
+        url: mg.ems_backend_url,
+        token: await obtainKeycloakToken(keycloak),
+      };
+    }
+
     // Issue #4: a stored Keycloak bearer token wins over Basic. There is no
     // plaintext "has token" signal (unlike the Basic username), so probe
     // presence with a cheap COUNT rather than selecting the ciphertext —
@@ -80,8 +93,8 @@ export async function getMicrogridEmsConfig(
         return { type: "direct_url", url: mg.ems_backend_url, token };
       }
       // Ciphertext vanished between the probe and the decrypt (concurrent
-      // reconfigure): fall through to the Basic/unauthenticated path rather
-      // than failing the whole resolution.
+      // reconfigure): fall through to the Basic path below rather than
+      // failing the whole resolution.
     }
 
     // #327. No username stored → unauthenticated backend, exactly as before,
@@ -256,6 +269,61 @@ export async function getEmsBearerTokenForMicrogrid(
 }
 
 /**
+ * Decrypt a microgrid's stored Keycloak client secret (issue #4).
+ *
+ * Same contract, same ordering, same reasons as the getters above.
+ *
+ * `fn_get_ems_keycloak_client_secret` is `service_role`-only (00062), so
+ * there is no path that reaches the plaintext on a user-session client.
+ */
+export async function getEmsKeycloakClientSecretForMicrogrid(
+  authorizedClient: SupabaseClient,
+  microgridId: string
+): Promise<string | null> {
+  return authorizeThenDecrypt(
+    authorizedClient,
+    microgridId,
+    "fn_get_ems_keycloak_client_secret",
+    "Keycloak client secret"
+  );
+}
+
+/**
+ * Resolve a complete stored Keycloak client triple, or null.
+ *
+ * All-or-nothing: a partially stored triple (missing URL, id, or secret)
+ * is treated as unconfigured rather than half-configured, so a half-saved
+ * form can never send the client secret to the wrong token endpoint.
+ * The secret travels only through the sibling decrypt getter above.
+ */
+export async function resolveKeycloakConfig(
+  authorizedClient: SupabaseClient,
+  microgridId: string
+): Promise<{ tokenUrl: string; clientId: string; clientSecret: string } | null> {
+  const { data: row, error } = await authorizedClient
+    .from("microgrids")
+    .select("ems_keycloak_token_url, ems_keycloak_client_id")
+    .eq("id", microgridId)
+    .maybeSingle<{
+      ems_keycloak_token_url: string | null;
+      ems_keycloak_client_id: string | null;
+    }>();
+  if (error || !row?.ems_keycloak_token_url || !row?.ems_keycloak_client_id) {
+    return null;
+  }
+  const clientSecret = await getEmsKeycloakClientSecretForMicrogrid(
+    authorizedClient,
+    microgridId
+  );
+  if (!clientSecret) return null;
+  return {
+    tokenUrl: row.ems_keycloak_token_url,
+    clientId: row.ems_keycloak_client_id,
+    clientSecret,
+  };
+}
+
+/**
  * The shared body of the two exported getters. Private on purpose.
  *
  * ── The ordering here is load-bearing. Do not reorder. ───────────────────
@@ -273,7 +341,8 @@ async function authorizeThenDecrypt(
   rpc:
     | "fn_get_ems_secret"
     | "fn_get_ems_basic_auth_password"
-    | "fn_get_ems_bearer_token",
+    | "fn_get_ems_bearer_token"
+    | "fn_get_ems_keycloak_client_secret",
   label: string
 ): Promise<string | null> {
   // ── Step 1: authorization. RLS on `microgrids` decides visibility. ──────

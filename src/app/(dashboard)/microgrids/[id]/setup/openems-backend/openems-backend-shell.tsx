@@ -53,6 +53,11 @@ type MicrogridProps = {
    * existing callers keep working; the page passes the real value.
    */
   ems_has_bearer_token?: boolean;
+  /**
+   * Whether a complete Keycloak client triple is on record. Deliberately a
+   * boolean — same rule as the other secrets.
+   */
+  ems_has_keycloak?: boolean;
   ems_known_edge_ids: string[];
   ems_last_discover_at: string | null;
   ems_last_discover_status: string | null;
@@ -162,6 +167,12 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   // Bearer token (issue #4): typed value only, never the stored secret.
   const [bearerToken, setBearerToken] = React.useState<string>("");
   const hasStoredBearerToken = microgrid.ems_has_bearer_token ?? false;
+  const hasStoredKeycloak = microgrid.ems_has_keycloak ?? false;
+  // Keycloak client-credentials (issue #4 follow-up): identifiers retyped
+  // with a blank secret preserve the stored secret; all three blank clears.
+  const [keycloakTokenUrl, setKeycloakTokenUrl] = React.useState<string>("");
+  const [keycloakClientId, setKeycloakClientId] = React.useState<string>("");
+  const [keycloakClientSecret, setKeycloakClientSecret] = React.useState<string>("");
 
   // Known edge IDs input state.
   // Prefill logic (3 cases, pinned in #112):
@@ -279,6 +290,9 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
     setBasicAuthUsername(microgrid.ems_basic_auth_username ?? "");
     setBasicAuthPassword("");
     setBearerToken("");
+    setKeycloakTokenUrl("");
+    setKeycloakClientId("");
+    setKeycloakClientSecret("");
     // Prefill known edge IDs from the saved list (case 2 + 3 above).
     setKnownEdgeIds(microgrid.ems_known_edge_ids.join(", "));
     setIsEditing(true);
@@ -323,6 +337,18 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       // Same rule for the bearer token (issue #4): typed values only.
       if (bearerToken && bearerToken.trim().length > 0) {
         base.bearerToken = bearerToken;
+      }
+      // Same rule for the Keycloak fields: typed values only. Retyped
+      // identifiers with a blank secret preserve the stored secret; blank
+      // identifiers clear the Keycloak identity (explicit switch).
+      if (keycloakTokenUrl.trim().length > 0) {
+        base.keycloakTokenUrl = keycloakTokenUrl.trim();
+      }
+      if (keycloakClientId.trim().length > 0) {
+        base.keycloakClientId = keycloakClientId.trim();
+      }
+      if (keycloakClientSecret && keycloakClientSecret.length > 0) {
+        base.keycloakClientSecret = keycloakClientSecret;
       }
       return base;
     }
@@ -727,11 +753,13 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                   Authentication
                 </p>
                 <p className="mt-1 font-mono text-xs text-foreground">
-                  {microgrid.ems_has_bearer_token
-                    ? "Bearer token"
-                    : microgrid.ems_basic_auth_username
-                      ? `Username (basic): ${microgrid.ems_basic_auth_username}`
-                      : "None"}
+                  {hasStoredKeycloak
+                    ? "Keycloak"
+                    : microgrid.ems_has_bearer_token
+                      ? "Bearer token"
+                      : microgrid.ems_basic_auth_username
+                        ? `Username (basic): ${microgrid.ems_basic_auth_username}`
+                        : "None"}
                 </p>
               </div>
             )}
@@ -980,6 +1008,70 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   For backends behind Keycloak: the dedicated account&apos;s
                   token. Leave blank for Basic or unauthenticated access.
+                </p>
+              )}
+            </div>
+            {/* Keycloak client-credentials (issue #4 follow-up): the server
+                obtains and refreshes access tokens itself, so the dedicated
+                account keeps working without retyping. Mutually exclusive
+                with both fields above — the save route rejects a mix. */}
+            <div>
+              <label htmlFor="keycloak-token-url" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak token URL
+              </label>
+              <Input
+                id="keycloak-token-url"
+                type="text"
+                value={keycloakTokenUrl}
+                onChange={(e) => setKeycloakTokenUrl(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="https://keycloak.example/realms/energy/protocol/openid-connect/token"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label htmlFor="keycloak-client-id" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak client ID
+              </label>
+              <Input
+                id="keycloak-client-id"
+                type="text"
+                value={keycloakClientId}
+                onChange={(e) => setKeycloakClientId(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label htmlFor="keycloak-client-secret" className="mb-1 block text-xs font-medium text-foreground">
+                Keycloak client secret
+              </label>
+              <Input
+                id="keycloak-client-secret"
+                type="password"
+                value={keycloakClientSecret}
+                onChange={(e) => setKeycloakClientSecret(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={
+                  hasStoredKeycloak
+                    ? "Leave blank to keep the current secret"
+                    : ""
+                }
+                className="font-mono text-xs"
+              />
+              {hasStoredKeycloak ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A Keycloak client is on record — leave blank to keep its
+                  secret. Naming a bearer token or username above switches
+                  away and clears it.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Retype the URL and client ID with a blank secret to keep a
+                  stored one; leave all three blank to clear Keycloak.
                 </p>
               )}
             </div>
