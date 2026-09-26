@@ -18,10 +18,11 @@ name: Test
 # budget; that is a defect in the test, tracked separately, not a deferral.
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, 'release-*/**', 'codex/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
