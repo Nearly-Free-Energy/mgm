@@ -31,7 +31,10 @@ const MICROGRID_ID = "00000000-0000-4000-8000-000000000010";
  * `null` models a row RLS hid from the caller (cross-org), which is exactly
  * how PostgREST surfaces it — not as an error.
  */
-function buildUserClient(row: Record<string, unknown> | null): {
+function buildUserClient(
+  row: Record<string, unknown> | null,
+  opts?: { tokenCount?: number }
+): {
   client: SupabaseClient;
   reads: string[];
   rpc: ReturnType<typeof vi.fn>;
@@ -44,6 +47,10 @@ function buildUserClient(row: Record<string, unknown> | null): {
       const chain = {
         select: () => chain,
         eq: () => chain,
+        not: async () => ({
+          count: opts?.tokenCount ?? 0,
+          error: null,
+        }),
         maybeSingle: async () => ({ data: row, error: null }),
       };
       return chain;
@@ -200,5 +207,70 @@ describe("getMicrogridEmsConfig — cross-org callers stop before the decrypt", 
     await expect(
       getMicrogridEmsConfig(client, MICROGRID_ID)
     ).rejects.toMatchObject({ code: "OPENEMS_FORBIDDEN", statusCode: 403 });
+  });
+});
+
+describe("getMicrogridEmsConfig — Keycloak bearer token (issue #4)", () => {
+  it("resolves a bearer config when a token is stored, without a username", async () => {
+    const { client } = buildUserClient(
+      {
+        id: MICROGRID_ID,
+        ems_type: "direct_url",
+        ems_backend_url: "https://example.invalid",
+        ems_basic_auth_username: null,
+      },
+      { tokenCount: 1 }
+    );
+
+    const cfg = await getMicrogridEmsConfig(client, MICROGRID_ID);
+
+    expect(cfg).toEqual({
+      type: "direct_url",
+      url: "https://example.invalid",
+      token: "PLAINTEXT-SECRET",
+    });
+    expect(decryptRpc).toHaveBeenCalledWith("fn_get_ems_bearer_token", {
+      _microgrid_id: MICROGRID_ID,
+    });
+  });
+
+  it("prefers the stored token over a Basic pair", async () => {
+    const { client } = buildUserClient(
+      {
+        id: MICROGRID_ID,
+        ems_type: "direct_url",
+        ems_backend_url: "https://example.invalid",
+        ems_basic_auth_username: "openems",
+      },
+      { tokenCount: 1 }
+    );
+
+    const cfg = await getMicrogridEmsConfig(client, MICROGRID_ID);
+
+    expect(cfg).toEqual({
+      type: "direct_url",
+      url: "https://example.invalid",
+      token: "PLAINTEXT-SECRET",
+    });
+  });
+
+  it("falls back to Basic when no token is stored", async () => {
+    const { client, rpc } = buildUserClient({
+      id: MICROGRID_ID,
+      ems_type: "direct_url",
+      ems_backend_url: "https://example.invalid",
+      ems_basic_auth_username: "openems",
+    });
+
+    decryptRpc.mockResolvedValue({ data: "basic-plaintext", error: null });
+    const cfg = await getMicrogridEmsConfig(client, MICROGRID_ID);
+
+    expect(cfg).toEqual({
+      type: "direct_url",
+      url: "https://example.invalid",
+      username: "openems",
+      password: "basic-plaintext",
+    });
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

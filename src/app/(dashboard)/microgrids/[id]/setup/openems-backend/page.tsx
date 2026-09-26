@@ -112,6 +112,7 @@ export default async function OpenemsBackendPage({
   // no gain, and #106 keeps the ciphertext off the page entirely — so this is
   // derived from a COUNT on the column rather than from its value.
   let hasBasicAuthPassword = false;
+  let hasBearerToken = false;
   if (mg.ems_type === "direct_url" && canConfigure) {
     const { count } = await supabase
       .from("microgrids")
@@ -119,6 +120,13 @@ export default async function OpenemsBackendPage({
       .eq("id", id)
       .not("ems_basic_auth_password_encrypted", "is", null);
     hasBasicAuthPassword = (count ?? 0) > 0;
+    // Same presence probe for the Keycloak bearer token (issue #4).
+    const { count: tokenCount } = await supabase
+      .from("microgrids")
+      .select("id", { count: "exact", head: true })
+      .eq("id", id)
+      .not("ems_bearer_token_encrypted", "is", null);
+    hasBearerToken = (tokenCount ?? 0) > 0;
   }
 
   // Attributability line. `fn_list_ems_operators` carries its own access gate
@@ -187,6 +195,7 @@ export default async function OpenemsBackendPage({
           ems_aws_access_key_id: mg.ems_aws_access_key_id,
           ems_basic_auth_username: mg.ems_basic_auth_username,
           ems_has_basic_auth_password: hasBasicAuthPassword,
+          ems_has_bearer_token: hasBearerToken,
           ems_known_edge_ids: mg.ems_known_edge_ids ?? [],
           ems_last_discover_at: mg.ems_last_discover_at,
           ems_last_discover_status: mg.ems_last_discover_status,

@@ -6,6 +6,7 @@ import type { OpenEmsClientConfig } from "@/lib/openems";
 import {
   getEmsSecretForMicrogrid,
   getEmsBasicAuthPasswordForMicrogrid,
+  getEmsBearerTokenForMicrogrid,
 } from "@/lib/openems/config";
 import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
@@ -22,6 +23,7 @@ const UUID_RE =
  *     known_edge_ids: string[],                // edge IDs to validate (#112)
  *     region?, accessKeyId?, secretAccessKey?  // cloud_aws only
  *     basicAuthUsername?, basicAuthPassword?   // direct_url only (#327)
+ *     bearerToken?                             // direct_url only (issue #4)
  *     confirmed_name?: string                  // closed-period bypass
  *   }
  *
@@ -30,6 +32,13 @@ const UUID_RE =
  * backend would report bad credentials rather than missing ones. Blank
  * password with a username and an existing ciphertext on record means
  * "keep the stored password", mirroring the cloud_aws secret-preserve flow.
+ *
+ * `bearerToken` (Keycloak token for the dedicated MGM account) is likewise
+ * optional and mutually exclusive with the Basic pair: blank with an
+ * existing ciphertext on record means "keep the stored token". The stored
+ * token wins over Basic at read time, so a saved mixed state always
+ * authenticates as the dedicated account — but this route rejects mixed
+ * input outright so no such state is ever written.
  *
  * Mandatory execution order (AC-ROUTE-1, amendments 2026-04-23 + #112):
  *
@@ -184,6 +193,7 @@ export async function PUT(
   // secret: blank + existing ciphertext means "keep the stored one".
   let basicAuthUsername: string | undefined;
   let basicAuthPassword: string | undefined;
+  let bearerToken: string | undefined;
 
   if (type === "direct_url") {
     basicAuthUsername =
@@ -193,6 +203,13 @@ export async function PUT(
     basicAuthPassword =
       typeof body.basicAuthPassword === "string"
         ? body.basicAuthPassword
+        : undefined;
+    // Bearer token (issue #4): blank means "keep the stored token", exactly
+    // like the Basic password preserve flow below. Whitespace-only is
+    // treated as blank — a token of spaces authenticates nowhere.
+    bearerToken =
+      typeof body.bearerToken === "string" && body.bearerToken.trim()
+        ? body.bearerToken
         : undefined;
   }
 
@@ -205,7 +222,7 @@ export async function PUT(
   const { data: mgRow, error: mgErr } = await supabase
     .from("microgrids")
     .select(
-      "id, name, ems_type, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted"
+      "id, name, ems_type, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted, ems_bearer_token_encrypted"
     )
     .eq("id", microgridId)
     .maybeSingle<{
@@ -214,6 +231,7 @@ export async function PUT(
       ems_type: "cloud_aws" | "direct_url" | null;
       ems_aws_secret_access_key_encrypted: string | null;
       ems_basic_auth_password_encrypted: string | null;
+      ems_bearer_token_encrypted: string | null;
     }>();
 
   if (mgErr) {
@@ -255,6 +273,17 @@ export async function PUT(
     mgRow.ems_basic_auth_password_encrypted !== null &&
     mgRow.ems_basic_auth_password_encrypted !== undefined;
 
+  // Bearer-token preserve gate (issue #4), mirroring the two above: a
+  // blank token with an existing ciphertext on record means "keep it" —
+  // but only when no Basic identity is being named. Typing a username is
+  // an explicit switch and clears the stored token below.
+  const preserveExistingBearerToken =
+    type === "direct_url" &&
+    !bearerToken &&
+    !basicAuthUsername &&
+    mgRow.ems_bearer_token_encrypted !== null &&
+    mgRow.ems_bearer_token_encrypted !== undefined;
+
   // Reject the half-filled form. Checked after the row read so that "username
   // present, password blank, ciphertext on record" is a preserve rather than
   // an error.
@@ -281,7 +310,33 @@ export async function PUT(
         { status: 400 }
       );
     }
+    // Bearer and Basic are mutually exclusive identities: a request naming
+    // both cannot say which account the backend will see, so it says
+    // neither. (Read-time precedence prefers the token, but that path
+    // exists only for states predating this validation.)
+    //
+    // Switching identities is explicit, never silent: typing a username
+    // clears a stored bearer token (and vice versa), because the operator
+    // named the new identity. Blank-everything keeps a stored bearer but
+    // clears Basic — matching the pre-existing Basic behavior where blank
+    // fields with no stored ciphertext mean "unauthenticated".
+    if (
+      bearerToken &&
+      (basicAuthUsername || basicAuthPassword || preserveExistingBasicAuthPassword)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Use either a bearer token or a username/password pair, not both. Clear one to proceed.",
+        },
+        { status: 400 }
+      );
+    }
   }
+  const wantsBearer =
+    type === "direct_url" &&
+    !basicAuthUsername &&
+    (!!bearerToken || preserveExistingBearerToken);
   // Configuration gate. Since #321 this is the same permission as reaching
   // the microgrid at all: an org manager configures any microgrid in their own
   // org and nothing else. It is a preview of what the BEFORE UPDATE trigger on
@@ -418,6 +473,32 @@ export async function PUT(
     effectiveBasicAuthPassword = decrypted;
   }
 
+  // Same treatment for the bearer token (issue #4): when the operator left
+  // it blank and a ciphertext is on record, decrypt the stored one so the
+  // pre-save test authenticates exactly as the saved config will. A
+  // pre-save test that authenticates differently from the saved config is
+  // worse than no test — it reports green on something that will not run.
+  let effectiveBearerToken: string | undefined = bearerToken;
+  if (wantsBearer && preserveExistingBearerToken) {
+    let decrypted: string | null = null;
+    let decryptErr: unknown = null;
+    try {
+      decrypted = await getEmsBearerTokenForMicrogrid(supabase, microgridId);
+    } catch (err) {
+      decryptErr = err;
+    }
+    if (decryptErr || !decrypted) {
+      return NextResponse.json(
+        {
+          error:
+            "Could not retrieve the existing token to test the connection. Re-enter the bearer token to proceed.",
+        },
+        { status: 500 }
+      );
+    }
+    effectiveBearerToken = decrypted;
+  }
+
   const candidateConfig: OpenEmsClientConfig =
     type === "cloud_aws"
       ? {
@@ -432,6 +513,7 @@ export async function PUT(
           url: backendUrl.trim(),
           username: basicAuthUsername ?? null,
           password: effectiveBasicAuthPassword ?? null,
+          token: effectiveBearerToken ?? null,
         };
 
   // ── Step 5: Edge-ID validation (#112) ─────────────────────────────────────
@@ -570,6 +652,24 @@ export async function PUT(
     encryptedBasicAuthPassword = data as string;
   }
 
+  // Same for the bearer token (issue #4). Encrypted through the same DEK
+  // path — fn_ems_encrypt_secret encrypts a string, whatever it is.
+  let encryptedBearerToken: string | null = null;
+  if (wantsBearer && bearerToken && !preserveExistingBearerToken) {
+    const { data, error } = await supabase.rpc("fn_ems_encrypt_secret", {
+      p_plaintext: bearerToken,
+    });
+    if (error || !data) {
+      return NextResponse.json(
+        {
+          error: `Failed to encrypt token: ${error?.message ?? "no data"}`,
+        },
+        { status: 500 }
+      );
+    }
+    encryptedBearerToken = data as string;
+  }
+
   // Build the UPDATE payload. When preserving the secret we OMIT the
   // ems_aws_secret_access_key_encrypted column entirely so the existing
   // ciphertext is left untouched. Omitting the column also prevents a
@@ -596,6 +696,15 @@ export async function PUT(
         ? encryptedBasicAuthPassword
         : null;
   }
+  if (!preserveExistingBearerToken) {
+    // Same rule for the bearer token (issue #4): naming a new identity
+    // (Basic fields, cloud_aws, or blank-everything without a stored token
+    // to keep) clears it. Only an explicit new token — or a blank token
+    // with no competing identity, handled by the preserve branch — keeps
+    // bearer authentication in force.
+    updatePayload.ems_bearer_token_encrypted =
+      wantsBearer && bearerToken ? encryptedBearerToken : null;
+  }
 
   const { error: updErr } = await supabase
     .from("microgrids")
@@ -616,7 +725,11 @@ export async function PUT(
       {
         error: scrubSecretValues(
           `Failed to persist config: ${updErr.message}`,
-          { secretAccessKey, password: effectiveBasicAuthPassword }
+          {
+            secretAccessKey,
+            password: effectiveBasicAuthPassword,
+            extra: effectiveBearerToken ? [effectiveBearerToken] : undefined,
+          }
         ),
       },
       { status: 500 }
@@ -774,7 +887,11 @@ export async function PUT(
           duration_ms: Date.now() - startedAt,
           at: new Date().toISOString(),
         },
-        { secretAccessKey, password: effectiveBasicAuthPassword }
+        {
+          secretAccessKey,
+          password: effectiveBasicAuthPassword,
+          extra: effectiveBearerToken ? [effectiveBearerToken] : undefined,
+        }
       )
     )
   );

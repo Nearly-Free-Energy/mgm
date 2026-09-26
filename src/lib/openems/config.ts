@@ -69,6 +69,21 @@ export async function getMicrogridEmsConfig(
   }
 
   if (mg.ems_type === "direct_url") {
+    // Issue #4: a stored Keycloak bearer token wins over Basic. There is no
+    // plaintext "has token" signal (unlike the Basic username), so probe
+    // presence with a cheap COUNT rather than selecting the ciphertext —
+    // the value itself is only ever read through the decrypt getter below.
+    const hasBearerToken = await hasEmsBearerToken(supabase, microgridId);
+    if (hasBearerToken) {
+      const token = await getEmsBearerTokenForMicrogrid(supabase, microgridId);
+      if (token) {
+        return { type: "direct_url", url: mg.ems_backend_url, token };
+      }
+      // Ciphertext vanished between the probe and the decrypt (concurrent
+      // reconfigure): fall through to the Basic/unauthenticated path rather
+      // than failing the whole resolution.
+    }
+
     // #327. No username stored → unauthenticated backend, exactly as before,
     // and no decrypt is attempted. The username is the cheap plaintext signal
     // that credentials exist; reaching for the password when there is no user
@@ -190,6 +205,57 @@ export async function getEmsBasicAuthPasswordForMicrogrid(
 }
 
 /**
+ * Whether a Keycloak bearer token is stored for the microgrid (issue #4).
+ *
+ * Presence probe, not a value read: a COUNT on the ciphertext column answers
+ * yes/no without the ciphertext (or its decrypt) entering this scope. Used
+ * by `getMicrogridEmsConfig` to decide whether a decrypt round trip is
+ * warranted — the bearer analogue of #327's username signal.
+ */
+export async function hasEmsBearerToken(
+  authorizedClient: SupabaseClient,
+  microgridId: string
+): Promise<boolean> {
+  const { count, error } = await authorizedClient
+    .from("microgrids")
+    .select("id", { count: "exact", head: true })
+    .eq("id", microgridId)
+    .not("ems_bearer_token_encrypted", "is", null);
+  if (error) {
+    throw new OpenEmsError(
+      `Failed to check for a stored bearer token: ${error.message}`,
+      "OPENEMS_INVALID_CONFIG",
+      500,
+      error
+    );
+  }
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Decrypt a microgrid's stored Keycloak bearer token (issue #4).
+ *
+ * Same contract, same ordering, same reasons as the two getters above —
+ * it shares their implementation precisely so the ordering cannot drift
+ * between them.
+ *
+ * `fn_get_ems_bearer_token` is `service_role`-only (00061, following 00049's
+ * treatment of the older secrets), so there is no path that reaches the
+ * plaintext on a user-session client.
+ */
+export async function getEmsBearerTokenForMicrogrid(
+  authorizedClient: SupabaseClient,
+  microgridId: string
+): Promise<string | null> {
+  return authorizeThenDecrypt(
+    authorizedClient,
+    microgridId,
+    "fn_get_ems_bearer_token",
+    "OpenEMS bearer token"
+  );
+}
+
+/**
  * The shared body of the two exported getters. Private on purpose.
  *
  * ── The ordering here is load-bearing. Do not reorder. ───────────────────
@@ -204,7 +270,10 @@ export async function getEmsBasicAuthPasswordForMicrogrid(
 async function authorizeThenDecrypt(
   authorizedClient: SupabaseClient,
   microgridId: string,
-  rpc: "fn_get_ems_secret" | "fn_get_ems_basic_auth_password",
+  rpc:
+    | "fn_get_ems_secret"
+    | "fn_get_ems_basic_auth_password"
+    | "fn_get_ems_bearer_token",
   label: string
 ): Promise<string | null> {
   // ── Step 1: authorization. RLS on `microgrids` decides visibility. ──────
@@ -229,9 +298,9 @@ async function authorizeThenDecrypt(
   // ── Step 3: decrypt only. ──────────────────────────────────────────────
   //
   // Imported lazily so that SUPABASE_SERVICE_ROLE_KEY is only a hard
-  // requirement for surfaces that actually decrypt. `@/lib/supabase/service`
-  // throws at module load when the key is unset; an eager import would make
-  // every page that merely *reads* EMS config fail to boot without it.
+  // requirement for surfaces that actually decrypt: the factory throws when
+  // called without the key, and an eager import would make every page that
+  // merely *reads* EMS config fail at request time without it.
   const { createServiceClient } = await import("@/lib/supabase/service");
   const { data: secret, error: secretErr } = await createServiceClient().rpc(
     rpc,

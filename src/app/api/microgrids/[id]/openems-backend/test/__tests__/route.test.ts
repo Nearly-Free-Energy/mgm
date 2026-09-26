@@ -125,6 +125,7 @@ describe("POST openems-backend/test", () => {
       secretAccessKey: null,
       basicAuthUsername: null,
       basicAuthPassword: null,
+      bearerToken: null,
     });
     expect(mocks.dispose).toHaveBeenCalledTimes(1);
   });
@@ -169,6 +170,7 @@ describe("POST openems-backend/test", () => {
       secretAccessKey: null,
       basicAuthUsername: "openems",
       basicAuthPassword: "stored-secret",
+      bearerToken: null,
     });
   });
 
@@ -197,6 +199,35 @@ describe("POST openems-backend/test", () => {
       secretAccessKey: null,
       basicAuthUsername: null,
       basicAuthPassword: null,
+      bearerToken: null,
+    });
+  });
+
+  it("fills an omitted bearer token from the stored config", async () => {
+    mocks.getEmsConfig.mockResolvedValue({
+      type: "direct_url",
+      url: "http://localhost:8075",
+      token: "stored-bearer",
+    });
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: true, edgeCount: 1, edges: [] },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(mocks.testConnection).toHaveBeenCalledWith(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      region: null,
+      accessKeyId: null,
+      secretAccessKey: null,
+      basicAuthUsername: null,
+      basicAuthPassword: null,
+      bearerToken: "stored-bearer",
     });
   });
 });

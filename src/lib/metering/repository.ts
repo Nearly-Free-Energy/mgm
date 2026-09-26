@@ -158,4 +158,6 @@ export type StoredConnectionCandidate = {
   secretAccessKey?: string | null;
   basicAuthUsername?: string | null;
   basicAuthPassword?: string | null;
+  /** Keycloak bearer token (issue #4). Mutually exclusive with Basic. */
+  bearerToken?: string | null;
 };

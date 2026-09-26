@@ -63,6 +63,32 @@ export class BasicAuth implements OpenEmsAuth {
   }
 }
 
+export class BearerAuth implements OpenEmsAuth {
+  /**
+   * Keycloak (or otherwise-issued) bearer token for `direct_url` backends
+   * whose dedicated MGM account authenticates with a token rather than an
+   * HTTP Basic pair (issue #4). The token travels in memory only: callers
+   * resolve it from encrypted storage per request and must never log it.
+   */
+  constructor(private readonly token: string) {}
+
+  resolveUrl(baseUrl: string): string {
+    return appendJsonRpcPath(baseUrl);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async apply(_request: {
+    url: string;
+    method: string;
+    body: string;
+  }): Promise<Record<string, string>> {
+    return {
+      Authorization: `Bearer ${this.token}`,
+      "Content-Type": "application/json",
+    };
+  }
+}
+
 export class SigV4Auth implements OpenEmsAuth {
   constructor(
     private readonly creds: {

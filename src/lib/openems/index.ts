@@ -1,6 +1,6 @@
 import { OpenEmsError } from "./errors";
 import { OpenEmsClient } from "./client";
-import { appendJsonRpcPath, BasicAuth, SigV4Auth } from "./auth";
+import { appendJsonRpcPath, BasicAuth, BearerAuth, SigV4Auth } from "./auth";
 
 /**
  * Configuration for constructing an OpenEMS client.
@@ -15,8 +15,9 @@ import { appendJsonRpcPath, BasicAuth, SigV4Auth } from "./auth";
  * an OpenEMS B2B endpoint. Requires IAM access key + region.
  *
  * `direct_url`: HTTP POST to an OpenEMS B2B REST endpoint, with optional HTTP
- * Basic credentials. #101 shipped this mode with no auth fields and directed
- * authenticated self-hosted backends at `cloud_aws` behind a Lambda proxy;
+ * Basic credentials (#327) or a bearer token (issue #4, e.g. Keycloak).
+ * #101 shipped this mode with no auth fields and directed authenticated
+ * self-hosted backends at `cloud_aws` behind a Lambda proxy;
  * #327 widened it, because an operator running OpenEMS Backend with the
  * REST/JSON-RPC API enabled gets an authenticated endpoint by default and
  * asking them to stand up a Lambda to reach it is infrastructure work for a
@@ -42,6 +43,13 @@ export type OpenEmsClientConfig =
       username?: string | null;
       /** HTTP Basic password, plaintext at this boundary. Optional. */
       password?: string | null;
+      /**
+       * Bearer token (e.g. Keycloak), plaintext at this boundary. Optional.
+       * Mutually exclusive with the Basic pair — routes validate this, and
+       * the factory prefers the token when both are somehow present, because
+       * the dedicated token account is the narrower identity.
+       */
+      token?: string | null;
     };
 
 /**
@@ -77,15 +85,20 @@ export function createOpenEmsClient(config: OpenEmsClientConfig): OpenEmsClient 
     );
   }
 
-  // direct_url. Credentials are optional (#327): with both present the client
-  // sends HTTP Basic, with neither it behaves exactly as it did before.
+  // direct_url. Credentials are optional (#327): a bearer token wins when
+  // present (the dedicated token account is the narrower identity), then
+  // the Basic pair, then unauthenticated — exactly as before.
   //
-  // Requiring BOTH rather than either is deliberate. A username with no
-  // password would send `Basic dXNlcjo=` — a well-formed header carrying an
-  // empty password — and the backend would reject it as bad credentials
-  // rather than as missing ones, sending the operator to check the password
-  // they never set. A half-filled form is a configuration error and belongs
-  // in the save route's validation, not in a header.
+  // Requiring BOTH Basic fields rather than either is deliberate. A username
+  // with no password would send `Basic dXNlcjo=` — a well-formed header
+  // carrying an empty password — and the backend would reject it as bad
+  // credentials rather than as missing ones, sending the operator to check
+  // the password they never set. A half-filled form is a configuration error
+  // and belongs in the save route's validation, not in a header.
+  if (config.token) {
+    return new OpenEmsClient(config.url, new BearerAuth(config.token));
+  }
+
   if (config.username && config.password) {
     return new OpenEmsClient(
       config.url,

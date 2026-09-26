@@ -104,6 +104,7 @@ export async function POST(
       asText(body.basicAuthUsername) ?? storedDirect?.username ?? null,
     basicAuthPassword:
       asText(body.basicAuthPassword) ?? storedDirect?.password ?? null,
+    bearerToken: asText(body.bearerToken) ?? storedDirect?.token ?? null,
   };
 
   try {

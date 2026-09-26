@@ -105,6 +105,7 @@ function mgSelectHandler(
     ems_type?: "cloud_aws" | "direct_url" | null;
     ems_aws_secret_access_key_encrypted?: string | null;
     ems_basic_auth_password_encrypted?: string | null;
+    ems_bearer_token_encrypted?: string | null;
   } | null
 ) {
   return () => ({
@@ -907,6 +908,125 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
     });
   });
 
+  // ── Issue #4: Keycloak bearer token on direct_url ─────────────────────────
+  describe("direct_url bearer token", () => {
+    it("rejects a bearer token mixed with Basic credentials (400)", async () => {
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: "https://ems.example/rest",
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+          basicAuthPassword: "s3cret",
+          bearerToken: "keycloak-abc",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/either a bearer token or/i);
+    });
+
+    it("persists the ENCRYPTED token and clears Basic columns", async () => {
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: "https://ems.example/rest",
+          known_edge_ids: [],
+          bearerToken: "keycloak-abc",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      // Ciphertext from fn_ems_encrypt_secret, never the plaintext.
+      expect(sink.payload?.ems_bearer_token_encrypted).toBe("\\x01020304");
+      expect(JSON.stringify(sink.payload)).not.toContain("keycloak-abc");
+      expect(mockRpc).toHaveBeenCalledWith("fn_ems_encrypt_secret", {
+        p_plaintext: "keycloak-abc",
+      });
+      // Naming a new identity clears the old one.
+      expect(sink.payload?.ems_basic_auth_username).toBeNull();
+      expect(sink.payload?.ems_basic_auth_password_encrypted).toBeNull();
+    });
+
+    it("OMITS the token column when blank and a ciphertext is on record (preserve)", async () => {
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_bearer_token_encrypted: "\\xDEADBEEF",
+        })
+      );
+      registerFrom(billingPeriodsHandler([]));
+      // getEmsBearerTokenForMicrogrid re-reads the row on the user client
+      // before decrypting — that read is the authorization step.
+      registerFrom(mgSelectHandler({ id: MG_ID, name: MG_NAME }));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: "https://ems.example/rest",
+          known_edge_ids: [],
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      // ABSENT, not null — setting it to null would wipe the stored token.
+      expect(sink.payload).not.toHaveProperty("ems_bearer_token_encrypted");
+    });
+
+    it("clears a stored token when switching to Basic explicitly", async () => {
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_bearer_token_encrypted: "\\xDEADBEEF",
+        })
+      );
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: "https://ems.example/rest",
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+          basicAuthPassword: "s3cret",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      // Typing the new identity clears the old one — never silent.
+      expect(sink.payload?.ems_bearer_token_encrypted).toBeNull();
+      expect(sink.payload?.ems_basic_auth_username).toBe("openems");
+    });
+  });
 });
 
 // Silence `periods` unused-warning when linter is strict about top-level lets.

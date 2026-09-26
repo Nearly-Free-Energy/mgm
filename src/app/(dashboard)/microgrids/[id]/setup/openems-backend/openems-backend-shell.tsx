@@ -46,6 +46,13 @@ type MicrogridProps = {
    * needs to know whether "leave blank to keep" is a meaningful offer.
    */
   ems_has_basic_auth_password: boolean;
+  /**
+   * Whether a Keycloak bearer token is on record. Deliberately a boolean —
+   * same rule as the Basic password above: the form only needs to know
+   * whether "leave blank to keep" is a meaningful offer. Optional so
+   * existing callers keep working; the page passes the real value.
+   */
+  ems_has_bearer_token?: boolean;
   ems_known_edge_ids: string[];
   ems_last_discover_at: string | null;
   ems_last_discover_status: string | null;
@@ -152,6 +159,9 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   );
   const [basicAuthPassword, setBasicAuthPassword] = React.useState<string>("");
   const hasStoredBasicAuthPassword = microgrid.ems_has_basic_auth_password;
+  // Bearer token (issue #4): typed value only, never the stored secret.
+  const [bearerToken, setBearerToken] = React.useState<string>("");
+  const hasStoredBearerToken = microgrid.ems_has_bearer_token ?? false;
 
   // Known edge IDs input state.
   // Prefill logic (3 cases, pinned in #112):
@@ -268,6 +278,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
     setSecretAccessKey("");
     setBasicAuthUsername(microgrid.ems_basic_auth_username ?? "");
     setBasicAuthPassword("");
+    setBearerToken("");
     // Prefill known edge IDs from the saved list (case 2 + 3 above).
     setKnownEdgeIds(microgrid.ems_known_edge_ids.join(", "));
     setIsEditing(true);
@@ -308,6 +319,10 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       // blank field means "keep the stored one" rather than "clear it".
       if (basicAuthPassword && basicAuthPassword.length > 0) {
         base.basicAuthPassword = basicAuthPassword;
+      }
+      // Same rule for the bearer token (issue #4): typed values only.
+      if (bearerToken && bearerToken.trim().length > 0) {
+        base.bearerToken = bearerToken;
       }
       return base;
     }
@@ -706,6 +721,20 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                   : "—"}
               </p>
             </div>
+            {microgrid.ems_type === "direct_url" && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Authentication
+                </p>
+                <p className="mt-1 font-mono text-xs text-foreground">
+                  {microgrid.ems_has_bearer_token
+                    ? "Bearer token"
+                    : microgrid.ems_basic_auth_username
+                      ? `Username (basic): ${microgrid.ems_basic_auth_username}`
+                      : "None"}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Right column */}
@@ -918,6 +947,39 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               {hasStoredBasicAuthPassword && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   Leave blank to keep the current password.
+                </p>
+              )}
+            </div>
+            {/* Bearer token (issue #4): Keycloak token for the dedicated MGM
+                account. Mutually exclusive with the Basic pair above — the
+                save route rejects a request naming both. */}
+            <div>
+              <label htmlFor="bearer-token" className="mb-1 block text-xs font-medium text-foreground">
+                Bearer token
+              </label>
+              <Input
+                id="bearer-token"
+                type="password"
+                value={bearerToken}
+                onChange={(e) => setBearerToken(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={
+                  hasStoredBearerToken
+                    ? "Leave blank to keep the current token"
+                    : ""
+                }
+                className="font-mono text-xs"
+              />
+              {hasStoredBearerToken ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A token is on record — leave blank to keep it. Typing a
+                  username above switches to Basic and clears it.
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  For backends behind Keycloak: the dedicated account&apos;s
+                  token. Leave blank for Basic or unauthenticated access.
                 </p>
               )}
             </div>

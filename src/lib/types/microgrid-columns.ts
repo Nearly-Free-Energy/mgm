@@ -38,7 +38,9 @@ export const MICROGRID_PUBLIC_COLUMNS =
 // action.
 export type MicrogridPublic = Omit<
   Microgrid,
-  "ems_aws_secret_access_key_encrypted" | "ems_basic_auth_password_encrypted"
+  | "ems_aws_secret_access_key_encrypted"
+  | "ems_basic_auth_password_encrypted"
+  | "ems_bearer_token_encrypted"
 >;
 
 // Customerapp-boundary subset (#257). The full `MICROGRID_PUBLIC_COLUMNS`

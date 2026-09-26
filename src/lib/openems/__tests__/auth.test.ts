@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BasicAuth, SigV4Auth } from "../auth";
+import { BasicAuth, BearerAuth, SigV4Auth } from "../auth";
 
 // Deterministic test credentials (canonical AWS example values)
 const TEST_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
@@ -235,5 +235,43 @@ describe("SigV4Auth", () => {
     expect(headers.Authorization).toContain(
       `Credential=${TEST_ACCESS_KEY_ID}/${TODAY_YYYYMMDD}/eu-west-1/lambda/aws4_request`
     );
+  });
+});
+
+describe("BearerAuth", () => {
+  const auth = new BearerAuth("keycloak-token-abc123");
+
+  it("resolveUrl appends /jsonrpc to baseUrl", () => {
+    expect(auth.resolveUrl("http://localhost:8075")).toBe(
+      "http://localhost:8075/jsonrpc"
+    );
+  });
+
+  it("apply returns an Authorization Bearer header and Content-Type", async () => {
+    const headers = await auth.apply({
+      url: "http://localhost:8075/jsonrpc",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(headers).toEqual(
+      expect.objectContaining({
+        Authorization: "Bearer keycloak-token-abc123",
+        "Content-Type": "application/json",
+      })
+    );
+  });
+
+  it("apply returns a plain object (not a Headers instance)", async () => {
+    const headers = await auth.apply({
+      url: "http://localhost:8075/jsonrpc",
+      method: "POST",
+      body: "{}",
+    });
+    expect(headers).not.toBeInstanceOf(Headers);
+    expect(typeof headers).toBe("object");
+    for (const v of Object.values(headers)) {
+      expect(typeof v).toBe("string");
+    }
   });
 });

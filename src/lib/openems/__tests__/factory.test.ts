@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createOpenEmsClient, NoAuth } from "../index";
 import { OpenEmsClient } from "../client";
-import { BasicAuth, SigV4Auth } from "../auth";
+import { BasicAuth, BearerAuth, SigV4Auth } from "../auth";
 import { OpenEmsError } from "../errors";
 
 // Helper: cast the returned client to access the private `auth` field for
@@ -136,6 +136,35 @@ describe("createOpenEmsClient(config)", () => {
       expect(
         getAuth(createOpenEmsClient({ ...base, password: "s3cret" }))
       ).toBeInstanceOf(NoAuth);
+    });
+  });
+
+  describe("type='direct_url' with bearer token (issue #4)", () => {
+    const base = { type: "direct_url" as const, url: "https://ems.example/rest" };
+
+    it("returns a BearerAuth-backed client when a token is present", () => {
+      const client = createOpenEmsClient({ ...base, token: "keycloak-abc" });
+      expect(getAuth(client)).toBeInstanceOf(BearerAuth);
+    });
+
+    it("emits an Authorization Bearer header carrying the token", async () => {
+      const client = createOpenEmsClient({ ...base, token: "keycloak-abc" });
+      const auth = getAuth(client) as BearerAuth;
+      const headers = await auth.apply({ url: base.url, method: "POST", body: "" });
+      expect(headers.Authorization).toBe("Bearer keycloak-abc");
+    });
+
+    it("prefers the token over a Basic pair when both are present", () => {
+      // Mixed state should not occur (routes reject it), but the factory
+      // must resolve it deterministically rather than by accident: the
+      // dedicated token account is the narrower identity.
+      const client = createOpenEmsClient({
+        ...base,
+        username: "openems",
+        password: "s3cret",
+        token: "keycloak-abc",
+      });
+      expect(getAuth(client)).toBeInstanceOf(BearerAuth);
     });
   });
 

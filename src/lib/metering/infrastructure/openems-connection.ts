@@ -100,15 +100,31 @@ function candidateToConfig(
       422
     );
   }
+  const bearerToken =
+    typeof candidate.bearerToken === "string" && candidate.bearerToken.trim()
+      ? candidate.bearerToken
+      : null;
+  if (
+    bearerToken &&
+    (candidate.basicAuthUsername || candidate.basicAuthPassword)
+  ) {
+    throw new MeteringError(
+      "Use either a bearer token or a username/password pair, not both.",
+      "METERING_CONFIGURATION",
+      422
+    );
+  }
   return {
     type: "direct_url",
     url: candidate.backendUrl.trim(),
-    ...(candidate.basicAuthUsername && candidate.basicAuthPassword
-      ? {
-          username: candidate.basicAuthUsername,
-          password: candidate.basicAuthPassword,
-        }
-      : {}),
+    ...(bearerToken
+      ? { token: bearerToken }
+      : candidate.basicAuthUsername && candidate.basicAuthPassword
+        ? {
+            username: candidate.basicAuthUsername,
+            password: candidate.basicAuthPassword,
+          }
+        : {}),
   };
 }
 
@@ -172,8 +188,18 @@ export function createOpenEmsConnection(
 
     async testCandidate(microgridId: string, candidate: StoredConnectionCandidate) {
       // Candidate secrets stay in memory for this call only: built into the
-      // client, never logged, never persisted, never returned.
-      const config = candidateToConfig(candidate);
+      // client, never logged, never persisted, never returned. Validation
+      // failures return results rather than throwing, so callers treat all
+      // outcomes uniformly.
+      let config: OpenEmsClientConfig;
+      try {
+        config = candidateToConfig(candidate);
+      } catch (error) {
+        if (error instanceof MeteringError) {
+          return { ok: false, code: "invalid_config", message: error.message };
+        }
+        throw error;
+      }
       const knownEdgeIds = await repo.getKnownEdgeIds(microgridId);
       return probe(config, knownEdgeIds);
     },

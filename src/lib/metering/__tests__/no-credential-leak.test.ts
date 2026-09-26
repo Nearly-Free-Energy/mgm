@@ -13,6 +13,7 @@ import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 const SECRET_COLUMNS = [
   "ems_aws_secret_access_key_encrypted",
   "ems_basic_auth_password_encrypted",
+  "ems_bearer_token_encrypted",
 ] as const;
 
 function projectedColumns(): string[] {

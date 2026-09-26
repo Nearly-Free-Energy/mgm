@@ -988,3 +988,66 @@ describe("OpenemsBackendShell — metering plugin and test-without-save", () => 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── Issue #4: Keycloak bearer token field on the Direct URL form ──────────
+describe("OpenemsBackendShell — bearer token", () => {
+  function openDirectForm() {
+    render(
+      <OpenemsBackendShell
+        microgrid={BASE_MG}
+        health="not_configured"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4={null}
+        canConfigure={true}
+        emsOperators={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /direct url/i }));
+  }
+
+  it("renders the bearer token field with Keycloak copy", () => {
+    openDirectForm();
+    expect(screen.getByLabelText(/bearer token/i)).toBeDefined();
+    expect(screen.getByText(/dedicated account/i)).toBeDefined();
+  });
+
+  it("shows leave-blank-to-keep copy when a token is on record", () => {
+    render(
+      <OpenemsBackendShell
+        microgrid={{ ...BASE_MG, ems_has_bearer_token: true }}
+        health="not_configured"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4={null}
+        canConfigure={true}
+        emsOperators={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /direct url/i }));
+    expect(screen.getByText(/a token is on record/i)).toBeDefined();
+  });
+
+  it("posts the typed token and omits it when blank", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "success", edgeCount: 0, edges: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    openDirectForm();
+    fireEvent.change(screen.getByLabelText(/backend url/i), {
+      target: { value: "https://ems.example/rest" },
+    });
+    fireEvent.change(screen.getByLabelText(/bearer token/i), {
+      target: { value: "keycloak-abc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /test without saving/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.bearerToken).toBe("keycloak-abc");
+    expect(body).not.toHaveProperty("basicAuthPassword");
+  });
+});
