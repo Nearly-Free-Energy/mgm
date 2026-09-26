@@ -12,7 +12,7 @@
  *   - Discover outcomes: success / auth_failed / unreachable / zero_edges
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ── Factory/client mock ───────────────────────────────────────────────────
@@ -167,7 +167,9 @@ function edgesSelectHandler(rows: { openems_edge_id: string }[]) {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe("PUT /api/microgrids/[id]/openems-backend", () => {
+  afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
+    vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "https://keycloak.example/realms/energy/protocol/openid-connect/token");
     vi.clearAllMocks();
     buildSupabase();
     fromCallIndex = 0;
