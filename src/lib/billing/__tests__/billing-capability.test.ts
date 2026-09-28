@@ -249,7 +249,7 @@ describe("BillingCapability", () => {
 
     const confirmed = await capability.closePeriod(PERIOD_ID, { confirmed: true });
     expect(confirmed).toMatchObject({ ok: true });
-    expect(close).toHaveBeenCalled();
+    expect(close).toHaveBeenCalledWith(PERIOD_ID, true);
   });
 
   it.each([undefined, { confirmed: true }])("blocks closure on summary failure even with confirmation %j", async (input) => {

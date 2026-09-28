@@ -61,6 +61,17 @@ describe("billing write gates", () => {
     expect(await allowed?.json()).toMatchObject({ code: "billing_gate_unavailable" });
   });
 
+  it("microgrid: returns 503 when plugin-state lookup throws", async () => {
+    const row = { id: MG_ID, communities: { org_id: ORG_ID } };
+    const supabase = {
+      ...chain(row),
+      rpc: async () => { throw new Error("database unavailable"); },
+    } as never;
+    const blocked = await billingWriteGateForMicrogrid(supabase, MG_ID);
+    expect(blocked?.status).toBe(503);
+    expect(await blocked?.json()).toMatchObject({ code: "billing_gate_unavailable" });
+  });
+
   it("period: resolves through the period row and gates", async () => {
     const supabase = {
       from: (table: string) => ({

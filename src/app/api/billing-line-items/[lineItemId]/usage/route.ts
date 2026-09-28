@@ -270,7 +270,16 @@ export async function PATCH(
   //   - only end_kwh   → derive usage_kwh = end_kwh - start_kwh
   //   - only usage_kwh → end_kwh = start_kwh + usage_kwh (so generate
   //     engine sees a consistent {start, end, usage} triple)
-  const startKwh = scoped.start_kwh ?? 0;
+  if (scoped.start_kwh === null) {
+    return NextResponse.json(
+      {
+        error: "A starting register reading is required before correcting this bill.",
+        reason: "missing_start_reading",
+      },
+      { status: 409 }
+    );
+  }
+  const startKwh = scoped.start_kwh;
   let nextEnd: number;
 
   if (parsed.usage_kwh !== undefined && parsed.end_kwh !== undefined) {

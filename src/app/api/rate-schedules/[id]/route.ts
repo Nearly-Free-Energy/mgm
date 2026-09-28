@@ -7,7 +7,8 @@ import { validatePayload } from "../route";
 /**
  * PUT /api/rate-schedules/[id]
  *
- * Updates an existing rate schedule by ID.
+ * Creates a new tariff version from an existing schedule. Existing versions
+ * remain unchanged for periods that have already selected them.
  *
  * Request body:
  * {
@@ -19,7 +20,7 @@ import { validatePayload } from "../route";
  * RLS: rate_schedules FOR ALL policy (00002_rls.sql:161) enforces microgrid access
  * via user_can_access_microgrid(). No additional handler-side check needed.
  *
- * Returns the updated RateSchedule row on success (200).
+ * Returns the new RateSchedule row on success (200).
  */
 export async function PUT(
   request: NextRequest,
@@ -51,21 +52,34 @@ export async function PUT(
   const gate = await billingWriteGateForRateSchedule(supabase, id);
   if (gate) return gate;
 
+  const { data: existing, error: lookupError } = await supabase
+    .from("rate_schedules")
+    .select("id, microgrid_id")
+    .eq("id", id)
+    .maybeSingle<{ id: string; microgrid_id: string }>();
+
+  if (lookupError) {
+    return NextResponse.json({ error: "Could not load rate schedule" }, { status: 503 });
+  }
+  if (!existing) {
+    return NextResponse.json({ error: "Rate schedule not found" }, { status: 404 });
+  }
+
   const { data, error } = await supabase
     .from("rate_schedules")
-    .update({
+    .insert({
+      microgrid_id: existing.microgrid_id,
       tiers: tiers as TierConfig[],
       service_charge: service_charge as number,
       tax_rate: tax_rate as number,
     })
-    .eq("id", id)
     .select("*")
     .single();
 
   if (error) {
     if (error.code === "42501" || error.message.includes("row-level security")) {
       return NextResponse.json(
-        { error: "Not authorized to update this rate schedule" },
+        { error: "Not authorized to create a new rate schedule version" },
         { status: 403 }
       );
     }

@@ -4,6 +4,30 @@
 -- include it explicitly when pushing that history (for example, db push
 -- --include-all) so Supabase does not skip it as an out-of-order migration.
 
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
+
+-- Backfill/reconcile any existing overlapping periods before this migration:
+-- accepting them would leave the database able to double bill a day.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM billing_periods a
+    JOIN billing_periods b ON a.microgrid_id = b.microgrid_id AND a.id < b.id
+    WHERE daterange(a.start_date, a.end_date, '[]') &&
+          daterange(b.start_date, b.end_date, '[]')
+  ) THEN
+    RAISE EXCEPTION 'Existing overlapping billing periods must be reconciled before Release 3 migration';
+  END IF;
+END;
+$$;
+
+ALTER TABLE billing_periods
+  ADD CONSTRAINT billing_periods_no_overlap
+  EXCLUDE USING gist (
+    microgrid_id WITH =,
+    daterange(start_date, end_date, '[]') WITH &&
+  );
+
 CREATE OR REPLACE FUNCTION fn_create_billing_period(
   _microgrid_id UUID,
   _start_date DATE,
@@ -53,7 +77,10 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION fn_close_billing_period(_period_id UUID)
+CREATE OR REPLACE FUNCTION fn_close_billing_period(
+  _period_id UUID,
+  _confirmed BOOLEAN DEFAULT FALSE
+)
 RETURNS SETOF billing_periods
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -61,12 +88,41 @@ SET search_path = public
 AS $$
 DECLARE
   v_period billing_periods%ROWTYPE;
+  v_unresolved JSONB;
 BEGIN
+  SELECT * INTO v_period
+  FROM billing_periods
+  WHERE id = _period_id
+    AND status <> 'closed'
+    AND user_can_access_microgrid(microgrid_id)
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Billing period not found, unauthorized, or already closed'
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'householdId', h.id,
+    'householdName', h.display_name,
+    'reason', 'No bill generated for this household in this period.'
+  ) ORDER BY h.display_name), '[]'::jsonb)
+  INTO v_unresolved
+  FROM households h
+  WHERE h.microgrid_id = v_period.microgrid_id
+    AND NOT EXISTS (
+      SELECT 1 FROM billing_line_items li
+      WHERE li.billing_period_id = v_period.id AND li.household_id = h.id
+    );
+
+  IF jsonb_array_length(v_unresolved) > 0 AND NOT _confirmed THEN
+    RAISE EXCEPTION 'Period has unresolved households; explicit confirmation required'
+      USING ERRCODE = '23514';
+  END IF;
+
   UPDATE billing_periods bp
   SET status = 'closed', closed_at = now()
   WHERE bp.id = _period_id
-    AND bp.status <> 'closed'
-    AND user_can_access_microgrid(bp.microgrid_id)
   RETURNING bp.* INTO v_period;
 
   IF NOT FOUND THEN
@@ -77,7 +133,8 @@ BEGIN
   INSERT INTO billing_audit_log (
     billing_period_id, event_type, actor_user_id, actor_kind, details
   ) VALUES (
-    v_period.id, 'period_closed', auth.uid(), 'human', '{}'::jsonb
+    v_period.id, 'period_closed', auth.uid(), 'human',
+    jsonb_build_object('confirmed', _confirmed, 'unresolved', v_unresolved)
   );
 
   RETURN NEXT v_period;
@@ -86,5 +143,5 @@ $$;
 
 REVOKE ALL ON FUNCTION fn_create_billing_period(UUID, DATE, DATE) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION fn_create_billing_period(UUID, DATE, DATE) TO authenticated;
-REVOKE ALL ON FUNCTION fn_close_billing_period(UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION fn_close_billing_period(UUID) TO authenticated;
+REVOKE ALL ON FUNCTION fn_close_billing_period(UUID, BOOLEAN) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION fn_close_billing_period(UUID, BOOLEAN) TO authenticated;

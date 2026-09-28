@@ -23,11 +23,13 @@ import { NextRequest } from "next/server";
 // ─── Shared mock state ────────────────────────────────────────────────────────
 
 const mockSingle = vi.fn();
-const mockSelect = vi.fn(() => ({ single: mockSingle }));
+const mockMaybeSingle = vi.fn();
+const mockSelect = vi.fn(() => ({ single: mockSingle, eq: () => ({ maybeSingle: mockMaybeSingle }) }));
 const mockUpdate = vi.fn(() => ({ eq: mockEqUpdate }));
 const mockEqUpdate = vi.fn(() => ({ select: mockSelect }));
 const mockInsert = vi.fn(() => ({ select: mockSelect }));
 const mockFrom = vi.fn(() => ({
+  select: mockSelect,
   update: mockUpdate,
   insert: mockInsert,
 }));
@@ -79,13 +81,14 @@ function makePostRequest(body: unknown): NextRequest {
 describe("PUT /api/rate-schedules/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockMaybeSingle.mockResolvedValue({ data: { id: VALID_ID, microgrid_id: MICROGRID_ID }, error: null });
     // Reset chain: update().eq().select().single()
     mockSingle.mockReset();
-    mockSelect.mockReturnValue({ single: mockSingle });
+    mockSelect.mockReturnValue({ single: mockSingle, eq: () => ({ maybeSingle: mockMaybeSingle }) });
     mockEqUpdate.mockReturnValue({ select: mockSelect });
     mockUpdate.mockReturnValue({ eq: mockEqUpdate });
     mockInsert.mockReturnValue({ select: mockSelect });
-    mockFrom.mockReturnValue({ update: mockUpdate, insert: mockInsert });
+    mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate, insert: mockInsert });
   });
 
   // (a) PUT 200 happy path
@@ -106,12 +109,13 @@ describe("PUT /api/rate-schedules/[id]", () => {
 
     // Supabase should have been called correctly
     expect(mockFrom).toHaveBeenCalledWith("rate_schedules");
-    expect(mockUpdate).toHaveBeenCalledWith({
+    expect(mockInsert).toHaveBeenCalledWith({
+      microgrid_id: MICROGRID_ID,
       tiers: CONTIGUOUS_TIERS,
       service_charge: 2000,
       tax_rate: 0.18,
     });
-    expect(mockEqUpdate).toHaveBeenCalledWith("id", VALID_ID);
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   // (b) PUT 400 non-contiguous tiers
@@ -154,11 +158,11 @@ describe("POST /api/rate-schedules", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSingle.mockReset();
-    mockSelect.mockReturnValue({ single: mockSingle });
+    mockSelect.mockReturnValue({ single: mockSingle, eq: () => ({ maybeSingle: mockMaybeSingle }) });
     mockEqUpdate.mockReturnValue({ select: mockSelect });
     mockUpdate.mockReturnValue({ eq: mockEqUpdate });
     mockInsert.mockReturnValue({ select: mockSelect });
-    mockFrom.mockReturnValue({ update: mockUpdate, insert: mockInsert });
+    mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate, insert: mockInsert });
   });
 
   // (d) POST 200 creation happy path
@@ -241,10 +245,10 @@ describe("Historical invariant: closed period tier_breakdown is unchanged after 
     ];
 
     mockSingle.mockReset();
-    mockSelect.mockReturnValue({ single: mockSingle });
+    mockSelect.mockReturnValue({ single: mockSingle, eq: () => ({ maybeSingle: mockMaybeSingle }) });
     mockEqUpdate.mockReturnValue({ select: mockSelect });
     mockUpdate.mockReturnValue({ eq: mockEqUpdate });
-    mockFrom.mockReturnValue({ update: mockUpdate, insert: mockInsert });
+    mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate, insert: mockInsert });
 
     mockSingle.mockResolvedValueOnce({
       data: {
@@ -266,8 +270,10 @@ describe("Historical invariant: closed period tier_breakdown is unchanged after 
     });
     const res = await PUT(req, { params: Promise.resolve({ id: VALID_ID }) });
 
-    // Rate schedule was updated successfully
+    // Editing creates a new schedule version; old period references stay valid.
     expect(res.status).toBe(200);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalledWith(expect.objectContaining({ microgrid_id: MICROGRID_ID, tiers: updatedTiers }));
 
     // Step 3: The closed line item's tier_breakdown snapshot is UNCHANGED.
     // The PUT route only writes to rate_schedules — it does NOT touch billing_line_items.

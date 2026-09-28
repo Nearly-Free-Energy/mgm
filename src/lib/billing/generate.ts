@@ -343,7 +343,7 @@ export async function runGenerationFor(
 
     const { data: pinnedScheduleId, error: pinError } = await supabase.rpc(
       "fn_pin_billing_period_rate_schedule",
-      { p_period_id: billingPeriod.id }
+      { _period_id: billingPeriod.id }
     );
     if (pinError || !pinnedScheduleId) {
       return {
@@ -421,6 +421,7 @@ export async function runGenerationFor(
     componentId: string;
   };
   const householdToDevice = new Map<string, ResolvedDevice | null>();
+  const householdEndDevice = new Map<string, string>();
   const householdAssignmentErrors = new Map<string, string>();
 
   for (const h of householdsAll) {
@@ -430,6 +431,18 @@ export async function runGenerationFor(
     let primaryHD: HouseholdRow["household_devices"][number] | undefined =
       primaryAssignments[0];
     if (params.requireEffectiveDatedAssignments && primaryAssignments.length > 0) {
+      // A manually reconciled replacement period still belongs to the meter
+      // assigned at its end; preserve that identity for later register lookup.
+      const endAssignment = primaryAssignments.find(
+        (assignment) =>
+          Boolean(assignment.effective_from) &&
+          assignment.effective_from! <= billingPeriod.end_date &&
+          (assignment.effective_to == null ||
+            assignment.effective_to > billingPeriod.end_date)
+      );
+      if (endAssignment?.devices?.id) {
+        householdEndDevice.set(h.id, endAssignment.devices.id);
+      }
       // Assignments are half-open DATE ranges [effective_from, effective_to),
       // while billing_periods stores inclusive end dates. Historical links
       // outside this period must not make a later or earlier period ambiguous.
@@ -719,7 +732,7 @@ export async function runGenerationFor(
       // Manual rows can have a device_id (BC2/BC3 toggle metered → manual)
       // OR none (un-metered household). Preserve the metered link if there
       // is one — informational only; the manual reading is authoritative.
-      deviceId = dev?.deviceId ?? null;
+      deviceId = dev?.deviceId ?? householdEndDevice.get(hid) ?? null;
       manualReason = manual.reason ?? null;
     } else if (assignmentError) {
       results.push({

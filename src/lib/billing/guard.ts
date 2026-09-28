@@ -38,12 +38,12 @@ function billingGateUnavailableResponse(): NextResponse {
   );
 }
 
-async function isEnabled(supabase: SupabaseClient, orgId: string): Promise<boolean> {
+async function isEnabled(supabase: SupabaseClient, orgId: string): Promise<boolean | null> {
   try {
     return await isBillingEnabled(supabase, orgId);
   } catch {
     // A write must not proceed when plugin state cannot be verified.
-    return false;
+    return null;
   }
 }
 
@@ -74,6 +74,7 @@ export async function billingWriteGateForMicrogrid(
   }
   if (!orgId) return null;
   const enabled = await isEnabled(supabase, orgId);
+  if (enabled === null) return billingGateUnavailableResponse();
   if (!enabled) return billingDisabledResponse();
   return null;
 }

@@ -163,7 +163,6 @@ export function createSupabaseBillingRepository(
         .from("billing_line_items")
         .select("id, household_id, total_amount")
         .eq("billing_period_id", periodId);
-
       // A failed read is not evidence of an empty, complete period.
       if (householdsError || itemsError || !households || !items) {
         throw new Error("Could not verify billing period completeness.");
@@ -192,11 +191,12 @@ export function createSupabaseBillingRepository(
       };
     },
 
-    async closeBillingPeriod(periodId: string) {
+    async closeBillingPeriod(periodId: string, confirmed: boolean) {
       // The state transition and period_closed audit event commit or roll
       // back together inside the RPC transaction.
       const { data, error } = await supabase.rpc("fn_close_billing_period", {
         _period_id: periodId,
+        _confirmed: confirmed,
       });
       if (error) return { row: null, error: toError(error) };
       const row = Array.isArray(data) ? data[0] : data;

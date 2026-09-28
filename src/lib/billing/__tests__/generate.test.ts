@@ -45,6 +45,7 @@ const FIXTURE = {
   hhP: "dddddddd-dddd-4000-8005-00000000000d",
   periodP: "dddddddd-dddd-4000-8006-00000000000d",
   periodP2: "dddddddd-dddd-4000-8006-00000000001d",
+  periodP3: "dddddddd-dddd-4000-8006-00000000002d",
 };
 
 let alejandroSuperAdmin: {
@@ -237,5 +238,62 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     expect(preview!.tierBreakdown[0].kwh).toBe(178.35);
     expect(preview!.tierBreakdown[0].kwh * 1000).toBe(178350);
     expect(Number.isInteger(preview!.tierBreakdown[0].amount)).toBe(true);
+  });
+
+  it("regenerates a closed period at its original tariff after a new version is added", async () => {
+    const { runGenerationFor } = await import("@/lib/billing/generate");
+    const svc = await serviceClient();
+    const { error: periodError } = await svc.from("billing_periods").insert({
+      id: FIXTURE.periodP3,
+      microgrid_id: FIXTURE.mgP,
+      start_date: "2026-06-01",
+      end_date: "2026-06-30",
+      status: "draft",
+    });
+    expect(periodError).toBeNull();
+
+    const input = {
+      supabase: alejandroSuperAdmin.client,
+      periodId: FIXTURE.periodP3,
+      householdIds: [FIXTURE.hhP],
+      manualReadings: [{
+        householdId: FIXTURE.hhP,
+        startKwh: 10,
+        endKwh: 20,
+        reason: "Pinned tariff regression",
+      }],
+      mode: "write" as const,
+      actorUserId: alejandroSuperAdmin.userId,
+    };
+
+    const first = await runGenerationFor(input);
+    expect("kind" in first && first.kind === "fatal").toBe(false);
+    const { data: initial } = await svc.from("billing_line_items")
+      .select("total_amount")
+      .eq("billing_period_id", FIXTURE.periodP3)
+      .eq("household_id", FIXTURE.hhP)
+      .single();
+    expect(Number(initial?.total_amount)).toBe(1000);
+
+    const { error: closeError } = await svc.from("billing_periods")
+      .update({ status: "closed", closed_at: new Date().toISOString() })
+      .eq("id", FIXTURE.periodP3);
+    expect(closeError).toBeNull();
+    const { error: newTariffError } = await svc.from("rate_schedules").insert({
+      microgrid_id: FIXTURE.mgP,
+      tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 500 }],
+      service_charge: 0,
+      tax_rate: 0,
+    });
+    expect(newTariffError).toBeNull();
+
+    const regenerated = await runGenerationFor(input);
+    expect("kind" in regenerated && regenerated.kind === "fatal").toBe(false);
+    const { data: historical } = await svc.from("billing_line_items")
+      .select("total_amount")
+      .eq("billing_period_id", FIXTURE.periodP3)
+      .eq("household_id", FIXTURE.hhP)
+      .single();
+    expect(Number(historical?.total_amount)).toBe(1000);
   });
 });

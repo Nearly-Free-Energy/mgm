@@ -50,6 +50,7 @@ const PERIOD_1: BillingPeriod = {
   created_at: "2026-02-01T00:00:00Z",
   closed_at: "2026-03-01T00:00:00Z",
   timezone: "UTC",
+  rate_schedule_id: null,
 };
 
 const PERIOD_2: BillingPeriod = {
@@ -61,6 +62,7 @@ const PERIOD_2: BillingPeriod = {
   created_at: "2026-03-01T00:00:00Z",
   closed_at: null,
   timezone: "UTC",
+  rate_schedule_id: null,
 };
 
 const SUMMARIES = {

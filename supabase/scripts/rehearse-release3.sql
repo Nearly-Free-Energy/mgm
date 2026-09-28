@@ -1,6 +1,7 @@
 -- supabase/scripts/rehearse-release3.sql
 -- Release 3 (issue #5, review P1) rehearsal: complete operator billing
--- workflow against the pilot-upgraded schema (00064 bridge applied).
+-- workflow against the pilot-upgraded schema (00064 bridge and Release 3
+-- safety migrations applied).
 --
 -- Run: psql "$PILOT_DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-release3.sql
 --   (e.g. PILOT_DB_URL=postgresql://postgres:postgres@127.0.0.1:56422/postgres)
@@ -16,7 +17,7 @@
 --      audit row appended with previous snapshot details)
 --   4. manual paid via fn_apply_payment_event (paid_at set, payment_events row)
 --   5. invoice numbering via fn_next_invoice_number (per-community sequence)
---   6. operator close (UPDATE status) + post-close correction attempt logged
+--   6. operator close through the audited RPC + post-close correction logged
 --      with period_was_closed audit hint
 --   7. audit reads (billing_audit_log + payment_events scoped joins)
 --
@@ -57,7 +58,7 @@ BEGIN
     email_change_token_new, recovery_token
   ) VALUES (
     '00000000-0000-0000-0000-000000000000', v_user, 'authenticated',
-    'authenticated', 'release3-rehearsal@test.local', 'x', now(),
+    'authenticated', 'release3-rehearsal-' || v_user::text || '@test.local', 'x', now(),
     '{}', '{}', now(), now(), '', '', '', ''
   );
   INSERT INTO user_roles(user_id, role, scope_type, scope_id)
@@ -187,8 +188,16 @@ BEGIN
   RAISE NOTICE 'OK: per-community invoice sequence advances';
 
   -- ── 7. Close period + post-close correction audit ──────────────────────
-  UPDATE billing_periods SET status = 'closed', closed_at = now()
-  WHERE id = v_period;
+  PERFORM fn_close_billing_period(v_period, false);
+  IF NOT EXISTS (
+    SELECT 1 FROM billing_audit_log
+    WHERE billing_period_id = v_period
+      AND event_type = 'period_closed'
+      AND actor_user_id = v_user
+      AND details->>'confirmed' = 'false'
+  ) THEN
+    RAISE EXCEPTION 'period close missing actor/confirmation audit';
+  END IF;
 
   SELECT * INTO v_item FROM fn_record_line_item_with_audit(
     v_period, v_household, NULL,

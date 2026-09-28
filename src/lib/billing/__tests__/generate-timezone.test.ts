@@ -77,6 +77,7 @@ function makeSupabase(opts: {
           end_date: "2026-04-30",
           status: opts.periodStatus ?? "draft",
           timezone: opts.periodTimezone,
+          rate_schedule_id: "aaaaaaaa-aaaa-4000-8003-000000000355",
         },
         error: null,
       },

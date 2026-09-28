@@ -236,6 +236,26 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 
+  it("records the end-of-period meter on a manual replacement reconciliation", async () => {
+    const { supabase, rpc } = makeSupabase(replacementHistory, {
+      startDate: "2026-09-01",
+      endDate: "2026-09-30",
+    });
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "write",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      manualReadings: [{ householdId: HH_UNMETERED, startKwh: 100, endKwh: 110 }],
+    });
+    expect(isRunGenerationFatal(out)).toBe(false);
+    expect(rpc).toHaveBeenCalledWith(
+      "fn_record_line_item_with_audit",
+      expect.objectContaining({ _device_id: NEW_DEVICE_ID })
+    );
+  });
+
   it("MGM review rejects a primary assignment that starts inside the period", async () => {
     const { supabase, rpc } = makeSupabase([{
       role: "primary_consumption_meter",

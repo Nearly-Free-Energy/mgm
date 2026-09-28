@@ -457,4 +457,33 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("409: missing start register never becomes zero consumption baseline", async () => {
+    mockLineItemMaybeSingle.mockResolvedValueOnce({
+      data: {
+        id: LI_UUID,
+        device_id: null,
+        start_kwh: null,
+        end_kwh: null,
+        usage_kwh: null,
+        household_id: HH_UUID,
+        billing_period_id: PERIOD_UUID,
+        billing_periods: {
+          id: PERIOD_UUID,
+          microgrid_id: MG_UUID,
+          status: "draft",
+          start_date: "2026-04-01",
+          end_date: "2026-04-30",
+        },
+      },
+      error: null,
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(LI_UUID, { usage_kwh: 10 }), {
+      params: Promise.resolve({ lineItemId: LI_UUID }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).reason).toBe("missing_start_reading");
+    expect(capturedUpdatePayload).toBeNull();
+  });
 });

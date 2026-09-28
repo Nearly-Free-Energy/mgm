@@ -19,6 +19,10 @@ import { NextRequest } from "next/server";
 const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440010";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440020";
 
+vi.mock("@/lib/billing/guard", () => ({
+  billingWriteGateForCommunity: async () => null,
+}));
+
 const mockRevalidatePath = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 

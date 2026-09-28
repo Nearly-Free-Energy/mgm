@@ -510,8 +510,16 @@ export class BillingCapability implements BillingCapabilityContract {
         unresolved: summary.unresolved,
       };
     }
-    const { row, error } = await this.repo.closeBillingPeriod(periodId);
+    const { row, error } = await this.repo.closeBillingPeriod(periodId, confirmed);
     if (error || !row) {
+      if (error?.code === "23514") {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_unresolved_households",
+          message: "Period completeness changed while closing. Refresh the summary and confirm again.",
+        };
+      }
       if (error?.code === "P0002") {
         return {
           ok: false as const,

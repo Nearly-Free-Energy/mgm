@@ -144,7 +144,8 @@ export interface BillingRepository {
   }): Promise<{ row: BillingPeriodRow | null; error: RepositoryError | null }>;
   getPeriodSummary(periodId: string): Promise<PeriodSummary | null>;
   closeBillingPeriod(
-    periodId: string
+    periodId: string,
+    confirmed: boolean
   ): Promise<{ row: BillingPeriodRow | null; error: RepositoryError | null }>;
   recordManualPayment(input: {
     lineItemId: string;
