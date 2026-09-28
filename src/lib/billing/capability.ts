@@ -404,6 +404,14 @@ export class BillingCapability implements BillingCapabilityContract {
       timezone,
     });
     if (error || !row) {
+      if (error?.code === "23P01") {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_period_overlap",
+          message: "This billing period overlaps an existing period for the microgrid.",
+        };
+      }
       if (error && (error.code === "42501" || error.message.includes("row-level security"))) {
         return {
           ok: false as const,
@@ -504,6 +512,14 @@ export class BillingCapability implements BillingCapabilityContract {
     }
     const { row, error } = await this.repo.closeBillingPeriod(periodId);
     if (error || !row) {
+      if (error?.code === "P0002") {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_period_closed",
+          message: "Billing period is already closed or no longer exists.",
+        };
+      }
       if (error && (error.code === "42501" || error.message.includes("row-level security"))) {
         return {
           ok: false as const,

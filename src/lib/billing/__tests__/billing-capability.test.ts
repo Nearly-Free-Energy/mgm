@@ -179,6 +179,23 @@ describe("BillingCapability", () => {
     );
   });
 
+  it("reports overlapping period rejection as a conflict", async () => {
+    const { capability } = setup({
+      createBillingPeriod: async () => ({
+        row: null,
+        error: { code: "23P01", message: "overlap" },
+      }),
+    });
+    const result = await capability.createPeriod({
+      microgrid_id: MG_ID,
+      start_date: "2026-09-15",
+      end_date: "2026-10-14",
+    });
+    expect(result).toMatchObject({
+      ok: false, status: 409, code: "billing_period_overlap",
+    });
+  });
+
   it("rejects an inverted period range", async () => {
     const { capability } = setup();
     const result = await capability.createPeriod({
@@ -268,6 +285,18 @@ describe("BillingCapability", () => {
     });
     const result = await capability.closePeriod(PERIOD_ID, { confirmed: true });
     expect(result).toMatchObject({ ok: false, status: 409, code: "billing_period_closed" });
+  });
+
+  it("maps a concurrent close to an already-closed conflict", async () => {
+    const { capability } = setup({
+      closeBillingPeriod: async () => ({
+        row: null,
+        error: { code: "P0002", message: "already closed" },
+      }),
+    });
+    expect(await capability.closePeriod(PERIOD_ID, { confirmed: true })).toMatchObject({
+      ok: false, status: 409, code: "billing_period_closed",
+    });
   });
 
   it("delegates preview without writing and maps fatal errors", async () => {

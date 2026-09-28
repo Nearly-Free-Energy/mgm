@@ -433,19 +433,13 @@ export function BillingTable({
     // capability (POST /api/billing-periods/[id]/close) — org-scoped,
     // plugin-gated, with the unresolved-household safeguard — never a
     // direct table update, so disabling Billing stops closure with a 409.
-    // The client already warns on unfilled rows; start unconfirmed unless
-    // the operator's own warning banner made the intent explicit, and
-    // escalate after a server 409.
-    const firstAttemptConfirmed = unfilledHouseholdNames.length > 0;
+    // The client warning is informational only. Confirmation is sent only
+    // after the server reports its authoritative unresolved-household list.
     try {
       const res = await fetch(`/api/billing-periods/${period.id}/close`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          closeConfirmedRef.current || firstAttemptConfirmed
-            ? { confirmed: true }
-            : {}
-        ),
+        body: JSON.stringify(closeConfirmedRef.current ? { confirmed: true } : {}),
       });
       const body = (await res.json().catch(() => ({}))) as {
         code?: string;

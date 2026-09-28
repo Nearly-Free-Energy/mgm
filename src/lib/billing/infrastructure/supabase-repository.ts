@@ -134,20 +134,16 @@ export function createSupabaseBillingRepository(
     },
 
     async createBillingPeriod(input) {
-      // The period timezone is stamped by the BEFORE INSERT trigger
-      // (00055) from the parent microgrid; the trigger ignores any
-      // client-supplied value, so no timezone column is sent here.
-      const { data, error } = await supabase
-        .from("billing_periods")
-        .insert({
-          microgrid_id: input.microgridId,
-          start_date: input.startDate,
-          end_date: input.endDate,
-        })
-        .select("id, microgrid_id, start_date, end_date, status, timezone")
-        .single();
+      // Serializes creation per microgrid and rejects overlapping windows in
+      // the database, so simultaneous requests cannot create duplicate spans.
+      const { data, error } = await supabase.rpc("fn_create_billing_period", {
+        _microgrid_id: input.microgridId,
+        _start_date: input.startDate,
+        _end_date: input.endDate,
+      });
       if (error) return { row: null, error: toError(error) };
-      return { row: data as unknown as BillingPeriodRow, error: null };
+      const row = Array.isArray(data) ? data[0] : data;
+      return { row: (row as unknown as BillingPeriodRow) ?? null, error: null };
     },
 
     async getPeriodSummary(periodId: string): Promise<PeriodSummary | null> {
@@ -197,21 +193,20 @@ export function createSupabaseBillingRepository(
     },
 
     async closeBillingPeriod(periodId: string) {
-      const { data, error } = await supabase
-        .from("billing_periods")
-        .update({ status: "closed", closed_at: new Date().toISOString() })
-        .eq("id", periodId)
-        .neq("status", "closed")
-        .select("id, microgrid_id, start_date, end_date, status, timezone")
-        .maybeSingle();
+      // The state transition and period_closed audit event commit or roll
+      // back together inside the RPC transaction.
+      const { data, error } = await supabase.rpc("fn_close_billing_period", {
+        _period_id: periodId,
+      });
       if (error) return { row: null, error: toError(error) };
-      if (!data) {
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) {
         return {
           row: null,
           error: { message: "Billing period not found or already closed." },
         };
       }
-      return { row: data as unknown as BillingPeriodRow, error: null };
+      return { row: row as unknown as BillingPeriodRow, error: null };
     },
 
     async recordManualPayment(input) {

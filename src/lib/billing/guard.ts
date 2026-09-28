@@ -10,11 +10,9 @@
  * New MGM routes (period create/close) go through `composeBilling` instead
  * and never touch this module.
  *
- * Test-mock note: mocked Supabase clients in route unit tests typically stub
- * only `from`/`auth`. If organization resolution throws (e.g. an unstubbed
- * chain), the guard returns `null` and the route's own 404/403 logic runs —
- * so existing tests keep their semantics. In production the client is real
- * and a disabled plugin always yields 409.
+ * A missing target row is left to the route's own 404/403 handling. A query
+ * failure returns 503 so a legacy write can never proceed without verifying
+ * the organization's billing state.
  */
 import "server-only";
 
@@ -33,12 +31,19 @@ export function billingDisabledResponse(): NextResponse {
   );
 }
 
-async function isEnabled(supabase: SupabaseClient, orgId: string): Promise<boolean | null> {
+function billingGateUnavailableResponse(): NextResponse {
+  return NextResponse.json(
+    { error: "Could not verify whether billing is enabled. Retry the request.", code: "billing_gate_unavailable" },
+    { status: 503 }
+  );
+}
+
+async function isEnabled(supabase: SupabaseClient, orgId: string): Promise<boolean> {
   try {
     return await isBillingEnabled(supabase, orgId);
   } catch {
-    // Unstubbed/throwing client (unit-test mocks) — let the route decide.
-    return null;
+    // A write must not proceed when plugin state cannot be verified.
+    return false;
   }
 }
 
@@ -56,19 +61,20 @@ export async function billingWriteGateForMicrogrid(
 ): Promise<NextResponse | null> {
   let orgId: string | null = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("microgrids")
       .select("id, communities!inner(org_id)")
       .eq("id", microgridId)
       .maybeSingle<OrgJoin & { id: string }>();
+    if (error) return billingGateUnavailableResponse();
     const communities = data?.communities;
     orgId = Array.isArray(communities) ? communities[0]?.org_id ?? null : communities?.org_id ?? null;
   } catch {
-    return null;
+    return billingGateUnavailableResponse();
   }
   if (!orgId) return null;
   const enabled = await isEnabled(supabase, orgId);
-  if (enabled === false) return billingDisabledResponse();
+  if (!enabled) return billingDisabledResponse();
   return null;
 }
 
@@ -81,14 +87,15 @@ export async function billingWriteGateForPeriod(
 ): Promise<NextResponse | null> {
   let microgridId: string | null = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("billing_periods")
       .select("id, microgrid_id")
       .eq("id", periodId)
       .maybeSingle<{ id: string; microgrid_id: string }>();
+    if (error) return billingGateUnavailableResponse();
     microgridId = data?.microgrid_id ?? null;
   } catch {
-    return null;
+    return billingGateUnavailableResponse();
   }
   if (!microgridId) return null;
   return billingWriteGateForMicrogrid(supabase, microgridId);
@@ -103,14 +110,15 @@ export async function billingWriteGateForLineItem(
 ): Promise<NextResponse | null> {
   let periodId: string | null = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("billing_line_items")
       .select("id, billing_period_id")
       .eq("id", lineItemId)
       .maybeSingle<{ id: string; billing_period_id: string }>();
+    if (error) return billingGateUnavailableResponse();
     periodId = data?.billing_period_id ?? null;
   } catch {
-    return null;
+    return billingGateUnavailableResponse();
   }
   if (!periodId) return null;
   return billingWriteGateForPeriod(supabase, periodId);
@@ -125,14 +133,15 @@ export async function billingWriteGateForRateSchedule(
 ): Promise<NextResponse | null> {
   let microgridId: string | null = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("rate_schedules")
       .select("id, microgrid_id")
       .eq("id", scheduleId)
       .maybeSingle<{ id: string; microgrid_id: string }>();
+    if (error) return billingGateUnavailableResponse();
     microgridId = data?.microgrid_id ?? null;
   } catch {
-    return null;
+    return billingGateUnavailableResponse();
   }
   if (!microgridId) return null;
   return billingWriteGateForMicrogrid(supabase, microgridId);
@@ -147,17 +156,18 @@ export async function billingWriteGateForCommunity(
 ): Promise<NextResponse | null> {
   let orgId: string | null = null;
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("communities")
       .select("id, org_id")
       .eq("id", communityId)
       .maybeSingle<{ id: string; org_id: string }>();
+    if (error) return billingGateUnavailableResponse();
     orgId = data?.org_id ?? null;
   } catch {
-    return null;
+    return billingGateUnavailableResponse();
   }
   if (!orgId) return null;
   const enabled = await isEnabled(supabase, orgId);
-  if (enabled === false) return billingDisabledResponse();
+  if (!enabled) return billingDisabledResponse();
   return null;
 }

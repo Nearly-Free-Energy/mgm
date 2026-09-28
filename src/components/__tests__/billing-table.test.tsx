@@ -861,12 +861,23 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
     );
   }
 
+  function renderTableWithUnfilledHousehold() {
+    return render(
+      <Wrapper>
+        <BillingTable
+          {...baseProps}
+          lineItems={[{ ...lineItems[0], device_id: null, usage_kwh: null }]}
+        />
+      </Wrapper>
+    );
+  }
+
   async function openDialogAndConfirm() {
     // Header "Close Period" opens the ClosePeriodDialog.
     fireEvent.click(screen.getByRole("button", { name: /^Close Period$/i }));
     // The dialog requires ticking the URA-copy checkbox first.
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /Close period/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Close period|Close anyway/i }));
   }
 
   it("POSTs to the close API unconfirmed and refreshes on 200", async () => {
@@ -884,6 +895,19 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({});
     await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
+  });
+
+  it("does not treat the local unfilled-row warning as server confirmation", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
+    });
+    renderTableWithUnfilledHousehold();
+    await openDialogAndConfirm();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({});
   });
 
   it("409 unresolved → error banner → Retry escalates to confirmed:true", async () => {

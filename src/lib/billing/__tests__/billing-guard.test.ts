@@ -55,9 +55,10 @@ describe("billing write gates", () => {
     expect(allowed).toBeNull();
   });
 
-  it("microgrid: null for unstubbed mock clients (existing route tests)", async () => {
+  it("microgrid: fails closed when its organization lookup throws", async () => {
     const allowed = await billingWriteGateForMicrogrid({ from: vi.fn() } as never, MG_ID);
-    expect(allowed).toBeNull();
+    expect(allowed?.status).toBe(503);
+    expect(await allowed?.json()).toMatchObject({ code: "billing_gate_unavailable" });
   });
 
   it("period: resolves through the period row and gates", async () => {
