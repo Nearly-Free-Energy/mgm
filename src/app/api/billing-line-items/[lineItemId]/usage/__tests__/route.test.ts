@@ -23,7 +23,7 @@ import { calculateTieredCost } from "@/lib/billing/calculations";
 let canAccessMicrogridReturn = true;
 
 const mockLineItemMaybeSingle = vi.fn();
-const mockMeterLinkMaybeSingle = vi.fn();
+const mockMeterLinks = vi.fn();
 const mockRateScheduleMaybeSingle = vi.fn();
 // BC1 (#173): the route now delegates to runGenerationFor instead of doing
 // its own UPDATE. We capture the call args (so the existing assertions on
@@ -45,15 +45,19 @@ function makeFromImpl(): any {
       };
     }
     if (table === "household_devices") {
-      return {
+      const query = {
         select: () => ({
           eq: () => ({
             eq: () => ({
-              maybeSingle: () => mockMeterLinkMaybeSingle(),
+              then: (
+                onFulfilled: (value: unknown) => unknown,
+                onRejected?: (reason: unknown) => unknown
+              ) => Promise.resolve(mockMeterLinks()).then(onFulfilled, onRejected),
             }),
           }),
         }),
       };
+      return query;
     }
     if (table === "rate_schedules") {
       return {
@@ -161,6 +165,10 @@ vi.mock("@/lib/auth/access", () => ({
   currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
 }));
 
+vi.mock("@/lib/billing/guard", () => ({
+  billingWriteGateForMicrogrid: async () => null,
+}));
+
 const LI_UUID = "660e8400-e29b-41d4-a716-446655440111";
 const HH_UUID = "660e8400-e29b-41d4-a716-446655440222";
 const PERIOD_UUID = "660e8400-e29b-41d4-a716-446655440333";
@@ -214,11 +222,13 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
           id: PERIOD_UUID,
           microgrid_id: MG_UUID,
           status: "draft",
+          start_date: "2026-04-01",
+          end_date: "2026-04-30",
         },
       },
       error: null,
     });
-    mockMeterLinkMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mockMeterLinks.mockResolvedValue({ data: [], error: null });
     mockRateScheduleMaybeSingle.mockResolvedValue({
       data: FIXTURE_RATE_SCHEDULE,
       error: null,
@@ -321,8 +331,8 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     // Belt-and-braces: even when the line item itself has no device_id,
     // a household-level meter link blocks manual edit. The meter link
     // would be filled in on the next Refresh Readings.
-    mockMeterLinkMaybeSingle.mockResolvedValueOnce({
-      data: { device_id: DEVICE_UUID },
+    mockMeterLinks.mockResolvedValueOnce({
+      data: [{ device_id: DEVICE_UUID, effective_from: "2026-01-01", effective_to: null }],
       error: null,
     });
     const { PATCH } = await import("../route");
@@ -333,6 +343,23 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.reason).toBe("device_linked");
+  });
+
+  it("200: historical replacement links outside the period do not block a manual correction", async () => {
+    mockMeterLinks.mockResolvedValueOnce({
+      data: [
+        { device_id: DEVICE_UUID, effective_from: "2025-01-01", effective_to: "2025-02-01" },
+        { device_id: "660e8400-e29b-41d4-a716-44665544bbbb", effective_from: "2027-01-01", effective_to: null },
+      ],
+      error: null,
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(LI_UUID, { usage_kwh: 10 }),
+      { params: Promise.resolve({ lineItemId: LI_UUID }) }
+    );
+
+    expect(res.status).toBe(200);
   });
 
   it("409: period_closed — closed period rejects", async () => {

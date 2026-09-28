@@ -316,19 +316,54 @@ export async function runGenerationFor(
       body: { error: "Billing period not found" },
     };
   }
-  const billingPeriod = periodRow as BillingPeriod;
+  const billingPeriod = periodRow as BillingPeriod & {
+    rate_schedule_id?: string | null;
+  };
 
   // Q4=B: closed-period regenerate IS allowed via /api/billing/generate (the
   // legacy reject removed in this ticket). PATCH /usage retains its own
   // `period_closed` reject upstream — see the route handler.
 
-  // ── 2. Fetch rate schedule ────────────────────────────────────────────────
+  // ── 2. Resolve the period's pinned rate schedule ─────────────────────────
+  // A period must never silently reprice against the microgrid's latest
+  // schedule. Draft writes made before the pinning migration can establish a
+  // pin exactly once; previews fail closed until a write performs that step.
+  let rateScheduleId = billingPeriod.rate_schedule_id ?? null;
+  if (!rateScheduleId) {
+    if (mode !== "write") {
+      return {
+        kind: "fatal",
+        status: 409,
+        body: {
+          error: "Billing period has no pinned rate schedule; generate the draft period before previewing it.",
+          code: "RATE_SCHEDULE_UNPINNED",
+        },
+      };
+    }
+
+    const { data: pinnedScheduleId, error: pinError } = await supabase.rpc(
+      "fn_pin_billing_period_rate_schedule",
+      { p_period_id: billingPeriod.id }
+    );
+    if (pinError || !pinnedScheduleId) {
+      return {
+        kind: "fatal",
+        status: 409,
+        body: {
+          error: pinError?.message ?? "Billing period has no pinned rate schedule.",
+          code: "RATE_SCHEDULE_UNPINNED",
+        },
+      };
+    }
+    rateScheduleId = pinnedScheduleId as string;
+  }
+
+  // ── 3. Fetch the pinned rate schedule ────────────────────────────────────
   const { data: schedule, error: scheduleError } = await supabase
     .from("rate_schedules")
     .select("*")
+    .eq("id", rateScheduleId)
     .eq("microgrid_id", billingPeriod.microgrid_id)
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
 
   if (scheduleError || !schedule) {
@@ -340,7 +375,7 @@ export async function runGenerationFor(
   }
   const rateSchedule = schedule as RateSchedule;
 
-  // ── 3. Fetch households on the period's microgrid (LEFT join) ─────────────
+  // ── 4. Fetch households on the period's microgrid (LEFT join) ─────────────
   const { data: householdsRaw, error: householdsError } = await supabase
     .from("households")
     .select(
@@ -392,16 +427,43 @@ export async function runGenerationFor(
     const primaryAssignments = h.household_devices.filter(
       (hd) => hd.role === "primary_consumption_meter"
     );
-    const primaryHD = primaryAssignments[0];
-    if (params.requireEffectiveDatedAssignments && primaryAssignments.length > 0 &&
-      (primaryAssignments.length !== 1 || !primaryHD.effective_from ||
-        primaryHD.effective_from > billingPeriod.start_date ||
-        (primaryHD.effective_to !== null &&
-          (!primaryHD.effective_to || primaryHD.effective_to <= billingPeriod.end_date)))) {
-      householdToDevice.set(h.id, null);
-      householdAssignmentErrors.set(h.id,
-        "No single meter assignment covers the complete billing period; verify replacement boundaries and readings.");
-      continue;
+    let primaryHD: HouseholdRow["household_devices"][number] | undefined =
+      primaryAssignments[0];
+    if (params.requireEffectiveDatedAssignments && primaryAssignments.length > 0) {
+      // Assignments are half-open DATE ranges [effective_from, effective_to),
+      // while billing_periods stores inclusive end dates. Historical links
+      // outside this period must not make a later or earlier period ambiguous.
+      const overlappingAssignments = primaryAssignments.filter(
+        (assignment) =>
+          Boolean(assignment.effective_from) &&
+          assignment.effective_from! <= billingPeriod.end_date &&
+          (assignment.effective_to === null ||
+            assignment.effective_to === undefined ||
+            assignment.effective_to > billingPeriod.start_date)
+      );
+      const coveringAssignments = overlappingAssignments.filter(
+        (assignment) =>
+          assignment.effective_from! <= billingPeriod.start_date &&
+          (assignment.effective_to === null ||
+            assignment.effective_to === undefined ||
+            assignment.effective_to > billingPeriod.end_date)
+      );
+
+      if (overlappingAssignments.length === 0) {
+        // The household has assignment history, but none of it belongs to
+        // this period. Treat it as unmetered for this period rather than
+        // billing against an arbitrary historical device.
+        primaryHD = undefined;
+      } else if (coveringAssignments.length !== 1) {
+        householdToDevice.set(h.id, null);
+        householdAssignmentErrors.set(
+          h.id,
+          "No single meter assignment covers the complete billing period; verify replacement boundaries and readings."
+        );
+        continue;
+      } else {
+        primaryHD = coveringAssignments[0];
+      }
     }
     if (!primaryHD || !primaryHD.devices) {
       householdToDevice.set(h.id, null);
