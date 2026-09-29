@@ -283,7 +283,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       code: "meter_assignment_continuity",
       householdId: HH_UNMETERED,
     }]);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 
   it("write mode, householdIds undefined, un-metered household → skips with unmetered_no_manual and writes NO row", async () => {
@@ -318,7 +318,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
 
     // The critical regression: NO placeholder row is written. The write path
     // is `supabase.rpc("fn_record_line_item_with_audit", …)`.
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
 
     // No 'written' result of any kind.
     expect(results.some((r) => r.kind === "written")).toBe(false);
@@ -347,8 +347,8 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     if (results[0].kind === "error") {
       expect(results[0].code).toBe("unmetered_no_manual");
     }
-    // Preview never writes anyway, but assert no preview placeholder row.
+    // Preview may refresh an empty draft's tariff pin, but writes no bill.
     expect(results.some((r) => r.kind === "preview")).toBe(false);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 });

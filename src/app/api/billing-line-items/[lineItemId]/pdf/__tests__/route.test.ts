@@ -29,6 +29,7 @@ const LINE_ITEM_ID = "550e8400-e29b-41d4-a716-446655440001";
 const MICROGRID_ID = "550e8400-e29b-41d4-a716-446655440002";
 const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440003";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440004";
+const SCHEDULE_ID = "550e8400-e29b-41d4-a716-446655440005";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ const fromState: FromState = {
   rate_schedules: { data: null, error: null },
   fnListVisibleUsers: { data: [], error: null },
 };
+const rateScheduleFilters: Array<[string, unknown]> = [];
 
 // Captured updates to billing_line_items so tests can assert the persist.
 const capturedUpdates: { invoice_number?: string }[] = [];
@@ -141,13 +143,17 @@ function makeFromImpl(table: string) {
   if (table === "rate_schedules") {
     return {
       select: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: () => ({
-              maybeSingle: () => Promise.resolve(fromState.rate_schedules),
-            }),
-          }),
-        }),
+        eq: (column: string, value: unknown) => {
+          rateScheduleFilters.push([column, value]);
+          return {
+            eq: (nextColumn: string, nextValue: unknown) => {
+              rateScheduleFilters.push([nextColumn, nextValue]);
+              return {
+                maybeSingle: () => Promise.resolve(fromState.rate_schedules),
+              };
+            },
+          };
+        },
       }),
     };
   }
@@ -215,6 +221,7 @@ function lineItemRow(overrides: Record<string, unknown> = {}) {
       microgrid_id: MICROGRID_ID,
       start_date: "2026-04-01",
       end_date: "2026-04-30",
+      rate_schedule_id: SCHEDULE_ID,
       microgrids: {
         id: MICROGRID_ID,
         community_id: COMMUNITY_ID,
@@ -274,6 +281,7 @@ const RATE_SCHEDULE_ROW = {
 beforeEach(() => {
   releasedRouteMock.mockReturnValue(true);
   vi.clearAllMocks();
+  rateScheduleFilters.length = 0;
   canAccessMicrogridReturn = true;
   capturedUpdates.length = 0;
   rpcCalls = [];
@@ -355,10 +363,26 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
       params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
     });
     expect(res.status).toBe(200);
+    expect(rateScheduleFilters).toContainEqual(["id", SCHEDULE_ID]);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const cd = res.headers.get("Content-Disposition") ?? "";
     expect(cd).toMatch(/^attachment; filename="NFE-2026-\d{5}\.pdf"$/);
+  });
+
+  it("409: an unpinned historical bill cannot print a later tariff", async () => {
+    fromState.lineItem = {
+      data: lineItemRow({ billing_periods: {
+        ...(lineItemRow().billing_periods as Record<string, unknown>),
+        rate_schedule_id: null,
+      } }),
+      error: null,
+    };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).reason).toBe("rate_schedule_unpinned");
+    expect(rateScheduleFilters).toEqual([]);
   });
 
   it.each([null, "existing-slug"])("omits gated payment links, including cached slug %s", async (slug) => {

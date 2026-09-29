@@ -11,7 +11,8 @@
 -- The script builds its own fixtures (org/community/microgrid/household/
 -- tariff/period) and exercises, as an authenticated org_manager exactly as
 -- PostgREST would (JWT claims + SET ROLE authenticated):
---   1. tariff insert (rate_schedules) + period insert (timezone stamped)
+--   1. tariff insert (rate_schedules) + period create RPC (timezone stamped,
+--      overlap rejected)
 --   2. bill generation write via fn_record_line_item_with_audit (INSERT path)
 --   3. selective regeneration via the same fn (UPDATE path: payment preserved,
 --      audit row appended with previous snapshot details)
@@ -42,6 +43,8 @@ DECLARE
   v_microgrid UUID;
   v_household UUID;
   v_period UUID;
+  v_tariff UUID;
+  v_new_tariff UUID;
   v_item billing_line_items%ROWTYPE;
   v_audit INT;
   v_events INT;
@@ -91,19 +94,36 @@ BEGIN
     '[{"label": "T1", "min_kwh": 1, "max_kwh": 10, "rate_per_kwh": 100},
       {"label": "T2", "min_kwh": 11, "max_kwh": null, "rate_per_kwh": 200}]'::jsonb,
     500, 0)
-  RETURNING id INTO v_period; -- reuse variable briefly as schedule id
+  RETURNING id INTO v_tariff;
   RAISE NOTICE 'OK: tariff created';
 
   -- ── 2. Period (timezone stamped, never re-derived) ─────────────────────
-  INSERT INTO billing_periods(microgrid_id, start_date, end_date, status)
-  VALUES (v_microgrid, '2026-09-01', '2026-09-30', 'draft')
-  RETURNING id INTO v_period;
+  SELECT id INTO v_period FROM fn_create_billing_period(
+    v_microgrid, '2026-09-01', '2026-09-30'
+  );
+  BEGIN
+    PERFORM fn_create_billing_period(v_microgrid, '2026-09-15', '2026-10-14');
+    RAISE EXCEPTION 'overlapping period was accepted';
+  EXCEPTION WHEN exclusion_violation THEN
+    RAISE NOTICE 'OK: overlapping period rejected';
+  END;
 
   SELECT timezone INTO v_tz FROM billing_periods WHERE id = v_period;
   IF v_tz <> 'Africa/Kampala' THEN
     RAISE EXCEPTION 'period timezone not stamped: %', v_tz;
   END IF;
   RAISE NOTICE 'OK: period created with stamped timezone %', v_tz;
+
+  -- A new tariff before the first bill may replace the empty draft's pin.
+  INSERT INTO rate_schedules(microgrid_id, tiers, service_charge, tax_rate)
+  VALUES (v_microgrid,
+    '[{"label":"T1","min_kwh":1,"max_kwh":null,"rate_per_kwh":200}]'::jsonb,
+    600, 0)
+  RETURNING id INTO v_new_tariff;
+  IF fn_pin_billing_period_rate_schedule(v_period) IS DISTINCT FROM v_new_tariff THEN
+    RAISE EXCEPTION 'empty draft failed to select new tariff';
+  END IF;
+  RAISE NOTICE 'OK: empty draft re-pinned to newer tariff before billing';
 
   -- ── 3. Generate (INSERT path) ──────────────────────────────────────────
   SELECT * INTO v_item FROM fn_record_line_item_with_audit(
@@ -139,8 +159,8 @@ BEGIN
 
   SELECT COUNT(*) INTO v_audit FROM billing_audit_log
   WHERE billing_period_id = v_period;
-  IF v_audit <> 2 THEN
-    RAISE EXCEPTION 'expected 2 audit rows, got %', v_audit;
+  IF v_audit <> 3 THEN
+    RAISE EXCEPTION 'expected creation and 2 line-item audit rows, got %', v_audit;
   END IF;
   RAISE NOTICE 'OK: selective regeneration preserved payment state + audit history';
 
@@ -216,6 +236,9 @@ BEGIN
     RAISE EXCEPTION 'post-close correction missing period_was_closed audit hint';
   END IF;
   RAISE NOTICE 'OK: period closed; post-close correction audited with period_was_closed';
+  IF fn_pin_billing_period_rate_schedule(v_period) IS DISTINCT FROM v_new_tariff THEN
+    RAISE EXCEPTION 'closed period tariff pin changed';
+  END IF;
 
   -- ── 8. Audit reads ─────────────────────────────────────────────────────
   SELECT COUNT(*) INTO v_audit FROM billing_audit_log

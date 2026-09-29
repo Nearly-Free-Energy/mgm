@@ -46,6 +46,7 @@ const FIXTURE = {
   periodP: "dddddddd-dddd-4000-8006-00000000000d",
   periodP2: "dddddddd-dddd-4000-8006-00000000001d",
   periodP3: "dddddddd-dddd-4000-8006-00000000002d",
+  periodP4: "dddddddd-dddd-4000-8006-00000000003d",
 };
 
 let alejandroSuperAdmin: {
@@ -295,5 +296,57 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       .eq("household_id", FIXTURE.hhP)
       .single();
     expect(Number(historical?.total_amount)).toBe(1000);
+  });
+
+  it("preview and first generation use a newer tariff for an empty draft", async () => {
+    const { runGenerationFor, isRunGenerationFatal } = await import("@/lib/billing/generate");
+    const svc = await serviceClient();
+    const { data: oldRate, error: oldRateError } = await svc.from("rate_schedules")
+      .insert({
+        microgrid_id: FIXTURE.mgP,
+        tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 600 }],
+        service_charge: 0,
+        tax_rate: 0,
+      })
+      .select("id").single();
+    expect(oldRateError).toBeNull();
+    const { error: periodError } = await svc.from("billing_periods").insert({
+      id: FIXTURE.periodP4,
+      microgrid_id: FIXTURE.mgP,
+      start_date: "2026-07-01",
+      end_date: "2026-07-31",
+      status: "draft",
+    });
+    expect(periodError).toBeNull();
+    const { data: newRate, error: newRateError } = await svc.from("rate_schedules")
+      .insert({
+        microgrid_id: FIXTURE.mgP,
+        tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 700 }],
+        service_charge: 0,
+        tax_rate: 0,
+      })
+      .select("id").single();
+    expect(newRateError).toBeNull();
+    expect(newRate?.id).not.toBe(oldRate?.id);
+
+    const input = {
+      supabase: alejandroSuperAdmin.client,
+      periodId: FIXTURE.periodP4,
+      householdIds: [FIXTURE.hhP],
+      manualReadings: [{ householdId: FIXTURE.hhP, startKwh: 10, endKwh: 20 }],
+      actorUserId: alejandroSuperAdmin.userId,
+    };
+    const preview = await runGenerationFor({ ...input, mode: "preview" });
+    expect(isRunGenerationFatal(preview)).toBe(false);
+    const { data: pinnedAfterPreview } = await svc.from("billing_periods")
+      .select("rate_schedule_id").eq("id", FIXTURE.periodP4).single();
+    expect(pinnedAfterPreview?.rate_schedule_id).toBe(newRate?.id);
+
+    const written = await runGenerationFor({ ...input, mode: "write" });
+    expect(isRunGenerationFatal(written)).toBe(false);
+    const { data: lineItem } = await svc.from("billing_line_items")
+      .select("total_amount").eq("billing_period_id", FIXTURE.periodP4)
+      .eq("household_id", FIXTURE.hhP).single();
+    expect(Number(lineItem?.total_amount)).toBe(7000);
   });
 });

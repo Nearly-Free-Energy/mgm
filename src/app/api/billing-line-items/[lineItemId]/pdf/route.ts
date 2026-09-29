@@ -127,6 +127,7 @@ export async function GET(
         start_date,
         end_date,
         timezone,
+        rate_schedule_id,
         microgrids!inner (
           id,
           community_id,
@@ -416,15 +417,21 @@ export async function GET(
     if (dev) meterDevice = dev as unknown as Device;
   }
 
-  // 7. Resolve rate schedule (most-recent for the microgrid).
+  // 7. Render only the tariff that was used to calculate this period.
+  const pinnedScheduleId = period.rate_schedule_id as string | null;
+  if (!pinnedScheduleId) {
+    return NextResponse.json(
+      { error: "This billed period needs historical tariff reconciliation.", reason: "rate_schedule_unpinned" },
+      { status: 409 },
+    );
+  }
   const { data: rateScheduleRow } = await supabase
     .from("rate_schedules")
     .select(
       "id, created_at, microgrid_id, service_charge, service_charge_description, tax_rate, tiers",
     )
+    .eq("id", pinnedScheduleId)
     .eq("microgrid_id", microgridId)
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
 
   if (!rateScheduleRow) {

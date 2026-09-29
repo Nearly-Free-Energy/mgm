@@ -169,6 +169,7 @@ export async function billingWriteGateForCommunity(
   }
   if (!orgId) return null;
   const enabled = await isEnabled(supabase, orgId);
+  if (enabled === null) return billingGateUnavailableResponse();
   if (!enabled) return billingDisabledResponse();
   return null;
 }

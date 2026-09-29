@@ -14,7 +14,7 @@
  *   - Service-role client used ONLY for the joins (households, devices,
  *     rate schedule) so the export does not depend on RLS visibility for
  *     joined rows; the access gate above already authorized the period.
- *   - Most-recent rate_schedule per microgrid (`ORDER BY created_at DESC LIMIT 1`).
+ *   - The period's pinned rate schedule, preserving historical charges.
  *   - Microgrid SELECT goes through `MICROGRID_PUBLIC_COLUMNS` (no
  *     `.select("*")`).
  *   - Works on both `draft` and `closed` periods.
@@ -87,7 +87,7 @@ export async function GET(
   //    missing → 404.
   const { data: periodRow, error: periodErr } = await supabase
     .from("billing_periods")
-    .select("id, microgrid_id, start_date, end_date, status, timezone")
+    .select("id, microgrid_id, start_date, end_date, status, timezone, rate_schedule_id")
     .eq("id", periodId)
     .maybeSingle();
 
@@ -160,13 +160,18 @@ export async function GET(
       ? (taxRaw.rate_pct as number)
       : 0;
 
-  // 4b. Most-recent rate schedule for the microgrid.
+  // 4b. Never render a later tariff beside this period's historical amounts.
+  if (!periodRow.rate_schedule_id) {
+    return NextResponse.json(
+      { error: "This billed period needs historical tariff reconciliation.", reason: "rate_schedule_unpinned" },
+      { status: 409 },
+    );
+  }
   const { data: rsRow, error: rsErr } = await svc
     .from("rate_schedules")
     .select("tiers, service_charge, tax_rate, created_at")
+    .eq("id", periodRow.rate_schedule_id)
     .eq("microgrid_id", microgridId)
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
 
   if (rsErr || !rsRow) {

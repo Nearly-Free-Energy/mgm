@@ -139,4 +139,14 @@ describe("billing write gates", () => {
     const allowed = await billingWriteGateForCommunity(makeSupabase(row, true), COMM_ID);
     expect(allowed).toBeNull();
   });
+
+  it("community: returns 503 when plugin state cannot be checked", async () => {
+    const supabase = {
+      ...chain({ id: COMM_ID, org_id: ORG_ID }),
+      rpc: async () => { throw new Error("database unavailable"); },
+    } as never;
+    const blocked = await billingWriteGateForCommunity(supabase, COMM_ID);
+    expect(blocked?.status).toBe(503);
+    expect(await blocked?.json()).toMatchObject({ code: "billing_gate_unavailable" });
+  });
 });

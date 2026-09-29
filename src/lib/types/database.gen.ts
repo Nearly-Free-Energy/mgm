@@ -1510,6 +1510,7 @@ export type Database = {
         | "token_generated"
         | "token_revoked"
         | "token_regenerated"
+        | "tariff_reconciled"
       billing_line_item_payment_status:
         | "unpaid"
         | "paid"
@@ -1676,6 +1677,7 @@ export const Constants = {
         "token_generated",
         "token_revoked",
         "token_regenerated",
+        "tariff_reconciled",
       ],
       billing_line_item_payment_status: [
         "unpaid",

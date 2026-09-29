@@ -326,21 +326,11 @@ export async function runGenerationFor(
 
   // ── 2. Resolve the period's pinned rate schedule ─────────────────────────
   // A period must never silently reprice against the microgrid's latest
-  // schedule. Draft writes made before the pinning migration can establish a
-  // pin exactly once; previews fail closed until a write performs that step.
+  // schedule. An empty draft follows the latest version until its first bill,
+  // including in preview so preview and write use the same selected tariff.
   let rateScheduleId = billingPeriod.rate_schedule_id ?? null;
-  if (!rateScheduleId) {
-    if (mode !== "write") {
-      return {
-        kind: "fatal",
-        status: 409,
-        body: {
-          error: "Billing period has no pinned rate schedule; generate the draft period before previewing it.",
-          code: "RATE_SCHEDULE_UNPINNED",
-        },
-      };
-    }
-
+  // The RPC locks the period and leaves billed/closed pins intact.
+  if (!rateScheduleId || billingPeriod.status === "draft") {
     const { data: pinnedScheduleId, error: pinError } = await supabase.rpc(
       "fn_pin_billing_period_rate_schedule",
       { _period_id: billingPeriod.id }
