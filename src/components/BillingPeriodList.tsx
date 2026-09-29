@@ -100,25 +100,37 @@ export function BillingPeriodList({
 
     setCreating(true);
 
-    const { data: newPeriod, error: insertError } = await supabase
-      .from("billing_periods")
-      .insert({
-        microgrid_id: microgridId,
-        start_date: startDate,
-        end_date: endDate,
-        status: "draft",
-      })
-      .select("id")
-      .single();
+    // Release 3 (issue #5, review P1): period creation runs through the
+    // billing capability (POST /api/billing-periods) — org-scoped,
+    // plugin-gated, timezone-stamped — never a direct table insert, so
+    // disabling Billing stops creation with a 409 the banner surfaces.
+    try {
+      const res = await fetch("/api/billing-periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          microgrid_id: microgridId,
+          start_date: startDate,
+          end_date: endDate,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        period?: { id: string };
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !body.period) {
+        setError(body.message ?? body.error ?? "Could not create the period.");
+        setCreating(false);
+        return;
+      }
 
-    if (insertError) {
-      setError(insertError.message);
       setCreating(false);
-      return;
+      router.push(`/microgrids/${microgridId}/billing/${body.period.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error.");
+      setCreating(false);
     }
-
-    setCreating(false);
-    router.push(`/microgrids/${microgridId}/billing/${newPeriod.id}`);
   }
 
   return (

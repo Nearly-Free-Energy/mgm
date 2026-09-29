@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import {
-  isRunGenerationFatal,
-  runGenerationFor,
-  type ManualReadingInput,
-} from "@/lib/billing/generate";
+  composeBilling,
+  type BillingResult,
+} from "@/lib/billing/compose";
+import type { ManualReadingInput } from "@/lib/billing/generate";
+
+function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
+  const { ok, status, ...body } = error;
+  void ok;
+  return NextResponse.json(body, { status });
+}
 
 /**
  * POST /api/billing/regenerate-preview (#173, BC1)
@@ -39,6 +44,11 @@ import {
  * write — preserved across the regenerate (AC3). DO NOT rename to
  * `currentPaymentStatus` — BC3 #175 already drafts `previousPaymentStatus`
  * consumption.
+ *
+ * Release 3 (issue #5, review P1): the compute runs through the billing
+ * Cordis capability (composeBilling + previewBills) with effective-dated
+ * meter-assignment coverage enforced, so the preview the operator confirms
+ * can never promise bills the write path would refuse.
  */
 
 const UUID_RE =
@@ -172,42 +182,69 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const out = await runGenerationFor({
-    supabase,
-    periodId: parsed.billingPeriodId,
-    householdIds: parsed.householdIds,
-    manualReadings: parsed.manualReadings,
-    mode: "preview",
-    actorUserId: user.id,
-    meteringProvider: createOpenEmsMeteringProvider(supabase),
-  });
-
-  if (isRunGenerationFatal(out)) {
-    return NextResponse.json(out.body, { status: out.status });
+  // Release 3 (issue #5, review P1): same capability routing as the write
+  // path — org scope, plugin gate, and assignment-date enforcement apply to
+  // the preview too.
+  const { data: period } = await supabase
+    .from("billing_periods")
+    .select("id, microgrid_id")
+    .eq("id", parsed.billingPeriodId)
+    .maybeSingle<{ id: string; microgrid_id: string }>();
+  if (!period) {
+    return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
+  }
+  const { data: microgrid } = await supabase
+    .from("microgrids")
+    .select("id, communities!inner(org_id)")
+    .eq("id", period.microgrid_id)
+    .maybeSingle<{
+      id: string;
+      communities: { org_id: string } | { org_id: string }[];
+    }>();
+  const communities = microgrid?.communities;
+  const orgId = Array.isArray(communities)
+    ? communities[0]?.org_id
+    : communities?.org_id;
+  if (!orgId) {
+    return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
   }
 
-  const preview = out.results
-    .filter((r) => r.kind === "preview")
-    .map((p) => ({
-      householdId: p.householdId,
-      householdName: p.householdName,
-      startKwh: p.startKwh,
-      endKwh: p.endKwh,
-      usageKwh: p.usageKwh,
-      tierBreakdown: p.tierBreakdown,
-      totalAmount: p.totalAmount,
-      previousTotalAmount: p.previousTotalAmount,
-      previousPaymentStatus: p.previousPaymentStatus,
-    }));
+  const composed = await composeBilling({ supabase, organizationId: orgId, readOnly: true });
+  if (!composed.ok) return mapError(composed);
 
-  const errors = out.results
-    .filter((r) => r.kind === "error")
-    .map((e) => ({
-      householdId: e.householdId,
-      householdName: e.householdName,
-      error: e.error,
-      code: e.code,
-    }));
+  try {
+    const result = await composed.data.billing.previewBills({
+      billingPeriodId: parsed.billingPeriodId,
+      householdIds: parsed.householdIds,
+      manualReadings: parsed.manualReadings,
+    });
+    if (!result.ok) return mapError(result);
 
-  return NextResponse.json({ preview, errors });
+    const preview = result.data.results
+      .filter((r) => r.kind === "preview")
+      .map((p) => ({
+        householdId: p.householdId,
+        householdName: p.householdName,
+        startKwh: p.startKwh,
+        endKwh: p.endKwh,
+        usageKwh: p.usageKwh,
+        tierBreakdown: p.tierBreakdown,
+        totalAmount: p.totalAmount,
+        previousTotalAmount: p.previousTotalAmount,
+        previousPaymentStatus: p.previousPaymentStatus,
+      }));
+
+    const errors = result.data.results
+      .filter((r) => r.kind === "error")
+      .map((e) => ({
+        householdId: e.householdId,
+        householdName: e.householdName,
+        error: e.error,
+        code: e.code,
+      }));
+
+    return NextResponse.json({ preview, errors });
+  } finally {
+    await composed.data.dispose();
+  }
 }

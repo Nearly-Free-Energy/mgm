@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BILLING_PLUGIN_NAME,
   COMMUNITY_MANAGEMENT_PLUGIN_NAME,
   METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
@@ -16,17 +17,30 @@ describe("MGM bundled plugins", () => {
       [ORGANIZATION_DIRECTORY_PLUGIN_NAME, true, true],
       [COMMUNITY_MANAGEMENT_PLUGIN_NAME, true, true],
       [METERING_PLUGIN_NAME, true, true],
+      [BILLING_PLUGIN_NAME, true, true],
     ]);
   });
 
   it("metering depends on community management, not the reverse", () => {
-    // Disabling metering never blocks community management.
+    // Disabling metering never blocks community management — but it is
+    // blocked while its own dependent (billing) is enabled.
+    expect(
+      validatePluginToggle({
+        pluginName: METERING_PLUGIN_NAME,
+        enabled: false,
+        states: { [BILLING_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({ ok: true });
     expect(
       validatePluginToggle({
         pluginName: METERING_PLUGIN_NAME,
         enabled: false,
       })
-    ).toEqual({ ok: true });
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Billing"),
+    });
     // Disabling community management is blocked while metering is enabled.
     expect(
       validatePluginToggle({
@@ -56,7 +70,7 @@ describe("MGM bundled plugins", () => {
 
   it("rejects unknown plugins", () => {
     expect(
-      validatePluginToggle({ pluginName: "billing", enabled: true })
+      validatePluginToggle({ pluginName: "online-payments", enabled: true })
     ).toEqual({
       ok: false,
       code: "unknown_plugin",
@@ -96,8 +110,46 @@ describe("MGM bundled plugins", () => {
       validatePluginToggle({
         pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
         enabled: false,
-        states: { [METERING_PLUGIN_NAME]: { enabled: false } },
+        states: {
+          [METERING_PLUGIN_NAME]: { enabled: false },
+          [BILLING_PLUGIN_NAME]: { enabled: false },
+        },
       })
     ).toEqual({ ok: true });
+  });
+
+  it("billing depends on metering, not the reverse", () => {
+    // Disabling billing never blocks metering.
+    expect(
+      validatePluginToggle({
+        pluginName: BILLING_PLUGIN_NAME,
+        enabled: false,
+      })
+    ).toEqual({ ok: true });
+    // Disabling metering is blocked while billing is enabled.
+    expect(
+      validatePluginToggle({
+        pluginName: METERING_PLUGIN_NAME,
+        enabled: false,
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Billing"),
+    });
+  });
+
+  it("rejects enabling billing while metering is disabled", () => {
+    expect(
+      validatePluginToggle({
+        pluginName: BILLING_PLUGIN_NAME,
+        enabled: true,
+        states: { [METERING_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_disabled",
+      message: expect.stringContaining("Metering"),
+    });
   });
 });

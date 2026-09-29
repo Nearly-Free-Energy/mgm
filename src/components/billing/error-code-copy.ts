@@ -27,6 +27,8 @@ export function errorCodeCopy(err: PartialFailureError): string {
       return `${name} no longer belongs to this microgrid.`;
     case "no_meter_reading":
       return `${name} has no current meter reading.`;
+    case "tariff_changed":
+      return `${name}'s billing tariff changed while this bill was being calculated — review the new tariff and regenerate this household.`;
     case "missing_openems_config":
       return `${name}'s edge has no OpenEMS connection configured.`;
     case "invalid_manual_reading":

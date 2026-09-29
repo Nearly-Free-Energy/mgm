@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { billingWriteGateForMicrogrid } from "@/lib/billing/guard";
 import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import {
@@ -92,6 +93,8 @@ type LineItemScope = {
     id: string;
     microgrid_id: string;
     status: string;
+    start_date: string;
+    end_date: string;
   } | null;
 };
 
@@ -155,7 +158,9 @@ export async function PATCH(
       billing_periods!inner (
         id,
         microgrid_id,
-        status
+        status,
+        start_date,
+        end_date
       )
     `
     )
@@ -200,6 +205,10 @@ export async function PATCH(
     );
   }
 
+  // 2a. Release 3 (issue #5): usage corrections fail closed while billing is disabled.
+  const billingGate = await billingWriteGateForMicrogrid(supabase, period.microgrid_id);
+  if (billingGate) return billingGate;
+
   // 3. Closed-period reject preserved (Out of Scope contract).
   if (period.status === "closed") {
     return NextResponse.json(
@@ -209,9 +218,11 @@ export async function PATCH(
   }
 
   // 4. Reject metered rows. Both signals must be checked: the line item's
-  //    own device_id AND the household's current primary_consumption_meter
-  //    link (a household may have a meter but the line item was inserted
-  //    pre-link).
+  //    own device_id AND any primary_consumption_meter assignment that
+  //    overlapped this billing period (a household may have a meter but the
+  //    line item was inserted pre-link). Historical replacements outside the
+  //    period must not block a correction, nor turn `.maybeSingle()` into a
+  //    multi-row error.
   if (scoped.device_id !== null) {
     return NextResponse.json(
       {
@@ -222,12 +233,11 @@ export async function PATCH(
     );
   }
 
-  const { data: meterLink, error: linkErr } = await supabase
+  const { data: meterLinks, error: linkErr } = await supabase
     .from("household_devices")
-    .select("device_id")
+    .select("device_id, effective_from, effective_to")
     .eq("household_id", scoped.household_id)
-    .eq("role", "primary_consumption_meter")
-    .maybeSingle();
+    .eq("role", "primary_consumption_meter");
 
   if (linkErr) {
     return NextResponse.json(
@@ -238,7 +248,12 @@ export async function PATCH(
       { status: 500 }
     );
   }
-  if (meterLink) {
+  const meterLinkOverlapsPeriod = (meterLinks ?? []).some(
+    (link: { effective_from: string; effective_to: string | null }) =>
+      link.effective_from <= period.end_date &&
+      (link.effective_to === null || link.effective_to > period.start_date)
+  );
+  if (meterLinkOverlapsPeriod) {
     return NextResponse.json(
       {
         error: "Use Refresh Readings for metered households",
@@ -255,7 +270,16 @@ export async function PATCH(
   //   - only end_kwh   → derive usage_kwh = end_kwh - start_kwh
   //   - only usage_kwh → end_kwh = start_kwh + usage_kwh (so generate
   //     engine sees a consistent {start, end, usage} triple)
-  const startKwh = scoped.start_kwh ?? 0;
+  if (scoped.start_kwh === null) {
+    return NextResponse.json(
+      {
+        error: "A starting register reading is required before correcting this bill.",
+        reason: "missing_start_reading",
+      },
+      { status: 409 }
+    );
+  }
+  const startKwh = scoped.start_kwh;
   let nextEnd: number;
 
   if (parsed.usage_kwh !== undefined && parsed.end_kwh !== undefined) {

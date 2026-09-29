@@ -212,6 +212,7 @@ export type Database = {
           end_date: string
           id: string
           microgrid_id: string
+          rate_schedule_id: string | null
           start_date: string
           status: Database["public"]["Enums"]["billing_period_status"]
           timezone: string
@@ -222,6 +223,7 @@ export type Database = {
           end_date: string
           id?: string
           microgrid_id: string
+          rate_schedule_id?: string | null
           start_date: string
           status?: Database["public"]["Enums"]["billing_period_status"]
           timezone?: string
@@ -232,6 +234,7 @@ export type Database = {
           end_date?: string
           id?: string
           microgrid_id?: string
+          rate_schedule_id?: string | null
           start_date?: string
           status?: Database["public"]["Enums"]["billing_period_status"]
           timezone?: string
@@ -242,6 +245,13 @@ export type Database = {
             columns: ["microgrid_id"]
             isOneToOne: false
             referencedRelation: "microgrids"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_periods_rate_schedule_id_fkey"
+            columns: ["rate_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "rate_schedules"
             referencedColumns: ["id"]
           },
         ]
@@ -1207,6 +1217,46 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_close_billing_period: {
+        Args: { _confirmed?: boolean; _period_id: string }
+        Returns: {
+          closed_at: string | null
+          created_at: string
+          end_date: string
+          id: string
+          microgrid_id: string
+          rate_schedule_id: string | null
+          start_date: string
+          status: Database["public"]["Enums"]["billing_period_status"]
+          timezone: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "billing_periods"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      fn_create_billing_period: {
+        Args: { _end_date: string; _microgrid_id: string; _start_date: string }
+        Returns: {
+          closed_at: string | null
+          created_at: string
+          end_date: string
+          id: string
+          microgrid_id: string
+          rate_schedule_id: string | null
+          start_date: string
+          status: Database["public"]["Enums"]["billing_period_status"]
+          timezone: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "billing_periods"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       fn_create_household: {
         Args: {
           p_account_number?: string
@@ -1364,6 +1414,10 @@ export type Database = {
         Args: { p_community_id: string; p_year: number }
         Returns: number
       }
+      fn_pin_billing_period_rate_schedule: {
+        Args: { _period_id: string }
+        Returns: string
+      }
       fn_record_line_item_with_audit: {
         Args: {
           _actor_kind?: string
@@ -1377,6 +1431,7 @@ export type Database = {
           _household_id: string
           _manual_reason: string
           _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
+          _rate_schedule_id: string
           _start_kwh: number
           _tier_breakdown: Json
           _total_amount: number
@@ -1456,6 +1511,7 @@ export type Database = {
         | "token_generated"
         | "token_revoked"
         | "token_regenerated"
+        | "tariff_reconciled"
       billing_line_item_payment_status:
         | "unpaid"
         | "paid"
@@ -1622,6 +1678,7 @@ export const Constants = {
         "token_generated",
         "token_revoked",
         "token_regenerated",
+        "tariff_reconciled",
       ],
       billing_line_item_payment_status: [
         "unpaid",

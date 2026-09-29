@@ -22,6 +22,11 @@ process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://localhost:54321";
 
 const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440010";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440020";
+let billingGateResponse: Response | null = null;
+
+vi.mock("@/lib/billing/guard", () => ({
+  billingWriteGateForCommunity: async () => billingGateResponse,
+}));
 
 let canAccessOrgReturn = true;
 vi.mock("@/lib/auth/access", () => ({
@@ -76,6 +81,7 @@ describe("POST /api/communities/[id]/invoice-logo", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     canAccessOrgReturn = true;
+    billingGateResponse = null;
     communitySelectResp = {
       data: { id: COMMUNITY_ID, org_id: ORG_ID },
       error: null,
@@ -172,6 +178,24 @@ describe("POST /api/communities/[id]/invoice-logo", () => {
     });
     expect(res.status).toBe(403);
     // The route must reject BEFORE touching storage.
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects upload while billing is disabled before parsing or uploading the body", async () => {
+    const { NextResponse } = await import("next/server");
+    billingGateResponse = NextResponse.json(
+      { code: "billing_disabled" },
+      { status: 409 },
+    );
+    const formData = new FormData();
+    formData.append("file", new File([pngBlob()], "logo.png", { type: "image/png" }));
+
+    const { POST } = await import("../route");
+    const response = await POST(makePostRequest(formData), {
+      params: Promise.resolve({ id: COMMUNITY_ID }),
+    });
+
+    expect(response.status).toBe(409);
     expect(uploadMock).not.toHaveBeenCalled();
   });
 

@@ -62,7 +62,12 @@ function makeSupabase(opts: {
   microgridTimezone: string;
   periodStatus?: string;
 }) {
-  const rpc = vi.fn(async () => ({ data: null, error: null }));
+  const rpc = vi.fn(async (name: string) => ({
+    data: name === "fn_pin_billing_period_rate_schedule"
+      ? "aaaaaaaa-aaaa-4000-8003-000000000355"
+      : null,
+    error: null,
+  }));
 
   const responses: Record<
     string,
@@ -77,6 +82,7 @@ function makeSupabase(opts: {
           end_date: "2026-04-30",
           status: opts.periodStatus ?? "draft",
           timezone: opts.periodTimezone,
+          rate_schedule_id: "aaaaaaaa-aaaa-4000-8003-000000000355",
         },
         error: null,
       },

@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const preview = vi.fn();
 const dispose = vi.fn();
+const billingWriteGateForPeriod = vi.fn();
+
+vi.mock("@/lib/billing/guard", () => ({ billingWriteGateForPeriod }));
 
 vi.mock("@/lib/cordis/billing-review", () => ({
   composeBillingReview: vi.fn(async () => ({ billingReview: { preview }, dispose })),
@@ -33,6 +36,7 @@ const HOUSEHOLD_ID = "550e8400-e29b-41d4-a716-446655440200";
 describe("POST /api/billing-review/preview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    billingWriteGateForPeriod.mockResolvedValue(null);
     process.env.MGM_REVIEW_ALLOWED_EMAIL = "reviewer@test.local";
     householdRows.mockResolvedValue({ data: [], error: null });
     maybeSingle.mockResolvedValueOnce({
@@ -99,6 +103,19 @@ describe("POST /api/billing-review/preview", () => {
     );
 
     expect(response.status).toBe(400);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("does not preview when billing is disabled", async () => {
+    billingWriteGateForPeriod.mockResolvedValue(NextResponse.json(
+      { code: "billing_disabled" }, { status: 409 }
+    ));
+    const { POST } = await import("../route");
+    const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
+      method: "POST",
+      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+    }));
+    expect(response.status).toBe(409);
     expect(preview).not.toHaveBeenCalled();
   });
 

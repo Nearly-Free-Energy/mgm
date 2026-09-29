@@ -16,6 +16,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const PERIOD_ID = "550e8400-e29b-41d4-a716-446655440001";
+const SCHEDULE_ID = "550e8400-e29b-41d4-a716-446655440005";
+const rateScheduleFilters: Array<[string, unknown]> = [];
 const MICROGRID_ID = "550e8400-e29b-41d4-a716-446655440002";
 const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440003";
 
@@ -82,14 +84,17 @@ function makeServiceFromImpl(table: string) {
   if (table === "rate_schedules") {
     return {
       select: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: () => ({
-              maybeSingle: () =>
-                Promise.resolve(serviceFromState.rate_schedules),
-            }),
-          }),
-        }),
+        eq: (column: string, value: unknown) => {
+          rateScheduleFilters.push([column, value]);
+          return {
+            eq: (nextColumn: string, nextValue: unknown) => {
+              rateScheduleFilters.push([nextColumn, nextValue]);
+              return {
+                maybeSingle: () => Promise.resolve(serviceFromState.rate_schedules),
+              };
+            },
+          };
+        },
       }),
     };
   }
@@ -142,6 +147,7 @@ function periodRow(overrides: Record<string, unknown> = {}) {
     end_date: "2026-04-30",
     status: "closed",
     timezone: "Africa/Kampala", // #358 — stamped zone threaded into the CSV
+    rate_schedule_id: SCHEDULE_ID,
     ...overrides,
   };
 }
@@ -215,6 +221,7 @@ const LINE_ITEM_ROW = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rateScheduleFilters.length = 0;
   canAccessMicrogridReturn = true;
   sessionFromState.billing_periods = { data: periodRow(), error: null };
   serviceFromState.microgrids = { data: microgridRow(), error: null };
@@ -287,11 +294,32 @@ describe("GET /api/billing-periods/[periodId]/export-csv", () => {
       params: Promise.resolve({ periodId: PERIOD_ID }),
     });
     expect(res.status).toBe(200);
+    expect(rateScheduleFilters).toContainEqual(["id", SCHEDULE_ID]);
     expect(res.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(res.headers.get("Content-Disposition")).toBe(
       `attachment; filename="sezibwa-billing-period-2026-04-01-to-2026-04-30.csv"`,
     );
+  });
+
+  it("409: unpinned historical period cannot export the newest tariff", async () => {
+    sessionFromState.billing_periods = {
+      data: periodRow({ rate_schedule_id: null }),
+      error: null,
+    };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ periodId: PERIOD_ID }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).reason).toBe("rate_schedule_unpinned");
+    expect(rateScheduleFilters).toEqual([]);
+  });
+
+  it("explains when the pinned tariff cannot be loaded", async () => {
+    serviceFromState.rate_schedules = { data: null, error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ periodId: PERIOD_ID }) });
+    expect(res.status).toBe(422);
+    expect((await res.json()).reason).toBe("pinned_rate_schedule_unavailable");
   });
 
   it("200: response body begins with the UTF-8 BOM (0xEF 0xBB 0xBF)", async () => {

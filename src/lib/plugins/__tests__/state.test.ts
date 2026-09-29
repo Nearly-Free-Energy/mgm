@@ -67,7 +67,7 @@ describe("setOrganizationPluginEnabled", () => {
 
   it("rejects unknown plugins", async () => {
     await expect(
-      setOrganizationPluginEnabled(makeSupabase(), ORG_ID, "billing", true)
+      setOrganizationPluginEnabled(makeSupabase(), ORG_ID, "online-payments", true)
     ).rejects.toMatchObject({ status: 400, code: "unknown_plugin" });
   });
 
@@ -130,6 +130,12 @@ describe("setOrganizationPluginEnabled", () => {
       {
         org_id: ORG_ID,
         plugin_name: "metering",
+        version: "0.1.0",
+        enabled: false,
+      },
+      {
+        org_id: ORG_ID,
+        plugin_name: "billing",
         version: "0.1.0",
         enabled: false,
       },

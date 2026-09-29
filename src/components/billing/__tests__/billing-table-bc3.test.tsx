@@ -63,6 +63,7 @@ function makePeriod(overrides?: Partial<BillingPeriod>): BillingPeriod {
     created_at: "2026-04-01T00:00:00Z",
     closed_at: null,
     timezone: "UTC",
+    rate_schedule_id: null,
     ...overrides,
   };
 }

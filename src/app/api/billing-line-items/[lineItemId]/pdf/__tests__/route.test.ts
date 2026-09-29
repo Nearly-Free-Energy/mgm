@@ -29,9 +29,12 @@ const LINE_ITEM_ID = "550e8400-e29b-41d4-a716-446655440001";
 const MICROGRID_ID = "550e8400-e29b-41d4-a716-446655440002";
 const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440003";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440004";
+const SCHEDULE_ID = "550e8400-e29b-41d4-a716-446655440005";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
+const releasedRouteMock = vi.fn();
+vi.mock("@/lib/mgm/released-routes", () => ({ isReleasedRoute: releasedRouteMock }));
 const ensurePaymentLinkMock = vi.fn();
 const renderInvoicePdfMock = vi.fn();
 const mintShortSlugMock = vi.fn();
@@ -88,6 +91,7 @@ const fromState: FromState = {
   rate_schedules: { data: null, error: null },
   fnListVisibleUsers: { data: [], error: null },
 };
+const rateScheduleFilters: Array<[string, unknown]> = [];
 
 // Captured updates to billing_line_items so tests can assert the persist.
 const capturedUpdates: { invoice_number?: string }[] = [];
@@ -139,13 +143,17 @@ function makeFromImpl(table: string) {
   if (table === "rate_schedules") {
     return {
       select: () => ({
-        eq: () => ({
-          order: () => ({
-            limit: () => ({
-              maybeSingle: () => Promise.resolve(fromState.rate_schedules),
-            }),
-          }),
-        }),
+        eq: (column: string, value: unknown) => {
+          rateScheduleFilters.push([column, value]);
+          return {
+            eq: (nextColumn: string, nextValue: unknown) => {
+              rateScheduleFilters.push([nextColumn, nextValue]);
+              return {
+                maybeSingle: () => Promise.resolve(fromState.rate_schedules),
+              };
+            },
+          };
+        },
       }),
     };
   }
@@ -213,6 +221,7 @@ function lineItemRow(overrides: Record<string, unknown> = {}) {
       microgrid_id: MICROGRID_ID,
       start_date: "2026-04-01",
       end_date: "2026-04-30",
+      rate_schedule_id: SCHEDULE_ID,
       microgrids: {
         id: MICROGRID_ID,
         community_id: COMMUNITY_ID,
@@ -270,7 +279,9 @@ const RATE_SCHEDULE_ROW = {
 };
 
 beforeEach(() => {
+  releasedRouteMock.mockReturnValue(true);
   vi.clearAllMocks();
+  rateScheduleFilters.length = 0;
   canAccessMicrogridReturn = true;
   capturedUpdates.length = 0;
   rpcCalls = [];
@@ -352,10 +363,46 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
       params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
     });
     expect(res.status).toBe(200);
+    expect(rateScheduleFilters).toContainEqual(["id", SCHEDULE_ID]);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const cd = res.headers.get("Content-Disposition") ?? "";
     expect(cd).toMatch(/^attachment; filename="NFE-2026-\d{5}\.pdf"$/);
+  });
+
+  it("409: an unpinned historical bill cannot print a later tariff", async () => {
+    fromState.lineItem = {
+      data: lineItemRow({ billing_periods: {
+        ...(lineItemRow().billing_periods as Record<string, unknown>),
+        rate_schedule_id: null,
+      } }),
+      error: null,
+    };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(409);
+    expect((await res.json()).reason).toBe("rate_schedule_unpinned");
+    expect(rateScheduleFilters).toEqual([]);
+  });
+
+  it("explains when the pinned tariff cannot be loaded", async () => {
+    fromState.rate_schedules = { data: null, error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(422);
+    expect((await res.json()).reason).toBe("pinned_rate_schedule_unavailable");
+  });
+
+  it.each([null, "existing-slug"])("omits gated payment links, including cached slug %s", async (slug) => {
+    const { isReleasedRoute } = await vi.importActual<typeof import("@/lib/mgm/released-routes")>("@/lib/mgm/released-routes");
+    releasedRouteMock.mockImplementation(isReleasedRoute);
+    fromState.lineItem = { data: lineItemRow({ short_slug: slug }), error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    expect(ensurePaymentLinkMock).not.toHaveBeenCalled();
+    expect(mintShortSlugMock).not.toHaveBeenCalled();
+    expect(renderInvoicePdfMock.mock.calls[0][0].paymentRedirectUrl).toBeNull();
   });
 
   it("ensure-link succeeds → helper invoked once, paymentRedirectUrl threaded as /p/<slug> (#223)", async () => {

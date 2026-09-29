@@ -57,10 +57,8 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.status).toBe(200);
   });
   it.each([
-    "/api/billing/generate",
     "/api/v1/billing/generate",
     "/api/openems/energy",
-    "/microgrids/grid-1/billing",
     "/communities/community-1/payment",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
@@ -83,6 +81,12 @@ describe("middleware PUBLIC_PATHS", () => {
     "/microgrids/grid-1/setup/edges",
     "/microgrids/grid-1/setup/openems-backend",
     "/microgrids/grid-1/setup/households/hh-1",
+    "/api/billing/generate",
+    "/api/billing-periods",
+    "/api/billing-line-items/abc/payment-status",
+    "/microgrids/grid-1/billing",
+    "/microgrids/grid-1/billing/period-1",
+    "/microgrids/grid-1/setup/rates",
   ])("permits released management route %s", async (path) => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
     const middleware = await loadMiddleware();

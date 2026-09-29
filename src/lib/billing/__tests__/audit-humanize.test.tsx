@@ -60,6 +60,14 @@ function renderNode(node: React.ReactNode) {
   );
 }
 
+it("labels audited historical tariff reconciliation with its review reference", () => {
+  const event = humanizeAuditEvent(entry({
+    eventType: "tariff_reconciled",
+    details: { review_reference: "pilot-rate-review-1" },
+  }));
+  expect(event.label).toBe("Historical tariff reconciled (pilot-rate-review-1)");
+});
+
 // ── Per-event-type renderers (6) ────────────────────────────────────────────
 
 describe("humanizeAuditEvent — period_created", () => {

@@ -257,6 +257,16 @@ export function humanizeAuditEvent(
       };
     }
 
+    case "tariff_reconciled": {
+      const reference = getString(entry.details?.["review_reference"]);
+      return {
+        label: reference
+          ? `Historical tariff reconciled (${reference})`
+          : "Historical tariff reconciled",
+        postCloseRevision: post,
+      };
+    }
+
     default: {
       // Defensive fallback for an unknown future event type. We keep the
       // raw eventType string so super_admin debugging still has a foothold.

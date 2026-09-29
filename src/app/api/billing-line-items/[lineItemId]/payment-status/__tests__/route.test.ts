@@ -181,8 +181,10 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     expect(args._raw_payload).toEqual({ payment_notes: NOTES });
 
     // No follow-up plain UPDATE on billing_line_items — the RPC is the only
-    // write path for both payment_status and payment_notes.
-    expect(mockFrom).toHaveBeenCalledTimes(1); // scope read only
+    // write path for both payment_status and payment_notes. `from` is called
+    // twice: the route's scope read plus the Release 3 billing-gate org
+    // resolution (which finds no org on this table-shaped mock and passes).
+    expect(mockFrom).toHaveBeenCalledTimes(2); // scope read + billing gate
     expect(mockFrom.mock.calls[0][0]).toBe("billing_line_items");
   });
 
@@ -209,7 +211,44 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     expect(args._raw_payload).toEqual({ payment_notes: null });
 
     // No follow-up plain UPDATE.
-    expect(mockFrom).toHaveBeenCalledTimes(1); // scope read only
+    expect(mockFrom).toHaveBeenCalledTimes(2); // scope read + billing gate
+  });
+
+  it("(b2) 409: manual payments fail closed while billing is disabled", async () => {
+    // Table-shaped mock: the billing gate resolves the org through the
+    // microgrids join, then the plugin check reports disabled.
+    mockFrom.mockImplementation((table: string) => ({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue(
+            table === "microgrids"
+              ? {
+                  data: {
+                    id: MICROGRID_ID,
+                    communities: { org_id: "550e8400-e29b-41d4-a716-446655440010" },
+                  },
+                  error: null,
+                }
+              : scopeResponse
+          ),
+        }),
+      }),
+    }));
+    mockRpc.mockImplementation((fn: string) =>
+      Promise.resolve(
+        fn === "mgm_plugin_enabled_for_org"
+          ? { data: false, error: null }
+          : { data: rpcResponse.data, error: rpcResponse.error }
+      )
+    );
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makeReq({ status: "paid" }), {
+      params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("billing_disabled");
   });
 
   it("(c) 200: failed→paid super_admin override", async () => {

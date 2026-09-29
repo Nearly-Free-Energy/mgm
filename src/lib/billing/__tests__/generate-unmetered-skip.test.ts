@@ -35,8 +35,19 @@ const HH_UNMETERED = "aaaaaaaa-aaaa-4000-8005-000000000001";
  * same builder; the terminal `.single()` / `.maybeSingle()` and `await`
  * (thenable) resolve to a per-table canned response.
  */
-function makeSupabase(householdDevices: unknown[] = []) {
-  const rpc = vi.fn(async () => ({ data: null, error: null }));
+function makeSupabase(
+  householdDevices: unknown[] = [],
+  period: { startDate: string; endDate: string } = {
+    startDate: "2026-04-01",
+    endDate: "2026-04-30",
+  }
+) {
+  const rpc = vi.fn(async (name: string) => {
+    if (name === "fn_pin_billing_period_rate_schedule") {
+      return { data: "aaaaaaaa-aaaa-4000-8003-000000000001", error: null };
+    }
+    return { data: null, error: null };
+  });
 
   const responses: Record<
     string,
@@ -47,9 +58,10 @@ function makeSupabase(householdDevices: unknown[] = []) {
         data: {
           id: PERIOD_ID,
           microgrid_id: MICROGRID_ID,
-          start_date: "2026-04-01",
-          end_date: "2026-04-30",
+          start_date: period.startDate,
+          end_date: period.endDate,
           status: "draft",
+          rate_schedule_id: "aaaaaaaa-aaaa-4000-8003-000000000001",
         },
         error: null,
       },
@@ -131,6 +143,119 @@ function makeSupabase(householdDevices: unknown[] = []) {
 }
 
 describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
+  const OLD_DEVICE_ID = "aaaaaaaa-aaaa-4000-8004-000000000010";
+  const NEW_DEVICE_ID = "aaaaaaaa-aaaa-4000-8004-000000000020";
+  const replacementHistory = [
+    {
+      role: "primary_consumption_meter",
+      effective_from: "2020-01-01",
+      effective_to: "2026-09-14",
+      devices: {
+        id: OLD_DEVICE_ID,
+        openems_component_id: "meter-old",
+        edges: { openems_edge_id: "edge0" },
+      },
+    },
+    {
+      role: "primary_consumption_meter",
+      effective_from: "2026-09-14",
+      effective_to: null,
+      devices: {
+        id: NEW_DEVICE_ID,
+        openems_component_id: "meter-new",
+        edges: { openems_edge_id: "edge0" },
+      },
+    },
+  ];
+
+  async function previewForReplacementPeriod(startDate: string, endDate: string) {
+    const { supabase, rpc } = makeSupabase(replacementHistory, { startDate, endDate });
+    const getReadings = vi.fn(async ({ devices }: { devices: Array<{ id: string }> }) =>
+      devices.map((device) => ({
+        deviceId: device.id,
+        usageKwh: 10,
+        startDate,
+        endDate,
+      }))
+    );
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "preview",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      meteringProvider: { getReadings },
+      seedReadings: replacementHistory.map((assignment) => ({
+        deviceId: assignment.devices.id,
+        dialReadingKwh: 100,
+        readAt: `${startDate}T12:00:00Z`,
+        startKwh: 90,
+      })),
+    });
+    return { out, getReadings, rpc };
+  }
+
+  it("selects the assignment that covers a whole period before a replacement", async () => {
+    const { out, getReadings, rpc } = await previewForReplacementPeriod(
+      "2026-08-01",
+      "2026-08-31"
+    );
+
+    expect(isRunGenerationFatal(out)).toBe(false);
+    expect(getReadings).toHaveBeenCalledWith(
+      expect.objectContaining({ devices: [expect.objectContaining({ id: OLD_DEVICE_ID })] })
+    );
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+  });
+
+  it("selects the assignment that covers a whole period after a replacement", async () => {
+    const { out, getReadings, rpc } = await previewForReplacementPeriod(
+      "2026-10-01",
+      "2026-10-31"
+    );
+
+    expect(isRunGenerationFatal(out)).toBe(false);
+    expect(getReadings).toHaveBeenCalledWith(
+      expect.objectContaining({ devices: [expect.objectContaining({ id: NEW_DEVICE_ID })] })
+    );
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+  });
+
+  it("rejects a period spanning a meter replacement", async () => {
+    const { out, getReadings, rpc } = await previewForReplacementPeriod(
+      "2026-09-01",
+      "2026-09-30"
+    );
+
+    expect(isRunGenerationFatal(out)).toBe(false);
+    if (isRunGenerationFatal(out)) return;
+    expect(out.results).toMatchObject([
+      { kind: "error", code: "meter_assignment_continuity", householdId: HH_UNMETERED },
+    ]);
+    expect(getReadings).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+  });
+
+  it("records the end-of-period meter on a manual replacement reconciliation", async () => {
+    const { supabase, rpc } = makeSupabase(replacementHistory, {
+      startDate: "2026-09-01",
+      endDate: "2026-09-30",
+    });
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "write",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      manualReadings: [{ householdId: HH_UNMETERED, startKwh: 100, endKwh: 110 }],
+    });
+    expect(isRunGenerationFatal(out)).toBe(false);
+    expect(rpc).toHaveBeenCalledWith(
+      "fn_record_line_item_with_audit",
+      expect.objectContaining({ _device_id: NEW_DEVICE_ID })
+    );
+  });
+
   it("MGM review rejects a primary assignment that starts inside the period", async () => {
     const { supabase, rpc } = makeSupabase([{
       role: "primary_consumption_meter",
@@ -158,7 +283,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       code: "meter_assignment_continuity",
       householdId: HH_UNMETERED,
     }]);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 
   it("write mode, householdIds undefined, un-metered household → skips with unmetered_no_manual and writes NO row", async () => {
@@ -193,7 +318,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
 
     // The critical regression: NO placeholder row is written. The write path
     // is `supabase.rpc("fn_record_line_item_with_audit", …)`.
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
 
     // No 'written' result of any kind.
     expect(results.some((r) => r.kind === "written")).toBe(false);
@@ -222,8 +347,8 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     if (results[0].kind === "error") {
       expect(results[0].code).toBe("unmetered_no_manual");
     }
-    // Preview never writes anyway, but assert no preview placeholder row.
+    // Preview may refresh an empty draft's tariff pin, but writes no bill.
     expect(results.some((r) => r.kind === "preview")).toBe(false);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 });

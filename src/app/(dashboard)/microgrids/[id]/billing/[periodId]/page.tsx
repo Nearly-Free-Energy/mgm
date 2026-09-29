@@ -50,7 +50,6 @@ export default async function BillingPeriodDetailPage({
     { data: lineItems, error: lineItemsError },
     { data: households, error: householdsError },
     { data: householdEdges, error: householdEdgesError },
-    { data: schedule, error: scheduleError },
     { data: microgrid, error: microgridError },
     isSuperAdmin,
   ] = await Promise.all([
@@ -97,14 +96,6 @@ export default async function BillingPeriodDetailPage({
       .eq("household_devices.role", "primary_consumption_meter")
       .returns<HouseholdEdgeRow[]>(),
     supabase
-      .from("rate_schedules")
-      .select("*")
-      .eq("microgrid_id", id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then((res) => ({ ...res, data: res.data as RateSchedule | null })),
-    supabase
       .from("microgrids")
       .select("id, name, currency, communities!inner(id, payment_provider)")
       .eq("id", id)
@@ -116,6 +107,18 @@ export default async function BillingPeriodDetailPage({
   if (periodError || !period) {
     notFound();
   }
+
+  // Amounts on historical bills must be explained by the period's own
+  // tariff. Never show the latest microgrid tariff beside older charges.
+  const { data: schedule, error: scheduleError } = period.rate_schedule_id
+    ? await supabase
+        .from("rate_schedules")
+        .select("*")
+        .eq("id", period.rate_schedule_id)
+        .eq("microgrid_id", id)
+        .maybeSingle()
+        .then((res) => ({ ...res, data: res.data as RateSchedule | null }))
+    : { data: null, error: null };
 
   if (microgridError || !microgrid) {
     return (
@@ -145,6 +148,16 @@ export default async function BillingPeriodDetailPage({
     return (
       <div className="rounded-md bg-destructive-muted p-4 text-sm text-destructive-fg">
         Error loading rate schedule: {scheduleError.message}
+      </div>
+    );
+  }
+
+  if (!schedule) {
+    return (
+      <div className="rounded-md bg-destructive-muted p-4 text-sm text-destructive-fg">
+        This period has no pinned tariff. For an older billed period, an
+        administrator must verify and reconcile its historical tariff before
+        invoices or corrections can be shown.
       </div>
     );
   }

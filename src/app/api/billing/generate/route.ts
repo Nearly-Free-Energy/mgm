@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
 import {
-  isRunGenerationFatal,
-  runGenerationFor,
-  type ManualReadingInput,
-  type SeedReadingInput,
+  composeBilling,
+  type BillingResult,
+} from "@/lib/billing/compose";
+import type {
+  ManualReadingInput,
+  SeedReadingInput,
 } from "@/lib/billing/generate";
+
+function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
+  const { ok, status, ...body } = error;
+  void ok;
+  return NextResponse.json(body, { status });
+}
 
 /**
  * POST /api/billing/generate (#173, BC1)
@@ -45,6 +52,11 @@ import {
  * Auth (NEW): explicit getUser() gate before any business logic — today's
  * route relies entirely on RLS. Returning 401 explicitly gives BC2/BC3 a
  * predictable upstream signal.
+ *
+ * Release 3 (issue #5, review P1): the write itself runs through the billing
+ * Cordis capability (composeBilling + generateBills), which enforces the
+ * organization scope, the billing plugin gate, and effective-dated
+ * meter-assignment coverage before the engine sees the request.
  *
  * Response:
  *   { lineItems: number; errors: Array<...> }
@@ -260,31 +272,60 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const out = await runGenerationFor({
-    supabase,
-    periodId: parsed.billingPeriodId,
-    householdIds: parsed.householdIds,
-    manualReadings: parsed.manualReadings,
-    seedReadings: parsed.seedReadings,
-    mode: "write",
-    actorUserId: user.id,
-    meteringProvider: createOpenEmsMeteringProvider(supabase),
-  });
-
-  if (isRunGenerationFatal(out)) {
-    return NextResponse.json(out.body, { status: out.status });
+  // Release 3 (issue #5, review P1): generation runs through the billing
+  // Cordis capability — org-scoped, plugin-gated, and always enforcing
+  // effective-dated meter-assignment coverage. The route resolves the
+  // organization, composes the request-scoped billing context, and delegates
+  // validation + writes; the engine is never called directly.
+  const { data: period } = await supabase
+    .from("billing_periods")
+    .select("id, microgrid_id")
+    .eq("id", parsed.billingPeriodId)
+    .maybeSingle<{ id: string; microgrid_id: string }>();
+  if (!period) {
+    return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
+  }
+  const { data: microgrid } = await supabase
+    .from("microgrids")
+    .select("id, communities!inner(org_id)")
+    .eq("id", period.microgrid_id)
+    .maybeSingle<{
+      id: string;
+      communities: { org_id: string } | { org_id: string }[];
+    }>();
+  const communities = microgrid?.communities;
+  const orgId = Array.isArray(communities)
+    ? communities[0]?.org_id
+    : communities?.org_id;
+  if (!orgId) {
+    return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
   }
 
-  // Shape the response: split written + errors.
-  const lineItems = out.results.filter((r) => r.kind === "written").length;
-  const errors = out.results
-    .filter((r) => r.kind === "error")
-    .map((e) => ({
-      householdId: e.householdId,
-      householdName: e.householdName,
-      error: e.error,
-      code: e.code,
-    }));
+  const composed = await composeBilling({ supabase, organizationId: orgId });
+  if (!composed.ok) return mapError(composed);
 
-  return NextResponse.json({ lineItems, errors });
+  try {
+    const result = await composed.data.billing.generateBills({
+      billingPeriodId: parsed.billingPeriodId,
+      householdIds: parsed.householdIds,
+      manualReadings: parsed.manualReadings,
+      seedReadings: parsed.seedReadings,
+    });
+    if (!result.ok) return mapError(result);
+
+    // Shape the response: split written + errors.
+    const lineItems = result.data.results.filter((r) => r.kind === "written").length;
+    const errors = result.data.results
+      .filter((r) => r.kind === "error")
+      .map((e) => ({
+        householdId: e.householdId,
+        householdName: e.householdName,
+        error: e.error,
+        code: e.code,
+      }));
+
+    return NextResponse.json({ lineItems, errors });
+  } finally {
+    await composed.data.dispose();
+  }
 }

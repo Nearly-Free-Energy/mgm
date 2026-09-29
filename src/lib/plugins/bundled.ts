@@ -12,15 +12,18 @@ export const ORGANIZATION_DIRECTORY_PLUGIN_NAME =
 export const COMMUNITY_MANAGEMENT_PLUGIN_NAME =
   "community-management" as const;
 export const METERING_PLUGIN_NAME = "metering" as const;
+export const BILLING_PLUGIN_NAME = "billing" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
   | typeof COMMUNITY_MANAGEMENT_PLUGIN_NAME
-  | typeof METERING_PLUGIN_NAME;
+  | typeof METERING_PLUGIN_NAME
+  | typeof BILLING_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
 export const METERING_PLUGIN_VERSION = "0.1.0";
+export const BILLING_PLUGIN_VERSION = "0.1.0";
 
 export interface BundledPlugin {
   name: MgmPluginName;
@@ -111,10 +114,45 @@ export const METERING_PLUGIN: BundledPlugin = {
   tables: ["devices", "edges", "household_devices", "meter_readings"],
 };
 
+export const BILLING_PLUGIN: BundledPlugin = {
+  name: BILLING_PLUGIN_NAME,
+  version: BILLING_PLUGIN_VERSION,
+  displayName: "Billing",
+  description:
+    "Tariffs, billing periods, household bills, invoices, and manual payments for one organization.",
+  dependencies: [METERING_PLUGIN_NAME],
+  core: false,
+  // Billing reads metering data through the metering capability — never a
+  // vendor client. Disabling preserves tariffs, periods, bills, invoices,
+  // and payment history.
+  provides: [
+    "tariffs",
+    "billing periods",
+    "bill generation",
+    "invoices",
+    "manual payments",
+  ],
+  routes: [
+    "/api/rate-schedules",
+    "/api/billing",
+    "/api/billing-periods",
+    "/api/billing-line-items",
+    "/api/billing-review",
+  ],
+  tables: [
+    "rate_schedules",
+    "billing_periods",
+    "billing_line_items",
+    "billing_audit_log",
+    "payment_events",
+  ],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
   METERING_PLUGIN,
+  BILLING_PLUGIN,
 ] as const;
 
 export function getBundledPlugin(

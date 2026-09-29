@@ -33,6 +33,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { ZodError } from "zod";
 
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
@@ -126,6 +127,7 @@ export async function GET(
         start_date,
         end_date,
         timezone,
+        rate_schedule_id,
         microgrids!inner (
           id,
           community_id,
@@ -229,7 +231,9 @@ export async function GET(
   let lineItemPesapalUrl = (scoped.pesapal_redirect_url as string | null) ?? null;
   let shortSlug = (scoped.short_slug as string | null) ?? null;
 
-  if (hasPaymentProvider) {
+  // Never create or embed a payment session while its customer routes are gated.
+  if (hasPaymentProvider && isReleasedRoute("/p/payment") &&
+      isReleasedRoute(`/api/billing-line-items/${lineItemId}/pay`)) {
     if (!lineItemPesapalUrl) {
       try {
         await ensurePaymentLinkForLineItem(supabase, lineItemId, {
@@ -413,23 +417,28 @@ export async function GET(
     if (dev) meterDevice = dev as unknown as Device;
   }
 
-  // 7. Resolve rate schedule (most-recent for the microgrid).
+  // 7. Render only the tariff that was used to calculate this period.
+  const pinnedScheduleId = period.rate_schedule_id as string | null;
+  if (!pinnedScheduleId) {
+    return NextResponse.json(
+      { error: "This billed period needs historical tariff reconciliation.", reason: "rate_schedule_unpinned" },
+      { status: 409 },
+    );
+  }
   const { data: rateScheduleRow } = await supabase
     .from("rate_schedules")
     .select(
       "id, created_at, microgrid_id, service_charge, service_charge_description, tax_rate, tiers",
     )
+    .eq("id", pinnedScheduleId)
     .eq("microgrid_id", microgridId)
-    .order("created_at", { ascending: false })
-    .limit(1)
     .maybeSingle();
 
   if (!rateScheduleRow) {
     return NextResponse.json(
       {
-        error:
-          "Cannot generate bill — no rate schedule configured for this microgrid.",
-        reason: "missing_rate_schedule",
+        error: "This period's pinned rate schedule could not be loaded.",
+        reason: "pinned_rate_schedule_unavailable",
       },
       { status: 422 },
     );

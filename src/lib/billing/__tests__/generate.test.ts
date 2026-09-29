@@ -45,6 +45,8 @@ const FIXTURE = {
   hhP: "dddddddd-dddd-4000-8005-00000000000d",
   periodP: "dddddddd-dddd-4000-8006-00000000000d",
   periodP2: "dddddddd-dddd-4000-8006-00000000001d",
+  periodP3: "dddddddd-dddd-4000-8006-00000000002d",
+  periodP4: "dddddddd-dddd-4000-8006-00000000003d",
 };
 
 let alejandroSuperAdmin: {
@@ -237,5 +239,138 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     expect(preview!.tierBreakdown[0].kwh).toBe(178.35);
     expect(preview!.tierBreakdown[0].kwh * 1000).toBe(178350);
     expect(Number.isInteger(preview!.tierBreakdown[0].amount)).toBe(true);
+  });
+
+  it("regenerates a closed period at its original tariff after a new version is added", async () => {
+    const { runGenerationFor } = await import("@/lib/billing/generate");
+    const svc = await serviceClient();
+    const { error: periodError } = await svc.from("billing_periods").insert({
+      id: FIXTURE.periodP3,
+      microgrid_id: FIXTURE.mgP,
+      start_date: "2026-06-01",
+      end_date: "2026-06-30",
+      status: "draft",
+    });
+    expect(periodError).toBeNull();
+
+    const input = {
+      supabase: alejandroSuperAdmin.client,
+      periodId: FIXTURE.periodP3,
+      householdIds: [FIXTURE.hhP],
+      manualReadings: [{
+        householdId: FIXTURE.hhP,
+        startKwh: 10,
+        endKwh: 20,
+        reason: "Pinned tariff regression",
+      }],
+      mode: "write" as const,
+      actorUserId: alejandroSuperAdmin.userId,
+    };
+
+    const first = await runGenerationFor(input);
+    expect("kind" in first && first.kind === "fatal").toBe(false);
+    const { data: initial } = await svc.from("billing_line_items")
+      .select("total_amount")
+      .eq("billing_period_id", FIXTURE.periodP3)
+      .eq("household_id", FIXTURE.hhP)
+      .single();
+    expect(Number(initial?.total_amount)).toBe(1000);
+
+    const { error: closeError } = await svc.from("billing_periods")
+      .update({ status: "closed", closed_at: new Date().toISOString() })
+      .eq("id", FIXTURE.periodP3);
+    expect(closeError).toBeNull();
+    const { error: newTariffError } = await svc.from("rate_schedules").insert({
+      microgrid_id: FIXTURE.mgP,
+      tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 500 }],
+      service_charge: 0,
+      tax_rate: 0,
+    });
+    expect(newTariffError).toBeNull();
+
+    const regenerated = await runGenerationFor(input);
+    expect("kind" in regenerated && regenerated.kind === "fatal").toBe(false);
+    const { data: historical } = await svc.from("billing_line_items")
+      .select("total_amount")
+      .eq("billing_period_id", FIXTURE.periodP3)
+      .eq("household_id", FIXTURE.hhP)
+      .single();
+    expect(Number(historical?.total_amount)).toBe(1000);
+  });
+
+  it("preview and first generation use a newer tariff for an empty draft", async () => {
+    const { runGenerationFor, isRunGenerationFatal } = await import("@/lib/billing/generate");
+    const svc = await serviceClient();
+    const { data: oldRate, error: oldRateError } = await svc.from("rate_schedules")
+      .insert({
+        microgrid_id: FIXTURE.mgP,
+        tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 600 }],
+        service_charge: 0,
+        tax_rate: 0,
+      })
+      .select("id").single();
+    expect(oldRateError).toBeNull();
+    const { error: periodError } = await svc.from("billing_periods").insert({
+      id: FIXTURE.periodP4,
+      microgrid_id: FIXTURE.mgP,
+      start_date: "2026-07-01",
+      end_date: "2026-07-31",
+      status: "draft",
+    });
+    expect(periodError).toBeNull();
+    const { data: newRate, error: newRateError } = await svc.from("rate_schedules")
+      .insert({
+        microgrid_id: FIXTURE.mgP,
+        tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 700 }],
+        service_charge: 0,
+        tax_rate: 0,
+      })
+      .select("id").single();
+    expect(newRateError).toBeNull();
+    expect(newRate?.id).not.toBe(oldRate?.id);
+
+    const input = {
+      supabase: alejandroSuperAdmin.client,
+      periodId: FIXTURE.periodP4,
+      householdIds: [FIXTURE.hhP],
+      manualReadings: [{ householdId: FIXTURE.hhP, startKwh: 10, endKwh: 20 }],
+      actorUserId: alejandroSuperAdmin.userId,
+    };
+    const preview = await runGenerationFor({ ...input, mode: "preview" });
+    expect(isRunGenerationFatal(preview)).toBe(false);
+    const { data: pinnedAfterPreview } = await svc.from("billing_periods")
+      .select("rate_schedule_id").eq("id", FIXTURE.periodP4).single();
+    expect(pinnedAfterPreview?.rate_schedule_id).toBe(newRate?.id);
+
+    // Simulate Manager A calculating at the old rate before Manager B's
+    // preview moved the empty draft's pin. The write must fail atomically.
+    const { error: staleWriteError } = await svc.rpc("fn_record_line_item_with_audit", {
+      _billing_period_id: FIXTURE.periodP4,
+      _household_id: FIXTURE.hhP,
+      _device_id: null,
+      _usage_kwh: 10,
+      _start_kwh: 10,
+      _end_kwh: 20,
+      _tier_breakdown: [{ label: "T1", kwh: 10, amount: 6000 }],
+      _total_amount: 6000,
+      _reading_source: "manual",
+      _entered_by_user_id: alejandroSuperAdmin.userId,
+      _manual_reason: "stale calculation",
+      _actor_user_id: alejandroSuperAdmin.userId,
+      _audit_details: {},
+      _rate_schedule_id: oldRate!.id,
+    });
+    expect(staleWriteError?.code).toBe("23514");
+    const { count: staleBillCount } = await svc.from("billing_line_items")
+      .select("id", { count: "exact", head: true })
+      .eq("billing_period_id", FIXTURE.periodP4);
+    expect(staleBillCount).toBe(0);
+
+    const written = await runGenerationFor({ ...input, mode: "write" });
+    expect(isRunGenerationFatal(written)).toBe(false);
+    const { data: lineItem } = await svc.from("billing_line_items")
+      .select("total_amount").eq("billing_period_id", FIXTURE.periodP4)
+      .eq("household_id", FIXTURE.hhP).single();
+    expect(Number(lineItem?.total_amount)).toBe(7000);
   });
 });

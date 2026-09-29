@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { composeBillingReview, isRunGenerationFatal } from "@/lib/cordis/billing-review";
 import { isMgmReviewer } from "@/lib/mgm/access";
 import { createClient } from "@/lib/supabase/server";
+import { billingWriteGateForPeriod } from "@/lib/billing/guard";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,9 @@ export async function POST(request: NextRequest) {
   if (periodError || !period) {
     return NextResponse.json({ error: "billing_period_not_found" }, { status: 404 });
   }
+  // Preview may re-pin an empty draft, so it is a billing write.
+  const billingGate = await billingWriteGateForPeriod(supabase, body.periodId);
+  if (billingGate) return billingGate;
 
   let householdIds = body.householdIds;
   if (householdIds === undefined) {

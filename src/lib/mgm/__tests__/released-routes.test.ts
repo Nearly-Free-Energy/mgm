@@ -48,21 +48,42 @@ describe("isReleasedRoute", () => {
     "/api/metering/readings",
     "/api/households/hh-1/assignments",
     "/api/meter-readings/opening",
+    // Release 3 pages.
+    "/microgrids/abc/billing",
+    "/microgrids/abc/billing/period-1",
+    "/microgrids/abc/billing/period-1/history",
+    "/microgrids/abc/setup/rates",
+    "/communities/abc/invoice",
+    // Release 3 APIs.
+    "/api/rate-schedules",
+    "/api/rate-schedules/rs-1",
+    "/api/billing/generate",
+    "/api/billing/regenerate-preview",
+    "/api/billing-review/preview",
+    "/api/billing-periods",
+    "/api/billing-periods/abc",
+    "/api/billing-periods/abc/close",
+    "/api/billing-periods/abc/audit-log",
+    "/api/billing-periods/abc/export-csv",
+    "/api/billing-line-items/abc",
+    "/api/billing-line-items/abc/payment-status",
+    "/api/billing-line-items/abc/pdf",
+    "/api/billing-line-items/abc/usage",
+    "/api/communities/abc/invoice-config",
+    "/api/communities/abc/invoice-preview",
+    "/api/communities/abc/invoice-logo",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
 
   it.each([
-    // Billing + payments stay gated for Release 3.
-    "/api/billing/generate",
-    "/api/billing/regenerate-preview",
-    "/api/billing-periods/abc/export-csv",
+    // Online gateways, payment links, portals, and notifications stay gated.
     "/api/billing-line-items/abc/pay",
+    "/api/billing-line-items/abc/url",
     "/api/payments/ipn",
     "/api/v1/microgrids",
     "/p/abc123",
-    "/microgrids/abc/billing",
-    "/microgrids/abc/setup/rates",
+    "/communities/abc/payment",
     "/microgrids/abc/setup/edges/edge-1/devices/extra",
     "/api/microgrids/abc/openems-backend/unknown",
     "/api/metering",
