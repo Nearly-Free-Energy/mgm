@@ -33,7 +33,10 @@ BEGIN
   END IF;
 
   -- Historical recovery is an audited SQL operation by the database owner,
-  -- never a direct Data API update by an authenticated manager.
+  -- never a direct Data API update by an authenticated manager. This
+  -- current_user check assumes no future postgres-owned SECURITY DEFINER
+  -- function exposes an arbitrary billing_periods update; audit any such
+  -- function before granting it to an application role.
   IF TG_OP = 'UPDATE' AND OLD.rate_schedule_id IS NULL
      AND NEW.rate_schedule_id IS NOT NULL
      AND (OLD.status <> 'draft' OR EXISTS (

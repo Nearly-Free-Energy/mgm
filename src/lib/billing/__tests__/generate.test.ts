@@ -342,6 +342,30 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       .select("rate_schedule_id").eq("id", FIXTURE.periodP4).single();
     expect(pinnedAfterPreview?.rate_schedule_id).toBe(newRate?.id);
 
+    // Simulate Manager A calculating at the old rate before Manager B's
+    // preview moved the empty draft's pin. The write must fail atomically.
+    const { error: staleWriteError } = await svc.rpc("fn_record_line_item_with_audit", {
+      _billing_period_id: FIXTURE.periodP4,
+      _household_id: FIXTURE.hhP,
+      _device_id: null,
+      _usage_kwh: 10,
+      _start_kwh: 10,
+      _end_kwh: 20,
+      _tier_breakdown: [{ label: "T1", kwh: 10, amount: 6000 }],
+      _total_amount: 6000,
+      _reading_source: "manual",
+      _entered_by_user_id: alejandroSuperAdmin.userId,
+      _manual_reason: "stale calculation",
+      _actor_user_id: alejandroSuperAdmin.userId,
+      _audit_details: {},
+      _rate_schedule_id: oldRate!.id,
+    });
+    expect(staleWriteError?.code).toBe("23514");
+    const { count: staleBillCount } = await svc.from("billing_line_items")
+      .select("id", { count: "exact", head: true })
+      .eq("billing_period_id", FIXTURE.periodP4);
+    expect(staleBillCount).toBe(0);
+
     const written = await runGenerationFor({ ...input, mode: "write" });
     expect(isRunGenerationFatal(written)).toBe(false);
     const { data: lineItem } = await svc.from("billing_line_items")

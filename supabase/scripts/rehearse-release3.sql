@@ -133,7 +133,7 @@ BEGIN
       {"label": "T2", "kwh": 2.5, "amount": 500}]'::jsonb,
     2000, 'edge', NULL, NULL, v_user,
     '{"household_name": "Rehearsal Household"}'::jsonb,
-    'human', NULL
+    v_new_tariff, 'human', NULL
   );
   IF v_item.total_amount <> 2000 THEN
     RAISE EXCEPTION 'unexpected total_amount: %', v_item.total_amount;
@@ -151,7 +151,7 @@ BEGIN
       {"label": "T2", "kwh": 5, "amount": 1000}]'::jsonb,
     2500, 'edge', NULL, NULL, v_user,
     '{"household_name": "Rehearsal Household", "previous_total_amount": 2000}'::jsonb,
-    'human', NULL
+    v_new_tariff, 'human', NULL
   );
   IF v_item.total_amount <> 2500 THEN
     RAISE EXCEPTION 'regenerate did not update total: %', v_item.total_amount;
@@ -193,7 +193,7 @@ BEGIN
       {"label": "T2", "kwh": 5, "amount": 1000}]'::jsonb,
     2500, 'edge', NULL, NULL, v_user,
     '{"household_name": "Rehearsal Household"}'::jsonb,
-    'human', NULL
+    v_new_tariff, 'human', NULL
   );
   IF v_item.payment_status <> 'paid' OR v_item.paid_at IS NULL THEN
     RAISE EXCEPTION 'regeneration clobbered payment state!';
@@ -226,7 +226,7 @@ BEGIN
       {"label": "T2", "kwh": 5, "amount": 1000}]'::jsonb,
     2500, 'manual', v_user, 'post-close correction', v_user,
     '{"household_name": "Rehearsal Household"}'::jsonb,
-    'human', NULL
+    v_new_tariff, 'human', NULL
   );
   IF NOT EXISTS (
     SELECT 1 FROM billing_audit_log

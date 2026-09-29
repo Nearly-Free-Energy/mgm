@@ -77,6 +77,7 @@ const FIXTURE = {
   device: "aaaaaaaa-aaaa-4000-8254-000000000001",
   household: "aaaaaaaa-aaaa-4000-8255-000000000001",
   billingPeriod: "aaaaaaaa-aaaa-4000-8256-000000000001",
+  rateSchedule: "aaaaaaaa-aaaa-4000-8257-000000000001",
 };
 
 const TEST_USER_EMAIL = `audit-actor-kind-${Date.now()}@example.invalid`;
@@ -137,6 +138,13 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
       microgrid_id: FIXTURE.microgrid,
       display_name: "AK Household",
       primary_phone: "+256700000250",
+    });
+    await insertOrThrow(svc, "rate_schedules", {
+      id: FIXTURE.rateSchedule,
+      microgrid_id: FIXTURE.microgrid,
+      tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 250 }],
+      service_charge: 0,
+      tax_rate: 0,
     });
     await insertOrThrow(svc, "billing_periods", {
       id: FIXTURE.billingPeriod,
@@ -295,6 +303,7 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
 
     const { data, error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.billingPeriod,
+      _rate_schedule_id: FIXTURE.rateSchedule,
       _household_id: householdB,
       _device_id: FIXTURE.device,
       _usage_kwh: 120,
@@ -341,6 +350,7 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
 
     const { data, error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.billingPeriod,
+      _rate_schedule_id: FIXTURE.rateSchedule,
       _household_id: householdC,
       _device_id: FIXTURE.device,
       _usage_kwh: 80,

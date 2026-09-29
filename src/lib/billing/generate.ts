@@ -118,6 +118,7 @@ export type SeedReadingInput = {
 export type GenerationErrorCode =
   | "currently_manual"
   | "no_meter_reading"
+  | "tariff_changed"
   | "missing_openems_config"
   | "invalid_manual_reading"
   | "unmetered_no_manual"
@@ -901,6 +902,7 @@ export async function runGenerationFor(
         _manual_reason: manualReason,
         _actor_user_id: actorUserId,
         _audit_details: auditDetails as unknown as Record<string, unknown>,
+        _rate_schedule_id: rateScheduleId,
         _actor_kind: actorKind,
         _actor_ref: actorRef,
       }
@@ -912,7 +914,9 @@ export async function runGenerationFor(
         householdId: hid,
         householdName,
         error: `Failed to write line item: ${rpcErr?.message ?? "unknown"}`,
-        code: "no_meter_reading",
+        code: rpcErr?.code === "23514" && rpcErr.message.includes("tariff changed")
+          ? "tariff_changed"
+          : "no_meter_reading",
       });
       continue;
     }

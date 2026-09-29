@@ -48,6 +48,7 @@ const FIXTURE = {
   deviceA: "dddddddd-dddd-4000-8004-00000000000a",
   hhA: "dddddddd-dddd-4000-8005-00000000000a",
   periodA: "dddddddd-dddd-4000-8006-00000000000a",
+  rateA: "dddddddd-dddd-4000-8007-00000000000a",
 
   // Extra households on mgA, isolated from hhA so the link-invalidation
   // tests (#217 / 00037) can run against fresh rows without contaminating
@@ -148,6 +149,13 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         primary_phone: "+256700001003",
       },
     ]);
+    await svc.from("rate_schedules").insert({
+      id: FIXTURE.rateA,
+      microgrid_id: FIXTURE.mgA,
+      tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 500 }],
+      service_charge: 0,
+      tax_rate: 0,
+    });
     await svc.from("billing_periods").insert({
       id: FIXTURE.periodA,
       microgrid_id: FIXTURE.mgA,
@@ -281,6 +289,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const svc = await serviceClient();
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 50,
@@ -368,6 +377,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // path. Payment fields MUST be untouched.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 80,
@@ -436,6 +446,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
 
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 90,
@@ -491,6 +502,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // Seed: insert via RPC at total_amount=1000 then plant the payment cache.
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 10,
@@ -519,6 +531,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // Re-key with a different total_amount.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 15,
@@ -561,6 +574,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
 
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv2,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 20,
@@ -588,6 +602,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // Re-run with the SAME total_amount — auto-invalidation must NOT fire.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv2,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 20,
@@ -630,6 +645,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // satisfied), then plant pesapal_redirect_url separately.
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv3,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 30,
@@ -682,6 +698,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // Re-key with a different total_amount.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv3,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 35,
@@ -756,6 +773,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
 
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 300,
@@ -978,6 +996,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     // re-key with dust-bearing inputs MUST land rounded values.
     const { error, data } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 178.3500000000002,
@@ -1060,6 +1079,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const fakeActor = randomUUID();
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
+      _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 999,

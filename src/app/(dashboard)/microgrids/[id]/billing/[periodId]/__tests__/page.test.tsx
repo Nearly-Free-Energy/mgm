@@ -58,6 +58,7 @@ let MOCK_ACTOR_ROWS: Array<Record<string, unknown>> = [];
 let LAST_LINE_ITEMS_SELECT = "";
 let LAST_RPC_ARGS: Record<string, unknown> | null = null;
 let LAST_SCHEDULE_FILTERS: Array<[string, unknown]> = [];
+let MOCK_PERIOD_RATE_SCHEDULE_ID: string | null = SCHEDULE_ID;
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ vi.mock("@/lib/supabase/server", () => ({
     from: (table: string) => {
       if (table === "billing_line_items") return buildLineItemsQuery();
       if (table === "billing_periods")
-        return buildQuery({ id: PERIOD_ID, microgrid_id: MICROGRID_ID, rate_schedule_id: SCHEDULE_ID });
+        return buildQuery({ id: PERIOD_ID, microgrid_id: MICROGRID_ID, rate_schedule_id: MOCK_PERIOD_RATE_SCHEDULE_ID });
       if (table === "households") return buildQuery([]);
       if (table === "rate_schedules") return buildQuery(
         { id: SCHEDULE_ID, tiers: [] },
@@ -187,6 +188,7 @@ beforeEach(() => {
   LAST_LINE_ITEMS_SELECT = "";
   LAST_RPC_ARGS = null;
   LAST_SCHEDULE_FILTERS = [];
+  MOCK_PERIOD_RATE_SCHEDULE_ID = SCHEDULE_ID;
   MOCK_LINE_ITEMS = [
     { id: LI_FULL, entered_by_user_id: ACTOR_FULL },
     { id: LI_FIRST_ONLY, entered_by_user_id: ACTOR_FIRST_ONLY },
@@ -239,6 +241,16 @@ describe("BillingPeriodDetailPage — fn_list_visible_users actor mapping (#269)
     });
     renderToStaticMarkup(node as React.ReactElement);
     expect(LAST_SCHEDULE_FILTERS).toContainEqual(["id", SCHEDULE_ID]);
+  });
+
+  it("shows an explicit reconciliation error for an unpinned period", async () => {
+    MOCK_PERIOD_RATE_SCHEDULE_ID = null;
+    const node = await BillingPeriodDetailPage({
+      params: Promise.resolve({ id: MICROGRID_ID, periodId: PERIOD_ID }),
+    });
+    const html = renderToStaticMarkup(node as React.ReactElement);
+    expect(html).toContain("no pinned tariff");
+    expect(LAST_SCHEDULE_FILTERS).toEqual([]);
   });
   it("does NOT request user_directory (dropped) and does NOT embed an actor join", async () => {
     const node = await BillingPeriodDetailPage({

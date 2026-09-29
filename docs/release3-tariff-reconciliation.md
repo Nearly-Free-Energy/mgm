@@ -26,6 +26,10 @@ latest schedule, and updates the pin only before any line item is written.
 After the first bill, and after closure, the pin is immutable. The period
 page, PDF, and CSV read only that pinned version.
 
+Generation passes the selected tariff ID to the bill-write RPC. That RPC
+locks the period and rejects a stale calculation before writing a line item
+if another request re-pinned the empty draft in the meantime.
+
 Release 3's create/close RPCs are granted to `authenticated` but use
 `user_can_access_microgrid`, whose current definition allows only a
 `super_admin` or an `org_manager` for the microgrid's organization. The RLS

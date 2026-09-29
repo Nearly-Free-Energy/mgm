@@ -437,9 +437,8 @@ export async function GET(
   if (!rateScheduleRow) {
     return NextResponse.json(
       {
-        error:
-          "Cannot generate bill — no rate schedule configured for this microgrid.",
-        reason: "missing_rate_schedule",
+        error: "This period's pinned rate schedule could not be loaded.",
+        reason: "pinned_rate_schedule_unavailable",
       },
       { status: 422 },
     );

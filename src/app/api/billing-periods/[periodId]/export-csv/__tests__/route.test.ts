@@ -314,6 +314,14 @@ describe("GET /api/billing-periods/[periodId]/export-csv", () => {
     expect(rateScheduleFilters).toEqual([]);
   });
 
+  it("explains when the pinned tariff cannot be loaded", async () => {
+    serviceFromState.rate_schedules = { data: null, error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ periodId: PERIOD_ID }) });
+    expect(res.status).toBe(422);
+    expect((await res.json()).reason).toBe("pinned_rate_schedule_unavailable");
+  });
+
   it("200: response body begins with the UTF-8 BOM (0xEF 0xBB 0xBF)", async () => {
     const { GET } = await import("../route");
     const res = await GET(makeReq(), {

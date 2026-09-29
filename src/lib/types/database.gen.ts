@@ -1431,6 +1431,7 @@ export type Database = {
           _household_id: string
           _manual_reason: string
           _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
+          _rate_schedule_id: string
           _start_kwh: number
           _tier_breakdown: Json
           _total_amount: number
