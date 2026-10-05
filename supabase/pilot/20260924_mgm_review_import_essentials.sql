@@ -65,9 +65,12 @@ BEGIN
 END;
 $$;
 
--- The MGM pilot does not expose inherited mutation RPCs. Trigger functions
--- remain attached to their triggers; revoking direct EXECUTE does not disable
--- trigger execution.
+-- The MGM pilot does not expose inherited mutation RPCs except invitation
+-- finalization, which the signed-in inviter calls after GoTrue sends the
+-- invitation. That SECURITY DEFINER function checks auth.uid() and the
+-- inviter's role and organization access before assigning a role. Trigger
+-- functions remain attached to their triggers; revoking direct EXECUTE does
+-- not disable trigger execution.
 REVOKE EXECUTE ON FUNCTION public.fn_change_user_role(UUID, public.user_role, UUID)
   FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.fn_create_household_with_meter(
@@ -75,7 +78,10 @@ REVOKE EXECUTE ON FUNCTION public.fn_create_household_with_meter(
 ) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.fn_finalize_user_invitation(
   UUID, TEXT, TEXT, TEXT, public.user_role, UUID
-) FROM PUBLIC, anon, authenticated;
+) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fn_finalize_user_invitation(
+  UUID, TEXT, TEXT, TEXT, public.user_role, UUID
+) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.fn_device_openems_component_valid()
   FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.fn_set_updated_at()

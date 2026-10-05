@@ -14,9 +14,12 @@ Use a disposable local Supabase database initialized with the reviewed base file
 
 - pilot_import_batches has RLS enabled and one SELECT policy scoped through user_can_access_microgrid.
 - anon and PUBLIC have no table privileges on pilot_import_batches; authenticated has SELECT only.
+- authenticated can execute fn_finalize_user_invitation, while anon cannot; the function itself still checks the inviter's role and organization access.
 - No batch can be marked applied with conflicts, mismatched counts, or more than 500 households or 5,000 readings.
 - baselineImportedAt can be derived from the earliest applied_at where is_baseline is true for the requested billing period.
 
 ## Apply controls
 
-Apply only to the new MGM pilot project after confirming the base schema is at 00015 and reviewing the grants and RLS. The script restricts the six inherited mutating/trigger functions from direct role invocation, while retaining the read helpers required by RLS. It contains no real-data import. Do not run the standard migration chain against the pilot project.
+Apply only to the new MGM pilot project after confirming the base schema is at 00015 and reviewing the grants and RLS. The script restricts inherited mutating/trigger functions from direct role invocation except fn_finalize_user_invitation, which is available only to signed-in inviters and performs its own authorization checks. It contains no real-data import. Do not run the standard migration chain against the pilot project.
+
+For an existing pilot that already ran the earlier overlay, apply the versioned `20261005141300_restore_pilot_invitation_execute.sql` upgrade. The production MGM pilot received that upgrade on 2026-10-05. New pilots get the same grant from this curated overlay, so they do not need the upgrade solely for invitation access.
