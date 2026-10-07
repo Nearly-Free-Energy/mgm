@@ -176,12 +176,12 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
 
   // Known edge IDs input state.
   // Prefill logic (3 cases, pinned in #112):
-  //   1. Empty-state form (new microgrid, ems_type == null) → "edge0"
+  //   1. Empty-state form (new microgrid, ems_type == null) → empty
   //   2. Reconfigure form with a populated list → joined list (e.g. "edge0, edge1")
   //   3. Reconfigure form with deliberately empty list (ems_type set, list=[]) → ""
   //      Do NOT re-prefill "edge0" — the user deliberately saved an empty list.
   const [knownEdgeIds, setKnownEdgeIds] = React.useState<string>(() => {
-    if (initialMode === "empty") return "edge0";
+    if (initialMode === "empty") return "";
     if (microgrid.ems_known_edge_ids.length > 0) {
       return microgrid.ems_known_edge_ids.join(", ");
     }
@@ -1082,7 +1082,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       {/* Known edge IDs — shown for both connection types, below credentials (#112) */}
       <div>
         <label htmlFor="known-edge-ids" className="mb-1 block text-xs font-medium text-foreground">
-          Known edge IDs
+          Known edge IDs (optional)
         </label>
         <Input
           id="known-edge-ids"
@@ -1095,7 +1095,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           className="font-mono text-xs"
         />
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Comma-separated edge IDs registered on this OpenEMS backend. You can find these in the OpenEMS Backend admin UI under Edges.
+          Automatic discovery lists edges when this connection has an OpenEMS UI username and password. Enter IDs here only for connections that cannot use UI discovery.
         </p>
       </div>
 

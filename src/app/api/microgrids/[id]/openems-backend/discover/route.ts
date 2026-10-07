@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
+import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -117,13 +118,8 @@ export async function POST(
 
   const knownEdgeIds: string[] = mgRow?.ems_known_edge_ids ?? [];
 
-  // Run Discover.
-  // Pass knownEdgeIds to getEdgesStatus instead of []. getEdgesStatus([])
-  // returns {} on real OpenEMS backends (verified 2026-04-23 against Kisakye);
-  // knownEdgeIds is the correct approach (#112).
-  //
-  // If knownEdgeIds is empty, skip the RPC and return zero_edges immediately
-  // (no edges declared yet — user must configure them via the OpenEMS Backend tab).
+  // The OpenEMS UI WebSocket can enumerate the authenticated user's edges.
+  // Older connection types retain explicit-ID probing as a fallback.
   let discoverStatus:
     | "success"
     | "auth_failed"
@@ -138,19 +134,25 @@ export async function POST(
     alreadyLinked: boolean;
   }> = [];
 
-  if (knownEdgeIds.length === 0) {
-    discoverStatus = "zero_edges";
-    discoverMessage =
-      "No edges declared yet — add some in Reconfigure → Known edge IDs to enable the Add Edge flow.";
-  } else {
+  {
     try {
-      const client = createOpenEmsClient(emsConfig);
-      const statuses = await client.getEdgesStatus(knownEdgeIds);
+      // The UI WebSocket enumerates the authenticated user's edges. Retain
+      // explicit-ID probing for legacy connections without UI credentials.
+      const statuses = emsConfig.type === "direct_url" && emsConfig.username && emsConfig.password
+        ? (await listOpenEmsEdges(emsConfig)).map((edge) => ({
+            edgeId: edge.id, online: edge.online, name: edge.name,
+          }))
+        : knownEdgeIds.length > 0
+          ? (await createOpenEmsClient(emsConfig).getEdgesStatus(knownEdgeIds))
+              .map((edge) => ({ ...edge, name: edge.edgeId }))
+          : [];
 
       if (statuses.length === 0) {
         discoverStatus = "zero_edges";
-        discoverMessage =
-          "Connected, but the OpenEMS Backend returned zero edges. Check that edges are registered under this backend.";
+        discoverMessage = knownEdgeIds.length === 0 &&
+          !(emsConfig.type === "direct_url" && emsConfig.username && emsConfig.password)
+          ? "Automatic discovery requires an OpenEMS UI username and password. Configure those credentials or provide edge IDs manually."
+          : "Connected, but OpenEMS returned no accessible edges for this account.";
       } else {
         // N+1 avoidance: prefetch existing edge ids once.
         const prefetched = new Set<string>();
@@ -164,7 +166,7 @@ export async function POST(
 
         discoveredEdges = statuses.map((s) => ({
           openems_edge_id: s.edgeId,
-          name: s.edgeId,
+          name: s.name,
           metadata: { online: s.online },
           alreadyLinked: prefetched.has(s.edgeId),
         }));
@@ -175,7 +177,7 @@ export async function POST(
         if (err.code === "OPENEMS_AUTH_FAILED") {
           discoverStatus = "auth_failed";
           discoverMessage =
-            "Authentication failed. Verify your AWS credentials and region (common cause: rotated access key).";
+            "OpenEMS authentication failed. Check the connection credentials.";
         } else if (err.code === "OPENEMS_INVALID_BACKEND_URL") {
           // Stored URL predates the write-time rules (mbe-docs#8). Not a
           // network fault — reported as unknown_error rather than

@@ -11,6 +11,7 @@ import {
 } from "@/lib/openems/config";
 import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
+import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,8 +69,8 @@ const UUID_RE =
  *   6. Persist the config (first transaction). fn_ems_encrypt_secret encrypts
  *      the AWS secret key if supplied. Saves ems_known_edge_ids.
  *   7. Run Discover against the saved config (second transaction; status
- *      fields updated regardless of success). Passes known_edge_ids to
- *      getEdgesStatus instead of []; reuses statuses stashed in step 5.
+ *      fields updated regardless of success). UI credentials enumerate edges;
+ *      explicit IDs reuse statuses from step 5.
  *   8. Return { status, message, edgeCount?, edges? }.
  *
  * Error mapping (OpenEmsError):
@@ -939,12 +940,8 @@ export async function PUT(
 
   // ── Step 7: Transaction 2 — Discover ───────────────────────────────────────
   //
-  // Pass known_edge_ids to getEdgesStatus instead of []. getEdgesStatus([])
-  // returns {} on real OpenEMS backends (verified 2026-04-23 against Kisakye);
-  // the known_edge_ids approach is the correct fix (#112).
-  //
-  // When known_edge_ids is empty, skip the RPC and return zero_edges immediately
-  // (no edges declared yet — user must configure them via Reconfigure).
+  // An empty ID list with UI credentials uses the UI WebSocket list. Other
+  // connections retain explicit-ID probing.
   //
   // If step 5 already fetched statuses (non-empty list path), reuse them to
   // avoid a second round-trip to the backend.
@@ -962,16 +959,23 @@ export async function PUT(
     alreadyLinked: boolean;
   }> = [];
 
-  if (known_edge_ids.length === 0) {
-    // Empty list — skip the RPC; surface as zero_edges.
+  const canEnumerate = candidateConfig.type === "direct_url" &&
+    !!candidateConfig.username && !!candidateConfig.password && !candidateConfig.token;
+  if (known_edge_ids.length === 0 && !canEnumerate) {
+    // A connection without UI credentials still needs manually supplied IDs.
     discoverStatus = "zero_edges";
     discoverMessage =
-      "Saved. No edges declared yet — add some in Reconfigure → Known edge IDs to enable the Add Edge flow.";
+      "Saved. Add OpenEMS UI username and password for automatic discovery, or enter known edge IDs manually.";
   } else {
     try {
-      const client = createOpenEmsClient(candidateConfig);
-      // Reuse statuses from step 5 when available; otherwise re-fetch.
-      const statuses = step5Statuses ?? await client.getEdgesStatus(known_edge_ids);
+      const statuses = canEnumerate && known_edge_ids.length === 0
+        ? (await listOpenEmsEdges(candidateConfig)).map((edge) => ({
+            edgeId: edge.id, online: edge.online, name: edge.name,
+          }))
+        : (step5Statuses ?? await createOpenEmsClient(candidateConfig)
+            .getEdgesStatus(known_edge_ids)).map((edge) => ({
+              ...edge, name: edge.edgeId,
+            }));
       if (statuses.length === 0) {
         discoverStatus = "zero_edges";
         discoverMessage =
@@ -988,7 +992,7 @@ export async function PUT(
 
         discoveredEdges = statuses.map((s) => ({
           openems_edge_id: s.edgeId,
-          name: s.edgeId, // Backend doesn't return a display name here; UI may enrich later.
+          name: s.name,
           metadata: { online: s.online },
           alreadyLinked: prefetched.has(s.edgeId),
         }));
@@ -996,7 +1000,7 @@ export async function PUT(
         const onlineCount = statuses.filter((s) => s.online).length;
         const offlineCount = statuses.length - onlineCount;
         const validatedCount = statuses.length;
-        const totalCount = known_edge_ids.length;
+        const totalCount = known_edge_ids.length || statuses.length;
         if (offlineCount > 0) {
           discoverMessage = `Connected. ${validatedCount} of ${totalCount} edge${totalCount === 1 ? "" : "s"} validated — ${offlineCount} offline.`;
         } else {
