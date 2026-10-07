@@ -18,6 +18,10 @@ import { NextRequest } from "next/server";
 // ── Factory/client mock ───────────────────────────────────────────────────
 
 const getEdgesStatusMock = vi.fn();
+const listOpenEmsEdgesMock = vi.fn();
+vi.mock("@/lib/openems/edge-discovery", () => ({
+  listOpenEmsEdges: listOpenEmsEdgesMock,
+}));
 vi.mock("@/lib/openems", async () => {
   const actual = await vi.importActual<typeof import("@/lib/openems")>(
     "@/lib/openems"
@@ -171,6 +175,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
   beforeEach(() => {
     vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "https://keycloak.example/realms/energy/protocol/openid-connect/token");
     vi.clearAllMocks();
+    listOpenEmsEdgesMock.mockResolvedValue([]);
     buildSupabase();
     fromCallIndex = 0;
     fromHandlers.length = 0;
@@ -577,7 +582,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe("zero_edges");
-    expect(json.message).toContain("No edges declared yet");
+    expect(json.message).toContain("automatic discovery");
     // Verify getEdgesStatus was NOT called (empty list skips the round-trip)
     expect(getEdgesStatusMock).not.toHaveBeenCalled();
   });

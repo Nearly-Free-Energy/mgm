@@ -646,7 +646,7 @@ describe("OpenemsBackendShell — Known edge IDs (#112)", () => {
     });
   }
 
-  it("Prefill case 1: empty-state (ems_type=null) → field initialized to 'edge0'", () => {
+  it("Prefill case 1: empty-state (ems_type=null) → no edge ID required", () => {
     render(
       <OpenemsBackendShell
         microgrid={BASE_MG}
@@ -660,7 +660,7 @@ describe("OpenemsBackendShell — Known edge IDs (#112)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /cloud \(aws\)/i }));
     const field = screen.getByLabelText(/known edge ids/i) as HTMLInputElement;
-    expect(field.value).toBe("edge0");
+    expect(field.value).toBe("");
   });
 
   it("Prefill case 2: reconfigure with populated list → field shows joined list", () => {

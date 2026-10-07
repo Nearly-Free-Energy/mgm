@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 const MG_ID = "550e8400-e29b-41d4-a716-446655440000";
 
 const getEdgesStatusMock = vi.fn();
+const listOpenEmsEdgesMock = vi.fn();
 const getMicrogridEmsConfigMock = vi.fn();
 
 vi.mock("@/lib/openems", async () => {
@@ -29,6 +30,9 @@ vi.mock("@/lib/openems", async () => {
 
 vi.mock("@/lib/openems/config", () => ({
   getMicrogridEmsConfig: getMicrogridEmsConfigMock,
+}));
+vi.mock("@/lib/openems/edge-discovery", () => ({
+  listOpenEmsEdges: listOpenEmsEdgesMock,
 }));
 
 let canAccessMicrogridReturn = true;
@@ -236,7 +240,7 @@ describe("POST /api/microgrids/[id]/openems-backend/discover", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe("zero_edges");
-    expect(json.message).toContain("No edges declared yet");
+    expect(json.message).toContain("Automatic discovery requires");
     // getEdgesStatus must NOT be called
     expect(getEdgesStatusMock).not.toHaveBeenCalled();
   });
@@ -278,5 +282,35 @@ describe("POST /api/microgrids/[id]/openems-backend/discover", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe("unreachable");
+  });
+
+  it("enumerates edges without configured IDs when UI credentials are available", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue({
+      type: "direct_url", url: "https://example.com/rest",
+      username: "reader", password: "secret",
+    });
+    registerFrom(() => ({ select: () => ({ eq: () => ({
+      maybeSingle: () => Promise.resolve({ data: { ems_known_edge_ids: [] } }),
+    }) }) }));
+    registerFrom(() => ({ select: () => ({ eq: () =>
+      Promise.resolve({ data: [] }),
+    }) }));
+    registerFrom(() => ({ update: () => ({ eq: () =>
+      Promise.resolve({ error: null }),
+    }) }));
+    listOpenEmsEdgesMock.mockResolvedValue([
+      { id: "pilot-gateway", name: "Pilot gateway", online: true },
+      { id: "offline-gateway", name: "Offline gateway", online: false },
+    ]);
+
+    const { POST } = await import("../route");
+    const res = await POST(makeReq(), { params: Promise.resolve({ id: MG_ID }) });
+    const json = await res.json();
+    expect(json.status).toBe("success");
+    expect(json.edges.map((edge: { openems_edge_id: string }) => edge.openems_edge_id))
+      .toEqual(["pilot-gateway", "offline-gateway"]);
+    expect(json.edges[0].name).toBe("Pilot gateway");
+    expect(listOpenEmsEdgesMock).toHaveBeenCalledOnce();
+    expect(getEdgesStatusMock).not.toHaveBeenCalled();
   });
 });
