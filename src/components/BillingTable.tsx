@@ -58,6 +58,7 @@ export function BillingTable({
   communityId,
   edgeAvailableByHouseholdId,
   seedNeededByHouseholdId,
+  allowUsageOnlyReadings = false,
   priorHintByHouseholdId,
   deviceIdByHouseholdId,
   actorByLineItemId,
@@ -83,6 +84,8 @@ export function BillingTable({
   edgeAvailableByHouseholdId?: Record<string, boolean>;
   /** #339 — households whose meter has no prior MBE reading. */
   seedNeededByHouseholdId?: Record<string, boolean>;
+  /** OpenEMS period usage can be billed without an absolute dial anchor. */
+  allowUsageOnlyReadings?: boolean;
   /** #339 — the household's last recorded end_kwh, shown as a hint only. */
   priorHintByHouseholdId?: Record<string, number | null>;
   /** #339 — primary consumption meter per household, for the seed payload. */
@@ -1050,6 +1053,7 @@ export function BillingTable({
           households={households}
           edgeAvailableByHouseholdId={edgeAvailableByHouseholdId ?? {}}
           seedNeededByHouseholdId={seedNeededByHouseholdId ?? {}}
+          allowUsageOnlyReadings={allowUsageOnlyReadings}
           priorHintByHouseholdId={priorHintByHouseholdId ?? {}}
           deviceIdByHouseholdId={deviceIdByHouseholdId ?? {}}
           periodStartDate={period.start_date}

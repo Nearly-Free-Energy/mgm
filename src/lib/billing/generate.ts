@@ -118,6 +118,7 @@ export type SeedReadingInput = {
 export type GenerationErrorCode =
   | "currently_manual"
   | "no_meter_reading"
+  | "line_item_write_failed"
   | "tariff_changed"
   | "missing_openems_config"
   | "invalid_manual_reading"
@@ -149,8 +150,8 @@ export type PreviewHouseholdResult = {
   kind: "preview";
   householdId: string;
   householdName: string;
-  startKwh: number;
-  endKwh: number;
+  startKwh: number | null;
+  endKwh: number | null;
   usageKwh: number;
   tierBreakdown: TierBreakdown[];
   totalAmount: number;
@@ -210,6 +211,8 @@ export type RunGenerationParams = {
    * do not need one.
    */
   meteringProvider?: MeteringProvider;
+  /** Bill from a trusted period usage total when no absolute register is known. */
+  allowUsageOnlyReadings?: boolean;
   /** MGM review databases record meter-assignment dates. Fail closed when a
    *  single assignment does not cover the entire period. Legacy MBE schemas
    *  do not have these columns, so this check is opt-in. */
@@ -454,10 +457,16 @@ export async function runGenerationFor(
       );
 
       if (overlappingAssignments.length === 0) {
-        // The household has assignment history, but none of it belongs to
-        // this period. Treat it as unmetered for this period rather than
-        // billing against an arbitrary historical device.
+        // MGM must surface the gap so the operator can reconcile it. A
+        // current link created after a historical billing period is not
+        // evidence that it covered that period.
         primaryHD = undefined;
+        if (params.allowUsageOnlyReadings) {
+          householdAssignmentErrors.set(
+            h.id,
+            "No meter assignment covers this billing period; verify the historical meter and its effective dates or enter a manual reading."
+          );
+        }
       } else if (coveringAssignments.length !== 1) {
         householdToDevice.set(h.id, null);
         householdAssignmentErrors.set(
@@ -633,6 +642,7 @@ export async function runGenerationFor(
         startDate: billingPeriod.start_date,
         endDate: billingPeriod.end_date,
         timezone: billingPeriod.timezone,
+        ...(params.allowUsageOnlyReadings ? { requireCompletePeriod: true } : {}),
       });
       usageMap = new Map(readings.map((reading) => [reading.deviceId, reading.usageKwh]));
     } catch (err) {
@@ -676,8 +686,8 @@ export async function runGenerationFor(
     }
 
     // Resolve start_kwh / end_kwh / usage_kwh / reading_source / device_id.
-    let startKwh: number;
-    let endKwh: number;
+    let startKwh: number | null;
+    let endKwh: number | null;
     let usageKwh: number;
     let readingSource: ReadingSource;
     let deviceId: string | null;
@@ -770,6 +780,11 @@ export async function runGenerationFor(
         startKwh = priorEnd;
       } else if (seed) {
         startKwh = seed.startKwh;
+      } else if (params.allowUsageOnlyReadings) {
+        // OpenEMS has a per-device total for this period, but no trustworthy
+        // absolute register at its start. Bill the measured usage and leave
+        // both dial fields unknown; zero would falsely claim a physical read.
+        startKwh = null;
       } else {
         results.push({
           kind: "error",
@@ -782,7 +797,7 @@ export async function runGenerationFor(
         continue;
       }
 
-      endKwh = startKwh + usageKwh;
+      endKwh = startKwh === null ? null : startKwh + usageKwh;
       readingSource = "edge";
       deviceId = dev.deviceId;
     } else {
@@ -821,8 +836,8 @@ export async function runGenerationFor(
     // Rounding here closes IEEE-754 dust from arithmetic like
     // `261.92 - 83.570 === 178.35000000000002` before the values land
     // in storage or in the preview payload.
-    const startKwhRounded = roundKwh(startKwh);
-    const endKwhRounded = roundKwh(endKwh);
+    const startKwhRounded = startKwh === null ? null : roundKwh(startKwh);
+    const endKwhRounded = endKwh === null ? null : roundKwh(endKwh);
     const usageKwhRounded = roundKwh(usageKwh);
     const previousTotalAmount =
       prior ? roundAmount(Number(prior.total_amount)) : null;
@@ -916,7 +931,7 @@ export async function runGenerationFor(
         error: `Failed to write line item: ${rpcErr?.message ?? "unknown"}`,
         code: rpcErr?.code === "23514" && rpcErr.message.includes("tariff changed")
           ? "tariff_changed"
-          : "no_meter_reading",
+          : "line_item_write_failed",
       });
       continue;
     }

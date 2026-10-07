@@ -128,6 +128,7 @@ export async function composeBilling(options: {
         actorUserId: input.actorUserId,
         meteringProvider: createOpenEmsMeteringProvider(options.supabase),
         requireEffectiveDatedAssignments: true,
+        allowUsageOnlyReadings: true,
       });
       if (isRunGenerationFatal(out)) return out;
       return { results: out.results };

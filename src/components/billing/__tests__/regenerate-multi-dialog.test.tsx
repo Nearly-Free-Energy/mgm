@@ -630,7 +630,7 @@ describe("RegenerateMultiDialog", () => {
       '[data-testid="regen-multi-result-failure-list"]',
     )!.textContent ?? "";
     expect(text).toContain("Alice no longer belongs to this microgrid.");
-    expect(text).toContain("Bob has no current meter reading.");
+    expect(text).toContain("Bob has no usable OpenEMS consumption for this billing period.");
     expect(text).toContain(
       "Carol's edge has no OpenEMS connection configured.",
     );

@@ -221,6 +221,121 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
   });
 
+  it("MGM bills measured period usage without inventing an opening register", async () => {
+    const { supabase } = makeSupabase([replacementHistory[0]], {
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "preview",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
+      meteringProvider: {
+        getReadings: async () => [{
+          deviceId: OLD_DEVICE_ID,
+          usageKwh: 37.25,
+          startDate: "2026-08-01",
+          endDate: "2026-08-31",
+        }],
+      },
+    });
+    expect(isRunGenerationFatal(out)).toBe(false);
+    if (isRunGenerationFatal(out)) return;
+    expect(out.results).toMatchObject([{
+      kind: "preview",
+      householdId: HH_UNMETERED,
+      startKwh: null,
+      endKwh: null,
+      usageKwh: 37.25,
+    }]);
+  });
+
+  it("writes measured usage with null dial readings", async () => {
+    const { supabase, rpc } = makeSupabase([replacementHistory[0]], {
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "write",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
+      meteringProvider: {
+        getReadings: async () => [{
+          deviceId: OLD_DEVICE_ID,
+          usageKwh: 37.25,
+          startDate: "2026-08-01",
+          endDate: "2026-08-31",
+        }],
+      },
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "fn_record_line_item_with_audit",
+      expect.objectContaining({
+        _start_kwh: null,
+        _end_kwh: null,
+        _usage_kwh: 37.25,
+        _reading_source: "edge",
+      })
+    );
+  });
+
+  it("MGM does not bill a meter when OpenEMS has no period usage", async () => {
+    const { supabase } = makeSupabase([replacementHistory[0]], {
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "preview",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
+      meteringProvider: {
+        getReadings: async () => [{
+          deviceId: OLD_DEVICE_ID,
+          usageKwh: null,
+          startDate: "2026-08-01",
+          endDate: "2026-08-31",
+        }],
+      },
+    });
+    expect(isRunGenerationFatal(out)).toBe(false);
+    if (isRunGenerationFatal(out)) return;
+    expect(out.results).toMatchObject([{
+      kind: "error", code: "no_meter_reading", householdId: HH_UNMETERED,
+    }]);
+  });
+
+  it("MGM flags a link created after the requested historical period", async () => {
+    const { supabase } = makeSupabase([replacementHistory[1]], {
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    const getReadings = vi.fn();
+    const out = await runGenerationFor({
+      supabase,
+      periodId: PERIOD_ID,
+      mode: "preview",
+      actorUserId: null,
+      requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
+      meteringProvider: { getReadings },
+    });
+    expect(isRunGenerationFatal(out)).toBe(false);
+    if (isRunGenerationFatal(out)) return;
+    expect(out.results).toMatchObject([{
+      kind: "error", code: "meter_assignment_continuity", householdId: HH_UNMETERED,
+    }]);
+    expect(getReadings).not.toHaveBeenCalled();
+  });
+
   it("rejects a period spanning a meter replacement", async () => {
     const { out, getReadings, rpc } = await previewForReplacementPeriod(
       "2026-09-01",

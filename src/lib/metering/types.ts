@@ -14,6 +14,8 @@ export type MeteringReadRequest = {
   startDate: string;
   endDate: string;
   timezone: string;
+  /** Fail closed if any local calendar day in the billing window lacks data. */
+  requireCompletePeriod?: boolean;
 };
 
 /** A request-scoped metering dependency for the billing engine. */

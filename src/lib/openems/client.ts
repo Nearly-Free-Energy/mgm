@@ -460,6 +460,26 @@ export class OpenEmsClient implements DeviceDataAdapter {
     toDate: string,
     timezone: string = "UTC"
   ): Promise<Record<string, number>> {
+    const byChannel = await this.queryDailyEnergyByChannel(
+      edgeId, channels, fromDate, toDate, timezone
+    );
+    const byDate: Record<string, number> = {};
+    for (const days of Object.values(byChannel)) {
+      for (const [date, kwh] of Object.entries(days)) {
+        byDate[date] = (byDate[date] ?? 0) + kwh;
+      }
+    }
+    return byDate;
+  }
+
+  /** Per-channel daily coverage; absent dates are unavailable, never zero. */
+  async queryDailyEnergyByChannel(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string = "UTC"
+  ): Promise<Record<string, Record<string, number>>> {
     const result = await this.rpc<{
       payload: JsonRpcResponse<{
         timestamps: number[];
@@ -482,24 +502,20 @@ export class OpenEmsClient implements DeviceDataAdapter {
     });
 
     const { timestamps, data } = result.payload.result;
-    const byDate: Record<string, number> = {};
+    const byChannel: Record<string, Record<string, number>> = {};
 
     for (let i = 0; i < timestamps.length; i++) {
       const dateStr = dayKeyInZone(new Date(timestamps[i]), timezone);
-      let dayTotal = 0;
-      let hasData = false;
-      for (const channelValues of Object.values(data)) {
+      for (const [channel, channelValues] of Object.entries(data)) {
         const wh = channelValues[i];
         if (wh !== null && wh !== undefined) {
-          dayTotal += wh;
-          hasData = true;
+          const days = byChannel[channel] ?? {};
+          days[dateStr] = (days[dateStr] ?? 0) + wh / 1000;
+          byChannel[channel] = days;
         }
-      }
-      if (hasData) {
-        byDate[dateStr] = (byDate[dateStr] ?? 0) + dayTotal / 1000; // Wh → kWh
       }
     }
 
-    return byDate;
+    return byChannel;
   }
 }

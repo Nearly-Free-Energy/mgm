@@ -26,7 +26,9 @@ export function errorCodeCopy(err: PartialFailureError): string {
     case "unknown_household":
       return `${name} no longer belongs to this microgrid.`;
     case "no_meter_reading":
-      return `${name} has no current meter reading.`;
+      return `${name} has no usable OpenEMS consumption for this billing period. Enter manual readings for this household.`;
+    case "line_item_write_failed":
+      return `${name}'s bill could not be saved. Retry after checking the reported error.`;
     case "tariff_changed":
       return `${name}'s billing tariff changed while this bill was being calculated — review the new tariff and regenerate this household.`;
     case "missing_openems_config":
@@ -36,7 +38,7 @@ export function errorCodeCopy(err: PartialFailureError): string {
     case "unmetered_no_manual":
       return `${name} has no meter and no manual reading provided.`;
     case "meter_assignment_continuity":
-      return `${name}'s meter assignment changed during this period — verify the replacement boundary readings before billing.`;
+      return `${name}'s meter assignment does not cover the whole period. Verify the historical meter and replacement date, or enter manual readings to reconcile this bill.`;
     case "needs_seed_reading":
       // #339. This message decides whether the operator walks to the meter or
       // types a zero to clear a block, so it must not read as a validation

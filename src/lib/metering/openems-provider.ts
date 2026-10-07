@@ -32,12 +32,42 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
 
       // OpenEmsClient itself only ever asks for
       // `${componentId}/ActiveConsumptionEnergy`; it never requests `_sum`.
-      return await createOpenEmsClient(config).getReadings(
+      const client = createOpenEmsClient(config);
+      const readings = await client.getReadings(
         request.devices,
         request.startDate,
         request.endDate,
         request.timezone
       );
+      if (!request.requireCompletePeriod) return readings;
+
+      // An aggregate can be non-null even when a meter first reported in the
+      // middle of the period. Check every local-day bucket for this meter
+      // before treating the aggregate as a complete household bill.
+      const days = calendarDays(request.startDate, request.endDate);
+      const devicesByEdge = new Map<string, typeof request.devices>();
+      for (const device of request.devices) {
+        const group = devicesByEdge.get(device.edgeOpenemsId) ?? [];
+        group.push(device);
+        devicesByEdge.set(device.edgeOpenemsId, group);
+      }
+      const covered = new Set<string>();
+      await Promise.all([...devicesByEdge].map(async ([edgeId, devices]) => {
+        const channels = devices.map((d) => `${d.componentId}/ActiveConsumptionEnergy`);
+        const daily = await client.queryDailyEnergyByChannel(
+          edgeId, channels, request.startDate, request.endDate, request.timezone
+        );
+        for (const device of devices) {
+          const channel = `${device.componentId}/ActiveConsumptionEnergy`;
+          if (days.every((day) => daily[channel]?.[day] !== undefined)) {
+            covered.add(device.id);
+          }
+        }
+      }));
+      return readings.map((reading) => ({
+        ...reading,
+        usageKwh: covered.has(reading.deviceId) ? reading.usageKwh : null,
+      }));
     } catch (error) {
       if (error instanceof MeteringError) throw error;
       if (error instanceof OpenEmsError) throw translateOpenEmsError(error);
@@ -49,6 +79,17 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       );
     }
   }
+}
+
+function calendarDays(startDate: string, endDate: string): string[] {
+  const days: string[] = [];
+  const day = new Date(`${startDate}T00:00:00Z`);
+  const last = new Date(`${endDate}T00:00:00Z`);
+  while (day <= last && days.length <= 366) {
+    days.push(day.toISOString().slice(0, 10));
+    day.setUTCDate(day.getUTCDate() + 1);
+  }
+  return days;
 }
 
 /**
