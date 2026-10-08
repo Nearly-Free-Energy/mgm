@@ -14,7 +14,7 @@ export type MeteringReadRequest = {
   startDate: string;
   endDate: string;
   timezone: string;
-  /** Fail closed if any local calendar day in the billing window lacks data. */
+  /** Fail closed if 15-minute coverage cannot verify the complete period. */
   requireCompletePeriod?: boolean;
 };
 

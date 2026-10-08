@@ -518,4 +518,35 @@ export class OpenEmsClient implements DeviceDataAdapter {
 
     return byChannel;
   }
+
+  /** Fifteen-minute channel samples used only to prove billing coverage. */
+  async queryHistoricCoverageSamples(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string
+  ): Promise<{ timestamps: number[]; data: Record<string, (number | null)[]> }> {
+    const result = await this.rpc<{
+      payload: JsonRpcResponse<{
+        timestamps: number[];
+        data: Record<string, (number | null)[]>;
+      }>;
+    }>("edgeRpc", {
+      edgeId,
+      payload: {
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "queryHistoricTimeseriesData",
+        params: {
+          fromDate,
+          toDate,
+          channels,
+          timezone,
+          resolution: { value: 15, unit: "Minutes" },
+        },
+      },
+    });
+    return result.payload.result;
+  }
 }

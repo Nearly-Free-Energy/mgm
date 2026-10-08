@@ -5,6 +5,7 @@ import { createOpenEmsClient } from "@/lib/openems";
 import type { OpenEmsClientConfig } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
+import { dayKeyInZone } from "@/lib/timezone/day-key";
 import { MeteringError } from "./errors";
 import type { MeteringProvider, MeteringReadRequest } from "./types";
 
@@ -33,6 +34,9 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       // OpenEmsClient itself only ever asks for
       // `${componentId}/ActiveConsumptionEnergy`; it never requests `_sum`.
       const client = createOpenEmsClient(config);
+      const days = request.requireCompletePeriod
+        ? calendarDays(request.startDate, request.endDate)
+        : [];
       const readings = await client.getReadings(
         request.devices,
         request.startDate,
@@ -41,10 +45,9 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       );
       if (!request.requireCompletePeriod) return readings;
 
-      // An aggregate can be non-null even when a meter first reported in the
-      // middle of the period. Check every local-day bucket for this meter
-      // before treating the aggregate as a complete household bill.
-      const days = calendarDays(request.startDate, request.endDate);
+      // A daily energy bucket can be numeric even when the meter first
+      // reported midway through that day. Check 15-minute samples across
+      // each local day, including both boundaries and any interior gaps.
       const devicesByEdge = new Map<string, typeof request.devices>();
       for (const device of request.devices) {
         const group = devicesByEdge.get(device.edgeOpenemsId) ?? [];
@@ -54,12 +57,31 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       const covered = new Set<string>();
       await Promise.all([...devicesByEdge].map(async ([edgeId, devices]) => {
         const channels = devices.map((d) => `${d.componentId}/ActiveConsumptionEnergy`);
-        const daily = await client.queryDailyEnergyByChannel(
-          edgeId, channels, request.startDate, request.endDate, request.timezone
-        );
+        const samplesByChannel = new Map<string, Map<string, number[]>>();
+        // Keep responses bounded for long billing periods.
+        for (let offset = 0; offset < days.length; offset += 31) {
+          const chunk = days.slice(offset, offset + 31);
+          const sample = await client.queryHistoricCoverageSamples(
+            edgeId, channels, chunk[0], chunk[chunk.length - 1], request.timezone
+          );
+          for (const channel of channels) {
+            const values = sample.data[channel] ?? [];
+            const byDay = samplesByChannel.get(channel) ?? new Map<string, number[]>();
+            for (let i = 0; i < sample.timestamps.length; i++) {
+              if (!Number.isFinite(values[i])) continue;
+              const timestamp = sample.timestamps[i];
+              const day = dayKeyInZone(timestamp, request.timezone);
+              const bins = byDay.get(day) ?? [];
+              bins.push(timestamp);
+              byDay.set(day, bins);
+            }
+            samplesByChannel.set(channel, byDay);
+          }
+        }
         for (const device of devices) {
           const channel = `${device.componentId}/ActiveConsumptionEnergy`;
-          if (days.every((day) => daily[channel]?.[day] !== undefined)) {
+          const byDay = samplesByChannel.get(channel);
+          if (days.every((day) => hasCompleteDay(byDay?.get(day), request.timezone))) {
             covered.add(device.id);
           }
         }
@@ -85,11 +107,35 @@ function calendarDays(startDate: string, endDate: string): string[] {
   const days: string[] = [];
   const day = new Date(`${startDate}T00:00:00Z`);
   const last = new Date(`${endDate}T00:00:00Z`);
-  while (day <= last && days.length <= 366) {
+  while (day <= last) {
+    if (days.length >= 366) {
+      throw new MeteringError(
+        "A billing period longer than 366 days cannot be verified against OpenEMS coverage.",
+        "METERING_INVALID_DATA",
+        422
+      );
+    }
     days.push(day.toISOString().slice(0, 10));
     day.setUTCDate(day.getUTCDate() + 1);
   }
   return days;
+}
+
+function hasCompleteDay(timestamps: number[] | undefined, timezone: string): boolean {
+  if (!timestamps?.length) return false;
+  const sorted = [...new Set(timestamps)].sort((a, b) => a - b);
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const first = formatter.format(sorted[0]);
+  const last = formatter.format(sorted[sorted.length - 1]);
+  if (first !== "00:00" || last !== "23:45") return false;
+  return sorted.every((timestamp, index) =>
+    index === 0 || timestamp - sorted[index - 1] === 15 * 60 * 1000
+  );
 }
 
 /**
