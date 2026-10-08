@@ -156,14 +156,23 @@ function isNoEnergyData(error: unknown): error is OpenEmsError {
 function recordSamples(
   samplesByChannel: Map<string, Map<string, number[]>>,
   channel: string,
-  sample: { timestamps: number[]; data: Record<string, (number | null)[]> },
+  sample: { timestamps: Array<number | string>; data: Record<string, (number | null)[]> },
   timezone: string
 ) {
   const values = sample.data[channel] ?? [];
   const byDay = samplesByChannel.get(channel) ?? new Map<string, number[]>();
   for (let i = 0; i < sample.timestamps.length; i++) {
     if (!Number.isFinite(values[i])) continue;
-    const timestamp = sample.timestamps[i];
+    // OpenEMS installations return either epoch milliseconds or ISO strings.
+    // Invalid instants never provide coverage evidence.
+    const rawTimestamp = sample.timestamps[i];
+    const numeric = typeof rawTimestamp === "number"
+      ? rawTimestamp
+      : /^\d{10,13}$/.test(rawTimestamp) ? Number(rawTimestamp) : null;
+    const timestamp = numeric === null
+      ? Date.parse(rawTimestamp as string)
+      : numeric < 1e11 ? numeric * 1000 : numeric;
+    if (!Number.isFinite(timestamp)) continue;
     const day = dayKeyInZone(timestamp, timezone);
     const bins = byDay.get(day) ?? [];
     bins.push(timestamp);
