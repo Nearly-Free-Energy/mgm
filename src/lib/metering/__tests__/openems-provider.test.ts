@@ -144,6 +144,77 @@ describe("OpenEmsMeteringProvider", () => {
     expect(readings[0].usageKwh).toBeNull();
   });
 
+  it("isolates a missing OpenEMS meter instead of failing all household reads", async () => {
+    const response = (result: unknown) => new Response(JSON.stringify({
+      jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
+    }), { status: 200 });
+    const missing = () => new Response(JSON.stringify({
+      error: { message: "Energy values are not available for query" },
+    }), { status: 400 });
+    const timestamps = Array.from({ length: 96 }, (_, index) =>
+      Date.UTC(2026, 7, 31, 21) + index * 15 * 60 * 1000
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(missing()) // batched energy
+      .mockResolvedValueOnce(response({ data: { "good/ActiveConsumptionEnergy": 23_000 } }))
+      .mockResolvedValueOnce(missing()) // missing meter's energy
+      .mockResolvedValueOnce(response({ timestamps, data: {
+        "good/ActiveConsumptionEnergy": timestamps.map(() => 1000),
+      } }));
+    const readings = await new OpenEmsMeteringProvider({} as never).getReadings({
+      microgridId: "microgrid-1",
+      devices: [
+        { id: "good-id", edgeOpenemsId: "edge-1", componentId: "good" },
+        { id: "missing-id", edgeOpenemsId: "edge-1", componentId: "missing" },
+      ],
+      startDate: "2026-09-01", endDate: "2026-09-01",
+      timezone: "Africa/Kampala", requireCompletePeriod: true,
+    });
+    expect(readings).toMatchObject([
+      { deviceId: "good-id", usageKwh: 23 },
+      { deviceId: "missing-id", usageKwh: null },
+    ]);
+    const coverageRequest = JSON.parse(fetchSpy.mock.calls[3][1]?.body as string);
+    expect(coverageRequest.params.payload.params.channels).toEqual([
+      "good/ActiveConsumptionEnergy",
+    ]);
+  });
+
+  it("isolates a missing coverage channel without treating it as complete", async () => {
+    const response = (result: unknown) => new Response(JSON.stringify({
+      jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
+    }), { status: 200 });
+    const missing = () => new Response(JSON.stringify({
+      error: { message: "Energy values are not available for query" },
+    }), { status: 400 });
+    const timestamps = Array.from({ length: 96 }, (_, index) =>
+      Date.UTC(2026, 7, 31, 21) + index * 15 * 60 * 1000
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ data: {
+        "good/ActiveConsumptionEnergy": 23_000,
+        "missing/ActiveConsumptionEnergy": 1_000,
+      } }))
+      .mockResolvedValueOnce(missing()) // batched coverage
+      .mockResolvedValueOnce(response({ timestamps, data: {
+        "good/ActiveConsumptionEnergy": timestamps.map(() => 1000),
+      } }))
+      .mockResolvedValueOnce(missing());
+    const readings = await new OpenEmsMeteringProvider({} as never).getReadings({
+      microgridId: "microgrid-1",
+      devices: [
+        { id: "good-id", edgeOpenemsId: "edge-1", componentId: "good" },
+        { id: "missing-id", edgeOpenemsId: "edge-1", componentId: "missing" },
+      ],
+      startDate: "2026-09-01", endDate: "2026-09-01",
+      timezone: "Africa/Kampala", requireCompletePeriod: true,
+    });
+    expect(readings).toMatchObject([
+      { deviceId: "good-id", usageKwh: 23 },
+      { deviceId: "missing-id", usageKwh: null },
+    ]);
+  });
+
   it("rejects periods beyond the supported coverage limit before contacting OpenEMS", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     await expect(new OpenEmsMeteringProvider({} as never).getReadings({
