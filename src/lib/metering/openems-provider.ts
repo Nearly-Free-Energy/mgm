@@ -128,6 +128,14 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
     } catch (error) {
       if (error instanceof MeteringError) throw error;
       if (error instanceof OpenEmsError) throw translateOpenEmsError(error);
+      // Keep the client-facing error generic, but retain the exception class
+      // and stack in server logs so unexpected OpenEMS response shapes can be
+      // diagnosed without logging configuration or credentials.
+      console.error("Unexpected MGM metering provider failure", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       throw new MeteringError(
         "Metering provider failed unexpectedly",
         "METERING_UNAVAILABLE",
