@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createOpenEmsClient } from "@/lib/openems";
 import type { OpenEmsClientConfig } from "@/lib/openems";
+import type { DeviceReading } from "@/lib/adapters/types";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
 import { dayKeyInZone } from "@/lib/timezone/day-key";
@@ -37,19 +38,41 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       const days = request.requireCompletePeriod
         ? calendarDays(request.startDate, request.endDate)
         : [];
-      const readings = await client.getReadings(
-        request.devices,
-        request.startDate,
-        request.endDate,
-        request.timezone
-      );
+      let readings: DeviceReading[];
+      try {
+        readings = await client.getReadings(
+          request.devices, request.startDate, request.endDate, request.timezone
+        );
+      } catch (error) {
+        if (!isNoEnergyData(error) || !request.requireCompletePeriod) throw error;
+        // OpenEMS can reject a batched query when one channel has no history.
+        // Isolate channels so that meter does not hide valid usage from peers.
+        readings = await Promise.all(request.devices.map(async (device) => {
+          try {
+            const [reading] = await client.getReadings(
+              [device], request.startDate, request.endDate, request.timezone
+            );
+            return reading;
+          } catch (deviceError) {
+            if (!isNoEnergyData(deviceError)) throw deviceError;
+            return {
+              deviceId: device.id,
+              usageKwh: null,
+              startDate: request.startDate,
+              endDate: request.endDate,
+            };
+          }
+        }));
+      }
       if (!request.requireCompletePeriod) return readings;
 
       // A daily energy bucket can be numeric even when the meter first
       // reported midway through that day. Check 15-minute samples across
       // each local day, including both boundaries and any interior gaps.
       const devicesByEdge = new Map<string, typeof request.devices>();
-      for (const device of request.devices) {
+      for (const device of request.devices.filter((device) =>
+        readings.some((reading) => reading.deviceId === device.id && reading.usageKwh !== null)
+      )) {
         const group = devicesByEdge.get(device.edgeOpenemsId) ?? [];
         group.push(device);
         devicesByEdge.set(device.edgeOpenemsId, group);
@@ -61,21 +84,33 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
         // Keep responses bounded for long billing periods.
         for (let offset = 0; offset < days.length; offset += 31) {
           const chunk = days.slice(offset, offset + 31);
-          const sample = await client.queryHistoricCoverageSamples(
-            edgeId, channels, chunk[0], chunk[chunk.length - 1], request.timezone
-          );
-          for (const channel of channels) {
-            const values = sample.data[channel] ?? [];
-            const byDay = samplesByChannel.get(channel) ?? new Map<string, number[]>();
-            for (let i = 0; i < sample.timestamps.length; i++) {
-              if (!Number.isFinite(values[i])) continue;
-              const timestamp = sample.timestamps[i];
-              const day = dayKeyInZone(timestamp, request.timezone);
-              const bins = byDay.get(day) ?? [];
-              bins.push(timestamp);
-              byDay.set(day, bins);
+          let sample;
+          try {
+            sample = await client.queryHistoricCoverageSamples(
+              edgeId, channels, chunk[0], chunk[chunk.length - 1], request.timezone
+            );
+          } catch (error) {
+            if (!isNoEnergyData(error)) throw error;
+            // A missing channel can also invalidate a batched coverage query.
+            // Retry individually; a still-missing channel remains uncovered.
+            const individual = await Promise.all(channels.map(async (channel) => {
+              try {
+                return { channel, sample: await client.queryHistoricCoverageSamples(
+                  edgeId, [channel], chunk[0], chunk[chunk.length - 1], request.timezone
+                ) };
+              } catch (channelError) {
+                if (!isNoEnergyData(channelError)) throw channelError;
+                return { channel, sample: null };
+              }
+            }));
+            for (const { channel, sample: single } of individual) {
+              if (!single) continue;
+              recordSamples(samplesByChannel, channel, single, request.timezone);
             }
-            samplesByChannel.set(channel, byDay);
+            continue;
+          }
+          for (const channel of channels) {
+            recordSamples(samplesByChannel, channel, sample, request.timezone);
           }
         }
         for (const device of devices) {
@@ -101,6 +136,32 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       );
     }
   }
+}
+
+function isNoEnergyData(error: unknown): error is OpenEmsError {
+  return error instanceof OpenEmsError &&
+    error.code === "OPENEMS_HTTP_ERROR" &&
+    (error.details as { status?: number } | undefined)?.status === 400 &&
+    error.message.includes("Energy values are not available for query");
+}
+
+function recordSamples(
+  samplesByChannel: Map<string, Map<string, number[]>>,
+  channel: string,
+  sample: { timestamps: number[]; data: Record<string, (number | null)[]> },
+  timezone: string
+) {
+  const values = sample.data[channel] ?? [];
+  const byDay = samplesByChannel.get(channel) ?? new Map<string, number[]>();
+  for (let i = 0; i < sample.timestamps.length; i++) {
+    if (!Number.isFinite(values[i])) continue;
+    const timestamp = sample.timestamps[i];
+    const day = dayKeyInZone(timestamp, timezone);
+    const bins = byDay.get(day) ?? [];
+    bins.push(timestamp);
+    byDay.set(day, bins);
+  }
+  samplesByChannel.set(channel, byDay);
 }
 
 function calendarDays(startDate: string, endDate: string): string[] {
