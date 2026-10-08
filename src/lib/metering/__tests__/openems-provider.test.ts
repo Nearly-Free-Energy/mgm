@@ -93,7 +93,7 @@ describe("OpenEmsMeteringProvider", () => {
         "jackie/ActiveConsumptionEnergy": 15_000,
       } }))
       .mockResolvedValueOnce(response({
-        timestamps,
+        timestamps: timestamps.map((timestamp) => new Date(timestamp).toISOString()),
         data: {
           "arthur/ActiveConsumptionEnergy": timestamps.map(() => 10_000),
           "jackie/ActiveConsumptionEnergy": timestamps.map((_, index) =>

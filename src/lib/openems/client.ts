@@ -526,10 +526,10 @@ export class OpenEmsClient implements DeviceDataAdapter {
     fromDate: string,
     toDate: string,
     timezone: string
-  ): Promise<{ timestamps: number[]; data: Record<string, (number | null)[]> }> {
+  ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
     const result = await this.rpc<{
       payload: JsonRpcResponse<{
-        timestamps: number[];
+        timestamps: Array<number | string>;
         data: Record<string, (number | null)[]>;
       }>;
     }>("edgeRpc", {
