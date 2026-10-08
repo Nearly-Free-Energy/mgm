@@ -91,6 +91,21 @@ describe("PreflightPanel — submit body shape", () => {
     refreshMock.mockClear();
   });
 
+  it("shows the capability's failure message when generation cannot reach metering", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ code: "METERING_UNAVAILABLE", message: "OpenEMS coverage query failed" }),
+    }));
+    render(<Wrap><PreflightPanel
+      open onClose={vi.fn()} billingPeriodId="p-1"
+      households={[makeHousehold("h-1", "Alice")]}
+      edgeAvailableByHouseholdId={{ "h-1": true }}
+      allowUsageOnlyReadings
+    /></Wrap>);
+    fireEvent.click(screen.getByTestId("preflight-generate-button"));
+    await waitFor(() => expect(screen.getByText("OpenEMS coverage query failed")).toBeTruthy());
+  });
+
   it("uses OpenEMS first and asks for manual readings only for missing period data", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({

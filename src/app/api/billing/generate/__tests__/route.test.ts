@@ -331,6 +331,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.message).toBe("Billing period not found");
+    expect(json.error).toBe("Billing period not found");
   });
 
   it("404 when the period is RLS-hidden or missing", async () => {
