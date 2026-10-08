@@ -65,6 +65,14 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
         }));
       }
       if (!request.requireCompletePeriod) return readings;
+      const missingEnergy = readings.filter((reading) => reading.usageKwh === null);
+      if (missingEnergy.length) {
+        console.warn("MGM OpenEMS period energy unavailable", {
+          startDate: request.startDate,
+          endDate: request.endDate,
+          deviceIds: missingEnergy.map((reading) => reading.deviceId),
+        });
+      }
 
       // A daily energy bucket can be numeric even when the meter first
       // reported midway through that day. Check 15-minute samples across
@@ -118,6 +126,25 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
           const byDay = samplesByChannel.get(channel);
           if (days.every((day) => hasCompleteDay(byDay?.get(day), request.timezone))) {
             covered.add(device.id);
+          } else {
+            const samples = [...(byDay?.values() ?? [])].flat().sort((a, b) => a - b);
+            const incompleteDays = days.filter((day) => !hasCompleteDay(byDay?.get(day), request.timezone));
+            console.warn("MGM OpenEMS coverage incomplete", {
+              deviceId: device.id,
+              channel,
+              startDate: request.startDate,
+              endDate: request.endDate,
+              sampleCount: samples.length,
+              firstSample: samples.length ? new Date(samples[0]).toISOString() : null,
+              lastSample: samples.length ? new Date(samples[samples.length - 1]).toISOString() : null,
+              incompleteDayCount: incompleteDays.length,
+              exampleDays: incompleteDays.slice(0, 3).map((day) => ({
+                day,
+                sampleCount: byDay?.get(day)?.length ?? 0,
+                first: byDay?.get(day)?.[0] ?? null,
+                last: byDay?.get(day)?.at(-1) ?? null,
+              })),
+            });
           }
         }
       }));
