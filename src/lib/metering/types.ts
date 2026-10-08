@@ -14,6 +14,8 @@ export type MeteringReadRequest = {
   startDate: string;
   endDate: string;
   timezone: string;
+  /** Fail closed if 15-minute coverage cannot verify the complete period. */
+  requireCompletePeriod?: boolean;
 };
 
 /** A request-scoped metering dependency for the billing engine. */

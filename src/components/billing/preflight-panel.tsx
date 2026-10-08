@@ -53,6 +53,8 @@ export interface PreflightPanelProps {
   edgeAvailableByHouseholdId: Record<string, boolean>;
   /** #339 — households whose meter has no prior MBE reading. */
   seedNeededByHouseholdId?: Record<string, boolean>;
+  /** Bill measured OpenEMS usage even when an absolute starting dial is unknown. */
+  allowUsageOnlyReadings?: boolean;
   /** #339 — the household's last recorded end_kwh. Hint text only; never
    *  prefilled, because it is a household figure rather than a reading of
    *  this meter and a plausible prefill is confirmed by inertia. */
@@ -163,6 +165,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
     households,
     edgeAvailableByHouseholdId,
     seedNeededByHouseholdId = {},
+    allowUsageOnlyReadings = false,
     priorHintByHouseholdId = {},
     deviceIdByHouseholdId = {},
     periodStartDate,
@@ -178,6 +181,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
   const [overrideExpanded, setOverrideExpanded] = React.useState(false);
   const [view, setView] = React.useState<"form" | "result">("form");
   const [result, setResult] = React.useState<ResultState | null>(null);
+  const [retryHouseholdIds, setRetryHouseholdIds] = React.useState<string[] | null>(null);
 
   // Reset state when the panel opens.
   React.useEffect(() => {
@@ -189,6 +193,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
       setOverrideExpanded(false);
       setView("form");
       setResult(null);
+      setRetryHouseholdIds(null);
     }
   }, [open]);
 
@@ -217,18 +222,21 @@ export function PreflightPanel(props: PreflightPanelProps) {
   }
 
   // Partition households by edge availability.
-  const needsManual = households.filter(
-    (h) => edgeAvailableByHouseholdId[h.id] === false,
+  const selectedHouseholds = retryHouseholdIds
+    ? households.filter((h) => retryHouseholdIds.includes(h.id))
+    : households;
+  const needsManual = selectedHouseholds.filter(
+    (h) => edgeAvailableByHouseholdId[h.id] === false || retryHouseholdIds?.includes(h.id),
   );
-  const edgeReady = households.filter(
-    (h) => edgeAvailableByHouseholdId[h.id] !== false,
+  const edgeReady = selectedHouseholds.filter(
+    (h) => edgeAvailableByHouseholdId[h.id] !== false && !retryHouseholdIds?.includes(h.id),
   );
 
   // #339 — households whose meter has no prior reading. Disjoint from
   // needsManual by construction: a seed is only meaningful for an
   // edge-available device, and needsManual is exactly the not-available set.
-  const needsSeed = households.filter(
-    (h) => seedNeededByHouseholdId[h.id] === true,
+  const needsSeed = selectedHouseholds.filter(
+    (h) => !allowUsageOnlyReadings && seedNeededByHouseholdId[h.id] === true,
   );
 
   /**
@@ -342,7 +350,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
     return null;
   }
 
-  const totalCount = households.length;
+  const totalCount = selectedHouseholds.length;
 
   async function handleSubmit() {
     // BOTH gates, not just the manual one. The button is disabled on
@@ -378,6 +386,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           billingPeriodId,
+          ...(retryHouseholdIds ? { householdIds: retryHouseholdIds } : {}),
           manualReadings,
           // #339. Inputs travel with the derived value: the route recomputes
           // and rejects a mismatch, and a wrong seed stays diagnosable.
@@ -444,6 +453,13 @@ export function PreflightPanel(props: PreflightPanelProps) {
       <ResultSection
         result={result}
         onClose={onClose}
+        onManualFallback={result.errors.some((e) => e.code === "no_meter_reading" || e.code === "meter_assignment_continuity")
+          ? () => {
+              setRetryHouseholdIds(result.errors.filter((e) => e.code === "no_meter_reading" || e.code === "meter_assignment_continuity").map((e) => e.householdId));
+              setForms({});
+              setView("form");
+            }
+          : undefined}
       />
     );
   }
@@ -478,7 +494,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         {/* Section 1: Ready (edge data) — collapsed by default */}
         <Disclosure
           testId="preflight-ready-section"
-          summary={`${edgeReady.length} household${edgeReady.length === 1 ? "" : "s"} will be billed using edge data.`}
+          summary={`${edgeReady.length} household${edgeReady.length === 1 ? "" : "s"} will be read from OpenEMS.`}
           expanded={readyExpanded}
           onToggle={() => setReadyExpanded((e) => !e)}
         >
@@ -505,6 +521,11 @@ export function PreflightPanel(props: PreflightPanelProps) {
             </ul>
           )}
         </Disclosure>
+        {allowUsageOnlyReadings && !retryHouseholdIds && (
+          <p className="text-[12px] text-muted-foreground">
+            Bills use OpenEMS consumption for this period. If an absolute meter register is unavailable, the bill leaves its starting and ending readings blank. Manual readings are requested only when period data is missing.
+          </p>
+        )}
 
         {/* Section 0 (#339): meters with no prior reading. Above "Needs
             manual entry" because it blocks the same button and is rarer.
@@ -794,8 +815,9 @@ export function PreflightPanel(props: PreflightPanelProps) {
 function ResultSection(props: {
   result: ResultState;
   onClose: () => void;
+  onManualFallback?: () => void;
 }) {
-  const { result, onClose } = props;
+  const { result, onClose, onManualFallback } = props;
   const { errors, successCount, attemptedCount } = result;
   const isFullFailure = successCount === 0;
   const tone: "destructive" | "warn" = isFullFailure ? "destructive" : "warn";
@@ -841,6 +863,16 @@ function ResultSection(props: {
       </Banner>
 
       <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-3">
+        {onManualFallback && (
+          <button
+            type="button"
+            data-testid="preflight-manual-fallback"
+            onClick={onManualFallback}
+            className="inline-flex h-8 items-center rounded-md border border-border px-3.5 text-[13px] font-medium text-foreground hover:bg-muted"
+          >
+            Enter manual readings for unresolved households
+          </button>
+        )}
         <button
           type="button"
           data-testid="preflight-result-close"

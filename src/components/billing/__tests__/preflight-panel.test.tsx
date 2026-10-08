@@ -91,6 +91,49 @@ describe("PreflightPanel — submit body shape", () => {
     refreshMock.mockClear();
   });
 
+  it("uses OpenEMS first and asks for manual readings only for missing period data", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ lineItems: 1, errors: [{
+          householdId: "h-2", householdName: "Bob", code: "no_meter_reading",
+          error: "No meter reading data available",
+        }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ lineItems: 1, errors: [] }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Wrap><PreflightPanel
+      open onClose={vi.fn()} billingPeriodId="p-1"
+      households={[makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")]}
+      edgeAvailableByHouseholdId={{ "h-1": true, "h-2": true }}
+      seedNeededByHouseholdId={{ "h-1": true, "h-2": true }}
+      allowUsageOnlyReadings
+    /></Wrap>);
+
+    expect(screen.queryByText(/Needs a starting reading/)).toBeNull();
+    const generate = screen.getByTestId("preflight-generate-button") as HTMLButtonElement;
+    expect(generate.disabled).toBe(false);
+    fireEvent.click(generate);
+    await waitFor(() => expect(screen.getByTestId("preflight-manual-fallback")).toBeTruthy());
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      billingPeriodId: "p-1", manualReadings: [],
+    });
+
+    fireEvent.click(screen.getByTestId("preflight-manual-fallback"));
+    fireEvent.change(screen.getByLabelText(/Start kWh for Bob/i), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText(/End kWh for Bob/i), { target: { value: "125" } });
+    fireEvent.click(screen.getByTestId("preflight-generate-button"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      billingPeriodId: "p-1",
+      householdIds: ["h-2"],
+      manualReadings: [{ householdId: "h-2", startKwh: 100, endKwh: 125 }],
+    });
+  });
+
   it("POSTs manualReadings (needs-manual + override-toggled), no householdIds", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -424,7 +467,7 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
     expect(text).toContain("Alice: Quoted server message");
     expect(text).toContain("Bob: another verbatim");
     // Mapped code wins for Carol.
-    expect(text).toContain("Carol has no current meter reading.");
+    expect(text).toContain("Carol has no usable OpenEMS consumption for this billing period.");
     vi.unstubAllGlobals();
   });
 

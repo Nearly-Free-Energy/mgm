@@ -108,6 +108,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
       periodId: PERIOD_ID,
       mode: "write",
       requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
     });
   });
 
@@ -131,6 +132,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
       periodId: PERIOD_ID,
       mode: "preview",
       requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
     });
   });
 });

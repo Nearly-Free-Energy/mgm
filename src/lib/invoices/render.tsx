@@ -676,9 +676,10 @@ function InvoiceDocument(props: RenderProps): React.ReactElement {
   const meterTypeValue =
     household.meter_type?.trim() || "Smart Submeter";
 
-  const startKwh = lineItem.start_kwh ?? 0;
-  const endKwh = lineItem.end_kwh ?? startKwh + (lineItem.usage_kwh ?? 0);
-  const usageKwh = lineItem.usage_kwh ?? Math.max(0, endKwh - startKwh);
+  const startKwh = lineItem.start_kwh;
+  const endKwh = lineItem.end_kwh;
+  const usageKwh = lineItem.usage_kwh ??
+    (startKwh != null && endKwh != null ? Math.max(0, endKwh - startKwh) : 0);
   const totalAmount = lineItem.total_amount ?? 0;
 
   const serviceAddress = [
@@ -862,13 +863,13 @@ function InvoiceDocument(props: RenderProps): React.ReactElement {
                     <View style={styles.detailHalf}>
                       <Text style={styles.label}>Previous Reading</Text>
                       <Text style={styles.value}>
-                        {formatKwh(startKwh, props.locale, { digits: 3 })} kWh
+                        {startKwh == null ? "—" : `${formatKwh(startKwh, props.locale, { digits: 3 })} kWh`}
                       </Text>
                     </View>
                     <View style={styles.detailHalf}>
                       <Text style={styles.label}>Current Reading</Text>
                       <Text style={styles.value}>
-                        {formatKwh(endKwh, props.locale, { digits: 3 })} kWh
+                        {endKwh == null ? "—" : `${formatKwh(endKwh, props.locale, { digits: 3 })} kWh`}
                       </Text>
                     </View>
                   </View>

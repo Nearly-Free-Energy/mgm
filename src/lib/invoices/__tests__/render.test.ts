@@ -427,6 +427,12 @@ function buildF6Input(): RenderInvoiceInput {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
+  it("does not invent zero register readings for an OpenEMS usage-only bill", async () => {
+    const input = buildF1Input();
+    input.lineItem = makeLineItem({ start_kwh: null, end_kwh: null, usage_kwh: 37.25 });
+    const buf = await renderInvoicePdf(input);
+    await expectStructuralPdfShape(buf, ["37.250 kWh", "—"], ["0.000 kWh"]);
+  });
   it("F1 full-config-with-logo: edge reading + tax + payment card + logo", async () => {
     const input = buildF1Input();
     const buf = await renderInvoicePdf(input);
