@@ -74,9 +74,9 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
         });
       }
 
-      // A daily energy bucket can be numeric even when the meter first
-      // reported midway through that day. Check 15-minute samples across
-      // each local day, including both boundaries and any interior gaps.
+      // Cumulative registers retain consumption across telemetry outages.
+      // Verify the opening and closing boundary bins only; interior gaps
+      // must not turn valid monthly consumption into a manual-entry request.
       const devicesByEdge = new Map<string, typeof request.devices>();
       for (const device of request.devices.filter((device) =>
         readings.some((reading) => reading.deviceId === device.id && reading.usageKwh !== null)
@@ -124,11 +124,11 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
         for (const device of devices) {
           const channel = `${device.componentId}/ActiveConsumptionEnergy`;
           const byDay = samplesByChannel.get(channel);
-          if (days.every((day) => hasCompleteDay(byDay?.get(day), request.timezone))) {
+          if (hasPeriodBoundaries(byDay, days, request.timezone)) {
             covered.add(device.id);
           } else {
             const samples = [...(byDay?.values() ?? [])].flat().sort((a, b) => a - b);
-            const incompleteDays = days.filter((day) => !hasCompleteDay(byDay?.get(day), request.timezone));
+            const boundaryDays = [...new Set([days[0], days[days.length - 1]])];
             console.warn("MGM OpenEMS coverage incomplete", {
               deviceId: device.id,
               channel,
@@ -137,8 +137,7 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
               sampleCount: samples.length,
               firstSample: samples.length ? new Date(samples[0]).toISOString() : null,
               lastSample: samples.length ? new Date(samples[samples.length - 1]).toISOString() : null,
-              incompleteDayCount: incompleteDays.length,
-              exampleDays: incompleteDays.slice(0, 3).map((day) => ({
+              exampleDays: boundaryDays.map((day) => ({
                 day,
                 sampleCount: byDay?.get(day)?.length ?? 0,
                 first: byDay?.get(day)?.[0] ?? null,
@@ -226,21 +225,26 @@ function calendarDays(startDate: string, endDate: string): string[] {
   return days;
 }
 
-function hasCompleteDay(timestamps: number[] | undefined, timezone: string): boolean {
-  if (!timestamps?.length) return false;
-  const sorted = [...new Set(timestamps)].sort((a, b) => a - b);
+function hasPeriodBoundaries(
+  byDay: Map<string, number[]> | undefined,
+  days: string[],
+  timezone: string
+): boolean {
+  if (!days.length) return false;
+  const opening = byDay?.get(days[0]);
+  const closing = byDay?.get(days[days.length - 1]);
+  if (!opening?.length || !closing?.length) return false;
   const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   });
-  const first = formatter.format(sorted[0]);
-  const last = formatter.format(sorted[sorted.length - 1]);
-  if (first !== "00:00" || last !== "23:45") return false;
-  return sorted.every((timestamp, index) =>
-    index === 0 || timestamp - sorted[index - 1] === 15 * 60 * 1000
-  );
+  // These are the boundary bins of OpenEMS's 15-minute historic query.
+  // Its energy query calculates the cumulative register difference; samples
+  // here establish that the result does not cover only part of the period.
+  return opening.some((timestamp) => formatter.format(timestamp) === "00:00") &&
+    closing.some((timestamp) => formatter.format(timestamp) === "23:45");
 }
 
 /**
