@@ -12,7 +12,9 @@ import type {
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
   void ok;
-  return NextResponse.json(body, { status });
+  // Keep the route's `error` field for its existing clients while exposing
+  // the capability's actionable message instead of a generic UI fallback.
+  return NextResponse.json({ ...body, error: body.message }, { status });
 }
 
 /**

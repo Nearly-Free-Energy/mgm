@@ -409,6 +409,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
       const body = (await res.json().catch(() => ({}))) as {
         lineItems?: number;
         error?: string;
+        message?: string;
         errors?: Array<{
           householdId: string;
           householdName: string;
@@ -417,7 +418,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         }>;
       };
       if (!res.ok) {
-        setErrorMsg(body.error ?? "Failed to generate");
+        setErrorMsg(body.message ?? body.error ?? "Failed to generate");
         setSubmitting(false);
         return;
       }
