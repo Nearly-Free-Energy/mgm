@@ -144,6 +144,44 @@ describe("OpenEmsMeteringProvider", () => {
     expect(readings[0].usageKwh).toBeNull();
   });
 
+  it("accepts cumulative usage across outages, including entire missing interior days", async () => {
+    const response = (result: unknown) => new Response(JSON.stringify({
+      jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
+    }), { status: 200 });
+    const timestamps = [Date.UTC(2026, 7, 31, 21), Date.UTC(2026, 8, 3, 20, 45)];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ data: { "meter/ActiveConsumptionEnergy": 23_000 } }))
+      .mockResolvedValueOnce(response({ timestamps, data: {
+        "meter/ActiveConsumptionEnergy": [100_000, 123_000],
+      } }));
+    const readings = await new OpenEmsMeteringProvider({} as never).getReadings({
+      microgridId: "microgrid-1",
+      devices: [{ id: "meter-id", edgeOpenemsId: "edge-1", componentId: "meter" }],
+      startDate: "2026-09-01", endDate: "2026-09-03",
+      timezone: "Africa/Kampala", requireCompletePeriod: true,
+    });
+    expect(readings[0].usageKwh).toBe(23);
+  });
+
+  it("requires a numeric closing boundary even when intermediate readings exist", async () => {
+    const response = (result: unknown) => new Response(JSON.stringify({
+      jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
+    }), { status: 200 });
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ data: { "meter/ActiveConsumptionEnergy": 23_000 } }))
+      .mockResolvedValueOnce(response({
+        timestamps: [Date.UTC(2026, 7, 31, 21), Date.UTC(2026, 8, 3, 20, 45)],
+        data: { "meter/ActiveConsumptionEnergy": [100_000, null] },
+      }));
+    const readings = await new OpenEmsMeteringProvider({} as never).getReadings({
+      microgridId: "microgrid-1",
+      devices: [{ id: "meter-id", edgeOpenemsId: "edge-1", componentId: "meter" }],
+      startDate: "2026-09-01", endDate: "2026-09-03",
+      timezone: "Africa/Kampala", requireCompletePeriod: true,
+    });
+    expect(readings[0].usageKwh).toBeNull();
+  });
+
   it("isolates a missing OpenEMS meter instead of failing all household reads", async () => {
     const response = (result: unknown) => new Response(JSON.stringify({
       jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
