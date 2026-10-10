@@ -95,10 +95,15 @@ BEGIN
   RAISE EXCEPTION 'cross-org override accepted' USING ERRCODE='XX000';
  EXCEPTION WHEN check_violation THEN NULL; END;
  RAISE NOTICE 'Checking authenticated notification RPC denial';
- BEGIN
-  PERFORM fn_payment_due_notifications(50);
-  RAISE EXCEPTION 'global notifications callable by authenticated' USING ERRCODE='XX000';
- EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ -- The CI PostgreSQL image crashes while planning a forbidden SETOF RPC
+ -- inside PL/pgSQL. Test the effective EXECUTE ACL directly instead.
+ IF has_function_privilege(current_user,'public.fn_payment_due_notifications(integer)','EXECUTE')
+    OR has_function_privilege('anon','public.fn_payment_due_notifications(integer)','EXECUTE') THEN
+  RAISE EXCEPTION 'global notifications callable by session roles' USING ERRCODE='XX000';
+ END IF;
+ IF NOT has_function_privilege('service_role','public.fn_payment_due_notifications(integer)','EXECUTE') THEN
+  RAISE EXCEPTION 'worker cannot lease notifications';
+ END IF;
  RAISE NOTICE 'Checking authenticated receipt write denial';
  BEGIN
   INSERT INTO payment_receipts(org_id,attempt_id,amount,currency,provider_status) VALUES(org,attempt_id,5000,'UGX','completed');
