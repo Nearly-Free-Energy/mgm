@@ -10,6 +10,7 @@ import "server-only";
 
 import { Context, type Fiber } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getCurrentUserRoles } from "@/lib/auth/access";
 import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import {
@@ -41,6 +42,8 @@ export const PAYMENTS_PLUGIN_NAME = "payments";
 export const PESAPAL_PROVIDER_PLUGIN_NAME = "pesapal";
 export { PAYMENTS_PLUGIN_VERSION, PESAPAL_PLUGIN_VERSION };
 
+function pesapalProviderPlugin(context: Context) { return context.provide("paymentProviders", pesapalProviderFactory); }
+
 function paymentsScopePlugin(context: Context, scope: PaymentsScope) {
   return context.provide("paymentsScope", scope);
 }
@@ -52,22 +55,26 @@ function paymentsCapabilityPlugin(
   return context.provide("payments", capability);
 }
 
-function defaultAppUrl(path: string): string {
+export function defaultAppUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
-  if (base) return `${base}${path}`;
+  if (base) {
+    const url = new URL(base);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("Invalid application URL");
+    return `${url.origin}${path}`;
+  }
   const callbackBase = (process.env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL ?? "").replace(/\/+$/, "");
   if (callbackBase) {
     try {
       const url = new URL(callbackBase);
       return `${url.origin}${path}`;
     } catch {
-      return path;
+      throw new Error("Invalid application URL");
     }
   }
-  return path;
+  throw new Error("Application URL is not configured");
 }
 
-const providerFactory: ProviderFactory = {
+const pesapalProviderFactory: ProviderFactory = {
   async forAccount(account: MerchantAccountSecret) {
     if (account.provider !== "pesapal") {
       return { ok: false, code: "payments_unknown_provider", message: `Unknown provider: ${account.provider}` };
@@ -154,7 +161,7 @@ export async function composePayments(options: {
     });
   }
 
-  const repository = createSupabasePaymentsRepository(options.supabase);
+  const repository = createSupabasePaymentsRepository(options.supabase, createServiceClient());
   if (
     !options.allowDisabled &&
     (!(await repository.isPaymentsEnabled(options.organizationId)) ||
@@ -176,12 +183,16 @@ export async function composePayments(options: {
   const capability = new PaymentsCapability(
     repository,
     scope,
-    providerFactory,
+    { forAccount: (account) => {
+      if (!context.paymentProviders) throw new Error("Payment provider plugin unavailable");
+      return context.paymentProviders.forAccount(account);
+    } },
     () => active,
     defaultAppUrl
   );
 
   try {
+    fibers.push(await context.plugin(pesapalProviderPlugin));
     fibers.push(await context.plugin(paymentsScopePlugin, scope));
     fibers.push(await context.plugin(paymentsCapabilityPlugin, capability));
     if (!context.payments || !context.paymentsScope) {
@@ -236,11 +247,15 @@ export async function composePaymentsPublic(options: {
   const capability = new PaymentsCapability(
     repository,
     scope,
-    providerFactory,
+    { forAccount: (account) => {
+      if (!context.paymentProviders) throw new Error("Payment provider plugin unavailable");
+      return context.paymentProviders.forAccount(account);
+    } },
     () => active,
     defaultAppUrl
   );
   try {
+    fibers.push(await context.plugin(pesapalProviderPlugin));
     fibers.push(await context.plugin(paymentsScopePlugin, scope));
     fibers.push(await context.plugin(paymentsCapabilityPlugin, capability));
     if (!context.payments || !context.paymentsScope) {

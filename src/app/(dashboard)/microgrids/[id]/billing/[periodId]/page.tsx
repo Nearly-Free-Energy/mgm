@@ -1,3 +1,4 @@
+import { composePayments } from "@/lib/payments/compose";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type {
@@ -179,7 +180,17 @@ export default async function BillingPeriodDetailPage({
       : (microgrid.communities as { id: string; payment_provider: string | null })
     : null;
 
-  const isPaymentConfigured = community?.payment_provider != null;
+  let isPaymentConfigured = false;
+  if (community) {
+    const { data: scope } = await supabase.from("communities").select("org_id").eq("id", community.id).maybeSingle<{ org_id: string }>();
+    if (scope) {
+      const composed = await composePayments({ supabase, organizationId: scope.org_id, allowDisabled: true });
+      if (composed.ok) {
+        try { const readiness = await composed.data.payments.getReadiness(community.id); isPaymentConfigured = readiness.ok && ["ready", "sandbox"].includes(readiness.data.state); }
+        finally { await composed.data.dispose(); }
+      }
+    }
+  }
   const communityId = community?.id;
 
   // BC2 (#174) — compute edgeAvailable per household. Mirrors the gate

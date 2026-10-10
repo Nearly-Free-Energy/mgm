@@ -1,34 +1,18 @@
-/**
- * POST /api/payments/reconcile-worker
- *
- * Reconciliation worker: processes due `payment_notifications`
- * (received/failed past next_retry_at) idempotently. Runs every five
- * minutes through Supabase scheduling (pg_cron → webhook) or Vercel cron.
- * Guarded by a shared secret (`PAYMENTS_WORKER_SECRET`); without it the
- * route only accepts service-role callers. Always returns 200 with counts —
- * failures are retained for retry with backoff, persistent ones surface via
- * `needs_reconciliation` for manager attention.
- */
+/** Five-minute Supabase worker. Header authentication is required; durable
+ * leases recover crashes and stop retrying after the configured limit. */
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { composePaymentsPublic } from "@/lib/payments/compose";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const secret = (process.env.PAYMENTS_WORKER_SECRET ?? "").trim();
-  if (secret) {
-    const provided =
-      request.headers.get("x-payments-worker-secret") ??
-      request.nextUrl.searchParams.get("secret") ??
-      "";
-    if (provided !== secret) {
-      return NextResponse.json(
-        { error: "Forbidden.", processed: 0, failed: 0 },
-        { status: 403 }
-      );
-    }
-  }
+  if (!secret) return NextResponse.json({ error: "Worker is not configured" }, { status: 503 });
+  const provided = request.headers.get("x-payments-worker-secret") ?? "";
+  if (provided !== secret) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const supabase = createServiceClient();
+  const { data: pending } = await supabase.from("payment_attempts").select("org_id, provider_tracking_id, merchant_reference").in("status", ["pending", "confirmation_pending"]).not("provider_tracking_id", "is", null).limit(50);
+  for (const attempt of pending ?? []) await supabase.from("payment_notifications").upsert({ org_id: attempt.org_id, provider: "pesapal", tracking_id: attempt.provider_tracking_id, merchant_reference: attempt.merchant_reference, raw_payload: { OrderTrackingId: attempt.provider_tracking_id, OrderMerchantReference: attempt.merchant_reference } }, { onConflict: "provider,tracking_id", ignoreDuplicates: true });
   const { data: due, error } = await supabase.rpc("fn_payment_due_notifications", {
     _limit: 50,
   });
@@ -37,7 +21,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if ((error.code ?? "") === "42P01" || /does not exist/i.test(error.message ?? "")) {
       return NextResponse.json({ processed: 0, failed: 0, skipped: "not_migrated" });
     }
-    return NextResponse.json({ processed: 0, failed: 0, error: error.message });
+    return NextResponse.json({ processed: 0, failed: 0, error: "Could not lease payment notifications" }, { status: 500 });
   }
   const rows = (due ?? []) as {
     id: string;
@@ -56,6 +40,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .eq("merchant_reference", row.merchant_reference)
         .maybeSingle<{ id: string; org_id: string }>();
       if (!attempt?.org_id) {
+        await supabase.from("payment_notifications").update({ status: "dead_letter", last_error: "unknown_reference" }).eq("id", row.id);
         failed += 1;
         continue;
       }

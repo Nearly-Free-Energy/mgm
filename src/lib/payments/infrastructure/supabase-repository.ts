@@ -20,6 +20,8 @@ import type {
   RepositoryError,
 } from "../repository";
 
+const ACCOUNT_COLUMNS = "id, org_id, provider, display_name, sandbox, consumer_key, base_url, ipn_id, ipn_url, version, disabled, last_tested_at, last_test_status, last_test_message";
+
 function toError(error: { code?: string; message?: string }): RepositoryError {
   return { code: error.code, message: error.message ?? "Unknown database error" };
 }
@@ -46,7 +48,8 @@ function toPublic(row: Record<string, unknown>, origin: MerchantAccountPublic["o
 }
 
 export function createSupabasePaymentsRepository(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  writer: SupabaseClient = supabase
 ): PaymentsRepository {
   return {
     async isPaymentsEnabled(organizationId: string) {
@@ -58,11 +61,12 @@ export function createSupabasePaymentsRepository(
     },
 
     async getLineItemOrganization(lineItemId: string) {
-      const { data: item } = await supabase
+      const { data: item, error: itemError } = await supabase
         .from("billing_line_items")
         .select("id, billing_period_id")
         .eq("id", lineItemId)
         .maybeSingle<{ id: string; billing_period_id: string }>();
+      if (itemError) throw new Error("Could not load bill");
       if (!item) return null;
       const { data: period } = await supabase
         .from("billing_periods")
@@ -86,17 +90,19 @@ export function createSupabasePaymentsRepository(
     },
 
     async loadBillSnapshot(lineItemId: string): Promise<BillSnapshot | null> {
-      const { data: item } = await supabase
+      const { data: item, error: itemError } = await supabase
         .from("billing_line_items")
-        .select("id, household_id, total_amount, updated_at, billing_period_id")
+        .select("id, household_id, total_amount, updated_at, payment_status, billing_period_id")
         .eq("id", lineItemId)
         .maybeSingle<{
           id: string;
           household_id: string;
           total_amount: number;
+          payment_status: string;
           updated_at: string | null;
           billing_period_id: string;
         }>();
+      if (itemError) throw new Error("Could not load bill");
       if (!item) return null;
       const { data: period } = await supabase
         .from("billing_periods")
@@ -141,6 +147,7 @@ export function createSupabasePaymentsRepository(
         totalAmount: Number(item.total_amount),
         currency: microgrid.currency || "UGX",
         updatedAt: item.updated_at ?? null,
+        paymentStatus: item.payment_status,
         periodStatus: period.status,
         contactEmail: household.primary_email,
         contactPhone: household.primary_phone,
@@ -153,11 +160,12 @@ export function createSupabasePaymentsRepository(
     async resolveMerchantAccount({ orgId, communityId }) {
       // Explicit resolution: override row present → use it (broken errors);
       // absent → org default.
-      const { data: override } = await supabase
+      const { data: override, error: overrideError } = await supabase
         .from("community_payment_overrides")
         .select("id, merchant_account_id")
         .eq("community_id", communityId)
         .maybeSingle<{ id: string; merchant_account_id: string | null }>();
+      if (overrideError) throw new Error("Could not resolve community payment override");
       if (override) {
         if (!override.merchant_account_id) {
           return {
@@ -169,7 +177,7 @@ export function createSupabasePaymentsRepository(
         }
         const { data: account, error } = await supabase
           .from("payment_merchant_accounts")
-          .select("*")
+          .select(ACCOUNT_COLUMNS)
           .eq("id", override.merchant_account_id)
           .maybeSingle<Record<string, unknown>>();
         if (error) return { ok: false as const, code: "override_broken" as const, message: error.message };
@@ -198,14 +206,16 @@ export function createSupabasePaymentsRepository(
         const pub = toPublic(account as Record<string, unknown>, "community_override", communityId);
         return { ok: true as const, account: { ...pub, secret }, origin: "community_override" as const };
       }
-      const { data: account } = await supabase
+      const { data: account, error: accountError } = await supabase
         .from("payment_merchant_accounts")
-        .select("*")
+        .select(ACCOUNT_COLUMNS)
         .eq("org_id", orgId)
         .eq("provider", "pesapal")
+        .eq("is_default", true)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle<Record<string, unknown>>();
+      if (accountError) throw new Error("Could not resolve payment account");
       if (!account) {
         return { ok: false as const, code: "unconfigured" as const, message: "No Pesapal account configured for this organization." };
       }
@@ -221,18 +231,23 @@ export function createSupabasePaymentsRepository(
     },
 
     async loadMerchantAccountPublic({ orgId, communityId }) {
-      const { data: override } = await supabase
+      const { data: community, error: scopeError } = await supabase.from("communities").select("id").eq("id", communityId).eq("org_id", orgId).maybeSingle();
+      if (scopeError) throw new Error("Could not authorize community");
+      if (!community) return { ok: false as const, code: "payments_scope_mismatch", message: "Community not available in this organization." };
+      const { data: override, error: overrideError } = await supabase
         .from("community_payment_overrides")
         .select("id, merchant_account_id")
         .eq("community_id", communityId)
         .maybeSingle<{ id: string; merchant_account_id: string | null }>();
+      if (overrideError) throw new Error("Could not load community payment override");
       if (override?.merchant_account_id) {
-        const { data: account } = await supabase
+        const { data: account, error: accountError } = await supabase
           .from("payment_merchant_accounts")
-          .select("*")
+          .select(ACCOUNT_COLUMNS)
           .eq("id", override.merchant_account_id)
           .maybeSingle<Record<string, unknown>>();
-        if (!account) {
+        if (accountError) throw new Error("Could not load override payment account");
+        if (!account || account.org_id !== orgId) {
           return { ok: true as const, account: null, hasOverride: true };
         }
         return {
@@ -244,14 +259,16 @@ export function createSupabasePaymentsRepository(
       if (override && !override.merchant_account_id) {
         return { ok: true as const, account: null, hasOverride: true };
       }
-      const { data: account } = await supabase
+      const { data: account, error: accountError } = await supabase
         .from("payment_merchant_accounts")
-        .select("*")
+        .select(ACCOUNT_COLUMNS)
         .eq("org_id", orgId)
         .eq("provider", "pesapal")
+        .eq("is_default", true)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle<Record<string, unknown>>();
+      if (accountError) throw new Error("Could not load payment account");
       if (!account) return { ok: true as const, account: null, hasOverride: false };
       return {
         ok: true as const,
@@ -261,13 +278,14 @@ export function createSupabasePaymentsRepository(
     },
 
     async findActiveAttempt({ lineItemId, amount, currency }) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("line_item_id", lineItemId)
         .in("status", ["pending", "confirmation_pending"])
         .order("created_at", { ascending: false })
         .limit(5);
+      if (error) throw new Error("Could not load payment attempts");
       const rows = (data ?? []) as unknown as PaymentAttempt[];
       return (
         rows.find(
@@ -280,7 +298,7 @@ export function createSupabasePaymentsRepository(
     },
 
     async findBlockedAttempt(lineItemId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("line_item_id", lineItemId)
@@ -288,34 +306,23 @@ export function createSupabasePaymentsRepository(
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle<PaymentAttempt>();
+      if (error) throw new Error("Could not load blocked attempt");
       return data ?? null;
     },
 
     async createAttempt(input) {
-      const { data, error } = await supabase
-        .from("payment_attempts")
-        .insert({
-          org_id: input.orgId,
-          line_item_id: input.lineItemId,
-          community_id: input.communityId,
-          merchant_account_id: input.merchantAccountId,
-          merchant_account_version: input.merchantAccountVersion,
-          amount: input.amount,
-          currency: input.currency,
-          bill_revision_total: input.billRevisionTotal,
-          bill_revision_updated_at: input.billRevisionUpdatedAt,
-          merchant_reference: input.merchantReference,
-          provider: "pesapal",
-          status: "pending",
-        })
-        .select("*")
-        .single();
+      const { data, error } = await writer.rpc("fn_payment_reserve_checkout", {
+        _org_id: input.orgId, _line_item_id: input.lineItemId, _community_id: input.communityId,
+        _account_id: input.merchantAccountId, _account_version: input.merchantAccountVersion,
+        _amount: input.amount, _currency: input.currency, _revision: input.billRevisionUpdatedAt,
+        _reference: input.merchantReference,
+      });
       if (error) return { attempt: null, error: toError(error) };
       return { attempt: data as unknown as PaymentAttempt, error: null };
     },
 
     async updateAttemptTracking(input) {
-      const { error } = await supabase
+      const { error } = await writer
         .from("payment_attempts")
         .update({
           provider_tracking_id: input.providerTrackingId,
@@ -327,7 +334,7 @@ export function createSupabasePaymentsRepository(
     },
 
     async markAttemptStatus(input) {
-      const { error } = await supabase
+      const { error } = await writer
         .from("payment_attempts")
         .update({
           status: input.status,
@@ -339,25 +346,27 @@ export function createSupabasePaymentsRepository(
     },
 
     async getAttempt(attemptId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("id", attemptId)
         .maybeSingle<PaymentAttempt>();
+      if (error) throw new Error("Could not load payment attempt");
       return (data as unknown as PaymentAttempt | null) ?? null;
     },
 
     async listAttemptsForLineItem(lineItemId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("line_item_id", lineItemId)
         .order("created_at", { ascending: true });
+      if (error) throw new Error("Could not load payment history");
       return ((data ?? []) as unknown as PaymentAttempt[]) ?? [];
     },
 
     async recordReceipt(input) {
-      const { error } = await supabase.from("payment_receipts").insert({
+      const { error } = await writer.from("payment_receipts").insert({
         org_id: input.orgId,
         attempt_id: input.attemptId,
         amount: input.amount,
@@ -377,59 +386,55 @@ export function createSupabasePaymentsRepository(
       return { created: true, error: null };
     },
 
+    async listExternalAdjustments(lineItemId) {
+      const { data, error } = await supabase.from("payment_events").select("at, raw_payload").eq("line_item_id", lineItemId).eq("source", "manual");
+      if (error) throw new Error("Could not load payment adjustments");
+      return (data ?? []).flatMap(row => {
+        const payload = row.raw_payload as Record<string, unknown> | null;
+        return payload && typeof payload.external_amount === "number" ? [{ amount: payload.external_amount, reference: typeof payload.reference === "string" ? payload.reference : null, notes: typeof payload.notes === "string" ? payload.notes : null, at: row.at }] : [];
+      });
+    },
+
     async listReceiptsForAttempt(attemptId: string) {
       const { data } = await supabase
         .from("payment_receipts")
-        .select("*")
+        .select("id, attempt_id, amount, currency, provider_status, provider_tracking_id, confirmation_code, payment_method, created_at")
         .eq("attempt_id", attemptId)
         .order("created_at", { ascending: true });
       return ((data ?? []) as unknown as PaymentReceipt[]) ?? [];
     },
 
     async upsertNotification(input) {
-      const { data, error } = await supabase
-        .from("payment_notifications")
-        .upsert(
-          {
-            org_id: input.orgId,
-            provider: input.provider,
-            tracking_id: input.trackingId,
-            merchant_reference: input.merchantReference,
-            raw_payload: input.rawPayload,
-            status: "received",
-            next_retry_at: new Date().toISOString(),
-          },
-          { onConflict: "provider,tracking_id" }
-        )
-        .select("id")
-        .single();
+      const { data, error } = await writer.rpc("fn_payment_enqueue_notification", {
+        _org: input.orgId, _tracking: input.trackingId, _reference: input.merchantReference, _payload: input.rawPayload,
+      });
       if (error) return { id: "", error: toError(error) };
-      return { id: (data as { id: string }).id, error: null };
+      return { id: String(data), error: null };
     },
 
     async markNotification(input) {
       if (input.status === "failed") {
-        const { data: current } = await supabase
+        const { data: current } = await writer
           .from("payment_notifications")
           .select("attempt_count")
           .eq("id", input.id)
           .maybeSingle<{ attempt_count: number }>();
         const nextCount = (current?.attempt_count ?? 0) + 1;
-        const { error } = await supabase
+        const { error } = await writer
           .from("payment_notifications")
           .update({
-            status: "failed",
+            status: nextCount >= 12 ? "dead_letter" : "failed",
             last_error: input.lastError ?? null,
             processed_attempt_id: input.processedAttemptId ?? null,
             attempt_count: nextCount,
             next_retry_at: new Date(
-              Date.now() + (input.retryInSeconds ?? 300) * 1000
+              Date.now() + Math.max(input.retryInSeconds ?? 300, Math.min(3600, 60 * 2 ** nextCount)) * 1000
             ).toISOString(),
           })
           .eq("id", input.id);
         return error ? toError(error) : null;
       }
-      const { error } = await supabase
+      const { error } = await writer
         .from("payment_notifications")
         .update({
           status: input.status,
@@ -455,25 +460,27 @@ export function createSupabasePaymentsRepository(
     },
 
     async findAttemptByReference(merchantReference: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("merchant_reference", merchantReference)
         .maybeSingle<PaymentAttempt>();
+      if (error) throw new Error("Could not load payment attempt");
       return (data as unknown as PaymentAttempt | null) ?? null;
     },
 
     async findAttemptByTracking(trackingId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_attempts")
         .select("*")
         .eq("provider_tracking_id", trackingId)
         .maybeSingle<PaymentAttempt>();
+      if (error) throw new Error("Could not load payment attempt");
       return (data as unknown as PaymentAttempt | null) ?? null;
     },
 
     async applyBillPayment(input) {
-      const { error } = await supabase.rpc("fn_apply_payment_event", {
+      const { error } = await writer.rpc("fn_apply_payment_event", {
         _line_item_id: input.lineItemId,
         _to_status: input.toStatus,
         _source: "ipn",
@@ -486,23 +493,32 @@ export function createSupabasePaymentsRepository(
     },
 
     async reconcileAttempt(input) {
-      // Audited reconciliation: mark resolved and record the manager action
-      // in payment_events via a manual transition where possible.
-      const { error } = await supabase
-        .from("payment_attempts")
-        .update({
-          status: "resolved",
-          resolved_by: input.actorUserId,
-          resolved_at: new Date().toISOString(),
-          resolve_notes: JSON.stringify({
-            action: input.action,
-            externalReference: input.externalReference ?? null,
-            notes: input.notes ?? null,
-          }).slice(0, 500),
-        })
-        .eq("id", input.attemptId);
+      const { error } = await writer.rpc("fn_payment_reconcile", {
+        _attempt_id: input.attemptId, _action: input.action,
+        _external_amount: input.externalAmount ?? 0, _reference: input.externalReference ?? null,
+        _notes: input.notes ?? null, _actor: input.actorUserId,
+      });
       return { error: error ? toError(error) : null };
     },
+    async loadAttemptAccount(attempt) {
+      // Attempt was read with the caller's RLS client before privileged decrypt.
+      const { data, error } = await writer.rpc("fn_payment_account_version", {
+        _account_id: attempt.merchant_account_id, _version: attempt.merchant_account_version,
+        _org_id: attempt.org_id,
+      });
+      if (error || !data) return null;
+      const row = data as Record<string, unknown>;
+      return { ...toPublic(row, "community_override", attempt.community_id), secret: String(row.secret) };
+    },
+    async commitVerification(input) {
+      const { error } = await writer.rpc("fn_payment_commit_verification", {
+        _attempt_id: input.attemptId, _amount: input.amount, _currency: input.currency,
+        _status: input.providerStatus, _tracking: input.trackingId,
+        _confirmation: input.confirmationCode, _method: input.paymentMethod, _payload: input.rawPayload,
+      });
+      return { error: error ? toError(error) : null };
+    },
+
   };
 }
 

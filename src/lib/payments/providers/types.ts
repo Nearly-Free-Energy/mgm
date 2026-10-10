@@ -39,6 +39,8 @@ export type VerifiedProviderStatus =
   | "unknown";
 
 export interface TransactionSnapshot {
+  /** Identity of the authenticated provider lookup, never a redirect claim. */
+  trackingId: string;
   status: VerifiedProviderStatus;
   amount?: number;
   currency?: string;

@@ -26,7 +26,7 @@ const PUBLIC_PATHS = [
  * silently exposing them.
  */
 function isPublicPaymentRoute(pathname: string): boolean {
-  if (pathname === "/api/payments/ipn") return true;
+  if (["/api/payments/ipn", "/api/payments/reconcile-worker", "/payment/callback"].includes(pathname)) return true;
   if (/^\/p\/[^/]+$/.test(pathname)) return true;
   if (/^\/api\/billing-line-items\/[^/]+\/pay$/.test(pathname)) return true;
   return false;
@@ -75,7 +75,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const isPublicPath =
-    PUBLIC_PATHS.some((p) => request.nextUrl.pathname.startsWith(p)) ||
+    PUBLIC_PATHS.some((p) => request.nextUrl.pathname === p) ||
     isPublicPaymentRoute(request.nextUrl.pathname);
 
   if (!user && !isPublicPath) {

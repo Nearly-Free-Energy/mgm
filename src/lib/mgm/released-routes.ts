@@ -89,6 +89,8 @@ const RELEASE_3_API_ROUTES = [
 ];
 
 const RELEASE_4_PAGE_ROUTES = [
+  /^\/payment\/callback$/,
+  /^\/organizations\/[^/]+\/payments$/,
   // Community payment configuration (org default + override states).
   /^\/communities\/[^/]+\/payment$/,
   // Stable customer-facing payment-link indirection (no session).

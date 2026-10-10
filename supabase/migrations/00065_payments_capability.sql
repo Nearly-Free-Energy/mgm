@@ -359,65 +359,20 @@ GRANT ALL ON payment_notifications TO service_role;
 -- from billing_line_items.pesapal_order_id. All idempotent (NOT EXISTS /
 -- ON CONFLICT DO NOTHING) so re-running the migration is safe.
 
--- 6a. One merchant account per org that has at least one configured community.
+-- Preserve each community's merchant credentials. The earliest account is
+-- the organization default; other configured communities keep overrides.
 DO $$
-DECLARE
-  v_org RECORD;
-  v_row RECORD;
+DECLARE c RECORD; account uuid;
 BEGIN
-  FOR v_org IN
-    SELECT DISTINCT c.org_id
-    FROM communities c
-    WHERE c.payment_provider IS NOT NULL
-  LOOP
-    IF NOT EXISTS (
-      SELECT 1 FROM payment_merchant_accounts p
-      WHERE p.org_id = v_org.org_id AND p.provider = 'pesapal'
-    ) THEN
-      SELECT c.payment_provider_config, c.payment_provider_secret_encrypted
-        INTO v_row
-      FROM communities c
-      WHERE c.org_id = v_org.org_id AND c.payment_provider IS NOT NULL
-      ORDER BY c.payment_last_configured_at DESC NULLS LAST
-      LIMIT 1;
-      INSERT INTO payment_merchant_accounts (
-        org_id, provider, display_name, sandbox, consumer_key,
-        secret_encrypted, base_url, ipn_id, ipn_url,
-        last_tested_at, last_test_status
-      )
-      VALUES (
-        v_org.org_id,
-        'pesapal',
-        'Default Pesapal account',
-        COALESCE((v_row.payment_provider_config->>'sandbox')::boolean, TRUE),
-        COALESCE(v_row.payment_provider_config->>'consumer_key', ''),
-        v_row.payment_provider_secret_encrypted,
-        COALESCE(v_row.payment_provider_config->>'base_url', ''),
-        v_row.payment_provider_config->>'ipn_id',
-        NULL,
-        now(),
-        'success'
-      )
-      ON CONFLICT DO NOTHING;
-    END IF;
-  END LOOP;
-END;
-$$;
-
--- 6b. Community overrides for every configured community.
-INSERT INTO community_payment_overrides (org_id, community_id, merchant_account_id)
-SELECT
-  c.org_id,
-  c.id,
-  (
-    SELECT p.id FROM payment_merchant_accounts p
-    WHERE p.org_id = c.org_id AND p.provider = 'pesapal'
-    ORDER BY p.created_at ASC
-    LIMIT 1
-  )
-FROM communities c
-WHERE c.payment_provider IS NOT NULL
-ON CONFLICT (community_id) DO NOTHING;
+ FOR c IN SELECT * FROM communities WHERE payment_provider='pesapal' ORDER BY created_at,id LOOP
+  IF EXISTS(SELECT 1 FROM community_payment_overrides WHERE community_id=c.id) THEN CONTINUE; END IF;
+  INSERT INTO payment_merchant_accounts(org_id,provider,display_name,sandbox,consumer_key,secret_encrypted,base_url,ipn_id,last_test_status)
+  VALUES(c.org_id,'pesapal',CASE WHEN NOT EXISTS(SELECT 1 FROM payment_merchant_accounts WHERE org_id=c.org_id) THEN 'Default Pesapal account' ELSE 'Migrated community '||c.id::text END,
+   COALESCE((c.payment_provider_config->>'sandbox')::boolean,true),COALESCE(c.payment_provider_config->>'consumer_key',''),c.payment_provider_secret_encrypted,
+   COALESCE(c.payment_provider_config->>'base_url',''),c.payment_provider_config->>'ipn_id','success') RETURNING id INTO account;
+  INSERT INTO community_payment_overrides(org_id,community_id,merchant_account_id) VALUES(c.org_id,c.id,account);
+ END LOOP;
+END $$;
 
 -- 6c. Attempts from legacy pesapal_order_id references.
 INSERT INTO payment_attempts (
@@ -431,10 +386,7 @@ SELECT
   li.id,
   mg.community_id,
   (
-    SELECT p.id FROM payment_merchant_accounts p
-    WHERE p.org_id = comm.org_id AND p.provider = 'pesapal'
-    ORDER BY p.created_at ASC
-    LIMIT 1
+    SELECT o.merchant_account_id FROM community_payment_overrides o WHERE o.community_id=comm.id
   ),
   1,
   li.total_amount,
@@ -511,4 +463,4 @@ AS $$
 $$;
 
 REVOKE EXECUTE ON FUNCTION fn_payment_due_notifications(INTEGER) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION fn_payment_due_notifications(INTEGER) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION fn_payment_due_notifications(INTEGER) TO service_role;

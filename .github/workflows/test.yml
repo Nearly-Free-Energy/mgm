@@ -58,6 +58,11 @@ jobs:
       # limit before the tests even start.
       - run: npx supabase start
 
+      - name: Payment integrity rehearsal
+        run: |
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-payments.sql
+
       - name: npm test
         run: |
           # These two are the only variables the suites read

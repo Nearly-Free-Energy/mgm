@@ -167,6 +167,7 @@ const lineItems: BillingLineItem[] = [
       { label: "Tier 2", kwh: 30, amount: 24000 },
     ],
     total_amount: 49000,
+    updated_at: "2026-04-01T00:00:00Z",
     created_at: "2026-04-01T00:00:00Z",
     // payment status columns (migration 00021)
     payment_status: "unpaid",
@@ -200,6 +201,7 @@ const lineItems: BillingLineItem[] = [
       { label: "Tier 2", kwh: 0, amount: 0 },
     ],
     total_amount: 22500,
+    updated_at: "2026-04-01T00:00:00Z",
     created_at: "2026-04-01T00:00:00Z",
     payment_status: "unpaid",
     paid_at: null,
@@ -232,6 +234,7 @@ const lineItems: BillingLineItem[] = [
       { label: "Tier 2", kwh: 60, amount: 48000 },
     ],
     total_amount: 73000,
+    updated_at: "2026-04-01T00:00:00Z",
     created_at: "2026-04-01T00:00:00Z",
     payment_status: "unpaid",
     paid_at: null,

@@ -7,6 +7,8 @@
 // IPN auto-close + entered-by caption + fallback regenerate handler tests
 // live here.
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { LocaleProvider } from "@/components/format/locale-context";

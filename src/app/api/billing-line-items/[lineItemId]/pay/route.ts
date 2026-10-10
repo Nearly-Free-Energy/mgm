@@ -50,7 +50,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { PaymentError } from "@/lib/payments";
-import { ensurePaymentLinkForLineItem } from "@/lib/payments/ensure-payment-link";
 import { composePaymentsPublic } from "@/lib/payments/compose";
 import { resolveOrgForLineItem } from "@/lib/payments/resolve-org";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -111,57 +110,20 @@ export async function GET(
     );
   }
 
-  // ── Helper delegation ───────────────────────────────────────────────────
-  // Prefer the Payments capability (stable MGM link → current bill revision,
-  // immutable attempts, reuse). Fall back to the legacy helper when the
-  // capability tables have not migrated yet so shipped links keep working.
   const supabase = createServiceClient();
   let result;
   try {
-    const orgScope = await resolveOrgForLineItem(supabase, lineItemId).catch(
-      () => null
-    );
-    if (orgScope) {
-      try {
-        const composed = await composePaymentsPublic({
-          supabase,
-          organizationId: orgScope.orgId,
-        });
-        if (composed.ok) {
-          const checkout = await composed.data.payments.ensureCheckout(lineItemId);
-          await composed.data.dispose().catch(() => {});
-          if (checkout.ok) {
-            result = {
-              redirectUrl: checkout.data.redirectUrl,
-              orderTrackingId: checkout.data.attempt.provider_tracking_id,
-              merchantReference: checkout.data.attempt.merchant_reference,
-              wasMinted: !checkout.data.reused,
-            };
-          }
-        }
-      } catch {
-        // fall through to legacy
-      }
-    }
-    if (!result) {
-      result = await ensurePaymentLinkForLineItem(supabase, lineItemId, {
-        // Public endpoint — no session, no auth.uid(). The audit row is
-        // recorded as system-attributed (#250 / migration 00041): the
-        // `actor_kind='system' + actor_ref='tenant_pay_redirect'` shape
-        // satisfies the new `payment_events_actor_consistency` CHECK and
-        // tells the audit reader "this transition originated from the
-        // consumer-facing /pay redirect, not an operator click."
-        actorUserId: null,
-        actorKind: "system",
-        actorRef: "tenant_pay_redirect",
-      });
-    }
+    const orgScope = await resolveOrgForLineItem(supabase, lineItemId);
+    if (!orgScope) return htmlResponse(404, "Bill not found", "This bill is not available. Please contact your operator.");
+    const composed = await composePaymentsPublic({ supabase, organizationId: orgScope.orgId });
+    if (!composed.ok) return htmlResponse(composed.status, "Payment unavailable", "Please contact your operator.");
+    try {
+      const checkout = await composed.data.payments.ensureCheckout(lineItemId);
+      if (!checkout.ok) return htmlResponse(checkout.status, "Payment unavailable", "This bill cannot accept another checkout right now. Please contact your operator.");
+      result = { redirectUrl: checkout.data.redirectUrl };
+    } finally { await composed.data.dispose(); }
   } catch (err) {
-    return handleError(err, {
-      lineItemId,
-      ipTruncated: truncateIp(ipFull),
-      startedAt,
-    });
+    return handleError(err, { lineItemId, ipTruncated: truncateIp(ipFull), startedAt });
   }
 
   logPayEvent({

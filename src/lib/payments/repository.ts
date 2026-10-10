@@ -62,7 +62,7 @@ export type PaymentReadiness =
   | { state: "unconfigured"; message: string }
   | { state: "sandbox"; message: string; account: MerchantAccountPublic }
   | { state: "ready"; message: string; account: MerchantAccountPublic }
-  | { state: "connection_error"; message: string; account: MerchantAccountPublic };
+  | { state: "connection_error"; message: string; account?: MerchantAccountPublic };
 
 export type AttemptStatus =
   | "pending"
@@ -113,6 +113,7 @@ export type BillSnapshot = {
   totalAmount: number;
   currency: string;
   updatedAt: string | null;
+  paymentStatus: string;
   periodStatus: "draft" | "closed";
   contactEmail: string | null;
   contactPhone: string | null;
@@ -135,6 +136,11 @@ export interface PaymentsRepository {
     | { ok: true; account: MerchantAccountSecret; origin: MerchantAccountPublic["origin"] }
     | { ok: false; code: "unconfigured" | "override_broken" | "disabled"; message: string }
   >;
+  loadAttemptAccount(attempt: PaymentAttempt): Promise<MerchantAccountSecret | null>;
+  commitVerification(input: {
+    attemptId: string; amount: number; currency: string; providerStatus: string;
+    trackingId: string; confirmationCode: string | null; paymentMethod: string | null; rawPayload: unknown;
+  }): Promise<{ error: RepositoryError | null }>;
   loadMerchantAccountPublic(input: {
     orgId: string;
     communityId: string;
@@ -185,6 +191,7 @@ export interface PaymentsRepository {
     paymentMethod: string | null;
     rawPayload: unknown;
   }): Promise<{ created: boolean; error: RepositoryError | null }>;
+  listExternalAdjustments(lineItemId: string): Promise<{ amount: number; reference: string | null; notes: string | null; at: string }[]>;
   listReceiptsForAttempt(attemptId: string): Promise<PaymentReceipt[]>;
   upsertNotification(input: {
     orgId: string | null;
@@ -214,6 +221,7 @@ export interface PaymentsRepository {
   reconcileAttempt(input: {
     attemptId: string;
     action: "accept_exact" | "record_external";
+    externalAmount?: number;
     externalReference?: string | null;
     notes?: string | null;
     actorUserId: string;
@@ -255,5 +263,5 @@ export interface PaymentsCapabilityContract {
   ): Promise<PaymentsResult<{ attempt: PaymentAttempt }>>;
   listHistory(
     lineItemId: string
-  ): Promise<PaymentsResult<{ attempts: PaymentAttempt[]; receipts: PaymentReceipt[] }>>;
+  ): Promise<PaymentsResult<{ attempts: PaymentAttempt[]; receipts: PaymentReceipt[]; currentTotal: number; currency: string; received: number; difference: number }>>;
 }

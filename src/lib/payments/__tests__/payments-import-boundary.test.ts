@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
 function runtimeImports(source: string): string[] {
   const withoutTypeImports = source.replace(/^\s*import\s+type\s[^;]+;/gm, "");
@@ -38,22 +38,10 @@ function collectTsFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const COMPAT_ROUTE_SHIMS = new Set([
-  // Dual-write shims during rollout: these routes call the capability first
-  // and fall back to the legacy community-config flow when capability tables
-  // are absent (deploy ordering). They are the only app/ files allowed to
-  // import the provider directly; everything else routes through compose.
-  "src/app/api/payments/ipn/route.ts",
-  "src/app/api/communities/[id]/payment/route.ts",
-  "src/app/api/organizations/[id]/payment-accounts/route.ts",
-]);
-
 function isAllowedImporter(file: string): boolean {
   const rel = path.relative(REPO_ROOT, file);
-  if (COMPAT_ROUTE_SHIMS.has(rel)) return true;
   return (
     rel.startsWith("src/lib/payments/compose.ts") ||
-    rel.startsWith("src/lib/payments/capability.ts") ||
     rel.startsWith("src/lib/payments/infrastructure/") ||
     rel.startsWith("src/lib/payments/providers/") ||
     rel.startsWith("src/lib/payments/pesapal/") ||
@@ -62,7 +50,7 @@ function isAllowedImporter(file: string): boolean {
     // compat routes migrate fully — but billing/ and app/ may not use them
     // to reach the provider.
     rel.startsWith("src/lib/payments/__tests__/") ||
-    rel.startsWith("src/lib/payments/resolve-org.ts")
+    ["src/lib/payments/resolve-org.ts", "src/lib/payments/config.ts", "src/lib/payments/factory.ts", "src/lib/payments/index.ts", "src/lib/payments/ensure-payment-link.ts"].includes(rel)
   );
 }
 
@@ -76,12 +64,8 @@ describe("payments import boundary", () => {
       path.join(REPO_ROOT, "src", "lib", "payments"),
     ];
     for (const root of roots) {
-      let files: string[] = [];
-      try {
-        files = collectTsFiles(root);
-      } catch {
-        continue;
-      }
+      const files = collectTsFiles(root);
+      expect(files.length).toBeGreaterThan(0);
       for (const file of files) {
         if (isAllowedImporter(file)) continue;
         // Capability-adjacent pure modules may not touch the provider either.

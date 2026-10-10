@@ -112,7 +112,7 @@ export class PesapalPaymentProvider implements PaymentProviderClient {
       },
       currency: request.currency,
     });
-    if (!response.redirect_url) {
+    if (!response.redirect_url || !response.order_tracking_id || response.merchant_reference !== request.merchantReference) {
       throw new PesapalError(
         "Pesapal submitOrder did not return a redirect_url",
         "PESAPAL_NO_REDIRECT",
@@ -122,8 +122,8 @@ export class PesapalPaymentProvider implements PaymentProviderClient {
     }
     return {
       redirectUrl: response.redirect_url,
-      providerTrackingId: response.order_tracking_id ?? "",
-      merchantReference: response.merchant_reference ?? request.merchantReference,
+      providerTrackingId: response.order_tracking_id,
+      merchantReference: response.merchant_reference,
     };
   }
 
@@ -138,6 +138,7 @@ export class PesapalPaymentProvider implements PaymentProviderClient {
     const token = await this.client.getAccessToken();
     const res = await this.client.getTransactionStatus(token, trackingId);
     return {
+      trackingId,
       status: mapPesapalStatus(res.payment_status_description),
       amount: res.amount,
       currency: res.currency,

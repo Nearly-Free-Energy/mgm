@@ -26,7 +26,12 @@ import { SignJWT } from "jose";
 // ── Constants ─────────────────────────────────────────────────────────────
 
 // RLS tests always target local Supabase — never cloud.
-export const LOCAL_SUPABASE_URL = "http://localhost:54321";
+const configuredTestUrl = process.env.MGM_TEST_SUPABASE_URL ?? "http://localhost:54321";
+const parsedTestUrl = new URL(configuredTestUrl);
+if (!['localhost', '127.0.0.1', '[::1]'].includes(parsedTestUrl.hostname) || parsedTestUrl.protocol !== 'http:') {
+  throw new Error("MGM_TEST_SUPABASE_URL must be an HTTP loopback service; cloud databases are forbidden in tests.");
+}
+export const LOCAL_SUPABASE_URL = configuredTestUrl;
 
 // ── Environment guard ────────────────────────────────────────────────────
 
@@ -267,7 +272,7 @@ export async function cleanupTestData(opts: {
   // Delete auth users by email (admin API lookup then delete).
   const { data: userList } = await svc.auth.admin.listUsers({ perPage: 1000 });
   for (const email of opts.userEmails) {
-    const user = userList?.users.find((u) => u.email === email);
+    const user = userList?.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
     if (user) {
       await svc.auth.admin.deleteUser(user.id);
     }

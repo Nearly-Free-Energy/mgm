@@ -233,4 +233,15 @@ describe("middleware PUBLIC_PATHS", () => {
 
     expect(res.status).toBe(401);
   });
+  it.each(["/api/payments/reconcile-worker", "/payment/callback"])("lets %s reach its own server-side validation without a session", async path => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    expect((await middleware(makeRequest(path))).status).toBe(200);
+  });
+  it("does not exempt worker sibling paths", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    expect((await middleware(makeRequest("/api/payments/reconcile-worker/extra"))).status).toBe(404);
+  });
+
 });

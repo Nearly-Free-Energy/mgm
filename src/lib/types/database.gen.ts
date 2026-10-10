@@ -120,6 +120,7 @@ export type Database = {
           start_kwh: number | null
           tier_breakdown: Json
           total_amount: number
+          updated_at: string
           usage_kwh: number | null
         }
         Insert: {
@@ -146,6 +147,7 @@ export type Database = {
           start_kwh?: number | null
           tier_breakdown?: Json
           total_amount?: number
+          updated_at?: string
           usage_kwh?: number | null
         }
         Update: {
@@ -172,6 +174,7 @@ export type Database = {
           start_kwh?: number | null
           tier_breakdown?: Json
           total_amount?: number
+          updated_at?: string
           usage_kwh?: number | null
         }
         Relationships: [
@@ -323,6 +326,55 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "communities_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      community_payment_overrides: {
+        Row: {
+          community_id: string
+          created_at: string
+          id: string
+          merchant_account_id: string | null
+          org_id: string
+          updated_at: string
+        }
+        Insert: {
+          community_id: string
+          created_at?: string
+          id?: string
+          merchant_account_id?: string | null
+          org_id: string
+          updated_at?: string
+        }
+        Update: {
+          community_id?: string
+          created_at?: string
+          id?: string
+          merchant_account_id?: string | null
+          org_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "community_payment_overrides_community_id_fkey"
+            columns: ["community_id"]
+            isOneToOne: true
+            referencedRelation: "communities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "community_payment_overrides_merchant_account_id_fkey"
+            columns: ["merchant_account_id"]
+            isOneToOne: false
+            referencedRelation: "payment_merchant_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "community_payment_overrides_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -895,6 +947,110 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_attempts: {
+        Row: {
+          amount: number
+          bill_revision_total: number
+          bill_revision_updated_at: string | null
+          checkout_url: string | null
+          community_id: string | null
+          created_at: string
+          currency: string
+          failure_code: string | null
+          failure_message: string | null
+          id: string
+          line_item_id: string
+          merchant_account_id: string | null
+          merchant_account_version: number
+          merchant_reference: string
+          org_id: string
+          provider: string
+          provider_tracking_id: string | null
+          resolve_notes: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          bill_revision_total?: number
+          bill_revision_updated_at?: string | null
+          checkout_url?: string | null
+          community_id?: string | null
+          created_at?: string
+          currency?: string
+          failure_code?: string | null
+          failure_message?: string | null
+          id?: string
+          line_item_id: string
+          merchant_account_id?: string | null
+          merchant_account_version?: number
+          merchant_reference: string
+          org_id: string
+          provider?: string
+          provider_tracking_id?: string | null
+          resolve_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          bill_revision_total?: number
+          bill_revision_updated_at?: string | null
+          checkout_url?: string | null
+          community_id?: string | null
+          created_at?: string
+          currency?: string
+          failure_code?: string | null
+          failure_message?: string | null
+          id?: string
+          line_item_id?: string
+          merchant_account_id?: string | null
+          merchant_account_version?: number
+          merchant_reference?: string
+          org_id?: string
+          provider?: string
+          provider_tracking_id?: string | null
+          resolve_notes?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_attempts_community_id_fkey"
+            columns: ["community_id"]
+            isOneToOne: false
+            referencedRelation: "communities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_attempts_line_item_id_fkey"
+            columns: ["line_item_id"]
+            isOneToOne: false
+            referencedRelation: "billing_line_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_attempts_merchant_account_id_fkey"
+            columns: ["merchant_account_id"]
+            isOneToOne: false
+            referencedRelation: "payment_merchant_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_attempts_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_events: {
         Row: {
           actor_kind: string
@@ -948,61 +1104,235 @@ export type Database = {
           },
         ]
       }
-      pilot_import_batches: {
+      payment_merchant_accounts: {
         Row: {
-          applied_at: string | null
-          billing_period_id: string
-          conflict_count: number
+          base_url: string
+          consumer_key: string
           created_at: string
-          duplicate_source_row_count: number
-          household_count: number
+          disabled: boolean
+          display_name: string
           id: string
-          initiated_by: string | null
-          inserted_reading_count: number
-          is_baseline: boolean
-          reading_count: number
-          source_label: string
-          status: string
-          unchanged_reading_count: number
+          ipn_id: string | null
+          ipn_url: string | null
+          is_default: boolean
+          last_test_message: string | null
+          last_test_status: string | null
+          last_tested_at: string | null
+          org_id: string
+          provider: string
+          sandbox: boolean
+          secret_encrypted: string | null
+          updated_at: string
+          version: number
         }
         Insert: {
-          applied_at?: string | null
-          billing_period_id: string
-          conflict_count?: number
+          base_url?: string
+          consumer_key?: string
           created_at?: string
-          duplicate_source_row_count?: number
-          household_count?: number
+          disabled?: boolean
+          display_name?: string
           id?: string
-          initiated_by?: string | null
-          inserted_reading_count?: number
-          is_baseline?: boolean
-          reading_count?: number
-          source_label: string
-          status?: string
-          unchanged_reading_count?: number
+          ipn_id?: string | null
+          ipn_url?: string | null
+          is_default?: boolean
+          last_test_message?: string | null
+          last_test_status?: string | null
+          last_tested_at?: string | null
+          org_id: string
+          provider?: string
+          sandbox?: boolean
+          secret_encrypted?: string | null
+          updated_at?: string
+          version?: number
         }
         Update: {
-          applied_at?: string | null
-          billing_period_id?: string
-          conflict_count?: number
+          base_url?: string
+          consumer_key?: string
           created_at?: string
-          duplicate_source_row_count?: number
-          household_count?: number
+          disabled?: boolean
+          display_name?: string
           id?: string
-          initiated_by?: string | null
-          inserted_reading_count?: number
-          is_baseline?: boolean
-          reading_count?: number
-          source_label?: string
-          status?: string
-          unchanged_reading_count?: number
+          ipn_id?: string | null
+          ipn_url?: string | null
+          is_default?: boolean
+          last_test_message?: string | null
+          last_test_status?: string | null
+          last_tested_at?: string | null
+          org_id?: string
+          provider?: string
+          sandbox?: boolean
+          secret_encrypted?: string | null
+          updated_at?: string
+          version?: number
         }
         Relationships: [
           {
-            foreignKeyName: "pilot_import_batches_billing_period_id_fkey"
-            columns: ["billing_period_id"]
+            foreignKeyName: "payment_merchant_accounts_org_id_fkey"
+            columns: ["org_id"]
             isOneToOne: false
-            referencedRelation: "billing_periods"
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_merchant_versions: {
+        Row: {
+          account_id: string
+          configuration: Json
+          created_at: string
+          org_id: string
+          version: number
+        }
+        Insert: {
+          account_id: string
+          configuration: Json
+          created_at?: string
+          org_id: string
+          version: number
+        }
+        Update: {
+          account_id?: string
+          configuration?: Json
+          created_at?: string
+          org_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_merchant_versions_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "payment_merchant_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_merchant_versions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_notifications: {
+        Row: {
+          attempt_count: number
+          created_at: string
+          id: string
+          last_error: string | null
+          merchant_reference: string
+          next_retry_at: string
+          org_id: string | null
+          processed_attempt_id: string | null
+          provider: string
+          raw_payload: Json
+          status: string
+          tracking_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          merchant_reference: string
+          next_retry_at?: string
+          org_id?: string | null
+          processed_attempt_id?: string | null
+          provider?: string
+          raw_payload?: Json
+          status?: string
+          tracking_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          merchant_reference?: string
+          next_retry_at?: string
+          org_id?: string | null
+          processed_attempt_id?: string | null
+          provider?: string
+          raw_payload?: Json
+          status?: string
+          tracking_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_notifications_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_notifications_processed_attempt_id_fkey"
+            columns: ["processed_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "payment_attempts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_receipts: {
+        Row: {
+          amount: number
+          attempt_id: string
+          confirmation_code: string | null
+          created_at: string
+          currency: string
+          id: string
+          org_id: string
+          payment_method: string | null
+          provider: string
+          provider_status: string
+          provider_tracking_id: string | null
+          raw_payload: Json
+        }
+        Insert: {
+          amount: number
+          attempt_id: string
+          confirmation_code?: string | null
+          created_at?: string
+          currency?: string
+          id?: string
+          org_id: string
+          payment_method?: string | null
+          provider?: string
+          provider_status: string
+          provider_tracking_id?: string | null
+          raw_payload?: Json
+        }
+        Update: {
+          amount?: number
+          attempt_id?: string
+          confirmation_code?: string | null
+          created_at?: string
+          currency?: string
+          id?: string
+          org_id?: string
+          payment_method?: string | null
+          provider?: string
+          provider_status?: string
+          provider_tracking_id?: string | null
+          raw_payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_receipts_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "payment_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_receipts_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -1199,6 +1529,7 @@ export type Database = {
           start_kwh: number | null
           tier_breakdown: Json
           total_amount: number
+          updated_at: string
           usage_kwh: number | null
         }
         SetofOptions: {
@@ -1331,7 +1662,15 @@ export type Database = {
         Args: { _microgrid_id: string }
         Returns: string
       }
+      fn_get_ems_keycloak_client_secret: {
+        Args: { _microgrid_id: string }
+        Returns: string
+      }
       fn_get_ems_secret: { Args: { _microgrid_id: string }; Returns: string }
+      fn_get_payment_merchant_secret: {
+        Args: { _account_id: string }
+        Returns: string
+      }
       fn_list_ems_operators: {
         Args: { _microgrid_id: string }
         Returns: {
@@ -1414,6 +1753,115 @@ export type Database = {
         Args: { p_community_id: string; p_year: number }
         Returns: number
       }
+      fn_payment_account_version: {
+        Args: { _account_id: string; _org_id: string; _version: number }
+        Returns: Json
+      }
+      fn_payment_commit_verification: {
+        Args: {
+          _amount: number
+          _attempt_id: string
+          _confirmation: string
+          _currency: string
+          _method: string
+          _payload: Json
+          _status: string
+          _tracking: string
+        }
+        Returns: undefined
+      }
+      fn_payment_due_notifications: {
+        Args: { _limit?: number }
+        Returns: {
+          attempt_count: number
+          created_at: string
+          id: string
+          last_error: string | null
+          merchant_reference: string
+          next_retry_at: string
+          org_id: string | null
+          processed_attempt_id: string | null
+          provider: string
+          raw_payload: Json
+          status: string
+          tracking_id: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "payment_notifications"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      fn_payment_enqueue_notification: {
+        Args: {
+          _org: string
+          _payload: Json
+          _reference: string
+          _tracking: string
+        }
+        Returns: string
+      }
+      fn_payment_reconcile: {
+        Args: {
+          _action: string
+          _actor: string
+          _attempt_id: string
+          _external_amount: number
+          _notes: string
+          _reference: string
+        }
+        Returns: undefined
+      }
+      fn_payment_reserve_checkout: {
+        Args: {
+          _account_id: string
+          _account_version: number
+          _amount: number
+          _community_id: string
+          _currency: string
+          _line_item_id: string
+          _org_id: string
+          _reference: string
+          _revision: string
+        }
+        Returns: {
+          amount: number
+          bill_revision_total: number
+          bill_revision_updated_at: string | null
+          checkout_url: string | null
+          community_id: string | null
+          created_at: string
+          currency: string
+          failure_code: string | null
+          failure_message: string | null
+          id: string
+          line_item_id: string
+          merchant_account_id: string | null
+          merchant_account_version: number
+          merchant_reference: string
+          org_id: string
+          provider: string
+          provider_tracking_id: string | null
+          resolve_notes: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "payment_attempts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_payment_run_worker: { Args: never; Returns: number }
+      fn_payment_save_account: {
+        Args: { _account_id: string; _expected_version: number; _payload: Json }
+        Returns: string
+      }
       fn_pin_billing_period_rate_schedule: {
         Args: { _period_id: string }
         Returns: string
@@ -1430,8 +1878,8 @@ export type Database = {
           _entered_by_user_id: string
           _household_id: string
           _manual_reason: string
-          _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           _rate_schedule_id: string
+          _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           _start_kwh: number
           _tier_breakdown: Json
           _total_amount: number
@@ -1461,6 +1909,7 @@ export type Database = {
           start_kwh: number | null
           tier_breakdown: Json
           total_amount: number
+          updated_at: string
           usage_kwh: number | null
         }
         SetofOptions: {
@@ -1478,11 +1927,11 @@ export type Database = {
         }
         Returns: string
       }
+      is_super_admin: { Args: never; Returns: boolean }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }
         Returns: boolean
       }
-      is_super_admin: { Args: never; Returns: boolean }
       user_can_access_community: {
         Args: { _community_id: string }
         Returns: boolean
