@@ -122,6 +122,51 @@ async function handleWebhook(
     return;
   }
 
+  // 1b. Prefer the Payments capability (persist receipt before ack,
+  //     idempotent, server-side verify, amount/currency validation). Falls
+  //     back to the legacy line-item flow when capability tables are absent
+  //     (deploy ordering) so in-flight payments keep reconciling.
+  try {
+    const { composePaymentsPublic } = await import("@/lib/payments/compose");
+    const supabaseCap = createServiceClient();
+    const { data: attemptRow } = await supabaseCap
+      .from("payment_attempts")
+      .select("id, org_id")
+      .eq("merchant_reference", merchantReference)
+      .maybeSingle<{ id: string; org_id: string }>();
+    if (attemptRow?.org_id) {
+      const composed = await composePaymentsPublic({
+        supabase: supabaseCap,
+        organizationId: attemptRow.org_id,
+      });
+      if (composed.ok) {
+        const raw: Record<string, unknown> = {};
+        try {
+          const url = request.nextUrl;
+          url.searchParams.forEach((value, key) => {
+            raw[key] = value;
+          });
+        } catch {
+          // ignore
+        }
+        raw.OrderTrackingId = orderTrackingId;
+        raw.OrderMerchantReference = merchantReference;
+        const handled = await composed.data.payments.handleNotification(raw);
+        await composed.data.dispose().catch(() => {});
+        if (handled.ok) {
+          safeInfo({
+            ...logBase,
+            status: handled.data.processed ? "applied_via_capability" : "capability_noop",
+            attempt_id: handled.data.attemptId,
+          });
+          return;
+        }
+      }
+    }
+  } catch {
+    // Capability tables missing or provider error — fall through to legacy.
+  }
+
   // 2. Resolve the line item by merchantReference (= pesapal_order_id).
   const supabase = createServiceClient();
 

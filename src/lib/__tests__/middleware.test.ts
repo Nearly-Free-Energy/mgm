@@ -59,7 +59,6 @@ describe("middleware PUBLIC_PATHS", () => {
   it.each([
     "/api/v1/billing/generate",
     "/api/openems/energy",
-    "/communities/community-1/payment",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
     const middleware = await loadMiddleware();
@@ -154,19 +153,19 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.headers.get("location")).toMatch(/\/login$/);
   });
 
-  // #223: /p/<slug> is the consumer-facing payment-link indirection.
-  // Customers arrive with no MBE session; the middleware MUST pass-through
-  // (the route's service-role SELECT is the access-control gate).
-  it("blocks inherited public payment links in Release 1", async () => {
+  // Release 4 (payments): /p/<slug> is the consumer-facing payment-link
+  // indirection. Customers arrive with no MBE session; the middleware MUST
+  // pass-through (the route's service-role SELECT is the access gate).
+  it("passes public payment links through without a session", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/p/Kp9XrA"));
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 
-  it("blocks inherited payment links for authenticated users too", async () => {
+  it("passes payment links for authenticated users too", async () => {
     getUserMock.mockResolvedValue({
       data: { user: { id: "u1" } },
       error: null,
@@ -177,7 +176,7 @@ describe("middleware PUBLIC_PATHS", () => {
 
     // No redirect — neither to /login nor to / (the authenticated-on-/login
     // branch is the only place a logged-in user gets redirected to root).
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 
   // #294: /api/payments/ipn is Pesapal's IPN webhook — an unauthenticated
@@ -185,7 +184,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // pass it through, otherwise it 401s ("Authentication required") before
   // the route handler runs and payments never auto-mark. Same class as the
   // /api/v1/ hotfix (#267).
-  it("blocks inherited payment webhooks in Release 1", async () => {
+  it("passes the payment webhook through without a session", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
@@ -193,7 +192,7 @@ describe("middleware PUBLIC_PATHS", () => {
 
     // Pass-through (NextResponse.next), NOT the 401 JSON that API routes get
     // when unauthenticated and non-public.
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(res.headers.get("location")).toBeNull();
   });
 
@@ -201,7 +200,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // payment routes (auth-gated payment-status mutations) must still 401 an
   // unauthenticated API request. Guards against a broad /api/payments/
   // prefix silently exposing them.
-  it("blocks inherited payment-status routes", async () => {
+  it("keeps sibling payment routes session-gated", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
     const middleware = await loadMiddleware();
 
@@ -210,5 +209,28 @@ describe("middleware PUBLIC_PATHS", () => {
     // API routes return 401 JSON (not a redirect) when non-public.
     expect(res.status).toBe(404);
     expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("passes the public customer pay redirect without a session", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(
+      makeRequest("/api/billing-line-items/12345678-1234-1234-1234-123456789012/pay")
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("keeps the operator payment-url mint session-gated", async () => {
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(
+      makeRequest("/api/billing-line-items/12345678-1234-1234-1234-123456789012/url")
+    );
+
+    expect(res.status).toBe(401);
   });
 });

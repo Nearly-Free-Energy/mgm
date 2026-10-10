@@ -44,6 +44,8 @@ import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { PaymentError } from "@/lib/payments";
 import { ensurePaymentLinkForLineItem } from "@/lib/payments/ensure-payment-link";
+import { composePayments } from "@/lib/payments/compose";
+import { resolveOrgForLineItem } from "@/lib/payments/resolve-org";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 
 const UUID_RE =
@@ -169,11 +171,72 @@ export async function POST(
     );
   }
 
-  // 3. Delegate to the shared ensure helper. It performs the
-  //    config-resolve → params-build → submitOrder → persist → audit-write
-  //    flow with optimistic-concurrency on the persist.
+  // 3. Prefer the Payments capability (org-default + override resolution,
+  //    immutable attempts, reuse on repeated clicks). Fall back to the legacy
+  //    community-config helper when the capability tables have not migrated
+  //    yet (deploy ordering) so shipped links keep working.
   let result;
   try {
+    const orgScope = await resolveOrgForLineItem(supabase, lineItemId);
+    if (orgScope) {
+      const composed = await composePayments({
+        supabase,
+        organizationId: orgScope.orgId,
+        allowDisabled: true,
+      });
+      if (composed.ok) {
+        try {
+          const checkout = await composed.data.payments.ensureCheckout(lineItemId, { force });
+          await composed.data.dispose();
+          if (checkout.ok) {
+            logPaymentEvent({
+              communityId,
+              microgridId,
+              lineItemId,
+              actorUserId,
+              provider: "pesapal",
+              status: checkout.data.reused ? "success_reused" : "success",
+              durationMs: Date.now() - startedAt,
+              sensitive: [checkout.data.redirectUrl].filter((s): s is string => Boolean(s)),
+            });
+            return NextResponse.json({
+              redirectUrl: checkout.data.redirectUrl,
+              orderTrackingId: checkout.data.attempt.provider_tracking_id,
+              merchantReference: checkout.data.attempt.merchant_reference,
+            });
+          }
+          await composed.data.dispose().catch(() => {});
+          // Capability-level failures that are not infra-missing surface directly.
+          if (
+            checkout.code !== "payments_unavailable" &&
+            checkout.code !== "payments_not_configured"
+          ) {
+            const mapped = mapCapabilityError(checkout.code, checkout.message);
+            logPaymentEvent({
+              communityId,
+              microgridId,
+              lineItemId,
+              actorUserId,
+              provider: null,
+              status: mapped.reason,
+              durationMs: Date.now() - startedAt,
+              sensitive: [],
+            });
+            return NextResponse.json(
+              { error: mapped.message, reason: mapped.reason },
+              { status: mapped.httpStatus },
+            );
+          }
+          // payments_unavailable / not_configured → fall through to legacy.
+        } catch {
+          try {
+            await composed.data.dispose();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
     result = await ensurePaymentLinkForLineItem(supabase, lineItemId, {
       actorUserId,
       force,
@@ -226,6 +289,36 @@ type MappedError = {
   reason: string;
   httpStatus: number;
 };
+
+/** Map Payments-capability error codes to the legacy { httpStatus, reason } shape. */
+function mapCapabilityError(code: string, message: string): MappedError {
+  switch (code) {
+    case "payments_missing_contact":
+      return { message, reason: "missing_contact", httpStatus: 400 };
+    case "payments_zero_amount":
+      return { message, reason: "zero_amount", httpStatus: 400 };
+    case "payments_not_configured":
+      return { message, reason: "not_configured", httpStatus: 409 };
+    case "payments_override_broken":
+      return { message, reason: "override_broken", httpStatus: 409 };
+    case "payments_account_disabled":
+    case "payments_disabled":
+    case "pesapal_disabled":
+      return { message, reason: "not_configured", httpStatus: 409 };
+    case "payments_needs_reconciliation":
+      return { message, reason: "needs_reconciliation", httpStatus: 409 };
+    case "payments_ipn_not_registered":
+      return { message, reason: "ipn_not_registered", httpStatus: 409 };
+    case "payments_confirmation_pending":
+      return { message, reason: "confirmation_pending", httpStatus: 503 };
+    case "payments_scope_mismatch":
+      return { message, reason: "not_found", httpStatus: 404 };
+    case "payments_bill_not_found":
+      return { message, reason: "not_found", httpStatus: 404 };
+    default:
+      return { message, reason: "unknown_error", httpStatus: 503 };
+  }
+}
 
 /** Map PaymentError / PesapalError codes to { httpStatus, reason }. */
 function mapPaymentError(err: unknown): MappedError {

@@ -270,3 +270,27 @@ export async function isBillingEnabled(
   if (error) return false;
   return data === true;
 }
+
+export async function isPaymentsEnabled(
+  supabase: SupabaseClient,
+  orgId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
+    _org_id: orgId,
+    _plugin_name: "payments",
+  });
+  if (error) return false;
+  return data === true;
+}
+
+export async function isPesapalEnabled(
+  supabase: SupabaseClient,
+  orgId: string
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
+    _org_id: orgId,
+    _plugin_name: "pesapal",
+  });
+  if (error) return false;
+  return data === true;
+}

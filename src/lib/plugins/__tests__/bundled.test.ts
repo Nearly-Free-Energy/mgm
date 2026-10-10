@@ -4,6 +4,8 @@ import {
   COMMUNITY_MANAGEMENT_PLUGIN_NAME,
   METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
+  PAYMENTS_PLUGIN_NAME,
+  PESAPAL_PLUGIN_NAME,
   resolvePluginStatuses,
   validatePluginToggle,
 } from "../bundled";
@@ -18,6 +20,8 @@ describe("MGM bundled plugins", () => {
       [COMMUNITY_MANAGEMENT_PLUGIN_NAME, true, true],
       [METERING_PLUGIN_NAME, true, true],
       [BILLING_PLUGIN_NAME, true, true],
+      [PAYMENTS_PLUGIN_NAME, true, true],
+      [PESAPAL_PLUGIN_NAME, true, true],
     ]);
   });
 
@@ -113,17 +117,76 @@ describe("MGM bundled plugins", () => {
         states: {
           [METERING_PLUGIN_NAME]: { enabled: false },
           [BILLING_PLUGIN_NAME]: { enabled: false },
+          [PAYMENTS_PLUGIN_NAME]: { enabled: false },
+          [PESAPAL_PLUGIN_NAME]: { enabled: false },
         },
       })
     ).toEqual({ ok: true });
   });
 
-  it("billing depends on metering, not the reverse", () => {
-    // Disabling billing never blocks metering.
+  it("payments depends on billing; pesapal depends on payments", () => {
+    expect(
+      validatePluginToggle({
+        pluginName: PAYMENTS_PLUGIN_NAME,
+        enabled: false,
+        states: { [PESAPAL_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({ ok: true });
+    expect(
+      validatePluginToggle({
+        pluginName: PAYMENTS_PLUGIN_NAME,
+        enabled: false,
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Pesapal"),
+    });
     expect(
       validatePluginToggle({
         pluginName: BILLING_PLUGIN_NAME,
         enabled: false,
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Payments"),
+    });
+    expect(
+      validatePluginToggle({
+        pluginName: PESAPAL_PLUGIN_NAME,
+        enabled: true,
+        states: { [PAYMENTS_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_disabled",
+      message: expect.stringContaining("Payments"),
+    });
+    expect(
+      validatePluginToggle({
+        pluginName: PAYMENTS_PLUGIN_NAME,
+        enabled: true,
+        states: { [BILLING_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_disabled",
+      message: expect.stringContaining("Billing"),
+    });
+  });
+
+  it("billing depends on metering, not the reverse", () => {
+    // Disabling billing never blocks metering — but it is blocked while its
+    // own dependent (payments) is enabled.
+    expect(
+      validatePluginToggle({
+        pluginName: BILLING_PLUGIN_NAME,
+        enabled: false,
+        states: {
+          [PAYMENTS_PLUGIN_NAME]: { enabled: false },
+          [PESAPAL_PLUGIN_NAME]: { enabled: false },
+        },
       })
     ).toEqual({ ok: true });
     // Disabling metering is blocked while billing is enabled.

@@ -394,8 +394,12 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
   });
 
   it.each([null, "existing-slug"])("omits gated payment links, including cached slug %s", async (slug) => {
-    const { isReleasedRoute } = await vi.importActual<typeof import("@/lib/mgm/released-routes")>("@/lib/mgm/released-routes");
-    releasedRouteMock.mockImplementation(isReleasedRoute);
+    // Release 4 ships payment links, so simulate the pre-release gate by
+    // forcing the pay/slug routes closed for this case only.
+    releasedRouteMock.mockImplementation((path: string) => {
+      if (path.startsWith("/p/") || path.includes("/pay")) return false;
+      return true;
+    });
     fromState.lineItem = { data: lineItemRow({ short_slug: slug }), error: null };
     const { GET } = await import("../route");
     const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });

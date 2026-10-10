@@ -10,6 +10,9 @@
  * Release 3 (issue #5): tariffs, billing periods, bill generation, invoice
  * exports, and manual payments. Online payment gateways, payment links,
  * customer portals, and automated notifications stay gated for future work.
+ * Release 4 (payments): Pesapal as the first provider plugin — org-default
+ * merchant accounts with community overrides, stable payment links, hosted
+ * checkout, verified receipts, and manager reconciliation.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -85,14 +88,36 @@ const RELEASE_3_API_ROUTES = [
   /^\/api\/communities\/[^/]+\/invoice-logo$/,
 ];
 
+const RELEASE_4_PAGE_ROUTES = [
+  // Community payment configuration (org default + override states).
+  /^\/communities\/[^/]+\/payment$/,
+  // Stable customer-facing payment-link indirection (no session).
+  /^\/p\/[^/]+$/,
+];
+
+const RELEASE_4_API_ROUTES = [
+  // Stable MGM payment link + hosted-checkout mint (compat: legacy long URLs kept).
+  /^\/api\/billing-line-items\/[^/]+\/(?:pay|url)$/,
+  // Pesapal IPN webhook (unauthenticated server-to-server).
+  /^\/api\/payments\/ipn$/,
+  // Payment attempts: history, refresh, reconcile, worker.
+  /^\/api\/payments\/attempts(?:\/[^/]+(?:\/(?:refresh|reconcile))?)?$/,
+  /^\/api\/payments\/reconcile-worker$/,
+  // Org-default merchant accounts + community overrides.
+  /^\/api\/organizations\/[^/]+\/payment-accounts(?:\/[^/]+)?$/,
+  /^\/api\/communities\/[^/]+\/payment(?:\/override)?$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
     ...RELEASE_1_PAGE_ROUTES,
     ...RELEASE_2_PAGE_ROUTES,
     ...RELEASE_3_PAGE_ROUTES,
+    ...RELEASE_4_PAGE_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
     ...RELEASE_3_API_ROUTES,
+    ...RELEASE_4_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }
