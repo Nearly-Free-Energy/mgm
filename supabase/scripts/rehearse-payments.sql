@@ -1,9 +1,6 @@
 -- Scratch databases only. All fixtures and changes are rolled back.
 \set ON_ERROR_STOP on
 BEGIN;
--- This tiny correctness rehearsal does not need LLVM code generation. Keep
--- JIT out of the fixture/denial checks; all RLS policies remain enabled.
-SET LOCAL jit = off;
 CREATE FUNCTION pg_temp.reject_test_payment_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.raw_payload->>'force'='failure' THEN RAISE EXCEPTION 'synthetic downstream audit failure' USING ERRCODE='23514'; END IF;
  RETURN NEW;
@@ -92,14 +89,17 @@ DECLARE org uuid:=current_setting('mgm_rehearsal.org')::uuid;
  account uuid:=current_setting('mgm_rehearsal.account')::uuid;
  attempt_id uuid:=current_setting('mgm_rehearsal.attempt')::uuid;
 BEGIN
+ RAISE NOTICE 'Checking authenticated cross-org override';
  BEGIN
   INSERT INTO community_payment_overrides(org_id,community_id,merchant_account_id) VALUES(org,foreign_community,account);
   RAISE EXCEPTION 'cross-org override accepted' USING ERRCODE='XX000';
  EXCEPTION WHEN check_violation THEN NULL; END;
+ RAISE NOTICE 'Checking authenticated notification RPC denial';
  BEGIN
   PERFORM fn_payment_due_notifications(50);
   RAISE EXCEPTION 'global notifications callable by authenticated' USING ERRCODE='XX000';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ RAISE NOTICE 'Checking authenticated receipt write denial';
  BEGIN
   INSERT INTO payment_receipts(org_id,attempt_id,amount,currency,provider_status) VALUES(org,attempt_id,5000,'UGX','completed');
   RAISE EXCEPTION 'client could forge payment evidence' USING ERRCODE='XX000';

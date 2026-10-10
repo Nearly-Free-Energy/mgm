@@ -66,7 +66,7 @@ UPDATE payment_attempts a SET bill_revision_updated_at=b.updated_at FROM billing
 WHERE a.line_item_id=b.id AND a.bill_revision_updated_at IS NULL AND a.bill_revision_total=b.total_amount;
 
 -- Enforce parent organization relationships even for privileged writes.
-CREATE OR REPLACE FUNCTION fn_payment_check_scope() RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+CREATE OR REPLACE FUNCTION fn_payment_check_scope() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE org uuid; community uuid;
 BEGIN
  IF TG_TABLE_NAME='community_payment_overrides' THEN
