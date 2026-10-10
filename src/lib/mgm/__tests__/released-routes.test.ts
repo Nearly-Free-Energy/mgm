@@ -72,18 +72,21 @@ describe("isReleasedRoute", () => {
     "/api/communities/abc/invoice-config",
     "/api/communities/abc/invoice-preview",
     "/api/communities/abc/invoice-logo",
+    // Release 4 (payments): Pesapal provider plugin.
+    "/api/billing-line-items/abc/pay",
+    "/api/billing-line-items/abc/url",
+    "/api/payments/ipn",
+    "/api/payments/attempts",
+    "/api/payments/reconcile-worker",
+    "/p/abc123",
+    "/communities/abc/payment",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
 
   it.each([
-    // Online gateways, payment links, portals, and notifications stay gated.
-    "/api/billing-line-items/abc/pay",
-    "/api/billing-line-items/abc/url",
-    "/api/payments/ipn",
+    // Customer portals and automated notifications stay gated.
     "/api/v1/microgrids",
-    "/p/abc123",
-    "/communities/abc/payment",
     "/microgrids/abc/setup/edges/edge-1/devices/extra",
     "/api/microgrids/abc/openems-backend/unknown",
     "/api/metering",

@@ -13,17 +13,23 @@ export const COMMUNITY_MANAGEMENT_PLUGIN_NAME =
   "community-management" as const;
 export const METERING_PLUGIN_NAME = "metering" as const;
 export const BILLING_PLUGIN_NAME = "billing" as const;
+export const PAYMENTS_PLUGIN_NAME = "payments" as const;
+export const PESAPAL_PLUGIN_NAME = "pesapal" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
   | typeof COMMUNITY_MANAGEMENT_PLUGIN_NAME
   | typeof METERING_PLUGIN_NAME
-  | typeof BILLING_PLUGIN_NAME;
+  | typeof BILLING_PLUGIN_NAME
+  | typeof PAYMENTS_PLUGIN_NAME
+  | typeof PESAPAL_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
 export const METERING_PLUGIN_VERSION = "0.1.0";
 export const BILLING_PLUGIN_VERSION = "0.1.0";
+export const PAYMENTS_PLUGIN_VERSION = "0.1.0";
+export const PESAPAL_PLUGIN_VERSION = "0.1.0";
 
 export interface BundledPlugin {
   name: MgmPluginName;
@@ -148,11 +154,64 @@ export const BILLING_PLUGIN: BundledPlugin = {
   ],
 };
 
+export const PAYMENTS_PLUGIN: BundledPlugin = {
+  name: PAYMENTS_PLUGIN_NAME,
+  version: PAYMENTS_PLUGIN_VERSION,
+  displayName: "Payments",
+  description:
+    "Online payment checkout attempts, verification, receipts, and reconciliation for one organization. Billing stays usable without an online provider.",
+  dependencies: [BILLING_PLUGIN_NAME],
+  core: false,
+  // Payments owns checkout attempts, reconciliation and audit history.
+  // Disabling stops new checkouts but preserves history and reconciliation
+  // of existing attempts.
+  provides: [
+    "checkout attempts",
+    "payment verification",
+    "payment receipts",
+    "reconciliation",
+  ],
+  routes: [
+    "/api/payments",
+    "/api/billing-line-items/[id]/pay",
+    "/api/billing-line-items/[id]/url",
+  ],
+  tables: [
+    "payment_merchant_accounts",
+    "community_payment_overrides",
+    "payment_attempts",
+    "payment_receipts",
+    "payment_notifications",
+  ],
+};
+
+export const PESAPAL_PLUGIN: BundledPlugin = {
+  name: PESAPAL_PLUGIN_NAME,
+  version: PESAPAL_PLUGIN_VERSION,
+  displayName: "Pesapal",
+  description:
+    "Pesapal provider implementation for the Payments capability (sandbox/live checkout, transaction lookup, notification parsing).",
+  dependencies: [PAYMENTS_PLUGIN_NAME],
+  core: false,
+  // Pesapal supplies the provider implementation; credentials, API types and
+  // status mappings stay inside this plugin. Disabling stops new Pesapal
+  // checkouts but preserves history.
+  provides: [
+    "pesapal checkout",
+    "pesapal transaction lookup",
+    "pesapal notifications",
+  ],
+  routes: ["/api/payments/ipn"],
+  tables: [],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
   METERING_PLUGIN,
   BILLING_PLUGIN,
+  PAYMENTS_PLUGIN,
+  PESAPAL_PLUGIN,
 ] as const;
 
 export function getBundledPlugin(

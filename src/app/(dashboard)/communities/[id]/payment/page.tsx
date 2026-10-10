@@ -131,6 +131,20 @@ export default async function PaymentPage({
     .replace(/\/+$/, "");
   const callbackUrl = callbackBase ? `${callbackBase}/api/payments/ipn` : "";
 
+  // Release 4: disabling either plugin stops new checkouts but preserves
+  // history. A missing mgm_plugins row means enabled (no backfill).
+  const [{ data: paymentsOn }, { data: pesapalOn }] = await Promise.all([
+    supabase.rpc("mgm_plugin_enabled_for_org", {
+      _org_id: community.org_id,
+      _plugin_name: "payments",
+    }),
+    supabase.rpc("mgm_plugin_enabled_for_org", {
+      _org_id: community.org_id,
+      _plugin_name: "pesapal",
+    }),
+  ]);
+  const pluginsDisabled = paymentsOn === false || pesapalOn === false;
+
   return (
     <div className="space-y-4">
       <PaymentShell
@@ -145,6 +159,7 @@ export default async function PaymentPage({
         health={health}
         secretLast4={secretLast4}
         canEdit={canEdit}
+        pluginsDisabled={pluginsDisabled}
       />
     </div>
   );

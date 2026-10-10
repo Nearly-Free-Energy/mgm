@@ -11,7 +11,26 @@ const PUBLIC_PATHS = [
   "/forgot-password",
   "/reset-password",
   "/api/mgm/health",
+  // Release 4 (payments): Pesapal IPN webhook is an unauthenticated
+  // server-to-server callback with no MBE session.
+  "/api/payments/ipn",
 ];
+
+/**
+ * Release 4 public payment surfaces (no MBE session). The line-item id /
+ * short slug is the bearer token and verification is always server-side.
+ * Deliberately narrow: only the customer redirect (`/pay`, `/p/<slug>`)
+ * and the IPN webhook are public. Sibling mutation routes
+ * (`/url`, `/payment-status`, attempts refresh/reconcile) stay
+ * session-gated — guards against a broad `/api/billing-line-items/` prefix
+ * silently exposing them.
+ */
+function isPublicPaymentRoute(pathname: string): boolean {
+  if (pathname === "/api/payments/ipn") return true;
+  if (/^\/p\/[^/]+$/.test(pathname)) return true;
+  if (/^\/api\/billing-line-items\/[^/]+\/pay$/.test(pathname)) return true;
+  return false;
+}
 
 export async function middleware(request: NextRequest) {
   // This fork deploys released MGM slices. Inherited MBE billing, payment,
@@ -55,9 +74,9 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isPublicPath = PUBLIC_PATHS.some((p) =>
-    request.nextUrl.pathname.startsWith(p)
-  );
+  const isPublicPath =
+    PUBLIC_PATHS.some((p) => request.nextUrl.pathname.startsWith(p)) ||
+    isPublicPaymentRoute(request.nextUrl.pathname);
 
   if (!user && !isPublicPath) {
     // API routes return 401 JSON instead of redirecting to login

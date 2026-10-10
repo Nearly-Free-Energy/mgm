@@ -378,6 +378,82 @@ export async function PUT(
     supabase,
   });
 
+  // Dual-write into the Payments capability tables (best-effort): the legacy
+  // community columns stay authoritative for old readers, while new checkout
+  // resolution uses merchant accounts + overrides. Failures here never fail
+  // the save — the migration backfill converges them on next deploy.
+  try {
+    const { createServiceClient } = await import("@/lib/supabase/service");
+    const service = createServiceClient();
+    const { data: communityRow } = await service
+      .from("communities")
+      .select("id, org_id")
+      .eq("id", communityId)
+      .maybeSingle<{ id: string; org_id: string }>();
+    if (communityRow?.org_id) {
+      const { data: account } = await service
+        .from("payment_merchant_accounts")
+        .select("id, version")
+        .eq("org_id", communityRow.org_id)
+        .eq("provider", "pesapal")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle<{ id: string; version: number }>();
+      let accountId = account?.id ?? null;
+      const secretForAccount = preserveExistingSecret
+        ? null
+        : encryptedSecret;
+      if (!accountId) {
+        const { data: created } = await service
+          .from("payment_merchant_accounts")
+          .insert({
+            org_id: communityRow.org_id,
+            provider: "pesapal",
+            display_name: "Default Pesapal account",
+            sandbox: parsed.sandbox,
+            consumer_key: parsed.consumer_key,
+            ...(secretForAccount ? { secret_encrypted: secretForAccount } : {}),
+            base_url: base_url,
+            ipn_id: registeredIpnId,
+            ipn_url: ipnUrl,
+            last_tested_at: new Date().toISOString(),
+            last_test_status: "success",
+          })
+          .select("id")
+          .single();
+        accountId = (created as { id: string } | null)?.id ?? null;
+      } else {
+        await service
+          .from("payment_merchant_accounts")
+          .update({
+            sandbox: parsed.sandbox,
+            consumer_key: parsed.consumer_key,
+            ...(secretForAccount ? { secret_encrypted: secretForAccount } : {}),
+            base_url: base_url,
+            ipn_id: registeredIpnId,
+            ipn_url: ipnUrl,
+            version: (account?.version ?? 1) + 1,
+            disabled: false,
+            last_tested_at: new Date().toISOString(),
+            last_test_status: "success",
+          })
+          .eq("id", accountId);
+      }
+      if (accountId) {
+        await service.from("community_payment_overrides").upsert(
+          {
+            org_id: communityRow.org_id,
+            community_id: communityId,
+            merchant_account_id: accountId,
+          },
+          { onConflict: "community_id" }
+        );
+      }
+    }
+  } catch {
+    // best-effort dual-write
+  }
+
   return NextResponse.json(
     {
       status: "success",
