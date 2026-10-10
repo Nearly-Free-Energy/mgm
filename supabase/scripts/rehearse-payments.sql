@@ -1,6 +1,9 @@
 -- Scratch databases only. All fixtures and changes are rolled back.
 \set ON_ERROR_STOP on
 BEGIN;
+-- This tiny correctness rehearsal does not need LLVM code generation. Keep
+-- JIT out of the fixture/denial checks; all RLS policies remain enabled.
+SET LOCAL jit = off;
 CREATE FUNCTION pg_temp.reject_test_payment_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.raw_payload->>'force'='failure' THEN RAISE EXCEPTION 'synthetic downstream audit failure' USING ERRCODE='23514'; END IF;
  RETURN NEW;
