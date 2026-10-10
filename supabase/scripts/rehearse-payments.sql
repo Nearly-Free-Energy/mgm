@@ -75,9 +75,20 @@ BEGIN
  PERFORM fn_payment_reconcile(attempt.id,'record_external',500,'external-receipt','Completed cash collection',manager);
  IF (SELECT payment_status FROM billing_line_items WHERE id=bill)<>'paid' OR (SELECT status FROM payment_attempts WHERE id=attempt.id)<>'resolved' OR NOT EXISTS(SELECT 1 FROM payment_events WHERE line_item_id=bill AND actor_user_id=manager AND raw_payload->>'external_amount'='500') THEN RAISE EXCEPTION 'external reconciliation was not audited settlement'; END IF;
  RAISE NOTICE 'OK: draft revision, late receipt and external settlement';
- -- RLS and execution privileges under the real authenticated database role.
- PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',manager)::text,true);
- EXECUTE 'SET LOCAL ROLE authenticated';
+ -- Pass fixture IDs to a separate role-scoped block. Change SQL roles outside
+ -- PL/pgSQL so privilege tests do not reuse a mixed-role execution context.
+ PERFORM set_config('mgm_rehearsal.org',org::text,true);
+ PERFORM set_config('mgm_rehearsal.foreign_community',foreign_community::text,true);
+ PERFORM set_config('mgm_rehearsal.account',account::text,true);
+ PERFORM set_config('mgm_rehearsal.attempt',attempt.id::text,true);
+END $$;
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE org uuid:=current_setting('mgm_rehearsal.org')::uuid;
+ foreign_community uuid:=current_setting('mgm_rehearsal.foreign_community')::uuid;
+ account uuid:=current_setting('mgm_rehearsal.account')::uuid;
+ attempt_id uuid:=current_setting('mgm_rehearsal.attempt')::uuid;
+BEGIN
  BEGIN
   INSERT INTO community_payment_overrides(org_id,community_id,merchant_account_id) VALUES(org,foreign_community,account);
   RAISE EXCEPTION 'cross-org override accepted' USING ERRCODE='XX000';
@@ -87,11 +98,13 @@ BEGIN
   RAISE EXCEPTION 'global notifications callable by authenticated' USING ERRCODE='XX000';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
  BEGIN
-  INSERT INTO payment_receipts(org_id,attempt_id,amount,currency,provider_status) VALUES(org,attempt.id,5000,'UGX','completed');
+  INSERT INTO payment_receipts(org_id,attempt_id,amount,currency,provider_status) VALUES(org,attempt_id,5000,'UGX','completed');
   RAISE EXCEPTION 'client could forge payment evidence' USING ERRCODE='XX000';
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
- EXECUTE 'RESET ROLE';
  RAISE NOTICE 'OK: authenticated cross-org and evidence denial';
+END $$;
+RESET ROLE;
+DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='mgm-payments-reconcile' AND schedule='*/5 * * * *') THEN RAISE EXCEPTION 'worker schedule missing'; END IF;
  RAISE NOTICE 'OK: five-minute schedule present';
 END $$;
