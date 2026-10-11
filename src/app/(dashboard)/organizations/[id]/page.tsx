@@ -65,6 +65,7 @@ export default async function OrganizationDetailPage({
 
   return (
     <div>
+      <Link href={`/organizations/${id}/payments`} className="text-primary underline">Payment accounts</Link>
       <DeletedSuccessBanner searchParams={sp} />
       <div className="mb-6 mt-4 flex items-start justify-between gap-4">
         <div>

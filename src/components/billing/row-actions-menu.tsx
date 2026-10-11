@@ -1,4 +1,5 @@
 "use client";
+import { PaymentHistory } from "@/components/payments/payment-history";
 
 // RowActionsMenu — consolidated per-row kebab menu for the BillingTable
 // Status column (BC2 #174). Replaces the deleted `<PaymentRowActions>` /
@@ -838,6 +839,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
+      <PaymentHistory lineItemId={lineItem.id} />
       {/* Payment-link popover — anchored next to the kebab. */}
       <PaymentLinkPopover url={pendingUrl} onClose={() => setPendingUrl(null)} />
 

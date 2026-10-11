@@ -37,10 +37,7 @@ import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { ZodError } from "zod";
 
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
-import { resolveOrigin } from "@/lib/auth/resolve-origin";
-import { PaymentError } from "@/lib/payments";
-import { ensurePaymentLinkForLineItem } from "@/lib/payments/ensure-payment-link";
-import { mintUniqueShortSlug } from "@/lib/payments/short-slug";
+import { composePayments } from "@/lib/payments/compose";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
@@ -120,6 +117,7 @@ export async function GET(
       tier_breakdown,
       total_amount,
       usage_kwh,
+      updated_at,
       billing_period_id,
       billing_periods!inner (
         id,
@@ -140,7 +138,6 @@ export async function GET(
             org_id,
             payment_provider,
             payment_provider_config,
-            payment_provider_secret_encrypted,
             payment_last_configured_at,
             organizations!inner (
               id,
@@ -222,99 +219,22 @@ export async function GET(
     );
   }
 
-  // 4. Ensure payment link if community has a provider configured AND the
-  //    line item has no cached URL yet (D6 — proactive ensure).
+  // Invoice rendering never creates a checkout. Embed only a stable MGM
+  // link; provider submission happens when the customer follows that link.
   let paymentRedirectUrl: string | null = null;
-  const hasPaymentProvider =
-    community.payment_provider != null &&
-    community.payment_provider_config != null;
-  let lineItemPesapalUrl = (scoped.pesapal_redirect_url as string | null) ?? null;
-  let shortSlug = (scoped.short_slug as string | null) ?? null;
-
-  // Never create or embed a payment session while its customer routes are gated.
-  if (hasPaymentProvider && isReleasedRoute("/p/payment") &&
-      isReleasedRoute(`/api/billing-line-items/${lineItemId}/pay`)) {
-    if (!lineItemPesapalUrl) {
+  const lineItemPesapalUrl = (scoped.pesapal_redirect_url as string | null) ?? null;
+  const shortSlug = (scoped.short_slug as string | null) ?? null;
+  if (isReleasedRoute(`/api/billing-line-items/${lineItemId}/pay`)) {
+    const composed = await composePayments({ supabase, organizationId: community.org_id as string, allowDisabled: true });
+    if (composed.ok) {
       try {
-        await ensurePaymentLinkForLineItem(supabase, lineItemId, {
-          actorUserId: user.id,
-        });
-        lineItemPesapalUrl = "ensured"; // marker — actual URL not used
-      } catch (err) {
-        const reason = err instanceof PaymentError ? err.code : "unknown_error";
-        const message =
-          err instanceof PaymentError
-            ? err.message
-            : "Pesapal upstream returned an unexpected error.";
-        console.warn(
-          JSON.stringify({
-            event: "pdf.ensure_payment_link_failed",
-            line_item_id: lineItemId,
-            community_id: communityId,
-            err_code: reason,
-            err_message: message,
-            at: new Date().toISOString(),
-          }),
-        );
-        return NextResponse.json(
-          {
-            error:
-              "Cannot generate bill — payment link could not be created.",
-            reason,
-            details: message,
-          },
-          { status: 422 },
-        );
-      }
+        const ready = await composed.data.payments.getReadiness(communityId);
+        if (ready.ok && ["ready", "sandbox"].includes(ready.data.state)) {
+          const link = await composed.data.payments.stablePaymentLink(lineItemId);
+          if (link.ok) paymentRedirectUrl = link.data.url;
+        }
+      } finally { await composed.data.dispose(); }
     }
-    // Mint the short slug (#223) AFTER ensurePaymentLink succeeds — order
-    // matters: if the ensure-payment-link 422'd above OR the community had
-    // no provider, we would NOT want to burn a slug on a row whose PDF
-    // never embeds the link. Lazy-mint keeps the column clean for
-    // already-shipped bills that never re-render.
-    //
-    // Stability invariant (#223): once minted, the slug never rotates.
-    // mintUniqueShortSlug() uses an UPDATE-NULL guard + loser-path re-SELECT;
-    // its return value is the row's PERSISTED slug (the local candidate when
-    // we win, the concurrent winner's slug when we lose). On retry-exhaustion
-    // it throws PaymentError — surface as 422 (same shape as ensure-link
-    // failure) so the operator gets a clear error rather than a 500.
-    if (!shortSlug) {
-      try {
-        shortSlug = await mintUniqueShortSlug(supabase, lineItemId);
-      } catch (err) {
-        const reason = err instanceof PaymentError ? err.code : "unknown_error";
-        const message =
-          err instanceof PaymentError
-            ? err.message
-            : "Failed to mint short payment slug.";
-        console.warn(
-          JSON.stringify({
-            event: "pdf.mint_short_slug_failed",
-            line_item_id: lineItemId,
-            community_id: communityId,
-            err_code: reason,
-            err_message: message,
-            at: new Date().toISOString(),
-          }),
-        );
-        return NextResponse.json(
-          {
-            error: "Cannot generate bill — short payment slug could not be created.",
-            reason,
-            details: message,
-          },
-          { status: 422 },
-        );
-      }
-    }
-    // The renderer embeds the SHORT `/p/<slug>` URL (#223). It 302s through
-    // to `/api/billing-line-items/<id>/pay` which reads `pesapal_redirect_url`
-    // and forwards to Pesapal — so the operator's PDF stays valid even if
-    // the Pesapal session URL ever rotates. The legacy long URL keeps
-    // working forever (#223 AC7) for bills already shipped to customers.
-    const origin = resolveOrigin(request);
-    paymentRedirectUrl = `${origin}/p/${shortSlug}`;
   }
 
   // 5. Resolve / generate invoice number.
@@ -525,6 +445,7 @@ export async function GET(
     id: scoped.id as string,
     billing_period_id: scoped.billing_period_id as string,
     created_at: scoped.created_at as string,
+    updated_at: scoped.updated_at as string,
     device_id: scoped.device_id as string | null,
     end_kwh: scoped.end_kwh as number | null,
     entered_at: scoped.entered_at as string | null,

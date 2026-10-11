@@ -60,6 +60,9 @@ export type PaymentShellProps = {
   health: PaymentHealth;
   secretLast4: string | null;
   canEdit: boolean;
+  /** When the Payments or Pesapal plugin is disabled: new checkouts stop,
+   *  history + reconciliation stay. Manual payments remain available. */
+  pluginsDisabled?: boolean;
 };
 
 type SaveOutcome =
@@ -73,8 +76,18 @@ type SaveOutcome =
   | { kind: "generic_error"; message: string };
 
 export function PaymentShell(props: PaymentShellProps) {
-  const { community, health, secretLast4, canEdit } = props;
+  const { community, health, secretLast4, canEdit, pluginsDisabled } = props;
   const router = useRouter();
+  const readiness =
+    pluginsDisabled === true
+      ? ("disabled" as const)
+      : community.payment_provider == null
+        ? ("unconfigured" as const)
+        : health === "failing"
+          ? ("connection_error" as const)
+          : community.config.sandbox
+            ? ("sandbox" as const)
+            : ("ready" as const);
 
   const initialMode: "empty" | "configured" =
     community.payment_provider == null ? "empty" : "configured";
@@ -557,6 +570,8 @@ export function PaymentShell(props: PaymentShellProps) {
     <div className="space-y-4">
       {header}
 
+      <ReadinessBanner readiness={readiness} />
+
       {!canEdit && mode === "configured" && (
         <Banner tone="info" title="Read-only view">
           You don&apos;t have permission to update this community&apos;s payment
@@ -585,6 +600,51 @@ function formatIpnId(ipnId: string): string {
   if (!ipnId) return "";
   if (ipnId.length <= 12) return ipnId;
   return `${ipnId.slice(0, 4)}…${ipnId.slice(-4)}`;
+}
+
+function ReadinessBanner({
+  readiness,
+}: {
+  readiness: "disabled" | "unconfigured" | "sandbox" | "ready" | "connection_error";
+}) {
+  if (readiness === "disabled") {
+    return (
+      <Banner tone="warn" title="Online payments disabled">
+        New checkouts are stopped while the Payments or Pesapal plugin is
+        disabled. History and reconciliation are preserved. Manual payment
+        recording remains available.
+      </Banner>
+    );
+  }
+  if (readiness === "unconfigured") {
+    return (
+      <Banner tone="info" title="Online payments unconfigured">
+        Configure the organization Pesapal account to share payment links.
+        Manual payment recording remains available without Pesapal.
+      </Banner>
+    );
+  }
+  if (readiness === "sandbox") {
+    return (
+      <Banner tone="info" title="Sandbox mode">
+        Sandbox account ready. Complete a test checkout before enabling the
+        live account. Manual payment recording remains available.
+      </Banner>
+    );
+  }
+  if (readiness === "ready") {
+    return (
+      <Banner tone="success" title="Ready for live collections">
+        Live account ready. Share a bill&apos;s payment link to collect.
+      </Banner>
+    );
+  }
+  return (
+    <Banner tone="destructive" title="Connection error">
+      The last connection test failed. Re-run Save &amp; test connection.
+      Manual payment recording remains available.
+    </Banner>
+  );
 }
 
 function OutcomeBanner({ outcome }: { outcome: SaveOutcome }) {
