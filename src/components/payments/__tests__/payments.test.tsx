@@ -24,7 +24,8 @@ it("shows a failed credential test without claiming the configuration was saved"
  await screen.findByText(/Pilot sandbox/, { selector: "li" });
  fireEvent.change(screen.getByLabelText("Consumer key"), { target: { value: "candidate" } });
  fireEvent.click(screen.getByText("Save and test connection"));
- expect(await screen.findByRole("status")).toHaveProperty("textContent", "Candidate authentication failed");
+ expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Payment configuration failedCandidate authentication failed");
+ expect(screen.queryByRole("status")).toBeNull();
  expect(screen.getByText(/Pilot sandbox/, { selector: "li" })).toBeTruthy();
 });
 it("shows reconciliation amounts and records only the entered external adjustment", async () => {

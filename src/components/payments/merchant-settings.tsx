@@ -9,6 +9,7 @@ export function MerchantSettings({ orgId, communityId }: { orgId: string; commun
   const [consumerSecret, setSecret] = useState("");
   const [sandbox, setSandbox] = useState(true);
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [accountId, setAccountId] = useState("");
@@ -21,30 +22,31 @@ export function MerchantSettings({ orgId, communityId }: { orgId: string; commun
     if (communityId) setSelected(values[1].override?.merchant_account_id ?? "");
     setReady(true);
   }, [orgId, communityId]);
-  useEffect(() => { load().catch(error => setMessage(error.message)); }, [load]);
+  useEffect(() => { load().catch(error => setErrorMessage(error.message)); }, [load]);
   async function save() {
-    setBusy(true); setMessage("");
+    setBusy(true); setMessage(""); setErrorMessage("");
     try {
       const response = await fetch(`/api/organizations/${orgId}/payment-accounts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ consumerKey, consumerSecret, sandbox, createOverride, ...(accountId ? { accountId } : {}) }) });
       const value = await response.json();
       if (!response.ok) throw new Error(value.error);
       setSecret(""); setMessage(value.message); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Configuration failed"); }
+    } catch (error) { setMessage(""); setErrorMessage(error instanceof Error ? error.message : "Configuration failed"); }
     finally { setBusy(false); }
   }
   async function setOverride() {
-    setBusy(true);
+    setBusy(true); setMessage(""); setErrorMessage("");
     try {
       const response = await fetch(`/api/communities/${communityId}/payment/override`, { method: selected ? "PUT" : "DELETE", headers: { "Content-Type": "application/json" }, ...(selected ? { body: JSON.stringify({ merchantAccountId: selected }) } : {}) });
       const value = await response.json(); if (!response.ok) throw new Error(value.error);
       setMessage("Community payment account updated."); await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Override failed"); }
+    } catch (error) { setMessage(""); setErrorMessage(error instanceof Error ? error.message : "Override failed"); }
     finally { setBusy(false); }
   }
   return <section className="max-w-2xl space-y-4">
     <h1 className="text-2xl font-semibold">Payment accounts</h1>
     <p>New online payments require Payments and Pesapal to be enabled in Settings → Plugins. Manual payments and existing receipt reconciliation remain available.</p>
-    {message && <p role="status">{message}</p>}
+    {errorMessage && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900"><h2 className="font-semibold">Payment configuration failed</h2><p className="mt-1">{errorMessage}</p></div>}
+    {message && <p role="status" className="rounded-md border border-green-300 bg-green-50 p-4 text-green-900">{message}</p>}
     {!ready && <p>Loading accounts…</p>}
     <ul>{accounts.map(account => <li key={account.id}>{account.display_name} · {account.is_default ? "Organization default" : "Optional override"} · {account.sandbox ? "Sandbox" : "Live"} · {account.disabled ? "Disabled" : account.last_test_status ?? "Not tested"}</li>)}</ul>
     {communityId && <div className="space-y-2"><label>Community account<select aria-label="Community account" value={selected} onChange={event => setSelected(event.target.value)} className="ml-2 rounded border p-2"><option value="">Inherit organization default</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.display_name} ({account.sandbox ? "Sandbox" : "Live"})</option>)}</select></label><button disabled={busy || !ready} onClick={setOverride} className="rounded border p-2">Save community selection</button></div>}
