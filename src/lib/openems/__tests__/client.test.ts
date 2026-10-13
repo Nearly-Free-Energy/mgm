@@ -944,7 +944,7 @@ describe("OpenEmsClient", () => {
     });
   });
 
-  // ── Sink-side URL validation (mbe-docs#8) ────────────────────────────────
+  // ── Sink-side URL validation ─────────────────────────────────────────────
   //
   // Defence in depth behind the save route's write-time check. The two cover
   // different data: write-time validation governs only rows written after it
@@ -1009,7 +1009,7 @@ describe("OpenEmsClient", () => {
     });
   });
 
-  // ── Redirects are not followed (mbe-docs#8) ──────────────────────────────
+  // ── Redirects are not followed ─────────────────────────────────────────
   //
   // The stored URL must be the URL actually contacted. Following a redirect
   // re-sends the POST — body included — to a host that never passed the

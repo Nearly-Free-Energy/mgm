@@ -49,7 +49,7 @@ const UUID_RE =
  *
  *   1. Validate body shape → 400 on malformed.
  *      Accepts known_edge_ids as string[] (non-array → 400).
- *      backendUrl must additionally pass `validateBackendUrl` (mbe-docs#8):
+ *      backendUrl must additionally pass `validateBackendUrl` (src/lib/openems/backend-url.ts):
  *      absolute https:// URL (http:// for localhost only), no embedded
  *      credentials, no private/loopback/link-local literal host.
  *   2. Permission check via currentUserCanAccessMicrogrid. 404 if the
@@ -125,7 +125,7 @@ export async function PUT(
   }
 
   // Scheme / host validation before anything is persisted or contacted
-  // (mbe-docs#8). Runs ahead of the permission and mid-period gates because
+  // (src/lib/openems/backend-url.ts). Runs ahead of the permission and mid-period gates because
   // it is a pure body-shape check — same tier as the `type` check above.
   const urlCheck = validateBackendUrl(backendUrl);
   if (!urlCheck.ok) {

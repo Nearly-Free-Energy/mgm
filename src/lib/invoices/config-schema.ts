@@ -1,8 +1,7 @@
 /**
  * config-schema.ts — Zod validators for the per-community invoice JSONB.
  *
- * Mirrors the JSONB shape spec'd in mbe-docs PLAN.md § "Data model". Reused
- * by:
+ * Defines the shape of `communities.invoice_config`. Reused by:
  *   - PDF2's PATCH /api/communities/[id]/invoice-config route (input validation
  *     before persisting).
  *   - PDF1b's renderer (defense-in-depth: corrupt JSONB won't 500 the renderer).

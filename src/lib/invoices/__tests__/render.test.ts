@@ -218,28 +218,9 @@ const VISUAL_REFERENCE_PATH = path.join(
   "full-config-with-logo.pdf",
 );
 
-function loadLogoBytes(): Buffer | null {
-  const logoPath = path.join(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "..",
-    "..",
-    "..",
-    "mbe-docs",
-    "design",
-    "assets",
-    "nfe-logo.png",
-  );
-  try {
-    if (existsSync(logoPath)) {
-      return readFileSync(logoPath);
-    }
-  } catch {
-    // Logo not present (CI without mbe-docs sibling) — fall through to null.
-  }
-  return null;
+/** A small synthetic logo checked into the repo, so F1 always renders one. */
+function loadLogoBytes(): Buffer {
+  return readFileSync(path.join(__dirname, "fixtures", "logo.png"));
 }
 
 async function expectStructuralPdfShape(

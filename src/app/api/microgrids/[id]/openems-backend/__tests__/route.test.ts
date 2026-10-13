@@ -210,7 +210,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
     expect(res.status).toBe(400);
   });
 
-  // ── backendUrl validation (mbe-docs#8) ──────────────────────────────────
+  // ── backendUrl validation ───────────────────────────────────────────────
   //
   // Runs at the body-shape tier, before any DB read or write, so a rejected
   // URL is never persisted and never contacted. Per-rule coverage of the

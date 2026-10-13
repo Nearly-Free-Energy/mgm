@@ -1,28 +1,13 @@
-# CLAUDE.md — Metering & Billing Engine
+# CLAUDE.md — MGM (Microgrid Manager)
 
-Tool-specific config for Claude Code. For the project's operating model, personas, and strategic context, see the private `mbe-docs` repo.
+Tool-specific config for Claude Code. MGM is a microgrid operating system built on [Cordis](https://github.com/cordiverse/cordis) plugins. Everything an agent or contributor needs lives in this repository.
 
-## Contributor Setup
+## Read first
 
-```
-~/Projects/energy-iot/
-├── metering-billing-engine/   ← this repo (public — code)
-├── mbe-docs/                  ← private repo (strategy, personas, learnings)
-└── docker-openems/            ← infra repo (public)
-```
-
-**Required:** Clone `energy-iot/mbe-docs` (private) alongside this repo. Personas and learnings load from `../mbe-docs/docs/`. Without it, `/architect`, `/pm`, `/designer`, `/infra` commands will prompt you to request access.
-
-**Access:** You must be a member of the `energy-iot` GitHub org with explicit access to `mbe-docs`. Ask Alejandro to grant access.
-
-## Operating Model
-
-**Read `../mbe-docs/docs/operating-model.md` before starting work.** It defines:
-- Four personas (Architect, PM, Designer, Infra Lead) with evaluation lenses
-- Architectural invariants (security boundaries, data flow, billing logic)
-- Implementation pipeline (ticket → refine → implement → review → merge)
-- Multi-contributor conventions (branch ownership, shared knowledge, protected files)
-- Knowledge system (learnings, evolution logs, project status)
+- `docs/operating-model.md` — how work moves from issue to production, the architectural invariants, and how decisions and lessons are recorded.
+- `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
+- `docs/entity-model.md` — the data model and the reasoning behind it.
+- Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`.
 
 ## Build & Dev Commands
 
@@ -76,26 +61,29 @@ See `docs/setup.md § "RLS Tests"` for full instructions.
 
 ## Stack
 
-- **Framework:** Next.js 15 (App Router)
+- **Framework:** Next.js 16 (App Router)
+- **Plugin runtime:** Cordis 4 (`src/lib/runtime/`, see `docs/cordis-runtime.md`)
 - **Auth + DB:** Supabase (Postgres + Auth + RLS)
 - **Hosting:** Vercel (free tier)
 - **Styling:** Tailwind CSS + shadcn/ui
 - **Testing:** Vitest
-- **OpenEMS Integration:** Server-side adapter (`src/lib/openems/`)
+- **OpenEMS Integration:** Server-side adapter (`src/lib/openems/`), exposed to billing through the metering provider registry
+- **Payments:** Pesapal, as a provider plugin of the Payments capability
 
 ## Project Structure
 
 ```
 src/
 ├── app/
-│   ├── (auth)/              ← login/signup pages
-│   ├── (dashboard)/         ← authenticated pages (microgrids, billing)
-│   └── api/
-│       ├── openems/         ← OpenEMS B2B proxy routes (server-side only)
-│       └── billing/         ← billing generation endpoint
+│   ├── (dashboard)/         ← authenticated pages (organizations, communities, microgrids, billing, settings)
+│   ├── login/, setup/, …    ← public auth and first-run pages
+│   └── api/                 ← route handlers; every write enters the Cordis runtime
 ├── components/              ← React components (BillingTable, DeviceManager, HouseholdTable, etc.)
 │   └── format/              ← format primitives (Currency, Kwh, LocalDate, locale-context)
 ├── lib/
+│   ├── runtime/             ← Cordis root context, request scopes, plugin gate
+│   ├── plugins/             ← bundled plugin catalog (names, dependencies, owned routes)
+│   ├── community-management/, metering/, billing/, payments/  ← capability plugins
 │   ├── openems/             ← OpenEMS client, types, errors (adapter pattern)
 │   │   └── device-descriptions.ts  ← human-readable device-type labels
 │   ├── supabase/            ← Supabase client/server/middleware helpers
@@ -112,7 +100,7 @@ src/
 - **Server-side only** for OpenEMS — all B2B calls go through `src/app/api/openems/*` routes
 - **No `NEXT_PUBLIC_`** on OpenEMS credentials — they're server-side env vars
 - **RLS everywhere** — new tables need Row Level Security policies
-- **Adapter pattern** — MBE doesn't import OpenEMS-specific types in billing logic. `DeviceDataAdapter` interface in `src/lib/adapters/types.ts` (renamed from `MeterDataAdapter` in C #51)
+- **Adapter pattern** — billing logic doesn't import OpenEMS-specific types. `DeviceDataAdapter` interface in `src/lib/adapters/types.ts` (renamed from `MeterDataAdapter` in C #51)
 - **Codegen types** — import entity types from `@/lib/types/domain`, never from `database.gen.ts` directly. Run `npm run db:types` after schema changes.
 - **Role constants** — import `SUPER_ADMIN`, `ORG_MANAGER`, `SCOPE_ORG` from `@/lib/roles` instead of spelling out string literals. Two roles ship: `super_admin` and `org_manager`, both `scope_type='org'`. The `ems_operator` role value and the `microgrid` scope type still exist in the enums and always will — `ALTER TYPE … ADD VALUE` cannot be undone — but **no role ships on them and nothing reads them** (#321 deleted the rows and repointed the predicate). The enums are deliberately wider than the constants; do not add constants back for enum values that carry no model. A user may still hold several role rows at once — `user_roles` is `UNIQUE (user_id, role, scope_type, scope_id)`, not one row per user. **Code that assumes one row per user is a bug** (see `fn_list_visible_users`); that constraint outlived the role that motivated it, and `fn_change_user_role` deleting rows it was not asked about is the data-loss path it exists to prevent.
 - **Microgrid SELECT lists** — avoid `.select('*')` on `microgrids`; enumerate columns via `MICROGRID_PUBLIC_COLUMNS` (`src/lib/types/microgrid-columns.ts`) so new sensitive additions don't silently leak. Enforced by `src/lib/__tests__/no-microgrid-star-select.test.ts`.
@@ -120,11 +108,10 @@ src/
   - A new **write** route either composes a capability or calls `gateRoute()` with the plugin that owns it in `src/lib/plugins/bundled.ts`. `src/lib/runtime/__tests__/route-surface.test.ts` fails the build otherwise; exemptions need a written reason there.
   - A capability plugin that `provide`s a new service name must add it to `REQUEST_SERVICES` in `src/lib/runtime/scope.ts`, or concurrent requests collide (Cordis rejects the second provide).
   - A new metering source or payment provider is a platform plugin that registers into `meteringProviders` / `paymentProviderRegistry`; billing and routes do not change.
-- **DCO sign-off** on docker-openems commits (`git commit -s`)
 
 ### Entity model (post-AB #50)
 
-The schema follows Org → Community → Microgrid → Edge → Device plus a parallel Household → household_devices join. Two user roles ship for MVP (`super_admin`, `org_manager`); `microgrid_manager` / `community_admin` / `region_admin` / `tenant` are future extensions via enum addition (no schema migration). See `../mbe-docs/docs/entity-model.md` for the full rationale.
+The schema follows Org → Community → Microgrid → Edge → Device plus a parallel Household → household_devices join. Two user roles ship for MVP (`super_admin`, `org_manager`); `microgrid_manager` / `community_admin` / `region_admin` / `tenant` are future extensions via enum addition (no schema migration). See `docs/entity-model.md` for the full rationale.
 
 **Schema change notes:**
 - `microgrids.location` TEXT was **dropped** — use the structured address columns instead (`address_city`, `address_region`, `address_country`, `lat`, `lng`). Downstream pages that read `location` are expected to fail at type-check until Ticket C (#51) lands.
@@ -214,9 +201,9 @@ Worked example: dropping the deprecated `user_can_configure_ems` alias requires,
 
 ## Design System
 
-Token reference: `../mbe-docs/design/v2-paste/README.md`
+Color tokens are CSS variables in `src/app/globals.css`, exposed to Tailwind through its `@theme inline` block; spacing, radii, motion, and elevation live in `tailwind.config.ts`. `src/app/_dev/components` renders the component gallery.
 
-Five rules every contributor must follow:
+Six rules every contributor must follow:
 
 1. **Status chips:** Use `<Chip>` not raw `<span>` for status indicators. Use `<StatusChip kind="…" status="…">` to map domain enums (billingPeriod, meterType, edge, household) — this keeps tone-to-status mapping in one file (`src/components/ui/status-chip.tsx`). Add new domain enums by extending `MAPS` in that file, not inline.
 
@@ -232,7 +219,7 @@ Five rules every contributor must follow:
 
 ## Required Merge Controls
 
-`main` is protected by the `require-DCO` ruleset (visible at https://github.com/energy-iot/metering-billing-engine/rules; `bypass_actors: []`, `current_user_can_bypass: never` — even repo admins cannot use `gh pr merge --admin` to bypass). Every PR must pass ALL of the following before merge:
+`main` is protected by a ruleset in this repository (GitHub → Settings → Rules). Every PR must pass ALL of the following before merge:
 
 1. **DCO** — every commit ends with `Signed-off-by: Your Name <email>`. Use `git commit -s`.
 2. **`required_signatures` (cryptographic)** — every commit must be GPG- or SSH-signed. DCO is a text trailer; `required_signatures` is a separate cryptographic guarantee. One-time per-machine setup:
@@ -249,14 +236,7 @@ Five rules every contributor must follow:
 5. **`Vercel` preview deploy** passes (build succeeds + preview URL provisioned).
 6. **`non_fast_forward` + `deletion` protection** — `main` cannot be force-pushed or deleted.
 
-**Bypass path** (genuine emergencies only — Aaron-blocking production hotfixes when the rules themselves are mis-configured):
-- Temporarily PATCH the ruleset to `enforcement: disabled`, merge, re-enable to `active`:
-  ```bash
-  gh api -X PUT repos/energy-iot/metering-billing-engine/rulesets/15518390 -f enforcement=disabled --silent
-  # ... merge ...
-  gh api -X PUT repos/energy-iot/metering-billing-engine/rulesets/15518390 -f enforcement=active --silent
-  ```
-- Use sparingly; log the bypass reason in the PR description.
+**Bypass path** (genuine emergencies only — production hotfixes when the rules themselves are mis-configured): a repository admin temporarily sets the ruleset's enforcement to *Disabled* in Settings → Rules, merges, and sets it back to *Active*. Log the reason in the PR description.
 
 **For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
 
@@ -289,7 +269,7 @@ Venue is the decision; redaction is not. Careful wording, omitted identifiers an
 
 Applies to issues, PR titles and bodies, commit messages, code comments, and test names in this repo, all of which are public. If the artifact would describe a weakness that is not yet fixed and deployed:
 
-- Put the detail in `mbe-docs` (private) and reference it by ticket number here.
+- Put the detail in a **private security advisory** on this repository (Security → Advisories → New draft advisory) and reference the advisory ID here. Reporters outside the team use private vulnerability reporting, which lands in the same place.
 - Describe public-repo work by what it *adds* ("microgrid-scoped configuration role"), not by what it *fixes* ("any org manager could read stored cloud credentials").
 - A fix landing on `main` is not the same as a fix being deployed. Wait for applied-in-production before publishing the detail.
 
@@ -298,7 +278,7 @@ Applies to issues, PR titles and bodies, commit messages, code comments, and tes
 **This is a public repo.** Never commit:
 - AWS resource names, account IDs, credentials
 - Supabase project URLs, keys, or passwords (use `.env.local`, gitignored)
-- Strategy, roadmap, or business context (belongs in `mbe-docs`, private)
+- Strategy, roadmap, or business context (keep it out of this repo; the team's Claude project or other private tools hold it)
 - Infrastructure metadata (Terraform state buckets, DynamoDB tables)
 
 When in doubt, ask before committing.

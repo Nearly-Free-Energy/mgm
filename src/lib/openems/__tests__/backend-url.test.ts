@@ -1,5 +1,5 @@
 /**
- * validateBackendUrl — operator-supplied OpenEMS backend URL (mbe-docs#8).
+ * validateBackendUrl — operator-supplied OpenEMS backend URL.
  *
  * Covers: https accepted; http rejected except localhost; loopback, private
  * and link-local literals rejected (v4 + v6); embedded credentials rejected.

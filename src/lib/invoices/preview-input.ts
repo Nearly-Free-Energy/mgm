@@ -18,9 +18,8 @@
  *   - Returns `Omit<RenderInvoiceInput, 'logoBytes' | 'paymentRedirectUrl'>` —
  *     the route adds those two after fetching/synthesising them.
  *
- * The shape produced here mirrors PDF1b's `RenderInvoiceInput` spec from
- * `mbe-docs/docs/tickets/pdf-invoices/PDF1b-renderer-and-pdf-endpoint.md`.
- * If the renderer's input bag changes, this helper must change in lockstep.
+ * The shape produced here mirrors the renderer's `RenderInvoiceInput`
+ * (`render.tsx`). If the renderer's input bag changes, this helper must change in lockstep.
  */
 
 import type { InvoiceConfig } from "./config-schema";
