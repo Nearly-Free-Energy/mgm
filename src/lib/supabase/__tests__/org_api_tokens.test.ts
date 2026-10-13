@@ -141,6 +141,7 @@ beforeEach(async () => {
 
 afterAll(() => {
   // Restore env so a later test in the same process isn't poisoned.
+  delete process.env.MGM_TOKEN_ENV_PREFIX;
   delete process.env.MBE_TOKEN_ENV_PREFIX;
 });
 
@@ -152,10 +153,10 @@ describe("resolveOrgFromToken (#255)", () => {
     expect(res).toMatchObject({ status: 401, reason: "missing_header" });
   });
 
-  it("401 invalid_format when header lacks `mbe_` prefix", async () => {
+  it("401 invalid_format when header lacks an `mgm_`/`mbe_` prefix", async () => {
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     const res = await resolveOrgFromToken(
-      makeRequest({ "x-api-key": "not-an-mbe-token" })
+      makeRequest({ "x-api-key": "not-an-api-token" })
     );
     expect(res.ok).toBe(false);
     expect(res).toMatchObject({ status: 401, reason: "invalid_format" });
@@ -236,6 +237,33 @@ describe("resolveOrgFromToken (#255)", () => {
     expect(update.eqArgs).toEqual(["id", "token-uuid-1"]);
   });
 
+  it("accepts both the current mgm_ prefix and the legacy mbe_ prefix", async () => {
+    for (const prefix of ["mgm", "mbe"]) {
+      lookupResult = {
+        data: {
+          id: "token-uuid-1",
+          org_id: "org-uuid-1",
+          name: "customerapp-prod-2026",
+          token_hash: KNOWN_HASH,
+          revoked_at: null,
+        },
+        error: null,
+      };
+      const { resolveOrgFromToken } = await import("@/lib/internal-auth");
+      const token = `${prefix}_dev_12345678_${KNOWN_SECRET}`;
+      const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
+      expect(res, prefix).toMatchObject({ ok: true, org_id: "org-uuid-1" });
+    }
+  });
+
+  it("401 invalid_format for any other product prefix", async () => {
+    const { resolveOrgFromToken } = await import("@/lib/internal-auth");
+    const res = await resolveOrgFromToken(
+      makeRequest({ "x-api-key": `xyz_dev_12345678_${KNOWN_SECRET}` })
+    );
+    expect(res).toMatchObject({ ok: false, status: 401, reason: "invalid_format" });
+  });
+
   it("401 revoked via post-verify race-window check (revoked_at set in row despite WHERE)", async () => {
     // Simulate a race: the lookup WHERE revoked_at IS NULL passed (the row
     // had revoked_at=null at SELECT time), but a regenerate flipped it
@@ -288,7 +316,7 @@ describe("generateToken (#255)", () => {
     const { generateToken } = await import("@/lib/internal-auth");
     const t = generateToken("prod");
     expect(t.plaintext).toMatch(
-      /^mbe_prod_[0-9a-f]{8}_[A-Za-z0-9_-]{43}$/
+      /^mgm_prod_[0-9a-f]{8}_[A-Za-z0-9_-]{43}$/
     );
     expect(t.lookup).toMatch(/^[0-9a-f]{8}$/);
     expect(t.envPrefix).toBe("prod");
@@ -299,14 +327,30 @@ describe("generateToken (#255)", () => {
   });
 
   it("uses default env prefix when none provided", async () => {
-    delete process.env.MBE_TOKEN_ENV_PREFIX;
+    delete process.env.MGM_TOKEN_ENV_PREFIX;
+  delete process.env.MBE_TOKEN_ENV_PREFIX;
     // Re-import to pick up the env default. vi.resetModules is required
     // because the env-prefix constant is captured at module load.
     vi.resetModules();
     const { generateToken } = await import("@/lib/internal-auth");
     const t = generateToken();
-    expect(t.plaintext).toMatch(/^mbe_dev__/);
+    expect(t.plaintext).toMatch(/^mgm_dev__/);
     expect(t.envPrefix).toBe("dev_");
+  });
+
+  it("reads MGM_TOKEN_ENV_PREFIX, falling back to MBE_TOKEN_ENV_PREFIX", async () => {
+    process.env.MBE_TOKEN_ENV_PREFIX = "stag";
+    delete process.env.MGM_TOKEN_ENV_PREFIX;
+    vi.resetModules();
+    expect((await import("@/lib/internal-auth")).generateToken().envPrefix).toBe("stag");
+
+    process.env.MGM_TOKEN_ENV_PREFIX = "prod";
+    vi.resetModules();
+    expect((await import("@/lib/internal-auth")).generateToken().envPrefix).toBe("prod");
+
+    delete process.env.MGM_TOKEN_ENV_PREFIX;
+    delete process.env.MBE_TOKEN_ENV_PREFIX;
+    vi.resetModules();
   });
 
   it("generates round-trippable hash + verify", async () => {
@@ -318,7 +362,7 @@ describe("generateToken (#255)", () => {
     // Parse plaintext via the canonical token regex to extract the secret
     // (using `.split('_')` is unsafe because env_prefix may contain `_`,
     // e.g. the default 'dev_').
-    const match = /^mbe_([a-z0-9_]{2,8})_([0-9a-f]{8})_([A-Za-z0-9_-]{43})$/.exec(
+    const match = /^mgm_([a-z0-9_]{2,8})_([0-9a-f]{8})_([A-Za-z0-9_-]{43})$/.exec(
       t.plaintext
     );
     expect(match).not.toBeNull();

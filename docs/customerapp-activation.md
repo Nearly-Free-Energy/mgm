@@ -75,8 +75,11 @@ VALUES (
 );
 ```
 
-Return the plaintext (`mbe_prod_<lookup>_<secret>`, 61 chars) to the
-operator **once** — the secret is not recoverable from the DB.
+Return the plaintext (`mgm_prod_<lookup>_<secret>`, 61 chars) to the
+operator **once** — the secret is not recoverable from the DB. Tokens
+issued before the MGM rename start with `mbe_`; they remain valid and need
+no re-issue. Set `MGM_TOKEN_ENV_PREFIX` (formerly `MBE_TOKEN_ENV_PREFIX`,
+still read as a fallback) to the environment marker for each deployment.
 
 ### 4. Wire the token into customerapp's config
 

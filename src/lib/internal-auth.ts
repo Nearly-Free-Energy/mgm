@@ -17,7 +17,10 @@ import { createServiceClient } from "@/lib/supabase/service";
  *
  * ── Token shape ──────────────────────────────────────────────────────────
  *
- * Plain text:  mbe_<env>_<lookup>_<secret>
+ * Plain text:  mgm_<env>_<lookup>_<secret>
+ *   * `mgm_`   — product prefix. Tokens issued before the MGM rename start
+ *                with `mbe_`; they stay valid (same lookup + hash), and only
+ *                newly generated tokens use `mgm_`.
  *   * <env>    — 2–8 chars (e.g. 'prod', 'stag', 'dev_') — env marker for
  *                log identification + accidental-cross-env-paste detection.
  *   * <lookup> — 8 hex chars (32 bits); NON-SECRET; indexed.
@@ -52,13 +55,19 @@ import { createServiceClient } from "@/lib/supabase/service";
  *   8. Return { ok: true, org_id, token_id, token_name }.
  */
 
-const TOKEN_RE =
-  /^mbe_([a-z0-9_]{2,8})_([0-9a-f]{8})_([A-Za-z0-9_-]{43})$/;
+/** Prefix for newly generated tokens. */
+export const TOKEN_PREFIX = "mgm";
+
+/** Accepts the current `mgm_` prefix and the legacy `mbe_` prefix. */
+export const TOKEN_RE =
+  /^(?:mgm|mbe)_([a-z0-9_]{2,8})_([0-9a-f]{8})_([A-Za-z0-9_-]{43})$/;
 
 // Default to 'dev_' for local dev; prod / staging deploys must set
-// MBE_TOKEN_ENV_PREFIX explicitly so the generated tokens carry the right
-// env marker.
-const ENV_PREFIX = process.env.MBE_TOKEN_ENV_PREFIX ?? "dev_";
+// MGM_TOKEN_ENV_PREFIX explicitly so the generated tokens carry the right
+// env marker. MBE_TOKEN_ENV_PREFIX is still read for deployments configured
+// before the rename.
+const ENV_PREFIX =
+  process.env.MGM_TOKEN_ENV_PREFIX ?? process.env.MBE_TOKEN_ENV_PREFIX ?? "dev_";
 
 // OWASP 2024 guidance for argon2id. 19 MiB / 2 iterations / 1 thread on
 // Vercel infra ≈ 10–20 ms per verify. Acceptable latency for internal-API
@@ -272,7 +281,7 @@ export type GeneratedToken = {
 export function generateToken(envPrefix: string = ENV_PREFIX): GeneratedToken {
   const lookup = randomBytes(4).toString("hex"); // 8 hex chars
   const secret = randomBytes(32).toString("base64url"); // 43 chars
-  const plaintext = `mbe_${envPrefix}_${lookup}_${secret}`;
+  const plaintext = `${TOKEN_PREFIX}_${envPrefix}_${lookup}_${secret}`;
   return {
     plaintext,
     lookup,

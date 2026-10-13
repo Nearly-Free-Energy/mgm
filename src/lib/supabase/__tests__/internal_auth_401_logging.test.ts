@@ -204,7 +204,7 @@ describe("resolveOrgFromToken — structured 401 logging (#252)", () => {
   it("invalid_format: emits structured log with keyPresent=true", async () => {
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     const res = await resolveOrgFromToken(
-      makeRequest({ "x-api-key": "not-an-mbe-token" })
+      makeRequest({ "x-api-key": "not-an-api-token" })
     );
 
     expect(res.ok).toBe(false);
@@ -217,7 +217,7 @@ describe("resolveOrgFromToken — structured 401 logging (#252)", () => {
     lookupResult = { data: null, error: null };
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     const token =
-      "mbe_stag_12345678_abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE";
+      "mgm_stag_12345678_abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE";
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -239,7 +239,7 @@ describe("resolveOrgFromToken — structured 401 logging (#252)", () => {
     };
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     const wrongSecret = "WRONGwrongWRONGwrongWRONGwrongWRONGwrong123";
-    const token = `mbe_dev_12345678_${wrongSecret}`;
+    const token = `mgm_dev_12345678_${wrongSecret}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -260,7 +260,7 @@ describe("resolveOrgFromToken — structured 401 logging (#252)", () => {
       error: null,
     };
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -301,7 +301,7 @@ describe("resolveOrgFromToken — structured 401 logging (#252)", () => {
       error: null,
     };
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     // Flush microtasks so any fire-and-forget UPDATE settles.
@@ -320,12 +320,12 @@ describe("resolveOrgFromToken — token-never-logged invariant (#252)", () => {
   // anywhere upstream of (or inside) resolveOrgFromToken, these assertions
   // will fire even if the structured-log shape stays correct.
 
-  const FULL_TOKEN = `mbe_dev_12345678_${"abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE"}`;
+  const FULL_TOKEN = `mgm_dev_12345678_${"abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE"}`;
   const LOOKUP_FRAGMENT = "12345678";
   const SECRET_FRAGMENT = "abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE";
 
   it("invalid_format path: token value absent from any log line", async () => {
-    const probeToken = "mbe_prod_ABCDEFGH_thisIsTheSecretValueDoNotLogMe___OK"; // malformed — hex regex rejects
+    const probeToken = "mgm_prod_ABCDEFGH_thisIsTheSecretValueDoNotLogMe___OK"; // malformed — hex regex rejects
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     await resolveOrgFromToken(makeRequest({ "x-api-key": probeToken }));
 
@@ -359,7 +359,7 @@ describe("resolveOrgFromToken — token-never-logged invariant (#252)", () => {
       error: null,
     };
     const wrongSecret = "WRONGwrongWRONGwrongWRONGwrongWRONGwrong123";
-    const wrongToken = `mbe_dev_12345678_${wrongSecret}`;
+    const wrongToken = `mgm_dev_12345678_${wrongSecret}`;
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     await resolveOrgFromToken(makeRequest({ "x-api-key": wrongToken }));
 
@@ -394,8 +394,8 @@ describe("resolveOrgFromToken — token-never-logged invariant (#252)", () => {
     await resolveOrgFromToken(makeRequest({}));
 
     const text = allLoggedText();
-    // No header was sent — but assert no `mbe_` token-fragment leaked from
+    // No header was sent — but assert no token fragment (`mgm_` or legacy `mbe_`) leaked from
     // anywhere else (e.g. a stack trace or upstream log).
-    expect(text).not.toMatch(/mbe_[a-z0-9_]{2,8}_[0-9a-f]{8}_/);
+    expect(text).not.toMatch(/(?:mgm|mbe)_[a-z0-9_]{2,8}_[0-9a-f]{8}_/);
   });
 });

@@ -65,7 +65,7 @@ jobs:
 
       - name: Database diagnostics on rehearsal failure
         if: failure()
-        run: docker logs --tail 200 supabase_db_metering-billing-engine
+        run: docker logs --tail 200 supabase_db_mgm
 
       - name: npm test
         run: |

@@ -93,7 +93,7 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("@/lib/internal-auth", () => ({
   generateToken: () => ({
-    plaintext: "mbe_dev__cafef00d_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    plaintext: "mgm_dev__cafef00d_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     lookup: "cafef00d",
     envPrefix: "dev_",
     hashPromise: Promise.resolve("$argon2id$stubhash2"),
@@ -187,7 +187,7 @@ describe("POST /api/org-api-tokens/:id/regenerate (#256)", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.id).toBe(NEW_TOKEN_ID);
-    expect(body.plaintext).toMatch(/^mbe_/);
+    expect(body.plaintext).toMatch(/^mgm_/);
 
     // One new token insert.
     expect(insertsByTable["org_api_tokens"]).toHaveLength(1);

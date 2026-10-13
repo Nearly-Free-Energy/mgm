@@ -131,6 +131,7 @@ beforeEach(async () => {
 });
 
 afterAll(() => {
+  delete process.env.MGM_TOKEN_ENV_PREFIX;
   delete process.env.MBE_TOKEN_ENV_PREFIX;
 });
 
@@ -154,7 +155,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: true, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(true);
@@ -170,7 +171,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: false, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -182,7 +183,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: true, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(lastRpcCall).not.toBeNull();
@@ -200,7 +201,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -215,7 +216,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: null, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -226,7 +227,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     stubValidLookup("org-uuid-flip");
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
 
     // Call 1: flag TRUE → ok.
     customerappEnabledResult = { data: true, error: null };
@@ -250,7 +251,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: false, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -268,7 +269,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
     const wrongSecret = "WRONGwrongWRONGwrongWRONGwrongWRONGwrong123";
-    const token = `mbe_dev_12345678_${wrongSecret}`;
+    const token = `mgm_dev_12345678_${wrongSecret}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -293,7 +294,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: false, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     const res = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     expect(res.ok).toBe(false);
@@ -308,7 +309,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     customerappEnabledResult = { data: false, error: null };
 
     const { resolveOrgFromToken } = await import("@/lib/internal-auth");
-    const token = `mbe_dev_12345678_${KNOWN_SECRET}`;
+    const token = `mgm_dev_12345678_${KNOWN_SECRET}`;
     await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
 
     // Flush microtasks just in case some stray fire-and-forget update

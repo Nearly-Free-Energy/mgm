@@ -18,7 +18,8 @@ This runbook covers creating, backing up, recovering, and rotating it.
 
 Values are encrypted with `pgp_sym_encrypt` through `fn_ems_encrypt_secret`
 and decrypted by `fn_ems_decrypt_secret`, which only `service_role` may
-execute. Both read the Vault secret named **`mbe_ems_dek`** at call time.
+execute. Both read the Vault secret named **`mgm_ems_dek`** at call time,
+falling back to the legacy name `mbe_ems_dek` if the new one is missing.
 The plaintext never leaves the database except to the server code that
 needs it.
 
@@ -28,7 +29,9 @@ rotation step below in the same PR.
 ## Create the key (new environment)
 
 Migrations create the Vault secret if it is missing, and refuse to invent
-one silently (migration `00025`):
+one silently (migration `00025`). The earlier migrations create it under the
+legacy name `mbe_ems_dek`; migration `20261014090000_mgm_credential_key_name`
+then copies it to `mgm_ems_dek`:
 
 - **Production or any shared database:** generate the key yourself and
   pass it to the migration run.
@@ -61,7 +64,7 @@ example, to back up a key that was generated before this runbook existed),
 use a privileged connection:
 
 ```sql
-SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mbe_ems_dek';
+SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mgm_ems_dek';
 ```
 
 Never paste the key into an issue, PR, chat, or log.
@@ -73,7 +76,7 @@ Never paste the key into an issue, PR, chat, or log.
   recreate it with the same value.
 
   ```sql
-  SELECT vault.create_secret('<plaintext from password manager>', 'mbe_ems_dek',
+  SELECT vault.create_secret('<plaintext from password manager>', 'mgm_ems_dek',
     'MGM credential encryption key');
   ```
 
@@ -110,8 +113,10 @@ FROM communities;
 
 -- 2. Switch Vault to the new key (generate it with `openssl rand -base64 32`
 --    and store it in the password manager first).
+--    While the legacy `mbe_ems_dek` row still exists, update both names so
+--    neither can serve a stale key.
 SELECT vault.update_secret(id, '<new plaintext key>')
-FROM vault.secrets WHERE name = 'mbe_ems_dek';
+FROM vault.secrets WHERE name IN ('mgm_ems_dek', 'mbe_ems_dek');
 
 -- 3. Re-encrypt under the new key.
 UPDATE microgrids m SET
@@ -136,3 +141,21 @@ privileged roles, so the updates are allowed on this connection. After
 committing, open one microgrid's OpenEMS page and run **Test connection**,
 and one organization's payment account test, to confirm decryption works.
 Then replace the old key in the password manager.
+
+## Retire the legacy key name
+
+After the `mgm_ems_dek` migration has run on an environment, the legacy
+`mbe_ems_dek` row is redundant. Remove it once you have confirmed the two
+match:
+
+```sql
+SELECT (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mgm_ems_dek')
+     = (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mbe_ems_dek')
+  AS keys_match;   -- must be true
+
+DELETE FROM vault.secrets WHERE name = 'mbe_ems_dek';
+```
+
+Then run **Test connection** on one microgrid to confirm decryption still
+works. The functions keep their fallback, so this step is optional and can
+wait.
