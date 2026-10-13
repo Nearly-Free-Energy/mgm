@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 
 // Only authentication pages are public in the first MGM release. Inherited
-// MBE payment links, customer APIs, and webhooks are blocked by the route
+// legacy payment links, customer APIs, and webhooks are blocked by the route
 // allowlist before this session check runs.
 const PUBLIC_PATHS = [
   "/login",
@@ -12,12 +12,12 @@ const PUBLIC_PATHS = [
   "/reset-password",
   "/api/mgm/health",
   // Release 4 (payments): Pesapal IPN webhook is an unauthenticated
-  // server-to-server callback with no MBE session.
+  // server-to-server callback with no MGM session.
   "/api/payments/ipn",
 ];
 
 /**
- * Release 4 public payment surfaces (no MBE session). The line-item id /
+ * Release 4 public payment surfaces (no MGM session). The line-item id /
  * short slug is the bearer token and verification is always server-side.
  * Deliberately narrow: only the customer redirect (`/pay`, `/p/<slug>`)
  * and the IPN webhook are public. Sibling mutation routes
@@ -33,7 +33,7 @@ function isPublicPaymentRoute(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  // This fork deploys released MGM slices. Inherited MBE billing, payment,
+  // This fork deploys released MGM slices. Inherited legacy billing, payment,
   // and unreleased handlers must not become callable through deep links
   // or direct API requests before their Cordis plugins are released —
   // see src/lib/mgm/released-routes.ts for the explicit allowlist.

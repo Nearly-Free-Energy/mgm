@@ -8,7 +8,7 @@
  *
  * ── This MUST agree with `runGenerationFor` ──────────────────────────────
  *
- * `generate.ts` refuses to bill a device that has neither a prior MBE
+ * `generate.ts` refuses to bill a device that has neither a prior MGM
  * `end_kwh` nor a seed. This decides who the panel asks. If the two disagree
  * in one direction the operator is asked for readings generation does not
  * want; in the other, generation refuses in front of an operator who was
@@ -20,20 +20,20 @@ export type SeedDetectionInput = {
   deviceIdByHouseholdId: Record<string, string>;
   /** Household id → whether an OpenEMS-backed reading is possible. */
   edgeAvailableByHouseholdId: Record<string, boolean>;
-  /** Device ids that already have a prior MBE-recorded `end_kwh`. */
+  /** Device ids that already have a prior MGM-recorded `end_kwh`. */
   devicesWithPriorEnd: ReadonlySet<string>;
 };
 
 /**
  * Returns household id → needs a starting reading.
  *
- * A household needs one when its meter can be read by OpenEMS but MBE has no
+ * A household needs one when its meter can be read by OpenEMS but MGM has no
  * previous reading of that meter to continue from.
  *
  * ── First-ever period ────────────────────────────────────────────────────
  *
  * On a microgrid's first period `devicesWithPriorEnd` is empty, so EVERY
- * edge-available household is flagged. That is correct and deliberate: MBE
+ * edge-available household is flagged. That is correct and deliberate: MGM
  * cannot distinguish a new meter sitting at zero from an existing meter
  * sitting at 4,182, and guessing is precisely what produced #339. The cost is
  * one reading per meter, once, at setup, entered by someone standing where

@@ -2,7 +2,7 @@
  * Supabase implementation of `BillingRepository`.
  *
  * Composition-root module: the ONLY place in the billing plugin allowed to
- * touch the Supabase client, auth access helpers, plugin state, and the MBE
+ * touch the Supabase client, auth access helpers, plugin state, and the
  * engine delegate. The capability consumes the repository interface from
  * `../repository` — see `__tests__/billing-import-boundary.test.ts`.
  */

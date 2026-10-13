@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * InviteUserDialog — Invite a new user into MBE (UX5 / #79).
+ * InviteUserDialog — Invite a new user into MGM (UX5 / #79).
  *
  * Caller-role-scoped UI:
  *   - super_admin: role select (super_admin | org_manager); when
@@ -136,7 +136,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
             data.error ?? "You do not have permission to invite this user."
           );
         } else if (res.status === 409) {
-          const msg = data.error ?? "User already exists in MBE.";
+          const msg = data.error ?? "User already exists in MGM.";
           setTopError(msg);
           setFieldErrors({ email: msg });
         } else {

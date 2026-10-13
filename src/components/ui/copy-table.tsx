@@ -337,7 +337,7 @@ export function CopyTable<Row>({
                 <th
                   key={ci}
                   scope="col"
-                  id={col.id ?? `mbe-col-${ci}`}
+                  id={col.id ?? `mgm-col-${ci}`}
                   className={cn(
                     "h-8 whitespace-nowrap border-b border-border px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
                     col.kind === "row-header" ? "text-left" : col.kind === "action" ? "text-center" : "text-right",

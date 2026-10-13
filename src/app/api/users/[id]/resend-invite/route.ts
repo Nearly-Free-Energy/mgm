@@ -226,7 +226,7 @@ export async function POST(
   });
 
   // ── Step G: re-issue the invite ────────────────────────────────────
-  // Per-call redirectTo so resends land on the MBE accept-invite page
+  // Per-call redirectTo so resends land on the MGM accept-invite page
   // (UX5c / #189) — same target as the original invite.
   const origin = resolveOrigin(request);
   const inviteRes = await svc.auth.admin.inviteUserByEmail(targetEmail, {

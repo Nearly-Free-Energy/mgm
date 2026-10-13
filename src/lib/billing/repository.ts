@@ -6,7 +6,7 @@
  * import-boundary test fails the build if domain files import a database
  * client, server helper, vendor SDK, or framework module directly.
  *
- * Billing reuses the MBE calculation engine (`calculations.ts`,
+ * Billing reuses the calculation engine (`calculations.ts`,
  * `precision.ts`, `generate.ts`, `csv-export.ts`) through injected
  * functions wired in `compose.ts` — the capability never constructs a
  * vendor client or resolves provider configuration itself.
@@ -84,7 +84,7 @@ export type GenerationOutput = GenerationResult;
 export type GenerationFatal = RunGenerationFatal;
 
 /**
- * Bill generation delegate, wired in `compose.ts` to the MBE engine
+ * Bill generation delegate, wired in `compose.ts` to the bill engine
  * (`runGenerationFor`) with the request-scoped metering provider. The
  * capability validates scope and plugin state before delegating, so the
  * engine never sees an unauthorized call.

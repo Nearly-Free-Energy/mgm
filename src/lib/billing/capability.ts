@@ -4,7 +4,7 @@
  *
  * Import boundary: consumes the repository/generation interfaces only —
  * never a database client, vendor SDK, or framework module. See
- * `__tests__/billing-import-boundary.test.ts`. Bill math lives in the MBE
+ * `__tests__/billing-import-boundary.test.ts`. Bill math lives in the
  * engine (`calculations.ts`, `precision.ts`) and reaches this capability
  * only through the injected `BillingGeneration` delegate wired in
  * `compose.ts`.

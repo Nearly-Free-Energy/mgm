@@ -14,7 +14,7 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      // Spacing scale from MBE design tokens.
+      // Spacing scale from the MGM design tokens.
       spacing: {
         "0": "0",
         "0.5": "2px",

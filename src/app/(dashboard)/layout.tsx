@@ -48,7 +48,7 @@ export default async function DashboardLayout({
       {/* Sidebar */}
       <aside className="flex w-64 flex-col border-r border-border bg-muted">
         <div className="border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">MBE</h2>
+          <h2 className="text-lg font-semibold text-foreground">MGM</h2>
         </div>
         <SidebarNav />
       </aside>

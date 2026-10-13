@@ -136,7 +136,7 @@ export async function GET(
 
   // 302 redirect with no-store so the URL never gets cached by intermediate
   // proxies or the browser. Pesapal session URLs are sensitive even in our
-  // "stable redirect" model — the *MBE* URL is stable; the *Pesapal* URL it
+  // "stable redirect" model — the *MGM* URL is stable; the *Pesapal* URL it
   // resolves to is one-shot-ish.
   return NextResponse.redirect(result.redirectUrl, {
     status: 302,

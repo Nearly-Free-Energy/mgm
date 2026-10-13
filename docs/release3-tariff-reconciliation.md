@@ -11,7 +11,7 @@ but the period page, PDF/CSV, and regeneration return an explicit
 reconciliation error until a verified tariff version is pinned.
 
 For each affected period, an operator should compare the original invoice or
-MBE source and line-item calculations against the historical tariff. If the
+original billing source and line-item calculations against the historical tariff. If the
 matching version no longer exists, reconstruct it as a new `rate_schedules`
 row and independently verify the figures. Then use the privileged SQL template
 in [`supabase/scripts/reconcile-historical-period-tariff.sql`](../supabase/scripts/reconcile-historical-period-tariff.sql)

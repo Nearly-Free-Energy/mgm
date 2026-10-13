@@ -78,7 +78,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
               Save this token now
             </Dialog.Title>
             <Dialog.Description className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              MBE cannot show this plaintext again. Paste it into your
+              MGM cannot show this plaintext again. Paste it into your
               customerapp configuration before closing this dialog.
             </Dialog.Description>
           </div>

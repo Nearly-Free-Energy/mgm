@@ -248,7 +248,7 @@ function hasPeriodBoundaries(
 }
 
 /**
- * MGM's pilot database deliberately does not contain the legacy MBE
+ * MGM's pilot database deliberately does not contain the legacy
  * `microgrids.ems_*` credential columns or their decrypt RPCs. When an MGM
  * OpenEMS environment is configured, its exact microgrid binding is checked
  * before any database lookup. A partial configuration or a different
@@ -269,7 +269,7 @@ async function resolveOpenEmsConfig(
   const anyPilotConfig = Boolean(microgridId || url || username || password);
 
   if (!anyPilotConfig) {
-    // Compatibility for the inherited MBE schema and its existing tests.
+    // Compatibility for the inherited legacy schema and its existing tests.
     return getMicrogridEmsConfig(supabase, requestedMicrogridId);
   }
 

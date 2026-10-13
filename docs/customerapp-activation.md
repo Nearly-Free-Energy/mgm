@@ -51,7 +51,7 @@ SET customerapp_enabled = TRUE
 WHERE id = '<org-uuid>';
 ```
 
-Or via the future MBE UI (super_admin org page → "Enable customerapp
+Or via the future MGM UI (super_admin org page → "Enable customerapp
 integration" toggle — not yet wired as of #251).
 
 ### 3. Mint a per-org token (#255 / #256)
@@ -80,7 +80,7 @@ operator **once** — the secret is not recoverable from the DB.
 
 ### 4. Wire the token into customerapp's config
 
-Customerapp reads its MBE token from its own deployment env. Update the
+Customerapp reads its MGM API token from its own deployment env. Update the
 secret and roll the deployment.
 
 ### 5. Smoke-test
@@ -88,7 +88,7 @@ secret and roll the deployment.
 From customerapp's environment:
 
 ```bash
-curl -sS -X POST https://mbe.example.com/api/v1/billing-periods \
+curl -sS -X POST https://mgm.example.com/api/v1/billing-periods \
   -H "x-api-key: $MBE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"microgrid_id":"<microgrid-uuid>","start_date":"2026-05-01","end_date":"2026-05-31"}'

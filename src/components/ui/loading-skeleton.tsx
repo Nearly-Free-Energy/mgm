@@ -22,7 +22,7 @@ export function LoadingSkeleton({ className }: { className?: string }) {
     <div aria-hidden="true" className={cn("relative overflow-hidden rounded-sm bg-muted", className)}>
       <span
         aria-hidden="true"
-        className="absolute inset-0 motion-safe:[animation:mbe-shimmer_1.4s_ease-in-out_infinite]"
+        className="absolute inset-0 motion-safe:[animation:mgm-shimmer_1.4s_ease-in-out_infinite]"
         style={{
           backgroundImage:
             "linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent)",

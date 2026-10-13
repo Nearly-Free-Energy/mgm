@@ -1,4 +1,4 @@
-# MBE Local Development Setup
+# MGM Local Development Setup
 
 ## Which path should I use?
 
@@ -20,8 +20,8 @@ Run the entire stack in Docker. No Node.js, npm, or Supabase CLI required.
 ### Quick Start
 
 ```bash
-git clone https://github.com/energy-iot/metering-billing-engine.git
-cd metering-billing-engine
+git clone https://github.com/Nearly-Free-Energy/mgm.git
+cd mgm
 ./setup.sh --docker
 ```
 
@@ -67,8 +67,8 @@ Runs local Supabase via CLI with hot reload and full dev tooling.
 ### Quick Start — Local Supabase (recommended)
 
 ```bash
-git clone https://github.com/energy-iot/metering-billing-engine.git
-cd metering-billing-engine
+git clone https://github.com/Nearly-Free-Energy/mgm.git
+cd mgm
 ./setup.sh
 npm run dev
 ```
@@ -82,8 +82,8 @@ Open [http://localhost:3000](http://localhost:3000) and log in:
 Connects to an existing hosted Supabase project. No Docker required.
 
 ```bash
-git clone https://github.com/energy-iot/metering-billing-engine.git
-cd metering-billing-engine
+git clone https://github.com/Nearly-Free-Energy/mgm.git
+cd mgm
 
 # Interactive (prompts for credentials):
 ./setup.sh --cloud
@@ -262,15 +262,15 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 
 ## Full-Stack Setup (with OpenEMS)
 
-To test meter readings and billing generation, you need the OpenEMS stack running alongside MBE.
+To test meter readings and billing generation, you need the OpenEMS stack running alongside MGM.
 
 ```bash
 # Terminal 1: Start OpenEMS
-cd ~/Projects/energy-iot/docker-openems
+cd path/to/docker-openems   # your checkout of the OpenEMS Docker stack
 ./setup.sh --edges 1
 
-# Terminal 2: Start MBE
-cd ~/Projects/energy-iot/metering-billing-engine
+# Terminal 2: Start MGM
+cd path/to/mgm
 ./setup.sh            # or ./setup.sh --docker
 ```
 
@@ -289,8 +289,8 @@ If using local/dev mode, run `npm run dev` after setup.
 | Login fails with "Invalid credentials" | Run `supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
 | Billing generation shows "No meter reading data" | Ensure OpenEMS edge simulations are running and meters are assigned to tenants |
-| Docker mode: app not starting | Check `docker compose logs mbe-app` for errors |
-| Docker mode: migration failures | Check `docker compose logs mbe-migrate` for errors. Try `./setup.sh --docker --force` for a fresh start. |
+| Docker mode: app not starting | Check `docker compose logs mgm-app` for errors |
+| Docker mode: migration failures | Check `docker compose logs mgm-migrate` for errors. Try `./setup.sh --docker --force` for a fresh start. |
 
 ## Architecture
 

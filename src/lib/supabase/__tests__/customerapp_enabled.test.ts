@@ -233,7 +233,7 @@ describe("customerapp_enabled acceptance gate (#251)", () => {
     const res1 = await resolveOrgFromToken(makeRequest({ "x-api-key": token }));
     expect(res1.ok).toBe(true);
 
-    // Operator flips it FALSE (super_admin via SQL or future MBE UI).
+    // Operator flips it FALSE (super_admin via SQL or future MGM UI).
     customerappEnabledResult = { data: false, error: null };
 
     // Call 2: same token, same org, but now the gate is closed.

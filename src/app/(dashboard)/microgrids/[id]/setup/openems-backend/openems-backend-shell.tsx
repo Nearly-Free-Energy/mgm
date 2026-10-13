@@ -659,7 +659,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
             Connect OpenEMS
           </h4>
           <p className="mt-2 text-sm text-muted-foreground">
-            Connect this microgrid to its OpenEMS backend. MBE pulls meter
+            Connect this microgrid to its OpenEMS backend. MGM pulls meter
             data from OpenEMS. Choose how to connect:
           </p>
           <div className="mt-4 inline-flex gap-2 rounded-md bg-muted p-1" role="group" aria-label="Connection type">

@@ -55,7 +55,7 @@ export const BillingPlugin = {
     };
     const meteringProviders = ctx.meteringProviders;
     let active = true;
-    // The MBE engine stays behind the generation delegate: the capability
+    // The bill engine stays behind the generation delegate: the capability
     // validates scope and plugin state, then delegates. The metering source
     // is resolved from the root registry once per generation run.
     const generation: BillingGeneration = {

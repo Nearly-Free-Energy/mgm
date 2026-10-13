@@ -99,7 +99,7 @@ export async function resolveActorRole(
 
 /**
  * Mirrors the `{ error: string }` shape used by #79's user-delete route
- * and the rest of the MBE API surface. Keep the key shape identical
+ * and the rest of the MGM API surface. Keep the key shape identical
  * across all #89 routes so a future shared error-helper stays uniform.
  */
 export function errorBody(message: string): { error: string } {

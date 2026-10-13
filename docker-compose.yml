@@ -42,7 +42,7 @@ services:
     image: postgrest/postgrest:v12.2.3
     depends_on:
       postgres: { condition: service_healthy }
-      mbe-migrate: { condition: service_completed_successfully }
+      mgm-migrate: { condition: service_completed_successfully }
     environment:
       PGRST_DB_URI: postgres://postgres:postgres@postgres:5432/postgres
       PGRST_DB_SCHEMAS: public
@@ -70,7 +70,7 @@ services:
       timeout: 5s
       retries: 10
 
-  mbe-migrate:
+  mgm-migrate:
     image: postgres:15-alpine
     depends_on:
       gotrue: { condition: service_healthy }
@@ -104,7 +104,7 @@ services:
       '
     restart: "no"
 
-  mbe-app:
+  mgm-app:
     build:
       context: .
       args:
@@ -113,7 +113,7 @@ services:
         NEXT_PUBLIC_SUPABASE_COOKIE_NAME: sb-mbe-auth-token
     depends_on:
       kong: { condition: service_healthy }
-      mbe-migrate: { condition: service_completed_successfully }
+      mgm-migrate: { condition: service_completed_successfully }
     environment:
       NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
       NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0

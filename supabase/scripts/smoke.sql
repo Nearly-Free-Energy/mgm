@@ -11,7 +11,7 @@
 
 \echo ''
 \echo '======================================================================'
-\echo ' MBE Smoke Test — AB #50 (schema + RLS + seed)'
+\echo ' MGM Smoke Test — AB #50 (schema + RLS + seed)'
 \echo '======================================================================'
 
 -- ── Section 1: SECURITY DEFINER helper functions ──────────────────────────

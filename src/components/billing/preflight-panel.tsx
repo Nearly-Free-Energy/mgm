@@ -51,7 +51,7 @@ export interface PreflightPanelProps {
   households: Household[];
   /** Whether each household has a primary_consumption_meter on a configured edge. */
   edgeAvailableByHouseholdId: Record<string, boolean>;
-  /** #339 — households whose meter has no prior MBE reading. */
+  /** #339 — households whose meter has no prior MGM reading. */
   seedNeededByHouseholdId?: Record<string, boolean>;
   /** Bill measured OpenEMS usage even when an absolute starting dial is unknown. */
   allowUsageOnlyReadings?: boolean;
@@ -544,7 +544,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                 true for its neighbour. Stating an unestablished cause is
                 #335's defect, and this section would have reproduced it. */}
             <p className="mb-2 text-[12px] text-muted-foreground">
-              MBE has no starting reading for these meters, so it cannot work
+              MGM has no starting reading for these meters, so it cannot work
               out what to print as the previous reading on the invoice. Enter
               what each meter reads, and the day you read it.
             </p>

@@ -26,7 +26,7 @@ export interface DeviceDataAdapter {
    * `timezone` is a plain IANA zone name (e.g. "Africa/Kampala") — a string,
    * not an adapter-specific type, so the contract stays backend-agnostic.
    * The adapter resolves `startDate`/`endDate` (YYYY-MM-DD) to local-day
-   * boundaries in that zone; MBE never does offset math itself (#355).
+   * boundaries in that zone; MGM never does offset math itself (#355).
    *
    * Callers in billing pass the billing period's *stamped* timezone
    * (`billing_periods.timezone`), never the microgrid's current value — the

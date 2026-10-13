@@ -491,7 +491,7 @@ export function EditUserDialog(props: EditUserDialogProps) {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         title="Revoke access?"
-        description={`Remove ${t.email}'s access to MBE. They can be re-invited later.`}
+        description={`Remove ${t.email}'s access to MGM. They can be re-invited later.`}
         confirmLabel="Revoke access"
         tone="destructive"
         onConfirm={handleRevoke}

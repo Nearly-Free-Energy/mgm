@@ -154,7 +154,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   // Release 4 (payments): /p/<slug> is the consumer-facing payment-link
-  // indirection. Customers arrive with no MBE session; the middleware MUST
+  // indirection. Customers arrive with no MGM session; the middleware MUST
   // pass-through (the route's service-role SELECT is the access gate).
   it("passes public payment links through without a session", async () => {
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });
@@ -180,7 +180,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   // #294: /api/payments/ipn is Pesapal's IPN webhook — an unauthenticated
-  // server-to-server callback with no MBE session. The middleware MUST
+  // server-to-server callback with no MGM session. The middleware MUST
   // pass it through, otherwise it 401s ("Authentication required") before
   // the route handler runs and payments never auto-mark. Same class as the
   // /api/v1/ hotfix (#267).

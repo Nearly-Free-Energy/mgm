@@ -168,7 +168,7 @@ export default async function EdgeDetailPage({
             title="Run discovery to see meters"
             body={
               <>
-                MBE pulls meters from this edge&apos;s OpenEMS backend. Make
+                MGM pulls meters from this edge&apos;s OpenEMS backend. Make
                 sure the edge is online, then click Discover.
               </>
             }
@@ -185,7 +185,7 @@ export default async function EdgeDetailPage({
             title="Edge is offline — can't discover yet"
             body={
               <>
-                MBE pulls meters from this edge&apos;s OpenEMS backend. Bring{" "}
+                MGM pulls meters from this edge&apos;s OpenEMS backend. Bring{" "}
                 <span className="font-medium text-foreground">{edge.name}</span>{" "}
                 online, then run discovery.
               </>

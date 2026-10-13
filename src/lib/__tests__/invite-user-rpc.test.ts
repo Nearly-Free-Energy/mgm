@@ -328,7 +328,7 @@ describe("fn_change_user_role — permission matrix", () => {
     // BLOCKER 1 regression test. With session_user fix: the trigger's
     // last-super_admin guard fires even via SECURITY DEFINER RPC.
     // Without the fix: current_user == 'postgres' → bypass → the last
-    // super_admin can be demoted, leaving MBE unmanageable.
+    // super_admin can be demoted, leaving MGM unmanageable.
     if (skipIfRequested()) return;
 
     const svc = await serviceClient();
