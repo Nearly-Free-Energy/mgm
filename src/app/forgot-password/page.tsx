@@ -6,7 +6,9 @@
  * Reached by users clicking "Forgot password?" on /login. Submits an
  * email address; the Supabase server emits a recovery email whose
  * `{{ .ConfirmationURL }}` lands the user on /reset-password with a
- * `?token_hash=…&type=recovery` query string.
+ * `#access_token=…&refresh_token=…&type=recovery` fragment. The request
+ * uses an isolated implicit-flow client so opening email in a different
+ * browser does not require a PKCE verifier cookie.
  *
  * Email-enumeration defense (AC2 + AC7 of #190):
  *   - Success copy is identical regardless of whether the email exists.
@@ -25,7 +27,7 @@
  */
 import * as React from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { createRecoveryRequestClient } from "@/lib/supabase/recovery-client";
 import { Banner } from "@/components/ui/banner";
 import { Input } from "@/components/ui/input";
 
@@ -49,7 +51,7 @@ export default function ForgotPasswordPage() {
     if (!email) return;
 
     setPhase({ kind: "submitting" });
-    const supabase = createClient();
+    const supabase = createRecoveryRequestClient();
     const redirectTo = `${window.location.origin}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo,

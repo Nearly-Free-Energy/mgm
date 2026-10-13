@@ -21,8 +21,8 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const resetPasswordForEmailSpy = vi.fn();
 
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({
+vi.mock("@/lib/supabase/recovery-client", () => ({
+  createRecoveryRequestClient: () => ({
     auth: {
       resetPasswordForEmail: (...args: unknown[]) =>
         resetPasswordForEmailSpy(...args),
