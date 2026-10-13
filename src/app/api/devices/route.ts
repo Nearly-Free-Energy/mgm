@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -95,6 +96,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "edge", id: edgeId },
+    method: "POST",
+  });
+  if (pluginGate) return pluginGate;
 
   // Build upsert rows. openems_component_id is required for OpenEMS-sourced edges.
   const rows = (

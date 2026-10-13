@@ -27,6 +27,9 @@ const getEdgesStatusMock = vi.fn();
 const getEdgeConfigMock = vi.fn();
 const getMicrogridEmsConfigMock = vi.fn();
 
+// The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
+
 vi.mock("@/lib/openems", async () => {
   const actual = await vi.importActual<typeof import("@/lib/openems")>(
     "@/lib/openems"

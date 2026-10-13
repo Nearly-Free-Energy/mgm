@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -75,6 +76,13 @@ export async function POST(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "microgrid", id: microgridId },
+    method: "POST",
+  });
+  if (pluginGate) return pluginGate;
 
   // Snapshot existing edges to compute inserted-vs-updated counts.
   const { data: existingRows, error: existingErr } = await supabase

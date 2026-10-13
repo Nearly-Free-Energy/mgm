@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { billingWriteGateForMicrogrid } from "@/lib/billing/guard";
+import { gateRoute } from "@/lib/runtime/gate";
 import type { TierConfig } from "@/lib/types/domain";
 
 const UUID_RE =
@@ -59,10 +59,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const supabase = await createClient();
 
   // Release 3 (issue #5): tariff writes fail closed while billing is disabled.
-  const gate = await billingWriteGateForMicrogrid(
-    supabase,
-    microgrid_id as string
-  );
+  const gate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "microgrid", id: microgrid_id as string },
+    method: "POST",
+  });
   if (gate) return gate;
 
   const { data, error } = await supabase

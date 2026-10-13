@@ -39,6 +39,8 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/plugins/state", () => ({
   isCommunityManagementEnabled: async () => pluginEnabled,
+  // Read by the MGM runtime gate (src/lib/runtime/gate.ts).
+  isPluginEnabledForOrg: async () => pluginEnabled,
 }));
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {
@@ -65,6 +67,19 @@ function configureEntityLookup(result: {
       return {
         select: () => ({
           eq: () => ({ maybeSingle: async () => result }),
+        }),
+      };
+    }
+    if (table === "communities") {
+      // Parent lookup: the organization the runtime gate checks.
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { org_id: "550e8400-e29b-41d4-a716-4466554400f0" },
+              error: null,
+            }),
+          }),
         }),
       };
     }

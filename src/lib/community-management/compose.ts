@@ -1,11 +1,20 @@
+/**
+ * composeCommunityManagement — the community-management capability for one
+ * authenticated, organization-scoped request on the MGM Cordis runtime
+ * (docs/cordis-runtime.md).
+ *
+ * The caller must dispose the composition in `finally`. Disposal unloads the
+ * capability plugin and marks the capability inactive, so a retained
+ * reference cannot write after its request ends.
+ */
 import "server-only";
 
-import { Context, type Fiber } from "cordis";
+import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCurrentUserRoles } from "@/lib/auth/access";
-import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import { isCommunityManagementEnabled } from "@/lib/plugins/state";
 import { COMMUNITY_MANAGEMENT_PLUGIN_VERSION } from "@/lib/plugins/bundled";
+import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
+import "@/lib/runtime/services";
 import { CommunityManagementCapability } from "./capability";
 import { createSupabaseCommunityRepository } from "./infrastructure/supabase-repository";
 import "./scope";
@@ -15,7 +24,6 @@ import {
   type CommunityManagementResult,
   type OrganizationScope,
 } from "./types";
-import { UUID_RE } from "./operations/shared";
 
 export type CommunityManagementComposition = {
   scope: OrganizationScope;
@@ -26,58 +34,58 @@ export type CommunityManagementComposition = {
 export const COMMUNITY_MANAGEMENT_PLUGIN_NAME = "community-management";
 export { COMMUNITY_MANAGEMENT_PLUGIN_VERSION };
 
-function organizationScopePlugin(context: Context, scope: OrganizationScope) {
-  return context.provide("organizationScope", scope);
-}
+/** The community-management capability plugin, loaded per request. */
+export const CommunityManagementPlugin = {
+  name: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+  inject: ["mgmRequest"],
+  apply(ctx: Context) {
+    const request = ctx.mgmRequest;
+    if (!request.userId) {
+      throw new Error("Community management requires an authenticated user");
+    }
+    const scope: OrganizationScope = {
+      organizationId: request.organizationId,
+      userId: request.userId,
+      roles: request.roles,
+    };
+    let active = true;
+    // The capability consumes the repository interface — never the raw
+    // client. Query, auth-plumbing, and RLS details stay behind the
+    // infrastructure boundary.
+    const capability = new CommunityManagementCapability(
+      createSupabaseCommunityRepository(request.supabase),
+      scope,
+      () => active
+    );
+    ctx.provide("organizationScope", scope);
+    ctx.provide("communityManagement", capability);
+    ctx.effect(() => () => {
+      active = false;
+    });
+  },
+} satisfies Plugin.Object<void>;
 
-function communityManagementPlugin(
-  context: Context,
-  capability: CommunityManagementCapabilityContract
-) {
-  return context.provide("communityManagement", capability);
-}
-
-/**
- * Compose one authenticated, organization-scoped Cordis context per caller.
- *
- * The caller must dispose the composition in `finally`. Disposal removes the
- * provided scope/capability from the context and marks the capability
- * inactive, so a retained reference cannot write after its request ends.
- */
 export async function composeCommunityManagement(options: {
   supabase: SupabaseClient;
   organizationId: string;
 }): Promise<CommunityManagementResult<CommunityManagementComposition>> {
-  if (!UUID_RE.test(options.organizationId)) {
-    return communityFailure({
-      status: 400,
-      code: "community_invalid_org",
-      message: "Invalid organization id — expected UUID.",
-      field: "org_id",
-    });
-  }
-
-  const {
-    data: { user },
-  } = await options.supabase.auth.getUser();
-  if (!user) {
-    return communityFailure({
-      status: 401,
-      code: "community_unauthenticated",
-      message: "Authentication required.",
-    });
-  }
-
-  const roles = await getCurrentUserRoles(options.supabase);
-  const canAccess =
-    roles.some((role) => role.role === SUPER_ADMIN) ||
-    roles.some(
-      (role) =>
-        role.role === ORG_MANAGER &&
-        role.scope_type === SCOPE_ORG &&
-        role.scope_id === options.organizationId
-    );
-  if (!canAccess) {
+  const access = await authorizeOrganization(options.supabase, options.organizationId);
+  if (!access.ok) {
+    if (access.reason === "invalid_org") {
+      return communityFailure({
+        status: 400,
+        code: "community_invalid_org",
+        message: "Invalid organization id — expected UUID.",
+        field: "org_id",
+      });
+    }
+    if (access.reason === "unauthenticated") {
+      return communityFailure({
+        status: 401,
+        code: "community_unauthenticated",
+        message: "Authentication required.",
+      });
+    }
     return communityFailure({
       status: 403,
       code: "community_forbidden",
@@ -95,35 +103,27 @@ export async function composeCommunityManagement(options: {
     });
   }
 
-  const scope: OrganizationScope = {
-    organizationId: options.organizationId,
-    userId: user.id,
-    roles,
-  };
-  const context = new Context();
-  const fibers: Fiber[] = [];
-  let active = true;
-  // The capability consumes the repository interface — never the raw
-  // client. Query, auth-plumbing, and RLS details stay behind the
-  // infrastructure boundary.
-  const repository = createSupabaseCommunityRepository(options.supabase);
-  const capability = new CommunityManagementCapability(
-    repository,
-    scope,
-    () => active
-  );
-
+  let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
-    fibers.push(await context.plugin(organizationScopePlugin, scope));
-    fibers.push(await context.plugin(communityManagementPlugin, capability));
-    if (!context.communityManagement || !context.organizationScope) {
+    requestScope = await openOrganizationScope({
+      organizationId: options.organizationId,
+      userId: access.user.id,
+      roles: access.roles,
+      supabase: options.supabase,
+    });
+    await requestScope.load(CommunityManagementPlugin);
+    const communityManagement = requestScope.ctx.get("communityManagement");
+    const scope = requestScope.ctx.get("organizationScope");
+    if (!communityManagement || !scope) {
       throw new Error("Community management capability did not register");
     }
+    const opened = requestScope;
+    return {
+      ok: true,
+      data: { scope, communityManagement, dispose: () => opened.dispose() },
+    };
   } catch (error) {
-    active = false;
-    await Promise.allSettled(
-      [...fibers].reverse().map((fiber) => fiber.dispose())
-    );
+    await requestScope?.dispose();
     return communityFailure({
       status: 500,
       code: "community_composition_failed",
@@ -133,16 +133,4 @@ export async function composeCommunityManagement(options: {
           : "Could not compose community management.",
     });
   }
-
-  return {
-    ok: true,
-    data: {
-      scope,
-      communityManagement: context.communityManagement,
-      async dispose() {
-        for (const fiber of [...fibers].reverse()) await fiber.dispose();
-        active = false;
-      },
-    },
-  };
 }

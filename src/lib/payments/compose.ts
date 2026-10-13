@@ -1,30 +1,30 @@
 /**
- * composePayments — one authenticated, organization-scoped Cordis context
- * per caller for the Payments plugin.
+ * composePayments — the Payments capability for one organization-scoped
+ * request on the MGM Cordis runtime (docs/cordis-runtime.md).
  *
- * Mirrors the billing composition: the caller selects no provider and
- * supplies no credentials. Provider resolution (Pesapal implementation)
- * happens here, once per request, behind the provider-neutral factory.
+ * The caller selects no provider and supplies no credentials. Payment
+ * providers live in the root `paymentProviderRegistry`; the Pesapal plugin
+ * (`providers/pesapal/plugin.ts`) registers there. The capability dispatches
+ * by merchant-account provider. The caller disposes in `finally`.
  */
 import "server-only";
 
-import { Context, type Fiber } from "cordis";
+import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/service";
-import { getCurrentUserRoles } from "@/lib/auth/access";
-import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import {
   PAYMENTS_PLUGIN_VERSION,
   PESAPAL_PLUGIN_VERSION,
 } from "@/lib/plugins/bundled";
+import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
+import "@/lib/runtime/services";
 import { PaymentsCapability } from "./capability";
 import { createSupabasePaymentsRepository } from "./infrastructure/supabase-repository";
-import { PesapalPaymentProvider, baseUrlForSandbox } from "./providers/pesapal/provider";
 import "./scope";
 import {
   paymentsFailure,
-  type MerchantAccountSecret,
   type PaymentsCapabilityContract,
+  type PaymentsRepository,
   type PaymentsResult,
   type PaymentsScope,
   type ProviderFactory,
@@ -41,19 +41,6 @@ export type { PaymentsResult } from "./repository";
 export const PAYMENTS_PLUGIN_NAME = "payments";
 export const PESAPAL_PROVIDER_PLUGIN_NAME = "pesapal";
 export { PAYMENTS_PLUGIN_VERSION, PESAPAL_PLUGIN_VERSION };
-
-function pesapalProviderPlugin(context: Context) { return context.provide("paymentProviders", pesapalProviderFactory); }
-
-function paymentsScopePlugin(context: Context, scope: PaymentsScope) {
-  return context.provide("paymentsScope", scope);
-}
-
-function paymentsCapabilityPlugin(
-  context: Context,
-  capability: PaymentsCapabilityContract
-) {
-  return context.provide("payments", capability);
-}
 
 export function defaultAppUrl(path: string): string {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
@@ -74,133 +61,60 @@ export function defaultAppUrl(path: string): string {
   throw new Error("Application URL is not configured");
 }
 
-const pesapalProviderFactory: ProviderFactory = {
-  async forAccount(account: MerchantAccountSecret) {
-    if (account.provider !== "pesapal") {
-      return { ok: false, code: "payments_unknown_provider", message: `Unknown provider: ${account.provider}` };
-    }
-    if (!account.consumer_key || !account.base_url) {
-      return {
-        ok: false,
-        code: "payments_invalid_config",
-        message: "Merchant account is missing consumer key or base URL.",
-      };
-    }
-    if (!account.ipn_id) {
-      return {
-        ok: false,
-        code: "payments_ipn_not_registered",
-        message:
-          "Payment provider is configured but no IPN has been registered yet. Run Save & test connection to register the IPN URL.",
-      };
-    }
-    try {
-      return {
-        ok: true,
-        provider: new PesapalPaymentProvider({
-          consumerKey: account.consumer_key,
-          consumerSecret: account.secret,
-          baseUrl: account.base_url || baseUrlForSandbox(account.sandbox),
-          ipnId: account.ipn_id,
-        }),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        code: "payments_invalid_config",
-        message: error instanceof Error ? error.message : "Invalid provider configuration.",
-      };
-    }
-  },
-};
+export type PaymentsPluginConfig = { repository: PaymentsRepository };
 
-export async function composePayments(options: {
-  supabase: SupabaseClient;
-  organizationId: string;
-  allowDisabled?: boolean;
-}): Promise<PaymentsResult<PaymentsComposition>> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(options.organizationId)) {
-    return paymentsFailure({
-      status: 400,
-      code: "payments_invalid_org",
-      message: "Invalid organization id — expected UUID.",
-      field: "org_id",
-    });
-  }
-
-  const {
-    data: { user },
-  } = await options.supabase.auth.getUser();
-
-  const roles = await getCurrentUserRoles(options.supabase);
-  const canAccess =
-    roles.some((role) => role.role === SUPER_ADMIN) ||
-    roles.some(
-      (role) =>
-        role.role === ORG_MANAGER &&
-        role.scope_type === SCOPE_ORG &&
-        role.scope_id === options.organizationId
+/** The Payments capability plugin, loaded per request. */
+export const PaymentsPlugin = {
+  name: PAYMENTS_PLUGIN_NAME,
+  inject: ["mgmRequest", "paymentProviderRegistry"],
+  apply(ctx: Context, config: PaymentsPluginConfig) {
+    const request = ctx.mgmRequest;
+    const scope: PaymentsScope = {
+      organizationId: request.organizationId,
+      userId: request.userId,
+      roles: request.roles,
+    };
+    const registry = ctx.paymentProviderRegistry;
+    let active = true;
+    const providers: ProviderFactory = {
+      forAccount: (account) => {
+        if (!active) throw new Error("Payment provider plugin unavailable");
+        return registry.forAccount(account);
+      },
+    };
+    const capability = new PaymentsCapability(
+      config.repository,
+      scope,
+      providers,
+      () => active,
+      defaultAppUrl
     );
-
-  // Public callers (IPN webhook, /pay redirect) compose with a service-role
-  // client and no user session: allow when user is null only if the caller
-  // explicitly opts in via allowDisabled-style public path? No — public
-  // routes use `composePaymentsPublic` below. This path requires auth.
-  if (!user) {
-    return paymentsFailure({
-      status: 401,
-      code: "payments_unauthenticated",
-      message: "Authentication required.",
+    ctx.provide("paymentProviders", providers);
+    ctx.provide("paymentsScope", scope);
+    ctx.provide("payments", capability);
+    ctx.effect(() => () => {
+      active = false;
     });
-  }
-  if (!canAccess) {
-    return paymentsFailure({
-      status: 403,
-      code: "payments_forbidden",
-      message: "Not authorized to act on this organization.",
-    });
-  }
+  },
+} satisfies Plugin.Object<PaymentsPluginConfig>;
 
-  const repository = createSupabasePaymentsRepository(options.supabase, createServiceClient());
-  if (
-    !options.allowDisabled &&
-    (!(await repository.isPaymentsEnabled(options.organizationId)) ||
-      !(await repository.isPesapalEnabled(options.organizationId)))
-  ) {
-    // Reads (history, readiness) stay available — callers that need them pass
-    // allowDisabled. New checkouts are gated in the capability instead so the
-    // error shape stays checkout-specific.
-  }
-
-  const scope: PaymentsScope = {
-    organizationId: options.organizationId,
-    userId: user.id,
-    roles,
-  };
-  const context = new Context();
-  const fibers: Fiber[] = [];
-  let active = true;
-  const capability = new PaymentsCapability(
-    repository,
-    scope,
-    { forAccount: (account) => {
-      if (!context.paymentProviders) throw new Error("Payment provider plugin unavailable");
-      return context.paymentProviders.forAccount(account);
-    } },
-    () => active,
-    defaultAppUrl
-  );
-
+async function loadPayments(input: {
+  request: PaymentsScope & { supabase: SupabaseClient };
+  repository: PaymentsRepository;
+}): Promise<PaymentsResult<PaymentsComposition>> {
+  let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
-    fibers.push(await context.plugin(pesapalProviderPlugin));
-    fibers.push(await context.plugin(paymentsScopePlugin, scope));
-    fibers.push(await context.plugin(paymentsCapabilityPlugin, capability));
-    if (!context.payments || !context.paymentsScope) {
+    requestScope = await openOrganizationScope(input.request);
+    await requestScope.load(PaymentsPlugin, { repository: input.repository });
+    const payments = requestScope.ctx.get("payments");
+    const scope = requestScope.ctx.get("paymentsScope");
+    if (!payments || !scope) {
       throw new Error("Payments capability did not register");
     }
+    const opened = requestScope;
+    return { ok: true, data: { scope, payments, dispose: () => opened.dispose() } };
   } catch (error) {
-    active = false;
-    await Promise.allSettled([...fibers].reverse().map((fiber) => fiber.dispose()));
+    await requestScope?.dispose();
     return paymentsFailure({
       status: 500,
       code: "payments_composition_failed",
@@ -210,18 +124,51 @@ export async function composePayments(options: {
           : "Could not compose payments.",
     });
   }
+}
 
-  return {
-    ok: true,
-    data: {
-      scope,
-      payments: capability,
-      async dispose() {
-        for (const fiber of [...fibers].reverse()) await fiber.dispose();
-        active = false;
-      },
+export async function composePayments(options: {
+  supabase: SupabaseClient;
+  organizationId: string;
+  /**
+   * Reads (history, readiness) stay available while Payments is disabled;
+   * new checkouts are gated inside the capability so the error shape stays
+   * checkout-specific. Kept for call-site compatibility.
+   */
+  allowDisabled?: boolean;
+}): Promise<PaymentsResult<PaymentsComposition>> {
+  const access = await authorizeOrganization(options.supabase, options.organizationId);
+  if (!access.ok) {
+    if (access.reason === "invalid_org") {
+      return paymentsFailure({
+        status: 400,
+        code: "payments_invalid_org",
+        message: "Invalid organization id — expected UUID.",
+        field: "org_id",
+      });
+    }
+    if (access.reason === "unauthenticated") {
+      return paymentsFailure({
+        status: 401,
+        code: "payments_unauthenticated",
+        message: "Authentication required.",
+      });
+    }
+    return paymentsFailure({
+      status: 403,
+      code: "payments_forbidden",
+      message: "Not authorized to act on this organization.",
+    });
+  }
+
+  return loadPayments({
+    request: {
+      organizationId: options.organizationId,
+      userId: access.user.id,
+      roles: access.roles,
+      supabase: options.supabase,
     },
-  };
+    repository: createSupabasePaymentsRepository(options.supabase, createServiceClient()),
+  });
 }
 
 /**
@@ -235,53 +182,13 @@ export async function composePaymentsPublic(options: {
   supabase: SupabaseClient;
   organizationId: string;
 }): Promise<PaymentsResult<PaymentsComposition>> {
-  const repository = createSupabasePaymentsRepository(options.supabase);
-  const scope: PaymentsScope = {
-    organizationId: options.organizationId,
-    userId: null,
-    roles: [],
-  };
-  const context = new Context();
-  const fibers: Fiber[] = [];
-  let active = true;
-  const capability = new PaymentsCapability(
-    repository,
-    scope,
-    { forAccount: (account) => {
-      if (!context.paymentProviders) throw new Error("Payment provider plugin unavailable");
-      return context.paymentProviders.forAccount(account);
-    } },
-    () => active,
-    defaultAppUrl
-  );
-  try {
-    fibers.push(await context.plugin(pesapalProviderPlugin));
-    fibers.push(await context.plugin(paymentsScopePlugin, scope));
-    fibers.push(await context.plugin(paymentsCapabilityPlugin, capability));
-    if (!context.payments || !context.paymentsScope) {
-      throw new Error("Payments capability did not register");
-    }
-  } catch (error) {
-    active = false;
-    await Promise.allSettled([...fibers].reverse().map((fiber) => fiber.dispose()));
-    return paymentsFailure({
-      status: 500,
-      code: "payments_composition_failed",
-      message:
-        error instanceof Error
-          ? `Could not compose payments: ${error.message}`
-          : "Could not compose payments.",
-    });
-  }
-  return {
-    ok: true,
-    data: {
-      scope,
-      payments: capability,
-      async dispose() {
-        for (const fiber of [...fibers].reverse()) await fiber.dispose();
-        active = false;
-      },
+  return loadPayments({
+    request: {
+      organizationId: options.organizationId,
+      userId: null,
+      roles: [],
+      supabase: options.supabase,
     },
-  };
+    repository: createSupabasePaymentsRepository(options.supabase),
+  });
 }

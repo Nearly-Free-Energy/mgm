@@ -379,6 +379,17 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       });
       const json = (await res.json()) as Record<string, unknown>;
 
+      if (res.status === 409 && typeof json.code === "string" && json.code.endsWith("_disabled")) {
+        // The MGM runtime gate: the plugin is off for this organization.
+        setOutcome({
+          kind: "generic_error",
+          message:
+            (typeof json.error === "string" ? json.error : "") ||
+            "This feature is disabled for your organization. Enable it in Settings → Plugins.",
+        });
+        return;
+      }
+
       if (res.status === 409) {
         // Branch (a) draft exists, or branch (b) requires_typed_confirmation.
         if (

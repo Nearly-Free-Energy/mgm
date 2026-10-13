@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
@@ -41,6 +42,13 @@ export async function POST(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "microgrid", id: microgridId },
+    method: "POST",
+  });
+  if (pluginGate) return pluginGate;
 
   // Discover resolves the decrypted secret via getMicrogridEmsConfig, so this
   // is a READ gate on the stored credential and it has to run before that call

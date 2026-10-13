@@ -165,8 +165,8 @@ vi.mock("@/lib/auth/access", () => ({
   currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
 }));
 
-vi.mock("@/lib/billing/guard", () => ({
-  billingWriteGateForMicrogrid: async () => null,
+vi.mock("@/lib/runtime/gate", () => ({
+  gateRoute: async () => null,
 }));
 
 const LI_UUID = "660e8400-e29b-41d4-a716-446655440111";

@@ -66,6 +66,11 @@ let mockInsertResult: { data: { id: string } | null; error: { message: string } 
   error: null,
 };
 
+// The MGM runtime gate: allow by default; individual tests set a response.
+let gateResponse: Response | null = null;
+const gateRoute = vi.fn(async () => gateResponse);
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute }));
+
 vi.mock("@/lib/internal-auth", () => ({
   resolveOrgFromToken: () => Promise.resolve(mockAuthResult),
   resolveMicrogridOrgId: () => Promise.resolve(mockMicrogridOrgResult),
@@ -109,6 +114,7 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
     mockMicrogridOrgResult = { ok: true, org_id: "org-uuid-1" };
     insertsByTable = {};
     mockInsertResult = { data: { id: "bp-id-1" }, error: null };
+    gateResponse = null;
   });
 
   it("401 when auth fails", async () => {
@@ -347,6 +353,40 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
     const json = await res.json();
     expect(json.error).toBe("microgrid_not_found");
     expect(insertsByTable["billing_periods"]).toBeUndefined();
+  });
+
+  it("409 billing_disabled when the token's organization has Billing off", async () => {
+    gateResponse = Response.json({ error: "Billing is disabled", code: "billing_disabled" }, { status: 409 });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        microgrid_id: MICROGRID_ID,
+        start_date: "2026-01-01",
+        end_date: "2026-01-31",
+      })
+    );
+    expect(res.status).toBe(409);
+    expect(gateRoute).toHaveBeenCalledWith(expect.anything(), {
+      plugin: "billing",
+      target: { kind: "organization", id: "org-uuid-1" },
+      method: "POST",
+    });
+    expect(insertsByTable.billing_periods ?? []).toEqual([]);
+  });
+
+  it("checks organization ownership before the plugin gate (no cross-org signal)", async () => {
+    mockMicrogridOrgResult = { ok: true, org_id: "org-uuid-OTHER" };
+    gateResponse = Response.json({ code: "billing_disabled" }, { status: 409 });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        microgrid_id: MICROGRID_ID,
+        start_date: "2026-01-01",
+        end_date: "2026-01-31",
+      })
+    );
+    expect(res.status).toBe(403);
+    expect(gateRoute).not.toHaveBeenCalled();
   });
 
   it("#254: accepts when payload microgrid belongs to the token's org", async () => {

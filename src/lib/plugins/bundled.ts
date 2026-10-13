@@ -66,6 +66,7 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/api/mgm/bootstrap",
     "/api/organizations",
     "/api/users",
+    "/api/org-api-tokens",
   ],
   tables: ["organizations", "user_roles", "user_profiles", "mgm_plugins"],
 };
@@ -90,6 +91,7 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
     "/api/communities",
     "/api/microgrids",
     "/api/households",
+    "/api/v1/microgrids",
   ],
   tables: ["communities", "microgrids", "households"],
 };
@@ -115,7 +117,13 @@ export const METERING_PLUGIN: BundledPlugin = {
   ],
   routes: [
     "/api/microgrids/[id]/openems-backend",
+    "/api/microgrids/[id]/edges",
+    "/api/edges",
+    "/api/devices",
+    "/api/households/[id]/assignments",
+    "/api/metering",
     "/api/meter-readings",
+    "/api/openems",
   ],
   tables: ["devices", "edges", "household_devices", "meter_readings"],
 };
@@ -144,6 +152,11 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/billing-periods",
     "/api/billing-line-items",
     "/api/billing-review",
+    "/api/communities/[id]/invoice-config",
+    "/api/communities/[id]/invoice-preview",
+    "/api/communities/[id]/invoice-logo",
+    "/api/v1/billing-periods",
+    "/api/v1/billing",
   ],
   tables: [
     "rate_schedules",
@@ -175,6 +188,8 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
     "/api/payments",
     "/api/billing-line-items/[id]/pay",
     "/api/billing-line-items/[id]/url",
+    "/api/organizations/[id]/payment-accounts",
+    "/api/communities/[id]/payment",
   ],
   tables: [
     "payment_merchant_accounts",
@@ -335,4 +350,38 @@ export function validatePluginToggle(input: {
   }
 
   return { ok: true };
+}
+
+function routeSegments(route: string): string[] {
+  return route
+    .replace(/\/+$/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => (/^\[.+\]$/.test(segment) ? "[]" : segment));
+}
+
+/**
+ * The bundled plugin that owns an API or page route: the plugin whose
+ * `routes` entry is the longest segment-prefix of the path. Bracketed
+ * segments (`[id]`) match any one segment. Undefined when no plugin claims
+ * the route.
+ */
+export function getRouteOwner(route: string): BundledPlugin | undefined {
+  const path = routeSegments(route);
+  let best: { plugin: BundledPlugin; length: number } | undefined;
+  for (const plugin of MGM_BUNDLED_PLUGINS) {
+    for (const pattern of plugin.routes) {
+      const segments = routeSegments(pattern);
+      if (segments.length > path.length) continue;
+      // The root page ("/") owns only itself, not every route.
+      if (segments.length === 0 && path.length > 0) continue;
+      const matches = segments.every(
+        (segment, index) => segment === "[]" || segment === path[index]
+      );
+      if (matches && (!best || segments.length > best.length)) {
+        best = { plugin, length: segments.length };
+      }
+    }
+  }
+  return best?.plugin;
 }

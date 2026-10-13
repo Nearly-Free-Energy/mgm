@@ -14,6 +14,9 @@ const MG_ID = "550e8400-e29b-41d4-a716-446655440000";
 
 const mockFrom = vi.fn();
 
+// The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mockFrom }),
 }));

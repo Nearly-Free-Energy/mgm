@@ -93,6 +93,19 @@ let mockGenerationOutput: unknown = {
   ],
 };
 
+// The MGM runtime gate: allow by default; individual tests set a response.
+let gateResponse: Response | null = null;
+const gateRoute = vi.fn(async () => gateResponse);
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/runtime/gate")>()),
+  gateRoute,
+}));
+
+// The runtime's OpenEMS platform plugin builds providers through this factory.
+vi.mock("@/lib/metering/openems-provider", () => ({
+  createOpenEmsMeteringProvider: (supabase: unknown) => ({ provider: "openems-stub", supabase }),
+}));
+
 vi.mock("@/lib/internal-auth", () => ({
   resolveOrgFromToken: () => Promise.resolve(mockAuthResult),
   resolveMicrogridOrgId: (_supabase: unknown, microgrid_id: string) => {
@@ -163,6 +176,7 @@ describe("POST /api/v1/billing/generate (#254)", () => {
       error: null,
     };
     runGenerationCalls = [];
+    gateResponse = null;
     mockGenerationOutput = {
       results: [
         {
@@ -327,6 +341,37 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     expect(
       (runGenerationCalls[0] as Record<string, unknown>).householdIds
     ).toBeUndefined();
+  });
+
+  it("bills through the runtime's metering provider registry", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody()));
+    expect(res.status).toBe(200);
+    expect(runGenerationCalls[0]?.meteringProvider).toMatchObject({ provider: "openems-stub" });
+  });
+
+  it("409 billing_disabled when the token's organization has Billing off", async () => {
+    gateResponse = Response.json({ error: "Billing is disabled", code: "billing_disabled" }, { status: 409 });
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody()));
+    expect(res.status).toBe(409);
+    expect(gateRoute).toHaveBeenCalledWith(expect.anything(), {
+      plugin: "billing",
+      target: { kind: "organization", id: "org-uuid-1" },
+      method: "POST",
+    });
+    expect(runGenerationCalls).toHaveLength(0);
+  });
+
+  it("checks the period's organization before the plugin gate (no cross-org signal)", async () => {
+    mockMicrogridOrgResolver = (id: string) =>
+      id === MICROGRID_ID ? { ok: true, org_id: "org-uuid-1" } : { ok: true, org_id: "org-uuid-OTHER" };
+    mockPeriodResult = { data: { id: PERIOD_ID, microgrid_id: "550e8400-e29b-41d4-a716-446655440999" }, error: null };
+    gateResponse = Response.json({ code: "billing_disabled" }, { status: 409 });
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody()));
+    expect(res.status).toBe(403);
+    expect(gateRoute).not.toHaveBeenCalled();
   });
 
   it("400 when manualReadings is present but not an array", async () => {

@@ -216,3 +216,28 @@ describe("MGM bundled plugins", () => {
     });
   });
 });
+
+describe("getRouteOwner", () => {
+  it.each([
+    ["/api/organizations/abc/plugins", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+    ["/api/organizations/abc/payment-accounts", PAYMENTS_PLUGIN_NAME],
+    ["/api/communities/abc", COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+    ["/api/communities/abc/invoice-config", BILLING_PLUGIN_NAME],
+    ["/api/communities/abc/payment/override", PAYMENTS_PLUGIN_NAME],
+    ["/api/households/abc", COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+    ["/api/households/abc/assignments", METERING_PLUGIN_NAME],
+    ["/api/microgrids/[id]/openems-backend/discover", METERING_PLUGIN_NAME],
+    ["/api/billing-line-items/[lineItemId]/pdf", BILLING_PLUGIN_NAME],
+    ["/api/billing-line-items/[lineItemId]/pay", PAYMENTS_PLUGIN_NAME],
+    ["/api/payments/ipn", PESAPAL_PLUGIN_NAME],
+    ["/", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+  ])("%s belongs to %s", async (route, plugin) => {
+    const { getRouteOwner } = await import("../bundled");
+    expect(getRouteOwner(route)?.name).toBe(plugin);
+  });
+
+  it("does not let the root page claim every route", async () => {
+    const { getRouteOwner } = await import("../bundled");
+    expect(getRouteOwner("/api/unclaimed")).toBeUndefined();
+  });
+});

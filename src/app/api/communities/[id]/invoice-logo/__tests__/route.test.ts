@@ -24,8 +24,8 @@ const COMMUNITY_ID = "550e8400-e29b-41d4-a716-446655440010";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440020";
 let billingGateResponse: Response | null = null;
 
-vi.mock("@/lib/billing/guard", () => ({
-  billingWriteGateForCommunity: async () => billingGateResponse,
+vi.mock("@/lib/runtime/gate", () => ({
+  gateRoute: async () => billingGateResponse,
 }));
 
 let canAccessOrgReturn = true;

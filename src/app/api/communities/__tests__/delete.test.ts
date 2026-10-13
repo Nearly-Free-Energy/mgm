@@ -41,6 +41,8 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@/lib/plugins/state", () => ({
   isCommunityManagementEnabled: async () => pluginEnabled,
+  // Read by the MGM runtime gate (src/lib/runtime/gate.ts).
+  isPluginEnabledForOrg: async () => pluginEnabled,
 }));
 
 function chainable(result: { data: unknown; error: unknown; count?: number }) {

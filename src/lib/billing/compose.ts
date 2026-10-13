@@ -1,21 +1,20 @@
 /**
- * composeBilling — one authenticated, organization-scoped Cordis context
- * per caller for the billing plugin (issue #5).
+ * composeBilling — the billing capability for one authenticated,
+ * organization-scoped request on the MGM Cordis runtime (issue #5,
+ * docs/cordis-runtime.md).
  *
- * Mirrors the metering composition: the caller selects no provider and
- * supplies no credentials. The composition wires the MBE bill engine
- * (`runGenerationFor`) to the request-scoped OpenEMS metering provider —
- * billing never constructs a vendor client itself — then disposes
- * everything in `finally`.
+ * The caller selects no provider and supplies no credentials. The billing
+ * plugin injects the root `meteringProviders` registry and binds the OpenEMS
+ * source to the caller's client — billing never constructs a vendor client
+ * itself. The caller disposes the composition in `finally`.
  */
 import "server-only";
 
-import { Context, type Fiber } from "cordis";
+import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCurrentUserRoles } from "@/lib/auth/access";
-import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import { BILLING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
+import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
+import "@/lib/runtime/services";
 import { BillingCapability } from "./capability";
 import { createSupabaseBillingRepository } from "./infrastructure/supabase-repository";
 import { isRunGenerationFatal, runGenerationFor } from "./generate";
@@ -24,6 +23,7 @@ import {
   billingFailure,
   type BillingCapabilityContract,
   type BillingGeneration,
+  type BillingRepository,
   type BillingResult,
   type BillingScope,
 } from "./repository";
@@ -39,54 +39,79 @@ export type { BillingResult } from "./repository";
 export const BILLING_PLUGIN_NAME = "billing";
 export { BILLING_PLUGIN_VERSION };
 
-function billingScopePlugin(context: Context, scope: BillingScope) {
-  return context.provide("billingScope", scope);
-}
+export type BillingPluginConfig = { repository: BillingRepository };
 
-function billingCapabilityPlugin(
-  context: Context,
-  capability: BillingCapabilityContract
-) {
-  return context.provide("billing", capability);
-}
+/** The billing capability plugin, loaded per request. */
+export const BillingPlugin = {
+  name: BILLING_PLUGIN_NAME,
+  inject: ["mgmRequest", "meteringProviders"],
+  apply(ctx: Context, config: BillingPluginConfig) {
+    const request = ctx.mgmRequest;
+    if (!request.userId) throw new Error("Billing requires an authenticated user");
+    const scope: BillingScope = {
+      organizationId: request.organizationId,
+      userId: request.userId,
+      roles: request.roles,
+    };
+    const meteringProviders = ctx.meteringProviders;
+    let active = true;
+    // The MBE engine stays behind the generation delegate: the capability
+    // validates scope and plugin state, then delegates. The metering source
+    // is resolved from the root registry once per generation run.
+    const generation: BillingGeneration = {
+      async run(input) {
+        const out = await runGenerationFor({
+          supabase: request.supabase,
+          periodId: input.periodId,
+          householdIds: input.householdIds,
+          manualReadings: input.manualReadings,
+          seedReadings: input.seedReadings,
+          mode: input.mode,
+          actorUserId: input.actorUserId,
+          meteringProvider: meteringProviders.create("openems", request.supabase),
+          requireEffectiveDatedAssignments: true,
+          allowUsageOnlyReadings: true,
+        });
+        if (isRunGenerationFatal(out)) return out;
+        return { results: out.results };
+      },
+    };
+    const capability = new BillingCapability(
+      config.repository,
+      scope,
+      generation,
+      () => active
+    );
+    ctx.provide("billingScope", scope);
+    ctx.provide("billing", capability);
+    ctx.effect(() => () => {
+      active = false;
+    });
+  },
+} satisfies Plugin.Object<BillingPluginConfig>;
 
 export async function composeBilling(options: {
   supabase: SupabaseClient;
   organizationId: string;
   readOnly?: boolean;
 }): Promise<BillingResult<BillingComposition>> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    options.organizationId
-  )) {
-    return billingFailure({
-      status: 400,
-      code: "billing_invalid_org",
-      message: "Invalid organization id — expected UUID.",
-      field: "org_id",
-    });
-  }
-
-  const {
-    data: { user },
-  } = await options.supabase.auth.getUser();
-  if (!user) {
-    return billingFailure({
-      status: 401,
-      code: "billing_unauthenticated",
-      message: "Authentication required.",
-    });
-  }
-
-  const roles = await getCurrentUserRoles(options.supabase);
-  const canAccess =
-    roles.some((role) => role.role === SUPER_ADMIN) ||
-    roles.some(
-      (role) =>
-        role.role === ORG_MANAGER &&
-        role.scope_type === SCOPE_ORG &&
-        role.scope_id === options.organizationId
-    );
-  if (!canAccess) {
+  const access = await authorizeOrganization(options.supabase, options.organizationId);
+  if (!access.ok) {
+    if (access.reason === "invalid_org") {
+      return billingFailure({
+        status: 400,
+        code: "billing_invalid_org",
+        message: "Invalid organization id — expected UUID.",
+        field: "org_id",
+      });
+    }
+    if (access.reason === "unauthenticated") {
+      return billingFailure({
+        status: 401,
+        code: "billing_unauthenticated",
+        message: "Authentication required.",
+      });
+    }
     return billingFailure({
       status: 403,
       code: "billing_forbidden",
@@ -105,48 +130,27 @@ export async function composeBilling(options: {
     });
   }
 
-  const scope: BillingScope = {
-    organizationId: options.organizationId,
-    userId: user.id,
-    roles,
-  };
-  const context = new Context();
-  const fibers: Fiber[] = [];
-  let active = true;
-  // The MBE engine stays behind the generation delegate: the capability
-  // validates scope and plugin state, then delegates. Vendor resolution
-  // (OpenEMS provider) happens here, once per request.
-  const generation: BillingGeneration = {
-    async run(input) {
-      const out = await runGenerationFor({
-        supabase: options.supabase,
-        periodId: input.periodId,
-        householdIds: input.householdIds,
-        manualReadings: input.manualReadings,
-        seedReadings: input.seedReadings,
-        mode: input.mode,
-        actorUserId: input.actorUserId,
-        meteringProvider: createOpenEmsMeteringProvider(options.supabase),
-        requireEffectiveDatedAssignments: true,
-        allowUsageOnlyReadings: true,
-      });
-      if (isRunGenerationFatal(out)) return out;
-      return { results: out.results };
-    },
-  };
-  const capability = new BillingCapability(repository, scope, generation, () => active);
-
+  let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
-    fibers.push(await context.plugin(billingScopePlugin, scope));
-    fibers.push(await context.plugin(billingCapabilityPlugin, capability));
-    if (!context.billing || !context.billingScope) {
+    requestScope = await openOrganizationScope({
+      organizationId: options.organizationId,
+      userId: access.user.id,
+      roles: access.roles,
+      supabase: options.supabase,
+    });
+    await requestScope.load(BillingPlugin, { repository });
+    const billing = requestScope.ctx.get("billing");
+    const scope = requestScope.ctx.get("billingScope");
+    if (!billing || !scope) {
       throw new Error("Billing capability did not register");
     }
+    const opened = requestScope;
+    return {
+      ok: true,
+      data: { scope, billing, dispose: () => opened.dispose() },
+    };
   } catch (error) {
-    active = false;
-    await Promise.allSettled(
-      [...fibers].reverse().map((fiber) => fiber.dispose())
-    );
+    await requestScope?.dispose();
     return billingFailure({
       status: 500,
       code: "billing_composition_failed",
@@ -156,16 +160,4 @@ export async function composeBilling(options: {
           : "Could not compose billing.",
     });
   }
-
-  return {
-    ok: true,
-    data: {
-      scope,
-      billing: capability,
-      async dispose() {
-        for (const fiber of [...fibers].reverse()) await fiber.dispose();
-        active = false;
-      },
-    },
-  };
 }
