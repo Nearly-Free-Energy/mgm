@@ -23,6 +23,12 @@ const WRITE_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as const;
 /** Routes no plugin owns. */
 const UNOWNED = new Set(["/api/mgm/health"]);
 
+// GETs that call integrations are gated as writes, not historical data reads.
+const EXTERNAL_GETS = new Set([
+  "/api/openems/status",
+  "/api/edges/[id]/discover-devices",
+]);
+
 /**
  * Write handlers that intentionally do not consult the gate. Each needs a
  * reason a reviewer can check.
@@ -165,7 +171,11 @@ describe("MGM runtime route surface", () => {
       if (!owner || owner.core) continue;
       const sources = handlerSources(readFileSync(file, "utf8"));
       for (const [method, source] of sources) {
-        if (!(WRITE_METHODS as readonly string[]).includes(method)) continue;
+        const externalGet = method === "GET" && EXTERNAL_GETS.has(route);
+        if (!(WRITE_METHODS as readonly string[]).includes(method) && !externalGet) continue;
+        if (externalGet && !/access:\s*"write"/.test(source)) {
+          offenders.push(`GET ${route} must classify integration access as write`);
+        }
         const key = `${method} ${route.replace(/\[[^\]]+\]/g, "[id]")}`;
         if (UNGATED_WRITES[key]) continue;
         if (!entersRuntime(source, owner.name)) offenders.push(`${key} (${owner.name})`);
@@ -175,6 +185,14 @@ describe("MGM runtime route surface", () => {
       offenders,
       "Call gateRoute(...) with the owning plugin, compose its capability, or document an exemption"
     ).toEqual([]);
+  });
+
+  it("inventories every GET that constructs a vendor client", () => {
+    const external = routes.filter(({ file }) => {
+      const source = handlerSources(readFileSync(file, "utf8")).get("GET") ?? "";
+      return /\bcreateOpenEmsClient\(/.test(source);
+    }).map(({ route }) => route).sort();
+    expect(external).toEqual([...EXTERNAL_GETS].sort());
   });
 
   it("keeps every exemption pointed at a real write handler", () => {

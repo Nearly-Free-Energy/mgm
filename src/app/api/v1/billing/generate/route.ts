@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
     actorUserId: null,
     actorKind: "customerapp",
     actorRef: auth.token_name,
-    meteringProvider: runtime.meteringProviders.create("openems", supabase),
+    meteringProvider: runtime.meteringProviders.forRequest(supabase),
   });
 
   if (isRunGenerationFatal(out)) {

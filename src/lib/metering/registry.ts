@@ -1,6 +1,6 @@
 import type { MeteringProvider } from "./types";
 
-export type MeteringProviderName = "openems" | "fixture";
+export type MeteringProviderName = string;
 
 /**
  * Small request-scoped registry. It deliberately has no fallback: production

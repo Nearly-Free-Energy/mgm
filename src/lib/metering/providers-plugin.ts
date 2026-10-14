@@ -18,7 +18,8 @@ export const OpenEmsMeteringPlugin = {
     // Registration is undone when this fiber unloads.
     ctx.effect(() =>
       ctx.meteringProviders.register("openems", (supabase) =>
-        createOpenEmsMeteringProvider(supabase)
+        createOpenEmsMeteringProvider(supabase),
+        { fallback: true }
       )
     );
   },

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
+import { getMgmRuntime } from "@/lib/runtime/root";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import {
   isRunGenerationFatal,
@@ -320,7 +320,7 @@ export async function PATCH(
     ],
     mode: "write",
     actorUserId: user.id,
-    meteringProvider: createOpenEmsMeteringProvider(supabase),
+    meteringProvider: (await getMgmRuntime()).meteringProviders.forRequest(supabase),
   });
 
   if (isRunGenerationFatal(out)) {
