@@ -21,8 +21,8 @@ def main(argv=None):
     parser.add_argument("--credential-writes-paused", action="store_true")
     parser.add_argument("--backup-confirmed", action="store_true")
     args = parser.parse_args(argv)
-    if args.commit and not (args.credential_writes_paused and args.backup_confirmed):
-        parser.error("Commit requires --credential-writes-paused and --backup-confirmed")
+    if args.operation == "rotate" and args.commit and not (args.credential_writes_paused and args.backup_confirmed):
+        parser.error("Rotation commit requires --credential-writes-paused and --backup-confirmed")
     if not (os.environ.get("PGSERVICE") or os.environ.get("PGDATABASE")):
         parser.error("Configure PGSERVICE or PGDATABASE for the intended database")
     if args.operation == "rotate":

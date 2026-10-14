@@ -6,9 +6,9 @@ operations against production. CI rehearsals use a disposable local database.
 
 ## Before committing an operation
 
-1. Back up the current key in the password manager. For rotation, generate a
+1. For rotation, back up the current key in the password manager and generate a
    new key there and save it before use.
-2. Pause credential configuration writes and drain in-flight requests. Keep
+2. For rotation, pause credential configuration writes and drain in-flight requests. Keep
    them paused until verification completes. Table locks do not drain requests
    that already encrypted a secret before the maintenance transaction.
 3. Select the intended database explicitly through a PostgreSQL service entry
@@ -46,11 +46,16 @@ After the dry run passes and the prerequisites above are fulfilled:
 
 ```bash
 PGSERVICE=your-maintenance-service python3 scripts/credential-key-maintenance.py rotate --commit --credential-writes-paused --backup-confirmed
-PGSERVICE=your-maintenance-service python3 scripts/credential-key-maintenance.py retire --commit --credential-writes-paused --backup-confirmed
+PGSERVICE=your-maintenance-service python3 scripts/credential-key-maintenance.py retire --commit
 ```
 
 These are independent operations; retirement does not require rotating the
-key. The flags are operator acknowledgments, not automatic downtime detection.
+key. Retirement preserves the matching MGM key and all ciphertext. The helper
+locks Vault and credential tables while checking equality, deleting the duplicate,
+and verifying decryption. In-flight application writes remain valid because the
+key value does not change, so retirement needs no rotation write pause or new
+key backup. Keep the usual disaster-recovery key backup regardless of retirement.
+The rotation flags are operator acknowledgments, not automatic downtime detection.
 Run one at a time. Verify an OpenEMS connection, the active Pesapal account,
 and an existing payment attempt before resuming credential writes. Keep the
 old key backup until the verification is complete. See [the DEK runbook](dek.md)

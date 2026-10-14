@@ -30,10 +30,10 @@ class MaintenanceTests(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["input"].endswith("ROLLBACK;\n"))
         self.assertIn("synthetic-''replacement-key-", run.call_args.kwargs["input"])
 
-    def test_commit_requires_both_acknowledgments(self):
+    def test_rotation_commit_requires_both_acknowledgments(self):
         with patch.object(maintenance.subprocess, "run") as run, redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                maintenance.main(["retire", "--commit"])
+                maintenance.main(["rotate", "--commit"])
             run.assert_not_called()
 
     def test_explicit_commit_and_failure_output(self):
@@ -45,6 +45,12 @@ class MaintenanceTests(unittest.TestCase):
     def test_retirement_uses_the_validating_helper(self):
         result, _, run, _ = self.run_cli(["retire"])
         self.assertEqual(result, 0)
+        self.assertIn("SELECT pg_temp.mgm_retire_legacy_credential_key();", run.call_args.kwargs["input"])
+
+    def test_retirement_commit_keeps_rotation_acknowledgments_separate(self):
+        result, _, run, _ = self.run_cli(["retire", "--commit"])
+        self.assertEqual(result, 0)
+        self.assertTrue(run.call_args.kwargs["input"].endswith("COMMIT;\n"))
         self.assertIn("SELECT pg_temp.mgm_retire_legacy_credential_key();", run.call_args.kwargs["input"])
 
 
