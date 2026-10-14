@@ -165,7 +165,8 @@ vi.mock("@/lib/auth/access", () => ({
   currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
 }));
 
-vi.mock("@/lib/runtime/gate", () => ({
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/runtime/gate")>(),
   gateRoute: async () => null,
 }));
 

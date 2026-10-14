@@ -347,7 +347,7 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     const { POST } = await import("../route");
     const res = await POST(makePostRequest(validBody()));
     expect(res.status).toBe(200);
-    expect(runGenerationCalls[0]?.meteringProvider).toMatchObject({ provider: "openems-stub" });
+    expect(runGenerationCalls[0]?.meteringProvider).toMatchObject({ getReadings: expect.any(Function) });
   });
 
   it("409 billing_disabled when the token's organization has Billing off", async () => {

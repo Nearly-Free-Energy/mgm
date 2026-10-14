@@ -23,11 +23,20 @@ Platform plugins hold no request data, credentials, or database clients.
 Provider factories receive the request's Supabase client when a request asks
 for a provider, so RLS always applies to the caller. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
-existing registry; nothing in billing or the routes changes.
+existing registry; nothing in billing or the routes changes. Metering plugins
+register a factory and an optional `supports(client, microgridId)` selector
+that reads their own configuration through the caller’s RLS-scoped client.
+Billing uses `forRequest(client)` and does not choose a vendor. Exactly one
+matching provider is required; ambiguous selections fail closed. OpenEMS is
+the compatibility fallback for existing microgrids. A configured non-fallback
+provider takes precedence, and selection errors never fall back silently.
 
-**Request (one per API call).** `openOrganizationScope()` authenticates the
-caller, checks organization access, and creates an *isolated* child context
-of the root. Isolation gives the request its own `mgmRequest`, capability and
+**Request (one per API call).** Authenticated composers call
+`authorizeOrganization()` to authenticate and check organization access.
+`openOrganizationScope()` is a low-level constructor accepting an already
+authorized request; it does not authenticate or authorize. Public payment
+callers establish their separate bearer-token/notification verification boundary.
+It creates an *isolated* child context of the root. Isolation gives the request its own `mgmRequest`, capability and
 registry slots, so concurrent requests on one warm instance never share a
 capability. The request scope plugin provides `mgmRequest`; capability plugins
 are then loaded into that child and declare `inject: ["mgmRequest", ...]`.
@@ -70,10 +79,19 @@ the database whether the plugin is enabled for that organization
 - Core plugins (organization directory) are never gated.
 
 `src/lib/runtime/__tests__/route-surface.test.ts` fails the build when any
-API `route.ts` — released or not — has a write handler that neither composes
+API `route.ts` — released or not — has a write handler (including inventoried
+external-call GETs) that neither composes
 a capability nor calls `gateRoute`, or when the route has no owner in the
 catalog's `routes` lists. The check is per handler, so a gated `PATCH` does
-not cover an ungated `DELETE` in the same file.
+not cover an ungated `DELETE` in the same file. This is a source-level
+guardrail, not a proof of all control flow. Direct `gateRoute` calls are
+parsed as TypeScript and must check and return their blocked response; comments
+do not count. Branches, composer result handling, and mutation ordering still
+require review. `runtime-gate-wiring.test.ts` executes the direct gated routes
+with 409 and 503 decisions and verifies they return before subsequent database
+work. GETs constructing an OpenEMS client must appear in the external-call
+inventory and declare `access: "write"`. Add behavioral coverage for new
+mutation routes; a composer call alone does not prove its result is checked.
 
 ### Callers without a user session
 

@@ -174,12 +174,13 @@ describe("routes gated by the MGM runtime", () => {
     );
   });
 
-  it.each(CASES.map((c) => [c.name, c] as const))(
-    "%s returns the gate response before touching data",
-    async (_name, testCase) => {
+  it.each(CASES.flatMap(c => [409, 503].map(status => [c.name, c, status] as const)))(
+    "%s stops before touching data when the gate returns %s",
+    async (_name, testCase, status) => {
+      gateRoute.mockResolvedValue(NextResponse.json({ error: "blocked", code: "plugin_blocked" }, { status }));
       const response = await testCase.call();
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({ code: "plugin_disabled" });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ code: "plugin_blocked" });
       expect(gateRoute).toHaveBeenCalledTimes(1);
       expect(gateRoute).toHaveBeenCalledWith(supabase, testCase.expected);
       expect(from).not.toHaveBeenCalled();

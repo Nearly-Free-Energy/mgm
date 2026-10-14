@@ -68,7 +68,7 @@ export const BillingPlugin = {
           seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,
-          meteringProvider: meteringProviders.create("openems", request.supabase),
+          meteringProvider: meteringProviders.forRequest(request.supabase),
           requireEffectiveDatedAssignments: true,
           allowUsageOnlyReadings: true,
         });

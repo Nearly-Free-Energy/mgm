@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
+import ts from "typescript";
 import * as bundled from "@/lib/plugins/bundled";
 import { getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
 
@@ -22,6 +23,12 @@ const WRITE_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as const;
 
 /** Routes no plugin owns. */
 const UNOWNED = new Set(["/api/mgm/health"]);
+
+// GETs that call integrations are gated as writes, not historical data reads.
+const EXTERNAL_GETS = new Set([
+  "/api/openems/status",
+  "/api/edges/[id]/discover-devices",
+]);
 
 /**
  * Write handlers that intentionally do not consult the gate. Each needs a
@@ -129,24 +136,66 @@ const PLUGIN_CONSTANTS = new Map(
 );
 
 function gatesPlugin(source: string, owner: MgmPluginName): boolean {
-  if (!/\b(gateRoute|checkGate)\(/.test(source)) return false;
-  for (const match of source.matchAll(/plugin:\s*(?:"([^"]+)"|([A-Z_]+))/g)) {
-    const plugin = match[1] ?? PLUGIN_CONSTANTS.get(match[2] ?? "");
-    if (plugin === owner) return true;
-  }
-  return false;
+  const file = ts.createSourceFile("handler.ts", source, ts.ScriptTarget.Latest, true);
+  let guarded = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+        ts.isAwaitExpression(node.initializer) && ts.isCallExpression(node.initializer.expression)) {
+      const call = node.initializer.expression;
+      if (ts.isIdentifier(call.expression) && ["gateRoute", "checkGate"].includes(call.expression.text)) {
+        const options = call.arguments[1];
+        if (options && ts.isObjectLiteralExpression(options)) {
+          const property = options.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(file) === "plugin") as ts.PropertyAssignment | undefined;
+          const value = property?.initializer;
+          const plugin = value && (ts.isStringLiteral(value) ? value.text : ts.isIdentifier(value) ? PLUGIN_CONSTANTS.get(value.text) : undefined);
+          if (plugin === owner) {
+            const name = node.name.text;
+            const statement = node.parent.parent;
+            const block = statement.parent;
+            if (ts.isBlock(block)) {
+              guarded ||= block.statements.some(s => {
+                if (s.pos < statement.end || !ts.isIfStatement(s)) return false;
+                const direct = ts.isIdentifier(s.expression) && s.expression.text === name;
+                const decision = ts.isPrefixUnaryExpression(s.expression) && s.expression.operator === ts.SyntaxKind.ExclamationToken && ts.isPropertyAccessExpression(s.expression.operand) && ts.isIdentifier(s.expression.operand.expression) && s.expression.operand.expression.text === name && s.expression.operand.name.text === "ok";
+                if (!direct && !decision) return false;
+                const returned = ts.isBlock(s.thenStatement) ? s.thenStatement.statements[0] : s.thenStatement;
+                if (!returned || !ts.isReturnStatement(returned) || !returned.expression) return false;
+                if (direct) return ts.isIdentifier(returned.expression) && returned.expression.text === name;
+                return ts.isCallExpression(returned.expression) && ts.isIdentifier(returned.expression.expression) && returned.expression.expression.text === "gateResponse" && returned.expression.arguments[0]?.getText(file) === name;
+              });
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return guarded;
 }
 
 function entersRuntime(source: string, owner: MgmPluginName): boolean {
-  const composed = Object.entries(COMPOSERS).some(
-    ([composer, plugins]) => plugins.includes(owner) && new RegExp(`\\b${composer}\\(`).test(source)
-  );
+  const file = ts.createSourceFile("handler.ts", source, ts.ScriptTarget.Latest, true);
+  let composed = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && COMPOSERS[node.expression.text]?.includes(owner)) composed = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return gatesPlugin(source, owner) || composed;
 }
 
 const routes = collectRoutes(API_ROOT).map((file) => ({ file, route: routePath(file) }));
 
 describe("MGM runtime route surface", () => {
+  it("rejects a gate whose blocked response is ignored, including commented calls", () => {
+    expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { /* gateRoute(db, { plugin: "billing" }) */ mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); if (gate) return gate; mutate(); }', "billing")).toBe(true);
+    expect(entersRuntime('export async function POST() { /* composeBilling({}) */ mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); mutate(); }', "billing")).toBe(true);
+  });
+
   it("finds the API routes", () => {
     expect(routes.length).toBeGreaterThan(55);
   });
@@ -165,7 +214,11 @@ describe("MGM runtime route surface", () => {
       if (!owner || owner.core) continue;
       const sources = handlerSources(readFileSync(file, "utf8"));
       for (const [method, source] of sources) {
-        if (!(WRITE_METHODS as readonly string[]).includes(method)) continue;
+        const externalGet = method === "GET" && EXTERNAL_GETS.has(route);
+        if (!(WRITE_METHODS as readonly string[]).includes(method) && !externalGet) continue;
+        if (externalGet && !/access:\s*"write"/.test(source)) {
+          offenders.push(`GET ${route} must classify integration access as write`);
+        }
         const key = `${method} ${route.replace(/\[[^\]]+\]/g, "[id]")}`;
         if (UNGATED_WRITES[key]) continue;
         if (!entersRuntime(source, owner.name)) offenders.push(`${key} (${owner.name})`);
@@ -175,6 +228,14 @@ describe("MGM runtime route surface", () => {
       offenders,
       "Call gateRoute(...) with the owning plugin, compose its capability, or document an exemption"
     ).toEqual([]);
+  });
+
+  it("inventories every GET that constructs a vendor client", () => {
+    const external = routes.filter(({ file }) => {
+      const source = handlerSources(readFileSync(file, "utf8")).get("GET") ?? "";
+      return /\bcreateOpenEmsClient\(/.test(source);
+    }).map(({ route }) => route).sort();
+    expect(external).toEqual([...EXTERNAL_GETS].sort());
   });
 
   it("keeps every exemption pointed at a real write handler", () => {

@@ -93,6 +93,7 @@ export type OrganizationScope = {
   dispose(): Promise<void>;
 };
 
+/** Low-level constructor: callers must authorize the request before opening it. */
 export async function openOrganizationScope(
   request: MgmRequest,
   options: {
