@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
+import ts from "typescript";
 import * as bundled from "@/lib/plugins/bundled";
 import { getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
 
@@ -135,12 +136,39 @@ const PLUGIN_CONSTANTS = new Map(
 );
 
 function gatesPlugin(source: string, owner: MgmPluginName): boolean {
-  if (!/\b(gateRoute|checkGate)\(/.test(source)) return false;
-  for (const match of source.matchAll(/plugin:\s*(?:"([^"]+)"|([A-Z_]+))/g)) {
-    const plugin = match[1] ?? PLUGIN_CONSTANTS.get(match[2] ?? "");
-    if (plugin === owner) return true;
-  }
-  return false;
+  const file = ts.createSourceFile("handler.ts", source, ts.ScriptTarget.Latest, true);
+  let guarded = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+        ts.isAwaitExpression(node.initializer) && ts.isCallExpression(node.initializer.expression)) {
+      const call = node.initializer.expression;
+      if (ts.isIdentifier(call.expression) && call.expression.text === "gateRoute") {
+        const options = call.arguments[1];
+        if (options && ts.isObjectLiteralExpression(options)) {
+          const property = options.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(file) === "plugin") as ts.PropertyAssignment | undefined;
+          const value = property?.initializer;
+          const plugin = value && (ts.isStringLiteral(value) ? value.text : ts.isIdentifier(value) ? PLUGIN_CONSTANTS.get(value.text) : undefined);
+          if (plugin === owner) {
+            const name = node.name.text;
+            const statement = node.parent.parent;
+            const block = statement.parent;
+            if (ts.isBlock(block)) {
+              guarded ||= block.statements.some(s => {
+                if (s.pos < statement.end || !ts.isIfStatement(s) || !ts.isIdentifier(s.expression) || s.expression.text !== name) return false;
+                const returned = ts.isBlock(s.thenStatement) ? s.thenStatement.statements[0] : s.thenStatement;
+                return returned && ts.isReturnStatement(returned) && returned.expression && ts.isIdentifier(returned.expression) && returned.expression.text === name;
+              });
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  // checkGate routes inspect the discriminated decision and return gateResponse.
+  return guarded || (/\bcheckGate\(/.test(source) && /if\s*\(!\w+\.ok\)\s*return gateResponse\(/.test(source) &&
+    [...source.matchAll(/plugin:\s*"([^"]+)"/g)].some(m => m[1] === owner));
 }
 
 function entersRuntime(source: string, owner: MgmPluginName): boolean {
@@ -153,6 +181,12 @@ function entersRuntime(source: string, owner: MgmPluginName): boolean {
 const routes = collectRoutes(API_ROOT).map((file) => ({ file, route: routePath(file) }));
 
 describe("MGM runtime route surface", () => {
+  it("rejects a gate whose blocked response is ignored, including commented calls", () => {
+    expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { /* gateRoute(db, { plugin: "billing" }) */ mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); if (gate) return gate; mutate(); }', "billing")).toBe(true);
+  });
+
   it("finds the API routes", () => {
     expect(routes.length).toBeGreaterThan(55);
   });

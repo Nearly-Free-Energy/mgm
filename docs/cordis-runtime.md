@@ -84,7 +84,9 @@ external-call GETs) that neither composes
 a capability nor calls `gateRoute`, or when the route has no owner in the
 catalog's `routes` lists. The check is per handler, so a gated `PATCH` does
 not cover an ungated `DELETE` in the same file. This is a source-level
-guardrail, not a proof of control flow: comments, branches and mutations still
+guardrail, not a proof of all control flow. Direct `gateRoute` calls are
+parsed as TypeScript and must check and return their blocked response; comments
+do not count. Branches, composer result handling, and mutation ordering still
 require review. `runtime-gate-wiring.test.ts` executes the direct gated routes
 with 409 and 503 decisions and verifies they return before subsequent database
 work. GETs constructing an OpenEMS client must appear in the external-call
