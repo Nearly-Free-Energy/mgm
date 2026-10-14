@@ -142,7 +142,7 @@ function gatesPlugin(source: string, owner: MgmPluginName): boolean {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
         ts.isAwaitExpression(node.initializer) && ts.isCallExpression(node.initializer.expression)) {
       const call = node.initializer.expression;
-      if (ts.isIdentifier(call.expression) && call.expression.text === "gateRoute") {
+      if (ts.isIdentifier(call.expression) && ["gateRoute", "checkGate"].includes(call.expression.text)) {
         const options = call.arguments[1];
         if (options && ts.isObjectLiteralExpression(options)) {
           const property = options.properties.find(p => ts.isPropertyAssignment(p) && p.name.getText(file) === "plugin") as ts.PropertyAssignment | undefined;
@@ -154,9 +154,14 @@ function gatesPlugin(source: string, owner: MgmPluginName): boolean {
             const block = statement.parent;
             if (ts.isBlock(block)) {
               guarded ||= block.statements.some(s => {
-                if (s.pos < statement.end || !ts.isIfStatement(s) || !ts.isIdentifier(s.expression) || s.expression.text !== name) return false;
+                if (s.pos < statement.end || !ts.isIfStatement(s)) return false;
+                const direct = ts.isIdentifier(s.expression) && s.expression.text === name;
+                const decision = ts.isPrefixUnaryExpression(s.expression) && s.expression.operator === ts.SyntaxKind.ExclamationToken && ts.isPropertyAccessExpression(s.expression.operand) && ts.isIdentifier(s.expression.operand.expression) && s.expression.operand.expression.text === name && s.expression.operand.name.text === "ok";
+                if (!direct && !decision) return false;
                 const returned = ts.isBlock(s.thenStatement) ? s.thenStatement.statements[0] : s.thenStatement;
-                return returned && ts.isReturnStatement(returned) && returned.expression && ts.isIdentifier(returned.expression) && returned.expression.text === name;
+                if (!returned || !ts.isReturnStatement(returned) || !returned.expression) return false;
+                if (direct) return ts.isIdentifier(returned.expression) && returned.expression.text === name;
+                return ts.isCallExpression(returned.expression) && ts.isIdentifier(returned.expression.expression) && returned.expression.expression.text === "gateResponse" && returned.expression.arguments[0]?.getText(file) === name;
               });
             }
           }
@@ -166,15 +171,17 @@ function gatesPlugin(source: string, owner: MgmPluginName): boolean {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  // checkGate routes inspect the discriminated decision and return gateResponse.
-  return guarded || (/\bcheckGate\(/.test(source) && /if\s*\(!\w+\.ok\)\s*return gateResponse\(/.test(source) &&
-    [...source.matchAll(/plugin:\s*"([^"]+)"/g)].some(m => m[1] === owner));
+  return guarded;
 }
 
 function entersRuntime(source: string, owner: MgmPluginName): boolean {
-  const composed = Object.entries(COMPOSERS).some(
-    ([composer, plugins]) => plugins.includes(owner) && new RegExp(`\\b${composer}\\(`).test(source)
-  );
+  const file = ts.createSourceFile("handler.ts", source, ts.ScriptTarget.Latest, true);
+  let composed = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && COMPOSERS[node.expression.text]?.includes(owner)) composed = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return gatesPlugin(source, owner) || composed;
 }
 
@@ -185,6 +192,8 @@ describe("MGM runtime route surface", () => {
     expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); mutate(); }', "billing")).toBe(false);
     expect(gatesPlugin('export async function POST() { /* gateRoute(db, { plugin: "billing" }) */ mutate(); }', "billing")).toBe(false);
     expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); if (gate) return gate; mutate(); }', "billing")).toBe(true);
+    expect(entersRuntime('export async function POST() { /* composeBilling({}) */ mutate(); }', "billing")).toBe(false);
+    expect(gatesPlugin('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); mutate(); }', "billing")).toBe(true);
   });
 
   it("finds the API routes", () => {
