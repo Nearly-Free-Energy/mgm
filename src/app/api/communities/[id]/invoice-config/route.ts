@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { billingWriteGateForCommunity } from "@/lib/billing/guard";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessOrg } from "@/lib/auth/access";
 import {
   parseInvoiceConfig,
@@ -113,7 +113,11 @@ export async function PATCH(
 
   // (4a) Release 3 (issue #5): invoice branding writes fail closed while
   // billing is disabled.
-  const billingGate = await billingWriteGateForCommunity(supabase, communityId);
+  const billingGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "community", id: communityId },
+    method: "PATCH",
+  });
   if (billingGate) return billingGate;
 
   // (5) Body shape + validation.

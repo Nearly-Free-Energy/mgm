@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import type { OpenEmsClientConfig } from "@/lib/openems";
@@ -237,6 +238,13 @@ export async function PUT(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "microgrid", id: microgridId },
+    method: "PUT",
+  });
+  if (pluginGate) return pluginGate;
 
   // Permission check — 404 on hidden/missing (don't leak existence).
   // Also read the existing encrypted secret so we can support the

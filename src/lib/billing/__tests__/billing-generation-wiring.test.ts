@@ -11,6 +11,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { composeBilling } from "../compose";
+import { getMgmRuntime } from "@/lib/runtime/root";
+import type { MeteringProvider } from "@/lib/metering/types";
 
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
 const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
@@ -135,4 +137,23 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
       allowUsageOnlyReadings: true,
     });
   });
+  it("generation uses a newly registered provider for its configured microgrid", async () => {
+    const runtime = await getMgmRuntime();
+    const getReadings = vi.fn(async () => []);
+    const unregister = runtime.meteringProviders.register("alternate-metering", () => ({ getReadings }), {
+      supports: async (_client, microgridId) => microgridId === MG_ID,
+    });
+    const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
+    if (!composed.ok) throw new Error("expected composition");
+    try {
+      await composed.data.billing.generateBills({ billingPeriodId: PERIOD_ID });
+      const provider = (capturedParams as Record<string, unknown> | null)?.meteringProvider as MeteringProvider;
+      await provider.getReadings({ microgridId: MG_ID, devices: [], startDate: "2026-09-01", endDate: "2026-09-30", timezone: "Africa/Kampala" });
+      expect(getReadings).toHaveBeenCalledTimes(1);
+    } finally {
+      await composed.data.dispose();
+      unregister();
+    }
+  });
+
 });

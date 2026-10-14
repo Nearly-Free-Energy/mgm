@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import type { DeviceType } from "@/lib/types/domain";
 
@@ -150,6 +151,13 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "device", id: id },
+    method: "PATCH",
+  });
+  if (pluginGate) return pluginGate;
 
   // Fetch the device (RLS-filtered) — `.maybeSingle()` + null-check produces
   // a clean 404 for missing OR RLS-hidden rows. We need the edge_id to

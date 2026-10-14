@@ -124,6 +124,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       let json: {
         status?: string;
         message?: string;
+        error?: string;
         edges?: Array<{
           openems_edge_id: string;
           name: string;
@@ -140,7 +141,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       if (!res.ok || json.status !== "success") {
         setRediscoverBanner({
           kind: "error",
-          message: json.message ?? "Discover failed. Check server logs.",
+          message: json.message ?? json.error ?? "Discover failed. Check server logs.",
         });
         return;
       }

@@ -106,6 +106,9 @@ const mockGetUser = vi.fn(async () => ({
   data: { user: { id: "user-1" } },
 }));
 
+// The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: mockFrom,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { currentUserCanAccessOrg } from "@/lib/auth/access";
-import { billingWriteGateForCommunity } from "@/lib/billing/guard";
+import { gateRoute } from "@/lib/runtime/gate";
 
 /**
  * POST /api/communities/[id]/invoice-logo — Upload an invoice-logo image (#204 / PDF2).
@@ -100,7 +100,11 @@ export async function POST(
   // Invoice branding is part of the billing plugin. Check the organization
   // state before accepting a potentially large multipart body or using the
   // service-role storage client.
-  const billingGate = await billingWriteGateForCommunity(supabase, communityId);
+  const billingGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "community", id: communityId },
+    method: "POST",
+  });
   if (billingGate) return billingGate;
 
   // (4) Multipart body parse — Next.js 15 native FormData.

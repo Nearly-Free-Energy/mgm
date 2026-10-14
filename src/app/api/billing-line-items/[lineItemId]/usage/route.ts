@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { billingWriteGateForMicrogrid } from "@/lib/billing/guard";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
+import { gateRoute } from "@/lib/runtime/gate";
+import { getMgmRuntime } from "@/lib/runtime/root";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import {
   isRunGenerationFatal,
@@ -206,7 +206,11 @@ export async function PATCH(
   }
 
   // 2a. Release 3 (issue #5): usage corrections fail closed while billing is disabled.
-  const billingGate = await billingWriteGateForMicrogrid(supabase, period.microgrid_id);
+  const billingGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "microgrid", id: period.microgrid_id },
+    method: "PATCH",
+  });
   if (billingGate) return billingGate;
 
   // 3. Closed-period reject preserved (Out of Scope contract).
@@ -316,7 +320,7 @@ export async function PATCH(
     ],
     mode: "write",
     actorUserId: user.id,
-    meteringProvider: createOpenEmsMeteringProvider(supabase),
+    meteringProvider: (await getMgmRuntime()).meteringProviders.forRequest(supabase),
   });
 
   if (isRunGenerationFatal(out)) {

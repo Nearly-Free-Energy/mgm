@@ -7,7 +7,7 @@ import {
   type CommunityManagementError,
 } from "@/lib/community-management";
 import { countEntityDescendants } from "@/lib/entity-descendants";
-import { isCommunityManagementEnabled } from "@/lib/plugins/state";
+import { gateRoute } from "@/lib/runtime/gate";
 import {
   errorBody,
   mapPgError,
@@ -153,14 +153,12 @@ export async function DELETE(
   if (!community) {
     return NextResponse.json(errorBody("Community not found."), { status: 404 });
   }
-  if (!(await isCommunityManagementEnabled(supabase, community.org_id))) {
-    return NextResponse.json(
-      errorBody(
-        "Community management is disabled for this organization. Enable it in Settings → Plugins before deleting; existing records are preserved."
-      ),
-      { status: 409 }
-    );
-  }
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "community-management",
+    target: { kind: "organization", id: community.org_id },
+    method: "DELETE",
+  });
+  if (pluginGate) return pluginGate;
   if (!community.name || !community.name.trim()) {
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),

@@ -19,6 +19,9 @@ import { NextRequest } from "next/server";
 
 const getEdgesStatusMock = vi.fn();
 const listOpenEmsEdgesMock = vi.fn();
+// The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
+
 vi.mock("@/lib/openems/edge-discovery", () => ({
   listOpenEmsEdges: listOpenEmsEdgesMock,
 }));

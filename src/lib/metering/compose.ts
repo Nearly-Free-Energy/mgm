@@ -1,21 +1,20 @@
 /**
- * composeMetering — one authenticated, organization-scoped Cordis context
- * per caller for the metering plugin (issue #4).
+ * composeMetering — the metering capability for one authenticated,
+ * organization-scoped request on the MGM Cordis runtime (issue #4,
+ * docs/cordis-runtime.md).
  *
- * Mirrors the community-management composition: the caller selects no
- * provider and supplies no credentials. The composition registers the
- * provider registry (OpenEMS always; fixture only when explicitly
- * configured for tests/demos), the OpenEMS connection plugin, and the
- * metering capability, then disposes everything in `finally`.
+ * The caller selects no provider and supplies no credentials. Metering
+ * sources come from the root `meteringProviders` registry (the OpenEMS
+ * platform plugin registers there); the fixture source is opt-in per request
+ * for tests and demos. The caller disposes the composition in `finally`.
  */
 import "server-only";
 
-import { Context, type Fiber } from "cordis";
+import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCurrentUserRoles } from "@/lib/auth/access";
-import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
 import { METERING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
-import { createOpenEmsMeteringProvider } from "./openems-provider";
+import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
+import "@/lib/runtime/services";
 import { FixtureMeteringProvider, type FixtureReading } from "./fixture-provider";
 import { MeteringRegistry } from "./registry";
 import { MeteringCapability } from "./capability";
@@ -25,6 +24,7 @@ import "./scope";
 import {
   meteringFailure,
   type MeteringCapabilityContract,
+  type MeteringRepository,
   type MeteringResult,
   type MeteringScope,
 } from "./repository";
@@ -40,40 +40,51 @@ export type { MeteringResult } from "./repository";
 export const METERING_PLUGIN_NAME = "metering";
 export { METERING_PLUGIN_VERSION };
 
-function meteringScopePlugin(context: Context, scope: MeteringScope) {
-  return context.provide("meteringScope", scope);
-}
+export type MeteringPluginConfig = {
+  repository: MeteringRepository;
+  /** Fixture registration is opt-in and only used by tests/demos. */
+  fixtureReadings?: readonly FixtureReading[];
+};
 
-function meteringRegistryPlugin(context: Context, registry: MeteringRegistry) {
-  return context.provide("meteringRegistry", registry);
-}
-
-function openEmsProviderPlugin(
-  _context: Context,
-  config: { registry: MeteringRegistry; supabase: SupabaseClient }
-) {
-  return config.registry.register(
-    "openems",
-    createOpenEmsMeteringProvider(config.supabase)
-  );
-}
-
-function fixtureProviderPlugin(
-  _context: Context,
-  config: { registry: MeteringRegistry; readings: readonly FixtureReading[] }
-) {
-  return config.registry.register(
-    "fixture",
-    new FixtureMeteringProvider(config.readings)
-  );
-}
-
-function meteringCapabilityPlugin(
-  context: Context,
-  capability: MeteringCapabilityContract
-) {
-  return context.provide("metering", capability);
-}
+/**
+ * The metering capability plugin. Loaded into a request scope; unloads (and
+ * deactivates the capability) when the request's `mgmRequest` goes away.
+ */
+export const MeteringPlugin = {
+  name: METERING_PLUGIN_NAME,
+  inject: ["mgmRequest", "meteringProviders"],
+  apply(ctx: Context, config: MeteringPluginConfig) {
+    const request = ctx.mgmRequest;
+    if (!request.userId) throw new Error("Metering requires an authenticated user");
+    const scope: MeteringScope = {
+      organizationId: request.organizationId,
+      userId: request.userId,
+      roles: request.roles,
+    };
+    const registry = new MeteringRegistry();
+    for (const name of ctx.meteringProviders.names()) {
+      registry.register(name, ctx.meteringProviders.create(name, request.supabase));
+    }
+    if (config.fixtureReadings) {
+      registry.register("fixture", new FixtureMeteringProvider(config.fixtureReadings));
+    }
+    let active = true;
+    const capability = new MeteringCapability(
+      config.repository,
+      scope,
+      registry,
+      createOpenEmsConnection(request.supabase, config.repository),
+      () => active
+    );
+    ctx.provide("meteringScope", scope);
+    ctx.provide("meteringRegistry", registry);
+    ctx.provide("metering", capability);
+    ctx.effect(() => () => {
+      active = false;
+      registry.clear();
+    });
+  },
+} satisfies Plugin.Object<MeteringPluginConfig>;
 
 export async function composeMetering(options: {
   supabase: SupabaseClient;
@@ -81,38 +92,23 @@ export async function composeMetering(options: {
   /** Fixture registration is opt-in and only used by tests/demos. */
   fixtureReadings?: readonly FixtureReading[];
 }): Promise<MeteringResult<MeteringComposition>> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    options.organizationId
-  )) {
-    return meteringFailure({
-      status: 400,
-      code: "metering_invalid_org",
-      message: "Invalid organization id — expected UUID.",
-      field: "org_id",
-    });
-  }
-
-  const {
-    data: { user },
-  } = await options.supabase.auth.getUser();
-  if (!user) {
-    return meteringFailure({
-      status: 401,
-      code: "metering_unauthenticated",
-      message: "Authentication required.",
-    });
-  }
-
-  const roles = await getCurrentUserRoles(options.supabase);
-  const canAccess =
-    roles.some((role) => role.role === SUPER_ADMIN) ||
-    roles.some(
-      (role) =>
-        role.role === ORG_MANAGER &&
-        role.scope_type === SCOPE_ORG &&
-        role.scope_id === options.organizationId
-    );
-  if (!canAccess) {
+  const access = await authorizeOrganization(options.supabase, options.organizationId);
+  if (!access.ok) {
+    if (access.reason === "invalid_org") {
+      return meteringFailure({
+        status: 400,
+        code: "metering_invalid_org",
+        message: "Invalid organization id — expected UUID.",
+        field: "org_id",
+      });
+    }
+    if (access.reason === "unauthenticated") {
+      return meteringFailure({
+        status: 401,
+        code: "metering_unauthenticated",
+        message: "Authentication required.",
+      });
+    }
     return meteringFailure({
       status: 403,
       code: "metering_forbidden",
@@ -131,50 +127,30 @@ export async function composeMetering(options: {
     });
   }
 
-  const scope: MeteringScope = {
-    organizationId: options.organizationId,
-    userId: user.id,
-    roles,
-  };
-  const context = new Context();
-  const registry = new MeteringRegistry();
-  const fibers: Fiber[] = [];
-  let active = true;
-  const capability = new MeteringCapability(
-    repository,
-    scope,
-    registry,
-    createOpenEmsConnection(options.supabase, repository),
-    () => active
-  );
-
+  let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
-    fibers.push(await context.plugin(meteringScopePlugin, scope));
-    fibers.push(await context.plugin(meteringRegistryPlugin, registry));
-    fibers.push(
-      await context.plugin(openEmsProviderPlugin, {
-        registry,
-        supabase: options.supabase,
-      })
-    );
-    if (options.fixtureReadings) {
-      fibers.push(
-        await context.plugin(fixtureProviderPlugin, {
-          registry,
-          readings: options.fixtureReadings,
-        })
-      );
-    }
-    fibers.push(await context.plugin(meteringCapabilityPlugin, capability));
-    if (!context.metering) {
+    requestScope = await openOrganizationScope({
+      organizationId: options.organizationId,
+      userId: access.user.id,
+      roles: access.roles,
+      supabase: options.supabase,
+    });
+    await requestScope.load(MeteringPlugin, {
+      repository,
+      fixtureReadings: options.fixtureReadings,
+    });
+    const metering = requestScope.ctx.get("metering");
+    const scope = requestScope.ctx.get("meteringScope");
+    if (!metering || !scope) {
       throw new Error("Metering capability did not register");
     }
+    const opened = requestScope;
+    return {
+      ok: true,
+      data: { scope, metering, dispose: () => opened.dispose() },
+    };
   } catch (error) {
-    active = false;
-    registry.clear();
-    await Promise.allSettled(
-      [...fibers].reverse().map((fiber) => fiber.dispose())
-    );
+    await requestScope?.dispose();
     return meteringFailure({
       status: 500,
       code: "metering_composition_failed",
@@ -184,17 +160,4 @@ export async function composeMetering(options: {
           : "Could not compose metering.",
     });
   }
-
-  return {
-    ok: true,
-    data: {
-      scope,
-      metering: capability,
-      async dispose() {
-        for (const fiber of [...fibers].reverse()) await fiber.dispose();
-        registry.clear();
-        active = false;
-      },
-    },
-  };
 }

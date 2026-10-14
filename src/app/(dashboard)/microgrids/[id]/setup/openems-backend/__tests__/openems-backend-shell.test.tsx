@@ -507,6 +507,35 @@ describe("OpenemsBackendShell — Save & test outcomes", () => {
     ).toBeDefined();
   });
 
+  it("(9b) 409 metering_disabled → shows the plugin message, not the mid-period banner", async () => {
+    mockFetch({
+      ok: false,
+      status: 409,
+      body: {
+        code: "metering_disabled",
+        error: "Metering is disabled for this organization. Enable it in Settings → Plugins.",
+      },
+    });
+    render(
+      <OpenemsBackendShell
+        microgrid={CONFIGURED_CLOUD}
+        health="healthy"
+        draftPeriodsCount={0}
+        closedPeriodsCount={0}
+        secretLast4="3ACH"
+        canConfigure={true}
+        emsOperators={[]}
+      />
+    );
+    await openForm();
+    await submitForm();
+    expect(screen.getByText(/metering is disabled for this organization/i)).toBeDefined();
+    expect(screen.queryByText(/there's an open billing period/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /save & test connection/i })
+    ).toBeDefined();
+  });
+
   it("(10) 409 requires_typed_confirmation → dialog opens; typing correct name + confirming retries PUT with confirmed_name", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 

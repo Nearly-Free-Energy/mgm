@@ -41,7 +41,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { billingWriteGateForMicrogrid } from "@/lib/billing/guard";
+import { gateRoute } from "@/lib/runtime/gate";
 import {
   currentUserCanAccessMicrogrid,
   currentUserIsSuperAdmin,
@@ -178,7 +178,11 @@ export async function PATCH(
   }
 
   // 3a. Release 3 (issue #5): manual payments fail closed while billing is disabled.
-  const billingGate = await billingWriteGateForMicrogrid(supabase, microgridId);
+  const billingGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "microgrid", id: microgridId },
+    method: "PATCH",
+  });
   if (billingGate) return billingGate;
 
   // 3b. Super-admin gate for reconciliation-class statuses.

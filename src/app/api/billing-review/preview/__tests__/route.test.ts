@@ -3,9 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 const preview = vi.fn();
 const dispose = vi.fn();
-const billingWriteGateForPeriod = vi.fn();
+const checkGate = vi.fn();
+const ORG_ID = "550e8400-e29b-41d4-a716-446655440900";
 
-vi.mock("@/lib/billing/guard", () => ({ billingWriteGateForPeriod }));
+vi.mock("@/lib/runtime/gate", () => ({
+  checkGate,
+  gateResponse: (decision: { status: number; code: string; message: string }) =>
+    NextResponse.json({ error: decision.message, code: decision.code }, { status: decision.status }),
+}));
 
 vi.mock("@/lib/cordis/billing-review", () => ({
   composeBillingReview: vi.fn(async () => ({ billingReview: { preview }, dispose })),
@@ -36,7 +41,7 @@ const HOUSEHOLD_ID = "550e8400-e29b-41d4-a716-446655440200";
 describe("POST /api/billing-review/preview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    billingWriteGateForPeriod.mockResolvedValue(null);
+    checkGate.mockResolvedValue({ ok: true, organizationId: ORG_ID });
     process.env.MGM_REVIEW_ALLOWED_EMAIL = "reviewer@test.local";
     householdRows.mockResolvedValue({ data: [], error: null });
     maybeSingle.mockResolvedValueOnce({
@@ -107,15 +112,47 @@ describe("POST /api/billing-review/preview", () => {
   });
 
   it("does not preview when billing is disabled", async () => {
-    billingWriteGateForPeriod.mockResolvedValue(NextResponse.json(
-      { code: "billing_disabled" }, { status: 409 }
-    ));
+    checkGate.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: "billing_disabled",
+      message: "Billing is disabled",
+    });
     const { POST } = await import("../route");
     const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
       method: "POST",
       body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
     }));
     expect(response.status).toBe(409);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("composes the review in the period's organization and gates it as a billing write", async () => {
+    const { composeBillingReview } = await import("@/lib/cordis/billing-review");
+    const { POST } = await import("../route");
+    const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
+      method: "POST",
+      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+    }));
+    expect(response.status).toBe(200);
+    expect(checkGate).toHaveBeenCalledWith(expect.anything(), {
+      plugin: "billing",
+      target: { kind: "billingPeriod", id: PERIOD_ID },
+      method: "POST",
+    });
+    expect(composeBillingReview).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG_ID, userId: "user-1" })
+    );
+  });
+
+  it("treats a period whose organization is not visible as missing", async () => {
+    checkGate.mockResolvedValue({ ok: true, organizationId: null });
+    const { POST } = await import("../route");
+    const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
+      method: "POST",
+      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+    }));
+    expect(response.status).toBe(404);
     expect(preview).not.toHaveBeenCalled();
   });
 

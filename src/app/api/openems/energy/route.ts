@@ -5,6 +5,7 @@ import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import type { DeviceEnergyResult } from "@/lib/openems/types";
 import type { DeviceConfig } from "@/lib/adapters/types";
 import { validateTimezone } from "@/lib/validation/timezone";
+import { gateRoute } from "@/lib/runtime/gate";
 
 type EnergyRequestBody = {
   deviceIds: string[];
@@ -149,6 +150,14 @@ export async function POST(request: NextRequest) {
   }
 
   const [microgridId] = microgridIds;
+  // MGM runtime gate: OpenEMS calls fail closed while Metering is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "microgrid", id: microgridId },
+    method: "POST",
+    access: "write",
+  });
+  if (pluginGate) return pluginGate;
 
   let emsConfig;
   try {

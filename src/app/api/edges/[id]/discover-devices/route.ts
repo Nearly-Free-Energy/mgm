@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
@@ -55,6 +56,15 @@ export async function GET(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "edge", id: edgeId },
+    method: "GET",
+    // Discovery calls the OpenEMS backend, so it is gated like a write.
+    access: "write",
+  });
+  if (pluginGate) return pluginGate;
 
   // Fetch the edge first so a missing edge yields 404, not 403.
   // RLS on edges filters cross-org rows; a non-existent or RLS-hidden edge

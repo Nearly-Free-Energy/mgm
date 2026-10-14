@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveOrgFromToken, resolveMicrogridOrgId } from "@/lib/internal-auth";
 import { createServiceClient } from "@/lib/supabase/service";
-import { createOpenEmsMeteringProvider } from "@/lib/metering/openems-provider";
+import { getMgmRuntime } from "@/lib/runtime/root";
+import { gateRoute } from "@/lib/runtime/gate";
 import { runGenerationFor, isRunGenerationFatal } from "@/lib/billing/generate";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -147,6 +148,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // MGM runtime gate, after the 404/403 ordering above so a disabled plugin
+  // never reveals that a period exists in another organization.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "organization", id: auth.org_id },
+    method: "POST",
+  });
+  if (pluginGate) return pluginGate;
+  // The metering source comes from the runtime's provider registry, the
+  // same one the dashboard's billing capability uses.
+  const runtime = await getMgmRuntime();
+
   // SIGNATURE NOTE: `fn_record_line_item_with_audit` was widened in #250
   // (actor_kind, actor_ref) — see `src/lib/billing/generate.ts` for the
   // full rationale + PostgREST overload-resolution caveat.
@@ -162,7 +175,7 @@ export async function POST(request: NextRequest) {
     actorUserId: null,
     actorKind: "customerapp",
     actorRef: auth.token_name,
-    meteringProvider: createOpenEmsMeteringProvider(supabase),
+    meteringProvider: runtime.meteringProviders.forRequest(supabase),
   });
 
   if (isRunGenerationFatal(out)) {

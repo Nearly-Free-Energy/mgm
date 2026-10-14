@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
+import { gateRoute } from "@/lib/runtime/gate";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * GET /api/openems/status?microgridId=<uuid>&edgeIds=<id>[,<id>...]
@@ -16,6 +20,12 @@ export async function GET(request: NextRequest) {
   if (!microgridId) {
     return NextResponse.json(
       { error: "Missing required query parameter: microgridId" },
+      { status: 400 }
+    );
+  }
+  if (!UUID_RE.test(microgridId)) {
+    return NextResponse.json(
+      { error: "microgridId must be a UUID" },
       { status: 400 }
     );
   }
@@ -40,6 +50,14 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: OpenEMS calls fail closed while Metering is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "microgrid", id: microgridId },
+    method: "GET",
+    access: "write",
+  });
+  if (pluginGate) return pluginGate;
 
   let emsConfig;
   try {

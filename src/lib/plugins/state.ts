@@ -235,62 +235,74 @@ export async function listOrganizationPluginAudit(
   return data ?? [];
 }
 
+function readPluginEnabled(
+  supabase: SupabaseClient,
+  orgId: string,
+  pluginName: MgmPluginName
+) {
+  return supabase.rpc("mgm_plugin_enabled_for_org", {
+    _org_id: orgId,
+    _plugin_name: pluginName,
+  });
+}
+
+/**
+ * Whether one plugin is enabled for an organization (missing row = enabled).
+ * Throws when the state cannot be read, so callers decide how to fail. The
+ * per-plugin helpers below keep their historical contract: a database error
+ * reads as disabled, a thrown client error propagates.
+ */
+export async function isPluginEnabledForOrg(
+  supabase: SupabaseClient,
+  orgId: string,
+  pluginName: MgmPluginName
+): Promise<boolean> {
+  const { data, error } = await readPluginEnabled(supabase, orgId, pluginName);
+  if (error) throw new Error(error.message ?? "Could not read plugin state");
+  return data === true;
+}
+
+async function enabledOrFalse(
+  supabase: SupabaseClient,
+  orgId: string,
+  pluginName: MgmPluginName
+): Promise<boolean> {
+  const { data, error } = await readPluginEnabled(supabase, orgId, pluginName);
+  if (error) return false;
+  return data === true;
+}
+
 export async function isCommunityManagementEnabled(
   supabase: SupabaseClient,
   orgId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
-    _org_id: orgId,
-    _plugin_name: "community-management",
-  });
-  if (error) return false;
-  return data === true;
+  return enabledOrFalse(supabase, orgId, "community-management");
 }
 
 export async function isMeteringEnabled(
   supabase: SupabaseClient,
   orgId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
-    _org_id: orgId,
-    _plugin_name: "metering",
-  });
-  if (error) return false;
-  return data === true;
+  return enabledOrFalse(supabase, orgId, "metering");
 }
 
 export async function isBillingEnabled(
   supabase: SupabaseClient,
   orgId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
-    _org_id: orgId,
-    _plugin_name: "billing",
-  });
-  if (error) return false;
-  return data === true;
+  return enabledOrFalse(supabase, orgId, "billing");
 }
 
 export async function isPaymentsEnabled(
   supabase: SupabaseClient,
   orgId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
-    _org_id: orgId,
-    _plugin_name: "payments",
-  });
-  if (error) return false;
-  return data === true;
+  return enabledOrFalse(supabase, orgId, "payments");
 }
 
 export async function isPesapalEnabled(
   supabase: SupabaseClient,
   orgId: string
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("mgm_plugin_enabled_for_org", {
-    _org_id: orgId,
-    _plugin_name: "pesapal",
-  });
-  if (error) return false;
-  return data === true;
+  return enabledOrFalse(supabase, orgId, "pesapal");
 }

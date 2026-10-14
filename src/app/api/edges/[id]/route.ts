@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import {
@@ -85,6 +86,13 @@ export async function PATCH(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "edge", id: id },
+    method: "PATCH",
+  });
+  if (pluginGate) return pluginGate;
 
   // Fetch current row (RLS-filtered) for 404 semantics.
   const { data: currentEdge, error: fetchError } = await supabase
@@ -184,6 +192,13 @@ export async function DELETE(
   }
 
   const supabase = await createClient();
+  // MGM runtime gate: metering writes fail closed while the plugin is disabled.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "metering",
+    target: { kind: "edge", id: id },
+    method: "DELETE",
+  });
+  if (pluginGate) return pluginGate;
 
   const { data: edge, error: fetchErr } = await supabase
     .from("edges")

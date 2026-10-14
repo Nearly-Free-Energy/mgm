@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { composeBillingReview, isRunGenerationFatal } from "@/lib/cordis/billing-review";
 import { isMgmReviewer } from "@/lib/mgm/access";
 import { createClient } from "@/lib/supabase/server";
-import { billingWriteGateForPeriod } from "@/lib/billing/guard";
+import { checkGate, gateResponse } from "@/lib/runtime/gate";
 
 export const runtime = "nodejs";
 
@@ -28,8 +28,8 @@ function parseBody(raw: unknown): PreviewBody | null {
 
 /**
  * Read-only MGM bill comparison. The route operates entirely through the
- * user-scoped Supabase client, makes a fresh Cordis context per request, and
- * never accepts manual readings or a provider name from the browser.
+ * user-scoped Supabase client, runs in an isolated request scope on the MGM
+ * Cordis runtime, and never accepts manual readings or a provider name from the browser.
  */
 export async function POST(request: NextRequest) {
   let raw: unknown;
@@ -63,8 +63,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "billing_period_not_found" }, { status: 404 });
   }
   // Preview may re-pin an empty draft, so it is a billing write.
-  const billingGate = await billingWriteGateForPeriod(supabase, body.periodId);
-  if (billingGate) return billingGate;
+  const gate = await checkGate(supabase, {
+    plugin: "billing",
+    target: { kind: "billingPeriod", id: body.periodId },
+    method: "POST",
+  });
+  if (!gate.ok) return gateResponse(gate);
+  // The gate resolved the period's organization for this write; a period
+  // whose organization the caller cannot see is treated as missing.
+  const organizationId = gate.organizationId;
+  if (!organizationId) {
+    return NextResponse.json({ error: "billing_period_not_found" }, { status: 404 });
+  }
 
   let householdIds = body.householdIds;
   if (householdIds === undefined) {
@@ -97,7 +107,7 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  const composition = await composeBillingReview({ supabase });
+  const composition = await composeBillingReview({ supabase, organizationId, userId: user.id });
   const calculatedAt = new Date().toISOString();
   try {
     // The provider is selected server-side. Fixture registration is absent

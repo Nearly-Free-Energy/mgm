@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveOrgFromToken, resolveMicrogridOrgId } from "@/lib/internal-auth";
 import { createServiceClient } from "@/lib/supabase/service";
+import { gateRoute } from "@/lib/runtime/gate";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -55,6 +56,15 @@ export async function POST(request: NextRequest) {
       { status: 403 },
     );
   }
+
+  // MGM runtime gate, after the 404/403 ordering above so a disabled plugin
+  // never reveals that a microgrid exists in another organization.
+  const pluginGate = await gateRoute(supabase, {
+    plugin: "billing",
+    target: { kind: "organization", id: auth.org_id },
+    method: "POST",
+  });
+  if (pluginGate) return pluginGate;
 
   // NOTE (#357): this route deliberately takes NO timezone parameter, and
   // must not grow one. The period's timezone is stamped from the parent
