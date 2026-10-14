@@ -1,5 +1,5 @@
 -- Historical tariff reconciliation for periods billed before rate_schedule_id
--- existed. Run ONLY after comparing the original invoice / MBE tariff and
+-- existed. Run ONLY after comparing the original invoice / legacy tariff and
 -- line-item amounts with the selected immutable rate_schedules row. If the
 -- historical tariff was edited in place and no matching row survives, first
 -- reconstruct and independently verify the original tariff as a new version.

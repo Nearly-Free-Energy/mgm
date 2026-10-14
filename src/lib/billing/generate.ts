@@ -126,7 +126,7 @@ export type GenerationErrorCode =
   | "meter_assignment_continuity"
   | "unknown_household"
   /**
-   * #339. The device has no prior MBE `end_kwh` and no seed was supplied, so
+   * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
    * the meter read zero at period start and printed that on the invoice.
    *
@@ -214,7 +214,7 @@ export type RunGenerationParams = {
   /** Bill from a trusted period usage total when no absolute register is known. */
   allowUsageOnlyReadings?: boolean;
   /** MGM review databases record meter-assignment dates. Fail closed when a
-   *  single assignment does not cover the entire period. Legacy MBE schemas
+   *  single assignment does not cover the entire period. Legacy schemas
    *  do not have these columns, so this check is opt-in. */
   requireEffectiveDatedAssignments?: boolean;
 };
@@ -761,7 +761,7 @@ export async function runGenerationFor(
 
       // #339. Three sources, in order, and NO zero default.
       //
-      //   1. prior MBE end_kwh for this device — the running tally
+      //   1. prior MGM end_kwh for this device — the running tally
       //   2. an operator seed — the meter was billed before it was connected
       //   3. neither → refuse; see needs_seed_reading
       //

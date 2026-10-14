@@ -4,7 +4,7 @@
  *
  * Covers:
  *   - hidden on mount (no flash on first load)
- *   - appears on mbe:navigation-start event with role="status"
+ *   - appears on mgm:navigation-start event with role="status"
  *   - hides after pathname settles
  *   - announceNavigationStart dispatches the window event
  */
@@ -21,7 +21,7 @@ vi.mock("next/navigation", () => ({
 import {
   NavigationProgress,
   announceNavigationStart,
-  MBE_NAVIGATION_START_EVENT,
+  MGM_NAVIGATION_START_EVENT,
 } from "../navigation-progress";
 
 beforeEach(() => {
@@ -47,9 +47,9 @@ describe("NavigationProgress", () => {
     const seen: string[] = [];
     const listener = (e: Event) =>
       seen.push((e as CustomEvent<string>).detail);
-    window.addEventListener(MBE_NAVIGATION_START_EVENT, listener);
+    window.addEventListener(MGM_NAVIGATION_START_EVENT, listener);
     announceNavigationStart("/communities");
-    window.removeEventListener(MBE_NAVIGATION_START_EVENT, listener);
+    window.removeEventListener(MGM_NAVIGATION_START_EVENT, listener);
     expect(seen).toEqual(["/communities"]);
   });
 

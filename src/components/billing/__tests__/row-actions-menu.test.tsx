@@ -85,9 +85,8 @@ function openMenu(trigger: HTMLElement) {
 
 // ── computeMenuItems pure-function snapshots ─────────────────────────────────
 //
-// Six designer states pulled verbatim from
-// `mbe-docs/design/mocks/billing-create-v1/billing-create-flows.html`
-// "Menu state matrix" cards 1-6.
+// Six menu states from the billing-create design's "Menu state matrix".
+// These snapshots are now the reference for that matrix.
 
 describe("computeMenuItems — designer matrix (6 states)", () => {
   const baseInput = {

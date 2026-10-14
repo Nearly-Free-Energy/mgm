@@ -63,9 +63,14 @@ jobs:
           eval "$(npx supabase status -o env | grep '^DB_URL=')"
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-payments.sql
 
+      - name: Credential key rotation rehearsal
+        run: |
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
+
       - name: Database diagnostics on rehearsal failure
         if: failure()
-        run: docker logs --tail 200 supabase_db_metering-billing-engine
+        run: docker logs --tail 200 supabase_db_mgm
 
       - name: npm test
         run: |

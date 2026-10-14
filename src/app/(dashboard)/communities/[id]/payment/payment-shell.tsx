@@ -309,7 +309,7 @@ export function PaymentShell(props: PaymentShellProps) {
           </h4>
           <p className="mt-2 text-sm text-muted-foreground">
             Pesapal handles mobile-money and card collection for households in
-            Uganda and Kenya. MBE generates one payment link per billing line
+            Uganda and Kenya. MGM generates one payment link per billing line
             item and records the redirect URL.
           </p>
           <div className="mt-4">
@@ -528,7 +528,7 @@ export function PaymentShell(props: PaymentShellProps) {
           </span>
         </label>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          When enabled, MBE talks to Pesapal&apos;s test environment at{" "}
+          When enabled, MGM talks to Pesapal&apos;s test environment at{" "}
           <span className="font-mono">cybqa.pesapal.com</span>. Leave unchecked
           for live collections.
         </p>

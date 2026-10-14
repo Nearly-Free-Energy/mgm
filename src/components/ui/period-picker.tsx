@@ -206,7 +206,7 @@ function Skeleton({ className }: { className?: string }) {
     >
       <span
         aria-hidden="true"
-        className="absolute inset-0 [animation:mbe-shimmer_1.4s_ease-in-out_infinite]"
+        className="absolute inset-0 [animation:mgm-shimmer_1.4s_ease-in-out_infinite]"
         style={{
           backgroundImage:
             "linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent)",

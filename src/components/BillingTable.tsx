@@ -82,7 +82,7 @@ export function BillingTable({
    * Defaults to `true` when a household id is missing from the map.
    */
   edgeAvailableByHouseholdId?: Record<string, boolean>;
-  /** #339 — households whose meter has no prior MBE reading. */
+  /** #339 — households whose meter has no prior MGM reading. */
   seedNeededByHouseholdId?: Record<string, boolean>;
   /** OpenEMS period usage can be billed without an absolute dial anchor. */
   allowUsageOnlyReadings?: boolean;

@@ -4,7 +4,7 @@
 //
 // Contract:
 //   • Any client-side navigation link dispatches `announceNavigationStart(href)`
-//     (window CustomEvent `mbe:navigation-start`) on click. This component shows
+//     (window CustomEvent `mgm:navigation-start`) on click. This component shows
 //     an indeterminate top bar immediately, so the click reads as recorded.
 //   • The bar hides shortly after `usePathname()` settles on the new route.
 //     A 4s safety timeout hides it if the pathname never changes (failed nav).
@@ -19,12 +19,12 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 
-export const MBE_NAVIGATION_START_EVENT = "mbe:navigation-start";
+export const MGM_NAVIGATION_START_EVENT = "mgm:navigation-start";
 
 export function announceNavigationStart(href: string) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
-    new CustomEvent<string>(MBE_NAVIGATION_START_EVENT, { detail: href }),
+    new CustomEvent<string>(MGM_NAVIGATION_START_EVENT, { detail: href }),
   );
 }
 
@@ -56,9 +56,9 @@ export function NavigationProgress() {
         setVisible(false);
       }, 4000);
     };
-    window.addEventListener(MBE_NAVIGATION_START_EVENT, onStart);
+    window.addEventListener(MGM_NAVIGATION_START_EVENT, onStart);
     return () => {
-      window.removeEventListener(MBE_NAVIGATION_START_EVENT, onStart);
+      window.removeEventListener(MGM_NAVIGATION_START_EVENT, onStart);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, []);
@@ -90,7 +90,7 @@ export function NavigationProgress() {
       aria-label="Loading page"
       className="fixed inset-x-0 top-0 z-[60] h-0.5 bg-transparent"
     >
-      <div className="h-full w-1/3 bg-primary motion-safe:animate-[mbe-nav-progress_1s_ease-in-out_infinite]" />
+      <div className="h-full w-1/3 bg-primary motion-safe:animate-[mgm-nav-progress_1s_ease-in-out_infinite]" />
       <span className="sr-only">Loading…</span>
     </div>
   );

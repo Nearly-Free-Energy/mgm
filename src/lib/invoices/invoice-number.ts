@@ -1,8 +1,9 @@
 /**
  * invoice-number.ts — invoice number formatter.
  *
- * Format: `{prefix}-{YYYY}-{NNNNN}` (e.g. "NFE-2026-00421"). Per Aaron's
- * existing nomenclature; locked as D3 in mbe-docs PLAN.md.
+ * Format: `{prefix}-{YYYY}-{NNNNN}` (e.g. "NFE-2026-00421"), following the
+ * operator's existing invoice numbering. Changing it changes every new
+ * invoice number, so treat the format as fixed.
  *
  * The bounds in this helper, the `invoice_counters.year` CHECK, the
  * plpgsql guard inside `fn_next_invoice_number`, AND the

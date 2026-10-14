@@ -77,7 +77,7 @@ export interface SubmitOrderResponse {
  * `payment_status_description` because it is the documented enum.
  *
  * Treated as untrusted by callers — the IPN route maps known descriptions to
- * MBE state transitions and ignores everything else (no-op + ack 200).
+ * MGM state transitions and ignores everything else (no-op + ack 200).
  */
 export interface GetTransactionStatusResponse {
   payment_method?: string;
@@ -86,9 +86,9 @@ export interface GetTransactionStatusResponse {
   confirmation_code?: string;
   /**
    * Pesapal's textual status. Documented values (subset we care about):
-   *   "COMPLETED" → MBE 'paid'
-   *   "FAILED"    → MBE 'failed'
-   *   "REVERSED"  → MBE 'refunded'
+   *   "COMPLETED" → MGM 'paid'
+   *   "FAILED"    → MGM 'failed'
+   *   "REVERSED"  → MGM 'refunded'
    *   "PENDING"   → no-op
    *   "INVALID"   → no-op
    */

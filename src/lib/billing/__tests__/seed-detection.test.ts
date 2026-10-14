@@ -49,7 +49,7 @@ describe("computeSeedNeeded (#339)", () => {
 
   // THE case that had no coverage. On a microgrid's first period there are no
   // prior line items at all, so every edge-available household is flagged.
-  // PM ruled this correct: MBE cannot tell a new meter at zero from an
+  // PM ruled this correct: MGM cannot tell a new meter at zero from an
   // existing meter at 4,182, and guessing is what produced #339.
   it("flags EVERY edge-available household on a first-ever period", () => {
     expect(

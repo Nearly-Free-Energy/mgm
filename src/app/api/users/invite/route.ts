@@ -169,7 +169,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const svc = createServiceClient();
 
-  // Per-call redirectTo: lands GoTrue's verify redirect on the MBE
+  // Per-call redirectTo: lands GoTrue's verify redirect on the MGM
   // accept-invite landing page, which calls verifyOtp + renders the
   // set-password form (UX5c / #189). Deliberately not hardcoded —
   // resolveOrigin honours x-forwarded-* so previews + local dev work.
@@ -209,7 +209,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // the original error — something is off.
       return NextResponse.json(
         {
-          error: "User already exists in MBE",
+          error: "User already exists in MGM",
           field: "email",
         },
         { status: 409 }
@@ -217,13 +217,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // Does the existing user have any profile / role rows? If yes, they
-    // are a real MBE user — don't re-invite. If no, treat as an orphan
+    // are a real MGM user — don't re-invite. If no, treat as an orphan
     // left over from a prior failed invite.
     const hasProfile = await userHasProfile(svc, existing.id);
     const hasRole = await userHasAnyRole(svc, existing.id);
     if (hasProfile || hasRole) {
       return NextResponse.json(
-        { error: "User already exists in MBE", field: "email" },
+        { error: "User already exists in MGM", field: "email" },
         { status: 409 }
       );
     }
@@ -287,7 +287,7 @@ async function findAuthUserByEmail(
 ): Promise<User | null> {
   const lower = email.toLowerCase();
   // MVP uses a single page; pagination is deferred. 1000 is far above
-  // any plausible MBE user count at pilot scale.
+  // any plausible MGM user count at pilot scale.
   const { data, error } = await svc.auth.admin.listUsers({ perPage: 1000 });
   if (error || !data) return null;
   if (data.users.length === 1000) {

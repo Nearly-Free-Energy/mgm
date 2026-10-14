@@ -1,7 +1,7 @@
 /**
  * The web and API routes shipped by released MGM slices. Keep this list
  * explicit: anything not listed here returns 404 from middleware, so an
- * inherited MBE surface cannot become callable through deep links or
+ * inherited legacy surface cannot become callable through deep links or
  * direct API requests before its release.
  *
  * Release 1: organization, community, microgrid, and household management.

@@ -5,7 +5,7 @@
  * `BillingRepository` / `BillingGeneration` interfaces only — never a
  * database client, server helper, vendor SDK, or framework module. Vendor
  * and persistence details live in `infrastructure/`, request wiring in
- * `compose.ts`. The MBE bill engine (`generate.ts`, `calculations.ts`,
+ * `compose.ts`. The bill engine (`generate.ts`, `calculations.ts`,
  * `precision.ts`, `csv-export.ts`) is consumed through the injected
  * delegate, never imported by the capability.
  *

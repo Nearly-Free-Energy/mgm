@@ -45,7 +45,7 @@ export class OpenEmsClient implements DeviceDataAdapter {
     });
 
     // Re-validate at the sink, immediately before the request is signed and
-    // sent (mbe-docs#8). This is defence in depth, not a substitute for the
+    // sent. This is defence in depth, not a substitute for the
     // write-time check in the save route — the two cover different data.
     //
     // Write-time validation only governs rows written after it shipped. Every
@@ -70,7 +70,7 @@ export class OpenEmsClient implements DeviceDataAdapter {
 
     let response: Response;
     try {
-      // `redirect: "manual"` — we do NOT follow redirects (mbe-docs#8).
+      // `redirect: "manual"` — we do NOT follow redirects.
       //
       // fetch defaults to `follow`, which means the URL an operator saved and
       // saw validated is not necessarily the URL their data reaches: a 308 at

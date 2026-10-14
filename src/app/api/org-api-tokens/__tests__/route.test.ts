@@ -73,7 +73,7 @@ vi.mock("@/lib/auth/access", () => ({
 // and so the plaintext + lookup are deterministic for the assertion.
 vi.mock("@/lib/internal-auth", () => ({
   generateToken: () => ({
-    plaintext: "mbe_dev__deadbeef_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    plaintext: "mgm_dev__deadbeef_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     lookup: "deadbeef",
     envPrefix: "dev_",
     hashPromise: Promise.resolve("$argon2id$stubhash"),
@@ -156,7 +156,7 @@ describe("POST /api/org-api-tokens (#256)", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.id).toBe(TOKEN_ID);
-    expect(body.plaintext).toMatch(/^mbe_/);
+    expect(body.plaintext).toMatch(/^mgm_/);
 
     // Token row written.
     expect(insertsByTable["org_api_tokens"]).toHaveLength(1);
@@ -203,7 +203,7 @@ describe("POST /api/org-api-tokens (#256)", () => {
     expect(res.status).toBe(201);
     // Body still carries the plaintext.
     const body = await res.json();
-    expect(body.plaintext).toMatch(/^mbe_/);
+    expect(body.plaintext).toMatch(/^mgm_/);
     // Warn-log captured the audit failure.
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();

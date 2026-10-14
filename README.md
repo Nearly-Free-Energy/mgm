@@ -1,8 +1,10 @@
-# Metering & Billing Engine (MBE)
+# MGM — Microgrid Manager
 
-Multi-tenant billing engine for microgrid energy management. Tracks energy consumption per tenant, applies time-of-use rate schedules, and generates billing summaries for microgrid entrepreneurs.
+An operating system for microgrid operators. Organizations manage their communities, microgrids, households, and meters; read consumption from OpenEMS; bill households against tariffs; and collect payments — each as a plugin they can turn on or off.
 
-**Stack:** Next.js (App Router) + Supabase (Postgres, Auth, RLS) + OpenEMS (meter data via B2B REST API)
+**Stack:** Next.js (App Router) + [Cordis](https://github.com/cordiverse/cordis) plugin runtime + Supabase (Postgres, Auth, RLS) + OpenEMS (meter data via its B2B API) + Pesapal (payments)
+
+**Docs:** [operating model](docs/operating-model.md) · [Cordis runtime](docs/cordis-runtime.md) · [entity model](docs/entity-model.md) · [setup](docs/setup.md) · [runbooks](docs/runbooks/)
 
 ## Getting Started
 
@@ -15,7 +17,7 @@ npm run dev     # start dev server at http://localhost:3000
 
 ## Related
 
-- [https://github.com/Nearly-Free-Energy/openems) -- OpenEMS energy platform (Edge + Backend + UI)
+- [Nearly-Free-Energy/openems](https://github.com/Nearly-Free-Energy/openems) — OpenEMS energy platform (Edge + Backend + UI)
 
 ### OpenEMS Keycloak configuration
 

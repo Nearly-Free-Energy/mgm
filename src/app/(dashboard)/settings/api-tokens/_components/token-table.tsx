@@ -93,7 +93,7 @@ export function TokenTable(props: TokenTableProps) {
                   </td>
                 )}
                 <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                  mbe_{row.env_prefix}_{row.token_lookup}_…
+                  …_{row.env_prefix}_{row.token_lookup}_…
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">
                   <LocalDateTime value={row.created_at} />

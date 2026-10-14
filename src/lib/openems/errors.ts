@@ -22,9 +22,9 @@ export class OpenEmsError extends Error {
 // "OPENEMS_NOT_JSON" (502) — 2xx whose body did not parse as JSON; carries the
 //     content-type and the first bytes (#325). A reverse proxy serving an
 //     error page or a single-page-app catch-all produces this.
-// "OPENEMS_REDIRECT" (502) — backend answered with a 3xx; not followed (mbe-docs#8)
+// "OPENEMS_REDIRECT" (502) — backend answered with a 3xx; not followed (see client.ts)
 // "OPENEMS_INVALID_BACKEND_URL" (503) — stored backend URL failed sink-side
-//     validation; typically a row written before the rules existed (mbe-docs#8)
+//     validation; typically a row written before the rules existed (see backend-url.ts)
 // "OPENEMS_INVALID_CONFIG" (503) — missing or malformed config
 // "OPENEMS_NOT_CONFIGURED" (409) — microgrid has no ems_type set
 // "OPENEMS_FORBIDDEN" (403) — caller lacks access to decrypt secret

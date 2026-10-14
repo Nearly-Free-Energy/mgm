@@ -36,7 +36,7 @@ const chipVariants = cva(
       },
       state: {
         default: "",
-        loading: "[&>span:first-child]:[animation:mbe-pulse_1.2s_ease-in-out_infinite]",
+        loading: "[&>span:first-child]:[animation:mgm-pulse_1.2s_ease-in-out_infinite]",
         disabled: "opacity-50 cursor-not-allowed",
         stale: "opacity-60 border border-dashed border-border",
       },

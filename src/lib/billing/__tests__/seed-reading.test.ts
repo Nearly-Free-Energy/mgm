@@ -6,7 +6,7 @@
  * defect being fixed was a fallback that produced a *plausible* value rather
  * than an error, and a mocked-everything test would have passed over it.
  *
- *   1. prior MBE `end_kwh` for the device — the running tally
+ *   1. prior MGM `end_kwh` for the device — the running tally
  *   2. an operator seed — the meter was billed before it was connected
  *   3. neither → refuse with `needs_seed_reading`, write nothing
  *
@@ -189,7 +189,7 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
     expect(Number(row?.endKwh)).toBe(3982 + USAGE_KWH);
   });
 
-  it("prefers a prior MBE reading over a seed when both exist", async () => {
+  it("prefers a prior MGM reading over a seed when both exist", async () => {
     const svc = await serviceClient();
     const insHere = async (table: string, row: Record<string, unknown>) => {
       const { error } = await svc.from(table).insert(row);

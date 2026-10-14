@@ -6,7 +6,7 @@
  * the server then POSTs a JSON-RPC payload to it. Before this module the only
  * gate was "non-empty string", so any scheme and any host was accepted.
  *
- * Rules (mbe-docs#8):
+ * Rules:
  *   1. Must parse as an absolute URL.
  *   2. Scheme must be `https:`. `http:` is allowed only for `localhost`,
  *      which `src/lib/openems/index.ts` documents as a supported development

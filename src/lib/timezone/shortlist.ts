@@ -5,9 +5,9 @@
  * Two derivation paths, in priority order:
  *
  *   1. `address_country` — curated country-name → zones map below. Primary
- *      path: MBE microgrids carry a free-text country column, and the map is
+ *      path: MGM microgrids carry a free-text country column, and the map is
  *      keyed on normalized names (plus common aliases). Coverage is the
- *      MBE deployment footprint (East Africa) plus common operator
+ *      MGM deployment footprint (East Africa) plus common operator
  *      countries; an unmapped country simply falls through to path 2 or an
  *      empty shortlist — the "Other zone…" full-list picker always exists,
  *      so the map never gates what an operator can choose.

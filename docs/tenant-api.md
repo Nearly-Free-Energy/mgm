@@ -1,6 +1,6 @@
 # Tenant API — contract sketch
 
-**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `mbe-docs/docs/entity-model.md` § "Tenant API contract" for the API user pattern A/B decision that must be resolved before implementation begins.
+**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: household (tenant) access" for the A/B decision that must be resolved before implementation begins.
 
 ---
 

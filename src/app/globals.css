@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────────────────
-   MBE Design System — Tokens (globals.css)
+   MGM Design System — Tokens (globals.css)
    Drop this into src/app/globals.css (overwriting the file shadcn init writes).
 
    ## Themability contract
@@ -122,6 +122,6 @@ body {
 }
 
 /* Animations used by Chip (loading) + skeletons + navigation progress. */
-@keyframes mbe-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
-@keyframes mbe-shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(100%) } }
-@keyframes mbe-nav-progress { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+@keyframes mgm-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+@keyframes mgm-shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(100%) } }
+@keyframes mgm-nav-progress { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }

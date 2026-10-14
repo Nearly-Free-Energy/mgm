@@ -430,7 +430,7 @@ describe("OpenEmsClient", () => {
   // ── #355: period timezone threads through getReadings → queryHistoricEnergy
   //
   // The billing window's local-day boundary is built by OpenEMS from the IANA
-  // zone NAME. MBE passes the name verbatim and does no numeric-offset math —
+  // zone NAME. MGM passes the name verbatim and does no numeric-offset math —
   // these tests assert on the RPC params object (the wire payload), not just
   // on which method was called.
   describe("getReadings timezone threading (#355)", () => {
@@ -481,7 +481,7 @@ describe("OpenEmsClient", () => {
       // OpenEMS treats `toDate` as INCLUSIVE (the query window is
       // [fromDate 00:00 local, toDate+1day 00:00 local) built server-side
       // from the zone), so fromDate == toDate is a valid one-local-day
-      // window — per #253's same-day periods. MBE's job is only to hand
+      // window — per #253's same-day periods. MGM's job is only to hand
       // both dates and the zone name over unmodified.
       fetchSpy.mockResolvedValue(
         energyResponse({ "meter0/ActiveConsumptionEnergy": 1000 })
@@ -944,7 +944,7 @@ describe("OpenEmsClient", () => {
     });
   });
 
-  // ── Sink-side URL validation (mbe-docs#8) ────────────────────────────────
+  // ── Sink-side URL validation ─────────────────────────────────────────────
   //
   // Defence in depth behind the save route's write-time check. The two cover
   // different data: write-time validation governs only rows written after it
@@ -1009,7 +1009,7 @@ describe("OpenEmsClient", () => {
     });
   });
 
-  // ── Redirects are not followed (mbe-docs#8) ──────────────────────────────
+  // ── Redirects are not followed ─────────────────────────────────────────
   //
   // The stored URL must be the URL actually contacted. Following a redirect
   // re-sends the POST — body included — to a host that never passed the
