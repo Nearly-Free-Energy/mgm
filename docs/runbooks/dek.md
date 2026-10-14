@@ -128,18 +128,13 @@ complete; replacing Vault names does not make a key backup obsolete immediately.
 
 ## Retire the legacy key name
 
-After the `mgm_ems_dek` migration has run on an environment, the legacy
-`mbe_ems_dek` row is redundant. Remove it once you have confirmed the two
-match:
+Retirement is optional maintenance, not part of the rename deployment. Keep
+both key names until the new migration and existing credential reads have been
+verified. The guarded operator tooling is reviewed separately in
+[PR #25](https://github.com/Nearly-Free-Energy/mgm/pull/25); use it only after
+that maintenance change is approved and its prerequisites are fulfilled.
 
-```sql
-SELECT (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mgm_ems_dek')
-     = (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mbe_ems_dek')
-  AS keys_match;   -- must be true
-
-DELETE FROM vault.secrets WHERE name = 'mbe_ems_dek';
-```
-
-Then run **Test connection** on one microgrid to confirm decryption still
-works. The functions keep their fallback, so this step is optional and can
-wait.
+Do not delete the legacy row as a deployment step. Retirement must refuse
+mismatched keys and verify active and historical credentials after removal,
+rolling back if any value cannot decrypt. The functions retain their fallback,
+so leaving the legacy name in place is supported.
