@@ -14,6 +14,7 @@ This runbook covers creating, backing up, recovering, and rotating it.
 | `microgrids` | `ems_bearer_token_encrypted` | OpenEMS bearer token |
 | `microgrids` | `ems_keycloak_client_secret_encrypted` | OpenEMS Keycloak client secret |
 | `payment_merchant_accounts` | `secret_encrypted` | Payment provider (Pesapal) consumer secret |
+| `payment_merchant_versions` | `configuration.secret_encrypted` | Historical credentials used by existing payment attempts |
 | `communities` | `payment_provider_secret_encrypted` | Legacy per-community payment secret |
 
 Values are encrypted with `pgp_sym_encrypt` through `fn_ems_encrypt_secret`
@@ -87,60 +88,43 @@ Never paste the key into an issue, PR, chat, or log.
 ## Rotate
 
 Rotate when the key may have been exposed, or on a schedule you choose.
-Run everything in **one transaction** on a privileged connection, during a
-quiet period:
+Pause credential configuration writes and drain in-flight requests before
+starting. Row locks alone cannot stop an application request that has already
+encrypted a secret from writing that old-key ciphertext after rotation.
+Back up the current and replacement keys in the password manager first.
+
+The tested implementation is
+[`supabase/scripts/rotate-credential-key.sql`](../../supabase/scripts/rotate-credential-key.sql).
+Loading it defines a session-local helper; it does not rotate anything. On a
+privileged psql connection, from the repository root:
 
 ```sql
+\i supabase/scripts/rotate-credential-key.sql
 BEGIN;
-
--- 1. Decrypt every value under the current key into a temporary table.
-CREATE TEMP TABLE dek_rotation ON COMMIT DROP AS
-SELECT 'microgrids' AS tbl, id,
-       fn_ems_decrypt_secret(ems_aws_secret_access_key_encrypted)   AS aws,
-       fn_ems_decrypt_secret(ems_basic_auth_password_encrypted)     AS basic,
-       fn_ems_decrypt_secret(ems_bearer_token_encrypted)            AS bearer,
-       fn_ems_decrypt_secret(ems_keycloak_client_secret_encrypted)  AS keycloak,
-       NULL::text AS merchant, NULL::text AS community
-FROM microgrids
-UNION ALL
-SELECT 'payment_merchant_accounts', id, NULL, NULL, NULL, NULL,
-       fn_ems_decrypt_secret(secret_encrypted), NULL
-FROM payment_merchant_accounts
-UNION ALL
-SELECT 'communities', id, NULL, NULL, NULL, NULL, NULL,
-       fn_ems_decrypt_secret(payment_provider_secret_encrypted)
-FROM communities;
-
--- 2. Switch Vault to the new key (generate it with `openssl rand -base64 32`
---    and store it in the password manager first).
---    While the legacy `mbe_ems_dek` row still exists, update both names so
---    neither can serve a stale key.
-SELECT vault.update_secret(id, '<new plaintext key>')
-FROM vault.secrets WHERE name IN ('mgm_ems_dek', 'mbe_ems_dek');
-
--- 3. Re-encrypt under the new key.
-UPDATE microgrids m SET
-  ems_aws_secret_access_key_encrypted  = fn_ems_encrypt_secret(r.aws),
-  ems_basic_auth_password_encrypted    = fn_ems_encrypt_secret(r.basic),
-  ems_bearer_token_encrypted           = fn_ems_encrypt_secret(r.bearer),
-  ems_keycloak_client_secret_encrypted = fn_ems_encrypt_secret(r.keycloak)
-FROM dek_rotation r WHERE r.tbl = 'microgrids' AND r.id = m.id;
-
-UPDATE payment_merchant_accounts a SET secret_encrypted = fn_ems_encrypt_secret(r.merchant)
-FROM dek_rotation r WHERE r.tbl = 'payment_merchant_accounts' AND r.id = a.id;
-
-UPDATE communities c SET payment_provider_secret_encrypted = fn_ems_encrypt_secret(r.community)
-FROM dek_rotation r WHERE r.tbl = 'communities' AND r.id = c.id;
-
+SELECT pg_temp.mgm_rotate_credential_key('<new plaintext key from password manager>');
 COMMIT;
 ```
 
-`fn_ems_encrypt_secret` and `fn_ems_decrypt_secret` return `NULL` for
-`NULL` input, so empty columns stay empty. Column-guard triggers exempt
-privileged roles, so the updates are allowed on this connection. After
-committing, open one microgrid's OpenEMS page and run **Test connection**,
-and one organization's payment account test, to confirm decryption works.
-Then replace the old key in the password manager.
+The helper locks credential tables, decrypts active and historical secrets
+before changing either Vault key name, then re-encrypts them in the same
+transaction. Historical account/version identities and all non-secret JSON
+fields remain unchanged. Normal active-account triggers may add a new current
+version; pending attempts retain their original version. NULL secrets remain
+NULL. Any failure aborts the operation. Do not print key values or save them
+in shell history or command-line arguments.
+
+The CI rehearsal uses the same helper to verify active credentials, multiple
+historical versions, a pending attempt bound to the original version, and
+rollback after an injected downstream failure. Run only against a scratch DB:
+
+```bash
+psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
+```
+
+After committing, run **Test connection** on one microgrid and one payment
+account, then verify an existing payment attempt's status. Resume credential
+writes after these checks. Retain the old key backup until verification is
+complete; replacing Vault names does not make a key backup obsolete immediately.
 
 ## Retire the legacy key name
 
