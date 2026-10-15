@@ -71,82 +71,82 @@ export async function POST(
   });
   if (!composed.ok) return mapError(composed);
 
-  // The form omits stored secrets ("blank means keep"). Fill omitted
-  // secrets from the stored configuration of the same type so testing an
-  // edited-but-not-retyped config works. Explicitly typed values always
-  // win; without a stored config of the same type the capability rejects
-  // the incomplete candidate. Secrets stay server-side: the merged object
-  // is built into an in-memory client, never logged, never returned.
-  const type = body.type as "cloud_aws" | "direct_url";
-  let stored: Awaited<ReturnType<typeof getMicrogridEmsConfig>> = null;
   try {
-    stored = await getMicrogridEmsConfig(supabase, microgridId);
-  } catch {
-    stored = null;
-  }
-  const asText = (value: unknown): string | null =>
-    typeof value === "string" && value.length > 0 ? value : null;
-  // Secrets merge only within the same type: a direct_url candidate never
-  // inherits AWS fields (and vice versa), so cross-type stored values cannot
-  // leak into an unrelated configuration.
-  const storedAws =
-    stored?.type === "cloud_aws" && type === "cloud_aws" ? stored : null;
-  const storedDirect =
-    stored?.type === "direct_url" && type === "direct_url" ? stored : null;
-  // Keycloak client-credentials (issue #4 follow-up): same blank-means-keep
-  // rule as the save route. Retyped identifiers with a blank secret reuse
-  // the stored secret; a newly typed secret requires retyped identifiers
-  // (no silent pairing with stored ones); all blank tests the stored triple.
-  let storedKeycloak: {
-    tokenUrl: string;
-    clientId: string;
-    clientSecret: string;
-  } | null = null;
-  if (type === "direct_url") {
+    // The form omits stored secrets ("blank means keep"). Fill omitted
+    // secrets from the stored configuration of the same type so testing an
+    // edited-but-not-retyped config works. Explicitly typed values always
+    // win; without a stored config of the same type the capability rejects
+    // the incomplete candidate. Secrets stay server-side: the merged object
+    // is built into an in-memory client, never logged, never returned.
+    const type = body.type as "cloud_aws" | "direct_url";
+    let stored: Awaited<ReturnType<typeof getMicrogridEmsConfig>> = null;
     try {
-      const { resolveKeycloakConfig } = await import("@/lib/openems/config");
-      storedKeycloak = await resolveKeycloakConfig(supabase, microgridId);
+      stored = await getMicrogridEmsConfig(supabase, microgridId);
     } catch {
-      storedKeycloak = null;
+      stored = null;
     }
-  }
-  const typedKeycloakSecret = asText(body.keycloakClientSecret);
-  const typedKeycloakUrl = asText(body.keycloakTokenUrl);
-  const typedKeycloakId = asText(body.keycloakClientId);
-  const candidateKeycloakSecret =
-    typedKeycloakSecret ?? storedKeycloak?.clientSecret ?? null;
-  // Strictness mirrors the save route: a new secret is only paired with
-  // retyped identifiers, never silently with stored ones.
-  const candidateKeycloakUrl =
-    typedKeycloakUrl ??
-    (typedKeycloakSecret ? null : (storedKeycloak?.tokenUrl ?? null));
-  const candidateKeycloakId =
-    typedKeycloakId ??
-    (typedKeycloakSecret ? null : (storedKeycloak?.clientId ?? null));
-  const candidate = {
-    type,
-    backendUrl: typeof body.backendUrl === "string" ? body.backendUrl : "",
-    region: asText(body.region) ?? storedAws?.region ?? null,
-    accessKeyId: asText(body.accessKeyId) ?? storedAws?.accessKeyId ?? null,
-    secretAccessKey:
-      asText(body.secretAccessKey) ?? storedAws?.secretAccessKey ?? null,
-    basicAuthUsername:
-      asText(body.basicAuthUsername) ?? storedDirect?.username ?? null,
-    basicAuthPassword:
-      asText(body.basicAuthPassword) ?? storedDirect?.password ?? null,
-    bearerToken: asText(body.bearerToken) ?? storedDirect?.token ?? null,
-    // Attached only when the Keycloak identity is in play (typed or
-    // stored): keeps the candidate shape stable for the other identities.
-    ...((candidateKeycloakUrl ?? candidateKeycloakId ?? candidateKeycloakSecret)
-      ? {
-          keycloakTokenUrl: candidateKeycloakUrl,
-          keycloakClientId: candidateKeycloakId,
-          keycloakClientSecret: candidateKeycloakSecret,
-        }
-      : {}),
-  };
+    const asText = (value: unknown): string | null =>
+      typeof value === "string" && value.length > 0 ? value : null;
+    // Secrets merge only within the same type: a direct_url candidate never
+    // inherits AWS fields (and vice versa), so cross-type stored values cannot
+    // leak into an unrelated configuration.
+    const storedAws =
+      stored?.type === "cloud_aws" && type === "cloud_aws" ? stored : null;
+    const storedDirect =
+      stored?.type === "direct_url" && type === "direct_url" ? stored : null;
+    // Keycloak client-credentials (issue #4 follow-up): same blank-means-keep
+    // rule as the save route. Retyped identifiers with a blank secret reuse
+    // the stored secret; a newly typed secret requires retyped identifiers
+    // (no silent pairing with stored ones); all blank tests the stored triple.
+    let storedKeycloak: {
+      tokenUrl: string;
+      clientId: string;
+      clientSecret: string;
+    } | null = null;
+    if (type === "direct_url") {
+      try {
+        const { resolveKeycloakConfig } = await import("@/lib/openems/config");
+        storedKeycloak = await resolveKeycloakConfig(supabase, microgridId);
+      } catch {
+        storedKeycloak = null;
+      }
+    }
+    const typedKeycloakSecret = asText(body.keycloakClientSecret);
+    const typedKeycloakUrl = asText(body.keycloakTokenUrl);
+    const typedKeycloakId = asText(body.keycloakClientId);
+    const candidateKeycloakSecret =
+      typedKeycloakSecret ?? storedKeycloak?.clientSecret ?? null;
+    // Strictness mirrors the save route: a new secret is only paired with
+    // retyped identifiers, never silently with stored ones.
+    const candidateKeycloakUrl =
+      typedKeycloakUrl ??
+      (typedKeycloakSecret ? null : (storedKeycloak?.tokenUrl ?? null));
+    const candidateKeycloakId =
+      typedKeycloakId ??
+      (typedKeycloakSecret ? null : (storedKeycloak?.clientId ?? null));
+    const candidate = {
+      type,
+      backendUrl: typeof body.backendUrl === "string" ? body.backendUrl : "",
+      region: asText(body.region) ?? storedAws?.region ?? null,
+      accessKeyId: asText(body.accessKeyId) ?? storedAws?.accessKeyId ?? null,
+      secretAccessKey:
+        asText(body.secretAccessKey) ?? storedAws?.secretAccessKey ?? null,
+      basicAuthUsername:
+        asText(body.basicAuthUsername) ?? storedDirect?.username ?? null,
+      basicAuthPassword:
+        asText(body.basicAuthPassword) ?? storedDirect?.password ?? null,
+      bearerToken: asText(body.bearerToken) ?? storedDirect?.token ?? null,
+      // Attached only when the Keycloak identity is in play (typed or
+      // stored): keeps the candidate shape stable for the other identities.
+      ...((candidateKeycloakUrl ?? candidateKeycloakId ?? candidateKeycloakSecret)
+        ? {
+            keycloakTokenUrl: candidateKeycloakUrl,
+            keycloakClientId: candidateKeycloakId,
+            keycloakClientSecret: candidateKeycloakSecret,
+          }
+        : {}),
+    };
 
-  try {
     const result = await composed.data.metering.testConnection(
       microgridId,
       candidate

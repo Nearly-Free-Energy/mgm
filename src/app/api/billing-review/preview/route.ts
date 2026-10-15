@@ -107,8 +107,8 @@ export async function POST(request: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  const composition = await composeBillingReview({ supabase, organizationId, userId: user.id });
   const calculatedAt = new Date().toISOString();
+  const composition = await composeBillingReview({ supabase, organizationId, userId: user.id });
   try {
     // The provider is selected server-side. Fixture registration is absent
     // from this production composition, so a request cannot switch providers.
