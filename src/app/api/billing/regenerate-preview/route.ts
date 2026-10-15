@@ -5,6 +5,7 @@ import {
   type BillingResult,
 } from "@/lib/billing/compose";
 import type { ManualReadingInput } from "@/lib/billing/generate";
+import { checkGate, gateResponse } from "@/lib/runtime/gate";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -15,8 +16,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 /**
  * POST /api/billing/regenerate-preview (#173, BC1)
  *
- * Same request body as /api/billing/generate. Pure compute path — performs
- * NO database writes. The OpenEMS read still happens (it's an HTTP call,
+ * Same request body as /api/billing/generate. Writes no bills or line
+ * items, but an empty draft period's tariff is re-pinned so preview and
+ * write price against the same schedule — which makes this a billing write
+ * for the plugin gate. The OpenEMS read still happens (it's an HTTP call,
  * not a transaction). Returns the per-household preview that BC3's
  * compute-then-confirm dialog (Q6) renders.
  *
@@ -208,6 +211,17 @@ export async function POST(request: NextRequest) {
   if (!orgId) {
     return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
   }
+
+  // Preview can re-pin an empty draft's tariff (`runGenerationFor` calls
+  // `fn_pin_billing_period_rate_schedule` in preview mode too), so it is a
+  // billing write and the gate runs here. `readOnly` below only skips the
+  // composer's own duplicate check — if preview stops pinning, revisit.
+  const gate = await checkGate(supabase, {
+    plugin: "billing",
+    target: { kind: "billingPeriod", id: parsed.billingPeriodId },
+    method: "POST",
+  });
+  if (!gate.ok) return gateResponse(gate);
 
   const composed = await composeBilling({ supabase, organizationId: orgId, readOnly: true });
   if (!composed.ok) return mapError(composed);

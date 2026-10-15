@@ -57,10 +57,38 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
   composeCommunityManagement: ["community-management"],
   composeMetering: ["metering"],
   composeBilling: ["billing"],
-  composeBillingReview: ["billing"],
   composePayments: ["payments", "pesapal"],
   composePaymentsPublic: ["payments", "pesapal"],
 };
+// Only composers that refuse a disabled plugin belong above, because a call
+// to one counts as gating the route. `composeBillingReview` opens a scope
+// without checking plugin state, so its route must gate itself. If it ever
+// starts checking, it can come back.
+
+/**
+ * Composer options that skip the composer's plugin check. A call passing one
+ * of these does not count as entering the runtime; the route needs its own
+ * `checkGate`/`gateRoute`. Keep in step with the option's handling in the
+ * composer (`composeBilling` in src/lib/billing/compose.ts).
+ */
+const SKIPS_PLUGIN_CHECK: Record<string, string[]> = {
+  composeBilling: ["readOnly"],
+};
+
+function skipsPluginCheck(call: ts.CallExpression, composer: string): boolean {
+  const options = call.arguments[0];
+  const names = SKIPS_PLUGIN_CHECK[composer] ?? [];
+  if (!names.length) return false;
+  // Options we cannot read statically (a variable, a spread) are treated as
+  // skipping the check, so the route has to prove it gates.
+  if (!options || !ts.isObjectLiteralExpression(options)) return true;
+  return options.properties.some((property) => {
+    if (ts.isSpreadAssignment(property)) return true;
+    if (!property.name || !names.includes(property.name.getText())) return false;
+    if (ts.isShorthandPropertyAssignment(property)) return true;
+    return !(ts.isPropertyAssignment(property) && property.initializer.kind === ts.SyntaxKind.FalseKeyword);
+  });
+}
 
 function collectRoutes(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -178,7 +206,12 @@ function entersRuntime(source: string, owner: MgmPluginName): boolean {
   const file = ts.createSourceFile("handler.ts", source, ts.ScriptTarget.Latest, true);
   let composed = false;
   const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && COMPOSERS[node.expression.text]?.includes(owner)) composed = true;
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      COMPOSERS[node.expression.text]?.includes(owner) &&
+      !skipsPluginCheck(node, node.expression.text)
+    ) composed = true;
     ts.forEachChild(node, visit);
   };
   visit(file);
@@ -194,6 +227,17 @@ describe("MGM runtime route surface", () => {
     expect(gatesPlugin('export async function POST() { const gate = await gateRoute(db, { plugin: "billing" }); if (gate) return gate; mutate(); }', "billing")).toBe(true);
     expect(entersRuntime('export async function POST() { /* composeBilling({}) */ mutate(); }', "billing")).toBe(false);
     expect(gatesPlugin('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); mutate(); }', "billing")).toBe(true);
+  });
+
+  it("does not count a composer call that skips the plugin check", () => {
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId }); }', "billing")).toBe(true);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: false }); }', "billing")).toBe(true);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: true }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ ...options }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling(options); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBillingReview({ supabase, organizationId }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const gate = await checkGate(db, { plugin: "billing" }); if (!gate.ok) return gateResponse(gate); const c = await composeBilling({ supabase, organizationId, readOnly: true }); }', "billing")).toBe(true);
   });
 
   it("finds the API routes", () => {

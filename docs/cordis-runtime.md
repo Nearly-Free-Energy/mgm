@@ -44,10 +44,24 @@ Disposing the scope fiber unloads every capability that injected it — Cordis
 does the cascade — and each capability's `isActive` guard turns false, so a
 reference retained after the request cannot write.
 
-The five composers (`composeCommunityManagement`, `composeMetering`,
-`composeBilling`, `composeBillingReview`, `composePayments` /
-`composePaymentsPublic`) keep their signatures and error codes; they are now
-thin adapters over `openOrganizationScope()`.
+The composers are thin adapters over `openOrganizationScope()`. They differ
+in what they check before opening the scope, and a route must supply whatever
+its composer does not:
+
+| Composer | Authenticates and checks org access | Refuses a disabled plugin |
+|---|---|---|
+| `composeCommunityManagement`, `composeMetering` | yes (`authorizeOrganization`) | yes, `409` |
+| `composeBilling` | yes | yes, `409` — except with `readOnly: true` |
+| `composePayments` | yes | in the Payments capability |
+| `composePaymentsPublic` | no — no user session; see below | in the Payments capability |
+| `composeBillingReview` | no | no |
+
+`composeBillingReview` takes the `organizationId` the route resolved and
+trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
+id through `checkGate` on the caller's RLS-scoped client, so a period the
+caller cannot see yields no organization and a 404. A new caller must do the
+same. The error codes of the other composers are unchanged by the runtime;
+`composeBillingReview` now takes `organizationId`.
 
 ## The gate
 
@@ -93,6 +107,14 @@ work. GETs constructing an OpenEMS client must appear in the external-call
 inventory and declare `access: "write"`. Add behavioral coverage for new
 mutation routes; a composer call alone does not prove its result is checked.
 
+A composer call counts as gating only if the composer refuses a disabled
+plugin (the table above). `composeBillingReview` does not count, and neither
+does `composeBilling` called with `readOnly: true` (or with options the test
+cannot read statically): routes using them call `checkGate`/`gateRoute`
+themselves. `POST /api/billing/regenerate-preview` is the worked example —
+preview can re-pin an empty draft period's tariff, so it is a billing write
+even though it saves no bills.
+
 ### Callers without a user session
 
 Two kinds of route run without a logged-in user and still enter the runtime:
@@ -129,4 +151,11 @@ super admin and an outsider, and that disabled plugins refuse writes.
 - The root is created at most once per module instance. In development, HMR
   can re-evaluate the module and create a new root; the old one holds no
   resources and is garbage-collected.
-- Request scopes must be disposed in `finally`. Each composer documents this.
+- Request scopes must be disposed in `finally`. A scope that is never
+  disposed stays registered on the root for the life of the process, holding
+  the caller's Supabase client. `scope-dispose.test.ts` fails the build when
+  a `compose*` result is not bound to a `const` and disposed in a `finally`
+  block of the same function, or when code outside the composer modules calls
+  `openOrganizationScope()` directly. `compose-concurrency.test.ts` composes
+  billing and metering for two organizations at once and checks that they stay
+  apart and that the root registry returns to its starting size.
