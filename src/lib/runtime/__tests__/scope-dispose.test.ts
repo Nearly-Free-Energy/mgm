@@ -6,7 +6,8 @@
  * caller disposes in `finally` today; this test keeps it that way:
  *
  *   1. every `compose*` call outside the composer modules binds its result to
- *      a `const` and disposes it in a `finally` block of the same function;
+ *      a `const` and disposes it in a `finally` block that the statements right
+ *      after it enter unconditionally (past `if (!c.ok) return` guards);
  *   2. only the composer modules call the low-level `openOrganizationScope`,
  *      which hands ownership of `dispose` to its caller.
  */
@@ -49,13 +50,6 @@ function collectSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function enclosingFunction(node: ts.Node): ts.FunctionLikeDeclaration | null {
-  for (let current = node.parent; current; current = current.parent) {
-    if (ts.isFunctionLike(current) && "body" in current) return current as ts.FunctionLikeDeclaration;
-  }
-  return null;
-}
-
 /** True if `block` calls `<name>.dispose()` or `<name>.data.dispose()`. */
 function disposes(block: ts.Block, name: string, file: ts.SourceFile): boolean {
   let found = false;
@@ -85,6 +79,43 @@ function boundName(call: ts.CallExpression): string | null {
   return declaration.name.text;
 }
 
+/** `if (!<name>.ok) return/throw/continue/break;` (or a block ending in one), no else. */
+function isNotOkExit(statement: ts.Statement, name: string, file: ts.SourceFile): boolean {
+  if (!ts.isIfStatement(statement) || statement.elseStatement) return false;
+  if (statement.expression.getText(file).replace(/\s/g, "") !== `!${name}.ok`) return false;
+  const exit = ts.isBlock(statement.thenStatement)
+    ? statement.thenStatement.statements[statement.thenStatement.statements.length - 1]
+    : statement.thenStatement;
+  return (
+    !!exit &&
+    (ts.isReturnStatement(exit) || ts.isThrowStatement(exit) || ts.isContinueStatement(exit) || ts.isBreakStatement(exit))
+  );
+}
+
+/**
+ * True if `statements` reach a `try` whose `finally` disposes `name` before
+ * running anything else: only `if (!name.ok) return` guards may come first,
+ * or the `try` may open an `if (name.ok) { … }` block. A `finally` that is
+ * reached conditionally, or only after other code that could throw, does not
+ * count — the scope would leak on that path.
+ */
+function protectedFromStart(statements: readonly ts.Statement[], name: string, file: ts.SourceFile): boolean {
+  for (const statement of statements) {
+    if (ts.isTryStatement(statement)) return !!statement.finallyBlock && disposes(statement.finallyBlock, name, file);
+    if (isNotOkExit(statement, name, file)) continue;
+    if (
+      ts.isIfStatement(statement) &&
+      !statement.elseStatement &&
+      statement.expression.getText(file).replace(/\s/g, "") === `${name}.ok` &&
+      ts.isBlock(statement.thenStatement)
+    ) {
+      return protectedFromStart(statement.thenStatement.statements, name, file);
+    }
+    return false;
+  }
+  return false;
+}
+
 function undisposedCompositions(source: string, fileName = "file.ts"): string[] {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   const offenders: string[] = [];
@@ -93,16 +124,13 @@ function undisposedCompositions(source: string, fileName = "file.ts"): string[] 
       const { line } = file.getLineAndCharacterOfPosition(node.getStart(file));
       const where = `${fileName}:${line + 1} ${node.expression.text}`;
       const name = boundName(node);
-      const fn = enclosingFunction(node);
+      // const c = await compose…(…) → its VariableStatement, which must sit
+      // directly in a block so the statements after it can be checked.
+      const statement = name ? node.parent.parent.parent.parent : undefined;
       let ok = false;
-      if (name && fn?.body && ts.isBlock(fn.body)) {
-        const check = (inner: ts.Node) => {
-          if (ts.isTryStatement(inner) && inner.finallyBlock && disposes(inner.finallyBlock, name, file)) ok = true;
-          // Do not credit a finally inside a nested function.
-          if (inner !== fn.body && ts.isFunctionLike(inner)) return;
-          ts.forEachChild(inner, check);
-        };
-        check(fn.body);
+      if (name && statement && ts.isVariableStatement(statement) && ts.isBlock(statement.parent)) {
+        const siblings = statement.parent.statements;
+        ok = protectedFromStart(siblings.slice(siblings.indexOf(statement) + 1), name, file);
       }
       if (!ok) offenders.push(where);
     }
@@ -120,6 +148,7 @@ describe("request scope disposal", () => {
       "async function a() { const c = await composeBilling(o); if (!c.ok) return; try { use(c); } finally { await c.data.dispose(); } }",
       "async function a() { const c = await composeBillingReview(o); try { use(c); } finally { await c.dispose(); } }",
       "async function a() { const c = await composePaymentsPublic(o); if (c.ok) { try { use(c); } finally { await c.data.dispose().catch(() => {}); } } }",
+      "async function a() { const c = await composeBilling(o); if (!c.ok) { log(c); return respond(c); } try { use(c); } finally { await c.data.dispose(); } }",
     ];
     for (const source of ok) expect(undisposedCompositions(source)).toEqual([]);
 
@@ -130,6 +159,11 @@ describe("request scope disposal", () => {
       "async function a() { let c = await composeBilling(o); try { use(c); } finally { await c.data.dispose(); } }",
       "async function a() { return composeBilling(o); }",
       "async function a() { const c = await composeBilling(o); const f = async () => { try {} finally { await c.data.dispose(); } }; }",
+      // The finally is reached only on some paths, or after code that can throw.
+      "async function a() { const c = await composeBilling(o); if (run) { try { use(c); } finally { await c.data.dispose(); } } }",
+      "async function a() { const c = await composeBilling(o); prepare(); try { use(c); } finally { await c.data.dispose(); } }",
+      "async function a() { const c = await composeBilling(o); if (!c.ok) log(c); try { use(c); } finally { await c.data.dispose(); } }",
+      "async function a() { const c = await composeBilling(o); if (c.ok) { prepare(); try { use(c); } finally { await c.data.dispose(); } } }",
     ];
     for (const source of bad) expect(undisposedCompositions(source)).toHaveLength(1);
   });

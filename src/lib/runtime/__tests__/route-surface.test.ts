@@ -75,16 +75,29 @@ const SKIPS_PLUGIN_CHECK: Record<string, string[]> = {
   composeBilling: ["readOnly"],
 };
 
+/**
+ * The name a property key spells (`readOnly`, `"readOnly"`, `["readOnly"]`
+ * all → `readOnly`); null when it cannot be known statically.
+ */
+function propertyKey(name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) return name.expression.text;
+  return null;
+}
+
 function skipsPluginCheck(call: ts.CallExpression, composer: string): boolean {
   const options = call.arguments[0];
   const names = SKIPS_PLUGIN_CHECK[composer] ?? [];
   if (!names.length) return false;
-  // Options we cannot read statically (a variable, a spread) are treated as
-  // skipping the check, so the route has to prove it gates.
+  // Options we cannot read statically (a variable, a spread, a computed key)
+  // are treated as skipping the check, so the route has to prove it gates.
   if (!options || !ts.isObjectLiteralExpression(options)) return true;
   return options.properties.some((property) => {
     if (ts.isSpreadAssignment(property)) return true;
-    if (!property.name || !names.includes(property.name.getText())) return false;
+    if (!property.name) return false;
+    const key = propertyKey(property.name);
+    if (key === null) return true;
+    if (!names.includes(key)) return false;
     if (ts.isShorthandPropertyAssignment(property)) return true;
     return !(ts.isPropertyAssignment(property) && property.initializer.kind === ts.SyntaxKind.FalseKeyword);
   });
@@ -234,6 +247,9 @@ describe("MGM runtime route surface", () => {
     expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: false }); }', "billing")).toBe(true);
     expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly: true }); }', "billing")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, readOnly }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, "readOnly": true }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, ["readOnly"]: true }); }', "billing")).toBe(false);
+    expect(entersRuntime('export async function POST() { const c = await composeBilling({ supabase, organizationId, [key]: true }); }', "billing")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composeBilling({ ...options }); }', "billing")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composeBilling(options); }', "billing")).toBe(false);
     expect(entersRuntime('export async function POST() { const c = await composeBillingReview({ supabase, organizationId }); }', "billing")).toBe(false);
