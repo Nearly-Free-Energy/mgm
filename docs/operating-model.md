@@ -109,6 +109,14 @@ review; unsigned or unsigned-off commits stay blocked, including via the
 GitHub web editor), treat the controls above as the intended policy rather
 than as proven behaviour.
 
+## CI
+
+The `Test` job starts a local Supabase with the CLI version pinned in
+`package-lock.json`. It pulls service images from GHCR by setting
+`SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io`, because the CLI default
+(`public.ecr.aws`) rate-limits anonymous pulls from shared runners. See
+`docs/adr/ADR-004-ci-supabase-image-source.md`.
+
 ## Where things are recorded
 
 | Kind | Where |
