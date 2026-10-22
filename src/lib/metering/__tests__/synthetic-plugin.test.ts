@@ -29,7 +29,7 @@ function client(opts: {
       ? { data: null, error: { message: "boom" } }
       : { data: opts.enabled[args._org_id] ?? false, error: null }
   );
-  const from = vi.fn((_table: string) => {
+  const from = vi.fn(() => {
     let microgridId = "";
     const builder = {
       select: () => builder,
