@@ -62,18 +62,21 @@ An export plus the credential key is every stored credential in plaintext.
   identity) somewhere other than export storage: a different account,
   provider and set of credentials. Never put them in the same bucket or
   archive as an export.
-- **Treat the export connection string as a full-access secret.** Exports
-  run with the database's `postgres` connection string
-  ([Requirements](#requirements)). That login can read every table and every
-  Vault secret, including the credential key and the payment worker secret,
-  and can change the database, so whoever holds it holds as much as an export
-  and its keys together. Keep it in the scheduler's secret store, give it only
-  to the export job and the people who run it, and change the database
-  password, and the stored connection string with it, when one of them
-  leaves.
-- The host that runs exports needs only the age *public* recipient, so the
-  exports it writes are unreadable without the offline identity. It does hold
-  the connection string, so protect it as you would the database itself.
+- **Treat the export connection string as a full-access secret.** An export
+  is an administrative procedure that runs with the database's `postgres`
+  connection string ([Scheduled exports](#scheduled-exports)). That login can
+  read every table and every Vault secret, including the credential key, and
+  can change the database, so whoever holds it holds as much as an export and
+  its keys together. Keep it in your secret store, such as the team password
+  manager, and never in a repository or a CI system. Read it from there for
+  each run, give it only to the people who run exports, and change the
+  database password, and the stored connection string with it, when one of
+  them leaves.
+- Run exports from an environment you control: an operator's machine, or a
+  scheduler you run yourself, not a hosted CI system. The host needs only the
+  age *public* recipient, so the exports it writes are unreadable without the
+  offline identity. It does hold the connection string while an export runs,
+  so protect it as you would the database itself.
 - Keep the age identity offline, with at least two copies held by different
   people. Losing it makes every export unreadable, so decrypt one in each
   rehearsal.
@@ -125,6 +128,16 @@ Supabase's
 Unlike the CLI, its data dump reads only the schemas MGM's data lives in, and
 it writes a manifest.
 
+An export is an administrative procedure. An operator runs it, by hand or
+from a scheduler they run, in an environment they control, with the
+database's `postgres` login, as Supabase's guide does. It is not a
+least-privilege job: that login can read and change everything in the
+database, so the protection goes on who can read its connection string and
+where exports run ([Keep keys and exports apart](#keep-keys-and-exports-apart)).
+A dedicated export login was tried, and
+[Why the export uses the `postgres` login](#why-the-export-uses-the-postgres-login-and-what-a-dedicated-login-would-need)
+reports what ruled it out and what one would need.
+
 ### Requirements
 
 - The PostgreSQL client programs `pg_dump` and `pg_dumpall`, of at least the
@@ -139,34 +152,71 @@ it writes a manifest.
   project has the IPv4 add-on. Put the password in the string's user-info part
   (`postgresql://user:password@host...`) and percent-encode its special
   characters. The script refuses a `password=` parameter. Treat the string as
-  a full-access secret ([Keep keys and exports apart](#keep-keys-and-exports-apart)).
+  a full-access secret: keep it in your secret store, not in a repository or a
+  CI system, and read it from there for each run
+  ([Keep keys and exports apart](#keep-keys-and-exports-apart)).
+- An environment you control to run exports in, with an encrypted disk: an
+  operator's machine, or a scheduler you run yourself. Not a hosted CI
+  system, which would have to hold the connection string.
 
-#### Why the export uses the `postgres` login
+#### Why the export uses the `postgres` login, and what a dedicated login would need
 
-Two kinds of dedicated login were tried for exports:
+A dedicated export login was tried in two forms, on local Supabase stacks
+(Supabase CLI 2.98.2, `supabase/postgres` 17.6.1.106, Auth 2.188.1, Storage
+1.54.1), connected as `postgres`. On Supabase, `postgres` is not a
+superuser; it has `CREATEROLE` and `BYPASSRLS`. A hosted project may differ.
 
-- **From explicit grants**, holding `SELECT` on just the tables the export
-  reads. Such a login cannot read the Auth tables a restore needs: `postgres`
-  can pass on read access to some of them, such as `auth.users`, but not
-  access to the `auth` schema itself. Granting that only raises a warning,
-  and the login is then refused with "permission denied for schema auth".
-- **With `pg_read_all_data` and `BYPASSRLS`.** Such a login can run the
-  export. It also reads Auth's session and refresh-token tables, which hold
-  what is needed to act as any signed-in user, so it has to be guarded as
-  closely as `postgres`. Nor is it read-only in effect:
-  `default_transaction_read_only = on` on the login is only a default, which
-  a session can turn off with `SET default_transaction_read_only = off`,
-  `SET TRANSACTION READ WRITE` or `BEGIN READ WRITE`.
+- **A login built from explicit grants**, holding `SELECT` on just the tables
+  the export reads, cannot be given all of them, because `postgres` holds
+  these without the grant option:
+  - `USAGE` on schema `auth`. Granting it only raises a warning that no
+    privileges were granted, and the login's dump then stops with
+    "permission denied for schema auth".
+  - `SELECT` on `auth.oauth_clients`, `auth.oauth_consents` and
+    `auth.webauthn_credentials`, which the export keeps.
+  - `SELECT` on `storage.buckets_analytics`, `storage.iceberg_namespaces`,
+    `storage.iceberg_tables`, `storage.s3_multipart_uploads` and
+    `storage.s3_multipart_uploads_parts`, which `postgres` holds only through
+    its role memberships.
+  - `USAGE` on schema `supabase_functions`.
 
-So the export uses the `postgres` login every project already has, and the
-protection goes on the connection string: who and what can read it
-([Keep keys and exports apart](#keep-keys-and-exports-apart)). Where the
-scheduler offers a protected secret scope, such as a deployment environment
-with required reviewers, keep the string there.
+  Making the login a member of `anon` gets past some of these refusals, not
+  all, and gives it everything `anon` may do.
+- **A login with `pg_read_all_data` and `BYPASSRLS`**, which `postgres` can
+  grant, runs the export's data dump, a schema-only dump and
+  `pg_dumpall --roles-only --no-role-passwords`. It also reads
+  `auth.sessions` and `auth.refresh_tokens`, which hold what is needed to act
+  as any signed-in user, so through the application it can make any change
+  that user could. Leaving those tables out of the export does not stop the
+  login reading them, and `pg_read_all_data` covers every table: it cannot
+  leave some out.
+- **A read-only default is not a boundary.** Setting
+  `default_transaction_read_only = on` on a login only sets a default: a
+  session turns it off with `SET default_transaction_read_only = off`,
+  `SET TRANSACTION READ WRITE` or `BEGIN READ WRITE`, and can then write
+  wherever the login's privileges allow.
+
+So on Supabase today a dedicated login either cannot export what a restore
+needs, or can act as any signed-in user and so cannot be kept from writing.
+Rather than leave recovery data out of the export, or widen a dedicated login
+until it can export, the export stays an administrative procedure with the
+`postgres` login, run by an operator from an environment they control.
+
+A dedicated login would need all of these:
+
+- Read access to everything the export reads, and none to Auth's sessions or
+  refresh tokens. On Supabase that means explicit grants, so `postgres` would
+  need the grant option on the `auth` schema and on the tables and schema
+  listed above.
+- A pass of the export-and-restore round trip in
+  `scripts/tests/test_export_restore_e2e.py`, run under that login.
+- Negative permission tests showing that it cannot write or reach the
+  credential key, through its role memberships and callable functions as
+  well as its table grants.
 
 Revisit this section if Supabase lets `postgres` pass on access to the `auth`
-schema, which may make a login built from explicit grants possible. This
-returns `false` until it does:
+schema, which may make a login built from explicit grants possible, subject
+to the tests above. This returns `false` until it does:
 
 ```sql
 SELECT has_schema_privilege('postgres', 'auth', 'USAGE WITH GRANT OPTION');
@@ -175,13 +225,13 @@ SELECT has_schema_privilege('postgres', 'auth', 'USAGE WITH GRANT OPTION');
 ### Run an export
 
 The script reads the connection string from the environment variable you name
-and never takes it as an argument. Provide the variable from a secret store;
-do not type the value on a command line, where shell history keeps it. Every
+and never takes it as an argument. Read the value from your secret store for
+the run; do not type it on a command line, where shell history keeps it. Every
 run must name either the age recipients to encrypt to (`--age-recipients`) or
 `--plaintext`; naming neither, or both, is a usage error.
 
 ```bash
-# MGM_EXPORT_DB_URL comes from the scheduler's secret store.
+# MGM_EXPORT_DB_URL is read from your secret store for this run.
 scripts/backup/export-database.sh \
   --db-url-env MGM_EXPORT_DB_URL \
   --out /srv/mgm-exports \
@@ -264,9 +314,8 @@ running, not whether it is the run that made the files: a run still in
 progress keeps its files, and so does a leftover whose ID another process of
 yours has since taken, until a run finds that ID no longer running. So:
 
-- Run exports on a host no one else uses, such as an ephemeral CI runner or a
-  dedicated machine with an encrypted disk, and keep `$TMPDIR` on that
-  encrypted disk or in memory.
+- Run exports on a machine you control that no one else uses, with an
+  encrypted disk, and keep `$TMPDIR` on that disk or in memory.
 - Make `--out` a local directory, not a mounted bucket or a synced folder, and
   copy only `*.tar.gz.age` files out of it.
 
@@ -275,8 +324,11 @@ yours has since taken, until a run finds that ID no longer running. So:
 - Export at least daily, and before every upgrade, but not while a deploy
   runs: schedule exports away from deploys, and retry an export that exits
   with code 4 because the migration history changed.
-- Pass the connection string to the export step only, as an environment
-  variable from the scheduler's secret store.
+- Run the schedule from an environment you control, such as an operator's
+  machine or a scheduler you run yourself, not a hosted CI system. Read the
+  connection string from your secret store for each run and pass it to the
+  export step only, as an environment variable. Never store it in the
+  scheduler's configuration, a CI system or a repository.
 - Always pass `--age-recipients`, never `--plaintext`, and make the job fail
   unless the path the script prints ends in `.tar.gz.age`, so a `--plaintext`
   added by mistake fails the job instead of storing an unencrypted export.
@@ -318,8 +370,8 @@ Supabase documents two ways to read a bucket:
 
 Both credentials give read and write access to every bucket and bypass
 row-level security ([S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication)).
-Keep them out of the export host's secret store unless your policy allows
-them there, and never next to key copies.
+Keep them off the export host unless your policy allows them there, and
+never next to key copies.
 
 Which tool you use is your choice; the restore rehearsal must show that it
 copies every object and that the copy restores. With the AWS CLI and the S3
@@ -528,8 +580,9 @@ export holds no Vault secrets for the key to unlock.
    key as before, so the restored credentials decrypt again. On a restore
    target it comes in two parts: the key now, and the payment worker entries
    at the [cutover](#keep-restore-targets-away-from-live-payments), on a
-   production replacement only. In `psql` with the target's service entry,
-   first check that the target holds none of MGM's Vault entries:
+   production replacement only. In a `psql` session connected as `postgres`
+   with the target's service entry, first check that the target holds none
+   of MGM's Vault entries:
 
    ```sql
    SELECT name FROM vault.secrets
@@ -545,10 +598,12 @@ export holds no Vault secrets for the key to unlock.
      ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
    ```
 
-   Then create the key from its offline copy. `\prompt` reads it into a psql
-   variable, so it stays out of your shell history, psql's history and any
-   saved SQL file; it does show what you type, so clear the terminal
-   afterwards:
+   Then create the key from its offline copy, as in step 2 of dek.md's
+   [Create the key](dek.md#create-the-key-new-environment). `\prompt` reads
+   the key into a psql variable, so the key is not in your shell history,
+   psql's history or a saved SQL file. Paste it at the prompt; psql shows
+   what you paste, so clear the terminal afterwards. Do not use the Supabase
+   SQL editor for this step: it would keep the key in its query history.
 
    ```sql
    \prompt 'Credential key: ' dek
@@ -585,8 +640,8 @@ export holds no Vault secrets for the key to unlock.
 
 10. **Set passwords for custom login roles**, if you have any. `roles.sql`
     carries none. On a production replacement, once it takes over, point the
-    scheduled exports at it: put its `postgres` connection string in the
-    scheduler's secret store in place of the old one.
+    exports at it: replace the old connection string in your secret store
+    with its `postgres` connection string.
 
 11. **Move the invoice counters** (production replacement only) past every
     invoice number the source issued, and give the bills the source first
@@ -639,9 +694,11 @@ has stopped serving and every [checklist](#verification-checklist) item except
 **Payment reconciliation running** has passed, so the target is verified
 before workers and payment callbacks start:
 
-1. Set `payments_worker_url` and `payments_worker_secret` in Vault for the new
-   application, from your copies, as in [dek.md](dek.md#recover). This
-   completes the Vault recovery that step 7 of the logical restore began.
+1. Set `payments_worker_url` and `payments_worker_secret` in Vault from your
+   copies, with the two `vault.create_secret` statements that end the
+   logical-restore recovery in [dek.md](dek.md#recover), and the new
+   application's worker URL. This completes the Vault recovery that step 7
+   of the logical restore began.
 2. Schedule the reconciliation job, with the statement from the release's
    migrations:
 
@@ -652,12 +709,14 @@ before workers and payment callbacks start:
    Check that `SELECT jobname, active FROM cron.job;` lists it as active.
 3. Re-enable the merchant accounts whose IDs you recorded.
 4. If the public URL changed, update each merchant account's provider
-   notification registration, the worker URL in Vault, and Supabase Auth's
-   site and redirect URLs, and check each one.
-5. Payments made after the export started are not in the target, but the
+   notification registration and Supabase Auth's site and redirect URLs,
+   and check each one. Step 1 already gave Vault the new worker URL.
+5. Run the connection tests that dek.md's recovery asks for: **Test
+   connection** on one microgrid and one payment account.
+6. Payments made after the export started are not in the target, but the
    payment provider still has them. Reconcile them before relying on payment
    status.
-6. Complete the **Payment reconciliation running** checklist item.
+7. Complete the **Payment reconciliation running** checklist item.
 
 Closing billing periods is not a cutover step. Periods the source closed
 after the export started stay open through the cutover, and are closed
@@ -753,9 +812,9 @@ and before anyone renders a bill in the target (logical restore, step 11):
    `mgm-restore-source`, as in step 1 of the logical restore, and remove it
    when you are done. Give it the source's `postgres` login, the one exports
    run with ([Requirements](#requirements)): row-level security on
-   `public.billing_line_items` stops a login that only has `SELECT` on the
-   table, and `postgres` bypasses it. Nothing here writes to the source.
-   From a private directory on the trusted machine:
+   `public.billing_line_items` hides every row from a login that only has
+   `SELECT` on the table, and `postgres` bypasses it. Nothing here writes to
+   the source. From a private directory on the trusted machine:
 
    ```bash
    PGSERVICE=mgm-restore-source psql -X --variable ON_ERROR_STOP=1 \
