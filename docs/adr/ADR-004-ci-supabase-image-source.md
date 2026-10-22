@@ -38,3 +38,5 @@ against the risk of diverging from the local setup. The job names `Test` and
 ### Amendment (22 Oct 2026): authenticate to GHCR
 
 Anonymous pulls from GHCR were then also refused with `toomanyrequests` on shared runners. The `Test` job now logs in to `ghcr.io` with the job's own `GITHUB_TOKEN` (`packages: read`, no stored secret) before `supabase start`, so pulls count as authenticated. Fork pull requests get the same read-only token, so this needs no repository secret.
+
+The start step also retries up to three times with a growing pause, because GHCR throttles in short bursts even for authenticated pulls ("toomanyrequests: retry-after ...ms").

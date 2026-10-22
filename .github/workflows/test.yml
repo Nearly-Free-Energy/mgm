@@ -70,7 +70,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_ACTOR: ${{ github.actor }}
 
-      - run: npx supabase start
+      # Retry: GHCR also throttles in short bursts ("toomanyrequests: retry-after ...ms").
+      - name: Start local Supabase (with retries)
+        run: |
+          for attempt in 1 2 3; do
+            if npx supabase start; then exit 0; fi
+            echo "supabase start failed (attempt $attempt); retrying"
+            npx supabase stop --no-backup || true
+            sleep $((attempt * 30))
+          done
+          exit 1
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
