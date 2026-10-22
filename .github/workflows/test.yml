@@ -11,11 +11,11 @@ name: Test
 # secret. Measured cold on ubuntu-latest: `supabase start` ~81-85s, the
 # 13-file rls project ~14-16s.
 #
-# SKIP_DEK_BOOTSTRAP_TEST stays set, and NOT for cost. dek-bootstrap.test.ts
-# does `ALTER DATABASE postgres SET app.allow_dev_dek`, which fails with
-# `permission denied to set parameter` because the `postgres` role is not a
-# superuser on Supabase (local or CI). It cannot pass here at any time
-# budget; that is a defect in the test, tracked separately, not a deferral.
+# `supabase start` runs with MGM_ALLOW_DEV_CREDENTIAL_KEY=1, so migration
+# 00018 gives this throwaway database a generated credential encryption key;
+# without it the migrations stop (docs/runbooks/dek.md). The last step resets
+# the database without and then with that opt-in, so it runs after everything
+# else that uses the database.
 
 on:
   workflow_dispatch:
@@ -42,6 +42,17 @@ jobs:
     # Raised from 10: the Supabase start adds ~85s to the job, and a cold run may
     # spend minutes retrying throttled image pulls.
     timeout-minutes: 25
+    # Pull the Supabase service images from GHCR, not the CLI default
+    # (public.ecr.aws), which rejects anonymous pulls from shared runner
+    # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
+    # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
+    # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
+    # set for the whole job because every CLI command that creates a
+    # container resolves the image through it: `supabase start`, and
+    # `supabase db reset` in the fresh-install key check, which recreates the
+    # database container. The runner has only the GHCR copies.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
     steps:
       - uses: actions/checkout@v4
@@ -60,11 +71,8 @@ jobs:
       # npm ci already installs the lockfile-pinned Supabase CLI. Avoid a
       # second release lookup here; the setup action can hit GitHub's rate
       # limit before the tests even start.
-      # Pull the Supabase service images from GHCR, not the CLI default
-      # (public.ecr.aws), which rejects anonymous pulls from shared runner
-      # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
-      # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
-      # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md.
+      # The images come from GHCR (the job-level SUPABASE_INTERNAL_IMAGE_REGISTRY
+      # above; docs/adr/ADR-004-ci-supabase-image-source.md).
       - name: Log in to GHCR for authenticated image pulls
         run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
         env:
@@ -132,7 +140,7 @@ jobs:
           done
           exit 1
         env:
-          SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
+          MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
 
       - name: Check the pre-pull list matches the images in use
         run: |
@@ -149,6 +157,7 @@ jobs:
       - name: Credential key rotation rehearsal
         run: |
           eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key-bootstrap.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
@@ -171,5 +180,14 @@ jobs:
           export SUPABASE_JWT_SECRET="$JWT_SECRET"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
+
+      # Last: it resets the database twice, without the development opt-in
+      # (the migrations must stop at the key check) and then with it.
+      - name: Fresh-install key check
+        run: |
+          eval "$(npx supabase status -o env | grep -E '^(ANON_KEY|JWT_SECRET)=')"
+          export SUPABASE_JWT_SECRET="$JWT_SECRET"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          npm test -- src/lib/supabase/__tests__/dek-bootstrap.test.ts
         env:
-          SKIP_DEK_BOOTSTRAP_TEST: '1'
+          RUN_DEK_BOOTSTRAP_TEST: '1'

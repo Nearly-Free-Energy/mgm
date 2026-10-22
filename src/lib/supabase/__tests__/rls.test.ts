@@ -4,7 +4,9 @@
  * RLS policy verification suite for the entity-model schema (AB ticket #50 / E ticket #56).
  *
  * Prerequisites:
- *   1. Local Supabase CLI running: `supabase start` (or `supabase start` + `supabase db reset`)
+ *   1. Local Supabase CLI running: `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`
+ *      (then `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply
+ *      migrations), or `./setup.sh`
  *   2. SUPABASE_JWT_SECRET set in .env.local (get from: `supabase status | grep 'JWT secret'`)
  *   3. NEXT_PUBLIC_SUPABASE_ANON_KEY set in .env.local
  *

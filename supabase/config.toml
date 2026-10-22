@@ -47,8 +47,17 @@ default_pool_size = 20
 # Maximum number of client connections allowed.
 max_client_conn = 100
 
-# [db.vault]
-# secret_key = "env(SECRET_VALUE)"
+[db.vault]
+# Development and CI only. With MGM_ALLOW_DEV_CREDENTIAL_KEY=1 set, the CLI adds
+# this entry to Vault before migrations run, and migration 00018 (which reads
+# this name) creates a throwaway credential encryption key instead of
+# stopping. Never set it when migrating a shared database, and never put it in
+# any .env file: the CLI reads .env, .env.local, .env.development* and
+# supabase/.env* for every command, including `supabase db push` and
+# `supabase migration up`, which write these entries too. Pass it only to the
+# command that needs it; see docs/runbooks/dek.md. Never add the real key
+# here: `db push` and `migration up` would overwrite it.
+mgm_allow_dev_credential_key = "env(MGM_ALLOW_DEV_CREDENTIAL_KEY)"
 
 [db.migrations]
 # If disabled, migrations will be skipped during a db push or reset.
