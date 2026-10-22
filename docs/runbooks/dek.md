@@ -198,25 +198,30 @@ comes back:
     [Backup and restore using the CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
     Copying replaces the new project's root key, so do it while the new
     project's Vault is still empty; or
-  - after restoring, replace MGM's Vault entries with your copies. Use the
-    same key as before, so the restored credentials decrypt again:
+  - after restoring, replace MGM's Vault entries with your copies, from a
+    psql session connected as `postgres`; paste the key at the prompt, as in
+    step 2 of "Create the key". Use the same key as before, so the restored
+    credentials decrypt again:
 
     ```sql
     DELETE FROM vault.secrets WHERE name IN
       ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
-    SELECT vault.create_secret('<key from the password manager>', 'mgm_ems_dek',
-      'MGM credential encryption key');
+    \prompt 'Credential key: ' dek
+    SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+    \unset dek
     SELECT vault.create_secret('<https://…/api/payments/reconcile-worker>', 'payments_worker_url');
     SELECT vault.create_secret('<PAYMENTS_WORKER_SECRET>', 'payments_worker_secret');
     ```
 
   Then run **Test connection** on one microgrid and one payment account.
 - **Vault secret lost but the plaintext is in the password manager:**
-  recreate it with the same value.
+  recreate it with the same value, from a psql session connected as
+  `postgres`; paste the key at the prompt, as in step 2 of "Create the key":
 
   ```sql
-  SELECT vault.create_secret('<plaintext from password manager>', 'mgm_ems_dek',
-    'MGM credential encryption key');
+  \prompt 'Credential key: ' dek
+  SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+  \unset dek
   ```
 
 - **Both lost:** the encrypted values cannot be recovered. Generate a new
@@ -232,17 +237,14 @@ starting. Row locks alone cannot stop an application request that has already
 encrypted a secret from writing that old-key ciphertext after rotation.
 Back up the current and replacement keys in the password manager first.
 
-The tested implementation is
-[`supabase/scripts/rotate-credential-key.sql`](../../supabase/scripts/rotate-credential-key.sql).
-Loading it defines a session-local helper; it does not rotate anything. On a
-privileged psql connection, from the repository root:
-
-```sql
-\i supabase/scripts/rotate-credential-key.sql
-BEGIN;
-SELECT pg_temp.mgm_rotate_credential_key('<new plaintext key from password manager>');
-COMMIT;
-```
+Use the guarded `rotate` command in
+[credential-key-maintenance.md](credential-key-maintenance.md): a dry run
+first, then the run with `--commit`. It asks for the replacement key twice
+at a hidden prompt and passes it to psql on standard input, so the key is
+not in your shell history, psql's history or a command-line argument. Each
+run applies the tested helper,
+[`supabase/scripts/rotate-credential-key.sql`](../../supabase/scripts/rotate-credential-key.sql),
+in one transaction that rolls back unless you pass `--commit`.
 
 The helper locks credential tables, decrypts active and historical secrets
 before changing either Vault key name, then re-encrypts them in the same
