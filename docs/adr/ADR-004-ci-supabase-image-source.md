@@ -20,11 +20,15 @@ CLI uses were checked to exist there anonymously.
 
 ## Decision
 
-Set `SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io` on the `supabase start` step
-of the `Test` job. No services are excluded: the database suites use storage
-(`invoice_logos_bucket`), and the saving from excluding the rest is small
-against the risk of diverging from the local setup. The job names `Test` and
-`CodeQL` and `permissions: contents: read` are unchanged.
+Set `SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io` in the job-level `env` of the
+`Test` job, so every Supabase CLI command in the job pulls from GHCR. That
+covers `supabase start` and any later command that recreates a container,
+such as the `supabase db reset` runs in the fresh-install key check, which
+delete and recreate the database container. No services are excluded: the
+database suites use storage (`invoice_logos_bucket`), and the saving from
+excluding the rest is small against the risk of diverging from the local
+setup. The job names `Test` and `CodeQL` and `permissions: contents: read`
+are unchanged.
 
 ## Consequences
 
