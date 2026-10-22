@@ -31,13 +31,17 @@ concurrency:
 # Tighten default token permissions; explicitly grant only what's required.
 permissions:
   contents: read
+  # read-only package scope so the runner can pull Supabase images from GHCR as an
+  # authenticated client; anonymous GHCR pulls from shared runner IPs are rate limited.
+  packages: read
 
 jobs:
   Test:
     name: Test
     runs-on: ubuntu-latest
-    # Raised from 10: the Supabase start adds ~85s to the job.
-    timeout-minutes: 15
+    # Raised from 10: the Supabase start adds ~85s to the job, and a cold run may
+    # spend minutes retrying throttled image pulls.
+    timeout-minutes: 25
     # Pull the Supabase service images from GHCR, not the CLI default
     # (public.ecr.aws), which rejects anonymous pulls from shared runner
     # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
@@ -66,11 +70,84 @@ jobs:
 
       # npm ci already installs the lockfile-pinned Supabase CLI. Avoid a
       # second release lookup here; the setup action can hit GitHub's rate
-      # limit before the tests even start. The images come from GHCR (the
-      # job-level SUPABASE_INTERNAL_IMAGE_REGISTRY above).
-      - run: npx supabase start
+      # limit before the tests even start.
+      # The images come from GHCR (the job-level SUPABASE_INTERNAL_IMAGE_REGISTRY
+      # above; docs/adr/ADR-004-ci-supabase-image-source.md).
+      - name: Log in to GHCR for authenticated image pulls
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+
+      # GHCR throttles bursts of parallel layer pulls from shared runner IPs, and
+      # `supabase start` pulls about a dozen images at once. So: restore the images
+      # from the Actions cache, pull only what is missing one at a time with
+      # backoff, and let `supabase start` find everything already local (the CLI
+      # pulls with pull_policy "missing"). The list is .github/supabase-ci-images.txt.
+      - name: Restore Supabase images from cache
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/supabase-images.tar.gz
+          key: supabase-images-${{ hashFiles('.github/supabase-ci-images.txt') }}
+
+      - name: Load cached Supabase images
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: gunzip -c "$RUNNER_TEMP/supabase-images.tar.gz" | docker load
+
+      - name: Pre-pull Supabase images one at a time
+        id: prepull
+        run: |
+          complete=true
+          while read -r image; do
+            case "$image" in ''|'#'*) continue ;; esac
+            if docker image inspect "$image" >/dev/null 2>&1; then continue; fi
+            # GHCR answers some single pulls with toomanyrequests and a
+            # retry-after of microseconds (shared-IP limiter), so retry quickly and
+            # alternate with the CLI's default mirror, then tag it as the GHCR name
+            # the CLI looks for.
+            ok=false
+            for attempt in $(seq 1 12); do
+              if docker pull --quiet "$image"; then ok=true; break; fi
+              mirror="public.ecr.aws/supabase/${image#ghcr.io/supabase/}"
+              if docker pull --quiet "$mirror" && docker tag "$mirror" "$image"; then ok=true; break; fi
+              echo "pull of $image failed (attempt $attempt)"
+              sleep $((attempt < 5 ? attempt * 3 : 15))
+            done
+            if [ "$ok" != true ]; then
+              echo "::warning::could not pre-pull $image; supabase start will retry it"
+              complete=false
+            fi
+          done < .github/supabase-ci-images.txt
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+
+      # Save the cache only from a complete set (the cache action saves the file
+      # at job end when this job succeeds and there was no cache hit).
+      - name: Archive Supabase images for the cache
+        if: steps.image-cache.outputs.cache-hit != 'true' && steps.prepull.outputs.complete == 'true'
+        run: |
+          grep -v -e '^#' -e '^$' .github/supabase-ci-images.txt \
+            | xargs docker save | gzip -1 > "$RUNNER_TEMP/supabase-images.tar.gz"
+
+      # Retry: GHCR also throttles in short bursts ("toomanyrequests: retry-after ...").
+      - name: Start local Supabase (with retries)
+        run: |
+          for attempt in 1 2 3; do
+            if npx supabase start; then exit 0; fi
+            echo "supabase start failed (attempt $attempt); retrying"
+            npx supabase stop --no-backup || true
+            sleep $((attempt * 30))
+          done
+          exit 1
         env:
           MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
+
+      - name: Check the pre-pull list matches the images in use
+        run: |
+          for image in $(docker ps --filter name=supabase_ --format '{{.Image}}'); do
+            grep -qxF "$image" .github/supabase-ci-images.txt \
+              || echo "::warning::$image is running but not in .github/supabase-ci-images.txt (pinned CLI changed?)"
+          done
 
       - name: Payment integrity rehearsal
         run: |
