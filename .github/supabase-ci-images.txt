@@ -1,0 +1,19 @@
+# Images the Test job pre-pulls and caches (one per line, ghcr.io/supabase/<name>:<tag>).
+# Derived from the pinned Supabase CLI 2.98.2: tags from
+# pkg/config/templates/Dockerfile, names from internal/utils.GetRegistryImageUrl
+# (registry + "/supabase/" + last path segment), set from internal/utils.GetServices
+# for supabase/config.toml (analytics and pooler are disabled, so vector,
+# logflare and supavisor are not pulled).
+# When the CLI version in package-lock.json changes, regenerate this file;
+# the Test job warns if a running Supabase container is not listed here.
+ghcr.io/supabase/postgres:17.6.1.106
+ghcr.io/supabase/kong:2.8.1
+ghcr.io/supabase/postgrest:v14.10
+ghcr.io/supabase/gotrue:v2.188.1
+ghcr.io/supabase/mailpit:v1.22.3
+ghcr.io/supabase/realtime:v2.86.3
+ghcr.io/supabase/storage-api:v1.54.1
+ghcr.io/supabase/imgproxy:v3.8.0
+ghcr.io/supabase/edge-runtime:v1.73.13
+ghcr.io/supabase/studio:2026.04.28-sha-89d08a2
+ghcr.io/supabase/postgres-meta:v0.96.4
