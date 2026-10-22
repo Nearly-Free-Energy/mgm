@@ -59,7 +59,7 @@ Runs local Supabase via CLI with hot reload and full dev tooling.
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Node.js | 24 (see `.nvmrc`) | [nodejs.org](https://nodejs.org/) or `brew install node` |
+| Node.js | 24 (see `.nvmrc`) | `nvm install` or `fnm install` (reads `.nvmrc`), or `brew install node@24` (keg-only: add it to your `PATH`). `brew install node` installs the newest release, not 24. |
 | npm | 9+ | Bundled with Node.js |
 | Docker Desktop | 4.0+ | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) |
 | Supabase CLI | 2.75+ | `brew install supabase/tap/supabase` or [docs](https://supabase.com/docs/guides/cli/getting-started) |

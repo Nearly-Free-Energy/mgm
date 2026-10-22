@@ -47,67 +47,96 @@ discussion first, not a PR.
 4. **Pull request.** Signed, signed-off commits (`git commit -s -S`). The
    `Test`, `CodeQL`, and `Build` checks must pass; hosting previews are
    informational. See "Merge controls" below and `CONTRIBUTING.md`.
-5. **Review.** At least one reviewer reads the diff against the invariants
-   above; protected areas need a code owner other than the author. For anything touching RLS, money, credentials, or the runtime, also
-   run the change against a database (`npm test` with local Supabase).
+5. **Review.** The author, or a code owner for protected areas, reads the diff
+   against the invariants above. Protected areas need approval from a code
+   owner other than the author; other changes may be merged by their author
+   once the checks pass. For anything touching RLS, money, credentials, or the
+   runtime, also run the change against a database (`npm test` with local
+   Supabase).
 6. **Deploy.** Apply database migrations before deploying the app. Follow
    the runbook for the area (`docs/runbooks/`, `docs/payments-rollout.md`,
    `docs/customerapp-activation.md`).
 
 ## Merge controls
 
-This section is the policy; the `main` ruleset is its enforcement, applied by
-a repository admin (the decision and its rationale are in
-`docs/adr/ADR-002-ci-build-gate-and-merge-controls.md`). `CLAUDE.md` §
-"Required Merge Controls" has the per-check detail and `CONTRIBUTING.md` is
-the contributor-facing version. Keep the three in step.
+Merge control is a **maintainer social contract**, not an enforced ruleset.
+GitHub does not block a merge that breaks it. Enforcement (branch protection or
+a ruleset) is deferred; the decision is in launch tracker #30 § 2 and
+`docs/adr/ADR-002-ci-build-gate-and-merge-controls.md`. `CLAUDE.md` §
+"Required Merge Controls" has the per-check detail and `CONTRIBUTING.md` is the
+contributor-facing version. Keep the three in step.
 
-**Required on `main`:** a pull request; the status checks `Test`, `CodeQL`,
-and `Build`; verified commit signatures; DCO sign-off; force-push and branch
-deletion blocked.
+**Merger checklist.** The person who merges verifies each item and declines to
+merge until it holds:
+
+1. A pull request exists; nothing goes to `main` directly.
+2. `Test`, `CodeQL` (both CodeQL entries) and `Build` are green.
+3. Every commit is Verified (signed).
+4. Every commit is signed off (`Signed-off-by:`). No automated DCO check
+   reports this, so the merger reads the commits.
+5. Code-owner approval for owned paths, on the final head commit, re-requested
+   after any push, from someone other than the person who pushed the
+   owned-path change. Reviewers suggest changes rather than pushing to the
+   author's branch.
+6. No rebase merging: GitHub cannot sign rebased commits. Squash or merge
+   commit only.
+7. Nobody force-pushes or deletes `main`.
 
 | Check | Workflow | Notes |
 |---|---|---|
-| `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite against a local Supabase |
+| `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite against a local Supabase; Node.js 24 from `.nvmrc` |
 | `CodeQL` | `.github/workflows/codeql.yml` | static security analysis |
 | `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets |
 
-Job names are the required-check contexts; renaming one silently un-requires it.
+Job names are the check names this checklist refers to; rename only together
+with these docs.
 
-**Code owners.** Approval from a code owner other than the author is required
-for database migrations (including the RLS helpers in `00002_rls.sql`),
-`src/lib/roles.ts`, the Cordis runtime gate (`src/lib/runtime/`,
-`src/lib/plugins/state.ts`), request middleware (`src/middleware.ts`,
-`src/lib/mgm/released-routes.ts`), and `.github/workflows/`. The paths live in
-`.github/CODEOWNERS`. Other changes may be merged by their author once the
-required checks pass.
+**Code owners.** The owned areas are database migrations (including the RLS
+helpers), roles, the Cordis runtime gate and plugin catalog, request
+middleware, and CI workflows. The paths live in `.github/CODEOWNERS`, which is
+the single list; `src/lib/__tests__/codeowners.test.ts` checks that each
+pattern still matches a tracked file. Other changes may be merged by their
+author once the checks pass.
 
-**Outside contributions.** Squash-merged. Squashing does **not** bypass the
-signature or sign-off requirements: they apply to every commit on the pull
-request, including ones from a fork. CLI contributors configure commit signing
-and use `git commit -s`; GitHub web edits are signed by GitHub and carry the
-sign-off when compulsory web sign-off is enabled. Maintainers may merge their
-own signed commits with merge commits. There is no routine admin bypass.
+**Outside contributions.** Squash-merged. Squashing does **not** waive the
+signature or sign-off items: they apply to every commit on the pull request,
+including ones from a fork. CLI contributors configure commit signing and use
+`git commit -s`; GitHub web edits are signed by GitHub and carry the sign-off
+only when the repository's web sign-off setting is on. A first-time
+contributor's workflow runs wait for a maintainer to approve them; the
+approving maintainer reads the diff first, especially anything under
+`.github/workflows/`, before approving the run. Maintainers may merge their own
+verified, signed-off commits with merge commits. For a commit that is unsigned
+or lacks a sign-off, withhold the merge and ask for a correction.
 
-**Hosting previews are informational.** A hosting-provider preview is never a
-required check, so a fork pull request never waits on a deployment
-authorization. Any application preview uses isolated synthetic data. The
-`Build` job, not a preview, is the production-build gate.
+**Hosting previews are informational.** A hosting-provider preview is not part
+of the checklist, so a fork pull request never waits on a deployment
+authorization that is not given. Keep Vercel Git Fork Protection enabled;
+maintainers do not authorize hosting deployments for fork pull requests. Any
+application preview uses isolated synthetic data. The `Build` job, not a
+preview, is the production-build gate.
 
 **Untrusted code gets no credentials.** The CI workflows run on the
 `pull_request` event with `permissions: contents: read` and read no repository
-secret; never use `pull_request_target` to build or test fork code.
+secret (the CodeQL job also gets `security-events: write` to upload its
+results); never use `pull_request_target` to build or test fork code.
 
-**Runtime versions.** CI and application builds target Node.js 24 LTS
-(`.nvmrc`, `package.json` `engines`). The Cordis dependency is pinned exactly
-in `package.json` (currently `4.0.0-rc.10`). The container image and the `Test`
-job remain on Node.js 20 until a deliberate runtime change moves them.
+**Runtime versions.** `.nvmrc` pins Node.js 24 LTS. Each path is separate:
 
-**Status.** The ruleset has not yet been verified against a fork pull request.
-Until it is rehearsed (signed and signed-off commits merge after checks and
-review; unsigned or unsigned-off commits stay blocked, including via the
-GitHub web editor), treat the controls above as the intended policy rather
-than as proven behaviour.
+- **Vercel** uses `package.json` `engines.node` (`>=24 <25`) in place of the
+  project's Node.js setting for builds and Functions. The project already
+  builds on 24.x, so this line does not change the production runtime.
+- **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to
+  Node 24 is a follow-up PR, linked from #33.
+- **`Test`** and **`Build`**: Node.js 24 from `.nvmrc`.
+
+The Cordis dependency is pinned exactly in `package.json` (currently
+`4.0.0-rc.10`).
+
+**Status.** The social contract has not yet been rehearsed with an outside
+fork pull request (including the GitHub web-editor path). The rehearsal is
+recorded on #33; until then treat the checklist as the agreed policy, applied
+by hand.
 
 ## CI
 
