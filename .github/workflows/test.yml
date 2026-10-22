@@ -56,7 +56,14 @@ jobs:
       # npm ci already installs the lockfile-pinned Supabase CLI. Avoid a
       # second release lookup here; the setup action can hit GitHub's rate
       # limit before the tests even start.
+      # Pull the Supabase service images from GHCR, not the CLI default
+      # (public.ecr.aws), which rejects anonymous pulls from shared runner
+      # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
+      # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
+      # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md.
       - run: npx supabase start
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
       - name: Payment integrity rehearsal
         run: |
