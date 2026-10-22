@@ -19,7 +19,8 @@
 # The files have the names, layout and filters of `supabase db dump` output,
 # so the restore commands in Supabase's backup-and-restore guide apply to
 # them. Unlike `supabase db dump`, the data dump reads an explicit list of
-# schemas (see "Dumps" below).
+# schemas, and the export fails if a migration is recorded while it runs (see
+# "Dumps" below).
 
 # Tracing would print the connection string, so turn it off before anything
 # else runs, including when the caller used `bash -x` or exported SHELLOPTS.
@@ -77,7 +78,8 @@ usage() {
     "  3  missing or unusable input (nothing was dumped): environment variable," \
     "     output directory, staging directory, recipients file, or a required" \
     "     program" \
-    "  4  pg_dump or pg_dumpall failed or wrote nothing" \
+    "  4  pg_dump or pg_dumpall failed or wrote nothing, or the migration history" \
+    "     changed while the export ran (a deploy ran); export again after it" \
     "  5  computing a size or SHA-256, packaging, encryption, or moving the" \
     "     export into place failed" \
     "" \
@@ -577,12 +579,12 @@ dump_data() {
   printf 'RESET ALL;\n' >>"$file"
 }
 
-# run_dump <label> <dumper> <file> [dumper arguments...]
+# run_dump <label> <dumper> <path> [dumper arguments...]
 run_dump() {
-  local label=$1 dumper=$2 file=$3 status=0
+  local label=$1 dumper=$2 path=$3 status=0
   shift 3
   note "dumping $label"
-  "$dumper" "$work/$file" "$@" 2>"$dump_log" || status=$?
+  "$dumper" "$path" "$@" 2>"$dump_log" || status=$?
   ((status == 0)) && return
   redact <"$dump_log" >&2
   if ((status == NO_OUTPUT)); then
@@ -647,18 +649,46 @@ for table in "${DATA_EXCLUDED_TABLES[@]}"; do
   data_selection+=("--exclude-table=\"${table%%.*}\".\"${table#*.}\"")
 done
 
-run_dump "roles" dump_roles roles.sql
-run_dump "schema" dump_schema schema.sql "$MANAGED_SCHEMAS" --exclude-schema="$MANAGED_SCHEMAS"
+# Each file comes from its own pg_dump or pg_dumpall run, with its own
+# snapshot. A migration applied between two runs would leave schema.sql from
+# before it and data.sql or history_data.sql from after it, which may not
+# restore. So the migration history is dumped once more, first of all, into
+# the staging directory but not the export, and compared with
+# history_data.sql, dumped last; if a migration was recorded in between, the
+# export fails. A schema change made without recording a migration, such as
+# one in the SQL editor, goes unnoticed, so the runbook also says not to
+# export during a deploy. pg_dump --snapshot could give the pg_dump runs one
+# snapshot, but only while another session holds a transaction open for the
+# whole export, and pg_dumpall cannot use it.
+
+history_first="$stage/history_first.sql"
+
+# Prints a dump without its \restrict and \unrestrict lines, whose key pg_dump
+# chooses at random on every run.
+without_restrict_key() {
+  sed -E '/^-- \\(un)?restrict /d' "$1"
+}
+
+run_dump "initial migration history" dump_data "$history_first" --schema=supabase_migrations
+run_dump "roles" dump_roles "$work/roles.sql"
+run_dump "schema" dump_schema "$work/schema.sql" "$MANAGED_SCHEMAS" --exclude-schema="$MANAGED_SCHEMAS"
 # The rows in data.sql are those of the snapshot pg_dump takes when it starts,
-# which is later than created_utc by however long the roles and schema dumps
-# took. This time, read just before pg_dump starts, is no later than the
+# which is later than created_utc by however long the dumps before it took. This time, read just before pg_dump starts, is no later than the
 # snapshot: a change committed before it is in the export, and one committed
 # after it may not be.
 data_dump_started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ') \
   || die "$EXIT_DUMP" "cannot read the clock"
-run_dump "data" dump_data data.sql "${data_selection[@]}"
-run_dump "migration history schema" dump_schema history_schema.sql "" --schema=supabase_migrations
-run_dump "migration history data" dump_data history_data.sql --schema=supabase_migrations
+run_dump "data" dump_data "$work/data.sql" "${data_selection[@]}"
+run_dump "migration history schema" dump_schema "$work/history_schema.sql" "" --schema=supabase_migrations
+run_dump "migration history data" dump_data "$work/history_data.sql" --schema=supabase_migrations
+
+history_at_start=$(without_restrict_key "$history_first") \
+  || die "$EXIT_DUMP" "cannot read the initial migration history"
+history_at_end=$(without_restrict_key "$work/history_data.sql") \
+  || die "$EXIT_DUMP" "cannot read history_data.sql"
+if [[ $history_at_start != "$history_at_end" ]]; then
+  die "$EXIT_DUMP" "the migration history changed while the export ran, so its files may come from both sides of a migration; export again when no deploy is running"
+fi
 
 # --- Manifest ----------------------------------------------------------------
 # Times are UTC from the export host's clock, to the second.

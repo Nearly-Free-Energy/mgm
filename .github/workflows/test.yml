@@ -61,9 +61,16 @@ jobs:
       # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
       # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
       # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md.
+      # MGM_ALLOW_DEV_CREDENTIAL_KEY is the development opt-in that gives this
+      # throwaway database a generated credential encryption key once
+      # supabase/config.toml passes it to the migrations (#74); nothing reads
+      # it before then. It is set ahead of #74 so that this database, which
+      # the export-and-restore test also exports, starts the same way
+      # whichever of the two changes merges first.
       - run: npx supabase start
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
+          MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
 
       - name: Payment integrity rehearsal
         run: |

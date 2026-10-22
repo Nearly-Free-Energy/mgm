@@ -171,10 +171,16 @@ directory:
 | `manifest.json` | UTC start time of the export (`created_utc`) and of its data dump (`data_dump_started_utc`), `pg_dump` and server versions, and each file's size and SHA-256 |
 
 Each file comes from a separate `pg_dump` or `pg_dumpall` run, so together
-they are not one snapshot. Do not apply migrations while an export runs. The
-data dump's snapshot is taken just after `data_dump_started_utc`, so
-`data.sql` holds every change committed before that time, and may lack any
-change committed later.
+they are not one snapshot. **Do not export during a deploy.** A migration
+applied while an export runs can leave `schema.sql` from before it and
+`data.sql` from after it, and such an export may not restore. The script
+reads the migration history before its first dump and compares it with
+`history_data.sql`, its last, and fails with exit code 4 if a migration was
+recorded in between; export again once the deploy has finished. It cannot
+see a schema change made without recording a migration, such as one made in
+the SQL editor. The data dump's snapshot is taken just after
+`data_dump_started_utc`, so `data.sql` holds every change committed before
+that time, and may lack any change committed later.
 
 The data dump reads every table in `auth` except those named in the script's
 `DATA_EXCLUDED_TABLES`, so a table that a Supabase upgrade adds to `auth` is
@@ -200,7 +206,7 @@ on an encrypted disk for an immediate restore, never on a schedule.
 | 0 | Export written |
 | 2 | Usage error, including naming neither or both of `--age-recipients` and `--plaintext` |
 | 3 | Missing or unusable input: the environment variable, output directory, staging directory, recipients file or a required program. Nothing was dumped. |
-| 4 | `pg_dump` or `pg_dumpall` failed or wrote nothing. Its error is shown, with the connection string and password removed. |
+| 4 | `pg_dump` or `pg_dumpall` failed or wrote nothing; its error is shown, with the connection string and password removed. Or the migration history changed while the export ran: a deploy ran, and the export must be run again after it. |
 | 5 | Computing a size or SHA-256, packaging, encryption or moving the export into place failed |
 
 The script checks everything it can before the first dump, including that
@@ -235,7 +241,9 @@ yours has since taken, until a run finds that ID no longer running. So:
 
 ### Schedule it
 
-- Export at least daily, and before every upgrade.
+- Export at least daily, and before every upgrade, but not while a deploy
+  runs: schedule exports away from deploys, and retry an export that exits
+  with code 4 because the migration history changed.
 - Pass the connection string to the export step only, as an environment
   variable from the scheduler's secret store.
 - Always pass `--age-recipients`, never `--plaintext`, and make the job fail
@@ -451,36 +459,85 @@ export holds no Vault secrets for the key to unlock.
 
    This expects a target without a `supabase_migrations` schema. The Supabase
    CLI creates one when it pushes migrations to a project or seeds it, and the
-   restore then stops on a duplicate primary key. If the target has one, check
-   that `supabase_migrations.schema_migrations` lists no migrations, drop it
-   with `DROP SCHEMA supabase_migrations CASCADE;`, and run this step again.
+   restore then stops on a duplicate primary key. If the target has one,
+   confirm the target again before you drop it. The preflight cannot run
+   again now that step 4 has restored into the target, so check the project
+   ref as in step 2:
+
+   ```bash
+   PGSERVICE=mgm-restore-target psql -X --command '\conninfo'
+   ```
+
+   Stop unless the project ref in the host or user it shows matches the ref
+   you recorded for this target, and stop if it is the ref of any project
+   that serves users. Then drop the schema and run this step again. The drop
+   stops, and drops nothing, if `supabase_migrations.schema_migrations` lists
+   any migration, as it does in every database the Supabase CLI has migrated:
+
+   ```bash
+   PGSERVICE=mgm-restore-target psql -X --variable ON_ERROR_STOP=1 <<'SQL'
+   DO $$
+   BEGIN
+     IF to_regclass('supabase_migrations.schema_migrations') IS NOT NULL THEN
+       IF EXISTS (SELECT FROM supabase_migrations.schema_migrations) THEN
+         RAISE EXCEPTION 'supabase_migrations.schema_migrations lists migrations; not dropping it';
+       END IF;
+     END IF;
+     DROP SCHEMA supabase_migrations CASCADE;
+   END $$;
+   SQL
+   ```
 
 6. **Compare row counts now**, before anyone signs in or anything else writes
    to the target (see the [checklist](#verification-checklist)).
 
-7. **Recreate the credential key, and nothing else in Vault.** On a restore
-   target, follow this step rather than the recovery section of
-   [dek.md](dek.md). Create the key from its offline copy, in `psql`, so the
-   value stays out of your shell history (`\prompt` shows what you type;
-   clear the terminal afterwards):
+7. **Recreate the credential key, and nothing else in Vault.** This is the
+   recovery for a logical restore in [dek.md](dek.md#recover): after
+   restoring, replace MGM's Vault entries with your copies, using the same
+   key as before, so the restored credentials decrypt again. On a restore
+   target it comes in two parts: the key now, and the payment worker entries
+   at the [cutover](#keep-restore-targets-away-from-live-payments), on a
+   production replacement only. In `psql` with the target's service entry,
+   first check that the target holds none of MGM's Vault entries:
 
    ```sql
-   \prompt 'Credential key: ' credential_key
-   SELECT vault.create_secret(:'credential_key', 'mgm_ems_dek', 'MGM credential encryption key');
-   \unset credential_key
+   SELECT name FROM vault.secrets
+   WHERE name IN ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
    ```
 
-   If `SELECT name FROM vault.secrets;` already lists `mgm_ems_dek`, replace
-   its value with `vault.update_secret` rather than creating a second one.
-   Check the key with the checklist's decryption checks, not by testing
-   connections: **Save and test connection** on a payment account registers a
-   notification with the payment provider using live credentials and
-   re-enables the account, and a microgrid's connection test connects to its
-   energy management system with production credentials. Leave
-   `payments_worker_url` and `payments_worker_secret` unset. A production
-   replacement creates them at the
-   [cutover](#keep-restore-targets-away-from-live-payments), once it is
-   verified.
+   The export carries no Vault entries, so this lists none unless someone
+   has created them in the target since. If it lists any, run `\conninfo`
+   and check the project ref as in step 2, then delete them, as dek.md does:
+
+   ```sql
+   DELETE FROM vault.secrets WHERE name IN
+     ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
+   ```
+
+   Then create the key from its offline copy. `\prompt` reads it into a psql
+   variable, so it stays out of your shell history, psql's history and any
+   saved SQL file; it does show what you type, so clear the terminal
+   afterwards:
+
+   ```sql
+   \prompt 'Credential key: ' dek
+   SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+   \unset dek
+   ```
+
+   Two things differ from dek.md, to keep the target away from live
+   payments:
+
+   - Leave `payments_worker_url` and `payments_worker_secret` unset. A
+     production replacement creates them at the cutover, once it is
+     verified.
+   - Check the key with the checklist's decryption checks, not with
+     **Test connection**: **Save and test connection** on a payment account
+     registers a notification with the payment provider using live
+     credentials and re-enables the account, and a microgrid's connection
+     test connects to its energy management system with production
+     credentials. On a production replacement, the connection tests dek.md
+     asks for come after the cutover.
 
 8. **Copy Storage files** from your latest Storage copy, decrypted on the same
    trusted machine. The data restore already created the bucket definitions
@@ -501,8 +558,10 @@ export holds no Vault secrets for the key to unlock.
     scheduler's secret store in place of the old one.
 
 11. **Move the invoice counters** (production replacement only) past every
-    invoice number the source issued. Do it before deploying the
-    application, so that no bill is numbered before the counters move
+    invoice number the source issued, and give the bills the source first
+    rendered after the export the numbers it gave them. Do it before
+    deploying the application, so that no bill is numbered before the
+    counters move
     ([Invoice numbers issued after the export](#invoice-numbers-issued-after-the-export)).
 
 12. **Deploy the application** at the same MGM release, configured with the
@@ -550,7 +609,8 @@ has stopped serving and every [checklist](#verification-checklist) item except
 before workers and payment callbacks start:
 
 1. Set `payments_worker_url` and `payments_worker_secret` in Vault for the new
-   application.
+   application, from your copies, as in [dek.md](dek.md#recover). This
+   completes the Vault recovery that step 7 of the logical restore began.
 2. Schedule the reconciliation job, with the statement from the release's
    migrations:
 
@@ -615,12 +675,12 @@ is rendered, and the counter then records the highest number issued. Numbers
 the source issued after the export started are missing from the restored
 copy, so its counters are behind the numbers already sent, and the
 application would issue those numbers again. A bill that existed at the
-export but was first rendered afterwards has no number in the target, and
-gets a new one when it is next rendered.
+export but was first rendered afterwards has no number in the target, so
+rendering it there would give it a second number.
 
 On a rehearsal target this needs nothing. On a production replacement, move
-the counters before invoicing resumes, and before anyone renders a bill in
-the target (logical restore, step 11):
+the counters and give those bills their numbers before invoicing resumes,
+and before anyone renders a bill in the target (logical restore, step 11):
 
 1. **Find the highest number issued** for each community and year. If the
    source is reachable, read its counters:
@@ -656,8 +716,51 @@ the target (logical restore, step 11):
    copy, so its counter can't be moved yet. Re-create the community first,
    then move its counter past the highest number it already issued, before
    any of its bills is rendered.
-3. **Record** each counter before and after, where the highest numbers came
-   from, who reviewed the SQL, and any bill you know will be numbered again.
+3. **Give bills the numbers the source gave them.** If the source is
+   reachable, list the bills that the target holds without a number and the
+   source has numbered. Add a service entry for the source, here
+   `mgm-restore-source`, as in step 1 of the logical restore, and remove it
+   when you are done. Its login needs only to read
+   `public.billing_line_items`: nothing here writes to the source. From a
+   private directory on the trusted machine:
+
+   ```bash
+   PGSERVICE=mgm-restore-source psql -X --variable ON_ERROR_STOP=1 \
+     --command '\copy (SELECT id, invoice_number FROM public.billing_line_items WHERE invoice_number IS NOT NULL) TO source-invoice-numbers.csv WITH (FORMAT csv)'
+   PGSERVICE=mgm-restore-target psql -X --variable ON_ERROR_STOP=1 \
+     --command 'CREATE TEMP TABLE source_invoice_numbers (id uuid PRIMARY KEY, invoice_number text NOT NULL)' \
+     --command '\copy source_invoice_numbers FROM source-invoice-numbers.csv WITH (FORMAT csv)' \
+     --command 'SELECT li.id, s.invoice_number FROM public.billing_line_items li JOIN source_invoice_numbers s USING (id) WHERE li.invoice_number IS NULL ORDER BY s.invoice_number'
+   ```
+
+   Each row is a bill that existed at the export and was first rendered
+   afterwards, with the number the source gave it, which its customer may
+   already have. Give each one that number, so that rendering it in the
+   target shows the same number again. With the SQL reviewed by a second
+   person, as in step 2, and from the same directory:
+
+   ```bash
+   PGSERVICE=mgm-restore-target psql -X --single-transaction --variable ON_ERROR_STOP=1 \
+     --command 'CREATE TEMP TABLE source_invoice_numbers (id uuid PRIMARY KEY, invoice_number text NOT NULL)' \
+     --command '\copy source_invoice_numbers FROM source-invoice-numbers.csv WITH (FORMAT csv)' \
+     --command 'UPDATE public.billing_line_items li SET invoice_number = s.invoice_number FROM source_invoice_numbers s WHERE li.id = s.id AND li.invoice_number IS NULL RETURNING li.id, li.invoice_number'
+   ```
+
+   It prints the bills it numbered; check they are the ones listed. A listed
+   bill holds what it held at the export. If the source changed it after
+   that, bring it up to date in the application before anyone renders it,
+   as for [billing periods closed after the export](#billing-periods-closed-after-the-export).
+
+   If the source is lost, match the target's bills that have no number with
+   the invoices you sent after the export started, from your invoicing
+   records. To give a matched bill its number, put its ID and number on a
+   line of `source-invoice-numbers.csv` (`<bill id>,<invoice number>`) and run
+   the second command. A bill you cannot match gets a new number when it is
+   rendered.
+4. **Record** each counter before and after, where the highest numbers came
+   from, the bills given the source's numbers, who reviewed the SQL, and any
+   bill that will be numbered again because it could not be matched. Delete
+   `source-invoice-numbers.csv` once the record is complete.
 
 ## Verification checklist
 
@@ -752,7 +855,9 @@ starts only when every other item has passed.
 
 - [ ] **Invoice counters** (production replacement only). Before any bill was
   rendered in the target, each community's counter was moved to at least the
-  highest number already issued, for every year with issued numbers
+  highest number already issued, for every year with issued numbers, and
+  every bill the source first rendered after the export has the number the
+  source gave it
   ([Invoice numbers issued after the export](#invoice-numbers-issued-after-the-export)).
 - [ ] **Files.** `SELECT bucket_id, count(*) FROM storage.objects GROUP BY 1;`
   matches the number of objects copied per bucket. A known invoice logo
@@ -775,8 +880,8 @@ starts only when every other item has passed.
   - If the source is lost, compare with the invoices you issued for those
     periods and with earlier verification records, until MGM ships its
     billing integrity export ([Verification record](#verification-record)).
-- [ ] **Clean-up.** Decrypted export and Storage copies are deleted. A
-  rehearsal target is deleted.
+- [ ] **Clean-up.** Decrypted export and Storage copies, and any
+  `source-invoice-numbers.csv`, are deleted. A rehearsal target is deleted.
 - [ ] **Payment reconciliation running** (production replacement only, after
   the cutover). Within ten minutes of scheduling the job, its latest runs
   show `succeeded`, and the worker's responses are 2xx:
@@ -821,7 +926,7 @@ Checklist results, item by item:
 Row-count mismatches and their explanation:
 Billing periods compared (identifiers in private records), what was compared, payments that postdate the export, result:
 Production replacement: billing periods closed in the source after the data dump started and open in the target (identifiers in private records); for each, who closed it in the application and when, or why it stays open:
-Production replacement: invoice counters before and after, per community and year; where the highest numbers came from; who reviewed the SQL; any gap left; bills that will be numbered again:
+Production replacement: invoice counters before and after, per community and year; where the highest numbers came from; bills given the number the source gave them after the export (identifiers in private records); who reviewed the SQL; any gap left; bills that will be numbered again:
 Deviations from this runbook, and the runbook changes they need:
 Target and decrypted files deleted on:
 ```

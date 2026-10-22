@@ -25,6 +25,9 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "backup" / "export-database.sh"
 DUMP_FILES = ["roles.sql", "schema.sql", "data.sql", "history_schema.sql", "history_data.sql"]
+# One run per file, plus the first read of the migration history, which the
+# script compares with history_data.sql.
+PG_RUNS = len(DUMP_FILES) + 1
 SECRET_PASSWORD = "s3cret-Pa55word"
 DB_URL = f"postgresql://export_user:{SECRET_PASSWORD}@db.example.invalid:5432/postgres"
 DB_URL_WITHOUT_PASSWORD = "postgresql://export_user@db.example.invalid:5432/postgres"
@@ -240,6 +243,20 @@ if os.environ.get("FAKE_PG_EMPTY_ON", "\\0") in flags:
 kind = "roles" if "--roles-only" in args else "schema" if "--schema-only" in args else "data"
 with open(os.path.join(os.environ["FAKE_PG_SAMPLES"], kind + ".sql")) as sample:
     text = sample.read()
+if os.environ.get("FAKE_PG_RANDOM_RESTRICT_KEY"):
+    # pg_dump picks a new \\restrict key on every run.
+    key = os.urandom(4).hex()
+    for fixed in ("cafe01", "beef02", "f00d03"):
+        text = text.replace(fixed, key)
+if os.environ.get("FAKE_PG_HISTORY_CHANGES") and "--data-only" in args and "--schema=supabase_migrations" in args:
+    # A migration is recorded between the first and the last read of the
+    # migration history.
+    reads_file = os.environ["FAKE_PG_LOG"] + ".history-reads"
+    reads = int(open(reads_file).read()) if os.path.exists(reads_file) else 0
+    with open(reads_file, "w") as file:
+        file.write(str(reads + 1))
+    if reads:
+        text = text.replace("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002")
 sys.stdout.write(text.replace("{{server_version}}", os.environ.get("FAKE_PG_SERVER_VERSION", "17.6")))
 sys.stdout.flush()
 if os.environ.get("FAKE_PG_DELAY_ON", "\\0") in flags:
@@ -556,7 +573,7 @@ class ExportDatabaseTests(unittest.TestCase):
         result = self.export_plaintext()
         self.assertEqual(result.returncode, 0, result.stderr)
         records = self.pg_records()
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), PG_RUNS)
         for record in records:
             argv = record["argv"]
             self.assertEqual(argv[0], f"--dbname={DB_URL_WITHOUT_PASSWORD}")
@@ -618,7 +635,7 @@ class ExportDatabaseTests(unittest.TestCase):
     def test_dumps_run_without_switching_role(self):
         self.export_plaintext()
         calls = self.pg_calls()
-        self.assertEqual(len(calls), 5)
+        self.assertEqual(len(calls), PG_RUNS)
         for _, argv in calls:
             # `supabase db dump` adds --role postgres; the script runs as the
             # login in the connection string and adds no role of its own.
@@ -632,17 +649,21 @@ class ExportDatabaseTests(unittest.TestCase):
         common = [dbname, "--no-password"]
         data_selection = [f'--schema="{schema}"' for schema in DATA_SCHEMAS]
         data_selection += [f"--exclude-table={quoted(table)}" for table in DATA_EXCLUDED_TABLES]
+        history_data = ("pg_dump", common + ["--data-only", "--quote-all-identifiers", "--schema=supabase_migrations"])
         self.assertEqual(self.pg_calls(), [
+            # The migration history is read first and dumped last, so that a
+            # migration recorded in between shows as a difference.
+            history_data,
             ("pg_dumpall", common + ["--roles-only", "--quote-all-identifiers", "--no-role-passwords", "--no-comments"]),
             ("pg_dump", common + ["--schema-only", "--quote-all-identifiers", f"--exclude-schema={MANAGED_SCHEMAS}"]),
             ("pg_dump", common + ["--data-only", "--quote-all-identifiers"] + data_selection),
             ("pg_dump", common + ["--schema-only", "--quote-all-identifiers", "--schema=supabase_migrations"]),
-            ("pg_dump", common + ["--data-only", "--quote-all-identifiers", "--schema=supabase_migrations"]),
+            history_data,
         ])
 
     def test_data_dump_never_reads_scheduled_jobs_or_queued_requests(self):
         self.export_plaintext()
-        _, data_argv = self.pg_calls()[2]
+        _, data_argv = next(call for call in self.pg_calls() if any(arg.startswith("--exclude-table") for arg in call[1]))
         included = [arg for arg in data_argv if arg.startswith("--schema")]
         self.assertEqual(included, [f'--schema="{schema}"' for schema in DATA_SCHEMAS])
         self.assertFalse([arg for arg in data_argv if arg.startswith("--exclude-schema")], data_argv)
@@ -742,6 +763,43 @@ class ExportDatabaseTests(unittest.TestCase):
                 self.assertIn(f"the {label} dump wrote nothing", result.stderr)
                 self.assertEqual(os.listdir(self.out), [])
 
+    # --- a migration recorded while the export runs -------------------------
+
+    def test_a_migration_recorded_during_the_export_fails_it(self):
+        for label, run in (("plaintext", self.export_plaintext), ("encrypted", self.export_encrypted)):
+            with self.subTest(label):
+                shutil.rmtree(self.out, ignore_errors=True)
+                self.pg_log.unlink(missing_ok=True)
+                Path(f"{self.pg_log}.history-reads").unlink(missing_ok=True)
+                result = run(env={"FAKE_PG_HISTORY_CHANGES": "1"})
+                self.assertEqual(result.returncode, 4, result.stderr)
+                self.assertIn("the migration history changed while the export ran", result.stderr)
+                self.assertIn("export again when no deploy is running", result.stderr)
+                # Every dump ran, and nothing was packaged or left behind.
+                self.assertEqual(len(self.pg_calls()), PG_RUNS)
+                self.assert_no_checksum_reported(result)
+                self.assertEqual(os.listdir(self.out), [])
+                self.assertEqual(os.listdir(self.staging_tmp), [])
+                self.assertEqual(len(self.age_calls()), 0 if label == "plaintext" else 1)
+                self.age_log.unlink(missing_ok=True)
+
+    def test_the_history_comparison_ignores_the_restrict_key(self):
+        # pg_dump 17.6 and later write \restrict and \unrestrict with a new
+        # key on every run; an unchanged history must still compare equal.
+        _, export_dir = self.plaintext_export(env={"FAKE_PG_RANDOM_RESTRICT_KEY": "1"})
+        self.assert_manifest(export_dir)
+        history = (export_dir / "history_data.sql").read_text()
+        self.assertRegex(history, r"(?m)^-- \\restrict [0-9a-f]{8}$")
+        self.assertNotIn("f00d03", history)
+
+    def test_a_failed_initial_history_read_stops_before_the_other_dumps(self):
+        result = self.export_plaintext(env={"FAKE_PG_FAIL_ON": "--schema=supabase_migrations"})
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("dumping initial migration history failed", result.stderr)
+        self.assertIn("[redacted]", result.stderr)
+        self.assertEqual(len(self.pg_calls()), 1)
+        self.assertEqual(os.listdir(self.out), [])
+
     # --- encrypted export --------------------------------------------------
 
     def test_encrypted_export_leaves_only_the_encrypted_tarball(self):
@@ -776,7 +834,7 @@ class ExportDatabaseTests(unittest.TestCase):
         result = self.export_encrypted(env={"FAKE_PG_WATCH": str(self.out)})
         self.assertEqual(result.returncode, 0, result.stderr)
         records = self.pg_records()
-        self.assertEqual(len(records), 5)
+        self.assertEqual(len(records), PG_RUNS)
         for record in records:
             self.assertEqual(record["watched"], [])
 
@@ -978,11 +1036,14 @@ class ExportDatabaseTests(unittest.TestCase):
     def test_a_size_that_fails_or_is_malformed_fails_the_export(self):
         self.write_fake("wc", FAKE_MEASURE)
         # Each data dump measures its file before and after pg_dump writes to
-        # it (four calls in all); the manifest measures every file after that.
+        # it: the initial migration history, data and migration history data
+        # (six calls in all). The manifest measures every file after that.
         cases = (
-            (0, 4, "dumping data failed"),
-            (1, 4, "dumping data failed"),
-            (4, 5, "cannot read the size of roles.sql"),
+            (0, 4, "dumping initial migration history failed"),
+            (1, 4, "dumping initial migration history failed"),
+            (2, 4, "dumping data failed"),
+            (3, 4, "dumping data failed"),
+            (6, 5, "cannot read the size of roles.sql"),
         )
         for good_calls, code, message in cases:
             for mode in ("fail", "fail-after-output", "empty", "not-a-number"):

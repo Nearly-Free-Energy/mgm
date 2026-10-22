@@ -15,8 +15,16 @@ tokens and MFA factors are absent, merchant accounts are disabled, and schema
 public with its privileges, the triggers and policies on Supabase-managed
 tables, and the migration history all match the source. It checks that the
 runbook's preflight and row-count check fail when they should, the preflight
-on the source included, and that every table in schema auth is one the export
+on the source included, that its drop of the migration history refuses one
+that lists migrations, and that every table in schema auth is one the export
 knowingly includes or one the script leaves out.
+
+After the export, the test bills in the source: it renders a bill the export
+holds without a number, and records and renders one the export lacks. It then
+runs the runbook's invoice-number steps for a production replacement against
+the target and checks that they list and number exactly the first bill, read
+the source's counters, and move the target's counter past every number the
+source issued without ever moving it back.
 
 The export runs with the source's `postgres` connection string, the one
 `supabase status` prints, which is the connection string the runbook tells
@@ -161,18 +169,36 @@ def code_blocks(text):
             body.append(line[indent:] if line[:indent].strip() == "" else line)
 
 
-def runbook_command(description, *containing, excluding=()):
-    """The one bash block in the runbook that contains every string in `containing`."""
+def runbook_block(language, description, *containing, excluding=()):
+    """The one block in `language` in the runbook that contains every string in `containing`."""
     found = [
-        body for language, body in code_blocks(RUNBOOK.read_text())
-        if language == "bash" and all(s in body for s in containing) and not any(s in body for s in excluding)
+        body for block_language, body in code_blocks(RUNBOOK.read_text())
+        if block_language == language and all(s in body for s in containing) and not any(s in body for s in excluding)
     ]
     if len(found) != 1:
         raise AssertionError(
-            f"expected one bash block in {RUNBOOK.relative_to(REPO)} for {description} "
+            f"expected one {language} block in {RUNBOOK.relative_to(REPO)} for {description} "
             f"(containing {containing}, not {excluding}); found {len(found)}"
         )
     return found[0]
+
+
+def runbook_command(description, *containing, excluding=()):
+    """The one bash block in the runbook that contains every string in `containing`."""
+    return runbook_block("bash", description, *containing, excluding=excluding)
+
+
+def runbook_sql(description, *containing, excluding=()):
+    """The one sql block in the runbook that contains every string in `containing`."""
+    return runbook_block("sql", description, *containing, excluding=excluding)
+
+
+def psql_rows(url, sql):
+    """Runs a runbook statement and returns its rows, each a list of column values."""
+    result = run(["psql", "-X", "-q", "-A", "-t", "-F", "\t", "-v", "ON_ERROR_STOP=1", "--dbname", url, "-c", sql])
+    if result.returncode != 0:
+        raise AssertionError(f"psql failed on the runbook's statement:\n{sql}\n{output_of(result)}")
+    return [line.split("\t") for line in result.stdout.splitlines() if line]
 
 
 def fill(command, values):
@@ -190,24 +216,33 @@ def run_runbook(command, cwd, env):
     return run(["bash", "-c", command], cwd=cwd, env=env)
 
 
-def service_env(directory, service, url):
-    """A PostgreSQL service file and password file naming `url` as `service`, as the runbook sets up."""
+def service_env(directory, services):
+    """A PostgreSQL service file and password file naming each URL in {service: url}, as the runbook sets up."""
     directory.mkdir(parents=True, exist_ok=True)
-    parts = urllib.parse.urlsplit(url)
-    params = {
-        "host": parts.hostname,
-        "port": str(parts.port or 5432),
-        "dbname": urllib.parse.unquote(parts.path.lstrip("/")) or "postgres",
-        "user": urllib.parse.unquote(parts.username or "postgres"),
-    }
-    params.update(urllib.parse.parse_qsl(parts.query))
+    entries, passwords = [], []
+    for service, url in services.items():
+        parts = urllib.parse.urlsplit(url)
+        params = {
+            "host": parts.hostname,
+            "port": str(parts.port or 5432),
+            "dbname": urllib.parse.unquote(parts.path.lstrip("/")) or "postgres",
+            "user": urllib.parse.unquote(parts.username or "postgres"),
+        }
+        params.update(urllib.parse.parse_qsl(parts.query))
+        entries.append(f"[{service}]\n" + "".join(f"{key}={value}\n" for key, value in params.items()))
+        fields = [params["host"], params["port"], params["dbname"], params["user"], urllib.parse.unquote(parts.password or "")]
+        passwords.append(":".join(f.replace("\\", "\\\\").replace(":", "\\:") for f in fields) + "\n")
     service_file = directory / "pg_service.conf"
-    service_file.write_text(f"[{service}]\n" + "".join(f"{key}={value}\n" for key, value in params.items()))
+    service_file.write_text("".join(entries))
     password_file = directory / "pgpass"
-    fields = [params["host"], params["port"], params["dbname"], params["user"], urllib.parse.unquote(parts.password or "")]
-    password_file.write_text(":".join(f.replace("\\", "\\\\").replace(":", "\\:") for f in fields) + "\n")
+    password_file.write_text("".join(passwords))
     password_file.chmod(0o600)
     return client_env({"PGSERVICEFILE": str(service_file), "PGPASSFILE": str(password_file), "MGM_CHECKOUT": str(REPO)})
+
+
+def listed_numbers(output):
+    """{bill id: invoice number} from psql's table output of the runbook's invoice-number commands."""
+    return dict(re.findall(rf"^\s*({UUID.pattern})\s*\|\s*(\S+)\s*$", output, re.M))
 
 
 def copy_row_counts(data_sql):
@@ -299,7 +334,9 @@ BEGIN
   PERFORM fn_record_line_item_with_audit(v_closed, v_neighbour, NULL, 4, 50, 54,
     '[{{"label": "T1", "kwh": 4, "amount": 400}}]', 900, 'manual',
     v_user, 'meter unreadable', v_user, '{{}}', v_tariff, 'human', NULL);
-  PERFORM fn_next_invoice_number(v_community, 2026);
+  -- The bill is rendered, which numbers it as the application does.
+  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  WHERE id = v_item.id AND invoice_number IS NULL;
   PERFORM fn_close_billing_period(v_closed, false);
 
   SELECT id INTO v_open FROM fn_create_billing_period(v_microgrid, '2026-09-01', '2026-09-30');
@@ -330,6 +367,47 @@ SELECT jsonb_build_object(
   'tariff', (SELECT to_jsonb(r) FROM rate_schedules r
              WHERE r.id = (SELECT rate_schedule_id FROM billing_periods WHERE id = '{period}'))
 )
+"""
+
+# Billing in the source after the export: the open period's bill, which the
+# export holds without a number, is rendered, and a bill the export does not
+# hold is recorded and rendered. Each rendering takes the next number, as the
+# application does.
+AFTER_EXPORT = """
+DO $after$
+DECLARE
+  v_user uuid := '{user}';
+  v_community uuid; v_open uuid; v_tariff uuid; v_neighbour uuid; v_new billing_line_items%ROWTYPE;
+BEGIN
+  SELECT c.id INTO STRICT v_community FROM communities c WHERE c.org_id = '{org}';
+  SELECT bp.id, bp.rate_schedule_id INTO STRICT v_open, v_tariff
+  FROM billing_periods bp JOIN microgrids m ON m.id = bp.microgrid_id
+  WHERE m.community_id = v_community AND bp.status <> 'closed';
+  SELECT h.id INTO STRICT v_neighbour
+  FROM households h JOIN microgrids m ON m.id = h.microgrid_id
+  WHERE m.community_id = v_community AND h.display_name = 'Household B';
+
+  PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user::text, 'role', 'authenticated')::text, true);
+  SET ROLE authenticated;
+  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  WHERE billing_period_id = v_open AND invoice_number IS NULL;
+  SELECT * INTO v_new FROM fn_record_line_item_with_audit(v_open, v_neighbour, NULL, 2, 54, 56,
+    '[{{"label": "T1", "kwh": 2, "amount": 200}}]', 700, 'edge', NULL, NULL, v_user, '{{}}', v_tariff, 'human', NULL);
+  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  WHERE id = v_new.id;
+  RESET ROLE;
+END
+$after$;
+"""
+
+# Every bill of the org, with its invoice number or null.
+INVOICE_NUMBERS = """
+SELECT coalesce(json_object_agg(li.id, li.invoice_number), '{{}}')
+FROM billing_line_items li
+JOIN billing_periods bp ON bp.id = li.billing_period_id
+JOIN microgrids m ON m.id = bp.microgrid_id
+JOIN communities c ON c.id = m.community_id
+WHERE c.org_id = '{org}'
 """
 
 ENABLED_ACCOUNTS = "SELECT coalesce(json_agg(id ORDER BY id), '[]') FROM payment_merchant_accounts WHERE NOT disabled"
@@ -372,7 +450,9 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
 
         cls.seed_source()
         cls.export()
+        cls.bill_after_export()
         cls.restore()
+        cls.number_invoices()
 
     @classmethod
     def seed_source(cls):
@@ -430,13 +510,25 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         shutil.copy2(encrypted, cls.restore_dir / encrypted.name)
 
     @classmethod
+    def bill_after_export(cls):
+        after = cls.work / "after-export.sql"
+        after.write_text(AFTER_EXPORT.format(org=cls.org, user=cls.user))
+        result = run([
+            "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction", "--dbname", cls.source,
+            "-f", str(after),
+        ])
+        if result.returncode != 0:
+            raise AssertionError(f"cannot bill in the source after the export\n{output_of(result)}")
+        cls.community = psql_value(cls.source, f"SELECT id FROM communities WHERE org_id = '{cls.org}'")
+
+    @classmethod
     def restore(cls):
         cls.restore_command = runbook_command("the restore", "--file roles.sql", "--file data.sql")
         service = re.search(r"\bPGSERVICE=([A-Za-z0-9_.-]+)", cls.restore_command)
         if not service:
             raise AssertionError(f"the runbook's restore command names no PGSERVICE:\n{cls.restore_command}")
         cls.service = service.group(1)
-        cls.target_env = service_env(cls.work / "target-service", cls.service, cls.target)
+        cls.target_env = service_env(cls.work / "target-service", {cls.service: cls.target})
         values = {"<time>": cls.export_time, "/path/to/age-identity.txt": str(cls.identity)}
 
         # Step 1, Prepare the target: the extensions the runbook says to
@@ -464,8 +556,45 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         cls.row_count_result = run_runbook(cls.row_count_command, cls.export_dir, cls.target_env)
 
     @classmethod
-    def step(cls, description, command, cwd):
-        result = run_runbook(command, cwd, cls.target_env)
+    def number_invoices(cls):
+        """The runbook's invoice-number steps for a production replacement, against the restored target."""
+        org_numbers = INVOICE_NUMBERS.format(org=cls.org)
+        cls.target_numbers_at_restore = psql_json(cls.target, org_numbers)
+        cls.source_numbers = psql_json(cls.source, org_numbers)
+
+        listing = runbook_command(
+            "listing bills the source numbered after the export", "source-invoice-numbers.csv", "SELECT li.id")
+        sources = set(re.findall(r"\bPGSERVICE=([A-Za-z0-9_.-]+)", listing)) - {cls.service}
+        if len(sources) != 1:
+            raise AssertionError(f"expected the runbook's listing to name one service for the source:\n{listing}")
+        env = service_env(cls.work / "invoice-services", {cls.service: cls.target, sources.pop(): cls.source})
+        directory = cls.work / "invoices"
+        directory.mkdir()
+        cls.listing_result = cls.step(
+            "listing bills the source numbered after the export", fill(listing, {}), directory, env)
+
+        cls.source_counters = psql_rows(
+            cls.source, fill(runbook_sql("reading the source's invoice counters", "AS highest_issued"), {}))
+        move = runbook_sql("moving the invoice counters", "ON CONFLICT (community_id, year)")
+        values = {"<community id>": cls.community, "<year>": "2026"}
+        cls.issued = max(int(number.rsplit("-", 1)[1]) for number in cls.source_numbers.values() if number)
+        cls.moved = psql_rows(cls.target, fill(move, {**values, "<highest number issued>": str(cls.issued)}))
+        # A lower value, as from an incomplete record, must not move it back.
+        cls.moved_back = psql_rows(cls.target, fill(move, {**values, "<highest number issued>": "1"}))
+
+        cls.copy_result = cls.step(
+            "giving bills the source's numbers",
+            fill(runbook_command("giving bills the source's numbers", "source-invoice-numbers.csv",
+                                 "UPDATE public.billing_line_items"), {}),
+            directory, env,
+        )
+        cls.target_numbers_after = psql_json(cls.target, org_numbers)
+        # The next bill rendered in the target, as the application numbers it.
+        cls.next_in_target = psql_value(cls.target, f"SELECT fn_next_invoice_number('{cls.community}', 2026)")
+
+    @classmethod
+    def step(cls, description, command, cwd, env=None):
+        result = run_runbook(command, cwd, env or cls.target_env)
         if result.returncode != 0:
             raise AssertionError(f"the runbook's command for {description} failed\n{command}\n{output_of(result)}")
         return result
@@ -514,7 +643,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
     def test_preflight_refuses_a_database_that_is_not_empty(self):
         for name, url in (("the restored target", self.target), ("the source", self.source)):
             with self.subTest(database=name):
-                env = service_env(self.work / f"preflight-{name.split()[-1]}", self.service, url)
+                env = service_env(self.work / f"preflight-{name.split()[-1]}", {self.service: url})
                 result = run_runbook(self.preflight_command, self.restore_dir, env)
                 self.assertNotEqual(result.returncode, 0, output_of(result))
                 self.assertIn(PREFLIGHT_REFUSAL, result.stderr, output_of(result))
@@ -522,7 +651,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
     def test_restore_refuses_the_source_and_changes_nothing(self):
         before = row_counts(self.source, self.export_tables())
         accounts = psql_json(self.source, ENABLED_ACCOUNTS)
-        env = service_env(self.work / "restore-into-source", self.service, self.source)
+        env = service_env(self.work / "restore-into-source", {self.service: self.source})
         result = run_runbook(fill(self.restore_command, {}), self.export_dir, env)
         self.assertNotEqual(result.returncode, 0, output_of(result))
         self.assertIn(PREFLIGHT_REFUSAL, result.stderr, output_of(result))
@@ -606,6 +735,45 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         query = "SELECT count(*) FROM cron.job WHERE jobname = 'mgm-payments-reconcile'"
         self.assertEqual(psql_value(self.source, query), "1")
         self.assertEqual(psql_value(self.target, query), "0")
+
+    def test_dropping_the_migration_history_refuses_one_that_lists_migrations(self):
+        drop = fill(runbook_command("dropping an empty migration history", "DROP SCHEMA supabase_migrations"), {})
+        count = "SELECT count(*) FROM supabase_migrations.schema_migrations"
+        before = psql_value(self.target, count)
+        self.assertNotEqual(before, "0")
+        result = run_runbook(drop, self.work, self.target_env)
+        self.assertNotEqual(result.returncode, 0, output_of(result))
+        self.assertIn("lists migrations; not dropping it", result.stderr, output_of(result))
+        self.assertEqual(psql_value(self.target, count), before)
+
+    # --- invoice numbers issued after the export ------------------------------
+
+    def test_runbook_lists_bills_the_source_numbered_after_the_export(self):
+        expected = {
+            bill: self.source_numbers[bill] for bill, number in self.target_numbers_at_restore.items()
+            if number is None and self.source_numbers.get(bill)
+        }
+        # Only the open period's bill: not the one numbered before the export,
+        # nor the one recorded after it, which the target does not hold.
+        self.assertEqual(len(expected), 1, expected)
+        self.assertEqual(len(self.source_numbers), len(self.target_numbers_at_restore) + 1)
+        self.assertEqual(listed_numbers(self.listing_result.stdout), expected, output_of(self.listing_result))
+
+    def test_runbook_gives_those_bills_the_numbers_the_source_gave_them(self):
+        listed = listed_numbers(self.listing_result.stdout)
+        self.assertTrue(listed)
+        self.assertEqual(listed_numbers(self.copy_result.stdout), listed, output_of(self.copy_result))
+        self.assertEqual(self.target_numbers_after, {**self.target_numbers_at_restore, **listed})
+
+    def test_runbook_counter_query_reads_the_highest_number_issued(self):
+        self.assertEqual(self.issued, 3)
+        self.assertIn([self.community, "2026", str(self.issued)], self.source_counters)
+
+    def test_runbook_counter_move_skips_every_number_issued_and_never_moves_back(self):
+        moved = [[self.community, "2026", str(self.issued)]]
+        self.assertEqual(self.moved, moved)
+        self.assertEqual(self.moved_back, moved)
+        self.assertEqual(self.next_in_target, str(self.issued + 1))
 
 
 class AuthTableClassificationTests(unittest.TestCase):
