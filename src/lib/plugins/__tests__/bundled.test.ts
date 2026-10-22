@@ -6,12 +6,13 @@ import {
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
+  SYNTHETIC_METERING_PLUGIN_NAME,
   resolvePluginStatuses,
   validatePluginToggle,
 } from "../bundled";
 
 describe("MGM bundled plugins", () => {
-  it("defaults missing state rows to enabled", () => {
+  it("defaults missing state rows to enabled, except demonstration plugins", () => {
     const statuses = resolvePluginStatuses();
     expect(
       statuses.map((status) => [status.plugin.name, status.enabled, status.ready])
@@ -22,7 +23,33 @@ describe("MGM bundled plugins", () => {
       [BILLING_PLUGIN_NAME, true, true],
       [PAYMENTS_PLUGIN_NAME, true, true],
       [PESAPAL_PLUGIN_NAME, true, true],
+      [SYNTHETIC_METERING_PLUGIN_NAME, false, true],
     ]);
+  });
+
+  it("synthetic metering is off by default and needs metering to enable", () => {
+    expect(
+      validatePluginToggle({ pluginName: SYNTHETIC_METERING_PLUGIN_NAME, enabled: true })
+    ).toEqual({ ok: true });
+    const withoutMetering = validatePluginToggle({
+      pluginName: SYNTHETIC_METERING_PLUGIN_NAME,
+      enabled: true,
+      states: { [METERING_PLUGIN_NAME]: { enabled: false } },
+    });
+    expect(withoutMetering).toMatchObject({ ok: false, code: "plugin_dependency_disabled" });
+  });
+
+  it("an enabled synthetic plugin blocks disabling metering", () => {
+    expect(
+      validatePluginToggle({
+        pluginName: METERING_PLUGIN_NAME,
+        enabled: false,
+        states: {
+          [BILLING_PLUGIN_NAME]: { enabled: false },
+          [SYNTHETIC_METERING_PLUGIN_NAME]: { enabled: true },
+        },
+      })
+    ).toMatchObject({ ok: false, code: "plugin_dependency_required" });
   });
 
   it("metering depends on community management, not the reverse", () => {

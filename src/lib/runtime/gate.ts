@@ -61,6 +61,8 @@ const DISABLED_MESSAGES: Partial<Record<MgmPluginName, string>> = {
     "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
   payments:
     "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
+  "synthetic-metering":
+    "Synthetic metering is disabled for this organization. Enable it in Settings → Plugins; stored data is preserved.",
   pesapal:
     "The Pesapal provider is disabled for this organization. Enable it in Settings → Plugins; history is preserved.",
 };

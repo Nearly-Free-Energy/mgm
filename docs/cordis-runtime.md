@@ -15,6 +15,7 @@ loads the platform plugins into it:
 | `mgm-gate` | `mgmGate` — organization resolution + per-org plugin enablement | `mgmCatalog` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
+| `synthetic-metering` | registers the `synthetic` factory (demonstration data; selected only for microgrids with a synthetic edge in an organization that enabled the plugin, off by default) | `meteringProviders` |
 | `payment-providers` | `paymentProviders` — registry of payment provider factories | — |
 | `pesapal` | registers the `pesapal` factory | `paymentProviders` |
 | `community-management`, `metering`, `billing`, `billing-review`, `payments` | capability *plugins* (loaded per request, see below) | `mgmRequest` + the platform services they need |

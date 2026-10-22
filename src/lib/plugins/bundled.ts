@@ -15,6 +15,7 @@ export const METERING_PLUGIN_NAME = "metering" as const;
 export const BILLING_PLUGIN_NAME = "billing" as const;
 export const PAYMENTS_PLUGIN_NAME = "payments" as const;
 export const PESAPAL_PLUGIN_NAME = "pesapal" as const;
+export const SYNTHETIC_METERING_PLUGIN_NAME = "synthetic-metering" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
@@ -22,7 +23,8 @@ export type MgmPluginName =
   | typeof METERING_PLUGIN_NAME
   | typeof BILLING_PLUGIN_NAME
   | typeof PAYMENTS_PLUGIN_NAME
-  | typeof PESAPAL_PLUGIN_NAME;
+  | typeof PESAPAL_PLUGIN_NAME
+  | typeof SYNTHETIC_METERING_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
@@ -30,6 +32,7 @@ export const METERING_PLUGIN_VERSION = "0.1.0";
 export const BILLING_PLUGIN_VERSION = "0.1.0";
 export const PAYMENTS_PLUGIN_VERSION = "0.1.0";
 export const PESAPAL_PLUGIN_VERSION = "0.1.0";
+export const SYNTHETIC_METERING_PLUGIN_VERSION = "0.1.0";
 
 export interface BundledPlugin {
   name: MgmPluginName;
@@ -39,6 +42,12 @@ export interface BundledPlugin {
   dependencies: MgmPluginName[];
   /** Core plugins own the admin surface itself and cannot be disabled. */
   core: boolean;
+  /**
+   * State when an organization has no `mgm_plugins` row. Omitted means
+   * enabled (existing deployments need no backfill). Demonstration plugins
+   * set `false`; `mgm_plugin_enabled_for_org` mirrors this in SQL.
+   */
+  defaultEnabled?: boolean;
   provides: string[];
   routes: string[];
   tables: string[];
@@ -220,6 +229,23 @@ export const PESAPAL_PLUGIN: BundledPlugin = {
   tables: [],
 };
 
+export const SYNTHETIC_METERING_PLUGIN: BundledPlugin = {
+  name: SYNTHETIC_METERING_PLUGIN_NAME,
+  version: SYNTHETIC_METERING_PLUGIN_VERSION,
+  displayName: "Synthetic metering (demonstration)",
+  description:
+    "Deterministic, clearly fake meter readings for trying billing without physical meters or an OpenEMS account. Applies only to microgrids that hold synthetic demonstration meters. Off until an organization enables it.",
+  dependencies: [METERING_PLUGIN_NAME],
+  core: false,
+  defaultEnabled: false,
+  // A metering provider: it registers into the metering provider registry and
+  // owns no routes or tables. Billing consumes it through the same metering
+  // capability as any other source. Disabling preserves all stored data.
+  provides: ["synthetic meter readings"],
+  routes: [],
+  tables: [],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
@@ -227,6 +253,7 @@ export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   BILLING_PLUGIN,
   PAYMENTS_PLUGIN,
   PESAPAL_PLUGIN,
+  SYNTHETIC_METERING_PLUGIN,
 ] as const;
 
 export function getBundledPlugin(
@@ -263,7 +290,7 @@ export function resolvePluginStatuses(
   const enabledByName = new Map<MgmPluginName, boolean>(
     MGM_BUNDLED_PLUGINS.map((plugin) => [
       plugin.name,
-      states[plugin.name]?.enabled ?? true,
+      states[plugin.name]?.enabled ?? plugin.defaultEnabled ?? true,
     ])
   );
 
@@ -273,7 +300,7 @@ export function resolvePluginStatuses(
     );
     return {
       plugin,
-      enabled: enabledByName.get(plugin.name) ?? true,
+      enabled: enabledByName.get(plugin.name) ?? plugin.defaultEnabled ?? true,
       version: states[plugin.name]?.version?.trim()
         ? (states[plugin.name]?.version as string).trim()
         : plugin.version,
@@ -336,7 +363,7 @@ export function validatePluginToggle(input: {
   }
 
   const blockingDependents = getPluginDependents(plugin.name).filter(
-    (dependent) => statusByName.get(dependent.name)?.enabled ?? true
+    (dependent) => statusByName.get(dependent.name)?.enabled ?? dependent.defaultEnabled ?? true
   );
   if (blockingDependents.length > 0) {
     const names = blockingDependents

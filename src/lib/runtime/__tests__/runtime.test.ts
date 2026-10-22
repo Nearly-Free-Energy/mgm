@@ -51,11 +51,12 @@ describe("MGM root runtime", () => {
       "mgm-gate",
       "metering-providers",
       "openems-metering",
+      "synthetic-metering",
       "payment-providers",
       "pesapal",
     ]);
     expect(runtime.catalog.plugins).toBe(MGM_BUNDLED_PLUGINS);
-    expect(runtime.meteringProviders.names()).toEqual(["openems"]);
+    expect(runtime.meteringProviders.names()).toEqual(["openems", "synthetic"]);
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
   });
 
