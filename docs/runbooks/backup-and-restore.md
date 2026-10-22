@@ -141,6 +141,37 @@ it writes a manifest.
   characters. The script refuses a `password=` parameter. Treat the string as
   a full-access secret ([Keep keys and exports apart](#keep-keys-and-exports-apart)).
 
+#### Why the export uses the `postgres` login
+
+Two kinds of dedicated login were tried for exports:
+
+- **From explicit grants**, holding `SELECT` on just the tables the export
+  reads. Such a login cannot read the Auth tables a restore needs: `postgres`
+  can pass on read access to some of them, such as `auth.users`, but not
+  access to the `auth` schema itself. Granting that only raises a warning,
+  and the login is then refused with "permission denied for schema auth".
+- **With `pg_read_all_data` and `BYPASSRLS`.** Such a login can run the
+  export. It also reads Auth's session and refresh-token tables, which hold
+  what is needed to act as any signed-in user, so it has to be guarded as
+  closely as `postgres`. Nor is it read-only in effect:
+  `default_transaction_read_only = on` on the login is only a default, which
+  a session can turn off with `SET default_transaction_read_only = off`,
+  `SET TRANSACTION READ WRITE` or `BEGIN READ WRITE`.
+
+So the export uses the `postgres` login every project already has, and the
+protection goes on the connection string: who and what can read it
+([Keep keys and exports apart](#keep-keys-and-exports-apart)). Where the
+scheduler offers a protected secret scope, such as a deployment environment
+with required reviewers, keep the string there.
+
+Revisit this section if Supabase lets `postgres` pass on access to the `auth`
+schema, which may make a login built from explicit grants possible. This
+returns `false` until it does:
+
+```sql
+SELECT has_schema_privilege('postgres', 'auth', 'USAGE WITH GRANT OPTION');
+```
+
 ### Run an export
 
 The script reads the connection string from the environment variable you name
