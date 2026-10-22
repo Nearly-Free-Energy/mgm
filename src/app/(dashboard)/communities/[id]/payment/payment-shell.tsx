@@ -48,8 +48,8 @@ type CommunityProps = {
   };
   /**
    * Server-derived public IPN callback URL — always
-   * `${NEXT_PUBLIC_PAYMENT_CALLBACK_URL}/api/payments/ipn`. Empty string when
-   * the env var is unset (e.g. in some test setups). Read-only display field;
+   * `${MGM_APP_URL}/api/payments/ipn`. Empty string when
+   * the setting is unset (e.g. in some test setups). Read-only display field;
    * never round-tripped through the form.
    */
   callback_url: string;

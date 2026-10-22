@@ -1,16 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
+import { cookieOptionsFor } from "@/lib/config/cookie-options";
 
 export async function createClient() {
   const cookieStore = await cookies();
 
-  const cookieName = process.env.NEXT_PUBLIC_SUPABASE_COOKIE_NAME;
+  // Request-time, validated (#46): server-only SUPABASE_INTERNAL_URL
+  // override, public anon key, and the same cookie name as the browser.
+  const settings = getServerSupabaseSettings();
 
   return createServerClient(
-    process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    settings.url,
+    settings.anonKey,
     {
-      ...(cookieName ? { cookieOptions: { name: cookieName } } : {}),
+      ...cookieOptionsFor(settings.publicConfig),
       cookies: {
         getAll() {
           return cookieStore.getAll();

@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
+import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
+import { cookieOptionsFor } from "@/lib/config/cookie-options";
 
 // Only authentication pages are public in the first MGM release. Inherited
 // legacy payment links, customer APIs, and webhooks are blocked by the route
@@ -44,13 +46,16 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
-  const cookieName = process.env.NEXT_PUBLIC_SUPABASE_COOKIE_NAME;
+  // Same validated runtime configuration as the server and browser clients
+  // (#46). Missing or invalid settings throw a RuntimeConfigError that names
+  // the variable, never its value, and the request fails closed.
+  const settings = getServerSupabaseSettings();
 
   const supabase = createServerClient(
-    process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    settings.url,
+    settings.anonKey,
     {
-      ...(cookieName ? { cookieOptions: { name: cookieName } } : {}),
+      ...cookieOptionsFor(settings.publicConfig),
       cookies: {
         getAll() {
           return request.cookies.getAll();

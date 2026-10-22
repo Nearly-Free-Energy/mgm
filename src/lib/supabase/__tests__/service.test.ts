@@ -21,7 +21,7 @@ afterEach(() => {
 describe("createServiceClient (env-var guard)", () => {
   it("loads without the key but throws from the factory when unset", async () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
+    process.env.MGM_PUBLIC_SUPABASE_URL = "http://localhost:54321";
 
     vi.resetModules();
 
@@ -31,8 +31,21 @@ describe("createServiceClient (env-var guard)", () => {
     );
   });
 
-  it("returns a client when URL + service-role key are present", async () => {
+  it("still accepts the legacy NEXT_PUBLIC_SUPABASE_URL for one release", async () => {
+    delete process.env.MGM_PUBLIC_SUPABASE_URL;
+    delete process.env.MGM_PUBLIC_SUPABASE_ANON_KEY;
+    delete process.env.SUPABASE_INTERNAL_URL;
     process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
+
+    vi.resetModules();
+
+    const mod = await import("../service");
+    expect(mod.createServiceClient()).toBeDefined();
+  });
+
+  it("returns a client when URL + service-role key are present", async () => {
+    process.env.MGM_PUBLIC_SUPABASE_URL = "http://localhost:54321";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 
     vi.resetModules();
@@ -46,8 +59,8 @@ describe("createServiceClient (env-var guard)", () => {
     expect(client.auth).toBeDefined();
   });
 
-  it("prefers SUPABASE_INTERNAL_URL over NEXT_PUBLIC_SUPABASE_URL", async () => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "http://public.local";
+  it("prefers SUPABASE_INTERNAL_URL over MGM_PUBLIC_SUPABASE_URL", async () => {
+    process.env.MGM_PUBLIC_SUPABASE_URL = "http://public.local";
     process.env.SUPABASE_INTERNAL_URL = "http://internal.local";
     process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 

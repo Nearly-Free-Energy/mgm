@@ -223,6 +223,8 @@ function makeMockClient(opts: {
 describe("ensurePaymentLinkForLineItem", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Default callback URL derives from the server-only MGM_APP_URL (#46).
+    vi.stubEnv("MGM_APP_URL", "https://mgm.example.test");
     getCommunityPaymentConfigMock.mockResolvedValue(GOOD_CONFIG);
     buildOrderParamsFromLineItemMock.mockResolvedValue(GOOD_BUILT);
     generatePaymentLinkMock.mockResolvedValue(GOOD_RESULT);

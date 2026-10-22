@@ -12,6 +12,7 @@ import "server-only";
 import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/service";
+import { appUrl } from "@/lib/config/app-url";
 import {
   PAYMENTS_PLUGIN_VERSION,
   PESAPAL_PLUGIN_VERSION,
@@ -42,23 +43,12 @@ export const PAYMENTS_PLUGIN_NAME = "payments";
 export const PESAPAL_PROVIDER_PLUGIN_NAME = "pesapal";
 export { PAYMENTS_PLUGIN_VERSION, PESAPAL_PLUGIN_VERSION };
 
+/**
+ * Absolute application URL for payment links and the provider return URL,
+ * from the server-only MGM_APP_URL (#46). See src/lib/config/app-url.ts.
+ */
 export function defaultAppUrl(path: string): string {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
-  if (base) {
-    const url = new URL(base);
-    if (!["http:", "https:"].includes(url.protocol)) throw new Error("Invalid application URL");
-    return `${url.origin}${path}`;
-  }
-  const callbackBase = (process.env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL ?? "").replace(/\/+$/, "");
-  if (callbackBase) {
-    try {
-      const url = new URL(callbackBase);
-      return `${url.origin}${path}`;
-    } catch {
-      throw new Error("Invalid application URL");
-    }
-  }
-  throw new Error("Application URL is not configured");
+  return appUrl(path);
 }
 
 export type PaymentsPluginConfig = { repository: PaymentsRepository };
