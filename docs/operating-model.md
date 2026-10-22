@@ -60,7 +60,7 @@ The `Test` job starts a local Supabase with the CLI version pinned in
 `package-lock.json`. It pulls service images from GHCR by setting
 `SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io`, because the CLI default
 (`public.ecr.aws`) rate-limits anonymous pulls from shared runners. See
-`docs/adr/ADR-004-ci-supabase-image-source.md`. It logs in to GHCR with the job's read-only `GITHUB_TOKEN` (`packages: read`) first, because anonymous GHCR pulls are rate limited too.
+`docs/adr/ADR-004-ci-supabase-image-source.md`. It logs in to GHCR with the job's read-only `GITHUB_TOKEN` (`packages: read`) first, because anonymous GHCR pulls are rate limited too. GHCR also throttles the CLI's parallel layer pulls, so the job restores the images from `actions/cache` (list in `.github/supabase-ci-images.txt`) and pre-pulls any missing one sequentially with backoff before `supabase start`; refresh that list whenever the pinned CLI version changes (ADR-004, 22 Oct amendment).
 
 ## Where things are recorded
 
