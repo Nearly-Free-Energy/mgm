@@ -127,7 +127,8 @@ results); never use `pull_request_target` to build or test fork code.
   project's Node.js setting for builds and Functions. The project already
   builds on 24.x, so this line does not change the production runtime.
 - **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to
-  Node 24 is a follow-up PR, linked from #33.
+  Node 24 is a follow-up PR, linked from #33 and covered by the container
+  work in #51.
 - **`Test`** and **`Build`**: Node.js 24 from `.nvmrc`.
 
 The Cordis dependency is pinned exactly in `package.json` (currently

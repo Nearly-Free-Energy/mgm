@@ -99,8 +99,8 @@ Worse or to watch:
   Functions, and the project already builds on 24.x, so `engines` does not
   change the production runtime. `Build` and `Test` run on Node 24 from
   `.nvmrc`. The container image (`Dockerfile`, `node:20-alpine`) is the only
-  path still on 20; moving it is a follow-up PR linked from #33 and needs its
-  own validation. `engines` makes npm warn, not fail, when run on Node 20.
+  path still on 20; moving it is a follow-up PR linked from #33 (container work: #51) and needs
+  its own validation. `engines` makes npm warn, not fail, when run on Node 20.
 - The checklist is unproven until a fork pull request has been rehearsed with
   a second account, positive and negative cases (withhold the merge for an
   unsigned or unsigned-off commit), including the GitHub web-editor path.

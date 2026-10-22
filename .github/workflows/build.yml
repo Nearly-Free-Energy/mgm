@@ -20,7 +20,7 @@ name: Build
 #     `pull_request` event (never `pull_request_target`).
 #
 # Node.js is pinned by .nvmrc (24); Test reads the same file. The Dockerfile
-# still uses Node 20 until its follow-up change; see #33.
+# still uses Node 20 until its follow-up change; see #33 and #51.
 
 on:
   workflow_dispatch:

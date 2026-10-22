@@ -250,7 +250,7 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
 
 **Node.js runtime paths** (each is separate; `.nvmrc` pins 24):
 - **Vercel** builds and runs on the Node.js version in `package.json` `engines.node` (`>=24 <25`), which Vercel uses in place of the project setting; the project already builds on 24.x.
-- **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR tracked on #33; do not change it silently.
+- **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR, linked from #33 and covered by the container work in #51; do not change it silently.
 - **`Test`**: Node 24 from `.nvmrc`. **`Build`**: Node 24 from `.nvmrc`, with a major-version check.
 
 **Bypass.** There is no routine bypass of signatures or sign-off. In a genuine emergency (a production hotfix when a check is broken), a maintainer may merge with an item waived and must log which item and why in the PR description.
