@@ -17,40 +17,20 @@
 --     (pgcrypto pgp_sym + a DEK held in Supabase Vault). Direct-URL mode
 --     supports no auth at all — used for localhost dev only.
 --
--- ── One-time Vault DEK bootstrap ─────────────────────────────────────────
+-- ── Credential encryption key (section 2) ────────────────────────────────
 --
--- The data-encryption key is named `mbe_ems_dek` in Vault. The migration
--- creates it if missing. Source of truth for the initial plaintext:
+-- Section 2 makes sure Vault holds the data-encryption key (DEK) under the
+-- legacy name `mbe_ems_dek`, which the functions in section 3 read. It
+-- generates a key only under the development opt-in; any other database
+-- without a key stops here, and nothing after this migration is applied.
+-- Creating, backing up, rotating and recovering the key: docs/runbooks/dek.md.
 --
---     psql -v app.ems_dek_bootstrap="$(openssl rand -base64 32)" \
---          -f supabase/migrations/00018_openems_backend_per_microgrid.sql
---
--- If the secret already exists, the bootstrap GUC is ignored (no-op). If the
--- secret is missing AND the GUC is not set, the migration RAISES with setup
--- instructions (never silently falls back to a hardcoded dev DEK — that would
--- be recoverable from source-control history forever).
---
--- For `supabase db reset` (local dev) the CLI passes GUCs via PGOPTIONS; when
--- no GUC is supplied, we generate an ephemeral dev key inline using
--- gen_random_bytes and proceed. This is a dev-convenience only (operator
--- re-running reset gets a fresh key; ciphertexts from a prior reset become
--- undecryptable and surface as "re-enter credentials"). Production
--- deployments MUST supply the GUC.
---
--- ── DEK rotation recipe (out of scope for this ticket — documented here) ──
---
--- To rotate the DEK:
---   1. Generate a new plaintext DEK (openssl rand -base64 32).
---   2. For every microgrid with ems_aws_secret_access_key_encrypted IS NOT NULL:
---        a. Decrypt under the OLD DEK using fn_ems_decrypt_secret.
---        b. Update the Vault secret mbe_ems_dek to the NEW DEK
---           (vault.update_secret).
---        c. Re-encrypt under the NEW DEK using fn_ems_encrypt_secret and
---           persist via a direct UPDATE.
---   The fn_ems_decrypt_secret body always reads the CURRENT Vault DEK, so
---   step (c) must happen before any reader calls fn_ems_decrypt_secret.
---   Run the rotation as a single transaction (or re-encrypt before flipping
---   the Vault secret). A future ticket packages this into a migration or RPC.
+-- Section 2 was revised after release to require an explicit key on new
+-- databases. Databases that had already applied this migration are
+-- unaffected: the migration runner never re-applies a recorded version, and
+-- a replay returns at (a) or (b) without changing the key. If the key ever
+-- moves to a name other than `mbe_ems_dek` or `mgm_ems_dek`, add that name
+-- to (a)/(b), or a replay on such a database stops at (e).
 --
 -- ── Hard-reset safety: abort if legacy state would be orphaned ───────────
 --
@@ -108,41 +88,65 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS supabase_vault;
 
 -- ═════════════════════════════════════════════════════════════════════════
--- 2. Bootstrap DEK in Vault (`mbe_ems_dek`) if not present.
+-- 2. Make sure Vault holds the credential encryption key (`mbe_ems_dek`).
 -- ═════════════════════════════════════════════════════════════════════════
 --
--- Resolution order for the initial plaintext:
---   (a) session GUC app.ems_dek_bootstrap (operator-supplied)
---   (b) auto-generated dev key via gen_random_bytes (local dev convenience)
---
--- If the secret already exists, we skip entirely — rerun-safe.
+-- First match wins:
+--   (a) `mbe_ems_dek` exists: nothing to do.
+--   (b) `mgm_ems_dek` exists, because the operator created it before running
+--       the migrations: copy it to `mbe_ems_dek`, the name later migrations
+--       look for.
+--   (c) The session setting app.ems_dek_bootstrap is set: store that value.
+--   (d) The development opt-in is set (app.allow_dev_dek = '1', or the Vault
+--       entry `mgm_allow_dev_credential_key` = '1' that supabase/config.toml
+--       adds when MGM_ALLOW_DEV_CREDENTIAL_KEY=1): generate a throwaway key.
+--   (e) Otherwise: stop with an error.
 
 DO $$
 DECLARE
-  v_bootstrap TEXT;
-  v_existing INT;
+  v_dek TEXT;
 BEGIN
-  SELECT COUNT(*) INTO v_existing FROM vault.secrets WHERE name = 'mbe_ems_dek';
-  IF v_existing > 0 THEN
-    -- Already bootstrapped; nothing to do.
+  -- (a)
+  IF EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'mbe_ems_dek') THEN
     RETURN;
   END IF;
 
-  v_bootstrap := current_setting('app.ems_dek_bootstrap', true);
+  -- (b)
+  SELECT decrypted_secret INTO v_dek
+  FROM vault.decrypted_secrets
+  WHERE name = 'mgm_ems_dek'
+  LIMIT 1;
 
-  IF v_bootstrap IS NULL OR length(btrim(v_bootstrap)) = 0 THEN
-    -- Dev fallback: generate a random 32-byte key, base64-encoded.
-    -- Operator should supply `app.ems_dek_bootstrap` in production.
-    -- We emit a WARNING so prod deploys catch this in logs.
-    v_bootstrap := encode(gen_random_bytes(32), 'base64');
+  -- (c)
+  IF v_dek IS NULL
+     AND length(btrim(coalesce(current_setting('app.ems_dek_bootstrap', true), ''))) > 0 THEN
+    v_dek := current_setting('app.ems_dek_bootstrap', true);
+  END IF;
+
+  -- (d)
+  IF v_dek IS NULL AND (
+    current_setting('app.allow_dev_dek', true) = '1'
+    OR EXISTS (
+      SELECT 1 FROM vault.decrypted_secrets
+      WHERE name = 'mgm_allow_dev_credential_key' AND decrypted_secret = '1'
+    )
+  ) THEN
+    v_dek := encode(gen_random_bytes(32), 'base64');
     RAISE WARNING
-      'mbe_ems_dek bootstrapped with an auto-generated dev DEK. For production, rerun with `psql -v app.ems_dek_bootstrap=$(openssl rand -base64 32)`.';
+      'Generated a throwaway credential encryption key (development opt-in). No copy exists outside this database, so do not store real credentials in it. See docs/runbooks/dek.md.';
+  END IF;
+
+  -- (e)
+  IF v_dek IS NULL THEN
+    RAISE EXCEPTION
+      'No credential encryption key. Create one, keep a copy outside the database, add it to Vault as mgm_ems_dek, and run the migrations again (docs/runbooks/dek.md). For a local development or CI database, set MGM_ALLOW_DEV_CREDENTIAL_KEY=1 instead.'
+      USING ERRCODE = '55000';
   END IF;
 
   PERFORM vault.create_secret(
-    v_bootstrap,
+    v_dek,
     'mbe_ems_dek',
-    'MBE OpenEMS envelope-encryption data-encryption key (DEK). See 00018 header for rotation recipe.'
+    'MGM credential encryption key (legacy name). See docs/runbooks/dek.md.'
   );
 END;
 $$;

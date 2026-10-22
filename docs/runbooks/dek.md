@@ -29,50 +29,109 @@ rotation step below in the same PR.
 
 ## Create the key (new environment)
 
-Migrations create the Vault secret if it is missing, and refuse to invent
-one silently (migration `00025`). The earlier migrations create it under the
-legacy name `mbe_ems_dek`; migration `20261014090000_mgm_credential_key_name`
-then copies it to `mgm_ems_dek`:
+The migrations never generate a key for a shared database. A database
+without one stops at migration `00018_openems_backend_per_microgrid` with
+`No credential encryption key`, and nothing after it is applied. Before the
+first migration run:
 
-- **Production or any shared database:** generate the key yourself and
-  pass it to the migration run.
+1. Generate the key and store it in the team password manager, labelled with
+   the environment and `mgm_ems_dek` (see "Back it up"):
 
-  ```bash
-  DEK="$(openssl rand -base64 32)"
-  # Store $DEK in the team password manager now — see "Back it up".
-  psql "$DB_URL" -v ON_ERROR_STOP=1 \
-    -c "ALTER DATABASE postgres SET app.ems_dek_bootstrap = '$DEK';"
-  # run migrations (supabase db push / your deploy pipeline)
-  psql "$DB_URL" -c "ALTER DATABASE postgres RESET app.ems_dek_bootstrap;"
-  ```
+   ```bash
+   openssl rand -base64 32
+   ```
 
-  Reset the setting once the migrations have run, so the key is not left in
-  the database configuration.
+2. Add it to the new database's Vault, from the Supabase SQL editor or a
+   psql session connected as `postgres`:
 
-- **Local development:** `./setup.sh` sets `app.allow_dev_dek = '1'`, and the
-  migration generates a throwaway key. Local credentials become
-  unreadable after the next `supabase db reset`; re-enter them.
+   ```sql
+   SELECT vault.create_secret('<key from the password manager>', 'mgm_ems_dek',
+     'MGM credential encryption key');
+   ```
 
-If neither setting is present on a database without the secret, the
-migration stops with `DEK bootstrap required` — by design.
+3. Run the migrations (`supabase db push` or your deploy pipeline).
+   Migration `00018` also copies the key to the legacy name `mbe_ems_dek`
+   (see "Retire the legacy key name").
+
+If a run stopped at `00018`, do steps 1 and 2, then run the migrations
+again; they continue from `00018`.
+
+### Local development and CI
+
+Local and CI databases use a throwaway key instead. Set
+`MGM_ALLOW_DEV_CREDENTIAL_KEY=1` for `supabase db reset`, for
+`supabase start` when it creates a new database, and for commands that
+build a shadow database from the migrations, such as `supabase db diff`:
+
+```bash
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
+```
+
+`./setup.sh` (local mode) and the CI `Test` job set it for you. The Supabase
+CLI then adds the `mgm_allow_dev_credential_key` entry from
+`supabase/config.toml` to Vault before running the migrations, and migration
+`00018` generates a key and prints a warning. Every reset creates a new key,
+so re-enter local credentials afterwards. A psql session that applies the
+migrations by hand can run `SET app.allow_dev_dek = '1'` instead.
+
+Never set the variable when migrating a shared database. The CLI writes
+`[db.vault]` entries during `supabase db push` too, so a new database would
+get a key that nobody has a copy of.
 
 ## Back it up
 
 Store the plaintext DEK in the team password manager as soon as it is
 created, labelled with the environment and the Vault secret name. Vault is
-the only other copy. To read the current value from a database (for
-example, to back up a key that was generated before this runbook existed),
-use a privileged connection:
+the only other copy, and a logical restore into a new project cannot read
+it (see "Recover"). To read the current value from a database (for example,
+to back up a key that was generated before this runbook existed), use a
+privileged connection:
 
 ```sql
 SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mgm_ems_dek';
 ```
 
+Keep copies of MGM's other Vault entries as well: `payments_worker_url`
+(the deployment's `/api/payments/reconcile-worker` URL) and
+`payments_worker_secret` (the application's `PAYMENTS_WORKER_SECRET`; see
+`docs/payments-rollout.md`).
+
 Never paste the key into an issue, PR, chat, or log.
 
 ## Recover
 
-- **Database restored from backup:** Vault is restored with it; nothing to do.
+Supabase encrypts Vault with a root key that belongs to the project, and
+backup files never contain it. What to do depends on where the database
+comes back:
+
+- **Restored into the same project** (scheduled backup or point-in-time
+  recovery): Vault is restored with it; nothing to do.
+- **Supabase's "Restore to a new project":** Supabase copies the root key,
+  so Vault stays readable. If the new project will serve a different
+  deployment, update `payments_worker_url`.
+- **Logical restore into a new project** (`supabase db dump` or `pg_dump`
+  files restored with psql): the new project has its own root key, so the
+  restored Vault entries cannot be decrypted, and neither can any stored
+  credential. Either:
+  - while the old project is still active, copy its root key to the new
+    project before restoring, as described under "Supabase Vault or column
+    encryption" in Supabase's
+    [Backup and restore using the CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
+    Copying replaces the new project's root key, so do it while the new
+    project's Vault is still empty; or
+  - after restoring, replace MGM's Vault entries with your copies. Use the
+    same key as before, so the restored credentials decrypt again:
+
+    ```sql
+    DELETE FROM vault.secrets WHERE name IN
+      ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
+    SELECT vault.create_secret('<key from the password manager>', 'mgm_ems_dek',
+      'MGM credential encryption key');
+    SELECT vault.create_secret('<https://…/api/payments/reconcile-worker>', 'payments_worker_url');
+    SELECT vault.create_secret('<PAYMENTS_WORKER_SECRET>', 'payments_worker_secret');
+    ```
+
+  Then run **Test connection** on one microgrid and one payment account.
 - **Vault secret lost but the plaintext is in the password manager:**
   recreate it with the same value.
 
@@ -82,8 +141,9 @@ Never paste the key into an issue, PR, chat, or log.
   ```
 
 - **Both lost:** the encrypted values cannot be recovered. Generate a new
-  key as in "Create the key", set the encrypted columns above to `NULL`, and
-  have operators re-enter OpenEMS and payment credentials in the app.
+  key and add it to Vault as in "Create the key", set the encrypted columns
+  above to `NULL`, and have operators re-enter OpenEMS and payment
+  credentials in the app.
 
 ## Rotate
 

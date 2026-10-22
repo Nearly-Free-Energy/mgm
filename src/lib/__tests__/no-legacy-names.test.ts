@@ -34,7 +34,6 @@ const LEGACY_COMPAT: Record<string, string> = {
   "src/lib/supabase/__tests__/org_api_tokens.test.ts": "proves legacy mbe_ tokens and the env fallback still work",
   "src/lib/supabase/__tests__/customerapp_enabled.test.ts": "clears the legacy env var between tests",
   "src/lib/supabase/__tests__/internal_auth_401_logging.test.ts": "asserts no legacy token fragment is logged",
-  "src/lib/supabase/__tests__/dek-bootstrap.test.ts": "earlier migrations still bootstrap the key as mbe_ems_dek",
   "src/lib/supabase/__tests__/credential_key.test.ts": "documents the legacy key name the migration copies from",
   "src/lib/__tests__/no-legacy-names.test.ts": "this guard",
   "supabase/scripts/retire-legacy-credential-key.sql": "retires the legacy Vault key only after verification",

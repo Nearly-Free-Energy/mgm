@@ -11,11 +11,11 @@ name: Test
 # secret. Measured cold on ubuntu-latest: `supabase start` ~81-85s, the
 # 13-file rls project ~14-16s.
 #
-# SKIP_DEK_BOOTSTRAP_TEST stays set, and NOT for cost. dek-bootstrap.test.ts
-# does `ALTER DATABASE postgres SET app.allow_dev_dek`, which fails with
-# `permission denied to set parameter` because the `postgres` role is not a
-# superuser on Supabase (local or CI). It cannot pass here at any time
-# budget; that is a defect in the test, tracked separately, not a deferral.
+# `supabase start` runs with MGM_ALLOW_DEV_CREDENTIAL_KEY=1, so migration
+# 00018 gives this throwaway database a generated credential encryption key;
+# without it the migrations stop (docs/runbooks/dek.md). The last step resets
+# the database without and then with that opt-in, so it runs after everything
+# else that uses the database.
 
 on:
   workflow_dispatch:
@@ -64,6 +64,7 @@ jobs:
       - run: npx supabase start
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
+          MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
 
       - name: Payment integrity rehearsal
         run: |
@@ -95,5 +96,14 @@ jobs:
           export SUPABASE_JWT_SECRET="$JWT_SECRET"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
+
+      # Last: it resets the database twice, without the development opt-in
+      # (the migrations must stop at the key check) and then with it.
+      - name: Fresh-install key check
+        run: |
+          eval "$(npx supabase status -o env | grep -E '^(ANON_KEY|JWT_SECRET)=')"
+          export SUPABASE_JWT_SECRET="$JWT_SECRET"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          npm test -- src/lib/supabase/__tests__/dek-bootstrap.test.ts
         env:
-          SKIP_DEK_BOOTSTRAP_TEST: '1'
+          RUN_DEK_BOOTSTRAP_TEST: '1'
