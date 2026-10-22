@@ -673,9 +673,10 @@ run_dump "initial migration history" dump_data "$history_first" --schema=supabas
 run_dump "roles" dump_roles "$work/roles.sql"
 run_dump "schema" dump_schema "$work/schema.sql" "$MANAGED_SCHEMAS" --exclude-schema="$MANAGED_SCHEMAS"
 # The rows in data.sql are those of the snapshot pg_dump takes when it starts,
-# which is later than created_utc by however long the dumps before it took. This time, read just before pg_dump starts, is no later than the
-# snapshot: a change committed before it is in the export, and one committed
-# after it may not be.
+# which is later than created_utc by however long the dumps before it took.
+# This time, read just before pg_dump starts, is no later than the snapshot:
+# a change committed before it is in the export, and one committed after it
+# may not be.
 data_dump_started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ') \
   || die "$EXIT_DUMP" "cannot read the clock"
 run_dump "data" dump_data "$work/data.sql" "${data_selection[@]}"

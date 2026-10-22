@@ -313,7 +313,7 @@ BEGIN
   -- Billing as the org manager, through the same functions the application calls.
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user::text, 'role', 'authenticated')::text, true);
   SET ROLE authenticated;
-  INSERT INTO communities(org_id, name, invoice_prefix) VALUES (v_org, 'Export and restore community', 'ER')
+  INSERT INTO communities(org_id, name, invoice_prefix) VALUES (v_org, 'Export and restore community', '{prefix}')
   RETURNING id INTO v_community;
   INSERT INTO microgrids(community_id, name, currency, timezone) VALUES (v_community, 'Export and restore microgrid', 'UGX', 'Africa/Kampala')
   RETURNING id INTO v_microgrid;
@@ -335,7 +335,7 @@ BEGIN
     '[{{"label": "T1", "kwh": 4, "amount": 400}}]', 900, 'manual',
     v_user, 'meter unreadable', v_user, '{{}}', v_tariff, 'human', NULL);
   -- The bill is rendered, which numbers it as the application does.
-  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  UPDATE billing_line_items SET invoice_number = '{prefix}-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
   WHERE id = v_item.id AND invoice_number IS NULL;
   PERFORM fn_close_billing_period(v_closed, false);
 
@@ -389,11 +389,11 @@ BEGIN
 
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user::text, 'role', 'authenticated')::text, true);
   SET ROLE authenticated;
-  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  UPDATE billing_line_items SET invoice_number = '{prefix}-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
   WHERE billing_period_id = v_open AND invoice_number IS NULL;
   SELECT * INTO v_new FROM fn_record_line_item_with_audit(v_open, v_neighbour, NULL, 2, 54, 56,
     '[{{"label": "T1", "kwh": 2, "amount": 200}}]', 700, 'edge', NULL, NULL, v_user, '{{}}', v_tariff, 'human', NULL);
-  UPDATE billing_line_items SET invoice_number = 'ER-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
+  UPDATE billing_line_items SET invoice_number = '{prefix}-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
   WHERE id = v_new.id;
   RESET ROLE;
 END
@@ -457,11 +457,16 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
     @classmethod
     def seed_source(cls):
         cls.org, cls.user = str(uuid.uuid4()), str(uuid.uuid4())
+        # Invoice numbers are unique across the database, so each run numbers
+        # its bills under a prefix taken from its org's ID, and a second run
+        # against the same source does not reuse the first run's numbers.
+        cls.prefix = "ER" + cls.org.replace("-", "")[:6].upper()
         cls.refresh_token = f"e2e-refresh-{uuid.uuid4().hex}"
         cls.totp_secret = f"E2ETOTP{uuid.uuid4().hex.upper()}"
         fixture = cls.work / "fixture.sql"
         fixture.write_text(FIXTURE.format(
-            org=cls.org, user=cls.user, refresh_token=cls.refresh_token, totp_secret=cls.totp_secret
+            org=cls.org, user=cls.user, refresh_token=cls.refresh_token, totp_secret=cls.totp_secret,
+            prefix=cls.prefix,
         ))
         result = run([
             "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction", "--dbname", cls.source,
@@ -512,7 +517,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
     @classmethod
     def bill_after_export(cls):
         after = cls.work / "after-export.sql"
-        after.write_text(AFTER_EXPORT.format(org=cls.org, user=cls.user))
+        after.write_text(AFTER_EXPORT.format(org=cls.org, user=cls.user, prefix=cls.prefix))
         result = run([
             "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction", "--dbname", cls.source,
             "-f", str(after),

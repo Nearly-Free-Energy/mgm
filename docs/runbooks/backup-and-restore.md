@@ -720,9 +720,11 @@ and before anyone renders a bill in the target (logical restore, step 11):
    reachable, list the bills that the target holds without a number and the
    source has numbered. Add a service entry for the source, here
    `mgm-restore-source`, as in step 1 of the logical restore, and remove it
-   when you are done. Its login needs only to read
-   `public.billing_line_items`: nothing here writes to the source. From a
-   private directory on the trusted machine:
+   when you are done. Give it the source's `postgres` login, the one exports
+   run with ([Requirements](#requirements)): row-level security on
+   `public.billing_line_items` stops a login that only has `SELECT` on the
+   table, and `postgres` bypasses it. Nothing here writes to the source.
+   From a private directory on the trusted machine:
 
    ```bash
    PGSERVICE=mgm-restore-source psql -X --variable ON_ERROR_STOP=1 \
