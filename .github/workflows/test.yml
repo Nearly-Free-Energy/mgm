@@ -39,8 +39,9 @@ jobs:
   Test:
     name: Test
     runs-on: ubuntu-latest
-    # Raised from 10: the Supabase start adds ~85s to the job.
-    timeout-minutes: 15
+    # Raised from 10: the Supabase start adds ~85s to the job, and a cold run may
+    # spend minutes retrying throttled image pulls.
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -93,11 +94,17 @@ jobs:
           while read -r image; do
             case "$image" in ''|'#'*) continue ;; esac
             if docker image inspect "$image" >/dev/null 2>&1; then continue; fi
+            # GHCR answers some single pulls with toomanyrequests and a
+            # retry-after of microseconds (shared-IP limiter), so retry quickly and
+            # alternate with the CLI's default mirror, then tag it as the GHCR name
+            # the CLI looks for.
             ok=false
-            for attempt in 1 2 3 4 5 6; do
+            for attempt in $(seq 1 12); do
               if docker pull --quiet "$image"; then ok=true; break; fi
+              mirror="public.ecr.aws/supabase/${image#ghcr.io/supabase/}"
+              if docker pull --quiet "$mirror" && docker tag "$mirror" "$image"; then ok=true; break; fi
               echo "pull of $image failed (attempt $attempt)"
-              sleep $((attempt * 20))
+              sleep $((attempt < 5 ? attempt * 3 : 15))
             done
             if [ "$ok" != true ]; then
               echo "::warning::could not pre-pull $image; supabase start will retry it"
