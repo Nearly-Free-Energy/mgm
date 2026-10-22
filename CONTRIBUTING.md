@@ -45,6 +45,9 @@ Every commit on a pull request needs both:
 1. **Sign-off.** Add the trailer with `git commit -s`. It adds
    `Signed-off-by: Your Name <your-email>`, certifying the
    [Developer Certificate of Origin](https://developercertificate.org/).
+   A merge commit that only brings in `main` needs no sign-off;
+   `git show --remerge-diff <sha>` prints nothing for one. A merge that
+   resolves conflicts needs `-s`.
 2. **A verified signature.** Configure commit signing once, then plain
    `git commit -s` signs automatically. The setup steps (SSH signing key,
    uploaded to GitHub as a *Signing Key*) are in `CLAUDE.md`
@@ -86,7 +89,7 @@ breaks these rules, so the maintainer who merges checks each one by hand
 | Sign-off | every commit carries `Signed-off-by:` (the merger reads the commits; no automated check reports it) |
 
 Changes to the areas listed in `.github/CODEOWNERS` (migrations and RLS
-helpers, the runtime gate and plugin catalog, request middleware, workflows)
+helpers, roles, the runtime gate and plugin catalog, request middleware, workflows)
 also need approval from a code owner other than the person who pushed the
 change, on the final head commit. After you push again, ask for the approval
 again. Reviewers suggest changes rather than pushing to your branch. Other

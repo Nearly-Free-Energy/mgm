@@ -235,7 +235,7 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
    git config --global tag.gpgsign true
    ```
    Then upload `~/.ssh/id_ed25519_signing.pub` at github.com → Settings → SSH and GPG keys → "New SSH key" with **Key type: Signing Key**. After setup, every `git commit` carries an "SSH" signature.
-4. **Every commit is signed off.** Each commit ends with `Signed-off-by: Your Name <email>` (`git commit -s`). No automated DCO check reports this today, so the merger reads the commits. Web-editor commits carry the sign-off only if the repository's web sign-off setting is on; check them too. The signature (item 3) and the sign-off are separate: the first is cryptographic, the second a text trailer.
+4. **Every commit is signed off.** Each commit ends with `Signed-off-by: Your Name <email>` (`git commit -s`). No automated DCO check reports this today, so the merger reads the commits. Web-editor commits carry the sign-off only if the repository's web sign-off setting is on; check them too. The signature (item 3) and the sign-off are separate: the first is cryptographic, the second a text trailer. A merge commit that only brings in `main` needs no sign-off; `git show --remerge-diff <sha>` prints nothing for one. A merge that resolves conflicts needs `-s`.
 5. **Code-owner approval for owned paths.** Areas: database migrations, RLS helpers, roles, the Cordis runtime gate and plugin catalog, request middleware, and CI workflows; the exact paths are in `.github/CODEOWNERS`. The approval must be on the **final head commit**, re-requested after any push, and the approver must not be the person who pushed the owned-path change. Reviewers suggest changes rather than pushing to the author's branch. Other changes may be merged by their author once items 1 to 4 hold.
 6. **No rebase merging.** GitHub cannot sign the commits a rebase merge creates. Outside contributions are squash-merged; maintainers may merge their own verified, signed-off commits with a merge commit. Squashing does not waive items 3 and 4: they apply to the commits on the PR, including PRs from forks.
 7. **Nobody force-pushes or deletes `main`.**
@@ -253,7 +253,6 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
 - **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR, linked from #33 and covered by the container work in #51; do not change it silently.
 - **`Test`**: Node 24 from `.nvmrc`. **`Build`**: Node 24 from `.nvmrc`, with a major-version check.
 
-**Bypass.** There is no routine bypass of signatures or sign-off. In a genuine emergency (a production hotfix when a check is broken), a maintainer may merge with an item waived and must log which item and why in the PR description.
 
 **For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
 

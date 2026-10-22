@@ -5,8 +5,7 @@ name: CodeQL
 # The merger checks that `CodeQL` is green before merging (a maintainer social
 # contract; see #30). The job's name below is the check name that checklist
 # refers to: rename it only together with the docs, and do NOT add a
-# matrix-suffix. The build step runs
-# the standard JavaScript/TypeScript analysis — no project-specific config
+# matrix-suffix. The build step runs the standard JavaScript/TypeScript analysis — no project-specific config
 # beyond the language list.
 
 on:

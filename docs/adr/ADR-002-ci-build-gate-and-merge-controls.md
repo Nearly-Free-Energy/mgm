@@ -9,7 +9,7 @@ MGM is being prepared for public development with outside contributors
 
 First, the only production-build proof today is the hosting provider's
 preview deployment. A pull request from a fork waits on a deployment
-authorization it cannot obtain, and the check exists only while the hosting
+authorization that is not given, and the check exists only while the hosting
 integration does. The project must not depend on a hosting provider to prove
 that it builds.
 
@@ -57,7 +57,9 @@ maintainer social contract and that ruleset enforcement is deferred (#30 § 2).
    `main`. GitHub does not block a merge that breaks the checklist.
    Enforcement through a ruleset is deferred (#30). No automated DCO check
    exists, so the merger verifies sign-off; a DCO app or workflow job can be
-   added separately and named then.
+   added separately and named then. A merge commit that only brings in
+   `main` needs no sign-off; `git show --remerge-diff <sha>` prints nothing
+   for one. A merge that resolves conflicts needs `-s`.
 4. **Code-owner approval** by someone other than the author for the areas in
    `.github/CODEOWNERS` (migrations and RLS helpers, roles, the Cordis runtime
    gate and plugin catalog, request middleware, workflows; owners:
@@ -67,7 +69,7 @@ maintainer social contract and that ruleset enforcement is deferred (#30 § 2).
    commits on the pull request. Outside contributions are squash-merged;
    maintainers may merge their own verified, signed-off commits with merge
    commits.
-6. **Hosting previews are informational** and never required checks.
+6. **Hosting previews are informational** and not part of the checklist.
 7. **Documentation moves together:** `CLAUDE.md`, `docs/operating-model.md`,
    `CONTRIBUTING.md`, and `docs/setup.md` are updated in the same change as
    the workflow.
@@ -99,8 +101,8 @@ Worse or to watch:
   Functions, and the project already builds on 24.x, so `engines` does not
   change the production runtime. `Build` and `Test` run on Node 24 from
   `.nvmrc`. The container image (`Dockerfile`, `node:20-alpine`) is the only
-  path still on 20; moving it is a follow-up PR linked from #33 (container work: #51) and needs
-  its own validation. `engines` makes npm warn, not fail, when run on Node 20.
+  path still on 20; moving it is a follow-up PR linked from #33 (container
+  work: #51) and needs its own validation. `engines` makes npm warn, not fail, when run on Node 20.
 - The checklist is unproven until a fork pull request has been rehearsed with
   a second account, positive and negative cases (withhold the merge for an
   unsigned or unsigned-off commit), including the GitHub web-editor path.

@@ -73,7 +73,9 @@ merge until it holds:
 2. `Test`, `CodeQL` (both CodeQL entries) and `Build` are green.
 3. Every commit is Verified (signed).
 4. Every commit is signed off (`Signed-off-by:`). No automated DCO check
-   reports this, so the merger reads the commits.
+   reports this, so the merger reads the commits. A merge commit that only
+   brings in `main` needs no sign-off; `git show --remerge-diff <sha>` prints
+   nothing for one. A merge that resolves conflicts needs `-s`.
 5. Code-owner approval for owned paths, on the final head commit, re-requested
    after any push, from someone other than the person who pushed the
    owned-path change. Reviewers suggest changes rather than pushing to the
@@ -119,7 +121,8 @@ preview, is the production-build gate.
 **Untrusted code gets no credentials.** The CI workflows run on the
 `pull_request` event with `permissions: contents: read` and read no repository
 secret (the CodeQL job also gets `security-events: write` to upload its
-results); never use `pull_request_target` to build or test fork code.
+results, and `Test` gets `packages: read` to pull the Supabase images from
+GHCR); never use `pull_request_target` to build or test fork code.
 
 **Runtime versions.** `.nvmrc` pins Node.js 24 LTS. Each path is separate:
 
