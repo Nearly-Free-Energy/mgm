@@ -34,3 +34,7 @@ against the risk of diverging from the local setup. The job names `Test` and
   fails at pull time; re-check the registry then, or fall back to caching.
 - Local development is unaffected; the variable is set in CI only.
 - This repository has no Structurizr DSL, so none is updated.
+
+### Amendment (22 Oct 2026): authenticate to GHCR
+
+Anonymous pulls from GHCR were then also refused with `toomanyrequests` on shared runners. The `Test` job now logs in to `ghcr.io` with the job's own `GITHUB_TOKEN` (`packages: read`, no stored secret) before `supabase start`, so pulls count as authenticated. Fork pull requests get the same read-only token, so this needs no repository secret.

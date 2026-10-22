@@ -31,6 +31,9 @@ concurrency:
 # Tighten default token permissions; explicitly grant only what's required.
 permissions:
   contents: read
+  # read-only package scope so the runner can pull Supabase images from GHCR as an
+  # authenticated client; anonymous GHCR pulls from shared runner IPs are rate limited.
+  packages: read
 
 jobs:
   Test:
@@ -61,6 +64,12 @@ jobs:
       # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
       # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
       # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md.
+      - name: Log in to GHCR for authenticated image pulls
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+
       - run: npx supabase start
         env:
           SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
