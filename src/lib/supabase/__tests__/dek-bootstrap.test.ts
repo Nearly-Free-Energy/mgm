@@ -4,16 +4,20 @@
  *
  * Runs `supabase db reset` against the local stack twice:
  *   1. Without the development opt-in, migration 00018 must stop the reset
- *      with an error that points at the runbook.
- *   2. With MGM_ALLOW_DEV_CREDENTIAL_KEY=1, the reset must succeed, report the
- *      throwaway key, and leave a key the encryption functions can use.
+ *      with its own error (SQLSTATE 55000), which points at the runbook.
+ *   2. With MGM_ALLOW_DEV_CREDENTIAL_KEY=1, the reset must succeed and leave a
+ *      key the encryption functions can use. The encrypt/decrypt roundtrip is
+ *      the check: the server's WARNING about the throwaway key is not
+ *      asserted, because not every Supabase CLI version prints server notices.
  *
  * Each reset wipes the local database, so the suite runs only with
  * RUN_DEK_BOOTSTRAP_TEST=1 and is reported as skipped otherwise. CI runs it in
- * its own step after `npm test`. It needs Docker, the Supabase CLI on PATH
- * (npm scripts provide the pinned one), and the same environment as the other
- * database suites (rls.helpers.ts). To reset a different local project, set
- * SUPABASE_WORKDIR and MGM_TEST_SUPABASE_URL.
+ * its own step after `npm test`. It needs Docker, a `supabase` CLI on PATH,
+ * and the same environment as the other database suites (rls.helpers.ts). It
+ * runs whichever `supabase` comes first on PATH: under `npm test` that is the
+ * lockfile-pinned CLI in node_modules/.bin when its install step downloaded
+ * the binary, and otherwise a globally installed CLI. To reset a different
+ * local project, set SUPABASE_WORKDIR and MGM_TEST_SUPABASE_URL.
  *
  * Requirement: Nearly-Free-Energy/mgm#30 (fresh installs need an
  * operator-supplied key).
@@ -73,14 +77,16 @@ describe.skipIf(process.env.RUN_DEK_BOOTSTRAP_TEST !== "1")(
       const reset = dbReset(false);
       expect(reset.ok, reset.output).toBe(false);
       expect(lastMigration(reset.output)).toBe("00018_openems_backend_per_microgrid.sql");
-      expect(reset.output).toContain("No credential encryption key");
-      expect(reset.output).toContain("docs/runbooks/dek.md");
+      // The CLI also echoes the failing statement, whose source contains the
+      // same words; only the error line has the "ERROR: " prefix and SQLSTATE.
+      expect(reset.output).toMatch(
+        /ERROR: No credential encryption key\.[^\n]*docs\/runbooks\/dek\.md[^\n]*\(SQLSTATE 55000\)/
+      );
     }, RESET_TIMEOUT_MS);
 
     it("installs with the development opt-in and leaves a usable key", async () => {
       const reset = dbReset(true);
       expect(reset.ok, reset.output).toBe(true);
-      expect(reset.output).toContain("Generated a throwaway credential encryption key");
 
       const svc = await serviceClient();
       const ciphertext = await eventually(() =>

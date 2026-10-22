@@ -208,7 +208,7 @@ instance** — they never run against cloud Supabase to prevent polluting shared
 
 ### Prerequisites
 
-- **Local Supabase CLI** running (`supabase start`).
+- **Local Supabase CLI** running (`MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`, or `./setup.sh`).
 
 ### Running RLS tests
 
@@ -288,10 +288,10 @@ If using local/dev mode, run `npm run dev` after setup.
 |---------|----------|
 | `Docker daemon is not running` | Start Docker Desktop, then re-run `./setup.sh` |
 | `supabase: command not found` | Install: `brew install supabase/tap/supabase` |
-| `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `supabase db reset` to re-apply. |
+| `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply. |
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
-| Login fails with "Invalid credentials" | Run `supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
+| Login fails with "Invalid credentials" | Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
 | Billing generation shows "No meter reading data" | Ensure OpenEMS edge simulations are running and meters are assigned to tenants |
 | Docker mode: app not starting | Check `docker compose logs mgm-app` for errors |

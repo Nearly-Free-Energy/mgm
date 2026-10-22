@@ -38,6 +38,17 @@ jobs:
     runs-on: ubuntu-latest
     # Raised from 10: the Supabase start adds ~85s to the job.
     timeout-minutes: 15
+    # Pull the Supabase service images from GHCR, not the CLI default
+    # (public.ecr.aws), which rejects anonymous pulls from shared runner
+    # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
+    # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
+    # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
+    # set for the whole job because every CLI command that creates a
+    # container resolves the image through it: `supabase start`, and
+    # `supabase db reset` in the fresh-install key check, which recreates the
+    # database container. The runner has only the GHCR copies.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
     steps:
       - uses: actions/checkout@v4
@@ -55,15 +66,10 @@ jobs:
 
       # npm ci already installs the lockfile-pinned Supabase CLI. Avoid a
       # second release lookup here; the setup action can hit GitHub's rate
-      # limit before the tests even start.
-      # Pull the Supabase service images from GHCR, not the CLI default
-      # (public.ecr.aws), which rejects anonymous pulls from shared runner
-      # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
-      # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
-      # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md.
+      # limit before the tests even start. The images come from GHCR (the
+      # job-level SUPABASE_INTERNAL_IMAGE_REGISTRY above).
       - run: npx supabase start
         env:
-          SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
           MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
 
       - name: Payment integrity rehearsal
@@ -74,6 +80,7 @@ jobs:
       - name: Credential key rotation rehearsal
         run: |
           eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key-bootstrap.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 

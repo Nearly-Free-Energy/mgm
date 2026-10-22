@@ -30,7 +30,11 @@
 -- unaffected: the migration runner never re-applies a recorded version, and
 -- a replay returns at (a) or (b) without changing the key. If the key ever
 -- moves to a name other than `mbe_ems_dek` or `mgm_ems_dek`, add that name
--- to (a)/(b), or a replay on such a database stops at (e).
+-- to (a)/(b), or a replay on such a database stops at (e). The header of
+-- 00025_dek_bootstrap_hardening.sql describes a setup step that has since
+-- been retired (setup.sh's `ALTER DATABASE ... app.allow_dev_dek`), and
+-- 00025 does nothing once this section has run, because it returns as soon
+-- as `mbe_ems_dek` exists.
 --
 -- ── Hard-reset safety: abort if legacy state would be orphaned ───────────
 --

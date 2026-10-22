@@ -41,20 +41,46 @@ first migration run:
    openssl rand -base64 32
    ```
 
-2. Add it to the new database's Vault, from the Supabase SQL editor or a
-   psql session connected as `postgres`:
+2. Add it to the new database's Vault from a psql session connected as
+   `postgres`. `\prompt` reads the key into a psql variable, so the key is
+   not in your shell history, psql's history or a saved SQL file; paste it
+   at the prompt:
 
    ```sql
-   SELECT vault.create_secret('<key from the password manager>', 'mgm_ems_dek',
-     'MGM credential encryption key');
+   \prompt 'Credential key: ' dek
+   SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+   \unset dek
    ```
 
-3. Run the migrations (`supabase db push` or your deploy pipeline).
-   Migration `00018` also copies the key to the legacy name `mbe_ems_dek`
-   (see "Retire the legacy key name").
+   You can instead run the same `SELECT` in the Supabase SQL editor, with
+   the key as a quoted literal in place of `:'dek'`, then delete the saved
+   snippet.
 
-If a run stopped at `00018`, do steps 1 and 2, then run the migrations
-again; they continue from `00018`.
+3. Run the migrations with the development opt-in cleared, so a value in a
+   `.env` file cannot apply (see "Local development and CI"):
+
+   ```bash
+   MGM_ALLOW_DEV_CREDENTIAL_KEY= supabase db push
+   ```
+
+   Check that the output has no "Generated a throwaway credential encryption
+   key" warning. Not every Supabase CLI version prints server warnings, so
+   also confirm that the key in use is your copy. Migration `00018` copies
+   your key to the legacy name `mbe_ems_dek` (see "Retire the legacy key
+   name"); in psql, paste the key again and check the result is `t`:
+
+   ```sql
+   \prompt 'Credential key: ' dek
+   SELECT decrypted_secret = :'dek' AS key_matches
+     FROM vault.decrypted_secrets WHERE name = 'mbe_ems_dek';
+   \unset dek
+   ```
+
+   A deploy pipeline that runs the migrations must not set
+   `MGM_ALLOW_DEV_CREDENTIAL_KEY` either.
+
+If a run stopped at `00018`, do steps 1 and 2, then step 3 again; the
+migrations continue from `00018`.
 
 ### Local development and CI
 
@@ -70,13 +96,18 @@ MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
 `./setup.sh` (local mode) and the CI `Test` job set it for you. The Supabase
 CLI then adds the `mgm_allow_dev_credential_key` entry from
 `supabase/config.toml` to Vault before running the migrations, and migration
-`00018` generates a key and prints a warning. Every reset creates a new key,
-so re-enter local credentials afterwards. A psql session that applies the
-migrations by hand can run `SET app.allow_dev_dek = '1'` instead.
+`00018` generates a key and raises a warning (not every CLI version prints
+it). Every reset creates a new key, so re-enter local credentials
+afterwards. A psql session that applies the migrations by hand can run
+`SET app.allow_dev_dek = '1'` instead.
 
 Never set the variable when migrating a shared database. The CLI writes
-`[db.vault]` entries during `supabase db push` too, so a new database would
-get a key that nobody has a copy of.
+`[db.vault]` entries during `supabase db push` and `supabase migration up`
+too, so a new database would get a key that nobody has a copy of. For the
+same reason, never put `MGM_ALLOW_DEV_CREDENTIAL_KEY` in any `.env` file:
+the CLI reads `.env`, `.env.local`, `.env.development*` and `supabase/.env*`
+for every command, including `db push` and `migration up`. Pass it only to
+the commands above, as in the example.
 
 ## Back it up
 
@@ -190,9 +221,8 @@ complete; replacing Vault names does not make a key backup obsolete immediately.
 
 Retirement is optional maintenance, not part of the rename deployment. Keep
 both key names until the new migration and existing credential reads have been
-verified. The guarded operator tooling is reviewed separately in
-[PR #25](https://github.com/Nearly-Free-Energy/mgm/pull/25); use it only after
-that maintenance change is approved and its prerequisites are fulfilled.
+verified. To retire the legacy name, use the guarded `retire` command in
+[credential-key-maintenance.md](credential-key-maintenance.md).
 
 Do not delete the legacy row as a deployment step. Retirement must refuse
 mismatched keys and verify active and historical credentials after removal,
