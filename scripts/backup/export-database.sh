@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # Export an MGM database with pg_dump and pg_dumpall.
 #
-#   export-database.sh --db-url-env <ENV_VAR_NAME> --out <dir> [--age-recipients <file>]
+#   export-database.sh --db-url-env <ENV_VAR_NAME> --out <dir> (--age-recipients <file> | --plaintext)
 #
 # Operator guide: docs/runbooks/backup-and-restore.md.
 #
-# The connection string is read from the environment variable named by
-# --db-url-env. It is never accepted as an argument to this script and never
-# printed by it. Its password reaches pg_dump and pg_dumpall through
-# PGPASSWORD, not through their command lines.
+# An export holds personal data and every stored credential, so each run must
+# say how to write it: --age-recipients to encrypt it, or --plaintext. Naming
+# neither is a usage error, so leaving a flag off never produces plaintext.
+#
+# The connection string, the database's postgres connection string, is read
+# from the environment variable named by --db-url-env. It grants full access
+# to the database, Vault secrets included, so keep it as a secret. It is never
+# accepted as an argument to this script and never printed by it. Its
+# password reaches pg_dump and pg_dumpall through PGPASSWORD, not through
+# their command lines.
 #
 # The files have the names, layout and filters of `supabase db dump` output,
 # so the restore commands in Supabase's backup-and-restore guide apply to
-# them. Unlike `supabase db dump`, the script never switches to the postgres
-# role, so a read-only login that is not a member of postgres can run it, and
-# the data dump reads an explicit list of schemas (see "Dumps" below).
+# them. Unlike `supabase db dump`, the data dump reads an explicit list of
+# schemas (see "Dumps" below).
 
 # Tracing would print the connection string, so turn it off before anything
 # else runs, including when the caller used `bash -x` or exported SHELLOPTS.
@@ -36,27 +41,35 @@ readonly DUMP_FILES=(roles.sql schema.sql data.sql history_schema.sql history_da
 
 usage() {
   printf '%s\n' \
-    "Usage: $PROG --db-url-env <ENV_VAR_NAME> --out <dir> [--age-recipients <file>]" \
+    "Usage: $PROG --db-url-env <ENV_VAR_NAME> --out <dir> (--age-recipients <file> | --plaintext)" \
     "" \
     "Exports a database with pg_dump and pg_dumpall: cluster roles, schema, data," \
     "and the Supabase CLI migration history, plus manifest.json recording the" \
-    "UTC start time, the pg_dump and server versions, and each file's size and" \
-    "SHA-256. Needs pg_dump and pg_dumpall of at least the server's major version." \
+    "UTC start time of the export and of its data dump, the pg_dump and server" \
+    "versions, and each file's size and SHA-256. Needs pg_dump and pg_dumpall of" \
+    "at least the server's major version." \
     "" \
     "  --db-url-env NAME      Environment variable that holds the postgresql://" \
     "                         connection string, with any password percent-encoded" \
     "                         in its user-info part. The value is never printed." \
     "  --out DIR              Directory that receives the export (created if" \
     "                         missing). Each run adds mgm-db-export-<UTC time>." \
-    "  --age-recipients FILE  age recipients file (public keys). When given, the" \
-    "                         only output is mgm-db-export-<UTC time>.tar.gz.age;" \
-    "                         the plaintext dumps are staged under \$TMPDIR (default" \
-    "                         /tmp), never in DIR, and removed after encryption." \
-    "                         Without it, the export is a plaintext directory." \
+    "  --age-recipients FILE  age recipients file (public keys). The only output" \
+    "                         is mgm-db-export-<UTC time>.tar.gz.age; the plaintext" \
+    "                         dumps are staged under \$TMPDIR (default /tmp), never" \
+    "                         in DIR, and removed after encryption." \
+    "  --plaintext            Write the export as an unencrypted directory instead." \
+    "                         It holds personal data and every stored credential;" \
+    "                         use it only on an encrypted disk, never on a schedule." \
     "  -h, --help             Show this help." \
+    "" \
+    "Exactly one of --age-recipients and --plaintext is required." \
     "" \
     "Prints the path of the export on stdout. Progress, and the SHA-256 of the" \
     "encrypted file (or of manifest.json for a plaintext export), go to stderr." \
+    "Each run first removes the staging directories and partial files that" \
+    "earlier runs of this script left behind when they were killed, if those runs" \
+    "are no longer running." \
     "" \
     "Exit codes:" \
     "  0  export written" \
@@ -65,7 +78,8 @@ usage() {
     "     output directory, staging directory, recipients file, or a required" \
     "     program" \
     "  4  pg_dump or pg_dumpall failed or wrote nothing" \
-    "  5  packaging, encryption or moving the export into place failed" \
+    "  5  computing a size or SHA-256, packaging, encryption, or moving the" \
+    "     export into place failed" \
     "" \
     "See docs/runbooks/backup-and-restore.md."
 }
@@ -103,20 +117,28 @@ describe_arg() {
   fi
 }
 
+# sha256_of and bytes_of print nothing and return non-zero unless they have a
+# well-formed result. Callers assign the result and check the status before
+# using it: a failure inside $(...) passed straight to printf would not trip
+# `set -e`, and the manifest would record an empty value.
 sha256_of() {
-  local sum
+  local sum re='^[0123456789abcdef]{64}$'
   if [[ $sha256_tool == sha256sum ]]; then
-    sum=$(sha256sum <"$1")
+    sum=$(sha256sum <"$1") || return
   else
-    sum=$(shasum -a 256 <"$1")
+    sum=$(shasum -a 256 <"$1") || return
   fi
-  printf '%s' "${sum%% *}"
+  sum=${sum%% *}
+  [[ $sum =~ $re ]] || return 1
+  printf '%s' "$sum"
 }
 
 bytes_of() {
   local n
-  n=$(wc -c <"$1")
-  printf '%s' "${n//[!0-9]/}"
+  n=$(wc -c <"$1") || return
+  n=${n//[!0-9]/}
+  [[ -n $n ]] || return 1
+  printf '%s' "$n"
 }
 
 # Keeps a version string safe to embed in JSON: letters, digits, spaces and
@@ -132,12 +154,18 @@ version_text() {
 db_url_env=""
 out_dir=""
 recipients_file=""
+plaintext=0
 
 while (($# > 0)); do
   case $1 in
     -h | --help)
       usage
       exit 0
+      ;;
+    --plaintext)
+      ((plaintext == 0)) || die_usage "--plaintext given more than once"
+      plaintext=1
+      shift
       ;;
     --db-url-env | --out | --age-recipients)
       if (($# < 2)) || [[ -z $2 || $2 == -* ]]; then
@@ -167,6 +195,12 @@ done
 
 [[ -n $db_url_env ]] || die_usage "--db-url-env is required"
 [[ -n $out_dir ]] || die_usage "--out is required"
+if [[ -n $recipients_file ]] && ((plaintext)); then
+  die_usage "--age-recipients and --plaintext cannot be used together"
+fi
+if [[ -z $recipients_file ]] && ((plaintext == 0)); then
+  die_usage "choose --age-recipients <file> to encrypt the export, or --plaintext to write it unencrypted"
+fi
 
 env_name_re='^[A-Za-z_][A-Za-z0-9_]*$'
 if ! [[ $db_url_env =~ $env_name_re ]]; then
@@ -234,11 +268,15 @@ else
   die "$EXIT_PRECONDITION" "neither sha256sum nor shasum is on PATH"
 fi
 
-if [[ -n $recipients_file ]]; then
+if ((plaintext == 0)); then
   command -v age >/dev/null 2>&1 \
     || die "$EXIT_PRECONDITION" "--age-recipients needs the 'age' program on PATH"
   command -v tar >/dev/null 2>&1 \
     || die "$EXIT_PRECONDITION" "--age-recipients needs the 'tar' program on PATH"
+  # GNU tar's -z runs the external gzip program; without it, packaging would
+  # fail only after the whole database had been read.
+  command -v gzip >/dev/null 2>&1 \
+    || die "$EXIT_PRECONDITION" "--age-recipients needs the 'gzip' program on PATH"
   [[ -f $recipients_file ]] \
     || die "$EXIT_PRECONDITION" "recipients file not found: $recipients_file"
   [[ -r $recipients_file ]] \
@@ -275,12 +313,13 @@ mkdir -p -- "$out_dir" 2>/dev/null \
 [[ -w $out_dir ]] || die "$EXIT_PRECONDITION" "output directory is not writable: $out_dir"
 out_dir=$(cd -- "$out_dir" && pwd -P)
 
-started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ') \
+  || die "$EXIT_PRECONDITION" "cannot read the clock"
 export_name="mgm-db-export-${started_utc//[-:]/}"
-if [[ -n $recipients_file ]]; then
-  final_path="$out_dir/$export_name.tar.gz.age"
-else
+if ((plaintext)); then
   final_path="$out_dir/$export_name"
+else
+  final_path="$out_dir/$export_name.tar.gz.age"
 fi
 [[ ! -e $final_path ]] || die "$EXIT_PRECONDITION" "an export with this name already exists: $final_path"
 
@@ -294,11 +333,15 @@ pg_dump_version=$(version_text "$pg_dump_version")
 # finished. With --age-recipients the staging directory is under $TMPDIR, not
 # --out: a run killed outright (SIGKILL, power loss) cannot clean up, and --out
 # is the directory that gets copied to export storage. age then writes to a
-# hidden .partial file in --out that is renamed when complete. Without
-# --age-recipients the output is plaintext anyway, so staging stays inside
-# --out, where the final move is a rename. The trap removes the staging
-# directory, and with it any plaintext, and any partial file, on every exit
-# path it can run on.
+# hidden .partial file in --out that is renamed when complete. With
+# --plaintext the output is plaintext anyway, so staging stays inside --out,
+# where the final move is a rename. The trap removes the staging directory,
+# and with it any plaintext, and any partial file, on every exit path it can
+# run on.
+#
+# The names of the staging directory and the partial file carry this run's
+# process ID, so that a later run can tell whether the run that made them is
+# still going (see "Leftovers" below).
 
 stage=""
 partial=""
@@ -311,16 +354,63 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [[ -n $recipients_file ]]; then
-  stage_parent=${TMPDIR:-/tmp}
-  stage_parent=${stage_parent%/}
-  stage_template="$stage_parent/mgm-export.XXXXXX"
-else
+tmp_parent=${TMPDIR:-/tmp}
+tmp_parent=${tmp_parent%/}
+
+# --- Leftovers ---------------------------------------------------------------
+# A run killed outright cannot run its trap, so its staging directory, with
+# plaintext dumps in it, and its partial encrypted file stay behind. Before
+# creating its own, each run removes those of earlier runs, and only those:
+#   - only names this script creates, in the two places it writes ($TMPDIR and
+#     --out), owned by the current user, and not symbolic links;
+#   - only when the process ID in the name is not a running process of the
+#     current user. A run still in progress keeps its files, so overlapping
+#     runs are safe. The ID can also be this run's own, reused after the
+#     earlier run died (a container that starts each run with the same IDs):
+#     this run has created nothing yet, so a name with its ID is stale.
+# A process ID means something only on the host that issued it, which is one
+# more reason --out must be a local directory, not one shared between hosts.
+# If the ID has since been reused by another process of the current user, the
+# leftover stays until a later run finds that process gone.
+
+readonly LEFTOVER_PID='([1-9][0-9]{0,9})'
+readonly TMP_STAGE_NAME_RE="^mgm-export\\.$LEFTOVER_PID\\.[A-Za-z0-9]{6}\$"
+readonly OUT_STAGE_NAME_RE="^\\.mgm-export\\.$LEFTOVER_PID\\.[A-Za-z0-9]{6}\$"
+readonly PARTIAL_NAME_RE="^\\.mgm-db-export-[0-9]{8}T[0-9]{6}Z\\.tar\\.gz\\.age\\.$LEFTOVER_PID\\.partial\$"
+
+# remove_leftovers <name regex> <description> <path>...
+remove_leftovers() {
+  local re=$1 what=$2 path pid
+  shift 2
+  for path in "$@"; do
+    [[ ${path##*/} =~ $re ]] || continue
+    pid=${BASH_REMATCH[1]}
+    [[ ! -L $path && -O $path ]] || continue
+    if [[ $pid != "$$" ]] && kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    if rm -rf -- "$path" 2>/dev/null; then
+      note "removed the $what of an earlier run that did not finish: $path"
+    else
+      note "warning: cannot remove the $what of an earlier run that did not finish: $path"
+    fi
+  done
+}
+
+remove_leftovers "$TMP_STAGE_NAME_RE" "staging directory" "$tmp_parent"/mgm-export.*
+remove_leftovers "$OUT_STAGE_NAME_RE" "staging directory" "$out_dir"/.mgm-export.*
+remove_leftovers "$PARTIAL_NAME_RE" "partial encrypted export" "$out_dir"/.mgm-db-export-*.partial
+
+if ((plaintext)); then
   stage_parent=$out_dir
-  stage_template="$out_dir/.mgm-export.XXXXXX"
+  stage_template="$out_dir/.mgm-export.$$.XXXXXX"
+else
+  stage_parent=$tmp_parent
+  stage_template="$tmp_parent/mgm-export.$$.XXXXXX"
 fi
 stage=$(mktemp -d "$stage_template" 2>/dev/null) \
   || die "$EXIT_PRECONDITION" "cannot create a staging directory in $stage_parent"
@@ -475,14 +565,15 @@ dump_schema() {
 # dump_data <file> [pg_dump selection options...]. Like the CLI's data dump,
 # it disables triggers while loading and resets the session afterwards.
 dump_data() {
-  local file=$1 header_bytes
+  local file=$1 header_bytes total_bytes
   shift
   printf 'SET session_replication_role = replica;\n\n' >"$file" || return
   header_bytes=$(bytes_of "$file") || return
   with_password pg_dump --dbname="$db_url_for_tools" --no-password \
     --data-only --quote-all-identifiers "$@" \
     | sed -E -e "$FILTER_RESTRICT" >>"$file" || return
-  (($(bytes_of "$file") > header_bytes)) || return "$NO_OUTPUT"
+  total_bytes=$(bytes_of "$file") || return
+  ((total_bytes > header_bytes)) || return "$NO_OUTPUT"
   printf 'RESET ALL;\n' >>"$file"
 }
 
@@ -510,13 +601,22 @@ run_dump() {
 #   - Supabase's own migration ledgers, which the target project has, and the
 #     Storage vector tables Supabase's guide excludes.
 #   - Auth's session state and second factors: sessions, refresh tokens, MFA
-#     factors, challenges and claims, pending sign-in flows, one-time tokens
-#     and SAML relay states. Refresh tokens are usable values that do not
-#     expire by default and MFA factors hold TOTP secrets, so with them an
-#     export would let its holder act as a signed-in user. Everyone signs in
-#     again after a restore, and users enroll MFA factors again.
-# Excluding these tables outright, rather than only their data, means the
-# login does not need to read them at all.
+#     factors, challenges and claims, pending sign-in flows, one-time tokens,
+#     SAML relay states, pending OAuth authorizations and client states, and
+#     WebAuthn challenges. Refresh tokens are usable values that do not expire
+#     by default, MFA factors hold TOTP secrets and pending authorizations
+#     hold authorization codes, so with them an export would let its holder
+#     act as a signed-in user. Everyone signs in again after a restore, and
+#     users enroll MFA factors again.
+#   - Auth's custom OAuth providers, which hold each provider's client
+#     secret. They are configuration, recorded and re-created with the
+#     project's other Auth settings.
+# Every other table in auth is exported, among them the clients registered
+# with Auth's OAuth server (whose secrets Auth stores only as hashes), the
+# consents users gave those clients, and WebAuthn credentials (public keys).
+# When a Supabase upgrade adds a table to auth,
+# scripts/tests/test_export_restore_e2e.py fails until it is classified here
+# or in that test's list of knowingly exported tables.
 
 readonly DATA_SCHEMAS=(public auth storage supabase_functions)
 readonly DATA_EXCLUDED_TABLES=(
@@ -533,6 +633,10 @@ readonly DATA_EXCLUDED_TABLES=(
   auth.flow_state
   auth.one_time_tokens
   auth.saml_relay_states
+  auth.oauth_authorizations
+  auth.oauth_client_states
+  auth.webauthn_challenges
+  auth.custom_oauth_providers
 )
 
 data_selection=()
@@ -545,11 +649,19 @@ done
 
 run_dump "roles" dump_roles roles.sql
 run_dump "schema" dump_schema schema.sql "$MANAGED_SCHEMAS" --exclude-schema="$MANAGED_SCHEMAS"
+# The rows in data.sql are those of the snapshot pg_dump takes when it starts,
+# which is later than created_utc by however long the roles and schema dumps
+# took. This time, read just before pg_dump starts, is no later than the
+# snapshot: a change committed before it is in the export, and one committed
+# after it may not be.
+data_dump_started_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ') \
+  || die "$EXIT_DUMP" "cannot read the clock"
 run_dump "data" dump_data data.sql "${data_selection[@]}"
 run_dump "migration history schema" dump_schema history_schema.sql "" --schema=supabase_migrations
 run_dump "migration history data" dump_data history_data.sql --schema=supabase_migrations
 
 # --- Manifest ----------------------------------------------------------------
+# Times are UTC from the export host's clock, to the second.
 
 server_version=$(awk '
   /^-- Dumped from database version / {
@@ -559,41 +671,44 @@ server_version=$(awk '
   }' "$work/data.sql")
 server_version=$(version_text "$server_version")
 
-{
-  printf '{\n'
-  printf '  "format": "%s",\n' "$EXPORT_FORMAT"
-  printf '  "created_utc": "%s",\n' "$started_utc"
-  printf '  "pg_dump_version": "%s",\n' "$pg_dump_version"
-  printf '  "server_version": "%s",\n' "$server_version"
-  printf '  "files": [\n'
-  separator=""
-  for file in "${DUMP_FILES[@]}"; do
-    printf '%s    {"name": "%s", "bytes": %s, "sha256": "%s"}' \
-      "$separator" "$file" "$(bytes_of "$work/$file")" "$(sha256_of "$work/$file")"
-    separator=$',\n'
-  done
-  printf '\n  ]\n'
-  printf '}\n'
-} >"$work/manifest.json"
+printf -v manifest '{\n  "format": "%s",\n  "created_utc": "%s",\n  "data_dump_started_utc": "%s",\n  "pg_dump_version": "%s",\n  "server_version": "%s",\n  "files": [' \
+  "$EXPORT_FORMAT" "$started_utc" "$data_dump_started_utc" "$pg_dump_version" "$server_version"
+separator=$'\n'
+for file in "${DUMP_FILES[@]}"; do
+  file_bytes=$(bytes_of "$work/$file") \
+    || die "$EXIT_PACKAGE" "cannot read the size of $file"
+  file_sha256=$(sha256_of "$work/$file") \
+    || die "$EXIT_PACKAGE" "cannot compute the SHA-256 of $file"
+  printf -v entry '%s    {"name": "%s", "bytes": %s, "sha256": "%s"}' \
+    "$separator" "$file" "$file_bytes" "$file_sha256"
+  manifest+=$entry
+  separator=$',\n'
+done
+manifest+=$'\n  ]\n}\n'
+printf '%s' "$manifest" >"$work/manifest.json" \
+  || die "$EXIT_PACKAGE" "cannot write manifest.json"
 
 # --- Output ------------------------------------------------------------------
 # The SHA-256 goes to stderr, which a scheduler keeps in its own log, outside
 # export storage. At restore time it shows that a file is the one this run
 # wrote: the manifest inside the archive detects corruption, not replacement,
 # because anyone who can write to export storage can encrypt to the public
-# recipients.
+# recipients. Each checksum is computed before the export is moved into place,
+# so a run that cannot report one fails without leaving an export behind.
 
-if [[ -z $recipients_file ]]; then
+if ((plaintext)); then
+  manifest_sha256=$(sha256_of "$work/manifest.json") \
+    || die "$EXIT_PACKAGE" "cannot compute the SHA-256 of manifest.json"
   [[ ! -e $final_path ]] || die "$EXIT_PACKAGE" "an export with this name appeared while dumping: $final_path"
   mv -- "$work" "$final_path" || die "$EXIT_PACKAGE" "cannot move the export into place: $final_path"
   note "wrote plaintext export; it contains personal data and encrypted credentials, so protect it accordingly"
-  note "sha256 $(sha256_of "$final_path/manifest.json")  $export_name/manifest.json"
+  note "sha256 $manifest_sha256  $export_name/manifest.json"
   printf '%s\n' "$final_path"
   exit 0
 fi
 
 note "encrypting"
-partial="$out_dir/.$export_name.tar.gz.age.partial"
+partial="$out_dir/.$export_name.tar.gz.age.$$.partial"
 [[ ! -e $partial ]] || die "$EXIT_PACKAGE" "a partial export with this name already exists: $partial"
 # COPYFILE_DISABLE stops macOS tar from adding ._ metadata files; other
 # platforms ignore it. The dump log stays out of the archive.
@@ -606,6 +721,8 @@ if [[ -s $partial ]]; then
 fi
 [[ $header == "age-encryption.org/v1" ]] \
   || die "$EXIT_PACKAGE" "age did not produce an encrypted file"
+encrypted_sha256=$(sha256_of "$partial") \
+  || die "$EXIT_PACKAGE" "cannot compute the SHA-256 of the encrypted export"
 
 [[ ! -e $final_path ]] || die "$EXIT_PACKAGE" "an export with this name appeared while dumping: $final_path"
 mv -- "$partial" "$final_path" || die "$EXIT_PACKAGE" "cannot move the export into place: $final_path"
@@ -613,5 +730,5 @@ partial=""
 cleanup
 stage=""
 note "wrote encrypted export; plaintext removed"
-note "sha256 $(sha256_of "$final_path")  $export_name.tar.gz.age"
+note "sha256 $encrypted_sha256  $export_name.tar.gz.age"
 printf '%s\n' "$final_path"

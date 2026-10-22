@@ -6,9 +6,10 @@
 -- nothing would bring them back.
 --
 -- Run it after data.sql, in the same transaction, from a checkout of the MGM
--- release being restored (docs/runbooks/backup-and-restore.md, logical
--- restore step 3). It is idempotent: each object is dropped if it exists,
--- then created. It does not open or commit a transaction of its own.
+-- release being restored (docs/runbooks/backup-and-restore.md, the logical
+-- restore's "Restore the database" step). It is idempotent: each object is
+-- dropped if it exists, then created. It does not open or commit a
+-- transaction of its own.
 --
 -- Each statement is copied from the newest migration that defines the object.
 -- scripts/tests/test_restore_managed_schema_objects.py compares this file with
