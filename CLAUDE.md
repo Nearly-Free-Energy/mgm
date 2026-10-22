@@ -4,7 +4,8 @@ Tool-specific config for Claude Code. MGM is a microgrid operating system built 
 
 ## Read first
 
-- `docs/operating-model.md` — how work moves from issue to production, the architectural invariants, and how decisions and lessons are recorded.
+- `docs/operating-model.md` — how work moves from issue to production, the architectural invariants, the merge controls, and how decisions and lessons are recorded.
+- `CONTRIBUTING.md` — contributor setup, DCO sign-off, signed commits, and the required checks.
 - `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
 - `docs/entity-model.md` — the data model and the reasoning behind it.
 - Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`.
@@ -219,10 +220,10 @@ Six rules every contributor must follow:
 
 ## Required Merge Controls
 
-`main` is protected by a ruleset in this repository (GitHub → Settings → Rules). Every PR must pass ALL of the following before merge:
+`main` is protected by a ruleset in this repository (GitHub → Settings → Rules). The policy below is what the ruleset must enforce; `docs/operating-model.md` § "Merge controls" and `docs/adr/ADR-002-ci-build-gate-and-merge-controls.md` record the decision. A repository admin applies and edits the ruleset; this file and the workflows are the source of truth for what it should say. Every PR must pass ALL of the following before merge:
 
-1. **DCO** — every commit ends with `Signed-off-by: Your Name <email>`. Use `git commit -s`.
-2. **`required_signatures` (cryptographic)** — every commit must be GPG- or SSH-signed. DCO is a text trailer; `required_signatures` is a separate cryptographic guarantee. One-time per-machine setup:
+1. **DCO** — every commit ends with `Signed-off-by: Your Name <email>`. Use `git commit -s`. Commits made in GitHub's web editor carry the sign-off automatically when compulsory web sign-off is enabled for the repository.
+2. **`required_signatures` (cryptographic)** — every commit must be GPG- or SSH-signed (or GitHub-signed for web edits). DCO is a text trailer; `required_signatures` is a separate cryptographic guarantee. **Squash merging does not bypass either requirement**: both apply to the commits on the PR, including PRs from forks. One-time per-machine setup:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_signing -C "<your-email>"
    git config --global gpg.format ssh
@@ -233,10 +234,17 @@ Six rules every contributor must follow:
    Then upload `~/.ssh/id_ed25519_signing.pub` at github.com → Settings → SSH and GPG keys → "New SSH key" with **Key type: Signing Key**. After setup, every `git commit` carries an "SSH" signature and GitHub shows the "Verified" badge.
 3. **`CodeQL` status check** — `.github/workflows/codeql.yml` runs `github/codeql-action` on every PR + push to main. The check name `CodeQL` MUST match the workflow job name; do NOT rename or add a matrix-suffix.
 4. **`Test` status check** — `.github/workflows/test.yml` runs `npm ci` → `npx tsc --noEmit` → `npm run lint` → `supabase start` → `npm test` on every PR + push to main. The check name `Test` MUST match the workflow job name; do NOT rename or add a matrix-suffix. **Since #324 the database-backed suites run in the gate**: `SKIP_RLS_TESTS` is no longer set, the `rls` project executes against a local Supabase started on the runner, and the suites are self-fixturing (no generated seed, no repository secret — `supabase start` produces its own `JWT_SECRET` and `ANON_KEY`). The job takes roughly three and a half to four minutes, of which `supabase start` is ~85s. **No test count is given here on purpose** — it moves with every PR that adds or removes one, and a count in this file would be stale within a day of being written. Read it off the latest `Test` run on `main`. `SKIP_DEK_BOOTSTRAP_TEST=1` **is** still set, and not for cost: `dek-bootstrap.test.ts` runs `ALTER DATABASE … SET app.allow_dev_dek`, which fails with *permission denied to set parameter* because the `postgres` role is not a superuser on Supabase, local or CI. It cannot pass at any time budget; that is a test defect tracked on #241, not a deferral. Note it currently reports as **2 passed** rather than skipped — it returns early inside its `it()` bodies instead of using `describe.skipIf`, so the run output overstates coverage. Also tracked on #241.
-5. **`Vercel` preview deploy** passes (build succeeds + preview URL provisioned).
-6. **`non_fast_forward` + `deletion` protection** — `main` cannot be force-pushed or deleted.
+5. **`Build` status check** — `.github/workflows/build.yml` runs `npm ci` → `npm run build` on Node.js 24 (`.nvmrc`) on every PR + push to main, with no hosting provider and no secrets (placeholder Supabase values only). The check name `Build` MUST match the workflow job name; do NOT rename or add a matrix-suffix. Do not add a repository secret to make it pass; fix the build instead.
+6. **Code-owner review** — changes to `supabase/migrations/` (including the RLS helpers in `00002_rls.sql`), `src/lib/roles.ts`, the Cordis runtime gate (`src/lib/runtime/`, `src/lib/plugins/state.ts`), request middleware (`src/middleware.ts`, `src/lib/mgm/released-routes.ts`), and `.github/workflows/` need approval from a code owner other than the author (`.github/CODEOWNERS`). Other changes may be merged by their author once the required checks pass.
+7. **`non_fast_forward` + `deletion` protection** — `main` cannot be force-pushed or deleted.
 
-**Bypass path** (genuine emergencies only — production hotfixes when the rules themselves are mis-configured): a repository admin temporarily sets the ruleset's enforcement to *Disabled* in Settings → Rules, merges, and sets it back to *Active*. Log the reason in the PR description.
+**Hosting previews are informational, never required.** A Vercel preview (or any hosting-provider check) must not be a required status check: a PR from a fork would otherwise wait on a deployment authorization it cannot get. The production-build proof is the `Build` job above.
+
+**Node.js:** CI builds and application builds target Node.js 24 LTS (`.nvmrc`, `package.json` `engines`). The `Dockerfile` and the `Test` job still use Node 20 until a deliberate runtime change moves them (tracked in ADR-002); do not change either silently.
+
+**Merging.** Outside contributions are squash-merged. The squash does not remove the signature and sign-off requirements on the PR's commits. Maintainers may merge their own signed, signed-off commits with a merge commit.
+
+**Bypass path** (genuine emergencies only — production hotfixes when the rules themselves are mis-configured): a repository admin temporarily sets the ruleset's enforcement to *Disabled* in Settings → Rules, merges, and sets it back to *Active*. Log the reason in the PR description. Routine admin bypass of signatures or sign-off is not part of the policy.
 
 **For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
 

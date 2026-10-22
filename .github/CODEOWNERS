@@ -1,0 +1,32 @@
+# Code owners for MGM.
+#
+# Changes to the paths below need review from a code owner other than the
+# author, once the `main` ruleset's "Require review from Code Owners" is on
+# (applied by a repository admin; see docs/operating-model.md § "Merge
+# controls"). Other paths are intentionally unlisted: they follow the agreed
+# policy that the author may merge once the required checks pass.
+#
+# Verify a path still exists before relying on a line here; a pattern that
+# matches nothing protects nothing and GitHub does not warn about it. If a file
+# below is moved, update this file in the same change.
+
+# Database migrations. 00002_rls.sql holds the RLS helper functions
+# (is_super_admin, user_can_access_org, user_can_access_microgrid), so it is
+# covered by this line; 00053 re-points user_can_configure_ems at them.
+/supabase/migrations/                  @tushabe @arindahills
+
+# Role constants that mirror the user_role enum the RLS helpers evaluate.
+/src/lib/roles.ts                      @tushabe @arindahills
+
+# Cordis runtime gate: root context, request scopes, plugin gate, and the
+# per-organization plugin enablement state the gate reads.
+/src/lib/runtime/                      @tushabe @arindahills
+/src/lib/plugins/state.ts              @tushabe @arindahills
+
+# Request middleware and the released-route allowlist it enforces.
+/src/middleware.ts                     @tushabe @arindahills
+/src/lib/mgm/released-routes.ts        @tushabe @arindahills
+
+# CI workflows, and this file.
+/.github/workflows/                    @tushabe @arindahills
+/.github/CODEOWNERS                    @tushabe @arindahills

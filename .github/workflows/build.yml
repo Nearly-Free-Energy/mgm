@@ -1,0 +1,64 @@
+name: Build
+
+# Production-build gate. Runs on every PR + push to main and is intended to be
+# a required status check on `main` (the repository ruleset is applied by an
+# admin separately; see docs/adr/ADR-002-ci-build-gate-and-merge-controls.md).
+# The job's name below MUST stay as "Build" so the required-check context
+# resolves; do NOT add a matrix-suffix or rename.
+#
+# This job proves the application compiles for production on its own, with no
+# hosting provider and no secrets:
+#   - it never talks to Vercel, so a fork pull request does not wait on a
+#     hosting-preview deployment authorization;
+#   - it reads no repository secret. The two Supabase values below are
+#     obviously fake placeholders: `next build` only needs them to be present
+#     and well-formed, and nothing at build time contacts a database.
+#     If a future change makes the build need a real service, fix the build,
+#     do not add a secret here.
+#   - the token is read-only, and untrusted fork code is built under the
+#     `pull_request` event (never `pull_request_target`).
+#
+# Node.js is pinned by .nvmrc (24). The Dockerfile and the Test job still use
+# Node 20 until a deliberate runtime change; see ADR-002.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  Build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Confirm the pinned Node.js major version
+        run: |
+          node --version
+          case "$(node --version)" in
+            v24.*) ;;
+            *) echo "Expected Node.js 24 from .nvmrc" >&2; exit 1 ;;
+          esac
+
+      - run: npm ci
+
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          # Placeholders only. Not credentials; they point nowhere.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key-not-a-secret
