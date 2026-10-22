@@ -24,8 +24,9 @@ falling back to the legacy name `mbe_ems_dek` if the new one is missing.
 The plaintext never leaves the database except to the server code that
 needs it.
 
-If you add a new encrypted column, add it to the table above and to the
-rotation step below in the same PR.
+If you add a new encrypted column, add it to the table above, to the
+rotation step below, and to the guard at the top of
+`supabase/scripts/rehearse-credential-key-bootstrap.sql` in the same PR.
 
 ## Create the key (new environment)
 
@@ -40,6 +41,8 @@ first migration run:
    ```bash
    openssl rand -base64 32
    ```
+
+   Migration `00018` refuses a key shorter than 32 characters.
 
 2. Add it to the new database's Vault from a psql session connected as
    `postgres`. `\prompt` reads the key into a psql variable, so the key is
@@ -80,7 +83,13 @@ first migration run:
    `MGM_ALLOW_DEV_CREDENTIAL_KEY` either.
 
 If a run stopped at `00018`, do steps 1 and 2, then step 3 again; the
-migrations continue from `00018`.
+migrations continue from `00018`. If it stopped because the key in Vault is
+shorter than 32 characters, delete that entry before step 2; nothing has
+been encrypted with it yet:
+
+```sql
+DELETE FROM vault.secrets WHERE name = 'mgm_ems_dek';
+```
 
 ### Local development and CI
 

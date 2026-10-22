@@ -30,11 +30,13 @@
 -- unaffected: the migration runner never re-applies a recorded version, and
 -- a replay returns at (a) or (b) without changing the key. If the key ever
 -- moves to a name other than `mbe_ems_dek` or `mgm_ems_dek`, add that name
--- to (a)/(b), or a replay on such a database stops at (e). The header of
+-- to (a)/(b), or a replay on such a database stops at (d). The header of
 -- 00025_dek_bootstrap_hardening.sql describes a setup step that has since
--- been retired (setup.sh's `ALTER DATABASE ... app.allow_dev_dek`), and
--- 00025 does nothing once this section has run, because it returns as soon
--- as `mbe_ems_dek` exists.
+-- been retired (setup.sh's `ALTER DATABASE ... app.allow_dev_dek`).
+-- This section no longer reads the session setting app.ems_dek_bootstrap.
+-- 00025 and 20260926132414_mgm_release2_pilot_connection_bridge.sql still
+-- read it, but only when `mbe_ems_dek` is missing, so neither does anything
+-- once this section has run (revisit if either one's guard changes).
 --
 -- ── Hard-reset safety: abort if legacy state would be orphaned ───────────
 --
@@ -99,12 +101,11 @@ CREATE EXTENSION IF NOT EXISTS supabase_vault;
 --   (a) `mbe_ems_dek` exists: nothing to do.
 --   (b) `mgm_ems_dek` exists, because the operator created it before running
 --       the migrations: copy it to `mbe_ems_dek`, the name later migrations
---       look for.
---   (c) The session setting app.ems_dek_bootstrap is set: store that value.
---   (d) The development opt-in is set (app.allow_dev_dek = '1', or the Vault
+--       look for. A key shorter than 32 characters stops here with an error.
+--   (c) The development opt-in is set (app.allow_dev_dek = '1', or the Vault
 --       entry `mgm_allow_dev_credential_key` = '1' that supabase/config.toml
 --       adds when MGM_ALLOW_DEV_CREDENTIAL_KEY=1): generate a throwaway key.
---   (e) Otherwise: stop with an error.
+--   (d) Otherwise: stop with an error.
 
 DO $$
 DECLARE
@@ -121,13 +122,13 @@ BEGIN
   WHERE name = 'mgm_ems_dek'
   LIMIT 1;
 
-  -- (c)
-  IF v_dek IS NULL
-     AND length(btrim(coalesce(current_setting('app.ems_dek_bootstrap', true), ''))) > 0 THEN
-    v_dek := current_setting('app.ems_dek_bootstrap', true);
+  IF length(v_dek) < 32 THEN
+    RAISE EXCEPTION
+      'The credential encryption key in Vault (mgm_ems_dek) is shorter than 32 characters. Replace it with a key created as docs/runbooks/dek.md describes, and run the migrations again.'
+      USING ERRCODE = '55000';
   END IF;
 
-  -- (d)
+  -- (c)
   IF v_dek IS NULL AND (
     current_setting('app.allow_dev_dek', true) = '1'
     OR EXISTS (
@@ -140,7 +141,7 @@ BEGIN
       'Generated a throwaway credential encryption key (development opt-in). No copy exists outside this database, so do not store real credentials in it. See docs/runbooks/dek.md.';
   END IF;
 
-  -- (e)
+  -- (d)
   IF v_dek IS NULL THEN
     RAISE EXCEPTION
       'No credential encryption key. Create one, keep a copy outside the database, add it to Vault as mgm_ems_dek, and run the migrations again (docs/runbooks/dek.md). For a local development or CI database, set MGM_ALLOW_DEV_CREDENTIAL_KEY=1 instead.'
