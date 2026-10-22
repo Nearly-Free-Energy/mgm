@@ -86,6 +86,14 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
    the runbook for the area (`docs/runbooks/`, `docs/payments-rollout.md`,
    `docs/customerapp-activation.md`).
 
+## CI
+
+The `Test` job starts a local Supabase with the CLI version pinned in
+`package-lock.json`. It pulls service images from GHCR by setting
+`SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io`, because the CLI default
+(`public.ecr.aws`) rate-limits anonymous pulls from shared runners. See
+`docs/adr/ADR-004-ci-supabase-image-source.md`.
+
 ## Where things are recorded
 
 | Kind | Where |
