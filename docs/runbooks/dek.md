@@ -55,11 +55,50 @@ first migration run:
    \unset dek
    ```
 
-   You can instead run the same `SELECT` in the Supabase SQL editor, with
-   the key as a quoted literal in place of `:'dek'`, then delete the saved
-   snippet.
+   Do not use the Supabase SQL editor for this step: it would keep the key
+   in its query history.
 
-3. Run the migrations with the development opt-in cleared, so a value in a
+3. Check that the database carries no development opt-in, so that if step
+   2 did not take effect, migration `00018` stops instead of generating a
+   throwaway key. In the same psql session, both queries must return no
+   rows:
+
+   ```sql
+   SELECT name FROM vault.secrets WHERE name = 'mgm_allow_dev_credential_key';
+
+   SELECT coalesce(d.datname, 'every database') AS database,
+          coalesce(r.rolname, 'every role') AS role,
+          split_part(c, '=', 1) AS setting
+     FROM pg_db_role_setting s
+     CROSS JOIN LATERAL unnest(s.setconfig) AS c
+     LEFT JOIN pg_database d ON d.oid = s.setdatabase
+     LEFT JOIN pg_roles r ON r.oid = s.setrole
+    WHERE split_part(c, '=', 1) IN ('app.allow_dev_dek', 'app.ems_dek_bootstrap');
+   ```
+
+   The second query prints setting names only, never their values. If the
+   first finds the Vault entry, delete it; the CLI leaves it in place when
+   `MGM_ALLOW_DEV_CREDENTIAL_KEY` is empty:
+
+   ```sql
+   DELETE FROM vault.secrets WHERE name = 'mgm_allow_dev_credential_key';
+   ```
+
+   Remove each setting the second finds with the command that matches its
+   row: `ALTER DATABASE <database> RESET <setting>;` when the role is
+   "every role", `ALTER ROLE <role> RESET <setting>;` when the database is
+   "every database", `ALTER ROLE ALL RESET <setting>;` when the row shows
+   both, and `ALTER ROLE <role> IN DATABASE <database> RESET <setting>;`
+   otherwise. On Supabase the `postgres` role is not a superuser, so a reset
+   can fail with `permission denied to set parameter`; ask Supabase support
+   to remove the setting then. `app.ems_dek_bootstrap` holds a key: an
+   earlier version of this runbook used it to supply the first key, and no
+   migration reads it once the key is in Vault.
+
+   Run both checks once on each existing shared database as well,
+   production included.
+
+4. Run the migrations with the development opt-in cleared, so a value in a
    `.env` file cannot apply (see "Local development and CI"):
 
    ```bash
@@ -82,7 +121,7 @@ first migration run:
    A deploy pipeline that runs the migrations must not set
    `MGM_ALLOW_DEV_CREDENTIAL_KEY` either.
 
-If a run stopped at `00018`, do steps 1 and 2, then step 3 again; the
+If a run stopped at `00018`, do steps 1 and 2, then step 4 again; the
 migrations continue from `00018`. If it stopped because the key in Vault is
 shorter than 32 characters, delete that entry before step 2; nothing has
 been encrypted with it yet:
