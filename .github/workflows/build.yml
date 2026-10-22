@@ -1,10 +1,11 @@
 name: Build
 
-# Production-build gate. Runs on every PR + push to main and is intended to be
-# a required status check on `main` (the repository ruleset is applied by an
-# admin separately; see docs/adr/ADR-002-ci-build-gate-and-merge-controls.md).
-# The job's name below MUST stay as "Build" so the required-check context
-# resolves; do NOT add a matrix-suffix or rename.
+# Production-build gate. Runs on every PR + push to main. The merger checks
+# that `Build` is green before merging (a maintainer social contract; GitHub
+# does not enforce it yet, see #30 and
+# docs/adr/ADR-002-ci-build-gate-and-merge-controls.md). The job's name below
+# is the check name the merge checklist refers to: rename it only together with
+# the docs, and do NOT add a matrix-suffix.
 #
 # This job proves the application compiles for production on its own, with no
 # hosting provider and no secrets:
@@ -18,8 +19,8 @@ name: Build
 #   - the token is read-only, and untrusted fork code is built under the
 #     `pull_request` event (never `pull_request_target`).
 #
-# Node.js is pinned by .nvmrc (24). The Dockerfile and the Test job still use
-# Node 20 until a deliberate runtime change; see ADR-002.
+# Node.js is pinned by .nvmrc (24); Test reads the same file. The Dockerfile
+# still uses Node 20 until its follow-up change; see #33.
 
 on:
   workflow_dispatch:

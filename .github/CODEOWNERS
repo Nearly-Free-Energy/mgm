@@ -1,14 +1,16 @@
 # Code owners for MGM.
 #
-# Changes to the paths below need review from a code owner other than the
-# author, once the `main` ruleset's "Require review from Code Owners" is on
-# (applied by a repository admin; see docs/operating-model.md § "Merge
-# controls"). Other paths are intentionally unlisted: they follow the agreed
-# policy that the author may merge once the required checks pass.
+# Changes to the paths below need approval from a code owner other than the
+# person who pushed the change, on the final head commit. This is a maintainer
+# social contract: the merger verifies it before merging, and GitHub does not
+# block a merge that lacks it (enforcement is deferred; see #30 and
+# docs/operating-model.md § "Merge controls"). Other paths are intentionally
+# unlisted: the author may merge them once the required checks pass.
 #
 # Verify a path still exists before relying on a line here; a pattern that
-# matches nothing protects nothing and GitHub does not warn about it. If a file
-# below is moved, update this file in the same change.
+# matches nothing protects nothing and GitHub does not warn about it;
+# src/lib/__tests__/codeowners.test.ts checks that each pattern matches a
+# tracked file. If a file below is moved, update this file in the same change.
 
 # Database migrations. 00002_rls.sql holds the RLS helper functions
 # (is_super_admin, user_can_access_org, user_can_access_microgrid), so it is
@@ -18,10 +20,11 @@
 # Role constants that mirror the user_role enum the RLS helpers evaluate.
 /src/lib/roles.ts                      @tushabe @arindahills
 
-# Cordis runtime gate: root context, request scopes, plugin gate, and the
-# per-organization plugin enablement state the gate reads.
+# Cordis runtime gate: root context, request scopes, and the plugin gate, plus
+# the plugin catalog. plugins/bundled.ts holds the `core` flags and the
+# route-ownership table that the runtime gate and the route-surface test read.
 /src/lib/runtime/                      @tushabe @arindahills
-/src/lib/plugins/state.ts              @tushabe @arindahills
+/src/lib/plugins/                      @tushabe @arindahills
 
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills
