@@ -21,7 +21,8 @@
  * former NEXT_PUBLIC_SUPABASE_URL / _ANON_KEY / _COOKIE_NAME are read as a
  * set. The two sets are never mixed.
  *
- * This module is imported by server code and by the edge middleware only.
+ * This module is imported by server code and by the middleware (Node.js
+ * runtime) only.
  * Do not import it from a "use client" module: the browser gets its values
  * from the provider, never from here. It carries no `server-only` import
  * because the middleware bundle imports it.
@@ -91,37 +92,34 @@ export function parseHttpUrl(value: string, variable: string): string {
 }
 
 /**
- * Refuses keys that must never reach a browser: Supabase secret keys
- * (`sb_secret_…`) and legacy JWT keys whose role is `service_role`. A
- * misconfigured installation fails here instead of serializing a privileged
- * key into every HTML response.
+ * Accepts only keys that are meant for browsers: Supabase publishable keys
+ * (`sb_publishable_…`) and legacy JWT keys whose `role` claim is `anon`.
+ * Everything else (secret keys, service-role JWTs, malformed values) is
+ * refused, so a misconfigured installation fails here instead of
+ * serializing a privileged key into every HTML response.
  */
 function assertPublicKey(value: string, variable: string): void {
+  const refuse = (): never => {
+    throw new RuntimeConfigError(
+      `${variable} must be the public key: an sb_publishable_ key or an anon-role JWT.`
+    );
+  };
   if (/\s/.test(value)) {
     throw new RuntimeConfigError(`${variable} must not contain whitespace.`);
   }
-  if (value.startsWith("sb_secret_")) {
-    throw new RuntimeConfigError(
-      `${variable} holds a secret key; it must be the public anon (publishable) key.`
-    );
-  }
+  if (/^sb_publishable_[A-Za-z0-9_-]+$/.test(value)) return;
   const parts = value.split(".");
-  if (parts.length === 3) {
-    let role: unknown;
-    try {
-      // atob, not Buffer: this also runs in the edge middleware runtime.
-      const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-      const json = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
-      role = (JSON.parse(json) as { role?: unknown }).role;
-    } catch {
-      role = undefined;
-    }
-    if (role === "service_role") {
-      throw new RuntimeConfigError(
-        `${variable} holds a service-role key; it must be the public anon key.`
-      );
-    }
+  if (parts.length !== 3) refuse();
+  let role: unknown;
+  try {
+    // atob, not Buffer: keeps the module runtime-neutral.
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+    role = (JSON.parse(json) as { role?: unknown }).role;
+  } catch {
+    role = undefined;
   }
+  if (role !== "anon") refuse();
 }
 
 export type ParsedPublicRuntimeConfig = {
@@ -166,6 +164,18 @@ export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeCo
   assertPublicKey(rawKey!, names.anonKey);
 
   const rawCookie = present(env[names.cookieName]);
+  // A legacy cookie name next to the new URL/key would be ignored, and the
+  // session cookie would silently change name. Refuse instead.
+  if (
+    useMgm &&
+    rawCookie === undefined &&
+    present(env[LEGACY_NAMES.cookieName]) !== undefined
+  ) {
+    throw new RuntimeConfigError(
+      `${LEGACY_NAMES.cookieName} is set but ignored because ${MGM_NAMES.url}/${MGM_NAMES.anonKey} are in use. ` +
+        `Rename it to ${MGM_NAMES.cookieName} (or remove it).`
+    );
+  }
   if (rawCookie !== undefined && !COOKIE_NAME_PATTERN.test(rawCookie)) {
     throw new RuntimeConfigError(
       `${names.cookieName} may contain only letters, digits, '.', '_' and '-' (at most 128).`
@@ -183,9 +193,10 @@ export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeCo
 }
 
 /**
- * Reads the live environment. Each name is accessed literally so the edge
- * middleware bundler can see which variables it needs; the MGM_ names have
- * no NEXT_PUBLIC_ prefix and are therefore never inlined at build time.
+ * Reads the live environment. The MGM_ names have no NEXT_PUBLIC_ prefix and
+ * are therefore never inlined at build time; the middleware runs on the
+ * Node.js runtime (src/middleware.ts), so it reads the real process
+ * environment like the rest of the server.
  */
 function readEnv(): RuntimeEnv {
   return {
@@ -200,6 +211,14 @@ function readEnv(): RuntimeEnv {
 }
 
 let legacyWarned = false;
+
+/**
+ * Validates the whole server-side configuration once at server start
+ * (src/instrumentation.ts). Same checks as request time.
+ */
+export function validatePublicRuntimeConfigAtStartup(env: RuntimeEnv = readEnv()): void {
+  getServerSupabaseSettings(env);
+}
 
 /**
  * The validated public configuration for this request. Read per call (no
@@ -250,9 +269,24 @@ export function getServerSupabaseSettings(env: RuntimeEnv = readEnv()): {
   publicConfig: PublicRuntimeConfig;
 } {
   const publicConfig = getPublicRuntimeConfig(env);
-  const internal = present(env.SUPABASE_INTERNAL_URL);
+  const rawInternal = present(env.SUPABASE_INTERNAL_URL);
+  const internal = rawInternal ? parseHttpUrl(rawInternal, "SUPABASE_INTERNAL_URL") : undefined;
+  // @supabase/ssr derives its default cookie name from the URL it is given.
+  // The server and middleware connect to the internal URL while the browser
+  // uses the public one, so without an explicit name the two sides would
+  // look for different cookies and sessions would never stick.
+  if (
+    internal &&
+    !publicConfig.cookieName &&
+    new URL(internal).host !== new URL(publicConfig.supabaseUrl).host
+  ) {
+    throw new RuntimeConfigError(
+      "SUPABASE_INTERNAL_URL points at a different host than MGM_PUBLIC_SUPABASE_URL, " +
+        "so MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set (e.g. sb-mgm-auth-token)."
+    );
+  }
   return {
-    url: internal ? parseHttpUrl(internal, "SUPABASE_INTERNAL_URL") : publicConfig.supabaseUrl,
+    url: internal ?? publicConfig.supabaseUrl,
     anonKey: publicConfig.supabaseAnonKey,
     publicConfig,
   };

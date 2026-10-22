@@ -114,6 +114,13 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Node.js runtime (#46): the middleware reads the request-time runtime
+  // configuration from the real process environment, as the server does,
+  // instead of the Edge sandbox's environment, so one build or container
+  // image serves any installation. Supported for middleware.ts by the
+  // installed Next.js (16.x); proxy.ts would also be Node.js-only but means
+  // renaming the file and its export.
+  runtime: "nodejs",
   matcher: [
     /*
      * Match all request paths except:

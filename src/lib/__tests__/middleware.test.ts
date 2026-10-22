@@ -31,7 +31,7 @@ beforeEach(() => {
   getUserMock.mockReset();
   // Provide minimal request-time runtime configuration (#46).
   vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "http://localhost:54321");
-  vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "anon-key");
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_test");
 });
 
 afterEach(() => {
@@ -256,23 +256,34 @@ describe("middleware runtime configuration (#46)", () => {
     {
       env: {
         MGM_PUBLIC_SUPABASE_URL: "https://alpha.example.test",
-        MGM_PUBLIC_SUPABASE_ANON_KEY: "anon-alpha",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_alpha",
         MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-alpha-auth-token",
         SUPABASE_INTERNAL_URL: "",
       },
       url: "https://alpha.example.test",
-      key: "anon-alpha",
+      key: "sb_publishable_alpha",
       cookie: { cookieOptions: { name: "sb-alpha-auth-token" } },
     },
     {
       env: {
         MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
-        MGM_PUBLIC_SUPABASE_ANON_KEY: "anon-beta",
-        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_beta",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-beta-auth-token",
         SUPABASE_INTERNAL_URL: "http://kong:8000",
       },
       url: "http://kong:8000",
-      key: "anon-beta",
+      key: "sb_publishable_beta",
+      cookie: { cookieOptions: { name: "sb-beta-auth-token" } },
+    },
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_gamma",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "",
+        SUPABASE_INTERNAL_URL: "",
+      },
+      url: "http://localhost:54321",
+      key: "sb_publishable_gamma",
       cookie: {},
     },
   ])("builds its Supabase client from the request-time settings ($url)", async ({ env, url, key, cookie }) => {
@@ -288,6 +299,21 @@ describe("middleware runtime configuration (#46)", () => {
     expect(calledUrl).toBe(url);
     expect(calledKey).toBe(key);
     expect(options.cookieOptions).toEqual((cookie as { cookieOptions?: unknown }).cookieOptions);
+  });
+
+  it("refuses an internal URL on another host without a shared cookie name", async () => {
+    vi.stubEnv("SUPABASE_INTERNAL_URL", "http://kong:8000");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+    const middleware = await loadMiddleware();
+    await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
+      /MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set/
+    );
+  });
+
+  it("runs on the Node.js runtime so it reads the real process environment", async () => {
+    vi.resetModules();
+    const { config } = await import("../../middleware");
+    expect(config.runtime).toBe("nodejs");
   });
 
   it("fails closed, naming the variable, when configuration is missing", async () => {

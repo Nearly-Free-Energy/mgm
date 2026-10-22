@@ -10,6 +10,12 @@
  */
 import type { PublicRuntimeConfig } from "./public-runtime-config";
 
+// A module-level store is correct only because each server process (and
+// each browser page) serves exactly one installation: every request handled
+// by this process reads the same environment, so the provider always writes
+// the same values. If a single process were ever made to serve several
+// installations (multi-tenant hosting), this must become request-scoped
+// (React context only) because server-side rendering would share it.
 let current: PublicRuntimeConfig | null = null;
 
 export function setBrowserPublicRuntimeConfig(config: PublicRuntimeConfig): void {

@@ -119,16 +119,29 @@ describe("parsePublicRuntimeConfig", () => {
     );
   });
 
+  it.each([
+    ["an arbitrary string", "anon-key"],
+    ["an authenticated-role JWT", jwtWithRole("authenticated")],
+    ["a JWT without a readable payload", "aaa.bbb.ccc"],
+    ["a publishable prefix with bad characters", "sb_publishable_abc$def"],
+  ])("refuses %s as the public key", (_label, value) => {
+    expectConfigError(
+      () => parsePublicRuntimeConfig({ ...INSTALL_A, MGM_PUBLIC_SUPABASE_ANON_KEY: value }),
+      /must be the public key/,
+      value
+    );
+  });
+
   it("refuses a service-role JWT or a secret key as the public key", () => {
     const serviceRole = jwtWithRole("service_role");
     expectConfigError(
       () => parsePublicRuntimeConfig({ ...INSTALL_A, MGM_PUBLIC_SUPABASE_ANON_KEY: serviceRole }),
-      /service-role key/,
+      /must be the public key/,
       serviceRole
     );
     expectConfigError(
       () => parsePublicRuntimeConfig({ ...INSTALL_A, MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_secret_abc123" }),
-      /secret key/,
+      /must be the public key/,
       "sb_secret_abc123"
     );
   });
@@ -144,14 +157,14 @@ describe("parsePublicRuntimeConfig", () => {
   it("falls back to the legacy NEXT_PUBLIC_ set only when no MGM name is set", () => {
     const legacy = {
       NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "legacy-anon",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
       NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy",
     };
     const parsed = parsePublicRuntimeConfig(legacy);
     expect(parsed.source).toBe("legacy");
     expect(parsed.config).toEqual({
       supabaseUrl: "https://legacy.example.test",
-      supabaseAnonKey: "legacy-anon",
+      supabaseAnonKey: "sb_publishable_legacy",
       cookieName: "sb-legacy",
     });
 
@@ -160,10 +173,22 @@ describe("parsePublicRuntimeConfig", () => {
       () => parsePublicRuntimeConfig({ ...legacy, MGM_PUBLIC_SUPABASE_URL: "https://new.example.test" }),
       /MGM_PUBLIC_SUPABASE_ANON_KEY/
     );
-    // And a complete MGM set wins, including its (absent) cookie name.
-    const both = parsePublicRuntimeConfig({ ...legacy, ...INSTALL_B });
+    // A complete MGM set wins over the legacy set.
+    const both = parsePublicRuntimeConfig({ ...legacy, ...INSTALL_A });
     expect(both.source).toBe("mgm");
-    expect(both.config.cookieName).toBeUndefined();
+    expect(both.config.cookieName).toBe("sb-alpha-auth-token");
+  });
+
+  it("refuses a legacy cookie name that the new MGM settings would silently ignore", () => {
+    expectConfigError(
+      () =>
+        parsePublicRuntimeConfig({
+          ...INSTALL_B,
+          NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy",
+        }),
+      /NEXT_PUBLIC_SUPABASE_COOKIE_NAME is set but ignored.*MGM_PUBLIC_SUPABASE_COOKIE_NAME/,
+      "sb-legacy"
+    );
   });
 });
 
@@ -190,6 +215,27 @@ describe("live environment readers", () => {
     expect(JSON.stringify(settings.publicConfig)).not.toContain("kong");
     expect(getServerSupabaseUrl(env)).toBe("http://kong:8000");
     expect(getServerSupabaseUrl(INSTALL_B)).toBe("http://localhost:54321");
+  });
+
+  it("requires a cookie name when the internal URL host differs from the public host", () => {
+    const noCookie = {
+      MGM_PUBLIC_SUPABASE_URL: INSTALL_A.MGM_PUBLIC_SUPABASE_URL,
+      MGM_PUBLIC_SUPABASE_ANON_KEY: ANON_A,
+      SUPABASE_INTERNAL_URL: "http://kong:8000",
+    };
+    expectConfigError(
+      () => getServerSupabaseSettings(noCookie),
+      /MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set/
+    );
+    // Same host (path or port-free variants aside): the derived names agree.
+    expect(
+      getServerSupabaseSettings({
+        ...noCookie,
+        SUPABASE_INTERNAL_URL: INSTALL_A.MGM_PUBLIC_SUPABASE_URL,
+      }).url
+    ).toBe(INSTALL_A.MGM_PUBLIC_SUPABASE_URL);
+    // No internal URL: nothing can diverge.
+    expect(getServerSupabaseSettings(INSTALL_B).url).toBe("http://localhost:54321");
   });
 
   it("lets service-role callers resolve the URL without an anon key", () => {

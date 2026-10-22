@@ -25,7 +25,14 @@ function present(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function parseOrigin(value: string, variable: string, originOnly: boolean): string {
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function parseOrigin(
+  value: string,
+  variable: string,
+  originOnly: boolean,
+  requireHttps = false
+): string {
   let url: URL;
   try {
     url = new URL(value);
@@ -34,6 +41,11 @@ function parseOrigin(value: string, variable: string, originOnly: boolean): stri
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new RuntimeConfigError(`${variable} must use http or https.`);
+  }
+  if (requireHttps && url.protocol !== "https:" && !LOOPBACK_HOSTS.has(url.hostname)) {
+    throw new RuntimeConfigError(
+      `${variable} must use https (http is allowed only for localhost/127.0.0.1).`
+    );
   }
   if (url.username || url.password) {
     throw new RuntimeConfigError(`${variable} must not contain credentials.`);
@@ -49,7 +61,7 @@ function parseOrigin(value: string, variable: string, originOnly: boolean): stri
 /** Pure parser: the validated application origin, without a trailing slash. */
 export function parseAppOrigin(env: RuntimeEnv): string {
   const mgm = present(env.MGM_APP_URL);
-  if (mgm) return parseOrigin(mgm, "MGM_APP_URL", true);
+  if (mgm) return parseOrigin(mgm, "MGM_APP_URL", true, true);
   // Legacy names: previous releases accepted a path on both and used only
   // the origin, so keep that leniency for the fallback.
   const legacyApp = present(env.NEXT_PUBLIC_APP_URL);
@@ -86,4 +98,41 @@ export function appUrl(path: string, env: RuntimeEnv = readEnv()): string {
     throw new Error("Application paths must start with a single '/'.");
   }
   return `${parseAppOrigin(env)}${path}`;
+}
+
+/**
+ * The payment provider's return URL (`/payment/callback`).
+ *
+ * With MGM_APP_URL: `${MGM_APP_URL}/payment/callback`.
+ * Legacy mode (MGM_APP_URL unset), unchanged from previous releases: the
+ * full NEXT_PUBLIC_PAYMENT_CALLBACK_URL, path included, when set; otherwise
+ * the NEXT_PUBLIC_APP_URL origin plus `/payment/callback`.
+ */
+export function paymentReturnUrl(env: RuntimeEnv = readEnv()): string {
+  if (present(env.MGM_APP_URL)) return appUrl("/payment/callback", env);
+  const legacyCallback = present(env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL);
+  if (legacyCallback) {
+    parseOrigin(legacyCallback, "NEXT_PUBLIC_PAYMENT_CALLBACK_URL", false);
+    return legacyCallback;
+  }
+  return appUrl("/payment/callback", env);
+}
+
+/**
+ * Server-start check (src/instrumentation.ts). An invalid application URL
+ * stops the server; a missing one is reported, because only the payments
+ * plugin needs it and it fails clearly on first use.
+ */
+export function validateAppUrlAtStartup(env: RuntimeEnv = readEnv()): void {
+  if (
+    !present(env.MGM_APP_URL) &&
+    !present(env.NEXT_PUBLIC_APP_URL) &&
+    !present(env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL)
+  ) {
+    console.warn(
+      "[mgm] MGM_APP_URL is not set; payment links and payment notification registration will fail until it is."
+    );
+    return;
+  }
+  parseAppOrigin(env);
 }

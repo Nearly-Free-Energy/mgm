@@ -32,9 +32,10 @@ human-only period close are unaffected and must stay so.
    `MGM_PUBLIC_SUPABASE_URL`, `MGM_PUBLIC_SUPABASE_ANON_KEY` and optional
    `MGM_PUBLIC_SUPABASE_COOKIE_NAME` (no `NEXT_PUBLIC_` prefix, so never
    inlined) and validates them in `src/lib/config/public-runtime-config.ts`:
-   absolute http(s) URL without credentials, query or fragment; a non-empty
-   key that is not a `service_role` JWT or an `sb_secret_` key; a restricted
-   cookie-name character set. Errors name the variable, never the value.
+   absolute http(s) URL without credentials, query or fragment; a key that is
+   either `sb_publishable_…` or a JWT whose role is `anon` (everything else is
+   refused); a restricted cookie-name character set. Errors name the
+   variable, never the value.
 2. **Root layout as the request-time boundary.** `src/app/layout.tsx` calls
    `connection()` and is `force-dynamic`, then passes only the three public
    values to `PublicRuntimeConfigProvider`. The provider re-picks the
@@ -45,10 +46,19 @@ human-only period close are unaffected and must stay so.
    client, the session middleware and the service-role client use the same
    validated values and cookie name. `SUPABASE_INTERNAL_URL` remains a
    server-only connection override and never enters the public config.
+   Because `@supabase/ssr` derives its default cookie name from the URL it is
+   given, an internal URL on a different host than the public URL requires
+   `MGM_PUBLIC_SUPABASE_COOKIE_NAME`; the configuration is refused otherwise.
+   The middleware runs on the Node.js runtime (`runtime: "nodejs"` in
+   `src/middleware.ts`), so it reads the real process environment like the
+   rest of the server.
 4. **Server-only `MGM_APP_URL`.** The installation's public origin, validated
-   as an origin, read per call by `src/lib/config/app-url.ts`, and used for
-   payment links, `/payment/callback` and `/api/payments/ipn` registration.
-   It is never sent to the browser. The localhost fallback is removed.
+   as an https origin (http only for localhost/127.0.0.1), read per call by
+   `src/lib/config/app-url.ts`, and used for payment links,
+   `/payment/callback` and `/api/payments/ipn` registration. It is never sent
+   to the browser. The localhost fallback is removed. `src/instrumentation.ts`
+   validates it, and the Supabase settings, at server start (skipped during
+   `next build`).
 5. **No deployment build arguments.** The Dockerfile drops the
    `NEXT_PUBLIC_SUPABASE_*` arguments; Compose and `setup.sh` write the new
    names as runtime environment.
@@ -56,8 +66,10 @@ human-only period close are unaffected and must stay so.
    old `NEXT_PUBLIC_SUPABASE_*` names are read as a complete set (never mixed
    with new names) with a one-time deprecation warning; `MGM_APP_URL` falls
    back to `NEXT_PUBLIC_APP_URL`, then the origin of
-   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`. The fallback is removed in the next
-   release. This was chosen over a hard cut because it lets an existing
+   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`; the payment return URL keeps the full
+   legacy `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` exactly. A legacy cookie name next
+   to new Supabase names is refused rather than silently ignored. The
+   fallback is removed in the next release. This was chosen over a hard cut because it lets an existing
    Vercel installation take the release before renaming its variables.
 
 ## Consequences
@@ -78,19 +90,19 @@ Worse, or to watch:
   not available.
 - The browser configuration is held in a module-level store written during the
   provider's render so that factory functions called from event handlers can
-  reach it. A browser client created outside the root layout's tree fails with
+  reach it. This is correct only because each server process serves one
+  installation; multi-tenant hosting in one process would need a
+  request-scoped store. A browser client created outside the root layout's tree fails with
   a clear error rather than using a stale value.
 - During the compatibility release a legacy `NEXT_PUBLIC_*` value present at
   build time can still be inlined into server code by Next.js. Only the new
   names are guaranteed request-time; operators should rename before the
   fallback is removed.
-- The session middleware still runs on the Edge runtime and reads the variables
-  through literal `process.env` accesses. Container verification (tracked
-  separately under RFC #30) must confirm request-time reads in the standalone
-  server with two distinct configurations on one image digest.
-- `MGM_APP_URL` is validated on first use rather than at process start;
-  a startup check can be added once its interaction with `next build` is
-  verified.
+- The session middleware moves from the Edge runtime to Node.js. Node.js
+  middleware is supported for `middleware.ts` by the installed Next.js 16;
+  renaming to `proxy.ts` (Node.js only) is a later mechanical change.
+  Container verification (tracked separately under RFC #30) still confirms
+  two distinct configurations on one image digest.
 - The database test harness still reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` as a
   test-only variable; renaming it touches the CI workflow and is left to a
   follow-up.

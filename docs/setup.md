@@ -165,18 +165,24 @@ browser bundle or the image. The decision is recorded in
 | Variable | Required | Reaches the browser | Purpose |
 |---|---|---|---|
 | `MGM_PUBLIC_SUPABASE_URL` | yes | yes | Supabase project URL used by the browser and, unless overridden, the server |
-| `MGM_PUBLIC_SUPABASE_ANON_KEY` | yes | yes | Supabase anon (publishable) key. A service-role or `sb_secret_` key is refused |
-| `MGM_PUBLIC_SUPABASE_COOKIE_NAME` | no | yes | Fixed auth cookie name, so server, middleware and browser find the same session (set it when `SUPABASE_INTERNAL_URL` differs from the public URL) |
+| `MGM_PUBLIC_SUPABASE_ANON_KEY` | yes | yes | Supabase public key: an `sb_publishable_…` key or a JWT whose role is `anon`. Anything else (secret or service-role keys included) is refused |
+| `MGM_PUBLIC_SUPABASE_COOKIE_NAME` | when `SUPABASE_INTERNAL_URL` is on another host | yes | Fixed auth cookie name, so server, middleware and browser find the same session. Without it, Supabase derives the cookie name from the URL each side uses; MGM refuses to start a request when the internal and public hosts differ and this is unset |
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
-| `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
+| `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`/`127.0.0.1`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
 served from a shared cache), validates the three `MGM_PUBLIC_*` values, and
 passes only those to a client configuration provider. Browser Supabase
 clients take their settings from that provider. Server code and the session
-middleware use the same validated values. Missing or invalid settings stop the
-request with an error that names the variable and never prints its value.
+middleware (which runs on the Node.js runtime) use the same validated values.
+Missing or invalid settings stop the request with an error that names the
+variable and never prints its value.
+
+At server start (`src/instrumentation.ts`, not during `next build`) MGM
+validates the Supabase settings and `MGM_APP_URL`: an invalid value stops the
+server; a missing `MGM_APP_URL` only logs a warning, because payments are the
+only feature that needs it and they fail clearly on first use.
 
 Variables are read when a request is served. Set them in the hosting
 environment (Vercel project settings, the container's `environment:`, or
@@ -204,8 +210,18 @@ fallback:
   `NEXT_PUBLIC_SUPABASE_*` values are used and a deprecation warning is logged
   once per server process. When either new name is set, only new names are
   read; the two sets are never mixed.
-- When `MGM_APP_URL` is unset, `NEXT_PUBLIC_APP_URL` and then the origin of
-  `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` are used.
+- A `NEXT_PUBLIC_SUPABASE_COOKIE_NAME` left behind after switching to the new
+  Supabase names is refused (it would otherwise be ignored and the session
+  cookie would change name). Rename it to `MGM_PUBLIC_SUPABASE_COOKIE_NAME`.
+- When `MGM_APP_URL` is unset, behaviour is exactly as in the previous release:
+  - the payment return URL is the full `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`, path
+    included, when it is set; otherwise the `NEXT_PUBLIC_APP_URL` origin plus
+    `/payment/callback`;
+  - payment links and the notification URL use the origin of
+    `NEXT_PUBLIC_APP_URL`, then the origin of `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`.
+  
+  Once `MGM_APP_URL` is set, the return URL is always
+  `${MGM_APP_URL}/payment/callback`; a custom return path is not carried over.
 - A legacy `NEXT_PUBLIC_*` value present at build time may still be inlined by
   Next.js into server code, as before. Only the new names are guaranteed to be
   read at request time; the browser bundle no longer reads any of them.

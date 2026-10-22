@@ -55,12 +55,14 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
   `SUPABASE_INTERNAL_URL`, the service-role key, the credential encryption
   key and provider credentials are never serialized into props, HTML or
   bundles.
-- **One source per request.** Browser, server and middleware Supabase
-  clients use the same validated values and cookie name. The configuration-
+- **One source per request.** Browser, server and middleware (Node.js
+  runtime) Supabase clients use the same validated values and cookie name;
+  an internal Supabase URL on another host requires an explicit cookie name. The configuration-
   bearing root layout renders per request; it is never prerendered or served
   from a shared cache.
-- **Fail clearly.** Missing or invalid settings stop the request with an
-  error naming the variable, never its value.
+- **Fail clearly.** Missing or invalid settings stop the request (and, at
+  server start, the server; `src/instrumentation.ts`) with an error naming the
+  variable, never its value.
 - **No `NEXT_PUBLIC_` for deployment settings.** Next.js inlines those at
   build time. The former `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL` and
   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names are a documented fallback for one
