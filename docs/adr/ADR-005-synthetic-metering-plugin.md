@@ -38,6 +38,10 @@ billing or human-only period close.
   `synthetic-metering` row. The catalog gains an optional `defaultEnabled`
   flag mirroring this. No table is created or altered; other plugins behave
   as before.
+- **Reserved ids, no mixing.** The edge registration API rejects ids with the
+  `SYNTHETIC-EDGE-` prefix, so synthetic edges come only from the operator
+  loader. The provider is selected only when EVERY edge of the microgrid is
+  synthetic; a microgrid mixing synthetic and real edges is refused (409).
 - **Dataset is not a migration.** `supabase/scripts/load-synthetic-demo.sql`
   creates a demonstration community, microgrid, edge, 8 meters and 8
   households in one named organization, only when run by an operator with an
@@ -56,4 +60,15 @@ billing or human-only period close.
 - Watch: a synthetic microgrid is selected ahead of the OpenEMS fallback, so
   keep demonstration data in its own microgrid. Do not freeze future metering
   plugin ownership boundaries on this design.
+- Cost: selection reads the microgrid's edges (one RLS-scoped query) on every
+  metering read, plus one plugin-state RPC for synthetic microgrids. Ordinary
+  microgrids pay the one query; acceptable at current scale, cacheable per
+  request if it ever matters.
+- Follow-up (not done here, to avoid touching billing logic): bills and
+  periods produced from synthetic readings are not marked as synthetic, so
+  payments cannot yet refuse them structurally. Until then the setup guide
+  says not to enable online payments on the demonstration organization.
+- Merge-order risk: the migration redefines `fn_mgm_set_plugin_enabled` in full
+  (copy of 00065 plus the new name). Any other migration that redefines it
+  must be merged first and this one re-based on its version.
 - No Structurizr DSL exists in this repository, so none was updated.

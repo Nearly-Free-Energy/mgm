@@ -27,15 +27,15 @@
 
 \set ON_ERROR_STOP on
 
+-- Missing variables are an error with a non-zero exit (ON_ERROR_STOP), not a
+-- silent quit.
 \if :{?org_id}
 \else
-  \echo 'ERROR: pass -v org_id=<organization uuid>'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'pass -v org_id=<organization uuid>'; END $$;
 \endif
 \if :{?confirm}
 \else
-  \echo 'ERROR: pass -v confirm=load-synthetic-demo to load demonstration data'
-  \quit
+  DO $$ BEGIN RAISE EXCEPTION 'pass -v confirm=load-synthetic-demo to load demonstration data'; END $$;
 \endif
 
 BEGIN;
@@ -72,10 +72,10 @@ BEGIN
   INSERT INTO microgrids (community_id, name)
   VALUES (v_community, 'Synthetic Demo Microgrid') RETURNING id INTO v_microgrid;
 
-  -- Not an OpenEMS edge: the SYNTHETIC-EDGE- id is the routing marker the
-  -- synthetic metering plugin looks for.
-  INSERT INTO edges (microgrid_id, name, data_source_type, openems_edge_id, role)
-  VALUES (v_microgrid, 'Synthetic demo edge', 'rest_api', 'SYNTHETIC-EDGE-001', 'metering')
+  -- The SYNTHETIC-EDGE- id is the routing marker the synthetic metering
+  -- plugin looks for. Columns match the current schema (database.gen.ts).
+  INSERT INTO edges (microgrid_id, name, openems_edge_id, role)
+  VALUES (v_microgrid, 'Synthetic demo edge', 'SYNTHETIC-EDGE-001', 'metering')
   RETURNING id INTO v_edge;
 
   FOR i IN 1..8 LOOP
@@ -85,8 +85,9 @@ BEGIN
     VALUES (v_edge, 'Synthetic meter ' || v_n, 'consumption_meter', 'SYNTHETIC-METER-' || v_n)
     RETURNING id INTO v_device;
 
-    INSERT INTO households (microgrid_id, display_name, unit_label)
-    VALUES (v_microgrid, 'Synthetic Household ' || v_n, 'SYN-' || v_n)
+    -- primary_phone is NOT NULL; the value is an obviously fake placeholder.
+    INSERT INTO households (microgrid_id, display_name, unit_label, primary_phone)
+    VALUES (v_microgrid, 'Synthetic Household ' || v_n, 'SYN-' || v_n, '000-SYNTHETIC-' || v_n)
     RETURNING id INTO v_household;
 
     -- Effective-dated from before the demonstration month, so the

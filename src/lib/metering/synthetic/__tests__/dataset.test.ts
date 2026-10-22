@@ -42,6 +42,20 @@ describe("synthetic demonstration dataset", () => {
     expect(SQL).toContain("'SYN-' || v_n");
   });
 
+  it("the script writes only columns that exist in the current schema", () => {
+    const gen = readFileSync(
+      path.resolve(__dirname, "../../../types/database.gen.ts"),
+      "utf8"
+    );
+    expect(SQL).not.toContain("data_source_type");
+    const edgesInsert = /INSERT INTO edges \(([^)]*)\)/.exec(SQL)?.[1] ?? "";
+    const edgeRow = /edges: \{\s+Row: \{([^}]*)\}/.exec(gen)?.[1] ?? "";
+    for (const column of edgesInsert.split(",").map((c) => c.trim())) {
+      expect(edgeRow).toContain(`${column}:`);
+    }
+    expect(SQL).toContain("primary_phone");
+  });
+
   it("the script needs explicit confirmation and is not a migration", () => {
     expect(SQL).toContain("load-synthetic-demo");
     expect(SQL).toMatch(/Refusing to load/);

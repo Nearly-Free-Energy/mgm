@@ -20,6 +20,8 @@ const ORG_B = "550e8400-e29b-41d4-a716-44665544000b";
  */
 function client(opts: {
   edges: Record<string, string>;
+  /** Extra non-synthetic edge ids per microgrid (mixed-microgrid case). */
+  realEdges?: Record<string, string[]>;
   enabled: Record<string, boolean>;
   rpcError?: boolean;
   queryError?: boolean;
@@ -29,23 +31,23 @@ function client(opts: {
       ? { data: null, error: { message: "boom" } }
       : { data: opts.enabled[args._org_id] ?? false, error: null }
   );
-  const from = vi.fn(() => {
-    let microgridId = "";
-    const builder = {
-      select: () => builder,
-      eq: (_col: string, value: string) => ((microgridId = value), builder),
-      like: () => builder,
-      limit: async () => {
+  const from = vi.fn(() => ({
+    select: () => ({
+      eq: async (_col: string, microgridId: string) => {
         if (opts.queryError) return { data: null, error: { message: "boom" } };
         const org = opts.edges[microgridId];
-        return {
-          data: org ? [{ id: "e", microgrids: { communities: { org_id: org } } }] : [],
-          error: null,
-        };
+        const embedded = { microgrids: { communities: { org_id: org } } };
+        const rows = [
+          ...(org ? [{ openems_edge_id: "SYNTHETIC-EDGE-001", ...embedded }] : []),
+          ...(opts.realEdges?.[microgridId] ?? []).map((id) => ({
+            openems_edge_id: id,
+            ...embedded,
+          })),
+        ];
+        return { data: rows, error: null };
       },
-    };
-    return builder;
-  });
+    }),
+  }));
   return { supabase: { from, rpc } as unknown as SupabaseClient, rpc, from };
 }
 
@@ -54,6 +56,28 @@ describe("synthetic metering plugin gate", () => {
     const { supabase, rpc } = client({ edges: {}, enabled: { [ORG_A]: true } });
     await expect(syntheticSupports(supabase, "real-microgrid")).resolves.toBe(false);
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses a microgrid mixing synthetic and real edges, without checking plugin state", async () => {
+    const { supabase, rpc } = client({
+      edges: { mg: ORG_A },
+      realEdges: { mg: ["real-edge-1"] },
+      enabled: { [ORG_A]: true },
+    });
+    await expect(syntheticSupports(supabase, "mg")).rejects.toMatchObject({
+      code: "METERING_CONFIGURATION",
+      statusCode: 409,
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("a real microgrid (real edges only) is never synthetic", async () => {
+    const { supabase } = client({
+      edges: {},
+      realEdges: { real: ["edge-7"] },
+      enabled: { [ORG_A]: true },
+    });
+    await expect(syntheticSupports(supabase, "real")).resolves.toBe(false);
   });
 
   it("applies when the owning organization enabled the plugin", async () => {

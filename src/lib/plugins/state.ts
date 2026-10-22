@@ -247,7 +247,8 @@ function readPluginEnabled(
 }
 
 /**
- * Whether one plugin is enabled for an organization (missing row = enabled).
+ * Whether one plugin is enabled for an organization (a missing row is enabled, except for plugins with
+ * `defaultEnabled: false`, such as synthetic-metering).
  * Throws when the state cannot be read, so callers decide how to fail. The
  * per-plugin helpers below keep their historical contract: a database error
  * reads as disabled, a thrown client error propagates.

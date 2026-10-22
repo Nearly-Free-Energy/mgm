@@ -5,7 +5,8 @@
  *
  * Selection is explicit on two counts, both read through the caller's
  * RLS-scoped client:
- *  1. the microgrid holds a synthetic demonstration edge (SYNTHETIC-EDGE-*),
+ *  1. EVERY edge of the microgrid is a synthetic demonstration edge
+ *     (SYNTHETIC-EDGE-*); a mixed microgrid is refused (409),
  *  2. the `synthetic-metering` plugin is enabled for that microgrid's
  *     organization (off unless an organization enables it).
  * A synthetic microgrid in an organization where the plugin is off fails
@@ -26,6 +27,7 @@ const one = <T,>(value: Embedded<T>): T | null =>
   Array.isArray(value) ? value[0] ?? null : value ?? null;
 
 type EdgeRow = {
+  openems_edge_id: string;
   microgrids: Embedded<{ communities: Embedded<{ org_id: string }> }>;
 };
 
@@ -33,17 +35,28 @@ export async function syntheticSupports(
   supabase: SupabaseClient,
   microgridId: string
 ): Promise<boolean> {
+  // One RLS-scoped read of the microgrid's edges (one extra query per
+  // metering read; see ADR-005). Selection looks at ALL edges so a microgrid
+  // mixing real and synthetic edges is refused rather than half-routed.
   const { data, error } = await supabase
     .from("edges")
-    .select("id, microgrids!inner(communities!inner(org_id))")
-    .eq("microgrid_id", microgridId)
-    .like("openems_edge_id", `${SYNTHETIC_EDGE_ID_PREFIX}%`)
-    .limit(1);
+    .select("openems_edge_id, microgrids!inner(communities!inner(org_id))")
+    .eq("microgrid_id", microgridId);
   if (error) {
     throw new MeteringError("Could not read metering configuration", "METERING_UNAVAILABLE", 503);
   }
-  const edge = (data as unknown as EdgeRow[] | null)?.[0];
-  if (!edge) return false;
+  const edges = (data as unknown as EdgeRow[] | null) ?? [];
+  const synthetic = edges.filter((e) => e.openems_edge_id.startsWith(SYNTHETIC_EDGE_ID_PREFIX));
+  if (synthetic.length === 0) return false;
+  if (synthetic.length !== edges.length) {
+    throw new MeteringError(
+      "This microgrid mixes synthetic and real edges; synthetic demonstration data must live in its own microgrid.",
+      "METERING_CONFIGURATION",
+      409,
+      { microgridId }
+    );
+  }
+  const edge = synthetic[0];
 
   const orgId = one(one(edge.microgrids)?.communities)?.org_id;
   if (!orgId) return false;

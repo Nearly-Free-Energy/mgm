@@ -307,12 +307,14 @@ explicit operator action.
    and a seed (default `mgm-synthetic-demo-v1`; set
    `MGM_SYNTHETIC_METERING_SEED` to change it), so every run gives the same
    usage. Meters 001-005 report every day. The rest show missing data:
-   - 006: no reading on 10-12 September. The meter is a cumulative register,
+   - 006: no reading on 10-12 September (only in the demo month, 2026-09; other months have no gap for this meter). The meter is a cumulative register,
      so usage is still known and billable.
-   - 007: no reading on 30 September (the closing day). Usage cannot be
+   - 007: no reading on 30 September, the closing day (a gap only for windows that include that day). Usage cannot be
      established, so it is reported as missing, not zero, and needs a manual
      reading before that household is billed.
    - 008: never reported. Missing, not zero.
+
+Synthetic edge ids (`SYNTHETIC-EDGE-*`) are reserved: the edge registration API rejects them, and a microgrid that mixes synthetic and real edges is refused by the provider. Keep the demonstration in its own microgrid and organization, and do not enable online payments for it.
 
 Closing a billing period remains a human action, as with any provider. To
 remove the demonstration data, delete "Synthetic Demo Microgrid".
