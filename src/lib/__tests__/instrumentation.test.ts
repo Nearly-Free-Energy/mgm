@@ -20,6 +20,8 @@ function stubValid() {
   vi.stubEnv("NEXT_PHASE", "");
   vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://alpha.example.test");
   vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_alpha");
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_COOKIE_NAME", "");
   vi.stubEnv("SUPABASE_INTERNAL_URL", "");
   vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
 }

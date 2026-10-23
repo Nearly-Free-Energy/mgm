@@ -61,6 +61,8 @@ describe("RootLayout", () => {
   it("enters the request-time boundary before reading configuration", async () => {
     vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://alpha.example.test");
     vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_alpha");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_COOKIE_NAME", "");
     await RootLayout({ children: <main /> });
     expect(order).toEqual(["connection", "config"]);
   });
