@@ -1,10 +1,11 @@
 # Releasing MGM
 
 A release of MGM carries a deployment asset: Vercel's prebuilt build output
-for one commit of `main`, packed as `mgm-vercel-output-<version>.tar.gz`, with
-a SHA-256 file and a build-provenance attestation. The Release workflow
-(`.github/workflows/release.yml`) builds the asset and attaches it when a
-maintainer publishes a GitHub release.
+for one commit of `main`, packed as `mgm-vercel-output-<version>.tar.gz`. Beside
+it are its third-party notices, `mgm-third-party-notices-<version>.txt`, a
+SHA-256 file for each, and a build-provenance attestation that covers both.
+The Release workflow (`.github/workflows/release.yml`) builds them and attaches
+them when a maintainer publishes a GitHub release.
 
 **Publishing a release deploys nothing.** The workflow has no hosting
 credentials and reads no secret. An operator chooses a version, verifies it,
@@ -43,6 +44,13 @@ back by deploying a previous version they verified.
 - **Identified by its digest, not by rebuilding it.** Every Next.js build gets
   its own build ID, so two builds of one commit differ. The attestation ties
   the asset's SHA-256 to its commit and to this repository's Release workflow.
+- **Published with its third-party notices.** The build copies into the
+  functions only the files they load, which rarely include the npm packages'
+  licence files. `mgm-third-party-notices-<version>.txt` lists every third-party package in
+  the asset, with its name, version and declared licence and the full text of
+  its LICENSE, LICENCE, COPYING and NOTICE files; identical texts are printed
+  once. It is a separate file, not part of the archive, so the asset deploys
+  exactly as Vercel built it.
 
 ## Publish a version
 
@@ -72,9 +80,9 @@ back by deploying a previous version they verified.
    --workflow release.yml`). `Build release asset` checks that the tag is a
    version and that its commit is on `main`, then builds and checks the asset.
    `Publish release asset` creates the attestation, uploads
-   `mgm-vercel-output-v0.0.N.tar.gz` and its `.sha256` file to the release,
-   and appends a "Deployment asset" section to the notes. It takes a few
-   minutes.
+   `mgm-vercel-output-v0.0.N.tar.gz`, `mgm-third-party-notices-v0.0.N.txt` and
+   their `.sha256` files to the release, and appends a "Deployment asset"
+   section to the notes. It takes a few minutes.
 
 5. [Verify the asset](#verify-an-asset) as an operator would before you
    announce the release.
@@ -91,9 +99,11 @@ only the workflow's build carries an attestation.
 version=v0.0.N
 commit=<the full commit SHA you reviewed>
 gh release download "$version" --repo Nearly-Free-Energy/mgm \
-  --pattern "mgm-vercel-output-$version.tar.gz*" --dir "mgm-$version"
+  --pattern "mgm-vercel-output-$version.tar.gz*" \
+  --pattern "mgm-third-party-notices-$version.txt*" --dir "mgm-$version"
 cd "mgm-$version"
-sha256sum -c "mgm-vercel-output-$version.tar.gz.sha256"   # macOS: shasum -a 256 -c
+sha256sum -c "mgm-vercel-output-$version.tar.gz.sha256" \
+  "mgm-third-party-notices-$version.txt.sha256"   # macOS: shasum -a 256 -c
 gh attestation verify "mgm-vercel-output-$version.tar.gz" \
   --repo Nearly-Free-Energy/mgm \
   --signer-workflow Nearly-Free-Energy/mgm/.github/workflows/release.yml \
@@ -104,7 +114,8 @@ gh attestation verify "mgm-vercel-output-$version.tar.gz" \
   only that the download is intact. An operator who pinned a digest compares
   the asset's SHA-256 with the pinned value instead.
 - `gh attestation verify` shows that this repository's Release workflow built
-  these exact bytes from the commit given to `--source-digest`.
+  these exact bytes from the commit given to `--source-digest`. Run it on
+  `mgm-third-party-notices-$version.txt` too: the same attestation covers it.
 - To confirm that the commit is on `main`, run
   `gh api repos/Nearly-Free-Energy/mgm/compare/main...$commit --jq .status`;
   it prints `behind` or `identical`.
@@ -139,6 +150,8 @@ scripts/release/build-deploy-asset.sh --version v0.0.0-test --out /tmp/mgm-asset
 
 - It builds the committed tree of `HEAD`, or of `--ref <commit>`. Uncommitted
   changes are not included.
+- It writes the notices file and its `.sha256` beside the asset, under the
+  same version and suffixes.
 - It needs Node.js from `.nvmrc`, npm, git, python3, tar, and network access
   to the npm registry and Google Fonts. It installs its pinned Vercel CLI into
   a temporary directory and takes a few minutes.
@@ -166,5 +179,14 @@ artifact holds that Linux build for a day, for inspection.
   in the script.
 - Every operator's verification names `.github/workflows/release.yml`
   (`--signer-workflow`). Do not move or rename it without telling them.
-- `scripts/tests/test_build_deploy_asset.py` covers the packer's checks and the
-  script's refusals; the `Test` workflow runs it.
+- `scripts/release/third_party_notices.py` writes the notices. It finds a
+  package in the asset four ways: its files are in a function's
+  `node_modules`; the build's source map for a JavaScript file in the output
+  names one of its modules; one of the project's stylesheets imports it; or it
+  is the builder that writes the functions' launchers. Client-side bundles
+  have no source maps, so a package that only browser code imports, and no
+  server-rendered module does, is not found: check the notices of the dry run
+  when adding one. The build fails, rather than leaving a package out, when a
+  function's source map or a package's `package.json` cannot be read.
+- `scripts/tests/test_build_deploy_asset.py` covers the packer's checks, the
+  notices writer and the script's refusals; the `Test` workflow runs it.

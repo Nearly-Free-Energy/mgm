@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build MGM's deployment asset: Vercel's prebuilt build output for one commit,
-# packed as a .tar.gz with a SHA-256 checksum file.
+# packed as a .tar.gz with a SHA-256 checksum file, and the third-party notices
+# for it, published beside it.
 #
 #   build-deploy-asset.sh --version <vX.Y.Z> --out <dir> [--ref <commit>]
 #                         [--preview] [--allow-foreign-platform]
@@ -42,13 +43,18 @@ usage() {
     "Usage: $PROG --version <vX.Y.Z> --out <dir> [--ref <commit>] [--preview] [--allow-foreign-platform]" \
     "" \
     "Builds Vercel's prebuilt output (vercel build --prod --standalone) from the" \
-    "committed tree of one commit, checks it, and packs it deterministically." \
+    "committed tree of one commit, checks it, packs it deterministically, and" \
+    "lists the third-party packages in it." \
     "Writes to DIR:" \
     "  mgm-vercel-output-<version>.tar.gz             the asset; extract it into" \
     "                                                 .vercel/output to deploy it" \
     "  mgm-vercel-output-<version>.tar.gz.sha256      its SHA-256 (sha256sum -c)" \
     "  mgm-vercel-output-<version>.build-info.json    commit, target, digest, and" \
     "                                                 the tool and runtime versions" \
+    "  mgm-third-party-notices-<version>.txt          each third-party package in" \
+    "                                                 the asset, with its licence" \
+    "                                                 and notice texts" \
+    "  mgm-third-party-notices-<version>.txt.sha256   its SHA-256" \
     "" \
     "  --version V              Release version, for example v0.0.1." \
     "  --out DIR                Directory for the files above (created if missing)." \
@@ -79,8 +85,10 @@ usage() {
     "     credentials, the host is not Linux x86-64, an output file exists, the" \
     "     commit or a required program is missing, or Node.js is not the .nvmrc" \
     "     version" \
-    "  4  installing, building, or checking the build output failed" \
-    "  5  packing, checksumming, or moving the files into DIR failed" \
+    "  4  installing, building, or checking the build output failed, or a" \
+    "     package in it could not be identified for the notices" \
+    "  5  packing, writing the notices, checksumming, or moving the files into" \
+    "     DIR failed" \
     "" \
     "See docs/releasing.md."
 }
@@ -229,18 +237,22 @@ commit=$(git -C "$repo" rev-parse --verify --quiet "${ref}^{commit}") \
 
 if ((preview)); then
   target=preview
-  name="mgm-vercel-output-${version}-preview${platform_suffix}"
+  variant="${version}-preview${platform_suffix}"
 else
   target=production
-  name="mgm-vercel-output-${version}${platform_suffix}"
+  variant="${version}${platform_suffix}"
 fi
+name="mgm-vercel-output-$variant"
+notices_name="mgm-third-party-notices-$variant.txt"
 
 mkdir -p -- "$out_dir" || die "$EXIT_PRECONDITION" "cannot create $out_dir"
 out_dir=$(cd -- "$out_dir" && pwd -P)
 asset="$out_dir/$name.tar.gz"
 checksum="$asset.sha256"
 info="$out_dir/$name.build-info.json"
-for file in "$asset" "$checksum" "$info"; do
+notices="$out_dir/$notices_name"
+notices_checksum="$notices.sha256"
+for file in "$asset" "$checksum" "$info" "$notices" "$notices_checksum"; do
   if [[ -e $file || -L $file ]]; then
     die "$EXIT_PRECONDITION" "$file already exists; an asset is never replaced." \
       "Use a new version, or remove the old files if they were never published."
@@ -354,13 +366,33 @@ sha=$(sha256_of "$work/$name.tar.gz") || die "$EXIT_PACKAGE" "computing the SHA-
 [[ $sha == "$packed_sha" ]] || die "$EXIT_PACKAGE" "the archive's SHA-256 does not match the packer's"
 printf '%s  %s\n' "$sha" "$name.tar.gz" >"$work/$name.tar.gz.sha256"
 
+# The notices go beside the asset, not into the output, which deploys as
+# Vercel built it. The build directory supplies what the output leaves out:
+# the packages' licence files and the source maps of the bundled code.
+note "writing the third-party notices"
+status=0
+notices_sha=$(python3 -I "$script_dir/third_party_notices.py" "$work/src/.vercel/output" "$work/$notices_name" \
+  --project "$work/src" --asset "$name.tar.gz" --version "$version" --commit "$commit") || status=$?
+case $status in
+  0) ;;
+  4) die "$EXIT_BUILD" "a package in the build output could not be identified for the notices" ;;
+  *) die "$EXIT_PACKAGE" "writing the third-party notices failed" ;;
+esac
+notices_check=$(sha256_of "$work/$notices_name") || die "$EXIT_PACKAGE" "computing the notices' SHA-256 failed"
+[[ $notices_check == "$notices_sha" ]] || die "$EXIT_PACKAGE" "the notices' SHA-256 does not match the writer's"
+printf '%s  %s\n' "$notices_sha" "$notices_name" >"$work/$notices_name.sha256"
+
 mv -- "$work/$name.build-info.json" "$info" || die "$EXIT_PACKAGE" "moving the build info into $out_dir failed"
 mv -- "$work/$name.tar.gz" "$asset" || die "$EXIT_PACKAGE" "moving the asset into $out_dir failed"
 mv -- "$work/$name.tar.gz.sha256" "$checksum" || die "$EXIT_PACKAGE" "moving the checksum into $out_dir failed"
+mv -- "$work/$notices_name" "$notices" || die "$EXIT_PACKAGE" "moving the notices into $out_dir failed"
+mv -- "$work/$notices_name.sha256" "$notices_checksum" \
+  || die "$EXIT_PACKAGE" "moving the notices' checksum into $out_dir failed"
 
-note "asset:  $asset"
-note "sha256: $sha"
-note "commit: $commit ($target target, Vercel CLI $cli_version)"
+note "asset:   $asset"
+note "notices: $notices"
+note "sha256:  $sha"
+note "commit:  $commit ($target target, Vercel CLI $cli_version)"
 if [[ -n $platform_suffix ]]; then
   note "built on $host_os $host_arch: for local tests only; its functions do not run on Vercel"
 fi

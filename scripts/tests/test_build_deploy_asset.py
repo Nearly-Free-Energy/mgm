@@ -1,7 +1,9 @@
-"""Tests for scripts/release/build-deploy-asset.sh and vercel_build_output.py.
+"""Tests for scripts/release/build-deploy-asset.sh, vercel_build_output.py and
+third_party_notices.py.
 
-The packer and its checks run against small synthetic Build Output
-directories, so these tests need no npm, network or Vercel CLI. The shell
+The packer, its checks and the notices writer run against small synthetic
+Build Output and project directories, so these tests need no npm, network or
+Vercel CLI. The shell
 script is tested only up to the point where it would start building: its
 argument handling, the environment it refuses, the host platform it refuses,
 and the files it never replaces. docs/releasing.md describes a full local run.
@@ -10,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +23,7 @@ import unittest
 RELEASE_DIR = Path(__file__).resolve().parents[1] / "release"
 SCRIPT = RELEASE_DIR / "build-deploy-asset.sh"
 PACKER = RELEASE_DIR / "vercel_build_output.py"
+NOTICES = RELEASE_DIR / "third_party_notices.py"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 MTIME = 1_760_000_000
 # The Test workflow sets this, so that a missing shellcheck fails the gate
@@ -240,6 +244,204 @@ class PackerTest(unittest.TestCase):
         self.assert_refused("Vercel CLI '64.0.0'", extra=())
 
 
+def write_package(directory, name, version, licence=None, files=None):
+    """An installed npm package: package.json plus the given top-level files."""
+    data = {"name": name, "version": version}
+    if licence is not None:
+        data["license"] = licence
+    write_json(directory / "package.json", data)
+    for file_name, text in (files or {}).items():
+        path = directory / file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+
+def make_notices_fixture(tmp):
+    """A Build Output directory and the project directory it was built in.
+
+    - argon2 and shared-* are in the function's node_modules, without their
+      licence files, as `vercel build --standalone` copies them;
+    - bundled is only in a server chunk, named by the chunk's source map, which
+      the build left in the project's .next directory;
+    - next is in the function, and its prebuilt runtime bundles the
+      react-dom copy it vendors under dist/compiled, named by the runtime's
+      installed source map;
+    - styles is imported by the project's stylesheet;
+    - unused is installed but in none of these.
+    """
+    output = tmp / "output"
+    project = tmp / "project"
+    make_output(output)
+    modules = project / "node_modules"
+    write_package(modules / "argon2", "argon2", "0.44.0", "MIT", {"LICENSE": "argon2 licence\n"})
+    shared = "Shared licence text\n\nCopyright (c) Example\n"
+    write_package(modules / "@scope" / "shared-a", "@scope/shared-a", "1.0.0", "MIT", {"LICENSE": shared})
+    write_package(modules / "shared-b", "shared-b", "2.0.0", "MIT",
+                  {"LICENCE.md": shared.replace("\n", "  \r\n") + "\r\n\r\n"})
+    write_package(modules / "bundled", "bundled", "3.0.0", "Apache-2.0",
+                  {"LICENSE": "Apache licence text\n", "NOTICE": "bundled notice\n", "license.js": "code"})
+    write_package(modules / "nolicence", "nolicence", "1.0.0", "ISC")
+    write_package(modules / "next", "next", "16.4.1", "MIT", {"license.md": "next licence\n"})
+    write_package(modules / "next" / "dist" / "compiled" / "react-dom", "react-dom-builtin", "0.0.0",
+                  None, {"LICENSE": "react-dom licence\n"})
+    write_package(modules / "styles", "styles", "1.1.0", "MIT", {"LICENSE": "styles licence\n"})
+    write_package(modules / "unused", "unused", "9.9.9", "MIT", {"LICENSE": "unused licence\n"})
+    (project / "src" / "app").mkdir(parents=True)
+    (project / "src" / "app" / "globals.css").write_text('@import "styles";\n@import "./local.css";\n')
+
+    func = output / "functions" / "api" / "pay.func"
+    for name in ["argon2", "@scope/shared-a", "shared-b", "nolicence"]:
+        shipped = func / "node_modules" / name
+        shipped.mkdir(parents=True, exist_ok=True)
+        shutil.copy(modules / name / "package.json", shipped / "package.json")
+    runtime = func / "node_modules" / "next" / "dist" / "compiled" / "next-server" / "runtime.prod.js"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("module.exports={}\n//# sourceMappingURL=runtime.prod.js.map\n")
+    shutil.copy(modules / "next" / "package.json", func / "node_modules" / "next" / "package.json")
+    installed_runtime = modules / "next" / "dist" / "compiled" / "next-server"
+    installed_runtime.mkdir(parents=True)
+    write_json(installed_runtime / "runtime.prod.js.map", {"version": 3, "sources": [
+        "webpack://next/./src/server/base-server.ts",
+        "webpack://next/./dist/compiled/react-dom/cjs/react-dom.production.js",
+    ], "mappings": ""})
+    # A package that keeps the comment but not the map.
+    (func / "node_modules" / "nolicence" / "index.js").write_text("//# sourceMappingURL=index.js.map\n")
+
+    chunk = func / ".next" / "server" / "chunks" / "ssr" / "page._.js"
+    chunk.parent.mkdir(parents=True)
+    chunk.write_text("module.exports=[]\n//# sourceMappingURL=page._.js.map\n")
+    build_chunks = project / ".next" / "server" / "chunks" / "ssr"
+    build_chunks.mkdir(parents=True)
+    write_json(build_chunks / "page._.js.map", {"version": 3, "sections": [
+        {"offset": {"line": 0, "column": 0}, "map": {"version": 3, "mappings": "", "sources": [
+            "../../../../src/app/page.tsx",
+            "../../../../node_modules/bundled/dist/index.js",
+            "../../../../node_modules/src/not-a-package.ts",
+        ]}},
+    ]})
+
+    builder = tmp / "cli" / "node_modules" / "@vercel" / "next"
+    write_package(builder, "@vercel/next", "26.0.0", "Apache-2.0", {"LICENSE": "builder licence\n"})
+    (builder / "dist").mkdir()
+    builds = json.loads((output / "builds.json").read_text())
+    builds["builds"][0]["requirePath"] = str(builder / "dist" / "index.js")
+    write_json(output / "builds.json", builds)
+    return output, project
+
+
+class NoticesTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="mgm-notices-test."))
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.output, self.project = make_notices_fixture(self.tmp)
+
+    def write(self, name="notices.txt", output=None):
+        notices = self.tmp / name
+        result = subprocess.run(
+            [sys.executable, "-I", str(NOTICES), str(output or self.output), str(notices),
+             "--project", str(self.project), "--asset", "mgm-vercel-output-v0.0.1.tar.gz",
+             "--version", "v0.0.1", "--commit", COMMIT],
+            capture_output=True, text=True, timeout=60,
+        )
+        return result, notices
+
+    def packages(self, text):
+        listed = text.split("\nPackages\n--------\n\n", 1)[1].split("\nTexts\n-----\n", 1)[0]
+        return {block.split("\n", 1)[0]: block for block in listed.strip().split("\n\n")}
+
+    def test_lists_every_package_in_the_asset(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = notices.read_text()
+        self.assertEqual(result.stdout.strip(), hashlib.sha256(notices.read_bytes()).hexdigest())
+        self.assertTrue(text.startswith("Third-party notices for MGM v0.0.1\n"))
+        self.assertIn(COMMIT, text)
+        self.assertEqual(sorted(self.packages(text)), sorted([
+            "@scope/shared-a 1.0.0",
+            "@vercel/next 26.0.0 (builder; writes each function's launcher)",
+            "argon2 0.44.0",
+            "bundled 3.0.0",
+            "next 16.4.1",
+            "nolicence 1.0.0",
+            "react-dom-builtin 0.0.0 (part of next 16.4.1, at dist/compiled/react-dom)",
+            "shared-b 2.0.0",
+            "styles 1.1.0",
+        ]))
+        self.assertNotIn("unused", text)
+        self.assertIn("Packages: 9\n", text)
+        # A source-map path that is no installed package is reported, not listed.
+        self.assertIn("skipped node_modules/src", result.stderr)
+
+    def test_prints_each_licence_and_notice_in_full(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = notices.read_text()
+        packages = self.packages(text)
+        self.assertIn("Licence: Apache-2.0", packages["bundled 3.0.0"])
+        self.assertRegex(packages["bundled 3.0.0"], r"Texts: \[\d+\] LICENSE, \[\d+\] NOTICE")
+        for body in ["argon2 licence", "Apache licence text", "bundled notice", "next licence",
+                     "react-dom licence", "styles licence", "builder licence"]:
+            self.assertEqual(text.count(body), 1, body)
+        self.assertNotIn("license.js", text)
+
+    def test_prints_identical_texts_once(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = notices.read_text()
+        # CRLF line endings, trailing spaces and blank lines do not make a new text.
+        self.assertEqual(text.count("Shared licence text"), 1)
+        packages = self.packages(text)
+        cited_a = re.search(r"\[(\d+)\] LICENSE", packages["@scope/shared-a 1.0.0"]).group(1)
+        cited_b = re.search(r"\[(\d+)\] LICENCE.md", packages["shared-b 2.0.0"]).group(1)
+        self.assertEqual(cited_a, cited_b)
+        self.assertIn(f"[{cited_a}] @scope/shared-a 1.0.0: LICENSE; shared-b 2.0.0: LICENCE.md", text)
+
+    def test_notes_a_package_without_a_licence_file(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        block = self.packages(notices.read_text())["nolicence 1.0.0"]
+        self.assertIn("Licence: ISC", block)
+        self.assertIn("no licence or notice text is installed with this package", block)
+        self.assertNotIn("Texts:", block)
+
+    def test_is_deterministic_and_sorted(self):
+        first, notices = self.write()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second, again = self.write(name="again.txt")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(notices.read_bytes(), again.read_bytes())
+        names = list(self.packages(notices.read_text()))
+        self.assertEqual(names, sorted(names, key=str.lower))
+
+    def test_refuses_a_bundle_whose_source_map_is_missing(self):
+        (self.project / ".next" / "server" / "chunks" / "ssr" / "page._.js.map").unlink()
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("page._.js.map is neither in the output nor in the project directory", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_a_package_that_differs_from_the_installed_one(self):
+        shipped = self.output / "functions" / "api" / "pay.func" / "node_modules" / "argon2" / "package.json"
+        write_json(shipped, {"name": "argon2", "version": "0.43.0", "license": "MIT"})
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("node_modules/argon2: the output's package.json has version '0.43.0'", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_an_unknown_builder(self):
+        builds = json.loads((self.output / "builds.json").read_text())
+        builds["builds"][0]["requirePath"] = str(self.tmp / "missing" / "dist" / "index.js")
+        write_json(self.output / "builds.json", builds)
+        result, _ = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("builder '@vercel/next'", result.stderr)
+
+    def test_refuses_to_write_into_the_output(self):
+        result, notices = self.write(name="output/notices.txt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertFalse(notices.exists())
+
+
 class ScriptTest(unittest.TestCase):
     """The script's refusals, all of which happen before anything is built."""
 
@@ -328,6 +530,17 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("already exists", result.stderr)
         self.assertEqual(existing.read_bytes(), b"published")
         self.assertEqual([p.name for p in self.tmp.glob("mgm-release.*")], [])
+
+    def test_never_replaces_existing_notices(self):
+        self.out.mkdir()
+        existing = self.out / "mgm-third-party-notices-v0.0.1-local-darwin-arm64.txt"
+        existing.write_text("published")
+        result = self.run_script(
+            "--version", "v0.0.1", "--out", str(self.out), "--allow-foreign-platform", fake_host=True,
+        )
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn(existing.name, result.stderr)
+        self.assertEqual(existing.read_text(), "published")
 
     def test_names_preview_assets(self):
         self.out.mkdir()

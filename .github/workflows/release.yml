@@ -1,8 +1,9 @@
 name: Release
 
 # Builds MGM's deployment asset for a published GitHub release and attaches it
-# to that release, with a SHA-256 file and a build-provenance attestation.
-# Maintainer guide: docs/releasing.md.
+# to that release, with its third-party notices, a SHA-256 file for each, and a
+# build-provenance attestation covering both. Maintainer guide:
+# docs/releasing.md.
 #
 # Publishing a release deploys nothing. This workflow holds no hosting
 # credentials and reads no repository secret: it builds Vercel's prebuilt
@@ -15,10 +16,10 @@ name: Release
 #     tagged commit is on main, and builds on a GitHub-hosted Linux x86-64
 #     runner, the platform Vercel runs Node.js functions on. Its token is
 #     read-only and is not left on disk.
-#   - `Publish release asset` receives the asset as a workflow artifact,
-#     creates its build-provenance attestation, uploads the asset and its
-#     .sha256 file to the release, and appends the asset's details to the
-#     release notes. It checks out and runs no repository code.
+#   - `Publish release asset` receives the asset and its notices as a
+#     workflow artifact, creates their build-provenance attestation, uploads
+#     them and their .sha256 files to the release, and appends the asset's
+#     details to the release notes. It checks out and runs no repository code.
 # docs/releasing.md names both jobs: rename them only together.
 #
 # A pull request that changes the release path, the dependencies or the
@@ -125,7 +126,8 @@ jobs:
 
       # The script refuses any host but Linux x86-64, exports the commit, runs
       # npm ci and `vercel build --prod --standalone` with an allowlisted
-      # environment, checks the output, and packs it.
+      # environment, checks the output, packs it, and writes the third-party
+      # notices beside it.
       - name: Build the asset
         env:
           VERSION: ${{ steps.source.outputs.version }}
@@ -165,14 +167,18 @@ jobs:
         run: |
           asset="mgm-vercel-output-$TAG.tar.gz"
           info="mgm-vercel-output-$TAG.build-info.json"
+          notices="mgm-third-party-notices-$TAG.txt"
           ls -l
-          sha256sum -c "$asset.sha256"
+          sha256sum -c "$asset.sha256" "$notices.sha256"
           jq -e --arg tag "$TAG" --arg commit "$GITHUB_SHA" \
             '.version == $tag and .commit == $commit and .target == "production"' "$info"
 
+      # One attestation, two subjects: the asset and its notices.
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: ${{ runner.temp }}/release/mgm-vercel-output-${{ github.event.release.tag_name }}.tar.gz
+          subject-path: |
+            ${{ runner.temp }}/release/mgm-vercel-output-${{ github.event.release.tag_name }}.tar.gz
+            ${{ runner.temp }}/release/mgm-third-party-notices-${{ github.event.release.tag_name }}.txt
 
       # Never --clobber: an operator may already have pinned an uploaded asset.
       - name: Upload the asset to the release
@@ -182,7 +188,8 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           asset="mgm-vercel-output-$TAG.tar.gz"
-          gh release upload "$TAG" "$asset" "$asset.sha256" --repo "$GITHUB_REPOSITORY"
+          notices="mgm-third-party-notices-$TAG.txt"
+          gh release upload "$TAG" "$asset" "$asset.sha256" "$notices" "$notices.sha256" --repo "$GITHUB_REPOSITORY"
 
       - name: Add the asset's details to the release notes
         working-directory: ${{ runner.temp }}/release
@@ -192,8 +199,10 @@ jobs:
         run: |
           asset="mgm-vercel-output-$TAG.tar.gz"
           info="mgm-vercel-output-$TAG.build-info.json"
+          notices="mgm-third-party-notices-$TAG.txt"
           commit=$(jq -r .commit "$info")
           sha256=$(jq -r .sha256 "$info")
+          notices_sha256=$(cut -d ' ' -f 1 "$notices.sha256")
           signer="${GITHUB_WORKFLOW_REF%@*}"
           {
             echo "## Deployment asset"
@@ -204,6 +213,7 @@ jobs:
             echo "- Production target: \`vercel deploy --prebuilt\` accepts it only with \`--prod\`."
             jq -r '"- Functions: \(.functions.nodejs) Node.js (\(.runtimes | map(select(. != "edge")) | join(", ")), \(.architectures | join(", "))), \(.functions.edge) edge"' "$info"
             jq -r '"- Built with: Vercel CLI \(.vercelCli); " + ([.builders[] | "\(.use) \(.version // "unknown")"] | join(", ")) + "; " + (.frameworks | join(", "))' "$info"
+            echo "- Third-party notices: \`$notices\`, SHA-256 \`$notices_sha256\`, covered by the same attestation."
             echo
             echo "Verify it before deploying (see docs/releasing.md):"
             echo
@@ -216,7 +226,7 @@ jobs:
             echo '```'
             echo
             # Matches LICENSE. If the project's license changes, change this line with it.
-            echo "The source code for this asset is available under the Eclipse Public License 2.0 at tag \`$TAG\`, in this release's source code archives."
+            echo "The source code for this asset is available under the Eclipse Public License 2.0 at tag \`$TAG\`, in this release's source code archives. The third-party packages the asset contains are listed, with the full text of their licences and notices, in \`$notices\`."
           } > section.md
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
           printf '\n\n' >> notes.md
