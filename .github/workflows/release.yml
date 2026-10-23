@@ -142,12 +142,14 @@ jobs:
           scripts/release/build-deploy-asset.sh --version "$VERSION" --ref "$COMMIT" --out "$RUNNER_TEMP/release"
           cat "$RUNNER_TEMP/release/mgm-vercel-output-$VERSION.build-info.json"
 
+      # A release run keeps the artifact for 7 days, so a failed publish job
+      # can be re-run; a dry run keeps it for a day.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-asset
           path: ${{ runner.temp }}/release/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: ${{ github.event_name == 'release' && 7 || 1 }}
 
   publish:
     name: Publish release asset

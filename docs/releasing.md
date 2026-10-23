@@ -90,10 +90,12 @@ back by deploying a previous version they verified.
    announce the release.
 
 If the run fails before uploading, nothing was published: fix the cause and
-re-run the failed jobs. If it fails after uploading, leave the uploaded files
-alone, because an operator may already have pinned them; finish the notes by
-hand or publish the next version. Never upload an asset built anywhere else:
-only the workflow's build carries an attestation.
+re-run the failed jobs. The built files are kept with the run for 7 days, so
+within that time a failed `Publish release asset` can be re-run on its own.
+If it fails after uploading, leave the uploaded files alone, because an
+operator may already have pinned them; finish the notes by hand or publish
+the next version. Never upload an asset built anywhere else: only the
+workflow's build carries an attestation.
 
 ## Verify an asset
 
