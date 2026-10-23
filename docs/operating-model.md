@@ -200,6 +200,73 @@ The `Test` job starts a local Supabase with the CLI version pinned in
 (`public.ecr.aws`) rate-limits anonymous pulls from shared runners. See
 `docs/adr/ADR-004-ci-supabase-image-source.md`. It logs in to GHCR with the job's read-only `GITHUB_TOKEN` (`packages: read`) first, because anonymous GHCR pulls are rate limited too. GHCR also throttles the CLI's parallel layer pulls, so the job restores the images from `actions/cache` (list in `.github/supabase-ci-images.txt`) and pre-pulls any missing one sequentially with short retries (GHCR, then the ECR mirror) before `supabase start`; refresh that list whenever the pinned CLI version changes (ADR-004, 22 Oct amendment).
 
+## Security fixes
+
+A fix for a security weakness that is not yet public (reported privately or
+found by a maintainer) replaces steps 1 and 4 of "How work moves" with the
+sequence in `SECURITY.md`. It starts from a draft security advisory, not an
+issue, and is developed and reviewed in the advisory's temporary private
+fork. GitHub runs no CI or status checks on pull requests there, so the
+checks are run by hand:
+
+- A change to an area that needs another maintainer's review as an ordinary
+  pull request, such as database migrations, RLS helpers, or CI workflows,
+  needs that maintainer's approval in the advisory before it merges.
+- Merging from the advisory merges every open pull request in the private
+  fork at once, and GitHub allows only one of them to target `main`. Before
+  the checks below, close any pull request that should not ship: they test
+  what the merge will produce, not each head on its own.
+- Immediately before merging, the maintainer who merges records the commit
+  `main` is at, the commit of any other branch a pull request targets, and
+  the head commit of every open pull request in the fork. Locally, they
+  merge each recorded head into its branch's recorded commit and review the
+  full diff of the combined result. On that result they run every step of
+  every job that `.github/workflows/` runs on pull requests to `main`,
+  except CodeQL, in order and with the Node.js version and environment
+  variables that job sets, plus any release build checks. That is more than
+  `npm test`: the `Test` job also runs database rehearsals and script tests
+  against its local Supabase. They use a disposable local environment with
+  synthetic data on a machine they control, and keep the recorded commits
+  and the results in the advisory's private record. This step defers to the
+  workflow files so that it changes when they do; if a pull-request check
+  ever runs outside `.github/workflows/`, add it here.
+- Steps that only prepare an Actions runner are replaced by their local
+  equivalent, not reproduced: the checkout is the combined result above,
+  Node.js setup is the job's version installed locally, and the GHCR login,
+  image cache, and image pre-pull steps in `Test` are left out, because
+  `supabase start` pulls any missing image itself. Where a job takes a value
+  from a repository secret or from its `GITHUB_TOKEN`, they use a local,
+  disposable value, never a real secret, or leave the step out if it only
+  authenticates a download. Today no workflow reads a repository secret,
+  and the only step given the job token is that GHCR login (`github.token`
+  and `github.actor`). Search the workflow files for `secrets.` and
+  `github.token` each time, because this changes with them.
+- They confirm every commit is signed and signed off. When they merge,
+  `main` and every head must still be at the recorded commits, with no pull
+  request opened or closed since. If anything has moved, they record,
+  review, and test the new combination before merging.
+- CodeQL cannot run in the private fork, so the maintainer who merges
+  records in the advisory's private record that it did not run there.
+  Nothing in GitHub blocks the merge for that: merge control on `main` is a
+  maintainer social contract (#30), and GitHub does not apply branch
+  protection rules to a merge from an advisory. If GitHub enforcement of
+  required checks is added later, it must let repository administrators
+  bypass it; if it blocks this merge, the maintainer who merges uses that
+  bypass and records it in the advisory's private record.
+- The workflows that run on pushes to `main` then check the merge commit
+  itself, CodeQL included, and the maintainer who merged checks their
+  results before the patch release is published.
+
+Before the merge, preparing the patch release is limited to drafting its
+release notes and the advisory, both privately. No version-bump or
+changelog pull request, pushed tag, built image, or other public artifact
+exists until the fix has merged. After the merge, the patch release is
+published and its artifacts are verified usable before the advisory is
+published; if that fails, the advisory stays in draft until the release is
+repaired and verified again. No installation is upgraded ahead of the
+release. Before 0.1.0 there is no patch release: the merged commit on
+`main` takes its place, as `SECURITY.md` describes.
+
 ## Where things are recorded
 
 | Kind | Where |
@@ -208,7 +275,7 @@ The `Test` job starts a local Supabase with the CLI version pinned in
 | A design decision | `docs/`, next to the area it governs (`entity-model.md`, `cordis-runtime.md`, …); cross-cutting decisions as an ADR in `docs/adr/` |
 | An operational procedure | `docs/runbooks/` |
 | Work in progress and status | GitHub issues and pull requests |
-| An unfixed security weakness | A private security advisory on this repository — never an issue, PR, commit, comment, or test name |
+| A security weakness whose advisory is not yet published | A private security advisory on this repository (`SECURITY.md`) — never an issue, PR, commit, comment, or test name |
 | Strategy, pricing, customer information | Outside this public repository |
 
 ## Legacy references
