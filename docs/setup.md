@@ -282,6 +282,48 @@ If using `--docker` mode, OpenEMS on the host is reachable via `host.docker.inte
 
 If using local/dev mode, run `npm run dev` after setup.
 
+## Try billing with synthetic data (no meters, no OpenEMS)
+
+The synthetic metering plugin produces deterministic, clearly fake readings so
+you can generate and explain a sample bill without physical meters or
+external credentials. Everything it uses is invented (`SYNTHETIC-` meter ids,
+"Synthetic Household 00N" names). It is off by default and loaded only by
+explicit operator action.
+
+1. **Load the demonstration dataset** into an organization of a demonstration
+   environment (never production). This is a script, not a migration:
+
+   ```bash
+   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+     -v org_id=<organization uuid> -v confirm=load-synthetic-demo \
+     -f supabase/scripts/load-synthetic-demo.sql
+   ```
+
+   It creates one "Synthetic Demo Microgrid" with 8 households, each with one
+   meter. It stores no readings and creates no tariff or bill.
+2. **Enable the plugin.** In Settings -> Plugins turn on "Synthetic metering
+   (demonstration)" (it requires Metering). While it is off, billing on the
+   demonstration microgrid fails with a clear "disabled" error and never
+   falls back to another provider.
+3. **Add a tariff** for the demonstration microgrid, then create a billing
+   period for **2026-09-01 to 2026-09-30** and generate bills as usual.
+4. **Read the result.** Readings are a pure function of the meter id, the day
+   and a seed (default `mgm-synthetic-demo-v1`; set
+   `MGM_SYNTHETIC_METERING_SEED` to change it), so every run gives the same
+   usage. Meters 001-005 report every day. The rest show missing data:
+   - 006: no reading on 10-12 September (only in the demo month, 2026-09; other months have no gap for this meter). The meter is a cumulative register,
+     so usage is still known and billable.
+   - 007: no reading on 30 September, the closing day (a gap only for windows that include that day). Usage cannot be
+     established, so it is reported as missing, not zero, and needs a manual
+     reading before that household is billed.
+   - 008: never reported. Missing, not zero.
+
+Synthetic edge ids (`SYNTHETIC-EDGE-*`) are reserved: the edge registration API rejects them, and a microgrid that mixes synthetic and real edges is refused by the provider. Keep the demonstration in its own microgrid and organization, and do not enable online payments for it.
+
+Closing a billing period remains a human action, as with any provider. To
+remove the demonstration data, delete "Synthetic Demo Microgrid".
+Design notes: `docs/adr/ADR-005-synthetic-metering-plugin.md`.
+
 ## Troubleshooting
 
 | Problem | Solution |

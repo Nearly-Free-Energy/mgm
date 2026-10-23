@@ -31,6 +31,7 @@ export default defineConfig({
           exclude: [
             "src/lib/supabase/__tests__/rls.test.ts",
             "src/lib/supabase/__tests__/community_plugin.test.ts",
+            "src/lib/supabase/__tests__/synthetic_metering_plugin.test.ts",
             "src/lib/supabase/__tests__/metering.test.ts",
             "src/lib/supabase/__tests__/ems_bearer_token.test.ts",
             "src/lib/supabase/__tests__/ems_keycloak_client.test.ts",
@@ -65,6 +66,7 @@ export default defineConfig({
           include: [
             "src/lib/supabase/__tests__/rls.test.ts",
             "src/lib/supabase/__tests__/community_plugin.test.ts",
+            "src/lib/supabase/__tests__/synthetic_metering_plugin.test.ts",
             "src/lib/supabase/__tests__/metering.test.ts",
             "src/lib/supabase/__tests__/ems_bearer_token.test.ts",
             "src/lib/supabase/__tests__/ems_keycloak_client.test.ts",

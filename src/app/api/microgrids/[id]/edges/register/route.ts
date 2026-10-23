@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
+import { SYNTHETIC_EDGE_ID_PREFIX } from "@/lib/metering/synthetic/dataset";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,6 +74,23 @@ export async function POST(
         { status: 400 }
       );
     }
+  }
+
+  // Synthetic demonstration edges come only from the operator loader
+  // (supabase/scripts/load-synthetic-demo.sql). Registering one here would let
+  // a real microgrid be routed to synthetic readings (ADR-005).
+  if (
+    body.edges.some((e) =>
+      e.openems_edge_id.trim().toUpperCase().startsWith(SYNTHETIC_EDGE_ID_PREFIX)
+    )
+  ) {
+    return NextResponse.json(
+      {
+        error: `Edge ids starting with ${SYNTHETIC_EDGE_ID_PREFIX} are reserved for synthetic demonstration data.`,
+        code: "edge_id_reserved",
+      },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();

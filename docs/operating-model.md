@@ -8,7 +8,8 @@ this page is the frame around them.
 MGM (Microgrid Manager) is an operating system for microgrid operators,
 built as [Cordis](https://github.com/cordiverse/cordis) plugins on Next.js and
 Supabase. An organization enables the plugins it needs — community
-management, metering, billing, payments — and each plugin owns its routes,
+management, metering, billing, payments, and optionally the synthetic
+metering demonstration source — and each plugin owns its routes,
 tables, and capability (`src/lib/plugins/bundled.ts`,
 `docs/cordis-runtime.md`). New capabilities and providers are added as
 plugins, not as edits to existing ones.

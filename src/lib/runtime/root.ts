@@ -15,6 +15,7 @@ import {
   type MgmPluginName,
 } from "@/lib/plugins/bundled";
 import { OpenEmsMeteringPlugin } from "@/lib/metering/providers-plugin";
+import { SyntheticMeteringPlugin } from "@/lib/metering/synthetic-plugin";
 import { PesapalProviderPlugin } from "@/lib/payments/providers/pesapal/plugin";
 import { MgmGate } from "./gate";
 import {
@@ -63,6 +64,7 @@ export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   GatePlugin,
   MeteringProvidersPlugin,
   OpenEmsMeteringPlugin,
+  SyntheticMeteringPlugin,
   PaymentProvidersPlugin,
   PesapalProviderPlugin,
 ];

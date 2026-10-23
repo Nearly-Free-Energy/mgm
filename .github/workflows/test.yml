@@ -162,6 +162,15 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
+      - name: Synthetic demonstration loader rehearsal
+        run: |
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-synthetic-demo.sql
+          # Missing variables must fail with a non-zero exit.
+          if psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/load-synthetic-demo.sql; then
+            echo "loader accepted a missing org_id/confirm"; exit 1
+          fi
+
       - name: Maintenance command safety tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_credential_key_maintenance.py'
 

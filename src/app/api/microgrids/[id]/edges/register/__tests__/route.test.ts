@@ -68,6 +68,19 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects reserved SYNTHETIC- edge ids (any case) before any database call", async () => {
+    const { POST } = await import("../route");
+    for (const id of ["SYNTHETIC-EDGE-001", " synthetic-edge-9 "]) {
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: "real-1", name: "r" }, { openems_edge_id: id, name: "s" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe("edge_id_reserved");
+    }
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for an entry missing openems_edge_id", async () => {
     const { POST } = await import("../route");
     const res = await POST(makeReq({ edges: [{ name: "n" }] }), {
