@@ -188,5 +188,11 @@ artifact holds that Linux build for a day, for inspection.
   server-rendered module does, is not found: check the notices of the dry run
   when adding one. The build fails, rather than leaving a package out, when a
   function's source map or a package's `package.json` cannot be read.
+- `src/lib/__tests__/no-server-actions-or-draft-mode.test.ts` fails when the
+  source introduces Server Actions (`"use server"`) or draft mode
+  (`draftMode`). Release assets are built without installation settings, so
+  before introducing either, set `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` (and a
+  fixed preview-mode configuration if draft mode is used) in the hosting
+  environment, then update the test.
 - `scripts/tests/test_build_deploy_asset.py` covers the packer's checks, the
   notices writer and the script's refusals; the `Test` workflow runs it.
