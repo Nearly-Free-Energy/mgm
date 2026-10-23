@@ -97,10 +97,12 @@ Worse, or to watch:
   installation; multi-tenant hosting in one process would need a
   request-scoped store. A browser client created outside the root layout's tree fails with
   a clear error rather than using a stale value.
-- During the compatibility release a legacy `NEXT_PUBLIC_*` value present at
-  build time can still be inlined into server code by Next.js. Only the new
-  names are guaranteed request-time; operators should rename before the
-  fallback is removed.
+- During the compatibility release the legacy `NEXT_PUBLIC_*` names are read
+  through an alias of `process.env` (`readEnv()` in both config modules), so
+  Next.js does not inline build-time values into server, middleware or
+  instrumentation bundles. If Next starts tracing aliases of `process.env`,
+  revisit; verify by grepping `.next/server` after a build with the old names
+  set.
 - The session middleware moves from the Edge runtime to Node.js. Node.js
   middleware is supported for `middleware.ts` by the installed Next.js 16;
   renaming to `proxy.ts` (Node.js only) is a later mechanical change.

@@ -77,10 +77,14 @@ export function parseAppOrigin(env: RuntimeEnv): string {
 }
 
 function readEnv(): RuntimeEnv {
+  // Read the legacy names through an alias so Next's define plugin cannot
+  // inline NEXT_PUBLIC_* at build time. If Next starts tracing aliases of
+  // process.env, revisit.
+  const env = process.env;
   return {
     MGM_APP_URL: process.env.MGM_APP_URL,
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-    NEXT_PUBLIC_PAYMENT_CALLBACK_URL: process.env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL,
+    NEXT_PUBLIC_APP_URL: env["NEXT_PUBLIC_APP_URL"],
+    NEXT_PUBLIC_PAYMENT_CALLBACK_URL: env["NEXT_PUBLIC_PAYMENT_CALLBACK_URL"],
   };
 }
 

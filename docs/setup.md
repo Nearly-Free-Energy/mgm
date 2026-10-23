@@ -233,9 +233,12 @@ fallback:
   
   Once `MGM_APP_URL` is set, the return URL is always
   `${MGM_APP_URL}/payment/callback`; a custom return path is not carried over.
-- A legacy `NEXT_PUBLIC_*` value present at build time may still be inlined by
-  Next.js into server code, as before. Only the new names are guaranteed to be
-  read at request time; the browser bundle no longer reads any of them.
+- The legacy names are read from the live environment at request time, like
+  the new ones (the code reads them through an alias of `process.env`, so
+  Next.js does not inline a value present at build time); the browser bundle
+  no longer reads any of them. A build made with the old names set therefore
+  carries none of their values, and a server without the new names reports
+  them as missing.
 
 The fallback will be removed in the next release. Rename, redeploy, and
 confirm login and a payment link before then.

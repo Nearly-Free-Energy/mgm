@@ -207,13 +207,17 @@ export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeCo
  * environment like the rest of the server.
  */
 function readEnv(): RuntimeEnv {
+  // Read the legacy names through an alias so Next's define plugin cannot
+  // inline NEXT_PUBLIC_* at build time. If Next starts tracing aliases of
+  // process.env, revisit.
+  const env = process.env;
   return {
     MGM_PUBLIC_SUPABASE_URL: process.env.MGM_PUBLIC_SUPABASE_URL,
     MGM_PUBLIC_SUPABASE_ANON_KEY: process.env.MGM_PUBLIC_SUPABASE_ANON_KEY,
     MGM_PUBLIC_SUPABASE_COOKIE_NAME: process.env.MGM_PUBLIC_SUPABASE_COOKIE_NAME,
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    NEXT_PUBLIC_SUPABASE_COOKIE_NAME: process.env.NEXT_PUBLIC_SUPABASE_COOKIE_NAME,
+    NEXT_PUBLIC_SUPABASE_URL: env[LEGACY_NAMES.url],
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: env[LEGACY_NAMES.anonKey],
+    NEXT_PUBLIC_SUPABASE_COOKIE_NAME: env[LEGACY_NAMES.cookieName],
     SUPABASE_INTERNAL_URL: process.env.SUPABASE_INTERNAL_URL,
   };
 }
