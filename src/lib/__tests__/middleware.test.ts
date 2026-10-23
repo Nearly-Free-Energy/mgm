@@ -11,26 +11,31 @@
  * project (vitest.config.ts only globs src/lib, src/components, and
  * src/app).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // Mock @supabase/ssr so getUser() resolves to a deterministic value.
 const getUserMock = vi.fn();
+const createServerClientMock = vi.fn((..._args: unknown[]) => ({
+  auth: {
+    getUser: getUserMock,
+  },
+}));
 
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: () => ({
-    auth: {
-      getUser: getUserMock,
-    },
-  }),
+  createServerClient: (...args: unknown[]) => createServerClientMock(...args),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
   getUserMock.mockReset();
-  // Provide minimal env for the middleware to construct a client.
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
+  // Provide minimal request-time runtime configuration (#46).
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "http://localhost:54321");
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_test");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 async function loadMiddleware() {
@@ -244,4 +249,86 @@ describe("middleware PUBLIC_PATHS", () => {
     expect((await middleware(makeRequest("/api/payments/reconcile-worker/extra"))).status).toBe(404);
   });
 
+});
+
+describe("middleware runtime configuration (#46)", () => {
+  it.each([
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "https://alpha.example.test",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_alpha",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-alpha-auth-token",
+        SUPABASE_INTERNAL_URL: "",
+      },
+      url: "https://alpha.example.test",
+      key: "sb_publishable_alpha",
+      cookie: { cookieOptions: { name: "sb-alpha-auth-token" } },
+    },
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_beta",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-beta-auth-token",
+        SUPABASE_INTERNAL_URL: "http://kong:8000",
+      },
+      url: "http://kong:8000",
+      key: "sb_publishable_beta",
+      cookie: { cookieOptions: { name: "sb-beta-auth-token" } },
+    },
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_gamma",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "",
+        SUPABASE_INTERNAL_URL: "",
+      },
+      url: "http://localhost:54321",
+      key: "sb_publishable_gamma",
+      cookie: {},
+    },
+  ])("builds its Supabase client from the request-time settings ($url)", async ({ env, url, key, cookie }) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    await middleware(makeRequest("/settings/plugins"));
+    const [calledUrl, calledKey, options] = createServerClientMock.mock.calls.at(-1) as [
+      string,
+      string,
+      Record<string, unknown>,
+    ];
+    expect(calledUrl).toBe(url);
+    expect(calledKey).toBe(key);
+    expect(options.cookieOptions).toEqual((cookie as { cookieOptions?: unknown }).cookieOptions);
+  });
+
+  it("refuses an internal URL on another host without a shared cookie name", async () => {
+    vi.stubEnv("SUPABASE_INTERNAL_URL", "http://kong:8000");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+    const middleware = await loadMiddleware();
+    await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
+      /MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set/
+    );
+  });
+
+  it("runs on the Node.js runtime so it reads the real process environment", async () => {
+    vi.resetModules();
+    const { config } = await import("../../middleware");
+    expect(config.runtime).toBe("nodejs");
+  });
+
+  it("fails closed, naming the variable, when configuration is missing", async () => {
+    for (const name of [
+      "MGM_PUBLIC_SUPABASE_URL",
+      "MGM_PUBLIC_SUPABASE_ANON_KEY",
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    ]) {
+      vi.stubEnv(name, "");
+    }
+    const middleware = await loadMiddleware();
+    await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
+      /MGM_PUBLIC_SUPABASE_URL/
+    );
+    expect(createServerClientMock).not.toHaveBeenCalled();
+  });
 });

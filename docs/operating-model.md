@@ -36,6 +36,40 @@ discussion first, not a PR.
    `src/lib/mgm/released-routes.ts`; inherited or unfinished surfaces stay
    behind it.
 
+## Configuration
+
+An installation is configured entirely by its server environment, read at
+request time, so the same build or container image serves any installation
+(#46; `docs/adr/ADR-003-runtime-public-configuration.md`; variables and the
+migration from the old names in `docs/setup.md`, "Runtime configuration").
+
+- **Public allowlist.** Exactly three values reach the browser:
+  `MGM_PUBLIC_SUPABASE_URL`, `MGM_PUBLIC_SUPABASE_ANON_KEY` and the optional
+  `MGM_PUBLIC_SUPABASE_COOKIE_NAME`. They are validated on the server
+  (`src/lib/config/public-runtime-config.ts`) and passed from the root layout
+  to `PublicRuntimeConfigProvider`. Browser code never reads `process.env`
+  for them, and no new value joins the allowlist without the same review as a
+  credential change.
+- **Server-only settings.** `MGM_APP_URL` (public origin for payment links
+  and payment-notification registration, `src/lib/config/app-url.ts`),
+  `SUPABASE_INTERNAL_URL`, the service-role key, the credential encryption
+  key and provider credentials are never serialized into props, HTML or
+  bundles.
+- **One source per request.** Browser, server and middleware (Node.js
+  runtime) Supabase clients use the same validated values and cookie name;
+  an internal Supabase URL on another host requires an explicit cookie name. The configuration-
+  bearing root layout renders per request; it is never prerendered or served
+  from a shared cache.
+- **Fail clearly.** Missing or invalid settings stop the request (and, at
+  server start, every request until fixed; `src/instrumentation.ts`) with an
+  error naming the variable, never its value. The process keeps running, so
+  look for "Failed to prepare server" in the logs. An invalid `MGM_APP_URL`
+  is only logged at start and fails payments on first use.
+- **No `NEXT_PUBLIC_` for deployment settings.** Next.js inlines those at
+  build time. The former `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL` and
+  `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names are a documented fallback for one
+  release only.
+
 ## How work moves
 
 1. **Issue.** Work starts as a GitHub issue on this repository describing the

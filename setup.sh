@@ -114,9 +114,11 @@ generate_env_local() {
   local service_role_key="$3"
 
   cat > .env.local <<ENVEOF
-NEXT_PUBLIC_SUPABASE_URL=${supabase_url}
-NEXT_PUBLIC_SUPABASE_ANON_KEY=${anon_key}
+# Request-time runtime configuration (docs/setup.md "Runtime configuration")
+MGM_PUBLIC_SUPABASE_URL=${supabase_url}
+MGM_PUBLIC_SUPABASE_ANON_KEY=${anon_key}
 SUPABASE_SERVICE_ROLE_KEY=${service_role_key}
+MGM_APP_URL=http://localhost:3000
 
 # OpenEMS B2B REST API
 OPENEMS_B2B_URL=http://localhost:8075
@@ -129,7 +131,7 @@ ENVEOF
 check_existing_env() {
   if [ -f .env.local ] && [ "$FORCE" = false ]; then
     local existing_url
-    existing_url=$(grep '^NEXT_PUBLIC_SUPABASE_URL=' .env.local | cut -d= -f2- || echo "")
+    existing_url=$(grep -E '^(MGM_PUBLIC|NEXT_PUBLIC)_SUPABASE_URL=' .env.local | head -n 1 | cut -d= -f2- || echo "")
     if echo "$existing_url" | grep -qE '(localhost|127\.0\.0\.1)'; then
       warn ".env.local already exists (pointing at local Supabase)"
     else
@@ -250,22 +252,23 @@ elif [ "$MODE" = "local" ]; then
 
     # Map supabase status env var names to the names our app expects
     supabase status -o env 2>/dev/null | awk -F= '
-      /^API_URL=/ { print "NEXT_PUBLIC_SUPABASE_URL=" substr($0, index($0,"=")+1) }
-      /^ANON_KEY=/ { print "NEXT_PUBLIC_SUPABASE_ANON_KEY=" substr($0, index($0,"=")+1) }
+      /^API_URL=/ { print "MGM_PUBLIC_SUPABASE_URL=" substr($0, index($0,"=")+1) }
+      /^ANON_KEY=/ { print "MGM_PUBLIC_SUPABASE_ANON_KEY=" substr($0, index($0,"=")+1) }
       /^SERVICE_ROLE_KEY=/ { print "SUPABASE_SERVICE_ROLE_KEY=" substr($0, index($0,"=")+1) }
     ' > .env.local
 
     # Validate we got all three values
-    if ! grep -q '^NEXT_PUBLIC_SUPABASE_URL=' .env.local || \
-       ! grep -q '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' .env.local || \
+    if ! grep -q '^MGM_PUBLIC_SUPABASE_URL=' .env.local || \
+       ! grep -q '^MGM_PUBLIC_SUPABASE_ANON_KEY=' .env.local || \
        ! grep -q '^SUPABASE_SERVICE_ROLE_KEY=' .env.local; then
       err "Failed to extract Supabase credentials from 'supabase status'"
       rm -f .env.local
       exit 1
     fi
 
-    # Append OpenEMS defaults
+    # Append the application origin and OpenEMS defaults
     cat >> .env.local <<'ENVEOF'
+MGM_APP_URL=http://localhost:3000
 
 # OpenEMS B2B REST API
 OPENEMS_B2B_URL=http://localhost:8075
