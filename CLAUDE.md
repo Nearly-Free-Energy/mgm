@@ -253,7 +253,6 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
 - **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR, linked from #33 and covered by the container work in #51; do not change it silently.
 - **`Test`**: Node 24 from `.nvmrc`. **`Build`**: Node 24 from `.nvmrc`, with a major-version check.
 
-
 **For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
 
 ## Local Dev Setup
