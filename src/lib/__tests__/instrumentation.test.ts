@@ -30,13 +30,19 @@ describe("instrumentation register()", () => {
     await expect((await loadRegister())()).resolves.toBeUndefined();
   });
 
-  it("stops the server on an invalid MGM_APP_URL", async () => {
+  it("logs an error naming MGM_APP_URL and does not throw on an invalid value", async () => {
     stubValid();
     vi.stubEnv("MGM_APP_URL", "http://mgm.example.org");
-    await expect((await loadRegister())()).rejects.toThrow(/MGM_APP_URL must use https/);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    const logged = String(error.mock.calls[0][0]);
+    expect(logged).toMatch(/MGM_APP_URL must use https/);
+    expect(logged).not.toContain("mgm.example.org");
+    error.mockRestore();
   });
 
-  it("stops the server on missing Supabase settings", async () => {
+  it("rejects register() on missing Supabase settings", async () => {
     stubValid();
     vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "");
     vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "");

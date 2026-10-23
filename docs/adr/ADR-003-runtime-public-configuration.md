@@ -58,7 +58,10 @@ human-only period close are unaffected and must stay so.
    `/payment/callback` and `/api/payments/ipn` registration. It is never sent
    to the browser. The localhost fallback is removed. `src/instrumentation.ts`
    validates it, and the Supabase settings, at server start (skipped during
-   `next build`).
+   `next build`). An invalid Supabase setting rejects `register()`, so every
+   request fails with 500 while the process keeps running; an invalid
+   `MGM_APP_URL` is logged and payments fail closed. No `process.exit()`
+   (it would break Vercel).
 5. **No deployment build arguments.** The Dockerfile drops the
    `NEXT_PUBLIC_SUPABASE_*` arguments; Compose and `setup.sh` write the new
    names as runtime environment.

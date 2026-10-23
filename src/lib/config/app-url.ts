@@ -120,8 +120,9 @@ export function paymentReturnUrl(env: RuntimeEnv = readEnv()): string {
 
 /**
  * Server-start check (src/instrumentation.ts). An invalid application URL
- * stops the server; a missing one is reported, because only the payments
- * plugin needs it and it fails clearly on first use.
+ * throws here and the caller logs it without stopping the server; a missing
+ * one is reported, because only the payments plugin needs it and it fails
+ * clearly on first use.
  */
 export function validateAppUrlAtStartup(env: RuntimeEnv = readEnv()): void {
   if (

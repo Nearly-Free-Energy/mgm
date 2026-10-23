@@ -61,8 +61,10 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
   bearing root layout renders per request; it is never prerendered or served
   from a shared cache.
 - **Fail clearly.** Missing or invalid settings stop the request (and, at
-  server start, the server; `src/instrumentation.ts`) with an error naming the
-  variable, never its value.
+  server start, every request until fixed; `src/instrumentation.ts`) with an
+  error naming the variable, never its value. The process keeps running, so
+  look for "Failed to prepare server" in the logs. An invalid `MGM_APP_URL`
+  is only logged at start and fails payments on first use.
 - **No `NEXT_PUBLIC_` for deployment settings.** Next.js inlines those at
   build time. The former `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL` and
   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names are a documented fallback for one

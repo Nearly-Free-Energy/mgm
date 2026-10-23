@@ -3,9 +3,12 @@
  *
  * Next.js calls register() once when a server instance starts. It is skipped
  * during `next build` (NEXT_PHASE), because a build carries no installation
- * settings by design, and on the Edge runtime. An invalid MGM_APP_URL or
- * Supabase setting stops the server with an error naming the variable, never
- * its value.
+ * settings by design, and on the Edge runtime. An invalid Supabase setting
+ * rejects register(): Next.js logs "Failed to prepare server", the process
+ * keeps running and every request fails with 500. An invalid MGM_APP_URL is
+ * logged here (variable named, never its value) and does not throw, because
+ * only payments need it and they fail closed through appUrl(). Do not call
+ * process.exit() here; it would break Vercel.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -14,6 +17,14 @@ export async function register() {
   const { validatePublicRuntimeConfigAtStartup } = await import(
     "@/lib/config/public-runtime-config"
   );
-  validateAppUrlAtStartup();
+  try {
+    validateAppUrlAtStartup();
+  } catch (error) {
+    console.error(
+      `[mgm] Invalid application URL; payment features will fail until it is fixed. ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
   validatePublicRuntimeConfigAtStartup();
 }

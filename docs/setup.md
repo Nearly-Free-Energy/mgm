@@ -182,9 +182,15 @@ Missing or invalid settings stop the request with an error that names the
 variable and never prints its value.
 
 At server start (`src/instrumentation.ts`, not during `next build`) MGM
-validates the Supabase settings and `MGM_APP_URL`: an invalid value stops the
-server; a missing `MGM_APP_URL` only logs a warning, because payments are the
-only feature that needs it and they fail clearly on first use.
+validates the Supabase settings and `MGM_APP_URL`. An invalid Supabase setting
+is logged at server start; every page and API request then fails with 500
+while the process keeps running (it does not exit, so a restart policy does
+not fire). Look for "Failed to prepare server" or "An error occurred while
+loading instrumentation hook" in the logs. An invalid `MGM_APP_URL` is logged
+as an error naming the variable and does not stop anything else; payment
+links and notification registration fail with the same message on first use.
+A missing `MGM_APP_URL` only logs a warning, because payments are the only
+feature that needs it.
 
 Variables are read when a request is served. Set them in the hosting
 environment (Vercel project settings, the container's `environment:`, or
