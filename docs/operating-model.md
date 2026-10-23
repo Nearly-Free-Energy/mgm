@@ -74,31 +74,60 @@ checks are run by hand:
 - A change to an area that needs another maintainer's review as an ordinary
   pull request, such as database migrations, RLS helpers, or CI workflows,
   needs that maintainer's approval in the advisory before it merges.
-- Immediately before merging, the maintainer who merges reviews the full
-  diff of every open pull request in the private fork at its current head.
-  On exactly those commits with current `main` merged in, they run every
-  step of every job that `.github/workflows/` runs on pull requests to
-  `main`, except CodeQL, in order and with the Node.js version and
-  environment variables that job sets, plus any release build checks. That
-  is more than `npm test`: the `Test` job also runs database rehearsals and
-  script tests against its local Supabase. They use a disposable local
-  environment with synthetic data on a machine they control, and record the
-  tested commit and the results privately. This step defers to the workflow
-  files so that it changes when they do; if a pull-request check ever runs
-  outside `.github/workflows/`, add it here.
-- They confirm every commit is signed and signed off, and do not merge if
-  any head has moved since the review.
-- CodeQL is a deliberate exception to the merge controls, which otherwise
-  require it to pass before merging: it cannot run in the private fork. It
-  runs on `main` after the merge, and the maintainer who merged checks its
-  result on the merge commit before the patch release is published.
+- Merging from the advisory merges every open pull request in the private
+  fork at once, and GitHub allows only one of them to target `main`. Before
+  the checks below, close any pull request that should not ship: they test
+  what the merge will produce, not each head on its own.
+- Immediately before merging, the maintainer who merges records the commit
+  `main` is at, the commit of any other branch a pull request targets, and
+  the head commit of every open pull request in the fork. Locally, they
+  merge each recorded head into its branch's recorded commit and review the
+  full diff of the combined result. On that result they run every step of
+  every job that `.github/workflows/` runs on pull requests to `main`,
+  except CodeQL, in order and with the Node.js version and environment
+  variables that job sets, plus any release build checks. That is more than
+  `npm test`: the `Test` job also runs database rehearsals and script tests
+  against its local Supabase. They use a disposable local environment with
+  synthetic data on a machine they control, and keep the recorded commits
+  and the results in the advisory's private record. This step defers to the
+  workflow files so that it changes when they do; if a pull-request check
+  ever runs outside `.github/workflows/`, add it here.
+- Steps that only prepare an Actions runner are replaced by their local
+  equivalent, not reproduced: the checkout is the combined result above,
+  Node.js setup is the job's version installed locally, and the GHCR login,
+  image cache, and image pre-pull steps in `Test` are left out, because
+  `supabase start` pulls any missing image itself. Where a job takes a value
+  from a repository secret or from its `GITHUB_TOKEN`, they use a local,
+  disposable value, never a real secret, or leave the step out if it only
+  authenticates a download. Today no workflow reads a repository secret,
+  and the only step given the job token is that GHCR login (`github.token`
+  and `github.actor`). Search the workflow files for `secrets.` and
+  `github.token` each time, because this changes with them.
+- They confirm every commit is signed and signed off. When they merge,
+  `main` and every head must still be at the recorded commits, with no pull
+  request opened or closed since. If anything has moved, they record,
+  review, and test the new combination before merging.
+- CodeQL cannot run in the private fork, so the maintainer who merges
+  records in the advisory's private record that it did not run there.
+  Nothing in GitHub blocks the merge for that: merge control on `main` is a
+  maintainer social contract (#30), and GitHub does not apply branch
+  protection rules to a merge from an advisory. If GitHub enforcement of
+  required checks is added later, it must let repository administrators
+  bypass it; if it blocks this merge, the maintainer who merges uses that
+  bypass and records it in the advisory's private record.
+- The workflows that run on pushes to `main` then check the merge commit
+  itself, CodeQL included, and the maintainer who merged checks their
+  results before the patch release is published.
 
-The patch release and the draft advisory are prepared before the merge.
-After it, the patch release is published and its artifacts are verified
-usable before the advisory is published; if that fails, the advisory stays
-in draft until the release is repaired and verified again. No installation
-is upgraded ahead of the release. Before 0.1.0 there is no patch release: the
-merged commit on `main` takes its place, as `SECURITY.md` describes.
+Before the merge, preparing the patch release is limited to drafting its
+release notes and the advisory, both privately. No version-bump or
+changelog pull request, pushed tag, built image, or other public artifact
+exists until the fix has merged. After the merge, the patch release is
+published and its artifacts are verified usable before the advisory is
+published; if that fails, the advisory stays in draft until the release is
+repaired and verified again. No installation is upgraded ahead of the
+release. Before 0.1.0 there is no patch release: the merged commit on
+`main` takes its place, as `SECURITY.md` describes.
 
 ## Where things are recorded
 

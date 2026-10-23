@@ -23,7 +23,7 @@ Read, in this order:
 1. **OpenEMS calls are server-side only.** Credentials never reach the browser and never use a `NEXT_PUBLIC_` variable.
 2. **RLS on every table.** Row Level Security enforces organization isolation; app-side checks are defense in depth.
 3. **Every write enters the Cordis runtime.** Compose a capability or call `gateRoute()` with the owning plugin; `route-surface.test.ts` enforces it.
-4. **This is a public repo.** Never commit credentials, infrastructure identifiers, or strategy. A security weakness is described only in a private security advisory until that advisory is published — never in an issue, PR, commit, or comment; `SECURITY.md` sets out how the fix is tested and released before the advisory is published.
+4. **This is a public repo.** Never commit credentials, infrastructure identifiers, or strategy. A security weakness is described only in a private security advisory until that advisory is published — never in an issue, PR, commit, or comment; `SECURITY.md` and `docs/operating-model.md` § "Security fixes" set out how the fix is tested and released before the advisory is published.
 5. **Billing periods are closed by a person.** Never automate period close.
 6. **Billing logic is provider-neutral.** It consumes the metering provider interface, not OpenEMS types.
 
