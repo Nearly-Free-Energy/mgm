@@ -1,5 +1,5 @@
-"""Tests for scripts/release/build-deploy-asset.sh, vercel_build_output.py and
-third_party_notices.py.
+"""Tests for scripts/release/build-deploy-asset.sh, vercel_build_output.py,
+third_party_notices.py and the pins in .github/workflows/release.yml.
 
 The packer, its checks and the notices writer run against small synthetic
 Build Output and project directories, so these tests need no npm, network or
@@ -22,6 +22,7 @@ import unittest
 
 RELEASE_DIR = Path(__file__).resolve().parents[1] / "release"
 SCRIPT = RELEASE_DIR / "build-deploy-asset.sh"
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
 PACKER = RELEASE_DIR / "vercel_build_output.py"
 NOTICES = RELEASE_DIR / "third_party_notices.py"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
@@ -685,6 +686,24 @@ class ScriptTest(unittest.TestCase):
         self.assertTrue(shutil.which("shellcheck"), "shellcheck is not installed")
         result = subprocess.run(["shellcheck", str(SCRIPT)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class WorkflowTest(unittest.TestCase):
+    """The pins in the Release workflow."""
+
+    def setUp(self):
+        self.lines = WORKFLOW.read_text().splitlines()
+
+    def test_every_action_is_pinned_to_a_commit_with_its_version(self):
+        uses = [line.strip() for line in self.lines if re.match(r"\s*(- )?uses:", line)]
+        self.assertTrue(uses)
+        for line in uses:
+            with self.subTest(line):
+                self.assertRegex(line, r"^(- )?uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$")
+
+    def test_every_job_runs_on_a_pinned_image(self):
+        runs_on = [line.strip() for line in self.lines if re.match(r"\s*runs-on:", line)]
+        self.assertEqual(runs_on, ["runs-on: ubuntu-24.04"] * 2)
 
 
 if __name__ == "__main__":

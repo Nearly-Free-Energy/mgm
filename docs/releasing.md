@@ -32,11 +32,11 @@ back by deploying a previous version they verified.
   with `--prod`, and otherwise refuses it before uploading anything.
 - **Self-contained.** `--standalone` copies every file the functions need into
   the output, so it deploys from an empty directory.
-- **Built on a GitHub-hosted Linux x86-64 runner.** The build copies only the
-  build host's native modules (MGM uses `argon2`) into the functions and
-  records the host's architecture, and Vercel runs Node.js functions on Linux
-  x86-64. The build script refuses any other host unless told the build is a
-  local test.
+- **Built on a GitHub-hosted Linux x86-64 runner** (`ubuntu-24.04`). The
+  build copies only the build host's native modules (MGM uses `argon2`) into
+  the functions and records the host's architecture, and Vercel runs Node.js
+  functions on Linux x86-64. The build script refuses any other host unless
+  told the build is a local test.
 - **Free of installation settings.** It is built from the committed tree,
   with placeholder project IDs, no Vercel account or token, and an
   environment made from an allowlist. Each installation supplies its own
@@ -175,6 +175,16 @@ artifact holds that Linux build for a day, for inspection.
   (`VERCEL_CLI_VERSION`). The CLI loads the `@vercel/next` builder it depends
   on, and the release notes record both versions. Change the pin deliberately,
   in its own pull request, so the dry run shows its effect.
+- Every action in `.github/workflows/release.yml` is pinned to a full commit
+  SHA, with its version in a comment. Dependabot (`.github/dependabot.yml`)
+  proposes updates weekly, and the dry run runs on each. Pin a new action the
+  same way: resolve its version tag with
+  `gh api repos/<owner>/<repo>/git/ref/tags/<version>`, and if that returns
+  an annotated tag (`"type": "tag"`), follow it with
+  `gh api repos/<owner>/<repo>/git/tags/<sha>` to the commit.
+- Both jobs run on `ubuntu-24.04`, not `ubuntu-latest`, so the build host
+  changes only in a pull request that changes it. Move to a newer image the
+  same way as a CLI upgrade, in its own pull request.
 - The placeholder project settings in the script match the hosting project's:
   the Next.js preset, the default install, build and output commands, and
   Node.js from `.nvmrc`. If the hosting project gains overrides, mirror them

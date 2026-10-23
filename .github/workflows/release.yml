@@ -22,6 +22,11 @@ name: Release
 #     details to the release notes. It checks out and runs no repository code.
 # docs/releasing.md names both jobs: rename them only together.
 #
+# Every action is pinned to a full commit SHA, with its version in a comment;
+# Dependabot (.github/dependabot.yml) proposes updates weekly. Both jobs run on
+# ubuntu-24.04 rather than ubuntu-latest, so the build host changes only in a
+# pull request that changes it, where the dry run below shows the effect.
+#
 # A pull request that changes the release path, the dependencies or the
 # Node.js version runs `Build release asset` alone, as a dry run: the same
 # build and checks on the pull request's merge commit, as version
@@ -64,13 +69,13 @@ defaults:
 jobs:
   build:
     name: Build release asset
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The release's tag; for a pull request, its merge commit (the default).
           ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || '' }}
@@ -112,7 +117,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       # No dependency cache: a release installs from the lockfile from scratch.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: '.nvmrc'
 
@@ -136,7 +141,7 @@ jobs:
           scripts/release/build-deploy-asset.sh --version "$VERSION" --ref "$COMMIT" --out "$RUNNER_TEMP/release"
           cat "$RUNNER_TEMP/release/mgm-vercel-output-$VERSION.build-info.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-asset
           path: ${{ runner.temp }}/release/
@@ -147,7 +152,7 @@ jobs:
     name: Publish release asset
     if: github.event_name == 'release'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write      # upload the asset to the release and edit its notes
@@ -155,7 +160,7 @@ jobs:
       attestations: write  # store the attestation in this repository
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-asset
           path: ${{ runner.temp }}/release
@@ -174,7 +179,7 @@ jobs:
             '.version == $tag and .commit == $commit and .target == "production"' "$info"
 
       # One attestation, two subjects: the asset and its notices.
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/release/mgm-vercel-output-${{ github.event.release.tag_name }}.tar.gz
