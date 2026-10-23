@@ -124,14 +124,20 @@ sha256sum -c "mgm-vercel-output-$version.tar.gz.sha256" \
 gh attestation verify "mgm-vercel-output-$version.tar.gz" \
   --repo Nearly-Free-Energy/mgm \
   --signer-workflow Nearly-Free-Energy/mgm/.github/workflows/release.yml \
-  --source-digest "$commit"
+  --source-digest "$commit" \
+  --source-ref "refs/tags/$version" \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com \
+  --deny-self-hosted-runners
 ```
 
 - The `.sha256` file comes from the same release as the asset, so it shows
   only that the download is intact. An operator who pinned a digest compares
   the asset's SHA-256 with the pinned value instead.
 - `gh attestation verify` shows that this repository's Release workflow built
-  these exact bytes from the commit given to `--source-digest`. Run it on
+  these exact bytes from the commit given to `--source-digest`, in a run for
+  this version's tag (`--source-ref`), signed with a GitHub Actions identity
+  (`--cert-oidc-issuer`, which is also `gh`'s default) on a GitHub-hosted
+  runner (`--deny-self-hosted-runners`). Run it on
   `mgm-third-party-notices-$version.txt` too: the same attestation covers it.
 - To confirm that the commit is on `main`, run
   `gh api repos/Nearly-Free-Energy/mgm/compare/main...$commit --jq .status`;

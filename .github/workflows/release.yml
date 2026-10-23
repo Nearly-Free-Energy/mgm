@@ -278,7 +278,10 @@ jobs:
             echo "gh attestation verify $asset \\"
             echo "  --repo $GITHUB_REPOSITORY \\"
             echo "  --signer-workflow $signer \\"
-            echo "  --source-digest $GITHUB_SHA"
+            echo "  --source-digest $GITHUB_SHA \\"
+            echo "  --source-ref refs/tags/$TAG \\"
+            echo "  --cert-oidc-issuer https://token.actions.githubusercontent.com \\"
+            echo "  --deny-self-hosted-runners"
             echo '```'
             echo
             # Matches LICENSE. If the project's license changes, change this line with it.
