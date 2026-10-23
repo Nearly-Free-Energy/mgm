@@ -219,12 +219,14 @@ fallback:
 - The Supabase settings are taken as a set. When neither
   `MGM_PUBLIC_SUPABASE_URL` nor `MGM_PUBLIC_SUPABASE_ANON_KEY` is set, all three
   `NEXT_PUBLIC_SUPABASE_*` values are used and a deprecation warning is logged
-  once per server process. When either new name is set, only new names are
+  at server start and on first use in each server bundle. When either new name is set, only new names are
   read; the two sets are never mixed.
 - A `NEXT_PUBLIC_SUPABASE_COOKIE_NAME` left behind after switching to the new
   Supabase names is refused (it would otherwise be ignored and the session
   cookie would change name). Rename it to `MGM_PUBLIC_SUPABASE_COOKIE_NAME`.
 - When `MGM_APP_URL` is unset, behaviour is exactly as in the previous release:
+  - a deprecation warning at server start names the old variable in use (never
+    its value); set `MGM_APP_URL` before the fallback is removed;
   - the payment return URL is the full `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`, path
     included, when it is set; otherwise the `NEXT_PUBLIC_APP_URL` origin plus
     `/payment/callback`;

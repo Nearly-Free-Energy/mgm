@@ -123,6 +123,30 @@ describe("validateAppUrlAtStartup", () => {
     warn.mockRestore();
   });
 
+  it.each(["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_PAYMENT_CALLBACK_URL"])(
+    "warns, naming %s but not its value, when it supplies the origin",
+    (name) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect(() => validateAppUrlAtStartup({ [name]: "https://legacy.example.org/x" })).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = String(warn.mock.calls[0][0]);
+      expect(logged).toContain(name);
+      expect(logged).toContain("MGM_APP_URL");
+      expect(logged).not.toContain("legacy.example.org");
+      warn.mockRestore();
+    }
+  );
+
+  it("does not warn about legacy names when MGM_APP_URL is set", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    validateAppUrlAtStartup({
+      MGM_APP_URL: "https://mgm.example.org",
+      NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
+    });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("accepts a valid configuration", () => {
     expect(() => validateAppUrlAtStartup({ MGM_APP_URL: "https://mgm.example.org" })).not.toThrow();
   });

@@ -67,9 +67,11 @@ human-only period close are unaffected and must stay so.
    names as runtime environment.
 6. **One-release compatibility.** When neither new Supabase name is set, the
    old `NEXT_PUBLIC_SUPABASE_*` names are read as a complete set (never mixed
-   with new names) with a one-time deprecation warning; `MGM_APP_URL` falls
+   with new names) with a deprecation warning at server start and on first use in each server
+   bundle; `MGM_APP_URL` falls
    back to `NEXT_PUBLIC_APP_URL`, then the origin of
-   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`; the payment return URL keeps the full
+   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` (with a startup warning naming the old
+   variable); the payment return URL keeps the full
    legacy `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` exactly. A legacy cookie name next
    to new Supabase names is refused rather than silently ignored. The
    fallback is removed in the next release. This was chosen over a hard cut because it lets an existing

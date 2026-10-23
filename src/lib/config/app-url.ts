@@ -129,15 +129,24 @@ export function paymentReturnUrl(env: RuntimeEnv = readEnv()): string {
  * clearly on first use.
  */
 export function validateAppUrlAtStartup(env: RuntimeEnv = readEnv()): void {
-  if (
-    !present(env.MGM_APP_URL) &&
-    !present(env.NEXT_PUBLIC_APP_URL) &&
-    !present(env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL)
-  ) {
+  const legacyVariable = present(env.NEXT_PUBLIC_APP_URL)
+    ? "NEXT_PUBLIC_APP_URL"
+    : present(env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL)
+      ? "NEXT_PUBLIC_PAYMENT_CALLBACK_URL"
+      : undefined;
+  if (!present(env.MGM_APP_URL) && !legacyVariable) {
     console.warn(
       "[mgm] MGM_APP_URL is not set; payment links and payment notification registration will fail until it is."
     );
     return;
+  }
+  if (!present(env.MGM_APP_URL) && legacyVariable) {
+    // The fallback is removed in the next release; warn now, never print the value.
+    console.warn(
+      `[mgm] ${legacyVariable} is deprecated and supplies the application origin. ` +
+        "Set MGM_APP_URL (origin only) instead; a custom payment callback path " +
+        "is not carried over (docs/setup.md)."
+    );
   }
   parseAppOrigin(env);
 }
