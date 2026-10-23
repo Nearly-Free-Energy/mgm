@@ -137,6 +137,20 @@ describe("validateAppUrlAtStartup", () => {
     }
   );
 
+  it("warns once for each legacy name present", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    validateAppUrlAtStartup({
+      NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
+      NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://legacy.example.org/cb",
+    });
+    const logged = warn.mock.calls.map((c) => String(c[0]));
+    expect(logged).toHaveLength(2);
+    expect(logged[0]).toContain("NEXT_PUBLIC_APP_URL");
+    expect(logged[1]).toContain("NEXT_PUBLIC_PAYMENT_CALLBACK_URL");
+    expect(logged.join(" ")).not.toContain("legacy.example.org");
+    warn.mockRestore();
+  });
+
   it("does not warn about legacy names when MGM_APP_URL is set", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     validateAppUrlAtStartup({

@@ -44,7 +44,7 @@ function parseOrigin(
   }
   if (requireHttps && url.protocol !== "https:" && !LOOPBACK_HOSTS.has(url.hostname)) {
     throw new RuntimeConfigError(
-      `${variable} must use https (http is allowed only for localhost/127.0.0.1).`
+      `${variable} must use https (http is allowed only for localhost, 127.0.0.1 and [::1]).`
     );
   }
   if (url.username || url.password) {
@@ -129,24 +129,25 @@ export function paymentReturnUrl(env: RuntimeEnv = readEnv()): string {
  * clearly on first use.
  */
 export function validateAppUrlAtStartup(env: RuntimeEnv = readEnv()): void {
-  const legacyVariable = present(env.NEXT_PUBLIC_APP_URL)
-    ? "NEXT_PUBLIC_APP_URL"
-    : present(env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL)
-      ? "NEXT_PUBLIC_PAYMENT_CALLBACK_URL"
-      : undefined;
-  if (!present(env.MGM_APP_URL) && !legacyVariable) {
+  const legacyVariables = (
+    ["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_PAYMENT_CALLBACK_URL"] as const
+  ).filter((name) => present(env[name]));
+  if (!present(env.MGM_APP_URL) && legacyVariables.length === 0) {
     console.warn(
       "[mgm] MGM_APP_URL is not set; payment links and payment notification registration will fail until it is."
     );
     return;
   }
-  if (!present(env.MGM_APP_URL) && legacyVariable) {
-    // The fallback is removed in the next release; warn now, never print the value.
-    console.warn(
-      `[mgm] ${legacyVariable} is deprecated and supplies the application origin. ` +
-        "Set MGM_APP_URL (origin only) instead; a custom payment callback path " +
-        "is not carried over (docs/setup.md)."
-    );
+  if (!present(env.MGM_APP_URL)) {
+    // The fallback is removed in the next release; warn now, once per legacy
+    // name in use, never printing a value.
+    for (const name of legacyVariables) {
+      console.warn(
+        `[mgm] ${name} is deprecated and supplies the application origin. ` +
+          "Set MGM_APP_URL (origin only) instead; a custom payment callback path " +
+          "is not carried over (docs/setup.md)."
+      );
+    }
   }
   parseAppOrigin(env);
 }

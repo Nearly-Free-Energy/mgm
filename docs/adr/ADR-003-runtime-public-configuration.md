@@ -53,7 +53,7 @@ human-only period close are unaffected and must stay so.
    `src/middleware.ts`), so it reads the real process environment like the
    rest of the server.
 4. **Server-only `MGM_APP_URL`.** The installation's public origin, validated
-   as an https origin (http only for localhost/127.0.0.1), read per call by
+   as an https origin (http only for localhost, 127.0.0.1 and [::1]), read per call by
    `src/lib/config/app-url.ts`, and used for payment links,
    `/payment/callback` and `/api/payments/ipn` registration. It is never sent
    to the browser. The localhost fallback is removed. `src/instrumentation.ts`
