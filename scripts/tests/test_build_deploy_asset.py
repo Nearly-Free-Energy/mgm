@@ -382,10 +382,10 @@ class NoticesTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp)
         self.output, self.project, self.supplement = make_notices_fixture(self.tmp)
 
-    def write(self, name="notices.txt", output=None, supplement=True):
+    def write(self, name="notices.txt", output=None, supplement=True, extra=()):
         """Runs the writer; supplement=False uses the supplement it ships with."""
         notices = self.tmp / name
-        extra = ["--supplement", str(self.supplement)] if supplement else []
+        extra = [*(["--supplement", str(self.supplement)] if supplement else []), *extra]
         result = subprocess.run(
             [sys.executable, "-I", str(NOTICES), str(output or self.output), str(notices),
              "--project", str(self.project), "--asset", "mgm-vercel-output-v0.0.1.tar.gz",
@@ -563,6 +563,29 @@ class NoticesTest(unittest.TestCase):
         result, notices = self.write(name="output/notices.txt")
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertFalse(notices.exists())
+
+    def test_records_its_name_and_digest_in_the_build_info(self):
+        info = self.tmp / "build-info.json"
+        write_json(info, {"asset": "mgm-vercel-output-v0.0.1.tar.gz", "sha256": "0" * 64})
+        result, notices = self.write(extra=["--info", str(info)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        digest = hashlib.sha256(notices.read_bytes()).hexdigest()
+        self.assertEqual(result.stdout.strip(), digest)
+        self.assertEqual(json.loads(info.read_text()), {
+            "asset": "mgm-vercel-output-v0.0.1.tar.gz",
+            "sha256": "0" * 64,
+            "notices": {"file": "notices.txt", "sha256": digest},
+        })
+
+    def test_refuses_build_info_it_cannot_read(self):
+        info = self.tmp / "build-info.json"
+        for content in [None, "not json", "[]"]:
+            with self.subTest(content):
+                if content is not None:
+                    info.write_text(content)
+                result, notices = self.write(extra=["--info", str(info)])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(notices.exists())
 
 
 class ScriptTest(unittest.TestCase):

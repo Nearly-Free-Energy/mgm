@@ -2,6 +2,7 @@
 
     python3 -I third_party_notices.py OUTPUT_DIR NOTICES --project DIR
         --asset NAME --version VERSION --commit SHA [--supplement DIR]
+        [--info FILE]
 
 build-deploy-asset.sh calls this after `vercel build`, with the directory the
 build ran in; see docs/releasing.md. The notices file is published beside the
@@ -61,7 +62,10 @@ by name and version, texts are numbered in the order the sorted packages first
 use them, and identical texts (compared after normalising line endings and
 trailing whitespace) are printed once.
 
-On success prints the file's SHA-256.
+On success prints the file's SHA-256. With --info, also records the file's
+name and SHA-256 in that build info file (the one vercel_build_output.py
+wrote), as "notices": {"file": ..., "sha256": ...}; the Release workflow's
+publish job checks the notices it publishes against it.
 Exit codes: 0 written, 2 usage error, 4 a package, source map, builder,
 build manifest or the supplement could not be read, or the supplement does
 not record a polyfill file (each problem is printed), 5 writing failed.
@@ -108,6 +112,7 @@ def parse_args(argv):
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--supplement", default=str(SUPPLEMENT))
+    parser.add_argument("--info")
     # argparse exits with 2 (EXIT_USAGE) on a usage error and 0 for --help.
     return parser.parse_args(argv)
 
@@ -736,6 +741,16 @@ def main(argv):
         # The notices are published beside the asset; the output deploys as built.
         print("third_party_notices.py: error: the notices file must not be inside the output", file=sys.stderr)
         return EXIT_USAGE
+    info = None
+    if args.info is not None:
+        try:
+            info = json.loads(Path(args.info).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"third_party_notices.py: error: reading {args.info} failed: {exc}", file=sys.stderr)
+            return EXIT_USAGE
+        if not isinstance(info, dict):
+            print(f"third_party_notices.py: error: {args.info} is not a build info object", file=sys.stderr)
+            return EXIT_USAGE
 
     problems = []
     packages, skipped = collect(output, project, Path(args.supplement), problems)
@@ -748,6 +763,7 @@ def main(argv):
         return EXIT_CHECK
 
     content = render(packages, args.asset, args.version, args.commit).encode("utf-8")
+    digest = hashlib.sha256(content).hexdigest()
     partial = notices.with_name(notices.name + ".partial")
     try:
         partial.write_bytes(content)
@@ -755,7 +771,17 @@ def main(argv):
     except OSError as exc:
         print(f"third_party_notices.py: error: writing {notices} failed: {exc}", file=sys.stderr)
         return EXIT_WRITE
-    print(hashlib.sha256(content).hexdigest())
+    if info is not None:
+        info["notices"] = {"file": notices.name, "sha256": digest}
+        info_path = Path(args.info)
+        partial_info = info_path.with_name(info_path.name + ".partial")
+        try:
+            partial_info.write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+            os.replace(partial_info, info_path)
+        except OSError as exc:
+            print(f"third_party_notices.py: error: writing {info_path} failed: {exc}", file=sys.stderr)
+            return EXIT_WRITE
+    print(digest)
     return 0
 
 

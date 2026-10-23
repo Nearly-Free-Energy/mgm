@@ -51,8 +51,9 @@ usage() {
     "  mgm-vercel-output-<version>.tar.gz             the asset; extract it into" \
     "                                                 .vercel/output to deploy it" \
     "  mgm-vercel-output-<version>.tar.gz.sha256      its SHA-256 (sha256sum -c)" \
-    "  mgm-vercel-output-<version>.build-info.json    commit, target, digest, and" \
-    "                                                 the tool and runtime versions" \
+    "  mgm-vercel-output-<version>.build-info.json    commit, target, both files'" \
+    "                                                 digests, and the tool and" \
+    "                                                 runtime versions" \
     "  mgm-third-party-notices-<version>.txt          each third-party package in" \
     "                                                 the asset, with its licence" \
     "                                                 and notice texts" \
@@ -389,11 +390,13 @@ printf '%s  %s\n' "$sha" "$name.tar.gz" >"$work/$name.tar.gz.sha256"
 
 # The notices go beside the asset, not into the output, which deploys as
 # Vercel built it. The build directory supplies what the output leaves out:
-# the packages' licence files and the source maps of the bundled code.
+# the packages' licence files and the source maps of the bundled code. The
+# writer adds the notices' name and SHA-256 to the build info.
 note "writing the third-party notices"
 status=0
 notices_sha=$(python3 -I "$script_dir/third_party_notices.py" "$work/src/.vercel/output" "$work/$notices_name" \
-  --project "$work/src" --asset "$name.tar.gz" --version "$version" --commit "$commit") || status=$?
+  --project "$work/src" --asset "$name.tar.gz" --version "$version" --commit "$commit" \
+  --info "$work/$name.build-info.json") || status=$?
 case $status in
   0) ;;
   4) die "$EXIT_BUILD" "a package in the build output could not be identified for the notices" ;;

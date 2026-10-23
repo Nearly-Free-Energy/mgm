@@ -54,6 +54,19 @@ back by deploying a previous version they verified.
   once. It is a separate file, not part of the archive, so the asset deploys
   exactly as Vercel built it.
 
+What a release publishes for operators to rely on is the asset, its notices,
+the `.sha256` file of each, and the attestation that covers both; the
+"Deployment asset" section of the release notes summarises them.
+
+The build also writes `mgm-vercel-output-<version>.build-info.json`, which is
+**not** part of that contract. It is the run's own record: the commit, the
+target, both files' SHA-256, and the tool and runtime versions. The publish
+job checks the files against it and writes the release notes from it. It
+stays with the workflow run, printed in the `Build release asset` log and
+kept in the run's artifact for 7 days, and is never attached to the release.
+Its fields may change between versions, so a deployment procedure must not
+depend on it.
+
 ## Publish a version
 
 1. Choose a commit on `main` whose `Test`, `CodeQL` and `Build` checks passed:
