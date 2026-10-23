@@ -129,10 +129,11 @@ jobs:
             *) echo "Expected Node.js 24 from .nvmrc" >&2; exit 1 ;;
           esac
 
-      # The script refuses any host but Linux x86-64, exports the commit, runs
-      # npm ci and `vercel build --prod --standalone` with an allowlisted
-      # environment, checks the output, packs it, and writes the third-party
-      # notices beside it.
+      # The script refuses any host but Linux x86-64, exports the commit,
+      # installs the Vercel CLI from its lockfile, runs npm ci and
+      # `vercel build --prod --standalone` with an allowlisted environment,
+      # checks the output, packs it, and writes the third-party notices beside
+      # it.
       - name: Build the asset
         env:
           VERSION: ${{ steps.source.outputs.version }}

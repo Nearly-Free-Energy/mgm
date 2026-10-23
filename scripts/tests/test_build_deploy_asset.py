@@ -1,12 +1,14 @@
 """Tests for scripts/release/build-deploy-asset.sh, vercel_build_output.py,
-third_party_notices.py and the pins in .github/workflows/release.yml.
+third_party_notices.py, the Vercel CLI lock in scripts/release/vercel-cli/ and
+the pins in .github/workflows/release.yml.
 
 The packer, its checks and the notices writer run against small synthetic
 Build Output and project directories, so these tests need no npm, network or
 Vercel CLI. The shell
 script is tested only up to the point where it would start building: its
 argument handling, the environment it refuses, the host platform it refuses,
-and the files it never replaces. docs/releasing.md describes a full local run.
+the Vercel CLI lock it refuses, and the files it never replaces.
+docs/releasing.md describes a full local run.
 """
 import hashlib
 import json
@@ -22,6 +24,7 @@ import unittest
 
 RELEASE_DIR = Path(__file__).resolve().parents[1] / "release"
 SCRIPT = RELEASE_DIR / "build-deploy-asset.sh"
+CLI_DIR = RELEASE_DIR / "vercel-cli"
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
 PACKER = RELEASE_DIR / "vercel_build_output.py"
 NOTICES = RELEASE_DIR / "third_party_notices.py"
@@ -576,7 +579,7 @@ class ScriptTest(unittest.TestCase):
         uname.write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; *) echo Darwin ;; esac\n')
         uname.chmod(0o755)
 
-    def run_script(self, *args, extra_env=None, fake_host=False):
+    def run_script(self, *args, extra_env=None, fake_host=False, script=SCRIPT):
         # An explicit environment: the Test workflow's own MGM_TEST_* variables
         # must not reach the script, which refuses MGM_* names.
         env = {"PATH": os.environ["PATH"], "HOME": str(self.tmp), "TMPDIR": str(self.tmp)}
@@ -584,7 +587,21 @@ class ScriptTest(unittest.TestCase):
             env["PATH"] = f"{self.fake_bin}{os.pathsep}{env['PATH']}"
         env.update(extra_env or {})
         return subprocess.run(
-            ["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=60,
+            ["bash", str(script), *args], env=env, capture_output=True, text=True, timeout=60,
+        )
+
+    def copy_release_dir(self):
+        """A copy of scripts/release in a new git repository with no commits."""
+        repo = self.tmp / "repo"
+        release = repo / "scripts" / "release"
+        shutil.copytree(RELEASE_DIR, release, ignore=shutil.ignore_patterns("__pycache__"))
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+        return release
+
+    def run_copy(self, release):
+        return self.run_script(
+            "--version", "v0.0.1", "--out", str(self.out), "--allow-foreign-platform",
+            fake_host=True, script=release / "build-deploy-asset.sh",
         )
 
     def assert_nothing_started(self):
@@ -681,11 +698,62 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("not a commit", result.stderr)
 
+    def test_refuses_a_vercel_cli_that_is_not_pinned_exactly(self):
+        release = self.copy_release_dir()
+        # The copy as it is gets past the CLI's lock, to the commit (the
+        # repository has none).
+        result = self.run_copy(release)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("not a commit", result.stderr)
+        manifest = release / "vercel-cli" / "package.json"
+        data = json.loads(manifest.read_text())
+        for pin in ["^65.1.0", "latest", "65.1", "65.1.0 || 66"]:
+            with self.subTest(pin):
+                data["dependencies"]["vercel"] = pin
+                manifest.write_text(json.dumps(data))
+                result = self.run_copy(release)
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertIn("must pin vercel to an exact version", result.stderr)
+        self.assert_nothing_started()
+
+    def test_refuses_a_vercel_cli_without_its_lockfile(self):
+        release = self.copy_release_dir()
+        (release / "vercel-cli" / "package-lock.json").unlink()
+        result = self.run_copy(release)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("needs package.json and package-lock.json", result.stderr)
+        self.assert_nothing_started()
+
     @needs("shellcheck")
     def test_shellcheck_clean(self):
         self.assertTrue(shutil.which("shellcheck"), "shellcheck is not installed")
         result = subprocess.run(["shellcheck", str(SCRIPT)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class VercelCliLockTest(unittest.TestCase):
+    """The lock the script installs the Vercel CLI from with npm ci."""
+
+    def setUp(self):
+        self.manifest = json.loads((CLI_DIR / "package.json").read_text())
+        self.lock = json.loads((CLI_DIR / "package-lock.json").read_text())
+
+    def test_pins_one_exact_version_of_the_cli(self):
+        pin = self.manifest["dependencies"]["vercel"]
+        self.assertEqual(self.manifest["dependencies"], {"vercel": pin})
+        self.assertRegex(pin, r"^[0-9]+\.[0-9]+\.[0-9]+$")
+        self.assertEqual(self.lock["lockfileVersion"], 3)
+        self.assertEqual(self.lock["packages"][""]["dependencies"], {"vercel": pin})
+        self.assertEqual(self.lock["packages"]["node_modules/vercel"]["version"], pin)
+
+    def test_locks_every_package_to_the_registry_by_integrity_hash(self):
+        packages = {path: entry for path, entry in self.lock["packages"].items() if path}
+        self.assertTrue(packages)
+        for path, entry in packages.items():
+            with self.subTest(path):
+                self.assertTrue(path.startswith("node_modules/"))
+                self.assertTrue(entry["resolved"].startswith("https://registry.npmjs.org/"), entry["resolved"])
+                self.assertRegex(entry["integrity"], r"^sha512-")
 
 
 class WorkflowTest(unittest.TestCase):

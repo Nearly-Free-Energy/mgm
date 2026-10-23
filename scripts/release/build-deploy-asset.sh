@@ -32,10 +32,12 @@ readonly EXIT_PRECONDITION=3
 readonly EXIT_BUILD=4
 readonly EXIT_PACKAGE=5
 
-# The Vercel CLI that builds the asset, pinned exactly. `vercel build` loads
-# the framework builder (@vercel/next) that this CLI version depends on; the
-# build info and the release notes record both. Change it deliberately.
-readonly VERCEL_CLI_VERSION="65.1.0"
+# The Vercel CLI that builds the asset is locked with its whole dependency
+# tree in vercel-cli/ beside this script: package.json pins `vercel` exactly
+# and package-lock.json pins every package it depends on by integrity hash.
+# `vercel build` loads the framework builder (@vercel/next) from that tree; the
+# build info and the release notes record both versions. Change it
+# deliberately (docs/releasing.md, "Maintaining the release path").
 readonly VERSION_RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
 
 usage() {
@@ -73,8 +75,9 @@ usage() {
     "  -h, --help               Show this help." \
     "" \
     "Needs git, node (the major version in .nvmrc), npm, python3, tar, and network" \
-    "access to the npm registry and Google Fonts. Installs the pinned Vercel CLI" \
-    "($VERCEL_CLI_VERSION) into a temporary directory; no Vercel account is used." \
+    "access to the npm registry and Google Fonts. Installs the Vercel CLI locked in" \
+    "scripts/release/vercel-cli/ into a temporary directory with npm ci, without" \
+    "running install scripts; no Vercel account is used." \
     "" \
     "Prints the asset's path on stdout; progress goes to stderr." \
     "" \
@@ -83,8 +86,8 @@ usage() {
     "  2  usage error" \
     "  3  refused before building: the environment holds MGM settings or Vercel" \
     "     credentials, the host is not Linux x86-64, an output file exists, the" \
-    "     commit or a required program is missing, or Node.js is not the .nvmrc" \
-    "     version" \
+    "     commit, a required program or the Vercel CLI's lockfile is missing, or" \
+    "     Node.js is not the .nvmrc version" \
     "  4  installing, building, or checking the build output failed, or a" \
     "     package in it could not be identified for the notices" \
     "  5  packing, writing the notices, checksumming, or moving the files into" \
@@ -232,6 +235,16 @@ fi
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) \
   || die "$EXIT_PRECONDITION" "$script_dir is not inside a git checkout"
+
+cli_dir="$script_dir/vercel-cli"
+[[ -f $cli_dir/package.json && -f $cli_dir/package-lock.json ]] \
+  || die "$EXIT_PRECONDITION" "$cli_dir needs package.json and package-lock.json"
+# npm ci refuses a lockfile that does not match package.json, so the exact
+# version here is also the one the lockfile installs.
+cli_pin=$(node -p 'String(require(process.argv[1]).dependencies.vercel)' "$cli_dir/package.json" 2>/dev/null) \
+  || die "$EXIT_PRECONDITION" "$cli_dir/package.json is unreadable"
+[[ $cli_pin =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || die "$EXIT_PRECONDITION" "$cli_dir/package.json must pin vercel to an exact version such as 65.1.0"
 commit=$(git -C "$repo" rev-parse --verify --quiet "${ref}^{commit}") \
   || die "$EXIT_PRECONDITION" "not a commit in $repo: $ref"
 
@@ -309,14 +322,22 @@ note "building $commit for the $target target"
 git -C "$repo" archive --format=tar "$commit" | tar -xf - -C "$work/src" \
   || die "$EXIT_BUILD" "exporting $commit failed"
 
-note "installing Vercel CLI $VERCEL_CLI_VERSION"
-clean_env npm install --prefix "$work/cli" --no-save --loglevel=error "vercel@$VERCEL_CLI_VERSION" >&2 \
-  || die "$EXIT_BUILD" "installing Vercel CLI $VERCEL_CLI_VERSION failed"
+# npm ci installs exactly the locked tree and checks every package against
+# its integrity hash. --ignore-scripts runs no package's install script. The
+# locked tree builds without them: esbuild, the one package in it with an
+# install script on Linux, loads its binary from its platform package without
+# that script. If a CLI upgrade adds a package that needs its install script,
+# the dry run's build fails; revisit this flag then.
+note "installing Vercel CLI $cli_pin from its lockfile (npm ci --ignore-scripts)"
+cp -- "$cli_dir/package.json" "$cli_dir/package-lock.json" "$work/cli/" \
+  || die "$EXIT_BUILD" "copying the Vercel CLI's lockfile failed"
+(cd "$work/cli" && clean_env npm ci --ignore-scripts --loglevel=error) >&2 \
+  || die "$EXIT_BUILD" "installing Vercel CLI $cli_pin failed"
 vercel="$work/cli/node_modules/.bin/vercel"
 cli_version=$(cd "$work/src" && clean_env "$vercel" --version 2>/dev/null | tail -n 1) \
   || die "$EXIT_BUILD" "the Vercel CLI did not run"
-[[ $cli_version == "$VERCEL_CLI_VERSION" ]] \
-  || die "$EXIT_BUILD" "the Vercel CLI reports version $cli_version, expected $VERCEL_CLI_VERSION"
+[[ $cli_version == "$cli_pin" ]] \
+  || die "$EXIT_BUILD" "the Vercel CLI reports version $cli_version, expected $cli_pin"
 
 note "installing dependencies (npm ci)"
 (cd "$work/src" && clean_env npm ci --loglevel=error) >&2 || die "$EXIT_BUILD" "npm ci failed"

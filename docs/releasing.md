@@ -155,8 +155,9 @@ scripts/release/build-deploy-asset.sh --version v0.0.0-test --out /tmp/mgm-asset
 - It writes the notices file and its `.sha256` beside the asset, under the
   same version and suffixes.
 - It needs Node.js from `.nvmrc`, npm, git, python3, tar, and network access
-  to the npm registry and Google Fonts. It installs its pinned Vercel CLI into
-  a temporary directory and takes a few minutes.
+  to the npm registry and Google Fonts. It installs the Vercel CLI locked in
+  `scripts/release/vercel-cli/` into a temporary directory and takes a few
+  minutes.
 - It refuses to start while `NEXT_PUBLIC_*`, `MGM_*`, `SUPABASE_*`,
   `VERCEL_TOKEN`, `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID` is set.
 - On a host other than Linux x86-64 it stops unless you pass
@@ -171,10 +172,16 @@ artifact holds that Linux build for a day, for inspection.
 
 ## Maintaining the release path
 
-- The Vercel CLI version is pinned in `build-deploy-asset.sh`
-  (`VERCEL_CLI_VERSION`). The CLI loads the `@vercel/next` builder it depends
-  on, and the release notes record both versions. Change the pin deliberately,
-  in its own pull request, so the dry run shows its effect.
+- The Vercel CLI and its whole dependency tree are locked in
+  `scripts/release/vercel-cli/`: `package.json` pins `vercel` to an exact
+  version and `package-lock.json` pins every package it depends on. The
+  script installs them with `npm ci --ignore-scripts`, so nothing is resolved
+  at build time and no install script runs. The CLI loads the `@vercel/next`
+  builder from that tree, and the release notes record both versions. Change
+  the pin deliberately, in its own pull request, so the dry run shows its
+  effect: in that directory, with Node.js from `.nvmrc`, run
+  `npm install --package-lock-only --ignore-scripts --save-exact vercel@<version>`
+  and commit both files.
 - Every action in `.github/workflows/release.yml` is pinned to a full commit
   SHA, with its version in a comment. Dependabot (`.github/dependabot.yml`)
   proposes updates weekly, and the dry run runs on each. Pin a new action the
