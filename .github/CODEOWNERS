@@ -33,3 +33,6 @@
 # CI workflows, and this file.
 /.github/workflows/                    @tushabe @arindahills
 /.github/CODEOWNERS                    @tushabe @arindahills
+
+# What the Release workflow runs to build the published deployment asset.
+/scripts/release/                      @tushabe @arindahills

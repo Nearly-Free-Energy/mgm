@@ -8,7 +8,7 @@ Tool-specific config for Claude Code. MGM is a microgrid operating system built 
 - `CONTRIBUTING.md` — contributor setup, sign-off, signed commits, and the required checks.
 - `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
 - `docs/entity-model.md` — the data model and the reasoning behind it.
-- Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`.
+- Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`, `docs/releasing.md` (publishing a versioned deployment asset; publishing deploys nothing).
 
 ## Build & Dev Commands
 
