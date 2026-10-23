@@ -93,6 +93,12 @@ export const BillingPlugin = {
 export async function composeBilling(options: {
   supabase: SupabaseClient;
   organizationId: string;
+  /**
+   * Skip the plugin check. Only for callers that gate the request themselves
+   * (`checkGate`/`gateRoute`); `route-surface.test.ts` does not count a call
+   * with this set as gating, so the route must. If that test stops reading
+   * this option, revisit.
+   */
   readOnly?: boolean;
 }): Promise<BillingResult<BillingComposition>> {
   const access = await authorizeOrganization(options.supabase, options.organizationId);
