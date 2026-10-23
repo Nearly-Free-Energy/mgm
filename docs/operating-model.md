@@ -53,9 +53,12 @@ discussion first, not a PR.
    once the checks pass. For anything touching RLS, money, credentials, or the
    runtime, also run the change against a database (`npm test` with local
    Supabase).
-6. **Deploy.** Apply database migrations before deploying the app. Follow
-   the runbook for the area (`docs/runbooks/`, `docs/payments-rollout.md`,
-   `docs/customerapp-activation.md`).
+6. **Release.** A maintainer publishes a versioned deployment asset from a
+   commit on `main` (`docs/releasing.md`). Publishing deploys nothing.
+7. **Deploy.** Separately from publishing, an operator deploys a verified
+   release with their own credentials. Apply database migrations before
+   deploying the app. Follow the runbook for the area (`docs/runbooks/`,
+   `docs/payments-rollout.md`, `docs/customerapp-activation.md`).
 
 ## Merge controls
 
@@ -95,10 +98,11 @@ with these docs.
 
 **Code owners.** The owned areas are database migrations (including the RLS
 helpers), roles, the Cordis runtime gate and plugin catalog, request
-middleware, and CI workflows. The paths live in `.github/CODEOWNERS`, which is
-the single list; `src/lib/__tests__/codeowners.test.ts` checks that each
-pattern still matches a tracked file. Other changes may be merged by their
-author once the checks pass.
+middleware, CI workflows, and the release build script. The paths live in
+`.github/CODEOWNERS`, which is the single list;
+`src/lib/__tests__/codeowners.test.ts` checks that each pattern still matches
+a tracked file. Other changes may be merged by their author once the checks
+pass.
 
 **Outside contributions.** Squash-merged. Squashing does **not** waive the
 signature or sign-off items: they apply to every commit on the pull request,
@@ -124,6 +128,15 @@ secret (the CodeQL job also gets `security-events: write` to upload its
 results, and `Test` gets `packages: read` to pull the Supabase images from
 GHCR); never use `pull_request_target` to build or test fork code.
 
+**Only a published release gets write access.** The Release workflow
+(`.github/workflows/release.yml`) builds with a read-only token, both on
+releases and on pull requests that change the release path, the dependencies
+or the Node.js version. Only after a maintainer publishes a release does its
+second job get `contents: write`, `id-token: write` and `attestations: write`,
+to attest the asset and attach it to the release; that job runs no repository
+code. The workflow reads no secret and holds no hosting credentials; see
+`docs/releasing.md`.
+
 **Runtime versions.** `.nvmrc` pins Node.js 24 LTS. Each path is separate:
 
 - **Vercel** uses `package.json` `engines.node` (`>=24 <25`) in place of the
@@ -133,6 +146,9 @@ GHCR); never use `pull_request_target` to build or test fork code.
   Node 24 is a follow-up PR, linked from #33 and covered by the container
   work in #51.
 - **`Test`** and **`Build`**: Node.js 24 from `.nvmrc`.
+- **Release asset** (`docs/releasing.md`): built on Node.js 24 from `.nvmrc`,
+  and its functions declare the `nodejs24.x` runtime, taken from the same
+  file. The build script refuses a different Node.js major version.
 
 The Cordis dependency is pinned exactly in `package.json` (currently
 `4.0.0-rc.10`).

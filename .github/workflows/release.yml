@@ -1,0 +1,294 @@
+name: Release
+
+# Builds MGM's deployment asset for a published GitHub release and attaches it
+# to that release, with its third-party notices, a SHA-256 file for each, and a
+# build-provenance attestation covering both. Maintainer guide:
+# docs/releasing.md.
+#
+# Publishing a release deploys nothing. This workflow holds no hosting
+# credentials and reads no repository secret: it builds Vercel's prebuilt
+# output with placeholder project settings and no Vercel account
+# (scripts/release/build-deploy-asset.sh). Operators deploy a verified asset
+# later, with their own credentials and procedure.
+#
+# Two jobs, so the code being built never runs with write access:
+#   - `Build release asset` checks out the release's tag, refuses unless the
+#     tagged commit is on main, and builds on a GitHub-hosted Linux x86-64
+#     runner, the platform Vercel runs Node.js functions on. Its token is
+#     read-only and is not left on disk.
+#   - `Publish release asset` receives the asset and its notices as a
+#     workflow artifact, computes their SHA-256 itself and checks the .sha256
+#     files and the build info against it, creates their build-provenance
+#     attestation, uploads them and their .sha256 files to the release, and
+#     appends the asset's details to the release notes. It checks out and runs
+#     no repository code.
+# docs/releasing.md names both jobs: rename them only together.
+#
+# Every action is pinned to a full commit SHA, with its version in a comment;
+# Dependabot (.github/dependabot.yml) proposes updates weekly. Both jobs run on
+# ubuntu-24.04 rather than ubuntu-latest, so the build host changes only in a
+# pull request that changes it, where the dry run below shows the effect.
+#
+# A pull request that changes the release path, the dependencies or the
+# Node.js version runs `Build release asset` alone, as a dry run: the same
+# build and checks on the pull request's merge commit, as version
+# v0.0.0-pr.<number>, kept as a workflow artifact for a day. Nothing is
+# attested or published. A change that breaks the Linux x86-64 build or its
+# checks shows up there, not when a release is published.
+#
+# A release event runs the workflow file of the tagged commit, so a tag on a
+# commit from before this file existed gets no asset. Consumers verify the
+# attestation with `gh attestation verify --signer-workflow
+# <owner>/<repo>/.github/workflows/release.yml`: moving or renaming this file
+# makes later assets fail that check until consumers change it too.
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.ts'
+      - '.nvmrc'
+
+# Tighten default token permissions; each job grants only what it needs.
+permissions:
+  contents: read
+
+# One run per release; a second run for the same tag waits rather than races.
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build release asset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The release's tag; for a pull request, its merge commit (the default).
+          ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || '' }}
+          # Full history, to check that the tagged commit is on main.
+          fetch-depth: 0
+          # Nothing here pushes; keep the token out of .git/config, where the
+          # build could read it.
+          persist-credentials: false
+
+      - name: Choose the version and commit
+        id: source
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            # Dry run: a version no release uses.
+            echo "version=v0.0.0-pr.$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+          if ! [[ $TAG =~ $re ]]; then
+            echo "::error::The release tag must be a version such as v0.0.1 or v0.0.1-rc.1."
+            exit 1
+          fi
+          commit=$(git rev-parse --verify "refs/tags/$TAG^{commit}")
+          if [ "$commit" != "$EVENT_SHA" ] || [ "$(git rev-parse HEAD)" != "$commit" ]; then
+            echo "::error::The checked-out commit is not the commit tag $TAG points at."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
+            echo "::error::Tag $TAG points at $commit, which is not on main. Release only commits merged to main."
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      # No dependency cache: a release installs from the lockfile from scratch.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Confirm the pinned Node.js major version
+        run: |
+          node --version
+          case "$(node --version)" in
+            v24.*) ;;
+            *) echo "Expected Node.js 24 from .nvmrc" >&2; exit 1 ;;
+          esac
+
+      # The script refuses any host but Linux x86-64, exports the commit,
+      # installs the Vercel CLI from its lockfile, runs npm ci and
+      # `vercel build --prod --standalone` with an allowlisted environment,
+      # checks the output, packs it, and writes the third-party notices beside
+      # it.
+      - name: Build the asset
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          COMMIT: ${{ steps.source.outputs.commit }}
+        run: |
+          scripts/release/build-deploy-asset.sh --version "$VERSION" --ref "$COMMIT" --out "$RUNNER_TEMP/release"
+          cat "$RUNNER_TEMP/release/mgm-vercel-output-$VERSION.build-info.json"
+
+      # A release run keeps the artifact for 7 days, so a failed publish job
+      # can be re-run; a dry run keeps it for a day.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-asset
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'release' && 7 || 1 }}
+
+  publish:
+    name: Publish release asset
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write      # upload the asset to the release and edit its notes
+      id-token: write      # sign the attestation with this run's identity
+      attestations: write  # store the attestation in this repository
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-asset
+          path: ${{ runner.temp }}/release
+
+      # The SHA-256 of each file is computed here, from the downloaded bytes.
+      # The .sha256 files and the build info come from the same artifact, so
+      # they must agree with the computed values rather than stand in for
+      # them, and only the computed values reach the release notes.
+      - name: Check the asset and notices against their checksums and source
+        id: check
+        working-directory: ${{ runner.temp }}/release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          asset="mgm-vercel-output-$TAG.tar.gz"
+          info="mgm-vercel-output-$TAG.build-info.json"
+          notices="mgm-third-party-notices-$TAG.txt"
+          ls -l
+          asset_sha256=$(sha256sum < "$asset" | cut -d ' ' -f 1)
+          notices_sha256=$(sha256sum < "$notices" | cut -d ' ' -f 1)
+          for pair in "$asset $asset_sha256" "$notices $notices_sha256"; do
+            file=${pair% *}
+            sum=${pair#* }
+            if [ "$(cat -- "$file.sha256")" != "$sum  $file" ]; then
+              echo "::error::$file.sha256 does not hold the SHA-256 computed from $file."
+              exit 1
+            fi
+          done
+          if ! jq -e \
+            --arg tag "$TAG" --arg commit "$GITHUB_SHA" \
+            --arg asset "$asset" --arg asset_sha256 "$asset_sha256" \
+            --arg notices "$notices" --arg notices_sha256 "$notices_sha256" \
+            '.version == $tag and .commit == $commit and .target == "production"
+             and .asset == $asset and .sha256 == $asset_sha256
+             and .notices.file == $notices and .notices.sha256 == $notices_sha256' "$info"; then
+            echo "::error::The build info does not match this release, its commit or the SHA-256 computed from the files."
+            exit 1
+          fi
+          # The release notes print these fields, so only plain values pass.
+          # vercel_build_output.py checks the builder and framework patterns
+          # when it builds; change both together.
+          if ! jq -e '
+            def plain_version: type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z");
+            def count: type == "number" and . >= 0 and . == floor;
+            (.vercelCli | type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+\\z"))
+            and (.functions.nodejs | count) and (.functions.edge | count)
+            and (.runtimes | type == "array" and all(.[]; type == "string" and test("\\A(edge|nodejs[0-9]+\\.x)\\z")))
+            and (.architectures | type == "array" and all(.[]; . == "x86_64"))
+            and (.builders | type == "array" and all(.[];
+                  (.use | type == "string" and test("\\A(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*\\z"))
+                  and (.version == null or (.version | plain_version))))
+            and (.frameworks | type == "array" and all(.[];
+                  type == "string" and test("\\A[a-z0-9][a-z0-9-]* [0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z")))
+          ' "$info" > /dev/null; then
+            echo "::error::The build info holds a value that is not plain enough for the release notes."
+            exit 1
+          fi
+          {
+            echo "asset_sha256=$asset_sha256"
+            echo "notices_sha256=$notices_sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      # One attestation, two subjects: the asset and its notices.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/mgm-vercel-output-${{ github.event.release.tag_name }}.tar.gz
+            ${{ runner.temp }}/release/mgm-third-party-notices-${{ github.event.release.tag_name }}.txt
+
+      # Never --clobber: an operator may already have pinned an uploaded asset.
+      - name: Upload the asset to the release
+        working-directory: ${{ runner.temp }}/release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          asset="mgm-vercel-output-$TAG.tar.gz"
+          notices="mgm-third-party-notices-$TAG.txt"
+          gh release upload "$TAG" "$asset" "$asset.sha256" "$notices" "$notices.sha256" --repo "$GITHUB_REPOSITORY"
+
+      # The digests are the ones the check step computed; the other fields
+      # passed its checks.
+      - name: Add the asset's details to the release notes
+        working-directory: ${{ runner.temp }}/release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          ASSET_SHA256: ${{ steps.check.outputs.asset_sha256 }}
+          NOTICES_SHA256: ${{ steps.check.outputs.notices_sha256 }}
+        run: |
+          asset="mgm-vercel-output-$TAG.tar.gz"
+          info="mgm-vercel-output-$TAG.build-info.json"
+          notices="mgm-third-party-notices-$TAG.txt"
+          signer="${GITHUB_WORKFLOW_REF%@*}"
+          {
+            echo "## Deployment asset"
+            echo
+            echo "\`$asset\` is Vercel's prebuilt build output (\`vercel build --prod --standalone\`) for commit \`$GITHUB_SHA\`, built by this repository's Release workflow. Publishing it deploys nothing."
+            echo
+            echo "- SHA-256: \`$ASSET_SHA256\`"
+            echo "- Production target: \`vercel deploy --prebuilt\` accepts it only with \`--prod\`."
+            jq -r '"- Functions: \(.functions.nodejs) Node.js (\(.runtimes | map(select(. != "edge")) | join(", ")), \(.architectures | join(", "))), \(.functions.edge) edge"' "$info"
+            jq -r '"- Built with: Vercel CLI \(.vercelCli); " + ([.builders[] | "\(.use) \(.version // "unknown")"] | join(", ")) + "; " + (.frameworks | join(", "))' "$info"
+            echo "- Third-party notices: \`$notices\`, SHA-256 \`$NOTICES_SHA256\`, covered by the same attestation."
+            echo
+            echo "Verify it before deploying (see docs/releasing.md):"
+            echo
+            echo '```'
+            echo "sha256sum -c $asset.sha256"
+            echo "gh attestation verify $asset \\"
+            echo "  --repo $GITHUB_REPOSITORY \\"
+            echo "  --signer-workflow $signer \\"
+            echo "  --source-digest $GITHUB_SHA \\"
+            echo "  --source-ref refs/tags/$TAG \\"
+            echo "  --cert-oidc-issuer https://token.actions.githubusercontent.com \\"
+            echo "  --deny-self-hosted-runners"
+            echo '```'
+            echo
+            # Matches LICENSE. If the project's license changes, change this line with it.
+            echo "The source code for this asset is available under the Eclipse Public License 2.0 at tag \`$TAG\`, in this release's source code archives. The third-party packages the asset contains are listed, with the full text of their licences and notices, in \`$notices\`."
+          } > section.md
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
+          printf '\n\n' >> notes.md
+          cat section.md >> notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+          cat section.md >> "$GITHUB_STEP_SUMMARY"
