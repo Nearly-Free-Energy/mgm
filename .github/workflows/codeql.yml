@@ -2,11 +2,11 @@ name: CodeQL
 
 # CodeQL static-analysis security scan.
 #
-# Required by the repository's "require-DCO" ruleset (status check name:
-# "CodeQL"). The job's name below MUST stay as "CodeQL" so the required-check
-# context resolves; do NOT add a matrix-suffix or rename. The build step runs
-# the standard JavaScript/TypeScript analysis — no project-specific config
-# beyond the language list.
+# The merger checks that `CodeQL` is green before merging (a maintainer social
+# contract; see #30). The job's name below is the check name that checklist
+# refers to: rename it only together with the docs, and do NOT add a
+# matrix-suffix. The build step runs the standard JavaScript/TypeScript
+# analysis — no project-specific config beyond the language list.
 
 on:
   workflow_dispatch:

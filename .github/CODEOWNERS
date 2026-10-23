@@ -1,0 +1,35 @@
+# Code owners for MGM.
+#
+# Changes to the paths below need approval from a code owner other than the
+# person who pushed the change, on the final head commit. This is a maintainer
+# social contract: the merger verifies it before merging, and GitHub does not
+# block a merge that lacks it (enforcement is deferred; see #30 and
+# docs/operating-model.md § "Merge controls"). Other paths are intentionally
+# unlisted: the author may merge them once the required checks pass.
+#
+# Verify a path still exists before relying on a line here; a pattern that
+# matches nothing protects nothing and GitHub does not warn about it;
+# src/lib/__tests__/codeowners.test.ts checks that each pattern matches a
+# tracked file. If a file below is moved, update this file in the same change.
+
+# Database migrations. 00002_rls.sql holds the RLS helper functions
+# (is_super_admin, user_can_access_org, user_can_access_microgrid), so it is
+# covered by this line; 00053 re-points user_can_configure_ems at them.
+/supabase/migrations/                  @tushabe @arindahills
+
+# Role constants that mirror the user_role enum the RLS helpers evaluate.
+/src/lib/roles.ts                      @tushabe @arindahills
+
+# Cordis runtime gate: root context, request scopes, and the plugin gate, plus
+# the plugin catalog. plugins/bundled.ts holds the `core` flags and the
+# route-ownership table that the runtime gate and the route-surface test read.
+/src/lib/runtime/                      @tushabe @arindahills
+/src/lib/plugins/                      @tushabe @arindahills
+
+# Request middleware and the released-route allowlist it enforces.
+/src/middleware.ts                     @tushabe @arindahills
+/src/lib/mgm/released-routes.ts        @tushabe @arindahills
+
+# CI workflows, and this file.
+/.github/workflows/                    @tushabe @arindahills
+/.github/CODEOWNERS                    @tushabe @arindahills
