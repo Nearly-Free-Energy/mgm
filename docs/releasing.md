@@ -46,9 +46,11 @@ back by deploying a previous version they verified.
   the asset's SHA-256 to its commit and to this repository's Release workflow.
 - **Published with its third-party notices.** The build copies into the
   functions only the files they load, which rarely include the npm packages'
-  licence files. `mgm-third-party-notices-<version>.txt` lists every third-party package in
-  the asset, with its name, version and declared licence and the full text of
-  its LICENSE, LICENCE, COPYING and NOTICE files; identical texts are printed
+  licence files. `mgm-third-party-notices-<version>.txt` lists the
+  third-party packages in the asset, found as
+  [Maintaining the release path](#maintaining-the-release-path) describes,
+  with each one's name, version and declared licence and the full text of its
+  LICENSE, LICENCE, COPYING and NOTICE files; identical texts are printed
   once. It is a separate file, not part of the archive, so the asset deploys
   exactly as Vercel built it.
 
@@ -180,14 +182,35 @@ artifact holds that Linux build for a day, for inspection.
 - Every operator's verification names `.github/workflows/release.yml`
   (`--signer-workflow`). Do not move or rename it without telling them.
 - `scripts/release/third_party_notices.py` writes the notices. It finds a
-  package in the asset four ways: its files are in a function's
+  package in the asset six ways: its files are in a function's
   `node_modules`; the build's source map for a JavaScript file in the output
-  names one of its modules; one of the project's stylesheets imports it; or it
-  is the builder that writes the functions' launchers. Client-side bundles
-  have no source maps, so a package that only browser code imports, and no
-  server-rendered module does, is not found: check the notices of the dry run
-  when adding one. The build fails, rather than leaving a package out, when a
-  function's source map or a package's `package.json` cannot be read.
+  names one of its modules; one of the project's stylesheets imports it; it
+  is the builder that writes the functions' launchers; it is a directory that
+  Next.js vendors under `dist/compiled` and loads from another vendored
+  directory already listed (the browser build of React DOM loads the
+  scheduler this way); or it is bundled into Next.js's polyfill file for
+  browsers without ES module support, which the supplement below records.
+  Client-side bundles have no source maps, so apart from the last two, browser
+  code is covered through the server-rendered modules that import the same
+  packages. A package that only browser code imports, and no server-rendered
+  module does, is not found: check the notices of the dry run when adding
+  one. The build fails, rather than leaving a package out, when a function's
+  source map, a package's `package.json` or the build manifest cannot be
+  read.
+- `scripts/release/notices-supplement/` lists the packages bundled into
+  Next.js's polyfill file, which has no source map and whose packages are not
+  installed. `supplement.json` records each reviewed file by SHA-256, with
+  each package's name, version and declared licence, and the package's
+  licence files are kept beside it. The build fails with exit code 4, and
+  prints the new SHA-256, when the build manifest names a polyfill file that
+  the supplement does not record, which a Next.js upgrade can cause. To record
+  it, read the `next-polyfill-nomodule` package in the Next.js repository at
+  the installed version's tag: its `src/index.js` imports the bundled
+  packages and its `package.json` pins their versions. Copy each package's
+  licence file from its npm tarball of that version into the supplement, and
+  replace the entry with one for the new file: the SHA-256 of
+  `node_modules/next/dist/build/polyfills/polyfill-nomodule.js`, a `source`
+  link to the tag you read, and the packages.
 - `src/lib/__tests__/no-server-actions-or-draft-mode.test.ts` fails when the
   source introduces Server Actions (`"use server"`) or draft mode
   (`draftMode`). Release assets are built without installation settings, so

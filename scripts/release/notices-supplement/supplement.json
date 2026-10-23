@@ -1,0 +1,14 @@
+{
+  "bundles": [
+    {
+      "file": "node_modules/next/dist/build/polyfills/polyfill-nomodule.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "source": "https://github.com/vercel/next.js/tree/v16.4.1/packages/next-polyfill-nomodule",
+      "packages": [
+        {"name": "core-js", "version": "3.38.1", "license": "MIT", "texts": ["core-js-3.38.1/LICENSE"]},
+        {"name": "object-assign", "version": "4.1.1", "license": "MIT", "texts": ["object-assign-4.1.1/license"]},
+        {"name": "whatwg-fetch", "version": "3.0.0", "license": "MIT", "texts": ["whatwg-fetch-3.0.0/LICENSE"]}
+      ]
+    }
+  ]
+}

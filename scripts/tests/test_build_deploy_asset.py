@@ -266,8 +266,15 @@ def make_notices_fixture(tmp):
     - next is in the function, and its prebuilt runtime bundles the
       react-dom copy it vendors under dist/compiled, named by the runtime's
       installed source map;
+    - that react-dom's browser build loads the scheduler next vendors beside
+      it, which nothing else names; next's own code loads another vendored
+      directory, which is not listed for it;
+    - the build manifest names a polyfill file in static/_next, whose
+      packages come from the supplement, which records its SHA-256;
     - styles is imported by the project's stylesheet;
     - unused is installed but in none of these.
+
+    Returns (output, project, supplement).
     """
     output = tmp / "output"
     project = tmp / "project"
@@ -282,8 +289,23 @@ def make_notices_fixture(tmp):
                   {"LICENSE": "Apache licence text\n", "NOTICE": "bundled notice\n", "license.js": "code"})
     write_package(modules / "nolicence", "nolicence", "1.0.0", "ISC")
     write_package(modules / "next", "next", "16.4.1", "MIT", {"license.md": "next licence\n"})
-    write_package(modules / "next" / "dist" / "compiled" / "react-dom", "react-dom-builtin", "0.0.0",
-                  None, {"LICENSE": "react-dom licence\n"})
+    compiled = modules / "next" / "dist" / "compiled"
+    write_package(compiled / "react-dom", "react-dom-builtin", "0.0.0", None, {
+        "LICENSE": "react-dom licence\n",
+        "cjs/react-dom-client.production.js":
+            'var s=require("next/dist/compiled/scheduler"),n=require("next/dist/lib/not-vendored");\n',
+    })
+    # Vendored like react-dom, but its package.json has only a name.
+    write_json(compiled / "scheduler" / "package.json", {"name": "scheduler-builtin"})
+    (compiled / "scheduler" / "LICENSE").write_text("react-dom licence\n")
+    (compiled / "scheduler" / "cjs").mkdir()
+    (compiled / "scheduler" / "cjs" / "scheduler.production.js").write_text("exports.unstable_now=0\n")
+    write_package(compiled / "unloaded", "unloaded-builtin", "0.0.0", None, {"LICENSE": "unloaded licence\n"})
+    (modules / "next" / "dist" / "server").mkdir(parents=True)
+    (modules / "next" / "dist" / "server" / "next.js").write_text('require("next/dist/compiled/unloaded")\n')
+    polyfill = b"!function(){/* polyfills */}();\n"
+    (modules / "next" / "dist" / "build" / "polyfills").mkdir(parents=True)
+    (modules / "next" / "dist" / "build" / "polyfills" / "polyfill-nomodule.js").write_bytes(polyfill)
     write_package(modules / "styles", "styles", "1.1.0", "MIT", {"LICENSE": "styles licence\n"})
     write_package(modules / "unused", "unused", "9.9.9", "MIT", {"LICENSE": "unused licence\n"})
     (project / "src" / "app").mkdir(parents=True)
@@ -326,21 +348,44 @@ def make_notices_fixture(tmp):
     builds = json.loads((output / "builds.json").read_text())
     builds["builds"][0]["requirePath"] = str(builder / "dist" / "index.js")
     write_json(output / "builds.json", builds)
-    return output, project
+
+    chunks = output / "static" / "_next" / "static" / "chunks"
+    chunks.mkdir(parents=True)
+    (chunks / "0polyfill.js").write_bytes(polyfill)
+    (chunks / "1main.js").write_text("self.main=1\n")
+    write_json(project / ".next" / "build-manifest.json", {
+        "polyfillFiles": ["static/chunks/0polyfill.js"], "rootMainFiles": ["static/chunks/1main.js"],
+    })
+    supplement = tmp / "supplement"
+    write_json(supplement / "supplement.json", {"bundles": [{
+        "file": "node_modules/next/dist/build/polyfills/polyfill-nomodule.js",
+        "sha256": hashlib.sha256(polyfill).hexdigest(),
+        "packages": [
+            {"name": "core-js", "version": "3.38.1", "license": "MIT", "texts": ["core-js-3.38.1/LICENSE"]},
+            {"name": "whatwg-fetch", "version": "3.0.0", "license": "MIT", "texts": ["whatwg-fetch-3.0.0/LICENSE"]},
+        ],
+    }]})
+    (supplement / "core-js-3.38.1").mkdir()
+    (supplement / "core-js-3.38.1" / "LICENSE").write_text("core-js licence\n")
+    (supplement / "whatwg-fetch-3.0.0").mkdir()
+    (supplement / "whatwg-fetch-3.0.0" / "LICENSE").write_text("whatwg-fetch licence\n")
+    return output, project, supplement
 
 
 class NoticesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="mgm-notices-test."))
         self.addCleanup(shutil.rmtree, self.tmp)
-        self.output, self.project = make_notices_fixture(self.tmp)
+        self.output, self.project, self.supplement = make_notices_fixture(self.tmp)
 
-    def write(self, name="notices.txt", output=None):
+    def write(self, name="notices.txt", output=None, supplement=True):
+        """Runs the writer; supplement=False uses the supplement it ships with."""
         notices = self.tmp / name
+        extra = ["--supplement", str(self.supplement)] if supplement else []
         result = subprocess.run(
             [sys.executable, "-I", str(NOTICES), str(output or self.output), str(notices),
              "--project", str(self.project), "--asset", "mgm-vercel-output-v0.0.1.tar.gz",
-             "--version", "v0.0.1", "--commit", COMMIT],
+             "--version", "v0.0.1", "--commit", COMMIT, *extra],
             capture_output=True, text=True, timeout=60,
         )
         return result, notices
@@ -356,19 +401,25 @@ class NoticesTest(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), hashlib.sha256(notices.read_bytes()).hexdigest())
         self.assertTrue(text.startswith("Third-party notices for MGM v0.0.1\n"))
         self.assertIn(COMMIT, text)
+        polyfill = "part of next 16.4.1, bundled into dist/build/polyfills/polyfill-nomodule.js"
         self.assertEqual(sorted(self.packages(text)), sorted([
             "@scope/shared-a 1.0.0",
             "@vercel/next 26.0.0 (builder; writes each function's launcher)",
             "argon2 0.44.0",
             "bundled 3.0.0",
+            f"core-js 3.38.1 ({polyfill})",
             "next 16.4.1",
             "nolicence 1.0.0",
             "react-dom-builtin 0.0.0 (part of next 16.4.1, at dist/compiled/react-dom)",
+            "scheduler-builtin (part of next 16.4.1, at dist/compiled/scheduler)",
             "shared-b 2.0.0",
             "styles 1.1.0",
+            f"whatwg-fetch 3.0.0 ({polyfill})",
         ]))
         self.assertNotIn("unused", text)
-        self.assertIn("Packages: 9\n", text)
+        self.assertNotIn("unloaded", text)
+        self.assertNotIn("not-vendored", text)
+        self.assertIn("Packages: 12\n", text)
         # A source-map path that is no installed package is reported, not listed.
         self.assertIn("skipped node_modules/src", result.stderr)
 
@@ -380,9 +431,77 @@ class NoticesTest(unittest.TestCase):
         self.assertIn("Licence: Apache-2.0", packages["bundled 3.0.0"])
         self.assertRegex(packages["bundled 3.0.0"], r"Texts: \[\d+\] LICENSE, \[\d+\] NOTICE")
         for body in ["argon2 licence", "Apache licence text", "bundled notice", "next licence",
-                     "react-dom licence", "styles licence", "builder licence"]:
+                     "react-dom licence", "styles licence", "builder licence", "core-js licence",
+                     "whatwg-fetch licence"]:
             self.assertEqual(text.count(body), 1, body)
         self.assertNotIn("license.js", text)
+
+    def test_lists_the_vendored_directories_a_listed_one_loads(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = notices.read_text()
+        block = self.packages(text)["scheduler-builtin (part of next 16.4.1, at dist/compiled/scheduler)"]
+        self.assertIn("Licence: not declared in package.json", block)
+        # The scheduler ships React's licence, so it cites the text react-dom does.
+        cited = re.search(r"Texts: \[(\d+)\] LICENSE", block).group(1)
+        react_dom = self.packages(text)["react-dom-builtin 0.0.0 (part of next 16.4.1, at dist/compiled/react-dom)"]
+        self.assertIn(f"[{cited}] LICENSE", react_dom)
+
+    def test_lists_the_packages_bundled_into_a_polyfill_file(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        packages = self.packages(notices.read_text())
+        polyfill = "part of next 16.4.1, bundled into dist/build/polyfills/polyfill-nomodule.js"
+        for name in [f"core-js 3.38.1 ({polyfill})", f"whatwg-fetch 3.0.0 ({polyfill})"]:
+            self.assertIn("Licence: MIT", packages[name])
+            self.assertRegex(packages[name], r"Texts: \[\d+\] LICENSE")
+
+    def test_refuses_a_polyfill_file_the_supplement_does_not_record(self):
+        chunk = self.output / "static" / "_next" / "static" / "chunks" / "0polyfill.js"
+        chunk.write_bytes(chunk.read_bytes() + b"/* a newer bundle */\n")
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        digest = hashlib.sha256(chunk.read_bytes()).hexdigest()
+        self.assertIn(f"static/_next/static/chunks/0polyfill.js: the build manifest names it as a polyfill file, "
+                      f"and {self.supplement / 'supplement.json'} records no bundle with its SHA-256 {digest}",
+                      result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_an_output_whose_build_manifest_is_missing(self):
+        (self.project / ".next" / "build-manifest.json").unlink()
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn(".next/build-manifest.json is unreadable", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_a_supplement_text_that_is_missing(self):
+        (self.supplement / "whatwg-fetch-3.0.0" / "LICENSE").unlink()
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("whatwg-fetch-3.0.0/LICENSE: unreadable", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_reads_the_supplement_it_ships_with(self):
+        # The fixture's polyfill file is not one the shipped supplement records,
+        # so the run stops, but only for that: the supplement itself is read.
+        result, notices = self.write(supplement=False)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        problems = [line for line in result.stderr.splitlines() if "check failed" in line]
+        self.assertEqual(len(problems), 1, result.stderr)
+        self.assertIn(f"{RELEASE_DIR / 'notices-supplement' / 'supplement.json'} records no bundle", problems[0])
+        self.assertFalse(notices.exists())
+
+    def test_the_shipped_supplement_names_files_it_contains(self):
+        directory = RELEASE_DIR / "notices-supplement"
+        bundles = json.loads((directory / "supplement.json").read_text())["bundles"]
+        self.assertTrue(bundles)
+        for bundle in bundles:
+            self.assertRegex(bundle["sha256"], r"^[0-9a-f]{64}$")
+            self.assertTrue(bundle["file"].startswith("node_modules/"), bundle["file"])
+            for package in bundle["packages"]:
+                self.assertTrue(package["name"] and package["version"] and package["license"], package)
+                for text in package["texts"]:
+                    self.assertIn("Copyright", (directory / text).read_text(), text)
 
     def test_prints_identical_texts_once(self):
         result, notices = self.write()

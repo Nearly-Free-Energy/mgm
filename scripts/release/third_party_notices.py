@@ -1,7 +1,7 @@
 """Write the third-party notices for an MGM release asset.
 
     python3 -I third_party_notices.py OUTPUT_DIR NOTICES --project DIR
-        --asset NAME --version VERSION --commit SHA
+        --asset NAME --version VERSION --commit SHA [--supplement DIR]
 
 build-deploy-asset.sh calls this after `vercel build`, with the directory the
 build ran in; see docs/releasing.md. The notices file is published beside the
@@ -23,10 +23,25 @@ A package is listed when any of these holds:
     The build inlines it into the output's CSS, which has no source map.
   - It is a builder that `vercel build` ran (builds.json). The builder writes
     each function's launcher into the output.
+  - It is a vendored directory (see below) that a listed vendored directory
+    loads by a path inside the same package. Next.js renders in the browser
+    with the React DOM it vendors, which loads the scheduler vendored beside
+    it (require("next/dist/compiled/scheduler")).
+  - It is bundled into a polyfill file in the output: one that the build
+    manifest (.next/build-manifest.json, polyfillFiles) names. Next.js
+    serves its prebuilt polyfill bundle to browsers without ES module
+    support. The bundle has no source map and the packages in it are not
+    installed, so they are listed from the supplement (--supplement, by
+    default notices-supplement beside this script). Its supplement.json
+    records each reviewed bundle by SHA-256, with the packages bundled into
+    it and their licence files, which are kept in the same directory. A
+    polyfill file whose SHA-256 it does not record stops the build until
+    someone reviews the new bundle and records it.
 
-Client-side JavaScript has no source map in the build. Its modules are found
-through the server-side bundles, which render the same components, so a
-package imported only by code that never runs on the server is not found.
+Client-side JavaScript has no source map in the build. Apart from the last
+two cases, its modules are found through the server-side bundles, which
+render the same components, so a package imported only by code that never
+runs on the server is not found.
 
 A directory inside a package that has its own package.json name and its own
 licence file is listed as a package of its own: Next.js ships other projects'
@@ -38,7 +53,8 @@ texts are the LICENSE, LICENCE, COPYING and NOTICE files (any case, with or
 without a suffix such as .md or -MIT) at the top of the installed package,
 because the build copies only the files a function loads and those rarely
 include them. A package that ships none is listed with its declared licence
-and a note saying so.
+and a note saying so. A package listed from the supplement takes all of
+these from the supplement.
 
 The file is deterministic for a given output and project: packages are sorted
 by name and version, texts are numbered in the order the sorted packages first
@@ -46,8 +62,9 @@ use them, and identical texts (compared after normalising line endings and
 trailing whitespace) are printed once.
 
 On success prints the file's SHA-256.
-Exit codes: 0 written, 2 usage error, 4 a package, source map or builder
-could not be read (each problem is printed), 5 writing failed.
+Exit codes: 0 written, 2 usage error, 4 a package, source map, builder,
+build manifest or the supplement could not be read, or the supplement does
+not record a polyfill file (each problem is printed), 5 writing failed.
 """
 import argparse
 import base64
@@ -73,7 +90,10 @@ PACKAGE_NAME = re.compile(r"[A-Za-z0-9~][A-Za-z0-9._~-]*")
 SOURCE_MAP_URL = re.compile(r"[#@]\s*sourceMappingURL=(\S+?)\s*(?:\*/)?\s*$")
 URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:(//)?")
 CSS_IMPORT = re.compile(r"""@(?:import|plugin|reference)\s+(?:url\(\s*)?["']([^"']+)["']""")
+LOAD = re.compile(r"""(?:\brequire\(\s*|\bfrom\s*|\bimport\(\s*)["']([^"'\n]+)["']""")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 JAVASCRIPT = (".js", ".mjs", ".cjs")
+SUPPLEMENT = Path(__file__).resolve().parent / "notices-supplement"
 # Project directories that hold no stylesheet of the project's own.
 NOT_SOURCE = {"node_modules", ".next", ".vercel", ".git"}
 WIDTH = 72
@@ -87,6 +107,7 @@ def parse_args(argv):
     parser.add_argument("--asset", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--supplement", default=str(SUPPLEMENT))
     # argparse exits with 2 (EXIT_USAGE) on a usage error and 0 for --help.
     return parser.parse_args(argv)
 
@@ -217,6 +238,59 @@ class Finder:
             self.skipped.add("/".join(parts[:end]))
             return
         self.add(parts, 0)
+
+    def add_loaded(self, problems):
+        """Records the vendored directories that listed ones load.
+
+        A listed vendored directory's installed JavaScript is read for
+        require(), import() and `from` specifiers that start with the name of
+        the package it is in; the vendored directory such a path leads into
+        is listed, and read in turn. Next.js's browser build of the React DOM
+        it vendors loads its vendored scheduler this way, and no server-side
+        bundle includes that build. Only vendored directories are read, not
+        whole packages, whose own files load much that is never shipped.
+        """
+        queue = sorted(self.components)
+        read = set()
+        while queue:
+            component = queue.pop(0)
+            if component in read:
+                continue
+            read.add(component)
+            end = package_end(component, component.index("node_modules"))
+            if end >= len(component):
+                continue
+            owner = (read_package_json(self.project.joinpath(*component[:end])) or {}).get("name")
+            if not isinstance(owner, str) or not owner:
+                continue
+            for path in javascript_files(self.project.joinpath(*component)):
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError as exc:
+                    problems.append(f"{path.relative_to(self.project).as_posix()}: unreadable: {exc}")
+                    continue
+                for specifier in sorted(set(LOAD.findall(text))):
+                    if not specifier.startswith(owner + "/"):
+                        continue
+                    inner = posixpath.normpath(specifier[len(owner) + 1:])
+                    if inner.startswith(("../", "/")) or inner in ("..", "."):
+                        continue
+                    parts = component[:end] + split(inner)
+                    for k in range(end + 1, len(parts) + 1):
+                        if self._is_vendored(parts[:k]):
+                            if parts[:k] not in self.components:
+                                self.components[parts[:k]] = set()
+                                queue.append(parts[:k])
+                            break
+
+
+def javascript_files(directory):
+    """The JavaScript files under directory, outside nested node_modules."""
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = sorted(d for d in dirnames if d != "node_modules")
+        for name in sorted(filenames):
+            if name.endswith(JAVASCRIPT):
+                yield Path(dirpath) / name
 
 
 def function_root(path, output):
@@ -443,19 +517,131 @@ def describe(directory, where, copies, origin, problems):
     return {"name": name, "version": version, "origin": origin, "licence": declared_licence(data), "texts": texts}
 
 
-def collect(output, project, problems):
+def owner_of(project, parts, end):
+    """Names the installed package at parts[:end] by its name and version."""
+    parent = read_package_json(project.joinpath(*parts[:end])) or {}
+    owner = " ".join(str(parent[f]) for f in ("name", "version") if parent.get(f))
+    return owner or "/".join(parts[:end])
+
+
+def polyfill_files(output, project, problems):
+    """The files in the output that the build manifest names as polyfills."""
+    if not (output / "static" / "_next").is_dir():
+        return []
+    try:
+        with open(project / ".next" / "build-manifest.json", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, ValueError) as exc:
+        problems.append(f".next/build-manifest.json is unreadable, so the polyfill files are unknown: {exc}")
+        return []
+    names = manifest.get("polyfillFiles", []) if isinstance(manifest, dict) else None
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        problems.append(".next/build-manifest.json: polyfillFiles is not a list of paths")
+        return []
+    found = []
+    for name in sorted(set(names)):
+        inner = posixpath.normpath(name)
+        path = output.joinpath("static", "_next", *split(inner))
+        if inner.startswith(("../", "/")) or inner in ("..", ".") or not path.is_file():
+            problems.append(f".next/build-manifest.json: polyfill file {name} is not in the output's static/_next")
+            continue
+        found.append(path)
+    return found
+
+
+def load_supplement(directory, problems):
+    """Returns {SHA-256: (installed file, packages)} from supplement.json.
+
+    Returns None when the supplement cannot be read. Each package's texts are
+    read from the files it names, relative to directory.
+    """
+    index = directory / "supplement.json"
+    try:
+        with open(index, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        problems.append(f"{index} is unreadable: {exc}")
+        return None
+    entries = data.get("bundles") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        problems.append(f"{index}: bundles is not a list")
+        return None
+    bundles = {}
+    for number, entry in enumerate(entries, 1):
+        where = f"{index}: bundle {number}"
+        if not (isinstance(entry, dict) and isinstance(entry.get("sha256"), str)
+                and SHA256.fullmatch(entry["sha256"]) and isinstance(entry.get("file"), str)
+                and isinstance(entry.get("packages"), list)):
+            problems.append(f"{where} needs sha256 (64 lowercase hex digits), file and packages")
+            continue
+        packages = []
+        for package in entry["packages"]:
+            if not (isinstance(package, dict)
+                    and all(isinstance(package.get(f), str) and package[f] for f in ("name", "version", "license"))
+                    and isinstance(package.get("texts"), list) and package["texts"]):
+                problems.append(f"{where}: each package needs name, version, license and texts")
+                continue
+            texts = []
+            for name in package["texts"]:
+                inner = posixpath.normpath(name) if isinstance(name, str) else ".."
+                if inner.startswith(("../", "/")) or inner in ("..", "."):
+                    problems.append(f"{where}: {name!r} is not a file in {directory}")
+                    continue
+                try:
+                    raw = directory.joinpath(*split(inner)).read_bytes()
+                except OSError as exc:
+                    problems.append(f"{where}: {name}: unreadable: {exc}")
+                    continue
+                texts.append((posixpath.basename(inner), normalise(raw)))
+            packages.append({"name": package["name"], "version": package["version"],
+                             "licence": package["license"], "texts": sorted(texts)})
+        bundles[entry["sha256"]] = (entry["file"], packages)
+    return bundles
+
+
+def add_polyfills(packages, output, project, supplement, problems):
+    """Adds the packages bundled into the output's polyfill files."""
+    polyfills = polyfill_files(output, project, problems)
+    bundles = load_supplement(supplement, problems) if polyfills else None
+    if bundles is None:
+        return
+    for path in polyfills:
+        rel = path.relative_to(output).as_posix()
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            problems.append(f"{rel}: unreadable: {exc}")
+            continue
+        if digest not in bundles:
+            problems.append(
+                f"{rel}: the build manifest names it as a polyfill file, and {supplement / 'supplement.json'} "
+                f"records no bundle with its SHA-256 {digest}. Review the packages bundled into it and "
+                "record them there (docs/releasing.md)"
+            )
+            continue
+        file, bundled = bundles[digest]
+        parts = split(file)
+        end = package_end(parts, 0)
+        if 0 < end < len(parts):
+            origin = f"part of {owner_of(project, parts, end)}, bundled into {'/'.join(parts[end:])}"
+        else:
+            origin = f"bundled into {file}"
+        for package in bundled:
+            merge(packages, dict(package, origin=origin))
+
+
+def collect(output, project, supplement, problems):
     """Returns (packages sorted by name and version, skipped paths)."""
     finder = Finder(project)
     scan_output(output, finder, problems)
     scan_stylesheets(project, finder)
+    finder.add_loaded(problems)
     packages = {}
     for component in sorted(finder.components):
         end = package_end(component, component.index("node_modules"))
         origin = None
         if end < len(component):
-            parent = read_package_json(project.joinpath(*component[:end])) or {}
-            owner = " ".join(str(parent[f]) for f in ("name", "version") if parent.get(f))
-            origin = f"part of {owner or '/'.join(component[:end])}, at {'/'.join(component[end:])}"
+            origin = f"part of {owner_of(project, component, end)}, at {'/'.join(component[end:])}"
         where = "/".join(component)
         record = describe(project.joinpath(*component), where, finder.components[component], origin, problems)
         if record is not None:
@@ -465,6 +651,7 @@ def collect(output, project, problems):
         record = describe(directory, directory.name, set(), origin, problems)
         if record is not None:
             merge(packages, record)
+    add_polyfills(packages, output, project, supplement, problems)
     ordered = sorted(
         packages.values(),
         key=lambda p: (p["name"].lower(), p["name"], p["version"] or "", p["origin"] or ""),
@@ -551,7 +738,7 @@ def main(argv):
         return EXIT_USAGE
 
     problems = []
-    packages, skipped = collect(output, project, problems)
+    packages, skipped = collect(output, project, Path(args.supplement), problems)
     for path in skipped:
         print(f"third_party_notices.py: note: skipped {path}: named by a source map or stylesheet, "
               "but not an installed package", file=sys.stderr)
