@@ -228,14 +228,15 @@ The script reads the connection string from the environment variable you name
 and never takes it as an argument. Do not type it on a command line, where
 shell history keeps it. Read it with `read -rs`, which shows nothing while you
 paste it from your secret store, and unset the variable when the export has
-finished, as below. A password manager's command-line tool can supply it
-instead, so that only a reference to the secret appears on the command line.
-Every run must name either the age recipients to encrypt to
-(`--age-recipients`) or `--plaintext`; naming neither, or both, is a usage
-error.
+finished, as below. The prompt is printed with `printf` because in zsh, macOS's
+default shell, `read -p` reads from a coprocess rather than printing a prompt.
+A password manager's command-line tool can supply the string instead, so that
+only a reference to the secret appears on the command line. Every run must
+name either the age recipients to encrypt to (`--age-recipients`) or
+`--plaintext`; naming neither, or both, is a usage error.
 
 ```bash
-read -rsp 'Connection string: ' MGM_EXPORT_DB_URL && echo >&2 && export MGM_EXPORT_DB_URL
+printf 'Connection string: ' >&2; read -rs MGM_EXPORT_DB_URL && echo >&2 && export MGM_EXPORT_DB_URL
 scripts/backup/export-database.sh \
   --db-url-env MGM_EXPORT_DB_URL \
   --out /srv/mgm-exports \
@@ -898,7 +899,7 @@ starts only when every other item has passed.
 
   ```bash
   (
-    read -rsp 'Password for mgm-restore-target: ' PGPASSWORD; echo >&2
+    printf 'Password for mgm-restore-target: ' >&2; read -rs PGPASSWORD; echo >&2
     export PGPASSWORD
     awk '/^COPY /{table=$2; rows=0; next} /^\\\.$/{if (table != "") print table, rows; table=""; next} table != ""{rows++}' data.sql >expected-row-counts.txt &&
       [ -s expected-row-counts.txt ] || { echo "ERROR: no table data read from data.sql" >&2; exit 2; }
