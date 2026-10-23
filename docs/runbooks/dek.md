@@ -24,66 +24,210 @@ falling back to the legacy name `mbe_ems_dek` if the new one is missing.
 The plaintext never leaves the database except to the server code that
 needs it.
 
-If you add a new encrypted column, add it to the table above and to the
-rotation step below in the same PR.
+If you add a new encrypted column, add it to the table above, to the
+rotation step below, and to the guard at the top of
+`supabase/scripts/rehearse-credential-key-bootstrap.sql` in the same PR.
 
 ## Create the key (new environment)
 
-Migrations create the Vault secret if it is missing, and refuse to invent
-one silently (migration `00025`). The earlier migrations create it under the
-legacy name `mbe_ems_dek`; migration `20261014090000_mgm_credential_key_name`
-then copies it to `mgm_ems_dek`:
+The migrations never generate a key for a shared database. A database
+without one stops at migration `00018_openems_backend_per_microgrid` with
+`No credential encryption key`, and nothing after it is applied. Before the
+first migration run:
 
-- **Production or any shared database:** generate the key yourself and
-  pass it to the migration run.
+1. Generate the key and store it in the team password manager, labelled with
+   the environment and `mgm_ems_dek` (see "Back it up"):
 
-  ```bash
-  DEK="$(openssl rand -base64 32)"
-  # Store $DEK in the team password manager now — see "Back it up".
-  psql "$DB_URL" -v ON_ERROR_STOP=1 \
-    -c "ALTER DATABASE postgres SET app.ems_dek_bootstrap = '$DEK';"
-  # run migrations (supabase db push / your deploy pipeline)
-  psql "$DB_URL" -c "ALTER DATABASE postgres RESET app.ems_dek_bootstrap;"
-  ```
+   ```bash
+   openssl rand -base64 32
+   ```
 
-  Reset the setting once the migrations have run, so the key is not left in
-  the database configuration.
+   Migration `00018` refuses a key shorter than 32 characters.
 
-- **Local development:** `./setup.sh` sets `app.allow_dev_dek = '1'`, and the
-  migration generates a throwaway key. Local credentials become
-  unreadable after the next `supabase db reset`; re-enter them.
+2. Add it to the new database's Vault from a psql session connected as
+   `postgres`. `\prompt` reads the key into a psql variable, so the key is
+   not in your shell history, psql's history or a saved SQL file; paste it
+   at the prompt:
 
-If neither setting is present on a database without the secret, the
-migration stops with `DEK bootstrap required` — by design.
+   ```sql
+   \prompt 'Credential key: ' dek
+   SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+   \unset dek
+   ```
+
+   Do not use the Supabase SQL editor for this step: it would keep the key
+   in its query history.
+
+3. Check that the database carries no development opt-in, so that if step
+   2 did not take effect, migration `00018` stops instead of generating a
+   throwaway key. In the same psql session, both queries must return no
+   rows:
+
+   ```sql
+   SELECT name FROM vault.secrets WHERE name = 'mgm_allow_dev_credential_key';
+
+   SELECT coalesce(d.datname, 'every database') AS database,
+          coalesce(r.rolname, 'every role') AS role,
+          split_part(c, '=', 1) AS setting
+     FROM pg_db_role_setting s
+     CROSS JOIN LATERAL unnest(s.setconfig) AS c
+     LEFT JOIN pg_database d ON d.oid = s.setdatabase
+     LEFT JOIN pg_roles r ON r.oid = s.setrole
+    WHERE split_part(c, '=', 1) IN ('app.allow_dev_dek', 'app.ems_dek_bootstrap');
+   ```
+
+   The second query prints setting names only, never their values. If the
+   first finds the Vault entry, delete it; the CLI leaves it in place when
+   `MGM_ALLOW_DEV_CREDENTIAL_KEY` is empty:
+
+   ```sql
+   DELETE FROM vault.secrets WHERE name = 'mgm_allow_dev_credential_key';
+   ```
+
+   Remove each setting the second finds with the command that matches its
+   row: `ALTER DATABASE <database> RESET <setting>;` when the role is
+   "every role", `ALTER ROLE <role> RESET <setting>;` when the database is
+   "every database", `ALTER ROLE ALL RESET <setting>;` when the row shows
+   both, and `ALTER ROLE <role> IN DATABASE <database> RESET <setting>;`
+   otherwise. On Supabase the `postgres` role is not a superuser, so a reset
+   can fail with `permission denied to set parameter`; ask Supabase support
+   to remove the setting then. `app.ems_dek_bootstrap` holds a key: an
+   earlier version of this runbook used it to supply the first key, and no
+   migration reads it once the key is in Vault.
+
+   Run both checks once on each existing shared database as well,
+   production included.
+
+4. Run the migrations with the development opt-in cleared, so a value in a
+   `.env` file cannot apply (see "Local development and CI"):
+
+   ```bash
+   MGM_ALLOW_DEV_CREDENTIAL_KEY= supabase db push
+   ```
+
+   Check that the output has no "Generated a throwaway credential encryption
+   key" warning. Not every Supabase CLI version prints server warnings, so
+   also confirm that the key in use is your copy. Migration `00018` copies
+   your key to the legacy name `mbe_ems_dek` (see "Retire the legacy key
+   name"); in psql, paste the key again and check the result is `t`:
+
+   ```sql
+   \prompt 'Credential key: ' dek
+   SELECT decrypted_secret = :'dek' AS key_matches
+     FROM vault.decrypted_secrets WHERE name = 'mbe_ems_dek';
+   \unset dek
+   ```
+
+   A deploy pipeline that runs the migrations must not set
+   `MGM_ALLOW_DEV_CREDENTIAL_KEY` either.
+
+If a run stopped at `00018`, do steps 1 and 2, then step 4 again; the
+migrations continue from `00018`. If it stopped because the key in Vault is
+shorter than 32 characters, delete that entry before step 2; nothing has
+been encrypted with it yet:
+
+```sql
+DELETE FROM vault.secrets WHERE name = 'mgm_ems_dek';
+```
+
+### Local development and CI
+
+Local and CI databases use a throwaway key instead. Set
+`MGM_ALLOW_DEV_CREDENTIAL_KEY=1` for `supabase db reset`, for
+`supabase start` when it creates a new database, and for commands that
+build a shadow database from the migrations, such as `supabase db diff`:
+
+```bash
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
+```
+
+`./setup.sh` (local mode) and the CI `Test` job set it for you. The Supabase
+CLI then adds the `mgm_allow_dev_credential_key` entry from
+`supabase/config.toml` to Vault before running the migrations, and migration
+`00018` generates a key and raises a warning (not every CLI version prints
+it). Every reset creates a new key, so re-enter local credentials
+afterwards. A psql session that applies the migrations by hand can run
+`SET app.allow_dev_dek = '1'` instead.
+
+Never set the variable when migrating a shared database. The CLI writes
+`[db.vault]` entries during `supabase db push` and `supabase migration up`
+too, so a new database would get a key that nobody has a copy of. For the
+same reason, never put `MGM_ALLOW_DEV_CREDENTIAL_KEY` in any `.env` file:
+the CLI reads `.env`, `.env.local`, `.env.development*` and `supabase/.env*`
+for every command, including `db push` and `migration up`. Pass it only to
+the commands above, as in the example.
 
 ## Back it up
 
 Store the plaintext DEK in the team password manager as soon as it is
 created, labelled with the environment and the Vault secret name. Vault is
-the only other copy. To read the current value from a database (for
-example, to back up a key that was generated before this runbook existed),
-use a privileged connection:
+the only other copy, and a logical restore into a new project cannot read
+it (see "Recover"). To read the current value from a database (for example,
+to back up a key that was generated before this runbook existed), use a
+privileged connection:
 
 ```sql
 SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'mgm_ems_dek';
 ```
 
+Keep copies of MGM's other Vault entries as well: `payments_worker_url`
+(the deployment's `/api/payments/reconcile-worker` URL) and
+`payments_worker_secret` (the application's `PAYMENTS_WORKER_SECRET`; see
+`docs/payments-rollout.md`).
+
 Never paste the key into an issue, PR, chat, or log.
 
 ## Recover
 
-- **Database restored from backup:** Vault is restored with it; nothing to do.
+Supabase encrypts Vault with a root key that belongs to the project, and
+backup files never contain it. What to do depends on where the database
+comes back:
+
+- **Restored into the same project** (scheduled backup or point-in-time
+  recovery): Vault is restored with it; nothing to do.
+- **Supabase's "Restore to a new project":** Supabase copies the root key,
+  so Vault stays readable. If the new project will serve a different
+  deployment, update `payments_worker_url`.
+- **Logical restore into a new project** (`supabase db dump` or `pg_dump`
+  files restored with psql): the new project has its own root key, so the
+  restored Vault entries cannot be decrypted, and neither can any stored
+  credential. Either:
+  - while the old project is still active, copy its root key to the new
+    project before restoring, as described under "Supabase Vault or column
+    encryption" in Supabase's
+    [Backup and restore using the CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
+    Copying replaces the new project's root key, so do it while the new
+    project's Vault is still empty; or
+  - after restoring, replace MGM's Vault entries with your copies, from a
+    psql session connected as `postgres`; paste the key at the prompt, as in
+    step 2 of "Create the key". Use the same key as before, so the restored
+    credentials decrypt again:
+
+    ```sql
+    DELETE FROM vault.secrets WHERE name IN
+      ('mgm_ems_dek', 'mbe_ems_dek', 'payments_worker_url', 'payments_worker_secret');
+    \prompt 'Credential key: ' dek
+    SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+    \unset dek
+    SELECT vault.create_secret('<https://…/api/payments/reconcile-worker>', 'payments_worker_url');
+    SELECT vault.create_secret('<PAYMENTS_WORKER_SECRET>', 'payments_worker_secret');
+    ```
+
+  Then run **Test connection** on one microgrid and one payment account.
 - **Vault secret lost but the plaintext is in the password manager:**
-  recreate it with the same value.
+  recreate it with the same value, from a psql session connected as
+  `postgres`; paste the key at the prompt, as in step 2 of "Create the key":
 
   ```sql
-  SELECT vault.create_secret('<plaintext from password manager>', 'mgm_ems_dek',
-    'MGM credential encryption key');
+  \prompt 'Credential key: ' dek
+  SELECT vault.create_secret(:'dek', 'mgm_ems_dek', 'MGM credential encryption key');
+  \unset dek
   ```
 
 - **Both lost:** the encrypted values cannot be recovered. Generate a new
-  key as in "Create the key", set the encrypted columns above to `NULL`, and
-  have operators re-enter OpenEMS and payment credentials in the app.
+  key and add it to Vault as in "Create the key", set the encrypted columns
+  above to `NULL`, and have operators re-enter OpenEMS and payment
+  credentials in the app.
 
 ## Rotate
 
@@ -93,17 +237,14 @@ starting. Row locks alone cannot stop an application request that has already
 encrypted a secret from writing that old-key ciphertext after rotation.
 Back up the current and replacement keys in the password manager first.
 
-The tested implementation is
-[`supabase/scripts/rotate-credential-key.sql`](../../supabase/scripts/rotate-credential-key.sql).
-Loading it defines a session-local helper; it does not rotate anything. On a
-privileged psql connection, from the repository root:
-
-```sql
-\i supabase/scripts/rotate-credential-key.sql
-BEGIN;
-SELECT pg_temp.mgm_rotate_credential_key('<new plaintext key from password manager>');
-COMMIT;
-```
+Use the guarded `rotate` command in
+[credential-key-maintenance.md](credential-key-maintenance.md): a dry run
+first, then the run with `--commit`. It asks for the replacement key twice
+at a hidden prompt and passes it to psql on standard input, so the key is
+not in your shell history, psql's history or a command-line argument. Each
+run applies the tested helper,
+[`supabase/scripts/rotate-credential-key.sql`](../../supabase/scripts/rotate-credential-key.sql),
+in one transaction that rolls back unless you pass `--commit`.
 
 The helper locks credential tables, decrypts active and historical secrets
 before changing either Vault key name, then re-encrypts them in the same
@@ -130,9 +271,8 @@ complete; replacing Vault names does not make a key backup obsolete immediately.
 
 Retirement is optional maintenance, not part of the rename deployment. Keep
 both key names until the new migration and existing credential reads have been
-verified. The guarded operator tooling is reviewed separately in
-[PR #25](https://github.com/Nearly-Free-Energy/mgm/pull/25); use it only after
-that maintenance change is approved and its prerequisites are fulfilled.
+verified. To retire the legacy name, use the guarded `retire` command in
+[credential-key-maintenance.md](credential-key-maintenance.md).
 
 Do not delete the legacy row as a deployment step. Retirement must refuse
 mismatched keys and verify active and historical credentials after removal,

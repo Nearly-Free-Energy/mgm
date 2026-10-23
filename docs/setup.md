@@ -134,7 +134,9 @@ Usage:
 **Local mode:**
 1. Checks prerequisites (Node.js, npm, Docker, Supabase CLI)
 2. Starts local Supabase containers (`supabase start`)
-3. Applies database migrations and seeds a dev admin user (`supabase db reset`)
+3. Applies database migrations and seeds a dev admin user (`supabase db reset`).
+   Both run with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, so the local database gets a
+   throwaway credential encryption key ([runbook](runbooks/dek.md#local-development-and-ci)).
 4. Generates `.env.local` with local Supabase URLs and keys
 5. Installs npm dependencies
 
@@ -166,10 +168,17 @@ After `./setup.sh` in local mode, these services are running:
 
 ```bash
 supabase status         # Show running services and keys
-supabase db reset       # Re-apply migrations + seed (destructive)
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset   # Re-apply migrations + seed (destructive)
 supabase stop           # Stop all local Supabase containers
 supabase start          # Restart containers
 ```
+
+Without `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, a reset stops at migration `00018`
+because the new database has no credential encryption key. `supabase start`
+needs the variable too when it creates a new database (the first start, or
+after `supabase stop --no-backup`), and so does `supabase db diff`, which
+builds a shadow database from the migrations. See
+[the runbook](runbooks/dek.md#local-development-and-ci).
 
 ## Per-org customerapp activation (`/api/v1/*`)
 
@@ -199,19 +208,16 @@ instance** — they never run against cloud Supabase to prevent polluting shared
 
 ### Prerequisites
 
-- **Local Supabase CLI** running (`supabase start`).
-- **`psql` on PATH** — required by `dek-bootstrap.test.ts`. Install with
-  `sudo apt install postgresql-client` (Debian/Ubuntu) or `brew install libpq` (macOS).
-  The suite skips cleanly if `psql` is missing.
+- **Local Supabase CLI** running (`MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`, or `./setup.sh`).
 
 ### Running RLS tests
 
 ```bash
 # 1. Start local Supabase (if not already running)
-supabase start
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start
 
 # 2. Re-apply migrations + seed (only needed once, or after schema changes)
-supabase db reset
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
 
 # 3. Get the JWT secret (needed to mint impersonation JWTs)
 supabase status | grep "JWT secret"
@@ -239,20 +245,18 @@ Missing `NEXT_PUBLIC_SUPABASE_URL` or `SUPABASE_JWT_SECRET` without `SKIP_RLS_TE
 loudly** with an actionable error — this is intentional so CI catches missing config rather than
 silently skipping coverage.
 
-### Bypassing the DEK-bootstrap integration test
+### The fresh-install key test
 
-`src/lib/supabase/__tests__/dek-bootstrap.test.ts` shells out to
-`supabase db reset --yes` to verify migration `00025_dek_bootstrap_hardening.sql`.
-That requires the Supabase CLI plus `psql` available on PATH. Skip the suite
-when those aren't present (CI without Docker, fast iteration loops, etc.):
+`src/lib/supabase/__tests__/dek-bootstrap.test.ts` runs `supabase db reset`
+twice: without `MGM_ALLOW_DEV_CREDENTIAL_KEY`, where the migrations must stop
+at `00018`, and with it. Each reset wipes the local database, so `npm test`
+reports the suite as skipped unless you ask for it:
 
 ```bash
-SKIP_DEK_BOOTSTRAP_TEST=1 npm test
+RUN_DEK_BOOTSTRAP_TEST=1 npm test -- dek-bootstrap.test.ts
 ```
 
-This is destructive when it runs (it resets the local DB), so prefer running
-it in isolation: `SKIP_RLS_TESTS=1 npm test -- dek-bootstrap.test.ts`. Combine
-both flags in CI without local Supabase: `SKIP_RLS_TESTS=1 SKIP_DEK_BOOTSTRAP_TEST=1 npm test`.
+CI runs it in its own step after `npm test`.
 
 ### How JWT impersonation works
 
@@ -284,9 +288,10 @@ If using local/dev mode, run `npm run dev` after setup.
 |---------|----------|
 | `Docker daemon is not running` | Start Docker Desktop, then re-run `./setup.sh` |
 | `supabase: command not found` | Install: `brew install supabase/tap/supabase` |
-| `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `supabase db reset` to re-apply. |
+| `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply. |
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
-| Login fails with "Invalid credentials" | Run `supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
+| `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
+| Login fails with "Invalid credentials" | Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
 | Billing generation shows "No meter reading data" | Ensure OpenEMS edge simulations are running and meters are assigned to tenants |
 | Docker mode: app not starting | Check `docker compose logs mgm-app` for errors |

@@ -80,7 +80,7 @@ export async function assertEnvironmentReady(): Promise<void> {
   } catch (err) {
     throw new Error(
       `[RLS tests] Cannot reach local Supabase at ${LOCAL_SUPABASE_URL}.\n` +
-        "Start it with: supabase start\n" +
+        "Start it with: MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start (or ./setup.sh)\n" +
         "Or set SKIP_RLS_TESTS=1 to bypass.\n" +
         `Original error: ${err instanceof Error ? err.message : String(err)}`
     );
