@@ -11,7 +11,8 @@
  *
  * Required env vars (set in .env.local):
  *   SUPABASE_JWT_SECRET              — local Supabase JWT signing secret
- *   NEXT_PUBLIC_SUPABASE_ANON_KEY    — local anon/publishable key (for non-service-role clients)
+ *   MGM_PUBLIC_SUPABASE_ANON_KEY     — local anon/publishable key (for non-service-role clients);
+ *                                      NEXT_PUBLIC_SUPABASE_ANON_KEY is still read as a fallback (CI)
  *
  * The LOCAL_SUPABASE_URL is always http://localhost:54321 — RLS tests never run against cloud.
  * A local service-role JWT is derived at runtime from SUPABASE_JWT_SECRET.
@@ -35,6 +36,14 @@ export const LOCAL_SUPABASE_URL = configuredTestUrl;
 
 // ── Environment guard ────────────────────────────────────────────────────
 
+/**
+ * The local anon/publishable key for tests. setup.sh writes the MGM_ name;
+ * CI still exports the old one (test.yml), so both are read.
+ */
+export function testAnonKey(): string | undefined {
+  return process.env.MGM_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+}
+
 export function shouldSkip(): boolean {
   return process.env.SKIP_RLS_TESTS === "1";
 }
@@ -52,7 +61,7 @@ export async function assertEnvironmentReady(): Promise<void> {
 
   const missing: string[] = [];
   if (!process.env.SUPABASE_JWT_SECRET) missing.push("SUPABASE_JWT_SECRET");
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  if (!testAnonKey()) missing.push("MGM_PUBLIC_SUPABASE_ANON_KEY");
 
   if (missing.length > 0) {
     throw new Error(
@@ -69,7 +78,7 @@ export async function assertEnvironmentReady(): Promise<void> {
   try {
     const res = await fetch(`${LOCAL_SUPABASE_URL}/rest/v1/`, {
       headers: {
-        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+        apikey: testAnonKey() ?? "",
       },
       signal: AbortSignal.timeout(3000),
     });
@@ -149,9 +158,9 @@ export async function serviceClient(): Promise<SupabaseClient> {
  * the role for RLS evaluation (auth.uid() = sub claim from JWT).
  */
 export function clientAs(jwt: string): SupabaseClient {
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const anonKey = testAnonKey();
   if (!anonKey) {
-    throw new Error("[RLS tests] NEXT_PUBLIC_SUPABASE_ANON_KEY is not set");
+    throw new Error("[RLS tests] MGM_PUBLIC_SUPABASE_ANON_KEY is not set");
   }
   return createClient(LOCAL_SUPABASE_URL, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },

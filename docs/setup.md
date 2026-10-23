@@ -341,7 +341,7 @@ If you don't have local Supabase running (e.g. CI without Docker), set `SKIP_RLS
 SKIP_RLS_TESTS=1 npm test
 ```
 
-Missing `NEXT_PUBLIC_SUPABASE_ANON_KEY` or `SUPABASE_JWT_SECRET` without `SKIP_RLS_TESTS=1` will **fail
+Missing `MGM_PUBLIC_SUPABASE_ANON_KEY` (the old `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still read by the test helpers, as CI exports it) or `SUPABASE_JWT_SECRET` without `SKIP_RLS_TESTS=1` will **fail
 loudly** with an actionable error — this is intentional so CI catches missing config rather than
 silently skipping coverage.
 

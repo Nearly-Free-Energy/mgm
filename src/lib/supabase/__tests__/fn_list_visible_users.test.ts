@@ -42,6 +42,7 @@ import {
   cleanupTestData,
   LOCAL_SUPABASE_URL,
   type TestUser,
+  testAnonKey,
 } from "./rls.helpers";
 
 const FIXTURE = {
@@ -135,8 +136,8 @@ type VisibleRow = {
 describe("fn_list_visible_users — visibility", () => {
   it("anon cannot call the RPC (permission denied at the grant layer)", async () => {
     if (skipIfRequested()) return;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!anonKey) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY not set");
+    const anonKey = testAnonKey();
+    if (!anonKey) throw new Error("MGM_PUBLIC_SUPABASE_ANON_KEY not set");
     // Anon client: no Authorization bearer, only the apikey. RPC must
     // 42501 / "permission denied" — this is the MEANINGFUL security
     // upgrade over the dropped view (which returned 0 rows via filter).

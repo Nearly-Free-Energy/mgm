@@ -110,6 +110,8 @@ Worse, or to watch:
   renaming to `proxy.ts` (Node.js only) is a later mechanical change.
   Container verification (tracked separately under RFC #30) still confirms
   two distinct configurations on one image digest.
-- The database test harness still reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` as a
-  test-only variable; renaming it touches the CI workflow and is left to a
-  follow-up.
+- The database test helpers read `MGM_PUBLIC_SUPABASE_ANON_KEY`, falling back
+  to `NEXT_PUBLIC_SUPABASE_ANON_KEY` (`testAnonKey()` in `rls.helpers.ts`)
+  because CI still exports the old name; renaming that export is a follow-up
+  (with #67). `setup.sh` must not write the old name back: Next.js would
+  build its value into the bundles again.

@@ -8,7 +8,7 @@
  *      (then `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply
  *      migrations), or `./setup.sh`
  *   2. SUPABASE_JWT_SECRET set in .env.local (get from: `supabase status | grep 'JWT secret'`)
- *   3. NEXT_PUBLIC_SUPABASE_ANON_KEY set in .env.local
+ *   3. MGM_PUBLIC_SUPABASE_ANON_KEY set in .env.local (written by ./setup.sh)
  *
  * Opt-out:
  *   SKIP_RLS_TESTS=1  — skips the suite cleanly (for CI without local Supabase)
@@ -36,6 +36,7 @@ import {
   cleanupTestData,
   LOCAL_SUPABASE_URL,
   type TestUser,
+  testAnonKey,
 } from "./rls.helpers";
 
 // ── Fixture IDs (deterministic — simplifies cleanup) ──────────────────────
@@ -2025,8 +2026,8 @@ describe("RLS: Community payment provider (#115)", () => {
         // also retains. Either outcome (NULL with no error, OR 42501 error)
         // means anon got nothing back, which is the load-bearing property.
         // src/middleware.ts:57-64 also 401s anon /api/* requests upstream.
-        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-        if (!anonKey) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY not set");
+        const anonKey = testAnonKey();
+        if (!anonKey) throw new Error("MGM_PUBLIC_SUPABASE_ANON_KEY not set");
         const anonClient = createClient(LOCAL_SUPABASE_URL, anonKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
@@ -2079,8 +2080,8 @@ describe("B1 #268 — anon REVOKE on SECURITY DEFINER mutators", () => {
   }
 
   function buildAnonClient(): SupabaseClient {
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!anonKey) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY not set");
+    const anonKey = testAnonKey();
+    if (!anonKey) throw new Error("MGM_PUBLIC_SUPABASE_ANON_KEY not set");
     return createClient(LOCAL_SUPABASE_URL, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
@@ -2166,8 +2167,8 @@ describe("B2 #270 — SECURITY DEFINER anon REVOKE", () => {
   }
 
   function buildAnonClient(): SupabaseClient {
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!anonKey) throw new Error("NEXT_PUBLIC_SUPABASE_ANON_KEY not set");
+    const anonKey = testAnonKey();
+    if (!anonKey) throw new Error("MGM_PUBLIC_SUPABASE_ANON_KEY not set");
     return createClient(LOCAL_SUPABASE_URL, anonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
