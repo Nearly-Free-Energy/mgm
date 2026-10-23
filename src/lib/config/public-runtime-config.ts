@@ -176,6 +176,14 @@ export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeCo
         `Rename it to ${MGM_NAMES.cookieName} (or remove it).`
     );
   }
+  // The reverse: an MGM cookie name next to the legacy URL/key. It must not
+  // switch the set on its own, and silently ignoring it would log everyone out.
+  if (!useMgm && present(env[MGM_NAMES.cookieName]) !== undefined) {
+    throw new RuntimeConfigError(
+      `${MGM_NAMES.cookieName} is set but ignored until ${MGM_NAMES.url} and ` +
+        `${MGM_NAMES.anonKey} are set too. Rename the three Supabase variables together.`
+    );
+  }
   if (rawCookie !== undefined && !COOKIE_NAME_PATTERN.test(rawCookie)) {
     throw new RuntimeConfigError(
       `${names.cookieName} may contain only letters, digits, '.', '_' and '-' (at most 128).`
@@ -269,20 +277,24 @@ export function getServerSupabaseSettings(env: RuntimeEnv = readEnv()): {
   publicConfig: PublicRuntimeConfig;
 } {
   const publicConfig = getPublicRuntimeConfig(env);
+  const { names } = selectNames(env);
   const rawInternal = present(env.SUPABASE_INTERNAL_URL);
   const internal = rawInternal ? parseHttpUrl(rawInternal, "SUPABASE_INTERNAL_URL") : undefined;
   // @supabase/ssr derives its default cookie name from the URL it is given.
   // The server and middleware connect to the internal URL while the browser
   // uses the public one, so without an explicit name the two sides would
-  // look for different cookies and sessions would never stick.
+  // look for different cookies and sessions would never stick. supabase-js
+  // keys the default on the first hostname label only; comparing the full
+  // host is deliberately stricter and only refuses configs that would have
+  // worked. If that derivation changes, revisit this check.
   if (
     internal &&
     !publicConfig.cookieName &&
     new URL(internal).host !== new URL(publicConfig.supabaseUrl).host
   ) {
     throw new RuntimeConfigError(
-      "SUPABASE_INTERNAL_URL points at a different host than MGM_PUBLIC_SUPABASE_URL, " +
-        "so MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set (e.g. sb-mgm-auth-token)."
+      `SUPABASE_INTERNAL_URL points at a different host than ${names.url}, ` +
+        `so ${names.cookieName} must be set (e.g. sb-mgm-auth-token).`
     );
   }
   return {

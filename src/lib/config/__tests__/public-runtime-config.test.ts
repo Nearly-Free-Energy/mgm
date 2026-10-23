@@ -190,6 +190,35 @@ describe("parsePublicRuntimeConfig", () => {
       "sb-legacy"
     );
   });
+
+  it("refuses an MGM cookie name next to the legacy URL and key", () => {
+    expectConfigError(
+      () =>
+        parsePublicRuntimeConfig({
+          NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
+          MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-new",
+        }),
+      /MGM_PUBLIC_SUPABASE_COOKIE_NAME is set but ignored until/,
+      "sb-new"
+    );
+  });
+
+  it("names the legacy variables in legacy mode for an internal host on another host", () => {
+    const legacy = {
+      NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
+      SUPABASE_INTERNAL_URL: "http://kong:8000",
+    };
+    expectConfigError(
+      () => getServerSupabaseSettings(legacy),
+      /NEXT_PUBLIC_SUPABASE_URL.*NEXT_PUBLIC_SUPABASE_COOKIE_NAME must be set/
+    );
+    // With the legacy cookie name set, the same configuration is accepted.
+    expect(
+      getServerSupabaseSettings({ ...legacy, NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy" }).url
+    ).toBe("http://kong:8000");
+  });
 });
 
 describe("live environment readers", () => {

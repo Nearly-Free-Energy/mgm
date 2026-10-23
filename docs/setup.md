@@ -209,6 +209,9 @@ Earlier releases used Next.js build-time names. Rename them:
 | `NEXT_PUBLIC_APP_URL` | `MGM_APP_URL` (origin only) |
 | `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` | `MGM_APP_URL` (its origin; the `/payment/callback` path is added by MGM) |
 
+Rename the three Supabase variables together: an `MGM_PUBLIC_SUPABASE_COOKIE_NAME`
+next to the old URL and key is refused, as is the reverse.
+
 **Compatibility for one release.** So that existing installations keep working
 until they adopt the new names, this release still accepts the old names as a
 fallback:
