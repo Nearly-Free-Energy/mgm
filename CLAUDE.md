@@ -4,7 +4,8 @@ Tool-specific config for Claude Code. MGM is a microgrid operating system built 
 
 ## Read first
 
-- `docs/operating-model.md` — how work moves from issue to production, the architectural invariants, and how decisions and lessons are recorded.
+- `docs/operating-model.md` — how work moves from issue to production, the architectural invariants, the merge controls, and how decisions and lessons are recorded.
+- `CONTRIBUTING.md` — contributor setup, sign-off, signed commits, and the required checks.
 - `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
 - `docs/entity-model.md` — the data model and the reasoning behind it.
 - Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`.
@@ -219,10 +220,13 @@ Six rules every contributor must follow:
 
 ## Required Merge Controls
 
-`main` is protected by a ruleset in this repository (GitHub → Settings → Rules). Every PR must pass ALL of the following before merge:
+Merge control on `main` is a **maintainer social contract**. GitHub does not block a merge that breaks it: branch-protection or ruleset enforcement is deferred (launch tracker #30 § 2, decided 22 October 2026). The person who merges applies the checklist below and refuses to merge, and asks for a correction, when any item is missing. `docs/operating-model.md` § "Merge controls" and `docs/adr/ADR-002-ci-build-gate-and-merge-controls.md` record the decision.
 
-1. **DCO** — every commit ends with `Signed-off-by: Your Name <email>`. Use `git commit -s`.
-2. **`required_signatures` (cryptographic)** — every commit must be GPG- or SSH-signed. DCO is a text trailer; `required_signatures` is a separate cryptographic guarantee. One-time per-machine setup:
+**Merger checklist.** Before merging a PR to `main`, verify every item:
+
+1. **A pull request.** Nothing is pushed to `main` directly.
+2. **`Test`, `CodeQL` and `Build` are green.** `CodeQL` appears as two entries on a PR (the job and the analysis); both must be green. These names are the check names this checklist refers to: rename a job only together with these docs, and do not add a matrix-suffix.
+3. **Every commit is Verified.** Cryptographic signature (GPG, SSH, or GitHub's own for web edits); GitHub must show the **Verified** badge on each commit. One-time per-machine setup:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_signing -C "<your-email>"
    git config --global gpg.format ssh
@@ -230,13 +234,24 @@ Six rules every contributor must follow:
    git config --global commit.gpgsign true
    git config --global tag.gpgsign true
    ```
-   Then upload `~/.ssh/id_ed25519_signing.pub` at github.com → Settings → SSH and GPG keys → "New SSH key" with **Key type: Signing Key**. After setup, every `git commit` carries an "SSH" signature and GitHub shows the "Verified" badge.
-3. **`CodeQL` status check** — `.github/workflows/codeql.yml` runs `github/codeql-action` on every PR + push to main. The check name `CodeQL` MUST match the workflow job name; do NOT rename or add a matrix-suffix.
-4. **`Test` status check** — `.github/workflows/test.yml` runs `npm ci` → `npx tsc --noEmit` → `npm run lint` → `supabase start` → `npm test` → the fresh-install key check on every PR + push to main. The check name `Test` MUST match the workflow job name; do NOT rename or add a matrix-suffix. **Since #324 the database-backed suites run in the gate**: `SKIP_RLS_TESTS` is no longer set, the `rls` project executes against a local Supabase started on the runner, and the suites are self-fixturing (no generated seed, no repository secret — `supabase start` produces its own `JWT_SECRET` and `ANON_KEY`). Up to `npm test`, the job takes roughly three and a half to four minutes, of which `supabase start` is ~85s. **No test count is given here on purpose** — it moves with every PR that adds or removes one, and a count in this file would be stale within a day of being written. Read it off the latest `Test` run on `main`. `supabase start` runs with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, the development opt-in that lets migration `00018` give the runner's throwaway database a generated credential encryption key; a fresh database without a key or the opt-in stops at `00018` (`docs/runbooks/dek.md`). The fresh-install key check then runs `dek-bootstrap.test.ts` with `RUN_DEK_BOOTSTRAP_TEST=1`: it resets the database without the opt-in, which must fail at `00018`, and then with it. It runs last because it wipes the database.
-5. **`Vercel` preview deploy** passes (build succeeds + preview URL provisioned).
-6. **`non_fast_forward` + `deletion` protection** — `main` cannot be force-pushed or deleted.
+   Then upload `~/.ssh/id_ed25519_signing.pub` at github.com → Settings → SSH and GPG keys → "New SSH key" with **Key type: Signing Key**. After setup, every `git commit` carries an "SSH" signature.
+4. **Every commit is signed off.** Each commit ends with `Signed-off-by: Your Name <email>` (`git commit -s`). No automated DCO check reports this today, so the merger reads the commits. Web-editor commits carry the sign-off only if the repository's web sign-off setting is on; check them too. The signature (item 3) and the sign-off are separate: the first is cryptographic, the second a text trailer. A merge commit that only brings in `main` needs no sign-off; `git show --remerge-diff <sha>` prints nothing for one. A merge that resolves conflicts needs `-s`.
+5. **Code-owner approval for owned paths.** Areas: database migrations, RLS helpers, roles, the Cordis runtime gate and plugin catalog, request middleware, and CI workflows; the exact paths are in `.github/CODEOWNERS`. The approval must be on the **final head commit**, re-requested after any push, and the approver must not be the person who pushed the owned-path change. Reviewers suggest changes rather than pushing to the author's branch. Other changes may be merged by their author once items 1 to 4 hold.
+6. **No rebase merging.** GitHub cannot sign the commits a rebase merge creates. Outside contributions are squash-merged; maintainers may merge their own verified, signed-off commits with a merge commit. Squashing does not waive items 3 and 4: they apply to the commits on the PR, including PRs from forks.
+7. **Nobody force-pushes or deletes `main`.**
 
-**Bypass path** (genuine emergencies only — production hotfixes when the rules themselves are mis-configured): a repository admin temporarily sets the ruleset's enforcement to *Disabled* in Settings → Rules, merges, and sets it back to *Active*. Log the reason in the PR description.
+**Check details.**
+
+- **`CodeQL`** — `.github/workflows/codeql.yml` runs `github/codeql-action` on every PR + push to main. The job also gets `security-events: write` to upload results.
+- **`Test`** — `.github/workflows/test.yml` runs `npm ci` → `npx tsc --noEmit` → `npm run lint` → `supabase start` → `npm test` → the fresh-install key check on every PR + push to main, on Node.js 24 from `.nvmrc`. **Since #324 the database-backed suites run in the gate**: `SKIP_RLS_TESTS` is no longer set, the `rls` project executes against a local Supabase started on the runner, and the suites are self-fixturing (no generated seed, no repository secret — `supabase start` produces its own `JWT_SECRET` and `ANON_KEY`). Up to `npm test`, the job takes roughly three and a half to four minutes, of which `supabase start` is ~85s. **No test count is given here on purpose** — it moves with every PR that adds or removes one, and a count in this file would be stale within a day of being written. Read it off the latest `Test` run on `main`. `supabase start` runs with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, the development opt-in that lets migration `00018` give the runner's throwaway database a generated credential encryption key; a fresh database without a key or the opt-in stops at `00018` (`docs/runbooks/dek.md`). The fresh-install key check then runs `dek-bootstrap.test.ts` with `RUN_DEK_BOOTSTRAP_TEST=1`: it resets the database without the opt-in, which must fail at `00018`, and then with it. It runs last because it wipes the database.
+- **`Build`** — `.github/workflows/build.yml` runs `npm ci` → `npm run build` on Node.js 24 (`.nvmrc`) on every PR + push to main, with no hosting provider and no secrets (placeholder Supabase values only). Do not add a repository secret to make it pass; fix the build instead.
+
+**Hosting previews are informational, never required.** A Vercel preview (or any hosting-provider check) is not part of the checklist: a fork PR would otherwise wait on a deployment that is not given. The production-build proof is the `Build` job. Keep Vercel Git Fork Protection enabled; maintainers do not authorize hosting deployments for fork pull requests.
+
+**Node.js runtime paths** (each is separate; `.nvmrc` pins 24):
+- **Vercel** builds and runs on the Node.js version in `package.json` `engines.node` (`>=24 <25`), which Vercel uses in place of the project setting; the project already builds on 24.x.
+- **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR, linked from #33 and covered by the container work in #51; do not change it silently.
+- **`Test`**: Node 24 from `.nvmrc`. **`Build`**: Node 24 from `.nvmrc`, with a major-version check.
 
 **For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
 

@@ -1,9 +1,10 @@
 name: Test
 
-# Test gate. Runs on every PR + push to main. Required by the
-# repository's "require-DCO" ruleset (status check name: "Test"). The
-# job's name below MUST stay as "Test" so the required-check context
-# resolves; do NOT add a matrix-suffix or rename.
+# Test gate. Runs on every PR + push to main. The merger checks that `Test`
+# is green before merging (a maintainer social contract; see #30). The job's
+# name below is the check name that checklist refers to: rename it only
+# together with the docs, and do NOT add a matrix-suffix. Node.js comes from
+# .nvmrc (24), the same file Build reads.
 #
 # The database-backed suites (vitest project "rls") now run here — see
 # #241. A local Supabase is started on the runner; the suites are
@@ -59,7 +60,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - run: npm ci

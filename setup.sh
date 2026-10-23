@@ -85,7 +85,7 @@ if [ "$MODE" = "docker" ]; then
   fi
 else
   # Local/cloud modes: need node + npm
-  check_command "node" "https://nodejs.org/ or brew install node"
+  check_command "node" "nvm install or fnm install (reads .nvmrc), or brew install node@24 (keg-only: add it to PATH); Node.js 24 is required"
   check_command "npm" "bundled with Node.js"
 
   if [ "$MODE" = "local" ]; then
