@@ -204,6 +204,25 @@ jobs:
             echo "::error::The build info does not match this release, its commit or the SHA-256 computed from the files."
             exit 1
           fi
+          # The release notes print these fields, so only plain values pass.
+          # vercel_build_output.py checks the builder and framework patterns
+          # when it builds; change both together.
+          if ! jq -e '
+            def plain_version: type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z");
+            def count: type == "number" and . >= 0 and . == floor;
+            (.vercelCli | type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+\\z"))
+            and (.functions.nodejs | count) and (.functions.edge | count)
+            and (.runtimes | type == "array" and all(.[]; type == "string" and test("\\A(edge|nodejs[0-9]+\\.x)\\z")))
+            and (.architectures | type == "array" and all(.[]; . == "x86_64"))
+            and (.builders | type == "array" and all(.[];
+                  (.use | type == "string" and test("\\A(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*\\z"))
+                  and (.version == null or (.version | plain_version))))
+            and (.frameworks | type == "array" and all(.[];
+                  type == "string" and test("\\A[a-z0-9][a-z0-9-]* [0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?\\z")))
+          ' "$info" > /dev/null; then
+            echo "::error::The build info holds a value that is not plain enough for the release notes."
+            exit 1
+          fi
           {
             echo "asset_sha256=$asset_sha256"
             echo "notices_sha256=$notices_sha256"

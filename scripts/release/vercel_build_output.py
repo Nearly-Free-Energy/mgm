@@ -25,6 +25,9 @@ fresh directory, or that targets the wrong place:
     output, so extracting the archive cannot write outside its directory.
   - No .env file other than a committed *.example template is present.
   - Only directories, regular files and symlinks.
+  - Each builder in builds.json is named like an npm package, with a plain
+    version number, and each function's framework is a plain slug and
+    version number. The release notes print them.
 
 The archive is deterministic for a given output: entries are relative to the
 output root and sorted, with uid/gid 0, empty owner names, the given mtime,
@@ -62,6 +65,14 @@ MACHO_MAGICS = {
     b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",  # 64-bit, either byte order
 }
 ELF_MACHINES = {3: "x86", 40: "ARM", 62: "x86-64", 183: "aarch64"}
+
+# The build info's builder and framework names and versions go into the
+# release notes, so only plain values are accepted. The Release workflow's
+# publish job (.github/workflows/release.yml) checks the same patterns before
+# it writes the notes; change both together.
+NPM_NAME = re.compile(r"(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
+PLAIN_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?")
+SLUG = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 def parse_args(argv):
@@ -155,7 +166,12 @@ def check_output(root, target, node_runtime, vercel_cli, require_linux_x64):
         if builds.get("cliVersion") != vercel_cli:
             problems.append(f"builds.json records Vercel CLI {builds.get('cliVersion')!r}, expected {vercel_cli!r}")
         for build in builds.get("builds") or []:
-            facts["builders"].append({"use": build.get("use"), "version": builder_version(build)})
+            use, version = build.get("use"), builder_version(build)
+            if not (isinstance(use, str) and NPM_NAME.fullmatch(use)):
+                problems.append(f"builds.json names a builder {use!r}, which is not an npm package name")
+            elif version is not None and not PLAIN_VERSION.fullmatch(version):
+                problems.append(f"builder {use} has version {version!r}, which is not a plain version number")
+            facts["builders"].append({"use": use, "version": version})
 
     root_real = os.path.realpath(root)
     for dirpath, dirnames, filenames in os.walk(root):
@@ -216,7 +232,12 @@ def check_function(full, rel, node_runtime, require_linux_x64, problems, facts):
     runtime = config.get("runtime")
     framework = config.get("framework")
     if isinstance(framework, dict) and framework.get("slug"):
-        facts["frameworks"].add(f"{framework.get('slug')} {framework.get('version')}")
+        slug, version = framework.get("slug"), framework.get("version")
+        if (isinstance(slug, str) and SLUG.fullmatch(slug)
+                and isinstance(version, str) and PLAIN_VERSION.fullmatch(version)):
+            facts["frameworks"].add(f"{slug} {version}")
+        else:
+            problems.append(f"{rel}: framework {slug!r} version {version!r} is not a plain name and version number")
     if isinstance(runtime, str) and runtime.startswith("nodejs"):
         facts["functions"]["nodejs"] += 1
         facts["runtimes"].add(runtime)

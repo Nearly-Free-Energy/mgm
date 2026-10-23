@@ -247,6 +247,46 @@ class PackerTest(unittest.TestCase):
         builds.write_text(json.dumps(data))
         self.assert_refused("Vercel CLI '64.0.0'", extra=())
 
+    def test_records_the_version_of_the_builder_it_loaded(self):
+        builds = json.loads((self.output / "builds.json").read_text())
+        builder = Path(builds["builds"][0]["requirePath"]).parent.parent
+        write_json(builder / "package.json", {"name": "@vercel/next", "version": "26.0.0"})
+        result, _, info = self.pack()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(info.read_text())["builders"], [{"use": "@vercel/next", "version": "26.0.0"}])
+
+    # The release notes print the builders and frameworks.
+    def test_refuses_a_builder_that_is_not_an_npm_package_name(self):
+        builds = self.output / "builds.json"
+        data = json.loads(builds.read_text())
+        for use in ["@vercel/next](https://example.com)", "Next", "@vercel/next\n- line", None]:
+            with self.subTest(use):
+                data["builds"][0]["use"] = use
+                builds.write_text(json.dumps(data))
+                self.assert_refused("which is not an npm package name", extra=())
+
+    def test_refuses_a_builder_version_that_is_not_a_plain_version(self):
+        builds = json.loads((self.output / "builds.json").read_text())
+        builder = Path(builds["builds"][0]["requirePath"]).parent.parent
+        for version in ["26.0.0 `x`", "26.0.0\n- line", "latest"]:
+            with self.subTest(version):
+                write_json(builder / "package.json", {"name": "@vercel/next", "version": version})
+                self.assert_refused("which is not a plain version number", extra=())
+
+    def test_refuses_a_framework_that_is_not_a_plain_name_and_version(self):
+        config = self.output / "functions" / "api" / "pay.func" / ".vc-config.json"
+        data = json.loads(config.read_text())
+        for framework in [
+            {"slug": "nextjs", "version": "16.4.1 <b>"},
+            {"slug": "nextjs", "version": "16.4.1\n- line"},
+            {"slug": "nextjs"},
+            {"slug": "Next.js", "version": "16.4.1"},
+        ]:
+            with self.subTest(framework):
+                data["framework"] = framework
+                config.write_text(json.dumps(data))
+                self.assert_refused("is not a plain name and version number", extra=())
+
 
 def write_package(directory, name, version, licence=None, files=None):
     """An installed npm package: package.json plus the given top-level files."""
