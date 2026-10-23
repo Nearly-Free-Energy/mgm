@@ -41,6 +41,7 @@ const LEGACY_COMPAT: Record<string, string> = {
   "supabase/scripts/rehearse-credential-key-bootstrap.sql": "tests that 00018 copies the operator's key to the legacy Vault name",
   "supabase/scripts/rotate-credential-key.sql": "keeps both Vault key names synchronized during rotation",
   "docs/runbooks/dek.md": "explains the legacy key name and how to retire it",
+  "docs/runbooks/backup-and-restore.md": "clears the legacy Vault key from a restore target, as dek.md's recovery does",
   "docs/customerapp-activation.md": "tells operators that mbe_ tokens stay valid",
 };
 

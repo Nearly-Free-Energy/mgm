@@ -49,9 +49,10 @@ jobs:
     # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
     # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
     # set for the whole job because every CLI command that creates a
-    # container resolves the image through it: `supabase start`, and
-    # `supabase db reset` in the fresh-install key check, which recreates the
-    # database container. The runner has only the GHCR copies.
+    # container resolves the image through it: `supabase start`, for the
+    # export-and-restore test's restore target too, and `supabase db reset`
+    # in the fresh-install key check, which recreates the database
+    # container. The runner has only the GHCR copies.
     env:
       SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
@@ -162,9 +163,6 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
-      - name: Maintenance command safety tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_credential_key_maintenance.py'
-
       - name: Database diagnostics on rehearsal failure
         if: failure()
         run: docker logs --tail 200 supabase_db_mgm
@@ -181,6 +179,76 @@ jobs:
           export SUPABASE_JWT_SECRET="$JWT_SECRET"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
+
+      # scripts/tests/test_export_restore_e2e.py exports the database above
+      # and restores it into a second, empty Supabase project, started here.
+      # pg_dump must be at least the server's major version, newer than the
+      # runner's own client, so that client comes from the PostgreSQL apt
+      # repository (added only if the runner does not already list it). The
+      # project uses a subset of the images listed for the stack above, so its
+      # start pulls only what is missing, and retries as that stack's does.
+      - name: Restore target for the export-and-restore test
+        id: restore_target
+        run: |
+          major=$(sed -n 's/^major_version = \([0-9][0-9]*\)$/\1/p' supabase/config.toml)
+          if ! grep -rqs 'apt\.postgresql\.org' /etc/apt/sources.list /etc/apt/sources.list.d/; then
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+              https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            . /etc/os-release
+            echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" \
+              | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "postgresql-client-$major"
+          echo "/usr/lib/postgresql/$major/bin" >> "$GITHUB_PATH"
+          target="$RUNNER_TEMP/restore-target"
+          mkdir -p "$target/supabase"
+          cp scripts/tests/restore-target.config.toml "$target/supabase/config.toml"
+          for attempt in 1 2 3; do
+            if npx supabase start --workdir "$target"; then exit 0; fi
+            echo "supabase start failed (attempt $attempt); retrying"
+            npx supabase stop --workdir "$target" --no-backup || true
+            sleep $((attempt * 30))
+          done
+          exit 1
+
+      # These run after npm test because the export-and-restore test commits
+      # fixture rows to the database the suites use. The export script's
+      # tests encrypt with the real age and lint the script with shellcheck.
+      # MGM_TEST_REQUIRE_TOOLS makes those tests fail, rather than skip, if
+      # either program is missing; MGM_TEST_REQUIRE_DATABASE does the same
+      # for the export-and-restore test's databases and programs.
+      - name: Maintenance command safety tests
+        id: maintenance_tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends age shellcheck
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          export MGM_E2E_SOURCE_DB_URL="${DB_URL-}"
+          # A target whose status prints no DB_URL must leave the variable
+          # empty, which fails the test, rather than reuse the source's.
+          unset DB_URL
+          eval "$(npx supabase status --workdir "$RUNNER_TEMP/restore-target" -o env | grep '^DB_URL=')"
+          export MGM_E2E_TARGET_DB_URL="${DB_URL-}"
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+        env:
+          MGM_TEST_REQUIRE_TOOLS: '1'
+          MGM_TEST_REQUIRE_DATABASE: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+
+      # Postgres logs of both stacks, for a failure in the two steps above:
+      # the test's own output shows the failing command, these show what the
+      # servers rejected and why.
+      - name: Database diagnostics on export-and-restore failure
+        if: failure() && (steps.restore_target.outcome == 'failure' || steps.maintenance_tests.outcome == 'failure')
+        run: |
+          docker ps -a --filter name=supabase_ --format '{{.Names}} {{.Status}}' || true
+          for container in supabase_db_mgm supabase_db_mgm-restore-target; do
+            echo "::group::$container"
+            docker logs --tail 200 "$container" 2>&1 || true
+            echo "::endgroup::"
+          done
 
       # Last: it resets the database twice, without the development opt-in
       # (the migrations must stop at the key check) and then with it.
