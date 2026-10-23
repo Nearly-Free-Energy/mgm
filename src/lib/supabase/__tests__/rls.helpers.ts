@@ -41,7 +41,11 @@ export const LOCAL_SUPABASE_URL = configuredTestUrl;
  * CI still exports the old one (test.yml), so both are read.
  */
 export function testAnonKey(): string | undefined {
-  return process.env.MGM_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return (
+    process.env.MGM_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+    undefined
+  );
 }
 
 export function shouldSkip(): boolean {
