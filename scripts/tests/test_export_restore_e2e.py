@@ -116,9 +116,9 @@ def client_env(extra=None):
     return env
 
 
-def run(command, *, cwd=None, env=None, timeout=600):
+def run(command, *, cwd=None, env=None, input=None, timeout=600):
     return subprocess.run(
-        command, cwd=cwd, env=env or client_env(), capture_output=True, text=True, timeout=timeout
+        command, cwd=cwd, env=env or client_env(), input=input, capture_output=True, text=True, timeout=timeout
     )
 
 
@@ -211,13 +211,24 @@ def fill(command, values):
     return command
 
 
-def run_runbook(command, cwd, env):
+def run_runbook(command, cwd, env, input=None):
     """Runs a runbook command as an operator pasting it would: no -e, no pipefail."""
-    return run(["bash", "-c", command], cwd=cwd, env=env)
+    return run(["bash", "-c", command], cwd=cwd, env=env, input=input)
+
+
+def url_password(url):
+    return urllib.parse.unquote(urllib.parse.urlsplit(url).password or "")
 
 
 def service_env(directory, services):
-    """A PostgreSQL service file and password file naming each URL in {service: url}, as the runbook sets up."""
+    """A PostgreSQL service file naming each URL in {service: url}, without passwords, as the runbook sets up.
+
+    The runbook has psql ask for each password as it connects. A test cannot
+    type at that prompt, so a password file in the test's directory answers in
+    the operator's place. A runbook command that reads the password itself,
+    like the row-count check, must run without that file, or the file would
+    hide a command that never passes the password on (row_count_check).
+    """
     directory.mkdir(parents=True, exist_ok=True)
     entries, passwords = [], []
     for service, url in services.items():
@@ -230,7 +241,7 @@ def service_env(directory, services):
         }
         params.update(urllib.parse.parse_qsl(parts.query))
         entries.append(f"[{service}]\n" + "".join(f"{key}={value}\n" for key, value in params.items()))
-        fields = [params["host"], params["port"], params["dbname"], params["user"], urllib.parse.unquote(parts.password or "")]
+        fields = [params["host"], params["port"], params["dbname"], params["user"], url_password(url)]
         passwords.append(":".join(f.replace("\\", "\\\\").replace(":", "\\:") for f in fields) + "\n")
     service_file = directory / "pg_service.conf"
     service_file.write_text("".join(entries))
@@ -315,11 +326,11 @@ BEGIN
   SET ROLE authenticated;
   INSERT INTO communities(org_id, name, invoice_prefix) VALUES (v_org, 'Export and restore community', '{prefix}')
   RETURNING id INTO v_community;
-  INSERT INTO microgrids(community_id, name, currency, timezone) VALUES (v_community, 'Export and restore microgrid', 'UGX', 'Africa/Kampala')
+  INSERT INTO microgrids(community_id, name, currency, timezone) VALUES (v_community, 'Export and restore microgrid', 'XXX', 'Etc/UTC')
   RETURNING id INTO v_microgrid;
-  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household A', '+256700000001')
+  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household A', '+10000000001')
   RETURNING id INTO v_household;
-  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household B', '+256700000002')
+  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household B', '+10000000002')
   RETURNING id INTO v_neighbour;
   INSERT INTO rate_schedules(microgrid_id, tiers, service_charge, tax_rate)
   VALUES (v_microgrid, '[{{"label": "T1", "min_kwh": 1, "max_kwh": 10, "rate_per_kwh": 100}},
@@ -558,7 +569,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
             cls.export_dir,
         )
         cls.row_count_command = fill(runbook_command("comparing row counts", "/^COPY /"), values)
-        cls.row_count_result = run_runbook(cls.row_count_command, cls.export_dir, cls.target_env)
+        cls.row_count_result = cls.row_count_check(cls.export_dir)
 
     @classmethod
     def number_invoices(cls):
@@ -598,6 +609,17 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         cls.next_in_target = psql_value(cls.target, f"SELECT fn_next_invoice_number('{cls.community}', 2026)")
 
     @classmethod
+    def row_count_check(cls, directory):
+        """The runbook's row-count check, given the target's password at its prompt.
+
+        PGPASSFILE names a file that does not exist, so no password file, the
+        test's or the user's own ~/.pgpass, stands in for the password the
+        check reads.
+        """
+        env = {**cls.target_env, "PGPASSFILE": str(cls.work / "no-password-file")}
+        return run_runbook(cls.row_count_command, directory, env, input=f"{url_password(cls.target)}\n")
+
+    @classmethod
     def step(cls, description, command, cwd, env=None):
         result = run_runbook(command, cwd, env or cls.target_env)
         if result.returncode != 0:
@@ -634,7 +656,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
             + "".join(f"{uuid.uuid4()}\textra\n" for _ in range(self.export_tables()['"public"."organizations"'] + 1))
             + "\\.\n"
         )
-        result = run_runbook(self.row_count_command, doctored, self.target_env)
+        result = self.row_count_check(doctored)
         self.assertNotEqual(result.returncode, 0, output_of(result))
         self.assertIn('MISMATCH "public"."organizations"', result.stdout + result.stderr, output_of(result))
 
@@ -642,7 +664,7 @@ class ExportRestoreEndToEndTests(unittest.TestCase):
         broken = self.work / "psql-error"
         broken.mkdir()
         (broken / "data.sql").write_text('COPY "public"."no_such_table" ("id") FROM stdin;\n1\n\\.\n')
-        result = run_runbook(self.row_count_command, broken, self.target_env)
+        result = self.row_count_check(broken)
         self.assertNotEqual(result.returncode, 0, output_of(result))
 
     def test_preflight_refuses_a_database_that_is_not_empty(self):

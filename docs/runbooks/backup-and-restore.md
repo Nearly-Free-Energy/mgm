@@ -225,17 +225,22 @@ SELECT has_schema_privilege('postgres', 'auth', 'USAGE WITH GRANT OPTION');
 ### Run an export
 
 The script reads the connection string from the environment variable you name
-and never takes it as an argument. Read the value from your secret store for
-the run; do not type it on a command line, where shell history keeps it. Every
-run must name either the age recipients to encrypt to (`--age-recipients`) or
-`--plaintext`; naming neither, or both, is a usage error.
+and never takes it as an argument. Do not type it on a command line, where
+shell history keeps it. Read it with `read -rs`, which shows nothing while you
+paste it from your secret store, and unset the variable when the export has
+finished, as below. A password manager's command-line tool can supply it
+instead, so that only a reference to the secret appears on the command line.
+Every run must name either the age recipients to encrypt to
+(`--age-recipients`) or `--plaintext`; naming neither, or both, is a usage
+error.
 
 ```bash
-# MGM_EXPORT_DB_URL is read from your secret store for this run.
+read -rsp 'Connection string: ' MGM_EXPORT_DB_URL && echo >&2 && export MGM_EXPORT_DB_URL
 scripts/backup/export-database.sh \
   --db-url-env MGM_EXPORT_DB_URL \
   --out /srv/mgm-exports \
   --age-recipients /etc/mgm/export-recipients.txt
+unset MGM_EXPORT_DB_URL
 ```
 
 Each run adds `mgm-db-export-<UTC time>.tar.gz.age` to `--out`. It prints the
@@ -293,8 +298,11 @@ on an encrypted disk for an immediate restore, never on a schedule.
 The script checks everything it can before the first dump, including that
 `age` accepts every entry in the recipients file. It hands the password to
 `pg_dump` and `pg_dumpall` in the `PGPASSWORD` environment variable, so it
-never appears in the process list. It redacts the connection string and
-password from any output of theirs it shows.
+never appears in the process list. The connection string's user and host, but
+not its password, are on their command lines and visible in the process list
+while the export runs, which is fine on a machine no one else uses. The script
+redacts the connection string and password from any output of theirs it
+shows.
 
 With `--age-recipients`, the plaintext dumps are staged in a private
 directory under `$TMPDIR` (default `/tmp`), never in `--out`. `age` writes to a
@@ -451,11 +459,16 @@ export holds no Vault secrets for the key to unlock.
 
 1. **Prepare the target.** Create the project, record its project ref in your
    private record, and enable the Vault, pg_cron and pg_net extensions. Put
-   its connection in a PostgreSQL service entry (`PGSERVICE`) with the
-   password in `.pgpass`, so it stays out of command arguments. Use the entry
-   for this target only, and remove it when you delete the target. The
-   commands below assume a service named `mgm-restore-target`, and a checkout
-   of the MGM release you are restoring in `$MGM_CHECKOUT`.
+   its connection in a PostgreSQL service entry (`PGSERVICE`): host, port,
+   database name, user and `sslmode`, and no password, so the commands below
+   name the target without a connection string. `psql` asks for the password
+   each time it connects; paste it from your secret store. Never write the
+   password to the service file, `.pgpass` or any other file: once restored,
+   the target holds production data, and a password left on disk outlives the
+   restore. Use the entry for this target only, and remove it when you delete
+   the target. The commands below assume a service named
+   `mgm-restore-target`, and a checkout of the MGM release you are restoring
+   in `$MGM_CHECKOUT`.
 
 2. **Confirm the target**, before you decrypt anything:
 
@@ -542,10 +555,12 @@ export holds no Vault secrets for the key to unlock.
 
    This expects a target without a `supabase_migrations` schema. The Supabase
    CLI creates one when it pushes migrations to a project or seeds it, and the
-   restore then stops on a duplicate primary key. If the target has one,
-   confirm the target again before you drop it. The preflight cannot run
-   again now that step 4 has restored into the target, so check the project
-   ref as in step 2:
+   restore then stops on that schema's constraints, before it writes
+   anything: `multiple primary keys for table "schema_migrations" are not
+   allowed`, or an `already exists` error on a constraint or index. If the
+   target has one, confirm the target again before you drop it. The preflight
+   cannot run again now that step 4 has restored into the target, so check the
+   project ref as in step 2:
 
    ```bash
    PGSERVICE=mgm-restore-target psql -X --command '\conninfo'
@@ -570,6 +585,12 @@ export holds no Vault secrets for the key to unlock.
    END $$;
    SQL
    ```
+
+   If the drop stops, the target already lists migrations. If this step has
+   already succeeded once, they are the ones it restored: check them with the
+   checklist's **Migration history** item and go on to step 6. Otherwise
+   something other than this restore has recorded migrations in the target,
+   so stop, and restore into a new project.
 
 6. **Compare row counts now**, before anyone signs in or anything else writes
    to the target (see the [checklist](#verification-checklist)).
@@ -809,12 +830,14 @@ and before anyone renders a bill in the target (logical restore, step 11):
 3. **Give bills the numbers the source gave them.** If the source is
    reachable, list the bills that the target holds without a number and the
    source has numbered. Add a service entry for the source, here
-   `mgm-restore-source`, as in step 1 of the logical restore, and remove it
-   when you are done. Give it the source's `postgres` login, the one exports
-   run with ([Requirements](#requirements)): row-level security on
-   `public.billing_line_items` hides every row from a login that only has
-   `SELECT` on the table, and `postgres` bypasses it. Nothing here writes to
-   the source. From a private directory on the trusted machine:
+   `mgm-restore-source`, without a password, as in step 1 of the logical
+   restore, and remove it when you are done. Give it the source's `postgres`
+   login, the one exports run with ([Requirements](#requirements)):
+   row-level security on `public.billing_line_items` hides every row from a
+   login that only has `SELECT` on the table, and `postgres` bypasses it.
+   Nothing here writes to the source. From a private directory on the trusted
+   machine, where `psql` asks for the source's password and then the
+   target's:
 
    ```bash
    PGSERVICE=mgm-restore-source psql -X --variable ON_ERROR_STOP=1 \
@@ -875,11 +898,13 @@ starts only when every other item has passed.
 
   ```bash
   (
+    read -rsp 'Password for mgm-restore-target: ' PGPASSWORD; echo >&2
+    export PGPASSWORD
     awk '/^COPY /{table=$2; rows=0; next} /^\\\.$/{if (table != "") print table, rows; table=""; next} table != ""{rows++}' data.sql >expected-row-counts.txt &&
       [ -s expected-row-counts.txt ] || { echo "ERROR: no table data read from data.sql" >&2; exit 2; }
     mismatches=0
     while read -r table rows; do
-      actual=$(PGSERVICE=mgm-restore-target psql -X -A -t --variable ON_ERROR_STOP=1 \
+      actual=$(PGSERVICE=mgm-restore-target psql -X --no-password -A -t --variable ON_ERROR_STOP=1 \
         --command "SELECT count(*) FROM $table" </dev/null) ||
         { echo "ERROR: psql could not count $table; stopping" >&2; exit 2; }
       if [ "$actual" != "$rows" ]; then
@@ -887,17 +912,21 @@ starts only when every other item has passed.
         mismatches=$((mismatches + 1))
       fi
     done <expected-row-counts.txt
+    unset PGPASSWORD
     echo "row counts compared; mismatches: $mismatches"
     [ "$mismatches" -eq 0 ]
   )
   ```
 
-  It stops at the first table `psql` cannot count, and its exit status is 0
-  only when every count matches. It writes `expected-row-counts.txt` next to
-  `data.sql`, so it goes when you delete the decrypted export. A count that cannot be taken is a failed
-  check, not a mismatch to explain. Platform-written tables such as Auth's
-  audit log can differ if anything has run since the restore. Investigate any
-  other mismatch.
+  It connects once per table, so it asks for the target's password once, at
+  the start, and keeps it in `PGPASSWORD` only inside its own subshell: the
+  password is gone when the block ends. It stops at the first table `psql`
+  cannot count, a wrong password included, and its exit status is 0 only
+  when every count matches. It writes `expected-row-counts.txt` next to
+  `data.sql`, so it goes when you delete the decrypted export. A count that
+  cannot be taken is a failed check, not a mismatch to explain.
+  Platform-written tables such as Auth's audit log can differ if anything has
+  run since the restore. Investigate any other mismatch.
 - [ ] **Migration history.** `SELECT max(version) FROM
   supabase_migrations.schema_migrations;` matches the newest file in the
   release's `supabase/migrations`.
