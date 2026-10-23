@@ -65,7 +65,7 @@ describe("testMerchantConfiguration IPN registration", () => {
     expect(result).toEqual({
       ok: false,
       reason: "callback_url_unknown",
-      message: "Application URL is not configured.",
+      message: expect.stringContaining("MGM_APP_URL"),
     });
     expect(mocks.getAccessToken).not.toHaveBeenCalled();
     expect(mocks.registerIpn).not.toHaveBeenCalled();
@@ -74,7 +74,12 @@ describe("testMerchantConfiguration IPN registration", () => {
   it("returns callback_url_unknown for an invalid MGM_APP_URL", async () => {
     vi.stubEnv("MGM_APP_URL", "http://mgm.example.org");
     const result = await testMerchantConfiguration(INPUT);
-    expect(result).toMatchObject({ ok: false, reason: "callback_url_unknown" });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "callback_url_unknown",
+      message: expect.stringMatching(/MGM_APP_URL must use https/),
+    });
+    expect(JSON.stringify(result)).not.toContain("mgm.example.org");
     expect(mocks.registerIpn).not.toHaveBeenCalled();
   });
 });
