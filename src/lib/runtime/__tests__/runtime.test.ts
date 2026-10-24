@@ -167,6 +167,7 @@ describe("organization request scopes", () => {
 
     // Between the rejected load and dispose: the half-provided service is not
     // served, and the capabilities that did start are untouched.
+    expect(brokenFiber).toBeDefined();
     expect(brokenFiber?.state).toBe(FiberState.FAILED);
     expect(scope.ctx.get("broken")).toBeUndefined();
     expect(probe?.active()).toBe(true);
@@ -251,28 +252,35 @@ describe("organization request scopes", () => {
 
 describe("Cordis guarantees the request scopes rely on", () => {
   it("gates on the ACTIVE state Cordis exports", () => {
+    // The state assertions below compare against these; a missing key would pass vacuously.
+    for (const state of ["ACTIVE", "FAILED", "DISPOSED"]) {
+      expect(FiberState[state]).toEqual(expect.any(Number));
+    }
     expect(FIBER_ACTIVE).toBe(FiberState.ACTIVE);
   });
 
   it("does not serve a root service through a name the scope isolates", async () => {
     const runtime = await getMgmRuntime();
     const decoy = await loadRootDecoy(runtime.root);
-    const scope = await openOrganizationScope(request(ORG_A), { isolate: ["decoy"] });
-
-    expect(scope.ctx.get("decoy")).toBeUndefined();
-    const Wants = { name: "wants-decoy", inject: ["decoy"], apply() {} };
-    await expect(scope.load(Wants)).rejects.toThrow('Cordis plugin "wants-decoy" did not activate');
-    expect(runtime.root.get("decoy")).toBe("SENTINEL");
-
-    await scope.dispose();
-    await decoy.dispose();
+    try {
+      const scope = await openOrganizationScope(request(ORG_A), { isolate: ["decoy"] });
+      try {
+        expect(scope.ctx.get("decoy")).toBeUndefined();
+        const Wants = { name: "wants-decoy", inject: ["decoy"], apply() {} };
+        await expect(scope.load(Wants)).rejects.toThrow('Cordis plugin "wants-decoy" did not activate');
+        expect(runtime.root.get("decoy")).toBe("SENTINEL");
+      } finally {
+        await scope.dispose();
+      }
+    } finally {
+      await decoy.dispose();
+    }
   });
 
-  it("disposes a dependent before the provider it injects", async () => {
+  async function loadProviderAndDependent(order: string[]) {
     const scope = await openOrganizationScope(request(ORG_A), { isolate: ["shared"] });
-    const order: string[] = [];
-    // The effect is registered before provide(), so it runs after the
-    // provision is released.
+    // Effects unwind in reverse, so this one, registered before provide(),
+    // records the provider only once its provision has been released.
     const provider = await scope.load({
       name: "provider",
       apply(ctx: Context) {
@@ -287,11 +295,23 @@ describe("Cordis guarantees the request scopes rely on", () => {
         ctx.effect(() => () => void order.push("dependent"));
       },
     });
+    return { scope, provider };
+  }
 
+  it("disposes a dependent before the provider it injects", async () => {
+    const order: string[] = [];
+    const { scope, provider } = await loadProviderAndDependent(order);
     // cordiverse/cordis#196: rc.10 tore the provider down first.
     await provider.dispose();
     expect(order).toEqual(["dependent", "provider"]);
     await scope.dispose();
+  });
+
+  it("disposes a dependent before its provider through scope.dispose()", async () => {
+    const order: string[] = [];
+    const { scope } = await loadProviderAndDependent(order);
+    await scope.dispose();
+    expect(order).toEqual(["dependent", "provider"]);
   });
 
   it("removes a request plugin's listeners when the scope is disposed", async () => {
