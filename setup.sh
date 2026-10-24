@@ -85,7 +85,7 @@ if [ "$MODE" = "docker" ]; then
   fi
 else
   # Local/cloud modes: need node + npm
-  check_command "node" "https://nodejs.org/ or brew install node"
+  check_command "node" "nvm install or fnm install (reads .nvmrc), or brew install node@24 (keg-only: add it to PATH); Node.js 24 is required"
   check_command "npm" "bundled with Node.js"
 
   if [ "$MODE" = "local" ]; then
@@ -114,9 +114,11 @@ generate_env_local() {
   local service_role_key="$3"
 
   cat > .env.local <<ENVEOF
-NEXT_PUBLIC_SUPABASE_URL=${supabase_url}
-NEXT_PUBLIC_SUPABASE_ANON_KEY=${anon_key}
+# Request-time runtime configuration (docs/setup.md "Runtime configuration")
+MGM_PUBLIC_SUPABASE_URL=${supabase_url}
+MGM_PUBLIC_SUPABASE_ANON_KEY=${anon_key}
 SUPABASE_SERVICE_ROLE_KEY=${service_role_key}
+MGM_APP_URL=http://localhost:3000
 
 # OpenEMS B2B REST API
 OPENEMS_B2B_URL=http://localhost:8075
@@ -129,7 +131,7 @@ ENVEOF
 check_existing_env() {
   if [ -f .env.local ] && [ "$FORCE" = false ]; then
     local existing_url
-    existing_url=$(grep '^NEXT_PUBLIC_SUPABASE_URL=' .env.local | cut -d= -f2- || echo "")
+    existing_url=$(grep -E '^(MGM_PUBLIC|NEXT_PUBLIC)_SUPABASE_URL=' .env.local | head -n 1 | cut -d= -f2- || echo "")
     if echo "$existing_url" | grep -qE '(localhost|127\.0\.0\.1)'; then
       warn ".env.local already exists (pointing at local Supabase)"
     else
@@ -221,6 +223,12 @@ if [ "$MODE" = "docker" ]; then
 
 # ── Local mode ───────────────────────────────────────────────────────
 elif [ "$MODE" = "local" ]; then
+  # The local database gets a throwaway credential encryption key. With this
+  # set, `supabase start` (on a new database) and `supabase db reset` add the
+  # opt-in entry from supabase/config.toml [db.vault] to Vault before the
+  # migrations run. See docs/runbooks/dek.md.
+  export MGM_ALLOW_DEV_CREDENTIAL_KEY=1
+
   # Step 1: Start local Supabase
   log "Starting local Supabase..."
   supabase start
@@ -234,20 +242,6 @@ elif [ "$MODE" = "local" ]; then
   else
     generate_seed_migration
 
-    # Opt the local database into the dev-DEK fallback so migration 00025's
-    # hardened bootstrap permits a random DEK here. `ALTER DATABASE ... SET`
-    # makes the GUC a session-default for every subsequent connection,
-    # including the migration runner spawned by `supabase db reset`.
-    # See supabase/migrations/00025_dek_bootstrap_hardening.sql header.
-    log "Enabling local dev DEK fallback (app.allow_dev_dek=1)..."
-    LOCAL_DB_URL="$(supabase status -o env 2>/dev/null | awk -F= '/^DB_URL=/ {print substr($0, index($0,"=")+1)}')"
-    if [ -z "$LOCAL_DB_URL" ]; then
-      err "Could not resolve local DB_URL from 'supabase status'. Is Supabase running?"
-      exit 1
-    fi
-    psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 \
-      -c "ALTER DATABASE postgres SET app.allow_dev_dek = '1';" >/dev/null
-
     log "Applying migrations and seed data..."
     supabase db reset --yes
   fi
@@ -258,22 +252,23 @@ elif [ "$MODE" = "local" ]; then
 
     # Map supabase status env var names to the names our app expects
     supabase status -o env 2>/dev/null | awk -F= '
-      /^API_URL=/ { print "NEXT_PUBLIC_SUPABASE_URL=" substr($0, index($0,"=")+1) }
-      /^ANON_KEY=/ { print "NEXT_PUBLIC_SUPABASE_ANON_KEY=" substr($0, index($0,"=")+1) }
+      /^API_URL=/ { print "MGM_PUBLIC_SUPABASE_URL=" substr($0, index($0,"=")+1) }
+      /^ANON_KEY=/ { print "MGM_PUBLIC_SUPABASE_ANON_KEY=" substr($0, index($0,"=")+1) }
       /^SERVICE_ROLE_KEY=/ { print "SUPABASE_SERVICE_ROLE_KEY=" substr($0, index($0,"=")+1) }
     ' > .env.local
 
     # Validate we got all three values
-    if ! grep -q '^NEXT_PUBLIC_SUPABASE_URL=' .env.local || \
-       ! grep -q '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' .env.local || \
+    if ! grep -q '^MGM_PUBLIC_SUPABASE_URL=' .env.local || \
+       ! grep -q '^MGM_PUBLIC_SUPABASE_ANON_KEY=' .env.local || \
        ! grep -q '^SUPABASE_SERVICE_ROLE_KEY=' .env.local; then
       err "Failed to extract Supabase credentials from 'supabase status'"
       rm -f .env.local
       exit 1
     fi
 
-    # Append OpenEMS defaults
+    # Append the application origin and OpenEMS defaults
     cat >> .env.local <<'ENVEOF'
+MGM_APP_URL=http://localhost:3000
 
 # OpenEMS B2B REST API
 OPENEMS_B2B_URL=http://localhost:8075

@@ -1,0 +1,8 @@
+{
+  "name": "mgm-release-vercel-cli",
+  "private": true,
+  "description": "The Vercel CLI that scripts/release/build-deploy-asset.sh builds the release asset with, installed with npm ci from package-lock.json. See docs/releasing.md.",
+  "dependencies": {
+    "vercel": "65.1.0"
+  }
+}

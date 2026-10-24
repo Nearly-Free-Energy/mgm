@@ -1,0 +1,65 @@
+name: Build
+
+# Production-build gate. Runs on every PR + push to main. The merger checks
+# that `Build` is green before merging (a maintainer social contract; GitHub
+# does not enforce it yet, see #30 and
+# docs/adr/ADR-002-ci-build-gate-and-merge-controls.md). The job's name below
+# is the check name the merge checklist refers to: rename it only together with
+# the docs, and do NOT add a matrix-suffix.
+#
+# This job proves the application compiles for production on its own, with no
+# hosting provider and no secrets:
+#   - it never talks to Vercel, so a fork pull request does not wait on a
+#     hosting-preview deployment authorization;
+#   - it reads no repository secret. The two Supabase values below are
+#     obviously fake placeholders: `next build` only needs them to be present
+#     and well-formed, and nothing at build time contacts a database.
+#     If a future change makes the build need a real service, fix the build,
+#     do not add a secret here.
+#   - the token is read-only, and untrusted fork code is built under the
+#     `pull_request` event (never `pull_request_target`).
+#
+# Node.js is pinned by .nvmrc (24); Test reads the same file. The Dockerfile
+# still uses Node 20 until its follow-up change; see #33 and #51.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  Build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Confirm the pinned Node.js major version
+        run: |
+          node --version
+          case "$(node --version)" in
+            v24.*) ;;
+            *) echo "Expected Node.js 24 from .nvmrc" >&2; exit 1 ;;
+          esac
+
+      - run: npm ci
+
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          # Placeholders only. Not credentials; they point nowhere.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.invalid
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key-not-a-secret

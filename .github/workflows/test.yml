@@ -1,9 +1,10 @@
 name: Test
 
-# Test gate. Runs on every PR + push to main. Required by the
-# repository's "require-DCO" ruleset (status check name: "Test"). The
-# job's name below MUST stay as "Test" so the required-check context
-# resolves; do NOT add a matrix-suffix or rename.
+# Test gate. Runs on every PR + push to main. The merger checks that `Test`
+# is green before merging (a maintainer social contract; see #30). The job's
+# name below is the check name that checklist refers to: rename it only
+# together with the docs, and do NOT add a matrix-suffix. Node.js comes from
+# .nvmrc (24), the same file Build reads.
 #
 # The database-backed suites (vitest project "rls") now run here — see
 # #241. A local Supabase is started on the runner; the suites are
@@ -11,11 +12,11 @@ name: Test
 # secret. Measured cold on ubuntu-latest: `supabase start` ~81-85s, the
 # 13-file rls project ~14-16s.
 #
-# SKIP_DEK_BOOTSTRAP_TEST stays set, and NOT for cost. dek-bootstrap.test.ts
-# does `ALTER DATABASE postgres SET app.allow_dev_dek`, which fails with
-# `permission denied to set parameter` because the `postgres` role is not a
-# superuser on Supabase (local or CI). It cannot pass here at any time
-# budget; that is a defect in the test, tracked separately, not a deferral.
+# `supabase start` runs with MGM_ALLOW_DEV_CREDENTIAL_KEY=1, so migration
+# 00018 gives this throwaway database a generated credential encryption key;
+# without it the migrations stop (docs/runbooks/dek.md). The last step resets
+# the database without and then with that opt-in, so it runs after everything
+# else that uses the database.
 
 on:
   workflow_dispatch:
@@ -31,20 +32,36 @@ concurrency:
 # Tighten default token permissions; explicitly grant only what's required.
 permissions:
   contents: read
+  # read-only package scope so the runner can pull Supabase images from GHCR as an
+  # authenticated client; anonymous GHCR pulls from shared runner IPs are rate limited.
+  packages: read
 
 jobs:
   Test:
     name: Test
     runs-on: ubuntu-latest
-    # Raised from 10: the Supabase start adds ~85s to the job.
-    timeout-minutes: 15
+    # Raised from 10: the Supabase start adds ~85s to the job, and a cold run may
+    # spend minutes retrying throttled image pulls.
+    timeout-minutes: 25
+    # Pull the Supabase service images from GHCR, not the CLI default
+    # (public.ecr.aws), which rejects anonymous pulls from shared runner
+    # IPs with "toomanyrequests: Data limit exceeded". The CLI reads
+    # SUPABASE_INTERNAL_IMAGE_REGISTRY (internal/utils/docker.go,
+    # GetRegistry); see docs/adr/ADR-004-ci-supabase-image-source.md. It is
+    # set for the whole job because every CLI command that creates a
+    # container resolves the image through it: `supabase start`, for the
+    # export-and-restore test's restore target too, and `supabase db reset`
+    # in the fresh-install key check, which recreates the database
+    # container. The runner has only the GHCR copies.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: ghcr.io
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: '.nvmrc'
           cache: 'npm'
 
       - run: npm ci
@@ -56,7 +73,83 @@ jobs:
       # npm ci already installs the lockfile-pinned Supabase CLI. Avoid a
       # second release lookup here; the setup action can hit GitHub's rate
       # limit before the tests even start.
-      - run: npx supabase start
+      # The images come from GHCR (the job-level SUPABASE_INTERNAL_IMAGE_REGISTRY
+      # above; docs/adr/ADR-004-ci-supabase-image-source.md).
+      - name: Log in to GHCR for authenticated image pulls
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_ACTOR: ${{ github.actor }}
+
+      # GHCR throttles bursts of parallel layer pulls from shared runner IPs, and
+      # `supabase start` pulls about a dozen images at once. So: restore the images
+      # from the Actions cache, pull only what is missing one at a time with
+      # backoff, and let `supabase start` find everything already local (the CLI
+      # pulls with pull_policy "missing"). The list is .github/supabase-ci-images.txt.
+      - name: Restore Supabase images from cache
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/supabase-images.tar.gz
+          key: supabase-images-${{ hashFiles('.github/supabase-ci-images.txt') }}
+
+      - name: Load cached Supabase images
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: gunzip -c "$RUNNER_TEMP/supabase-images.tar.gz" | docker load
+
+      - name: Pre-pull Supabase images one at a time
+        id: prepull
+        run: |
+          complete=true
+          while read -r image; do
+            case "$image" in ''|'#'*) continue ;; esac
+            if docker image inspect "$image" >/dev/null 2>&1; then continue; fi
+            # GHCR answers some single pulls with toomanyrequests and a
+            # retry-after of microseconds (shared-IP limiter), so retry quickly and
+            # alternate with the CLI's default mirror, then tag it as the GHCR name
+            # the CLI looks for.
+            ok=false
+            for attempt in $(seq 1 12); do
+              if docker pull --quiet "$image"; then ok=true; break; fi
+              mirror="public.ecr.aws/supabase/${image#ghcr.io/supabase/}"
+              if docker pull --quiet "$mirror" && docker tag "$mirror" "$image"; then ok=true; break; fi
+              echo "pull of $image failed (attempt $attempt)"
+              sleep $((attempt < 5 ? attempt * 3 : 15))
+            done
+            if [ "$ok" != true ]; then
+              echo "::warning::could not pre-pull $image; supabase start will retry it"
+              complete=false
+            fi
+          done < .github/supabase-ci-images.txt
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+
+      # Save the cache only from a complete set (the cache action saves the file
+      # at job end when this job succeeds and there was no cache hit).
+      - name: Archive Supabase images for the cache
+        if: steps.image-cache.outputs.cache-hit != 'true' && steps.prepull.outputs.complete == 'true'
+        run: |
+          grep -v -e '^#' -e '^$' .github/supabase-ci-images.txt \
+            | xargs docker save | gzip -1 > "$RUNNER_TEMP/supabase-images.tar.gz"
+
+      # Retry: GHCR also throttles in short bursts ("toomanyrequests: retry-after ...").
+      - name: Start local Supabase (with retries)
+        run: |
+          for attempt in 1 2 3; do
+            if npx supabase start; then exit 0; fi
+            echo "supabase start failed (attempt $attempt); retrying"
+            npx supabase stop --no-backup || true
+            sleep $((attempt * 30))
+          done
+          exit 1
+        env:
+          MGM_ALLOW_DEV_CREDENTIAL_KEY: '1'
+
+      - name: Check the pre-pull list matches the images in use
+        run: |
+          for image in $(docker ps --filter name=supabase_ --format '{{.Image}}'); do
+            grep -qxF "$image" .github/supabase-ci-images.txt \
+              || echo "::warning::$image is running but not in .github/supabase-ci-images.txt (pinned CLI changed?)"
+          done
 
       - name: Payment integrity rehearsal
         run: |
@@ -66,11 +159,9 @@ jobs:
       - name: Credential key rotation rehearsal
         run: |
           eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key-bootstrap.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
-
-      - name: Maintenance command safety tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_credential_key_maintenance.py'
 
       - name: Database diagnostics on rehearsal failure
         if: failure()
@@ -88,5 +179,84 @@ jobs:
           export SUPABASE_JWT_SECRET="$JWT_SECRET"
           export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
+
+      # scripts/tests/test_export_restore_e2e.py exports the database above
+      # and restores it into a second, empty Supabase project, started here.
+      # pg_dump must be at least the server's major version, newer than the
+      # runner's own client, so that client comes from the PostgreSQL apt
+      # repository (added only if the runner does not already list it). The
+      # project uses a subset of the images listed for the stack above, so its
+      # start pulls only what is missing, and retries as that stack's does.
+      - name: Restore target for the export-and-restore test
+        id: restore_target
+        run: |
+          major=$(sed -n 's/^major_version = \([0-9][0-9]*\)$/\1/p' supabase/config.toml)
+          if ! grep -rqs 'apt\.postgresql\.org' /etc/apt/sources.list /etc/apt/sources.list.d/; then
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+              https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            . /etc/os-release
+            echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" \
+              | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "postgresql-client-$major"
+          echo "/usr/lib/postgresql/$major/bin" >> "$GITHUB_PATH"
+          target="$RUNNER_TEMP/restore-target"
+          mkdir -p "$target/supabase"
+          cp scripts/tests/restore-target.config.toml "$target/supabase/config.toml"
+          for attempt in 1 2 3; do
+            if npx supabase start --workdir "$target"; then exit 0; fi
+            echo "supabase start failed (attempt $attempt); retrying"
+            npx supabase stop --workdir "$target" --no-backup || true
+            sleep $((attempt * 30))
+          done
+          exit 1
+
+      # These run after npm test because the export-and-restore test commits
+      # fixture rows to the database the suites use. The export script's
+      # tests encrypt with the real age and lint the script with shellcheck.
+      # MGM_TEST_REQUIRE_TOOLS makes those tests fail, rather than skip, if
+      # either program is missing; MGM_TEST_REQUIRE_DATABASE does the same
+      # for the export-and-restore test's databases and programs.
+      - name: Maintenance command safety tests
+        id: maintenance_tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends age shellcheck
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          export MGM_E2E_SOURCE_DB_URL="${DB_URL-}"
+          # A target whose status prints no DB_URL must leave the variable
+          # empty, which fails the test, rather than reuse the source's.
+          unset DB_URL
+          eval "$(npx supabase status --workdir "$RUNNER_TEMP/restore-target" -o env | grep '^DB_URL=')"
+          export MGM_E2E_TARGET_DB_URL="${DB_URL-}"
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
         env:
-          SKIP_DEK_BOOTSTRAP_TEST: '1'
+          MGM_TEST_REQUIRE_TOOLS: '1'
+          MGM_TEST_REQUIRE_DATABASE: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+
+      # Postgres logs of both stacks, for a failure in the two steps above:
+      # the test's own output shows the failing command, these show what the
+      # servers rejected and why.
+      - name: Database diagnostics on export-and-restore failure
+        if: failure() && (steps.restore_target.outcome == 'failure' || steps.maintenance_tests.outcome == 'failure')
+        run: |
+          docker ps -a --filter name=supabase_ --format '{{.Names}} {{.Status}}' || true
+          for container in supabase_db_mgm supabase_db_mgm-restore-target; do
+            echo "::group::$container"
+            docker logs --tail 200 "$container" 2>&1 || true
+            echo "::endgroup::"
+          done
+
+      # Last: it resets the database twice, without the development opt-in
+      # (the migrations must stop at the key check) and then with it.
+      - name: Fresh-install key check
+        run: |
+          eval "$(npx supabase status -o env | grep -E '^(ANON_KEY|JWT_SECRET)=')"
+          export SUPABASE_JWT_SECRET="$JWT_SECRET"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          npm test -- src/lib/supabase/__tests__/dek-bootstrap.test.ts
+        env:
+          RUN_DEK_BOOTSTRAP_TEST: '1'

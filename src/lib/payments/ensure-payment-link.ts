@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { paymentReturnUrl } from "@/lib/config/app-url";
 import { PaymentError } from "./errors";
 import { getPaymentProviderClient } from "./factory";
 import { getCommunityPaymentConfig } from "./config";
@@ -104,7 +105,7 @@ export interface EnsurePaymentLinkOptions {
   /** Opaque caller-supplied identifier; required by DB CHECK whenever
    *  `actorKind != 'human'`. */
   actorRef?: string | null;
-  /** Override the callback URL; defaults to NEXT_PUBLIC_PAYMENT_CALLBACK_URL. */
+  /** Override the callback URL; defaults to `paymentReturnUrl()` (`${MGM_APP_URL}/payment/callback`). */
   callbackUrl?: string;
   /**
    * Operator-explicit "Regenerate" (#217). When true:
@@ -139,9 +140,13 @@ const inflight = new Map<string, Promise<EnsurePaymentLinkResult>>();
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
-const DEFAULT_CALLBACK_URL =
-  process.env.NEXT_PUBLIC_PAYMENT_CALLBACK_URL ??
-  "http://localhost:3000/payment/callback";
+// Resolved per call (#46): `${MGM_APP_URL}/payment/callback`, or in legacy
+// mode the full NEXT_PUBLIC_PAYMENT_CALLBACK_URL exactly as before. No
+// localhost default, so a missing setting fails instead of sending payers
+// to the wrong host.
+function defaultCallbackUrl(): string {
+  return paymentReturnUrl();
+}
 
 type LineItemScopeRow = {
   id: string;
@@ -297,7 +302,7 @@ async function mintAndPersist(
     amount: built.amount,
     description: built.description,
     billingAddress: built.billingAddress,
-    callbackUrl: opts.callbackUrl ?? DEFAULT_CALLBACK_URL,
+    callbackUrl: opts.callbackUrl ?? defaultCallbackUrl(),
     currency,
   });
 
