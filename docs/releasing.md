@@ -7,20 +7,15 @@ SHA-256 file for each, and a build-provenance attestation that covers both.
 The Release workflow (`.github/workflows/release.yml`) builds them and attaches
 them when a maintainer publishes a GitHub release.
 
-**Publishing a release deploys nothing.** The workflow has no hosting
-credentials and reads no secret. An operator chooses a version, verifies it,
-and deploys it with their own credentials and procedure; see
-[Deploying an asset](#deploying-an-asset). NFE's own deployment procedure is
-kept outside this repository.
+**Publishing a release deploys nothing, and neither does a merge to `main`.**
+The workflow has no hosting credentials and reads no secret. An operator
+pins a version and its SHA-256, verifies the asset, and deploys it with their
+own credentials and procedure; see [Deploying an asset](#deploying-an-asset).
+NFE's own deployment procedure is kept outside this repository.
 
 Versions are `v0.0.N` pre-releases for now. A version is never reused and an
 uploaded asset is never replaced. Keep earlier releases: an operator rolls
 back by deploying a previous version they verified.
-
-> **Not yet usable.** Until the request-time configuration slice of #46 is on
-> `main`, the browser code reads its Supabase settings at build time, so an
-> asset built from `main` has none and cannot serve a working installation.
-> Publish no release before then. Remove this note when that slice merges.
 
 ## What the asset is
 

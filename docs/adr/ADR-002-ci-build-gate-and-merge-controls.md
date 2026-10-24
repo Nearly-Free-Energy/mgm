@@ -110,3 +110,13 @@ Worse or to watch:
   The result is recorded on #33.
 - The exact Cordis version for 0.1 is a separate decision (the dependency is
   currently pinned at `4.0.0-rc.10`) and is not made here.
+
+### Amendment (23 Oct 2026): no hosting previews
+
+The hosting provider no longer builds pull requests or `main`: no preview or
+hosting check appears on a pull request, and `Build` remains the
+production-build proof. Production runs a published release asset that an
+operator deploys (`docs/releasing.md`), so a merge to `main` deploys nothing.
+The runtime consequence above now applies to that asset, whose functions
+declare `nodejs24.x`, taken from `.nvmrc`. The Context describes the situation
+when this ADR was accepted.

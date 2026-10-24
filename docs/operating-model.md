@@ -79,8 +79,8 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
    the database tests that assert it and the regenerated `database.gen.ts`,
    and a decision ships with the doc that records it.
 4. **Pull request.** Signed, signed-off commits (`git commit -s -S`). The
-   `Test`, `CodeQL`, and `Build` checks must pass; hosting previews are
-   informational. See "Merge controls" below and `CONTRIBUTING.md`.
+   `Test`, `CodeQL`, and `Build` checks must pass; no hosting provider builds
+   or checks pull requests. See "Merge controls" below and `CONTRIBUTING.md`.
 5. **Review.** The author, or a code owner for protected areas, reads the diff
    against the invariants above. Protected areas need approval from a code
    owner other than the author; other changes may be merged by their author
@@ -90,9 +90,10 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
 6. **Release.** A maintainer publishes a versioned deployment asset from a
    commit on `main` (`docs/releasing.md`). Publishing deploys nothing.
 7. **Deploy.** Separately from publishing, an operator deploys a verified
-   release with their own credentials. Apply database migrations before
-   deploying the app. Follow the runbook for the area (`docs/runbooks/`,
-   `docs/payments-rollout.md`, `docs/customerapp-activation.md`).
+   release with their own credentials; merging to `main` deploys nothing.
+   Apply database migrations before deploying the app. Follow the runbook for
+   the area (`docs/runbooks/`, `docs/payments-rollout.md`,
+   `docs/customerapp-activation.md`).
 
 ## Merge controls
 
@@ -149,12 +150,10 @@ approving maintainer reads the diff first, especially anything under
 verified, signed-off commits with merge commits. For a commit that is unsigned
 or lacks a sign-off, withhold the merge and ask for a correction.
 
-**Hosting previews are informational.** A hosting-provider preview is not part
-of the checklist, so a fork pull request never waits on a deployment
-authorization that is not given. Keep Vercel Git Fork Protection enabled;
-maintainers do not authorize hosting deployments for fork pull requests. Any
-application preview uses isolated synthetic data. The `Build` job, not a
-preview, is the production-build gate.
+**No hosting previews.** No hosting provider builds pull requests or posts a
+status check on them, so a fork pull request never waits on a deployment
+authorization, and none is part of the checklist. Any application preview
+uses isolated synthetic data. The `Build` job is the production-build gate.
 
 **Untrusted code gets no credentials.** The CI workflows run on the
 `pull_request` event with `permissions: contents: read` and read no repository
@@ -173,9 +172,8 @@ code. The workflow reads no secret and holds no hosting credentials; see
 
 **Runtime versions.** `.nvmrc` pins Node.js 24 LTS. Each path is separate:
 
-- **Vercel** uses `package.json` `engines.node` (`>=24 <25`) in place of the
-  project's Node.js setting for builds and Functions. The project already
-  builds on 24.x, so this line does not change the production runtime.
+- **Vercel** runs the release asset below; `package.json` `engines.node`
+  (`>=24 <25`) agrees with its runtime.
 - **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to
   Node 24 is a follow-up PR, linked from #33 and covered by the container
   work in #51.

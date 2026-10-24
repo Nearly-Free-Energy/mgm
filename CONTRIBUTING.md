@@ -100,10 +100,10 @@ rebased commits.
 **First-time contributors:** the workflow runs on your pull request wait for a
 maintainer to approve them. That is expected; it can take a while.
 
-**Hosting previews (for example a Vercel preview) are informational.** They
-are not part of the checklist, and a pull request from a fork does not wait on
-one. If a preview fails or is not authorized for your fork, rely on the checks
-above.
+**No hosting preview runs on a pull request.** No hosting provider builds
+pull requests or reports a check on them, so the checks above are the whole
+verdict. Merging to `main` deploys nothing either: production is deployed
+separately, from published release assets (`docs/releasing.md`).
 
 ## Pull request habits
 
