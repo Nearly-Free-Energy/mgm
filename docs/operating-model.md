@@ -183,7 +183,7 @@ code. The workflow reads no secret and holds no hosting credentials; see
   file. The build script refuses a different Node.js major version.
 
 The Cordis dependency is pinned exactly in `package.json` (currently
-`4.0.0-rc.10`).
+`4.0.0-rc.12`).
 
 **Status.** The social contract has not yet been rehearsed with an outside
 fork pull request (including the GitHub web-editor path). The rehearsal is

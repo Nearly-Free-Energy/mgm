@@ -80,8 +80,9 @@ export type MgmRuntime = {
 /**
  * `FiberState.ACTIVE`. Cordis declares `FiberState` as an ambient const enum,
  * which `isolatedModules` cannot read — if Cordis renumbers it, revisit.
+ * `runtime.test.ts` compares it with the value Cordis exports at runtime.
  */
-const FIBER_ACTIVE = 2;
+export const FIBER_ACTIVE = 2;
 
 /** Wait for a fiber and fail if it is not active (missing inject, error). */
 export async function requireActive(fiber: Fiber, label: string): Promise<Fiber> {

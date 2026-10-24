@@ -31,7 +31,7 @@
     "aws4": "^1.13.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cordis": "4.0.0-rc.10",
+    "cordis": "4.0.0-rc.12",
     "next": "16.4.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
