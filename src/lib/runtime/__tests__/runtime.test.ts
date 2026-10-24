@@ -3,7 +3,7 @@ import type { Context, Plugin } from "cordis";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { openOrganizationScope, REQUEST_SERVICES } from "../scope";
-import { PaymentProviderRegistry } from "../services";
+import { PaymentProviderRegistry, type MgmRequest } from "../services";
 import "../services";
 
 vi.mock("@/lib/metering/openems-provider", () => ({
@@ -132,6 +132,83 @@ describe("organization request scopes", () => {
     const Needy = { name: "needy", inject: ["notProvided"], apply() {} };
     await expect(scope.load(Needy)).rejects.toThrow('Cordis plugin "needy" did not activate');
     await scope.dispose();
+  });
+
+  it("unloads everything when a capability load fails and the scope is disposed", async () => {
+    const runtime = await getMgmRuntime();
+    const before = runtime.root.registry.size;
+    const scope = await openOrganizationScope(request(ORG_A), { isolate: ["probe", "broken"] });
+    await scope.load(ProbePlugin);
+    const probe = scope.ctx.get("probe");
+
+    // Provides a request service, then fails — the composers' failure path.
+    const Broken = {
+      name: "broken",
+      inject: ["probe"],
+      apply(ctx: Context) {
+        ctx.provide("broken", {});
+        throw new Error("capability failed to start");
+      },
+    };
+    await expect(scope.load(Broken)).rejects.toThrow("capability failed to start");
+    await scope.dispose();
+
+    expect(probe?.active()).toBe(false);
+    expect(scope.ctx.get("mgmRequest")).toBeUndefined();
+    expect(scope.ctx.get("broken")).toBeUndefined();
+    expect(runtime.root.registry.size).toBe(before);
+
+    // The next request on the same root starts clean.
+    const next = await openOrganizationScope(request(ORG_B), { isolate: ["probe"] });
+    await next.load(ProbePlugin);
+    expect(next.ctx.get("probe")?.organizationId).toBe(ORG_B);
+    await next.dispose();
+    expect(runtime.root.registry.size).toBe(before);
+  });
+
+  it("keeps mgmRequest private across many concurrent scopes", async () => {
+    const runtime = await getMgmRuntime();
+    const before = runtime.root.registry.size;
+    const requests = Array.from({ length: 40 }, (_, i) => ({
+      ...request(i % 2 ? ORG_A : ORG_B),
+      userId: `user-${i}`,
+    }));
+
+    // Reads mgmRequest again after yielding, so interleaved requests would show.
+    const mismatches: MgmRequest[] = [];
+    const Reader = {
+      name: "reader",
+      inject: ["mgmRequest"],
+      async apply(ctx: Context, expected: MgmRequest) {
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * 5));
+        if (ctx.mgmRequest !== expected) mismatches.push(expected);
+      },
+    } satisfies Plugin.Object<MgmRequest>;
+
+    const scopes = await Promise.all(
+      requests.map((r) => openOrganizationScope(r, { isolate: ["probe"] }))
+    );
+    await Promise.all(
+      scopes.map((scope) => Promise.all([scope.load(ProbePlugin), scope.load(Reader, scope.request)]))
+    );
+    expect(mismatches).toEqual([]);
+
+    const check = (live: typeof scopes) => {
+      for (const scope of live) {
+        expect(scope.ctx.get("mgmRequest")).toBe(scope.request);
+        expect(scope.ctx.get("probe")?.organizationId).toBe(scope.request.organizationId);
+      }
+    };
+    check(scopes);
+
+    // Dispose every third scope concurrently; the rest still see only their own request.
+    const [gone, kept] = [scopes.filter((_, i) => i % 3 === 0), scopes.filter((_, i) => i % 3 !== 0)];
+    await Promise.all(gone.map((scope) => scope.dispose()));
+    for (const scope of gone) expect(scope.ctx.get("mgmRequest")).toBeUndefined();
+    check(kept);
+
+    await Promise.all(kept.map((scope) => scope.dispose()));
+    expect(runtime.root.registry.size).toBe(before);
   });
 
   it("refuses loads after dispose", async () => {
