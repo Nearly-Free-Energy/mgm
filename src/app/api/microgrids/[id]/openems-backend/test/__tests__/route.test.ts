@@ -291,4 +291,86 @@ describe("POST openems-backend/test", () => {
     expect(candidate.keycloakClientId).toBe("ems-backend");
     expect(candidate.keycloakClientSecret).toBe("stored-secret");
   });
+
+  // The route never builds a response from a caught error: the stored-config
+  // reads fall back to "nothing stored", and anything the capability throws
+  // propagates, so the framework answers with a bare 500.
+  it("swallows stored-config read failures without echoing them", async () => {
+    mocks.getEmsConfig.mockRejectedValueOnce(
+      new Error("decrypt failed for stored-basic-secret")
+    );
+    mocks.resolveKeycloak.mockRejectedValueOnce(
+      new Error("decrypt failed for stored-keycloak-secret")
+    );
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: false, code: "unreachable", message: "Could not reach the OpenEMS backend." },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain("decrypt failed");
+    expect(text).not.toContain("stored-");
+    expect(mocks.testConnection).toHaveBeenCalledWith(MG_ID, {
+      type: "direct_url",
+      backendUrl: "http://localhost:8075",
+      region: null,
+      accessKeyId: null,
+      secretAccessKey: null,
+      basicAuthUsername: null,
+      basicAuthPassword: null,
+      bearerToken: null,
+    });
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns only the capability's result, never the candidate's secrets", async () => {
+    mocks.getEmsConfig.mockResolvedValueOnce({
+      type: "direct_url",
+      url: "http://localhost:8075",
+      username: "openems",
+      password: "stored-basic-secret",
+    });
+    mocks.testConnection.mockResolvedValue({
+      ok: true,
+      data: { ok: false, code: "auth_failed", message: "Authentication failed." },
+    });
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ type: "direct_url", backendUrl: "http://localhost:8075" }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      code: "auth_failed",
+      message: "Authentication failed.",
+    });
+    // The stored secret did reach the capability, and only the capability.
+    expect(mocks.testConnection.mock.calls[0][1]).toMatchObject({
+      basicAuthPassword: "stored-basic-secret",
+    });
+  });
+
+  it("does not turn a thrown error into a response, and still disposes", async () => {
+    mocks.testConnection.mockRejectedValueOnce(
+      new Error("socket closed while sending typed-bearer-secret")
+    );
+    const { POST } = await import("../route");
+    await expect(
+      POST(
+        makePost({
+          type: "direct_url",
+          backendUrl: "http://localhost:8075",
+          bearerToken: "typed-bearer-secret",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      )
+    ).rejects.toThrow("socket closed");
+    expect(mocks.dispose).toHaveBeenCalledTimes(1);
+  });
 });

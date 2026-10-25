@@ -25,8 +25,13 @@ function mapError(error: Extract<MeteringResult<never>, { ok: false }>) {
  * stored, never returned.
  *
  * Released metering mutations route through the metering Cordis capability.
- * Always responds 200 with a ConnectionTestResult body — even an
+ * A test that runs responds 200 with a ConnectionTestResult body — even an
  * auth_failed/unreachable outcome is a successful *test*.
+ *
+ * No response is built from a caught error: a failed read of the stored
+ * configuration counts as nothing stored, and anything the capability
+ * throws propagates to the framework's bare 500. The scope is disposed
+ * either way.
  */
 export async function POST(
   request: NextRequest,

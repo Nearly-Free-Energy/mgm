@@ -8,11 +8,19 @@
  *     previousPaymentStatus passthrough from the capability's preview
  *     results.
  *   - delegates to the billing capability (previewBills); assignment-date
- *     enforcement and plugin gating are capability-owned.
- *   - 404 when the period is missing; 409 when billing is disabled.
+ *     enforcement is capability-owned. Plugin gating is not: the
+ *     capability's generation checks plugin state only in write mode, and
+ *     previewBills runs it in preview mode, so the route's gate below is
+ *     the only plugin check on this path (revisit if runGeneration starts
+ *     gating preview).
+ *   - 404 when the period is missing; composition failures map through.
  *   - gated as a billing write: preview can re-pin an empty draft's tariff,
  *     so a disabled plugin (409) or unreadable plugin state (503) stops the
- *     request before the capability runs.
+ *     request before the capability runs, and the scope is still disposed.
+ *   - organization access (the composer's 401/403) is decided before the
+ *     gate, so a caller without access never learns the plugin's state.
+ *   - 404 when the gate resolves the period to a different organization (or
+ *     none) than the one the scope was authorized for.
  *
  * The "no DB write" assertion is an integration concern owned by the
  * live-DB suite at `src/lib/supabase/__tests__/billing_audit_log.test.ts`
@@ -55,6 +63,19 @@ let microgridRow: { id: string; communities: { org_id: string } } | null = {
   communities: { org_id: "550e8400-e29b-41d4-a716-446655440000" },
 };
 let composeResult: { ok: boolean; status?: number; code?: string; message?: string } | null = null;
+const previewBills = vi.fn(async (input: {
+  billingPeriodId: string;
+  householdIds?: string[];
+  manualReadings?: unknown[];
+}) => {
+  lastCapabilityCall = {
+    billingPeriodId: input.billingPeriodId,
+    householdIds: input.householdIds,
+    manualReadings: input.manualReadings,
+  };
+  return mockCapabilityResult;
+});
+const dispose = vi.fn(async () => {});
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
@@ -83,21 +104,8 @@ vi.mock("@/lib/billing/compose", () => ({
     return {
       ok: true,
       data: {
-        billing: {
-          previewBills: vi.fn(async (input: {
-            billingPeriodId: string;
-            householdIds?: string[];
-            manualReadings?: unknown[];
-          }) => {
-            lastCapabilityCall = {
-              billingPeriodId: input.billingPeriodId,
-              householdIds: input.householdIds,
-              manualReadings: input.manualReadings,
-            };
-            return mockCapabilityResult;
-          }),
-        },
-        dispose: async () => {},
+        billing: { previewBills: (...args: Parameters<typeof previewBills>) => previewBills(...args) },
+        dispose: () => dispose(),
       },
     };
   }),
@@ -105,6 +113,8 @@ vi.mock("@/lib/billing/compose", () => ({
 
 const PERIOD_ID = "660e8400-e29b-41d4-a716-446655441000";
 const HH_A = "660e8400-e29b-41d4-a716-446655442001";
+const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
+const OTHER_ORG_ID = "550e8400-e29b-41d4-a716-446655440999";
 
 function makePostRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/billing/regenerate-preview", {
@@ -129,7 +139,7 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       communities: { org_id: "550e8400-e29b-41d4-a716-446655440000" },
     };
     composeResult = null;
-    gateDecision = { ok: true, organizationId: "550e8400-e29b-41d4-a716-446655440000" };
+    gateDecision = { ok: true, organizationId: ORG_ID };
   });
 
   it("401 when no auth user", async () => {
@@ -194,6 +204,7 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       totalAmount: 49000,
     });
     expect(json.errors).toEqual([]);
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("preview shape includes previous* fields when prior line item exists", async () => {
@@ -244,22 +255,23 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     expect(lastCapabilityCall).toBeNull();
   });
 
-  it("409 when billing is disabled (composition fails closed)", async () => {
+  it("maps a composition failure; neither the gate nor the capability runs", async () => {
     composeResult = {
       ok: false,
-      status: 409,
-      code: "billing_disabled",
-      message: "Billing is disabled for this organization.",
+      status: 500,
+      code: "billing_composition_failed",
+      message: "Could not compose billing.",
     };
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
-    expect(res.status).toBe(409);
-    const json = await res.json();
-    expect(json.code).toBe("billing_disabled");
+    expect(res.status).toBe(500);
+    expect((await res.json()).code).toBe("billing_composition_failed");
+    expect(checkGate).not.toHaveBeenCalled();
     expect(lastCapabilityCall).toBeNull();
   });
 
   it("gates the preview as a billing write on the period", async () => {
+    const { composeBilling } = await import("@/lib/billing/compose");
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
     expect(res.status).toBe(200);
@@ -268,7 +280,41 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       target: { kind: "billingPeriod", id: PERIOD_ID },
       method: "POST",
     });
+    expect(composeBilling).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG_ID, readOnly: true })
+    );
   });
+
+  it("authorizes the organization, then gates, then runs the capability", async () => {
+    const { composeBilling } = await import("@/lib/billing/compose");
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+    expect(res.status).toBe(200);
+    const composedAt = vi.mocked(composeBilling).mock.invocationCallOrder[0];
+    const gatedAt = checkGate.mock.invocationCallOrder[0];
+    const previewedAt = previewBills.mock.invocationCallOrder[0];
+    expect(composedAt).toBeLessThan(gatedAt);
+    expect(gatedAt).toBeLessThan(previewedAt);
+  });
+
+  it.each([
+    [403, "billing_forbidden", 409, "billing_disabled"],
+    [403, "billing_forbidden", 503, "billing_gate_unavailable"],
+    [401, "billing_unauthenticated", 409, "billing_disabled"],
+    [401, "billing_unauthenticated", 503, "billing_gate_unavailable"],
+  ] as const)(
+    "%i %s wins over the gate's %i %s: the plugin state stays hidden",
+    async (status, code, gateStatus, gateCode) => {
+      composeResult = { ok: false, status, code, message: "Not authorized." };
+      gateDecision = { ok: false, status: gateStatus, code: gateCode, message: "gate" };
+      const { POST } = await import("../route");
+      const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+      expect(res.status).toBe(status);
+      expect((await res.json()).code).toBe(code);
+      expect(checkGate).not.toHaveBeenCalled();
+      expect(lastCapabilityCall).toBeNull();
+    }
+  );
 
   it("409 billing_disabled from the gate; the capability never runs", async () => {
     gateDecision = {
@@ -277,13 +323,13 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       code: "billing_disabled",
       message: "Billing is disabled for this organization.",
     };
-    const { composeBilling } = await import("@/lib/billing/compose");
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("billing_disabled");
-    expect(composeBilling).not.toHaveBeenCalled();
+    expect(previewBills).not.toHaveBeenCalled();
     expect(lastCapabilityCall).toBeNull();
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("503 when plugin state cannot be read (fails closed)", async () => {
@@ -291,15 +337,33 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       ok: false,
       status: 503,
       code: "billing_gate_unavailable",
-      message: "Could not confirm billing is enabled.",
+      message: "Could not verify whether Billing is enabled. Retry the request.",
     };
-    const { composeBilling } = await import("@/lib/billing/compose");
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
     expect(res.status).toBe(503);
-    expect(composeBilling).not.toHaveBeenCalled();
+    expect((await res.json()).code).toBe("billing_gate_unavailable");
+    expect(previewBills).not.toHaveBeenCalled();
     expect(lastCapabilityCall).toBeNull();
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["a different organization", OTHER_ORG_ID],
+    ["no organization", null],
+  ])(
+    "404 when the gate resolves the period to %s; the capability never runs",
+    async (_label, organizationId) => {
+      gateDecision = { ok: true, organizationId };
+      const { POST } = await import("../route");
+      const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("Billing period not found");
+      expect(previewBills).not.toHaveBeenCalled();
+      expect(lastCapabilityCall).toBeNull();
+      expect(dispose).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it("response splits errors with code field", async () => {
     mockCapabilityResult = {
