@@ -57,6 +57,9 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
   composeCommunityManagement: ["community-management"],
   composeMetering: ["metering"],
   composeBilling: ["billing"],
+  // Payments credit = checkout refusal only; reconcile, refresh and IPN
+  // writes are deliberately allowed while disabled (docs/payments-rollout.md).
+  //
   // The payments composers check no plugin state at compose time. The
   // capability refuses new checkouts itself (409 when Payments or Pesapal is
   // off, 503 when the state cannot be read). It keeps history and
