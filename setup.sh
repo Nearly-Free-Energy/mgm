@@ -131,13 +131,33 @@ ENVEOF
 check_existing_env() {
   if [ -f .env.local ] && [ "$FORCE" = false ]; then
     local existing_url
-    existing_url=$(grep -E '^(MGM_PUBLIC|NEXT_PUBLIC)_SUPABASE_URL=' .env.local | head -n 1 | cut -d= -f2- || echo "")
-    if echo "$existing_url" | grep -qE '(localhost|127\.0\.0\.1)'; then
+    existing_url=$(grep -E '^MGM_PUBLIC_SUPABASE_URL=' .env.local | head -n 1 | cut -d= -f2- || echo "")
+    if [ -z "$existing_url" ]; then
+      warn ".env.local already exists but does not set MGM_PUBLIC_SUPABASE_URL"
+    elif echo "$existing_url" | grep -qE '(localhost|127\.0\.0\.1)'; then
       warn ".env.local already exists (pointing at local Supabase)"
     else
       warn ".env.local already exists (pointing at ${existing_url})"
     fi
-    warn "Use --force to overwrite"
+    # Names v0.0.1/v0.0.2 accepted and later releases no longer read (#79;
+    # src/lib/config/retired-names.ts holds the same list - if that list changes, revisit).
+    local pair old new retired=false
+    for pair in NEXT_PUBLIC_SUPABASE_URL:MGM_PUBLIC_SUPABASE_URL \
+                NEXT_PUBLIC_SUPABASE_ANON_KEY:MGM_PUBLIC_SUPABASE_ANON_KEY \
+                NEXT_PUBLIC_SUPABASE_COOKIE_NAME:MGM_PUBLIC_SUPABASE_COOKIE_NAME \
+                NEXT_PUBLIC_APP_URL:MGM_APP_URL \
+                NEXT_PUBLIC_PAYMENT_CALLBACK_URL:MGM_APP_URL; do
+      old=${pair%%:*}; new=${pair##*:}
+      if grep -qE "^${old}=." .env.local && ! grep -qE "^${new}=." .env.local; then
+        warn ".env.local sets ${old}, which is no longer read; rename it to ${new} (docs/setup.md, \"Upgrading from v0.0.1 or v0.0.2\")"
+        retired=true
+      fi
+    done
+    if [ "$retired" = true ]; then
+      warn "Or use --force to overwrite (in local mode --force also resets the local database)"
+    else
+      warn "Use --force to overwrite"
+    fi
     return 1
   fi
   return 0

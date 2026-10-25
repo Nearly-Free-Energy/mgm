@@ -310,6 +310,8 @@ describe("middleware runtime configuration (#46)", () => {
     );
   });
 
+  // Delete this test with the `runtime` line when moving to proxy.ts: Next.js
+  // 16 refuses route segment config in a Proxy file (see src/middleware.ts).
   it("runs on the Node.js runtime so it reads the real process environment", async () => {
     vi.resetModules();
     const { config } = await import("../../middleware");
@@ -317,14 +319,12 @@ describe("middleware runtime configuration (#46)", () => {
   });
 
   it("fails closed, naming the variable, when configuration is missing", async () => {
-    for (const name of [
-      "MGM_PUBLIC_SUPABASE_URL",
-      "MGM_PUBLIC_SUPABASE_ANON_KEY",
-      "NEXT_PUBLIC_SUPABASE_URL",
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    ]) {
+    for (const name of ["MGM_PUBLIC_SUPABASE_URL", "MGM_PUBLIC_SUPABASE_ANON_KEY"]) {
       vi.stubEnv(name, "");
     }
+    // A retired name does not stand in for a missing MGM_ name (#79).
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://legacy.example.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_legacy");
     const middleware = await loadMiddleware();
     await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
       /MGM_PUBLIC_SUPABASE_URL/

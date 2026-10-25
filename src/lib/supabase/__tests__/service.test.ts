@@ -31,7 +31,7 @@ describe("createServiceClient (env-var guard)", () => {
     );
   });
 
-  it("still accepts the legacy NEXT_PUBLIC_SUPABASE_URL for one release", async () => {
+  it("no longer accepts the retired NEXT_PUBLIC_SUPABASE_URL (#79)", async () => {
     delete process.env.MGM_PUBLIC_SUPABASE_URL;
     delete process.env.MGM_PUBLIC_SUPABASE_ANON_KEY;
     delete process.env.SUPABASE_INTERNAL_URL;
@@ -41,7 +41,9 @@ describe("createServiceClient (env-var guard)", () => {
     vi.resetModules();
 
     const mod = await import("../service");
-    expect(mod.createServiceClient()).toBeDefined();
+    expect(() => mod.createServiceClient()).toThrow(
+      /Supabase URL is not configured: Missing required runtime configuration: MGM_PUBLIC_SUPABASE_URL/
+    );
   });
 
   it("returns a client when URL + service-role key are present", async () => {

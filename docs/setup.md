@@ -197,57 +197,47 @@ environment (Vercel project settings, the container's `environment:`, or
 `.env.local` for `npm run dev`); for the container there are no build
 arguments.
 
-### Migrating from `NEXT_PUBLIC_*` names
+### Upgrading from v0.0.1 or v0.0.2
 
-Earlier releases used Next.js build-time names. Rename them:
+v0.0.1 and v0.0.2 still accepted the old Next.js build-time names when the
+new names were unset. Later releases **no longer read the old names**. Rename
+them in the hosting environment before upgrading (the same applies to a build
+from before v0.0.1):
 
-| Old name | New name |
+| Old name (no longer read) | New name |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `MGM_PUBLIC_SUPABASE_URL` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `MGM_PUBLIC_SUPABASE_ANON_KEY` |
 | `NEXT_PUBLIC_SUPABASE_COOKIE_NAME` | `MGM_PUBLIC_SUPABASE_COOKIE_NAME` |
 | `NEXT_PUBLIC_APP_URL` | `MGM_APP_URL` (origin only) |
-| `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` | `MGM_APP_URL` (its origin; the `/payment/callback` path is added by MGM) |
+| `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` | `MGM_APP_URL` (its origin only) |
 
-Rename the three Supabase variables together: an `MGM_PUBLIC_SUPABASE_COOKIE_NAME`
-next to the old URL and key is refused, as is the reverse.
+- **Payment return URL.** It is always the `MGM_APP_URL` origin plus
+  `/payment/callback`. A custom path or query in
+  `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` is not carried over. With only
+  `NEXT_PUBLIC_APP_URL` set, releases before v0.0.1 sent payers back to
+  `http://localhost:3000/payment/callback`; since v0.0.1 the return URL has
+  been the application origin plus `/payment/callback`.
+- **Cookie name.** If you set `NEXT_PUBLIC_SUPABASE_COOKIE_NAME`, rename it
+  too. Without `MGM_PUBLIC_SUPABASE_COOKIE_NAME`, sessions use Supabase's
+  default cookie name, so everyone has to sign in again, and an internal
+  Supabase URL on another host is refused (see the table above).
+- **What happens if you forget.** An old name left set is ignored. At server
+  start MGM logs one warning for each old name that is set while its new name
+  is not, naming both and never the value, for example
+  `[mgm] NEXT_PUBLIC_SUPABASE_URL is set but no longer read; set MGM_PUBLIC_SUPABASE_URL instead.`
+  The missing new names then fail as described above: missing Supabase
+  settings make every page and API request fail with 500, and a missing
+  `MGM_APP_URL` fails payment links and notification registration. An old
+  name set next to its new name is ignored without a warning; delete it once
+  you have renamed it.
+- **Containers.** The image takes no `--build-arg NEXT_PUBLIC_*`. Pass the
+  variables above as runtime environment.
+- **Local development.** Rename the same names in `.env.local`. `./setup.sh`
+  warns about each old name it finds there; `./setup.sh --force` regenerates
+  the file instead, but in local mode it also resets the local database.
 
-**Compatibility for one release.** So that existing installations keep working
-until they adopt the new names, this release still accepts the old names as a
-fallback:
-
-- The Supabase settings are taken as a set. When neither
-  `MGM_PUBLIC_SUPABASE_URL` nor `MGM_PUBLIC_SUPABASE_ANON_KEY` is set, all three
-  `NEXT_PUBLIC_SUPABASE_*` values are used and a deprecation warning is logged
-  at server start and on first use in each server bundle. When either new name is set, only new names are
-  read; the two sets are never mixed.
-- A `NEXT_PUBLIC_SUPABASE_COOKIE_NAME` left behind after switching to the new
-  Supabase names is refused (it would otherwise be ignored and the session
-  cookie would change name). Rename it to `MGM_PUBLIC_SUPABASE_COOKIE_NAME`.
-- When `MGM_APP_URL` is unset, behaviour is exactly as in the previous release:
-  - a deprecation warning at server start names the old variable in use (never
-    its value); set `MGM_APP_URL` before the fallback is removed;
-  - the payment return URL is the full `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`, path
-    included, when it is set; otherwise the `NEXT_PUBLIC_APP_URL` origin plus
-    `/payment/callback`;
-  - payment links and the notification URL use the origin of
-    `NEXT_PUBLIC_APP_URL`, then the origin of `NEXT_PUBLIC_PAYMENT_CALLBACK_URL`.
-  
-  Once `MGM_APP_URL` is set, the return URL is always
-  `${MGM_APP_URL}/payment/callback`; a custom return path is not carried over.
-- The legacy names are read from the live environment at request time, like
-  the new ones (the code reads them through an alias of `process.env`, so
-  Next.js does not inline a value present at build time); the browser bundle
-  no longer reads any of them. A build made with the old names set therefore
-  carries none of their values, and a server with neither the new nor the legacy names set reports the new
-  names as missing.
-
-The fallback will be removed in the next release. Rename, redeploy, and
-confirm login and a payment link before then.
-
-Container users: the image no longer takes `--build-arg NEXT_PUBLIC_*`.
-Remove those arguments from build scripts and pass the variables above as
-runtime environment instead.
+After renaming, redeploy and confirm login and a payment link.
 
 Changing an installation's public URL also means updating the payment
 provider's notification registration, the payment worker URL in Vault, and
@@ -341,7 +331,7 @@ If you don't have local Supabase running (e.g. CI without Docker), set `SKIP_RLS
 SKIP_RLS_TESTS=1 npm test
 ```
 
-Missing `MGM_PUBLIC_SUPABASE_ANON_KEY` (the old `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still read by the test helpers, as CI exports it) or `SUPABASE_JWT_SECRET` without `SKIP_RLS_TESTS=1` will **fail
+Missing `MGM_PUBLIC_SUPABASE_ANON_KEY` or `SUPABASE_JWT_SECRET` without `SKIP_RLS_TESTS=1` will **fail
 loudly** with an actionable error — this is intentional so CI catches missing config rather than
 silently skipping coverage.
 
@@ -390,6 +380,7 @@ If using local/dev mode, run `npm run dev` after setup.
 | `supabase: command not found` | Install: `brew install supabase/tap/supabase` |
 | `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply. |
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
+| `[mgm] NEXT_PUBLIC_… is set but no longer read` at `npm run dev` | Rename the variable in `.env.local` ([Upgrading from v0.0.1 or v0.0.2](#upgrading-from-v001-or-v002)), or rerun `./setup.sh --force` (in local mode this also resets the local database) |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
 | Login fails with "Invalid credentials" | Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |

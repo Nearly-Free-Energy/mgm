@@ -12,7 +12,7 @@
  * Required env vars (set in .env.local):
  *   SUPABASE_JWT_SECRET              — local Supabase JWT signing secret
  *   MGM_PUBLIC_SUPABASE_ANON_KEY     — local anon/publishable key (for non-service-role clients);
- *                                      NEXT_PUBLIC_SUPABASE_ANON_KEY is still read as a fallback (CI)
+ *                                      CI exports it too (.github/workflows/test.yml)
  *
  * The LOCAL_SUPABASE_URL is always http://localhost:54321 — RLS tests never run against cloud.
  * A local service-role JWT is derived at runtime from SUPABASE_JWT_SECRET.
@@ -37,15 +37,12 @@ export const LOCAL_SUPABASE_URL = configuredTestUrl;
 // ── Environment guard ────────────────────────────────────────────────────
 
 /**
- * The local anon/publishable key for tests. setup.sh writes the MGM_ name;
- * CI still exports the old one (test.yml), so both are read.
+ * The local anon/publishable key for tests: MGM_PUBLIC_SUPABASE_ANON_KEY,
+ * which setup.sh writes to .env.local and CI exports (test.yml). The retired
+ * NEXT_PUBLIC_SUPABASE_ANON_KEY is not read (#79).
  */
 export function testAnonKey(): string | undefined {
-  return (
-    process.env.MGM_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-    undefined
-  );
+  return process.env.MGM_PUBLIC_SUPABASE_ANON_KEY?.trim() || undefined;
 }
 
 export function shouldSkip(): boolean {

@@ -27,7 +27,10 @@ export function PublicRuntimeConfigProvider({
   children: React.ReactNode;
 }) {
   // Re-pick the allowlisted fields so an accidental wider object cannot
-  // reach the context.
+  // reach the context or the browser store. This cannot keep a field out of
+  // the page: Next.js serializes these props before the provider runs, so
+  // that guard is the root layout passing parsePublicRuntimeConfig's
+  // three-field object (src/app/__tests__/root-layout.test.tsx).
   const value = React.useMemo<PublicRuntimeConfig>(
     () => ({
       supabaseUrl: config.supabaseUrl,

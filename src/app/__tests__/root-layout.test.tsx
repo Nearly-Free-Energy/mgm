@@ -2,6 +2,12 @@
  * Root layout (#46): rendered per request, request-time boundary before the
  * configuration is read, and only the three public fields reach the client
  * configuration provider.
+ *
+ * "passes only the three public fields" is the guard on what reaches the
+ * page: the provider's props are what Next.js serializes into the page
+ * payload, so they must already be the fresh three-field object that
+ * parsePublicRuntimeConfig returns. The provider's own re-pick happens after
+ * that serialization (see public-runtime-config-provider.test.tsx).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as React from "react";
@@ -62,7 +68,6 @@ describe("RootLayout", () => {
     vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://alpha.example.test");
     vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_alpha");
     vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_COOKIE_NAME", "");
     await RootLayout({ children: <main /> });
     expect(order).toEqual(["connection", "config"]);
   });
@@ -89,14 +94,12 @@ describe("RootLayout", () => {
   });
 
   it("fails clearly, without rendering, when configuration is missing", async () => {
-    for (const name of [
-      "MGM_PUBLIC_SUPABASE_URL",
-      "MGM_PUBLIC_SUPABASE_ANON_KEY",
-      "NEXT_PUBLIC_SUPABASE_URL",
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-    ]) {
+    for (const name of ["MGM_PUBLIC_SUPABASE_URL", "MGM_PUBLIC_SUPABASE_ANON_KEY"]) {
       vi.stubEnv(name, "");
     }
+    // A retired name does not stand in for a missing MGM_ name (#79).
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://legacy.example.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_legacy");
     await expect(RootLayout({ children: <main /> })).rejects.toThrow(/MGM_PUBLIC_SUPABASE_URL/);
   });
 });

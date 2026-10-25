@@ -120,3 +120,10 @@ operator deploys (`docs/releasing.md`), so a merge to `main` deploys nothing.
 The runtime consequence above now applies to that asset, whose functions
 declare `nodejs24.x`, taken from `.nvmrc`. The Context describes the situation
 when this ADR was accepted.
+
+### Amendment (24 Oct 2026): no placeholder settings in Build
+
+`Build` no longer sets placeholder Supabase values. Supabase and
+application-URL settings are read at request time (ADR-003, amendment item 7),
+so `next build` runs with none. Decision 1 describes the job when this ADR was
+accepted.

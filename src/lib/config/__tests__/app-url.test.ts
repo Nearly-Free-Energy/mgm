@@ -1,7 +1,8 @@
 /**
  * Server-only MGM_APP_URL (#46): payment links, the provider return URL and
  * the payment notification (IPN) URL are built from the installation's own
- * origin, read at call time.
+ * origin, read at call time. The retired NEXT_PUBLIC_APP_URL and
+ * NEXT_PUBLIC_PAYMENT_CALLBACK_URL are no longer read (#79).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { appUrl, parseAppOrigin, paymentReturnUrl, validateAppUrlAtStartup } from "../app-url";
@@ -43,21 +44,15 @@ describe("parseAppOrigin", () => {
     expect(() => parseAppOrigin({})).toThrow(/Missing required runtime configuration: MGM_APP_URL/);
   });
 
-  it("falls back to the legacy names for one release, using only their origin", () => {
-    expect(parseAppOrigin({ NEXT_PUBLIC_APP_URL: "https://legacy.example.org/x" })).toBe(
-      "https://legacy.example.org"
+  it("does not read the retired names (#79)", () => {
+    const retired = {
+      NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
+      NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://cb.example.org/payment/callback",
+    };
+    expect(() => parseAppOrigin(retired)).toThrow(/Missing required runtime configuration: MGM_APP_URL/);
+    expect(parseAppOrigin({ ...retired, MGM_APP_URL: "https://new.example.org" })).toBe(
+      "https://new.example.org"
     );
-    expect(
-      parseAppOrigin({ NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://cb.example.org/payment/callback" })
-    ).toBe("https://cb.example.org");
-    // MGM_APP_URL wins over both.
-    expect(
-      parseAppOrigin({
-        MGM_APP_URL: "https://new.example.org",
-        NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
-        NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://cb.example.org/payment/callback",
-      })
-    ).toBe("https://new.example.org");
   });
 });
 
@@ -77,24 +72,24 @@ describe("payment URL builder", () => {
     expect(b).toBe("https://beta.example.net:8443/payment/callback");
   });
 
-  it("keeps the legacy return URL exactly: the full NEXT_PUBLIC_PAYMENT_CALLBACK_URL wins", () => {
-    const legacy = {
-      NEXT_PUBLIC_APP_URL: "https://app.example.org/ignored-path",
+  it("builds the return URL from MGM_APP_URL only: a retired custom callback URL is not carried over", () => {
+    const retired = {
+      NEXT_PUBLIC_APP_URL: "https://app.example.org",
       NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://pay.example.net/custom/return?src=mgm",
     };
-    // Return URL: unchanged legacy behaviour, path and query included.
-    expect(paymentReturnUrl(legacy)).toBe("https://pay.example.net/custom/return?src=mgm");
-    // Other application URLs (payment links, notification URL) keep using
-    // the NEXT_PUBLIC_APP_URL origin, as before.
-    expect(appUrl("/api/payments/ipn", legacy)).toBe("https://app.example.org/api/payments/ipn");
-    // Only NEXT_PUBLIC_APP_URL: origin plus /payment/callback.
-    expect(paymentReturnUrl({ NEXT_PUBLIC_APP_URL: legacy.NEXT_PUBLIC_APP_URL })).toBe(
-      "https://app.example.org/payment/callback"
-    );
-    // MGM_APP_URL set: the legacy names are ignored.
-    expect(paymentReturnUrl({ ...legacy, MGM_APP_URL: "https://new.example.org" })).toBe(
+    expect(() => paymentReturnUrl(retired)).toThrow(/MGM_APP_URL/);
+    expect(() => appUrl("/api/payments/ipn", retired)).toThrow(/MGM_APP_URL/);
+    expect(paymentReturnUrl({ ...retired, MGM_APP_URL: "https://new.example.org" })).toBe(
       "https://new.example.org/payment/callback"
     );
+  });
+
+  it("does not read the retired names from the process environment", () => {
+    vi.stubEnv("MGM_APP_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://legacy.example.org");
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_CALLBACK_URL", "https://legacy.example.org/payment/callback");
+    expect(() => paymentReturnUrl()).toThrow(/Missing required runtime configuration: MGM_APP_URL/);
+    expect(() => appUrl("/api/payments/ipn")).toThrow(/MGM_APP_URL/);
   });
 
   it("throws when the application URL is not configured", () => {
@@ -123,41 +118,16 @@ describe("validateAppUrlAtStartup", () => {
     warn.mockRestore();
   });
 
-  it.each(["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_PAYMENT_CALLBACK_URL"])(
-    "warns, naming %s but not its value, when it supplies the origin",
-    (name) => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      expect(() => validateAppUrlAtStartup({ [name]: "https://legacy.example.org/x" })).not.toThrow();
-      expect(warn).toHaveBeenCalledTimes(1);
-      const logged = String(warn.mock.calls[0][0]);
-      expect(logged).toContain(name);
-      expect(logged).toContain("MGM_APP_URL");
-      expect(logged).not.toContain("legacy.example.org");
-      warn.mockRestore();
-    }
-  );
-
-  it("warns once for each legacy name present", () => {
+  it("treats the retired names as unset: the missing-URL warning, no fallback", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    validateAppUrlAtStartup({
-      NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
-      NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://legacy.example.org/cb",
-    });
-    const logged = warn.mock.calls.map((c) => String(c[0]));
-    expect(logged).toHaveLength(2);
-    expect(logged[0]).toContain("NEXT_PUBLIC_APP_URL");
-    expect(logged[1]).toContain("NEXT_PUBLIC_PAYMENT_CALLBACK_URL");
-    expect(logged.join(" ")).not.toContain("legacy.example.org");
-    warn.mockRestore();
-  });
-
-  it("does not warn about legacy names when MGM_APP_URL is set", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    validateAppUrlAtStartup({
-      MGM_APP_URL: "https://mgm.example.org",
-      NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
-    });
-    expect(warn).not.toHaveBeenCalled();
+    expect(() =>
+      validateAppUrlAtStartup({
+        NEXT_PUBLIC_APP_URL: "https://legacy.example.org",
+        NEXT_PUBLIC_PAYMENT_CALLBACK_URL: "https://legacy.example.org/cb",
+      })
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain("MGM_APP_URL is not set");
     warn.mockRestore();
   });
 
