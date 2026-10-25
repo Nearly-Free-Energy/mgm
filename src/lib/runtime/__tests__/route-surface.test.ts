@@ -57,13 +57,31 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
   composeCommunityManagement: ["community-management"],
   composeMetering: ["metering"],
   composeBilling: ["billing"],
+  // The payments composers check no plugin state at compose time. The
+  // capability refuses new checkouts itself (409 when Payments or Pesapal is
+  // off, 503 when the state cannot be read). It keeps history and
+  // verification available, as docs/payments-rollout.md requires, and
+  // reconciliation, which the payments_disabled message in capability.ts and
+  // the Payments catalog entry promise.
+  // src/lib/payments/__tests__/capability-gating.test.ts enforces that for
+  // every capability method. payments-route-boundary.test.ts beside it keeps
+  // requests from reaching a provider or writing payment records any other
+  // way, and keeps the Payments and Pesapal routes credited here from
+  // writing anything or making an outbound call except through the
+  // capability, apart from the exceptions it lists with their reasons in
+  // ALLOWED_IMPORTS and ALLOWED_DIRECT_ACCESS (merchant setup, community
+  // overrides, manual recording under Billing, the webhook's and worker's
+  // notification queue). If either stops holding, remove these two entries
+  // and gate the payments routes with `checkGate`/`gateRoute`.
   composePayments: ["payments", "pesapal"],
   composePaymentsPublic: ["payments", "pesapal"],
 };
-// Only composers that refuse a disabled plugin belong above, because a call
-// to one counts as gating the route. `composeBillingReview` opens a scope
-// without checking plugin state, so its route must gate itself. If it ever
-// starts checking, it can come back.
+// Only composers whose path refuses a disabled plugin belong above, because a
+// call to one counts as gating the route: the composer refuses it itself, or,
+// for the payments composers, the capability does (see above). This is the
+// rule in docs/cordis-runtime.md. `composeBillingReview` opens a scope without
+// checking plugin state, and nothing on its path refuses a disabled plugin,
+// so its route must gate itself. If it ever starts checking, it can come back.
 
 /**
  * Composer options that skip the composer's plugin check. A call passing one
