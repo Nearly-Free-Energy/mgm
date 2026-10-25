@@ -11,7 +11,7 @@ import "server-only";
 
 import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isCommunityManagementEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { COMMUNITY_MANAGEMENT_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
@@ -94,7 +94,28 @@ export async function composeCommunityManagement(options: {
     });
   }
 
-  if (!(await isCommunityManagementEnabled(options.supabase, options.organizationId))) {
+  // Read through `isPluginEnabledForOrg`, as `MgmGate.check` does, not
+  // `isCommunityManagementEnabled`: supabase-js resolves a failed read as
+  // `{ error }` rather than rejecting, which that helper reads as disabled
+  // (409) and this call throws on. So an unreadable state fails closed with
+  // the gate's 503 code and copy, before any scope opens. If the gate's
+  // read, code or copy changes, change them here too.
+  let enabled: boolean;
+  try {
+    enabled = await isPluginEnabledForOrg(
+      options.supabase,
+      options.organizationId,
+      COMMUNITY_MANAGEMENT_PLUGIN_NAME
+    );
+  } catch {
+    return communityFailure({
+      status: 503,
+      code: "community_management_gate_unavailable",
+      message:
+        "Could not verify whether Community management is enabled. Retry the request.",
+    });
+  }
+  if (!enabled) {
     return communityFailure({
       status: 409,
       code: "community_management_disabled",

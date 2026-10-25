@@ -19,7 +19,7 @@ export type OrganizationScope = {
 
 export type CommunityManagementError = {
   ok: false;
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 500;
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503;
   code: string;
   message: string;
   field?: string;

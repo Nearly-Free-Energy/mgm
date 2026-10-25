@@ -13,6 +13,7 @@ import "server-only";
 import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BILLING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
 import { BillingCapability } from "./capability";
@@ -127,13 +128,35 @@ export async function composeBilling(options: {
   }
 
   const repository = createSupabaseBillingRepository(options.supabase);
-  if (!options.readOnly && !(await repository.isPluginEnabled(options.organizationId))) {
-    return billingFailure({
-      status: 409,
-      code: "billing_disabled",
-      message:
-        "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
-    });
+  if (!options.readOnly) {
+    // Read through `isPluginEnabledForOrg`, as `MgmGate.check` does, not
+    // `repository.isPluginEnabled`: supabase-js resolves a failed read as
+    // `{ error }` rather than rejecting, which the repository reads as disabled
+    // (409) and this call throws on. So an unreadable state fails closed with
+    // the gate's 503 code and copy, before any scope opens. If the gate's
+    // read, code or copy changes, change them here too.
+    let enabled: boolean;
+    try {
+      enabled = await isPluginEnabledForOrg(
+        options.supabase,
+        options.organizationId,
+        BILLING_PLUGIN_NAME
+      );
+    } catch {
+      return billingFailure({
+        status: 503,
+        code: "billing_gate_unavailable",
+        message: "Could not verify whether Billing is enabled. Retry the request.",
+      });
+    }
+    if (!enabled) {
+      return billingFailure({
+        status: 409,
+        code: "billing_disabled",
+        message:
+          "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
+      });
+    }
   }
 
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;

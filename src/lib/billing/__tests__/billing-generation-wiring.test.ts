@@ -33,6 +33,7 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("@/lib/plugins/state", () => ({
   isBillingEnabled: async () => true,
+  isPluginEnabledForOrg: async () => true,
 }));
 
 vi.mock("@/lib/billing/generate", () => ({
