@@ -52,11 +52,34 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     };
   }
 
+  /**
+   * New checkouts only; every other method stays available while the
+   * plugins are off (`__tests__/capability-gating.test.ts`). An unreadable
+   * state fails closed with the gate's 503 code and wording (`checkGate`,
+   * src/lib/runtime/gate.ts); if the gate's wording changes, change it here.
+   * The 503 relies on the repository rejecting when it cannot read the
+   * state, as the Supabase repository does through `isPluginEnabledForOrg`.
+   * A repository that turns a failed read into `false` answers 409
+   * `payments_disabled` instead; the gating test runs the real one.
+   */
   private async requirePlugins(): Promise<Extract<
     PaymentsResult<never>,
     { ok: false }
   > | null> {
-    if (!(await this.repo.isPaymentsEnabled(this.scope.organizationId))) {
+    let paymentsOn: boolean;
+    let pesapalOn: boolean;
+    try {
+      paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
+      pesapalOn = paymentsOn && (await this.repo.isPesapalEnabled(this.scope.organizationId));
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: "payments_gate_unavailable",
+        message: "Could not verify whether Payments is enabled. Retry the request.",
+      };
+    }
+    if (!paymentsOn) {
       return {
         ok: false,
         status: 409,
@@ -65,7 +88,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
           "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
       };
     }
-    if (!(await this.repo.isPesapalEnabled(this.scope.organizationId))) {
+    if (!pesapalOn) {
       return {
         ok: false,
         status: 409,
@@ -110,8 +133,17 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         message: loaded.message,
       };
     }
-    const paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
-    const pesapalOn = await this.repo.isPesapalEnabled(this.scope.organizationId);
+    let paymentsOn = false;
+    let pesapalOn = false;
+    try {
+      paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
+      pesapalOn = await this.repo.isPesapalEnabled(this.scope.organizationId);
+    } catch {
+      // An unreadable state reads as disabled. The invoice PDF route and the
+      // billing period page offer a payment link only for `ready`/`sandbox`,
+      // so they render without one instead of failing; if a caller starts
+      // treating `disabled` as an error, revisit.
+    }
     if (!paymentsOn || !pesapalOn) {
       return {
         ok: true as const,

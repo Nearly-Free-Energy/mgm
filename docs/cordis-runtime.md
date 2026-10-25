@@ -44,10 +44,35 @@ Disposing the scope fiber unloads every capability that injected it — Cordis
 does the cascade — and each capability's `isActive` guard turns false, so a
 reference retained after the request cannot write.
 
-The five composers (`composeCommunityManagement`, `composeMetering`,
-`composeBilling`, `composeBillingReview`, `composePayments` /
-`composePaymentsPublic`) keep their signatures and error codes; they are now
-thin adapters over `openOrganizationScope()`.
+The composers are thin adapters over `openOrganizationScope()`. They differ
+in what they check before opening the scope, and a route must supply whatever
+its composer does not:
+
+| Composer | Authenticates and checks org access | Refuses a disabled plugin |
+|---|---|---|
+| `composeCommunityManagement`, `composeMetering` | yes (`authorizeOrganization`) | yes: `409`, or `503` when plugin state cannot be read |
+| `composeBilling` | yes | yes: `409` or `503` — except with `readOnly: true` |
+| `composePayments` | yes | new checkouts only, in the Payments capability (see "Payments" below) |
+| `composePaymentsPublic` | no — no user session; see below | new checkouts only, in the Payments capability |
+| `composeBillingReview` | no | no |
+
+The three composers that refuse a disabled plugin check access first, so a
+caller without it gets `401`/`403` and learns nothing about the plugin. They
+then read plugin state with `isPluginEnabledForOrg`, the read the gate makes,
+and refuse with the gate's codes and copy before opening any scope:
+`409 <plugin>_disabled` while the plugin is off, `503 <plugin>_gate_unavailable`
+when its state cannot be read (`community_management_…` for community
+management). The per-plugin helpers (`isBillingEnabled` and the rest) would
+not do: supabase-js answers a failed read with `{ error }` rather than
+rejecting, and they read that as disabled. `compose-fail-closed.test.ts`
+compares each refusal with the gate's for the same client and checks that no
+scope was opened.
+
+`composeBillingReview` takes the `organizationId` the route resolved and
+trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
+id through `checkGate` on the caller's RLS-scoped client, so a period the
+caller cannot see yields no organization and a 404. A new caller must do the
+same.
 
 ## The gate
 
@@ -93,6 +118,55 @@ work. GETs constructing an OpenEMS client must appear in the external-call
 inventory and declare `access: "write"`. Add behavioral coverage for new
 mutation routes; a composer call alone does not prove its result is checked.
 
+A composer call counts as gating only if a disabled plugin is refused on that
+path: by the composer (the table above) or, for the payments composers, by
+the capability (below). `composeBillingReview` does not count, and neither
+does `composeBilling` called with `readOnly: true` (or with options the test
+cannot read statically): routes using them call `checkGate`/`gateRoute`
+themselves. `POST /api/billing/regenerate-preview` is the worked example —
+preview can re-pin an empty draft period's tariff, so it is a billing write
+even though it saves no bills. `previewBills` runs generation in preview mode,
+which skips the capability's plugin check (the capability checks only for
+generation in write mode), so the route's gate is the only check on this path.
+The route composes first, so the composer settles organization access
+(`401`/`403`) before the gate's `409`/`503` can reveal whether billing is on.
+It calls `checkGate` inside the `try` whose `finally` disposes the scope, and
+answers `404` unless the gate resolved the period to the organization the
+scope was authorized for. Its route test pins that order.
+
+### Payments
+
+The payments composers open their scope whatever the plugin state, because
+most of the capability must keep working while Payments is off:
+`docs/payments-rollout.md` requires that "plugin disablement blocks new
+checkout while keeping history and verification available", and the
+`payments_disabled` message also promises reconciliation. Only
+`ensureCheckout` reads plugin state to refuse: `409 payments_disabled` or
+`pesapal_disabled` while either plugin is off, `503 payments_gate_unavailable`
+when their state cannot be read, before it obtains a provider or writes
+anything. The reads (`getReadiness`, `stablePaymentLink`, `listHistory`),
+verification of attempts already submitted (`refreshPaymentStatus`,
+`handleNotification`) and `reconcile` run regardless; `getReadiness` reports
+unreadable state as disabled, so an invoice renders without a payment link
+instead of failing. The `503` relies on the payments repository rejecting
+when it cannot read the state, as `isPluginEnabledForOrg` does; a repository
+that reads a failure as `false` answers `409` instead.
+
+Two tests let route-surface count `composePayments` and
+`composePaymentsPublic` as gating.
+`src/lib/payments/__tests__/capability-gating.test.ts` classifies every
+capability method, with the reason each available one may run, and checks the
+provider operations and writes each performs with the plugins off and with
+their state unreadable. `payments-route-boundary.test.ts` follows every
+import from `src/app`, the middleware and the instrumentation hook, and fails
+when a request can reach a provider or write payment records other than
+through the capability, or when a route Payments or Pesapal owns that
+composes the capability writes or calls out itself. Each of its
+exceptions (merchant setup, community overrides, manual payment recording
+under Billing, the webhook's and worker's notification queue) states why it
+is allowed while Payments is off. If either test is dropped, the payments
+routes must gate themselves with `checkGate`/`gateRoute`.
+
 ### Callers without a user session
 
 Two kinds of route run without a logged-in user and still enter the runtime:
@@ -105,8 +179,8 @@ Two kinds of route run without a logged-in user and still enter the runtime:
   Bill generation takes its OpenEMS source from the root
   `meteringProviders` registry, like the dashboard's billing capability.
 - **Payments webhook and worker.** These compose through
-  `composePaymentsPublic`; checkout and settlement are gated inside the
-  Payments capability.
+  `composePaymentsPublic` and verify through `handleNotification`, which
+  stays available while Payments is off (see "Payments" above).
 
 The OpenEMS proxy routes (`/api/openems/*`) call the vendor with stored
 credentials, so they are gated like writes (`access: "write"`) even when
@@ -129,4 +203,27 @@ super admin and an outsider, and that disabled plugins refuse writes.
 - The root is created at most once per module instance. In development, HMR
   can re-evaluate the module and create a new root; the old one holds no
   resources and is garbage-collected.
-- Request scopes must be disposed in `finally`. Each composer documents this.
+- Request scopes must be disposed in `finally`. A scope that is never
+  disposed stays registered on the root for the life of the process, holding
+  the caller's Supabase client. `scope-dispose.test.ts` fails the build
+  unless every composer call outside the composer modules is bound alone to a
+  `const` (`const c = await composeX(…)`) and followed, past
+  `if (!c.ok) return` guards or inside `if (c.ok) { … }`, by a `try` whose
+  `finally` starts with an unconditional `[await] c.data.dispose()` (or
+  `c.dispose()`): no code before it, no condition, `&&` or closure around it,
+  and not in a generator, which never runs its `finally` if abandoned. A
+  composer may be referenced only as the callee of such a call, so storing,
+  passing, re-exporting or dynamically importing it fails, and only the
+  composer modules may bind `openOrganizationScope`. Names are resolved
+  through each file's imports, renamed and namespace imports and the
+  `@/lib/community-management` and `@/lib/runtime` barrels included. A new
+  composer module goes in the test's `COMPOSER_MODULES`; until it does, its
+  own `openOrganizationScope` binding fails the test.
+- `compose-concurrency.test.ts` composes billing and metering for two
+  organizations at once. It checks that each composition runs on its own
+  organization's client, that disposing one organization's scopes makes its
+  capabilities refuse while the other's keep working, that plugin state is
+  read per organization, and that the root registry returns to its starting
+  size. `compose-fail-closed.test.ts` checks that a composer refusing on
+  plugin state opens no scope, and that one whose capability fails to load
+  disposes the scope it opened.

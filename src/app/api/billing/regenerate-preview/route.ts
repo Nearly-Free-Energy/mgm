@@ -5,6 +5,7 @@ import {
   type BillingResult,
 } from "@/lib/billing/compose";
 import type { ManualReadingInput } from "@/lib/billing/generate";
+import { checkGate, gateResponse } from "@/lib/runtime/gate";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -15,8 +16,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 /**
  * POST /api/billing/regenerate-preview (#173, BC1)
  *
- * Same request body as /api/billing/generate. Pure compute path — performs
- * NO database writes. The OpenEMS read still happens (it's an HTTP call,
+ * Same request body as /api/billing/generate. Writes no bills or line
+ * items, but an empty draft period's tariff is re-pinned so preview and
+ * write price against the same schedule — which makes this a billing write
+ * for the plugin gate. The OpenEMS read still happens (it's an HTTP call,
  * not a transaction). Returns the per-household preview that BC3's
  * compute-then-confirm dialog (Q6) renders.
  *
@@ -49,6 +52,13 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * Cordis capability (composeBilling + previewBills) with effective-dated
  * meter-assignment coverage enforced, so the preview the operator confirms
  * can never promise bills the write path would refuse.
+ *
+ * Refusals, in order: 400 body; 401 no session; 404 period not visible;
+ * the composer's 400/401/403 (organization access); the billing gate's
+ * 409/503; 404 when the gate resolved the period to another organization.
+ * Access is checked before the gate so a caller without access to the
+ * organization gets 403, not a 409/503 that reveals whether billing is on
+ * there. The capability runs only after every check has passed.
  */
 
 const UUID_RE =
@@ -209,10 +219,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
   }
 
+  // Composing first authorizes the caller for the organization (401/403)
+  // before anything reveals the plugin's state. `readOnly` skips only the
+  // composer's plugin check, which the gate below replaces: preview can
+  // re-pin an empty draft's tariff (`runGenerationFor` calls
+  // `fn_pin_billing_period_rate_schedule` in preview mode too), so it is a
+  // billing write. If preview stops pinning, revisit.
   const composed = await composeBilling({ supabase, organizationId: orgId, readOnly: true });
   if (!composed.ok) return mapError(composed);
 
   try {
+    // Inside the try, so a refusal still disposes the scope opened above.
+    const gate = await checkGate(supabase, {
+      plugin: "billing",
+      target: { kind: "billingPeriod", id: parsed.billingPeriodId },
+      method: "POST",
+    });
+    if (!gate.ok) return gateResponse(gate);
+    // The gate resolved the period's organization on its own; it must be the
+    // one the scope was authorized for. For a write on a non-core plugin the
+    // gate passes with `null` only when it cannot see the period, so `null`
+    // is a 404 like the lookups above. If billing becomes core or this stops
+    // being a write, the gate passes `null` unchecked and this refuses every
+    // request.
+    if (gate.organizationId !== orgId) {
+      return NextResponse.json({ error: "Billing period not found" }, { status: 404 });
+    }
+
     const result = await composed.data.billing.previewBills({
       billingPeriodId: parsed.billingPeriodId,
       householdIds: parsed.householdIds,

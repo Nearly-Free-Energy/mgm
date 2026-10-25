@@ -13,6 +13,7 @@ import "server-only";
 import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { METERING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
 import { FixtureMeteringProvider, type FixtureReading } from "./fixture-provider";
@@ -118,7 +119,27 @@ export async function composeMetering(options: {
   }
 
   const repository = createSupabaseMeteringRepository(options.supabase);
-  if (!(await repository.isPluginEnabled(options.organizationId))) {
+  // Read through `isPluginEnabledForOrg`, as `MgmGate.check` does, not
+  // `repository.isPluginEnabled`: supabase-js resolves a failed read as
+  // `{ error }` rather than rejecting, which the repository reads as disabled
+  // (409) and this call throws on. So an unreadable state fails closed with
+  // the gate's 503 code and copy, before any scope opens. If the gate's
+  // read, code or copy changes, change them here too.
+  let enabled: boolean;
+  try {
+    enabled = await isPluginEnabledForOrg(
+      options.supabase,
+      options.organizationId,
+      METERING_PLUGIN_NAME
+    );
+  } catch {
+    return meteringFailure({
+      status: 503,
+      code: "metering_gate_unavailable",
+      message: "Could not verify whether Metering is enabled. Retry the request.",
+    });
+  }
+  if (!enabled) {
     return meteringFailure({
       status: 409,
       code: "metering_disabled",

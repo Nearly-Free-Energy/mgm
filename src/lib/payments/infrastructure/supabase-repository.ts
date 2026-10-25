@@ -9,7 +9,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isPaymentsEnabled, isPesapalEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import type {
   BillSnapshot,
   MerchantAccountPublic,
@@ -53,11 +53,11 @@ export function createSupabasePaymentsRepository(
 ): PaymentsRepository {
   return {
     async isPaymentsEnabled(organizationId: string) {
-      return isPaymentsEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "payments");
     },
 
     async isPesapalEnabled(organizationId: string) {
-      return isPesapalEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "pesapal");
     },
 
     async getLineItemOrganization(lineItemId: string) {
