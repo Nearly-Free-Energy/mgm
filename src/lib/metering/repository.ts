@@ -75,6 +75,7 @@ export type AssignmentLink = {
 export interface MeteringRepository {
   getAuthenticatedUserId(): Promise<string | null>;
   getUserRoles(): Promise<UserRoleRecord[]>;
+  /** Rejects when plugin state cannot be read; the capability answers 503. */
   isPluginEnabled(organizationId: string): Promise<boolean>;
   getMicrogridOrganization(
     microgridId: string

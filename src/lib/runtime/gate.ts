@@ -51,7 +51,18 @@ export type GateDecision =
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
-/** Copy shown when a plugin is off; matches the capability composers. */
+/**
+ * Copy shown when a plugin is off. It is repeated, with the 409/503 policy
+ * and the 503 wording in `check` below, by code that refuses without calling
+ * the gate: the composers (`composeBilling`, `composeMetering`,
+ * `composeCommunityManagement`), the capabilities' re-checks before a write
+ * (`requirePlugin` in billing/ and metering/capability.ts,
+ * `requireCommunityPlugin` in community-management/operations/shared.ts) and
+ * the Payments checkout (`requirePlugins` in payments/capability.ts). If the
+ * copy or the policy changes, change each of them too; the refusals are
+ * compared with this gate's in runtime/__tests__/compose-fail-closed.test.ts
+ * and payments/__tests__/capability-gating.test.ts.
+ */
 const DISABLED_MESSAGES: Partial<Record<MgmPluginName, string>> = {
   "community-management":
     "Community management is disabled for this organization. Enable it in Settings → Plugins; existing records are preserved.",

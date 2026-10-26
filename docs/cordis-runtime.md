@@ -68,6 +68,23 @@ rejecting, and they read that as disabled. `compose-fail-closed.test.ts`
 compares each refusal with the gate's for the same client and checks that no
 scope was opened.
 
+The plugin can be turned off between composition and a write, so the
+capabilities behind those three composers read its state again before they
+act: `requirePlugin` in `src/lib/billing/capability.ts` before each billing
+write, `requirePlugin` in `src/lib/metering/capability.ts` before each
+metering write or provider call, and `requireCommunityPlugin` in
+`src/lib/community-management/operations/shared.ts` before each community
+write. They read through their Supabase repository, which also uses
+`isPluginEnabledForOrg` and rejects when the state cannot be read, and refuse
+with the same `409` or `503` before anything is written or called. Billing's
+`previewBills` saves nothing and does not re-check (see
+`POST /api/billing/regenerate-preview` below). The capabilities' unit tests
+check that each method in their `WRITES` / `GATED` tables re-checks before it
+acts; the tables are kept by hand, so a new gated method is covered only once
+it has a row there. `compose-fail-closed.test.ts` also writes through each
+composed capability with the plugin turned off after composition, or its
+state unreadable at the re-check, and compares the refusal with the gate's.
+
 `composeBillingReview` takes the `organizationId` the route resolved and
 trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
 id through `checkGate` on the caller's RLS-scoped client, so a period the
@@ -102,6 +119,14 @@ the database whether the plugin is enabled for that organization
 - If organization or plugin state cannot be read, writes fail closed with
   `503 <plugin>_gate_unavailable`.
 - Core plugins (organization directory) are never gated.
+
+The `409`/`503` part of this policy, with the gate's codes and copy, is also
+applied without calling the gate: by the three composers that refuse a
+disabled plugin (§ "Two lifetimes"), by the re-checks in their capabilities
+before a write, and by the Payments checkout (`requirePlugins` in
+`src/lib/payments/capability.ts`). A change to the policy or the copy in
+`gate.ts` must be made in each of them as well; `compose-fail-closed.test.ts`
+and `capability-gating.test.ts` compare their refusals with the gate's.
 
 `src/lib/runtime/__tests__/route-surface.test.ts` fails the build when any
 API `route.ts` — released or not — has a write handler (including inventoried

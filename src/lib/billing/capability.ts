@@ -256,11 +256,32 @@ export class BillingCapability implements BillingCapabilityContract {
     };
   }
 
+  /**
+   * The plugin can be turned off between composition and a write, so each
+   * write reads its state again here, with composeBilling's policy. An
+   * unreadable state fails closed with the gate's 503 code and wording
+   * (`MgmGate.check`, src/lib/runtime/gate.ts); if the gate's codes or
+   * wording change, change them here. The 503 relies on the repository
+   * rejecting when it cannot read the state, as the Supabase repository does
+   * through `isPluginEnabledForOrg`; a repository that turns a failed read
+   * into `false` answers 409 `billing_disabled` instead.
+   */
   private async requirePlugin(): Promise<Extract<
     BillingResult<never>,
     { ok: false }
   > | null> {
-    if (await this.repo.isPluginEnabled(this.scope.organizationId)) return null;
+    let enabled: boolean;
+    try {
+      enabled = await this.repo.isPluginEnabled(this.scope.organizationId);
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: "billing_gate_unavailable",
+        message: "Could not verify whether Billing is enabled. Retry the request.",
+      };
+    }
+    if (enabled) return null;
     return {
       ok: false,
       status: 409,

@@ -10,7 +10,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUserRoles } from "@/lib/auth/access";
-import { isBillingEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import type {
   BillingPeriodRow,
   BillingRepository,
@@ -39,8 +39,10 @@ export function createSupabaseBillingRepository(
       return getCurrentUserRoles(supabase);
     },
 
+    // Rejects when plugin state cannot be read, a database error included,
+    // so the capability can tell "off" from "unknown" and fail closed.
     async isPluginEnabled(organizationId: string) {
-      return isBillingEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "billing");
     },
 
     async getMicrogridOrganization(microgridId: string) {

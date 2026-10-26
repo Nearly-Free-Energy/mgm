@@ -15,7 +15,7 @@ import {
   getHierarchyLevels,
   type HierarchyScope,
 } from "@/lib/hierarchy";
-import { isCommunityManagementEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 import type {
   Community,
@@ -54,8 +54,10 @@ export function createSupabaseCommunityRepository(
       return getCurrentUserRoles(supabase);
     },
 
+    // Rejects when plugin state cannot be read, a database error included,
+    // so the operations can tell "off" from "unknown" and fail closed.
     async isPluginEnabled(organizationId: string) {
-      return isCommunityManagementEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "community-management");
     },
 
     async getCommunityOrganizationId(communityId: string) {

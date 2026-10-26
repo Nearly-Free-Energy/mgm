@@ -70,11 +70,32 @@ export class MeteringCapability implements MeteringCapabilityContract {
     };
   }
 
+  /**
+   * The plugin can be turned off between composition and a call, so each
+   * gated method reads its state again here, with composeMetering's policy.
+   * An unreadable state fails closed with the gate's 503 code and wording
+   * (`MgmGate.check`, src/lib/runtime/gate.ts); if the gate's codes or
+   * wording change, change them here. The 503 relies on the repository
+   * rejecting when it cannot read the state, as the Supabase repository does
+   * through `isPluginEnabledForOrg`; a repository that turns a failed read
+   * into `false` answers 409 `metering_disabled` instead.
+   */
   private async requirePlugin(): Promise<Extract<
     MeteringResult<never>,
     { ok: false }
   > | null> {
-    if (await this.repo.isPluginEnabled(this.scope.organizationId)) return null;
+    let enabled: boolean;
+    try {
+      enabled = await this.repo.isPluginEnabled(this.scope.organizationId);
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: "metering_gate_unavailable",
+        message: "Could not verify whether Metering is enabled. Retry the request.",
+      };
+    }
+    if (enabled) return null;
     return {
       ok: false,
       status: 409,

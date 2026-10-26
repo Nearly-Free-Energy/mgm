@@ -120,11 +120,12 @@ export async function composeMetering(options: {
 
   const repository = createSupabaseMeteringRepository(options.supabase);
   // Read through `isPluginEnabledForOrg`, as `MgmGate.check` does, not
-  // `repository.isPluginEnabled`: supabase-js resolves a failed read as
-  // `{ error }` rather than rejecting, which the repository reads as disabled
-  // (409) and this call throws on. So an unreadable state fails closed with
-  // the gate's 503 code and copy, before any scope opens. If the gate's
-  // read, code or copy changes, change them here too.
+  // `isMeteringEnabled`: supabase-js resolves a failed read as `{ error }`
+  // rather than rejecting, which that helper reads as disabled (409) and this
+  // call throws on. So an unreadable state fails closed with the gate's 503
+  // code and copy, before any scope opens. Each gated call re-checks with the
+  // same codes and copy (`requirePlugin` in capability.ts). If the gate's
+  // read, code or copy changes, change them here and there too.
   let enabled: boolean;
   try {
     enabled = await isPluginEnabledForOrg(

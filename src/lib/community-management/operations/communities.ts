@@ -12,6 +12,7 @@ import {
   accessDenied,
   mapRlsError,
   readOptionalString,
+  requireCommunityPlugin,
   requireScopedAccess,
   UUID_RE,
 } from "./shared";
@@ -213,13 +214,5 @@ export async function assertCommunityPluginForOrganization(
   repo: CommunityManagementRepository,
   organizationId: string
 ): Promise<CommunityManagementError | null> {
-  if (!(await repo.isPluginEnabled(organizationId))) {
-    return communityFailure({
-      status: 409,
-      code: "community_management_disabled",
-      message:
-        "Community management is disabled for this organization. Enable it in Settings → Plugins; existing records are preserved.",
-    });
-  }
-  return null;
+  return requireCommunityPlugin(repo, organizationId);
 }

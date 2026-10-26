@@ -11,7 +11,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUserRoles } from "@/lib/auth/access";
-import { isMeteringEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import type {
   AssignmentLink,
   ManagedDevice,
@@ -39,8 +39,10 @@ export function createSupabaseMeteringRepository(
       return getCurrentUserRoles(supabase);
     },
 
+    // Rejects when plugin state cannot be read, a database error included,
+    // so the capability can tell "off" from "unknown" and fail closed.
     async isPluginEnabled(organizationId: string) {
-      return isMeteringEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "metering");
     },
 
     async getMicrogridOrganization(microgridId: string) {

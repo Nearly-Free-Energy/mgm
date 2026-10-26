@@ -78,6 +78,18 @@ describe("POST openems-backend/test", () => {
     expect(res.status).toBe(400);
   });
 
+  it("400 on a body that is not an object, before composing", async () => {
+    const { POST } = await import("../route");
+    for (const body of [null, [CANDIDATE]]) {
+      const res = await POST(makePost(body), {
+        params: Promise.resolve({ id: MG_ID }),
+      });
+      expect(res.status).toBe(400);
+    }
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.compose).not.toHaveBeenCalled();
+  });
+
   it("404 when the microgrid is hidden or missing", async () => {
     mocks.from.mockImplementation(() => ({
       select: () => ({

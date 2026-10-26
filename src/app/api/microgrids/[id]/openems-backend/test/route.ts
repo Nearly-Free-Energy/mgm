@@ -52,6 +52,11 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+  // A JSON `null` would otherwise throw on `body.type` below, after the
+  // scope opened; an array is not a candidate configuration either.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Body must be an object" }, { status: 400 });
+  }
 
   const supabase = await createClient();
   const { data: microgrid } = await supabase
