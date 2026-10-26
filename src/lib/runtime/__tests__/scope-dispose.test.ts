@@ -5,21 +5,26 @@
  * the life of the process, together with the caller's Supabase client. Every
  * caller disposes in `finally` today; this test keeps it that way:
  *
- *   1. every composer call outside the composer modules binds its result to a
- *      `const`, and the statements right after it (past `if (!c.ok) return`
- *      guards) enter a `try` whose `finally` disposes that const as its first
- *      statement, unconditionally, in a function that is not a generator (an
- *      abandoned generator never runs its `finally`);
+ *   1. every composer call binds its result to a `const`, and the statements
+ *      right after it (past `if (!c.ok) return` guards) enter a `try` whose
+ *      `finally` disposes that const as its first statement, unconditionally,
+ *      in a function that is not a generator (an abandoned generator never
+ *      runs its `finally`);
  *   2. a composer is referenced only as the callee of such a call, so no call
  *      escapes rule 1: it is not stored, passed, re-exported or loaded with a
  *      dynamic `import()` or `require()`, and no module load computes its
  *      specifier;
  *   3. only the composer modules bind the low-level `openOrganizationScope`,
- *      which hands ownership of `dispose` to its caller.
+ *      which hands ownership of `dispose` to its caller, and there only a
+ *      composer calls it: in its own body, or through an unexported helper
+ *      that only composers call. The opener's own module only declares it.
  *
  * Names are resolved through each file's import declarations, renamed and
  * namespace imports included, and through the barrels that re-export them,
- * so importing under another name does not get past either rule.
+ * so importing under another name does not get past either rule. The
+ * composer modules and the opener's module are checked like every other
+ * file, with their own composers and the opener bound from the start, so
+ * neither can leave under another name from the module that defines it.
  */
 import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -349,6 +354,18 @@ function isModuleLoad(call: ts.CallExpression): boolean {
   return call.expression.kind === ts.SyntaxKind.ImportKeyword || isName(call.expression, "require");
 }
 
+/** True if `node` is the callee of a call: `node(…)`. */
+function isCallee(node: ts.Node): boolean {
+  return ts.isCallExpression(node.parent) && node.parent.expression === node;
+}
+
+function isExported(statement: ts.Statement): boolean {
+  return (
+    ts.canHaveModifiers(statement) &&
+    !!ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  );
+}
+
 /**
  * Applies the three rules to one file. `calls` counts the composer calls it
  * resolved, whatever their local names.
@@ -363,9 +380,14 @@ function analyze(text: string, file: string): { calls: number; offenses: Offense
   };
 
   // Local names bound to a composer, and namespace objects of modules that
-  // export a composer or the opener.
-  const composers = new Map<string, Tracked>();
+  // export a composer or the opener. A composer module's own composers are
+  // bound by their declarations.
+  const own = COMPOSER_MODULES.get(file) ?? [];
+  const composers = new Map<string, Tracked>(own.map((name) => [name, { kind: "composer", name }]));
   const namespaces = new Map<string, Map<string, Tracked>>();
+  // Local names bound to the opener where that is allowed: the composer
+  // modules' imports of it, and its own declaration.
+  const openers = new Set<string>(file === OPENER_MODULE ? [OPENER] : []);
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement)) {
       const clause = statement.importClause;
@@ -373,8 +395,10 @@ function analyze(text: string, file: string): { calls: number; offenses: Offense
       const exported = target ? exportsOf(target) : undefined;
       if (!clause || !exported?.size) continue;
       const bind = (local: ts.Identifier, tracked: Tracked | undefined) => {
-        if (tracked?.kind === "opener") report("opens", local, `binds ${OPENER} as ${local.text}`);
-        else if (tracked) composers.set(local.text, tracked);
+        if (tracked?.kind === "opener") {
+          if (COMPOSER_MODULES.has(file)) openers.add(local.text);
+          else report("opens", local, `binds ${OPENER} as ${local.text}`);
+        } else if (tracked) composers.set(local.text, tracked);
       };
       if (clause.name) bind(clause.name, exported.get("default"));
       const bindings = clause.namedBindings;
@@ -444,6 +468,60 @@ function analyze(text: string, file: string): { calls: number; offenses: Offense
     }
   };
 
+  // The name of a composer or of the opener where this module declares it
+  // (top level), which is a definition rather than a use.
+  const declaresOwn = (node: ts.Identifier) =>
+    ts.isFunctionDeclaration(node.parent) &&
+    node.parent.name === node &&
+    node.parent.parent === source &&
+    (own.includes(node.text) || (file === OPENER_MODULE && node.text === OPENER));
+  const isComposer = (fn: ts.Node | undefined) =>
+    !!fn && ts.isFunctionDeclaration(fn) && fn.parent === source && !!fn.name && own.includes(fn.name.text);
+  const enclosing = (node: ts.Node) => ts.findAncestor(node.parent, ts.isFunctionLike);
+
+  // Unexported top-level functions that only composers call, directly: a
+  // composer may open its scope through one (payments' `loadPayments`; the
+  // cases below edit it by name, so renaming it fails them). Any other use —
+  // an export, a store, a call from anywhere else — lets code that is not a
+  // composer reach the opener through it.
+  const helpers = new Map<string, ts.FunctionDeclaration>();
+  if (own.length > 0) {
+    for (const statement of source.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name && !own.includes(statement.name.text) && !isExported(statement)) {
+        helpers.set(statement.name.text, statement);
+      }
+    }
+    const disqualify = (node: ts.Node): void => {
+      if (
+        ts.isIdentifier(node) &&
+        helpers.has(node.text) &&
+        isReference(node) &&
+        !(ts.isFunctionDeclaration(node.parent) && node.parent.name === node) &&
+        !ts.isTypeQueryNode(node.parent) &&
+        !(isCallee(node) && isComposer(enclosing(node)))
+      ) {
+        helpers.delete(node.text);
+      }
+      ts.forEachChild(node, disqualify);
+    };
+    disqualify(source);
+  }
+  const isHelper = (fn: ts.Node | undefined) =>
+    !!fn && ts.isFunctionDeclaration(fn) && !!fn.name && helpers.get(fn.name.text) === fn;
+
+  // The opener may be named in a `typeof`, and called from a composer's own
+  // body or from one of `helpers`; not from a closure, which the composer
+  // could hand on.
+  const checkOpenerUse = (reference: ts.Identifier) => {
+    if (ts.isTypeQueryNode(reference.parent)) return;
+    const fn = enclosing(reference);
+    if (isCallee(reference) && (isComposer(fn) || isHelper(fn))) return;
+    const detail = isCallee(reference)
+      ? "is called other than from a composer or an unexported function only composers call"
+      : "is referenced other than by calling it";
+    report("opens", reference, `${reference.text} ${detail}`);
+  };
+
   const visit = (node: ts.Node): void => {
     // Import bindings were read above; `export … from` names belong to the other module.
     if (ts.isImportDeclaration(node)) return;
@@ -460,9 +538,10 @@ function analyze(text: string, file: string): { calls: number; offenses: Offense
         report(kind, node, `loads ${specifier.getText(source)} dynamically`);
       }
     }
-    if (ts.isIdentifier(node) && isReference(node)) {
+    if (ts.isIdentifier(node) && isReference(node) && !declaresOwn(node)) {
       const composer = composers.get(node.text);
       if (composer) checkComposerUse(node, composer);
+      if (openers.has(node.text)) checkOpenerUse(node);
       const members = namespaces.get(node.text);
       if (members) checkNamespaceUse(node, members);
     }
@@ -478,8 +557,7 @@ function analyze(text: string, file: string): { calls: number; offenses: Offense
  */
 function declaredExports(file: string): string[] {
   return parse(file).statements.flatMap((statement) => {
-    if (!ts.canHaveModifiers(statement)) return [];
-    if (!ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) return [];
+    if (!isExported(statement)) return [];
     if (ts.isFunctionDeclaration(statement)) return [statement.name?.text ?? ""];
     if (!ts.isVariableStatement(statement)) return [];
     return statement.declarationList.declarations.flatMap((declaration) =>
@@ -512,8 +590,8 @@ function outcome(text: string, file = ROUTE): { calls: number; kinds: Offense["k
 
 const BILLING = 'import { composeBilling } from "@/lib/billing/compose";';
 
-const callers = collectSources(SRC).filter((file) => !SCOPE_OPENERS.has(file));
-const reports = callers.map((file) => analyze(readFileSync(file, "utf8"), file));
+const sources = collectSources(SRC);
+const reports = sources.map((file) => analyze(readFileSync(file, "utf8"), file));
 const offenses = reports.flatMap((report) => report.offenses);
 
 describe("request scope disposal", () => {
@@ -558,6 +636,8 @@ describe("request scope disposal", () => {
       `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { if (debug) await c.data.dispose(); } }`,
       `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { flag && c.data.dispose(); } }`,
       `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { await audit(); await c.data.dispose(); } }`,
+      `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { await c.data?.dispose(); } }`,
+      `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { await c.data.dispose(signal()); } }`,
       // The dispose names a different binding than the composition.
       `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { const c = other; await c.data.dispose(); } }`,
       `${BILLING} async function a() { const c = await composeBilling(o); try { use(c); } finally { await c.data.dispose(); const c = other; } }`,
@@ -592,8 +672,12 @@ describe("request scope disposal", () => {
         file: inSrc("lib/example/use.ts"),
         calls: 1,
       },
-      // A type cannot call the composer.
+      // A type cannot call the composer, nor the opener when only its type is imported.
       { source: `${BILLING} type R = Awaited<ReturnType<typeof composeBilling>>;`, calls: 0 },
+      {
+        source: 'import type { openOrganizationScope } from "@/lib/runtime/scope"; type Open = typeof openOrganizationScope;',
+        calls: 0,
+      },
       // The rest of the runtime barrel is free to use.
       {
         source:
@@ -642,6 +726,8 @@ describe("request scope disposal", () => {
       'import * as runtime from "@/lib/runtime"; await runtime.openOrganizationScope(r);',
       'export { openOrganizationScope } from "@/lib/runtime/scope";',
       'const runtime = await import("@/lib/runtime");',
+      // The value binding itself, even where only a type names it.
+      'import { openOrganizationScope } from "@/lib/runtime/scope"; type Open = typeof openOrganizationScope;',
     ];
     for (const source of bad) expect(analyze(source, ROUTE).offenses, source).toHaveLength(1);
   });
@@ -696,6 +782,81 @@ describe("request scope disposal", () => {
     );
   });
 
+  it("keeps composers and the opener inside the modules that define them", () => {
+    // Each module is edited in memory only, and checked as itself.
+    const outcomeIn = (file: string, edit: (text: string) => string) =>
+      withSource(file, edit, () => outcome(parse(file).text, file));
+    const append = (line: string) => (text: string) => `${text}\n${line}`;
+    const rewrite = (from: string, to: string) => (text: string) => {
+      const edited = text.replace(from, to);
+      expect(edited, `the code this case rewrites: ${from}`).not.toBe(text);
+      return edited;
+    };
+    const billing = inSrc("lib/billing/compose.ts");
+    const payments = inSrc("lib/payments/compose.ts");
+    const review = inSrc("lib/cordis/billing-review.ts");
+
+    // As they are: each composer opens its scope in its own body or through
+    // an unexported helper only composers call (payments' loadPayments), and
+    // the opener is otherwise named only in types.
+    for (const file of SCOPE_OPENERS) {
+      expect(analyze(parse(file).text, file), file).toEqual({ calls: 0, offenses: [] });
+      // The whole-source checks below cover them too.
+      expect(sources, file).toContain(file);
+    }
+    expect(outcomeIn(payments, append("type Loaded = Awaited<ReturnType<typeof loadPayments>>;"))).toEqual({
+      calls: 0,
+      kinds: [],
+    });
+
+    // Every module's opener binding and every composer is tracked.
+    for (const file of SCOPE_OPENERS) {
+      expect(outcomeIn(file, append("export const openScope = openOrganizationScope;")).kinds, file).toEqual(["opens"]);
+    }
+    for (const [file, names] of COMPOSER_MODULES) {
+      for (const name of names) {
+        expect(outcomeIn(file, append(`export const handOut = ${name};`)).kinds, `${file} ${name}`).toEqual(["escapes"]);
+      }
+    }
+
+    // An edit appends a line, or rewrites [from, to] once.
+    const bad: [file: string, edit: string | [string, string], kind: Offense["kind"]][] = [
+      // The opener handed on under a name importers are not resolved by.
+      [billing, "export { openOrganizationScope as openScope };", "opens"],
+      [billing, 'export { openOrganizationScope as openScope } from "@/lib/runtime/scope";', "opens"],
+      [billing, "export const api = { openOrganizationScope };", "opens"],
+      [billing, "export async function openBillingScope(o: never) { return openOrganizationScope(o); }", "opens"],
+      [OPENER_MODULE, "export { openOrganizationScope as openScope };", "opens"],
+      [OPENER_MODULE, "export async function openAnyScope(r: MgmRequest) { return openOrganizationScope(r); }", "opens"],
+      // Called from a closure, which the composer could hand on.
+      [billing, ["await openOrganizationScope(", "await ((r: never) => openOrganizationScope(r))("], "opens"],
+      // A helper that code other than a composer can reach.
+      [payments, "export async function openPayments(o: never) { return loadPayments(o); }", "opens"],
+      [payments, ["async function loadPayments(", "export async function loadPayments("], "opens"],
+      [payments, ["async function loadPayments(", "export default async function loadPayments("], "opens"],
+      [payments, "export { loadPayments };", "opens"],
+      [payments, "export const load = loadPayments;", "opens"],
+      [payments, ["return loadPayments({", "const load = loadPayments;\n  return load({"], "opens"],
+      // A module's own composer, under a name its importers are not resolved by.
+      [billing, "export const api = { composeBilling };", "escapes"],
+      [billing, "export { composeBilling as buildBilling };", "escapes"],
+      [billing, "export default composeBilling;", "escapes"],
+      [billing, "export async function prepareBilling(o: never) { return composeBilling(o); }", "undisposed"],
+      // Another module's composer, passed on whole or wrapped without disposing it.
+      [payments, 'import * as billingNs from "@/lib/billing/compose";\nexport { billingNs };', "escapes"],
+      [payments, 'export * as billingNs from "@/lib/billing/compose";', "escapes"],
+      [
+        review,
+        'import { composeBilling } from "@/lib/billing/compose";\nexport async function reviewWithBilling(o: never) { const c = await composeBilling(o); return c; }',
+        "undisposed",
+      ],
+    ];
+    for (const [file, edit, kind] of bad) {
+      const { kinds } = outcomeIn(file, typeof edit === "string" ? append(edit) : rewrite(...edit));
+      expect(kinds, `${path.relative(SRC, file)}: ${typeof edit === "string" ? edit : edit[1]}`).toEqual([kind]);
+    }
+  });
+
   it("finds the composer call sites", () => {
     const calls = reports.reduce((sum, report) => sum + report.calls, 0);
     expect(calls).toBeGreaterThan(20);
@@ -708,10 +869,10 @@ describe("request scope disposal", () => {
     ).toEqual([]);
   });
 
-  it("opens scopes directly only in the composer modules", () => {
+  it("opens scopes directly only in the composer modules, and there only from a composer", () => {
     expect(
       offenses.filter((offense) => offense.kind === "opens").map((offense) => offense.at),
-      "Compose a capability instead of opening a request scope directly"
+      "Compose a capability instead of opening a request scope directly. In a composer module, call the opener from a composer's own body or from an unexported function only composers call, and never hand it on"
     ).toEqual([]);
   });
 });

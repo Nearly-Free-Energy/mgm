@@ -105,8 +105,8 @@ the database whether the plugin is enabled for that organization
 
 `src/lib/runtime/__tests__/route-surface.test.ts` fails the build when any
 API `route.ts` — released or not — has a write handler (including inventoried
-external-call GETs) that neither composes
-a capability nor calls `gateRoute`, or when the route has no owner in the
+external-call GETs) that neither calls a composer that refuses its plugin nor
+calls `gateRoute`/`checkGate`, or when the route has no owner in the
 catalog's `routes` lists. The check is per handler, so a gated `PATCH` does
 not cover an ungated `DELETE` in the same file. This is a source-level
 guardrail, not a proof of all control flow. Direct `gateRoute` calls are
@@ -118,11 +118,11 @@ work. GETs constructing an OpenEMS client must appear in the external-call
 inventory and declare `access: "write"`. Add behavioral coverage for new
 mutation routes; a composer call alone does not prove its result is checked.
 
-A composer call counts as gating only if a disabled plugin is refused on that
-path: by the composer (the table above) or, for the payments composers, by
-the capability (below). `composeBillingReview` does not count, and neither
-does `composeBilling` called with `readOnly: true` (or with options the test
-cannot read statically): routes using them call `checkGate`/`gateRoute`
+A composer call counts as gating only if the composer refuses a disabled
+plugin before opening its scope (the table above; the test's `COMPOSERS` map
+is the list it checks against). `composeBillingReview` does not count, and
+neither does `composeBilling` called with `readOnly: true` (or with options
+the test cannot read statically): routes using them call `checkGate`/`gateRoute`
 themselves. `POST /api/billing/regenerate-preview` is the worked example —
 preview can re-pin an empty draft period's tariff, so it is a billing write
 even though it saves no bills. `previewBills` runs generation in preview mode,
@@ -152,19 +152,41 @@ instead of failing. The `503` relies on the payments repository rejecting
 when it cannot read the state, as `isPluginEnabledForOrg` does; a repository
 that reads a failure as `false` answers `409` instead.
 
-Two tests let route-surface count `composePayments` and
-`composePaymentsPublic` as gating.
+The payments composers do not count as gating. Their write routes (the
+stable link, refresh, reconcile, the IPN webhook and the notification worker)
+reach capability methods that only read or keep running while Payments is
+off. So route-surface lists each in `UNGATED_WRITES` as a `PaymentExemption`
+naming the one method it reaches. The test reads the whole route file, not
+only the handler, since helpers, code that runs when the module loads and
+sibling handlers can all run for it. It checks that the file composes
+Payments and calls only that method on the capability. It checks that the
+file hands neither the capability nor its composition on, whether by
+aliasing the composer, destructuring the result or passing it along, and
+reaches the capability no other way. It also checks that
+`capability-gating.test.ts` classifies the method as available while
+disabled, and that Payments or Pesapal owns the route. A route whose
+exemption is a plain reason may not reach the capability at all, under any
+import name or module path. A new payments write route fails the build until
+it calls `checkGate`/`gateRoute` itself or carries a `PaymentExemption`.
+
+Two other tests hold what those methods and routes may do.
 `src/lib/payments/__tests__/capability-gating.test.ts` classifies every
-capability method, with the reason each available one may run, and checks the
-provider operations and writes each performs with the plugins off and with
-their state unreadable. `payments-route-boundary.test.ts` follows every
-import from `src/app`, the middleware and the instrumentation hook, and fails
+capability method, with the reason each available one may run. It checks the
+provider operations and writes each method performs with the plugins off and
+with their state unreadable. `payments-route-boundary.test.ts` follows every
+import from `src/app`, the middleware and the instrumentation hook. It fails
 when a request can reach a provider or write payment records other than
-through the capability, or when a route Payments or Pesapal owns that
-composes the capability writes or calls out itself. Each of its
-exceptions (merchant setup, community overrides, manual payment recording
-under Billing, the webhook's and worker's notification queue) states why it
-is allowed while Payments is off. If either test is dropped, the payments
+through the capability. It also checks every route Payments or Pesapal owns
+that composes the capability, its GETs included. Such a route fails when the
+code it runs does any of the following outside the capability: writes a
+table, calls a database function, invokes an Edge Function, makes a Supabase
+Auth call other than a read, reaches `fetch`, or imports a package outside
+the allowlist `ROUTE_PACKAGES`. A write counts however its `from` or `rpc` is
+spelled, with element access or through `.call`, `.apply` or `.bind`. Each
+exception states why it is allowed while Payments is off: merchant setup,
+community overrides, manual payment recording under Billing, the webhook's
+and worker's notification queue, and each allowed package. If either test is
+dropped, the payment exemptions lose their footing, and the payments write
 routes must gate themselves with `checkGate`/`gateRoute`.
 
 ### Callers without a user session
@@ -206,16 +228,19 @@ super admin and an outsider, and that disabled plugins refuse writes.
 - Request scopes must be disposed in `finally`. A scope that is never
   disposed stays registered on the root for the life of the process, holding
   the caller's Supabase client. `scope-dispose.test.ts` fails the build
-  unless every composer call outside the composer modules is bound alone to a
-  `const` (`const c = await composeX(…)`) and followed, past
-  `if (!c.ok) return` guards or inside `if (c.ok) { … }`, by a `try` whose
-  `finally` starts with an unconditional `[await] c.data.dispose()` (or
-  `c.dispose()`): no code before it, no condition, `&&` or closure around it,
-  and not in a generator, which never runs its `finally` if abandoned. A
-  composer may be referenced only as the callee of such a call, so storing,
-  passing, re-exporting or dynamically importing it fails, and only the
-  composer modules may bind `openOrganizationScope`. Names are resolved
-  through each file's imports, renamed and namespace imports and the
+  unless every composer call is bound alone to a `const`
+  (`const c = await composeX(…)`) and followed, past `if (!c.ok) return`
+  guards or inside `if (c.ok) { … }`, by a `try` whose `finally` starts with
+  an unconditional `[await] c.data.dispose()` (or `c.dispose()`): no code
+  before it, no condition, `&&`, `?.`, argument or closure around it, and not
+  in a generator, which never runs its `finally` if abandoned. A composer may
+  be referenced only as the callee of such a call, so storing, passing,
+  re-exporting or dynamically importing it fails, in the module that defines
+  it as much as anywhere else. Only the composer modules may bind
+  `openOrganizationScope`, and there only a composer calls it: in its own
+  body, or through an unexported function that only composers call. Neither
+  they nor `runtime/scope.ts` may hand it on under another name. Names are
+  resolved through each file's imports, renamed and namespace imports and the
   `@/lib/community-management` and `@/lib/runtime` barrels included. A new
   composer module goes in the test's `COMPOSER_MODULES`; until it does, its
   own `openOrganizationScope` binding fails the test.
