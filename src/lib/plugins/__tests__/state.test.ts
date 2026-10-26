@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setOrganizationPluginEnabled } from "../state";
+import {
+  isBillingEnabled,
+  isCommunityManagementEnabled,
+  isMeteringEnabled,
+  isPaymentsEnabled,
+  isPesapalEnabled,
+  isPluginEnabledForOrg,
+  setOrganizationPluginEnabled,
+} from "../state";
 
 let canAccessOrg = true;
 let user: { id: string } | null = { id: "user-1" };
 let pluginRows: unknown[] = [];
-let rpcImpl: () => Promise<{ data: unknown; error: null }> = async () => ({
+let rpcImpl: () => Promise<{ data: unknown; error: { message: string } | null }> = async () => ({
   data: null,
   error: null,
 });
@@ -173,5 +181,45 @@ describe("setOrganizationPluginEnabled", () => {
       _plugin_version: "0.1.0",
     });
     expect(status.enabled).toBe(false);
+  });
+});
+
+/**
+ * The per-plugin helpers read a database error as disabled, so a caller that
+ * cannot read plugin state refuses instead of going ahead.
+ * `isPluginEnabledForOrg` throws instead, and leaves the refusal to its caller.
+ */
+describe.each([
+  ["isCommunityManagementEnabled", isCommunityManagementEnabled, "community-management"],
+  ["isMeteringEnabled", isMeteringEnabled, "metering"],
+  ["isBillingEnabled", isBillingEnabled, "billing"],
+  ["isPaymentsEnabled", isPaymentsEnabled, "payments"],
+  ["isPesapalEnabled", isPesapalEnabled, "pesapal"],
+] as const)("%s", (_name, isEnabled, plugin) => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("answers false when the plugin state read returns a database error", async () => {
+    rpcImpl = async () => ({ data: null, error: { message: "database unavailable" } });
+    await expect(isEnabled(makeSupabase(), ORG_ID)).resolves.toBe(false);
+  });
+
+  it.each([true, false])("answers %s when the database does, for its own plugin", async (enabled) => {
+    rpcImpl = async () => ({ data: enabled, error: null });
+    await expect(isEnabled(makeSupabase(), ORG_ID)).resolves.toBe(enabled);
+    expect(mockRpc).toHaveBeenCalledWith("mgm_plugin_enabled_for_org", {
+      _org_id: ORG_ID,
+      _plugin_name: plugin,
+    });
+  });
+});
+
+describe("isPluginEnabledForOrg", () => {
+  it("rejects when the plugin state read returns a database error", async () => {
+    rpcImpl = async () => ({ data: null, error: { message: "database unavailable" } });
+    await expect(isPluginEnabledForOrg(makeSupabase(), ORG_ID, "billing")).rejects.toThrow(
+      "database unavailable"
+    );
   });
 });

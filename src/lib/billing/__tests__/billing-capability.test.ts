@@ -336,3 +336,80 @@ describe("BillingCapability", () => {
     expect(result).toMatchObject({ ok: false, code: "billing_composition_disposed" });
   });
 });
+
+/**
+ * Every write re-reads plugin state just before it writes. The lookups that
+ * resolve the organization run first; anything else on the repository or the
+ * bill engine runs only once the re-check passes. Whether the wording matches
+ * the gate's is checked end to end, through the real repository, in
+ * runtime/__tests__/compose-fail-closed.test.ts.
+ */
+const READ_BEFORE_RECHECK = new Set<string>([
+  "getMicrogridOrganization",
+  "getPeriodOrganization",
+  "getLineItemOrganization",
+  "isPluginEnabled",
+]);
+
+const WRITES: { method: string; run: (capability: BillingCapability) => Promise<unknown> }[] = [
+  { method: "createTariff", run: (c) => c.createTariff(TARIFF) },
+  {
+    method: "createPeriod",
+    run: (c) =>
+      c.createPeriod({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" }),
+  },
+  { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, { confirmed: true }) },
+  { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
+  { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },
+];
+
+function spiedSetup(isPluginEnabled: BillingRepository["isPluginEnabled"]) {
+  const repo = Object.fromEntries(
+    Object.entries(stubRepo({ isPluginEnabled })).map(([name, fn]) => [name, vi.fn(fn)])
+  ) as unknown as BillingRepository & Record<string, ReturnType<typeof vi.fn>>;
+  const run = vi.fn(stubGeneration().run);
+  const capability = new BillingCapability(repo, scope, { run }, () => true);
+  const calledAfterRecheck = () => [
+    ...Object.entries(repo)
+      .filter(([name, spy]) => !READ_BEFORE_RECHECK.has(name) && spy.mock.calls.length > 0)
+      .map(([name]) => name),
+    ...(run.mock.calls.length > 0 ? ["generation.run"] : []),
+  ];
+  return { capability, repo, calledAfterRecheck };
+}
+
+describe("BillingCapability plugin re-check before each write", () => {
+  it.each(WRITES)("$method answers 409 and writes nothing when the plugin is disabled", async ({ run }) => {
+    const { capability, repo, calledAfterRecheck } = spiedSetup(async () => false);
+    const result = await run(capability);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "billing_disabled" });
+    expect(repo.isPluginEnabled).toHaveBeenCalledWith(ORG_ID);
+    expect(calledAfterRecheck()).toEqual([]);
+  });
+
+  it.each(WRITES)("$method answers 503 and writes nothing when plugin state cannot be read", async ({ run }) => {
+    const { capability, repo, calledAfterRecheck } = spiedSetup(async () => {
+      throw new Error("canceling statement due to statement timeout");
+    });
+    const result = await run(capability);
+    expect(result).toMatchObject({ ok: false, status: 503, code: "billing_gate_unavailable" });
+    expect(repo.isPluginEnabled).toHaveBeenCalledWith(ORG_ID);
+    expect(calledAfterRecheck()).toEqual([]);
+  });
+
+  it.each(WRITES)("$method goes on to the repository or bill engine when the plugin is enabled", async ({ run }) => {
+    // Keeps the two refusals above from passing vacuously.
+    const { capability, calledAfterRecheck } = spiedSetup(async () => true);
+    await run(capability);
+    expect(calledAfterRecheck()).not.toEqual([]);
+  });
+
+  it("previews bills without reading plugin state", async () => {
+    const { capability, repo } = spiedSetup(async () => {
+      throw new Error("canceling statement due to statement timeout");
+    });
+    const result = await capability.previewBills({ billingPeriodId: PERIOD_ID });
+    expect(result).toMatchObject({ ok: true });
+    expect(repo.isPluginEnabled).not.toHaveBeenCalled();
+  });
+});

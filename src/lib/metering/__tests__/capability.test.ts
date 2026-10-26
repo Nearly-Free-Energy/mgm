@@ -350,3 +350,81 @@ describe("MeteringCapability", () => {
     });
   });
 });
+
+/**
+ * Every method that calls the capability's plugin re-check reads plugin state
+ * just before acting. The lookups that resolve the organization run first;
+ * anything else on the repository, the connection or the provider registry
+ * runs only once the re-check passes. Whether the wording matches the gate's
+ * is checked end to end, through the real repository, in
+ * runtime/__tests__/compose-fail-closed.test.ts.
+ */
+const READ_BEFORE_RECHECK = new Set<string>([
+  "getMicrogridOrganization",
+  "getDeviceOrganization",
+  "isPluginEnabled",
+]);
+
+const GATED: { method: string; run: (capability: MeteringCapability) => Promise<unknown> }[] = [
+  { method: "testConnection", run: (c) => c.testConnection(MG_ID) },
+  { method: "discoverMeters", run: (c) => c.discoverMeters(MG_ID) },
+  {
+    method: "getConsumption",
+    run: (c) =>
+      c.getConsumption({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" }),
+  },
+  {
+    method: "recordOpeningRegister",
+    run: (c) =>
+      c.recordOpeningRegister({ deviceId: DEV_ID, readingKwh: 10, readAt: "2026-09-01T00:00:00Z" }),
+  },
+];
+
+function spiedSetup(isPluginEnabled: MeteringRepository["isPluginEnabled"]) {
+  const spyAll = <T extends object>(stub: T) =>
+    Object.fromEntries(
+      Object.entries(stub).map(([name, fn]) => [name, vi.fn(fn)])
+    ) as unknown as T & Record<string, ReturnType<typeof vi.fn>>;
+  const repo = spyAll(stubRepo({ isPluginEnabled }));
+  const connection = spyAll(stubConnection());
+  const registry = new MeteringRegistry();
+  const resolve = vi.spyOn(registry, "resolve");
+  const capability = new MeteringCapability(repo, scope, registry, connection, () => true);
+  const calledAfterRecheck = () => [
+    ...Object.entries(repo)
+      .filter(([name, spy]) => !READ_BEFORE_RECHECK.has(name) && spy.mock.calls.length > 0)
+      .map(([name]) => name),
+    ...Object.entries(connection)
+      .filter(([, spy]) => spy.mock.calls.length > 0)
+      .map(([name]) => `connection.${name}`),
+    ...(resolve.mock.calls.length > 0 ? ["registry.resolve"] : []),
+  ];
+  return { capability, repo, calledAfterRecheck };
+}
+
+describe("MeteringCapability plugin re-check", () => {
+  it.each(GATED)("$method answers 409 and acts on nothing when the plugin is disabled", async ({ run }) => {
+    const { capability, repo, calledAfterRecheck } = spiedSetup(async () => false);
+    const result = await run(capability);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "metering_disabled" });
+    expect(repo.isPluginEnabled).toHaveBeenCalledWith(ORG_ID);
+    expect(calledAfterRecheck()).toEqual([]);
+  });
+
+  it.each(GATED)("$method answers 503 and acts on nothing when plugin state cannot be read", async ({ run }) => {
+    const { capability, repo, calledAfterRecheck } = spiedSetup(async () => {
+      throw new Error("canceling statement due to statement timeout");
+    });
+    const result = await run(capability);
+    expect(result).toMatchObject({ ok: false, status: 503, code: "metering_gate_unavailable" });
+    expect(repo.isPluginEnabled).toHaveBeenCalledWith(ORG_ID);
+    expect(calledAfterRecheck()).toEqual([]);
+  });
+
+  it.each(GATED)("$method goes on past the re-check when the plugin is enabled", async ({ run }) => {
+    // Keeps the two refusals above from passing vacuously.
+    const { capability, calledAfterRecheck } = spiedSetup(async () => true);
+    await run(capability);
+    expect(calledAfterRecheck()).not.toEqual([]);
+  });
+});
