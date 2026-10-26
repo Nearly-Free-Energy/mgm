@@ -158,10 +158,15 @@ fallback:
    middleware bundle ruled it out was wrong). Browser code imports the
    `PublicRuntimeConfig` type alone.
 4. **Guard test.** `src/lib/__tests__/no-browser-env-config.test.ts` fails
-   when any source file reads an old name from `process.env`, when a file
-   other than the two config modules reads the current settings from it, or
-   when a browser file ("use client" or a browser client factory) names a
-   setting or imports a value from a config module.
+   when any source file reads a `NEXT_PUBLIC_` name from `process.env`
+   (dot, bracket, `process['env']` and `?.` forms); when any file other
+   than `retired-names.ts` names a retired setting anywhere in code,
+   comments excepted, which also catches destructuring, aliases and
+   variable keys; when a file other than the two config modules reads the
+   current settings from `process.env`; or when a browser file ("use
+   client" or a browser client factory) names a setting or imports a value
+   from a config module. A destructured or aliased read of a *current*
+   setting outside the config modules is not detected; review covers it.
 5. **What guards the page payload (decision 2).** The provider's re-pick runs
    after Next.js has serialized the layout's props into the page, so it
    protects only the context value and the browser store. The guard on what

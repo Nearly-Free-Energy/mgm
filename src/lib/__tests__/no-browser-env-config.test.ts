@@ -12,7 +12,11 @@
  * and co-located test files, which are not built, and checks that:
  *   1. no file reads any NEXT_PUBLIC_ name from `process.env`: Next.js
  *      inlines those at build time, so this covers the names retired after
- *      v0.0.2 (retired-names.ts only lists them) and any new one;
+ *      v0.0.2 and any new one;
+ *   1a. no file except retired-names.ts, which lists them for the startup
+ *      warning, names a retired setting anywhere in code (comments
+ *      excepted), so a fallback cannot come back through destructuring, an
+ *      alias, `process['env']` or `?.`;
  *   2. only the two config modules read the current settings from
  *      `process.env`;
  *   3. browser files ("use client" modules and the browser-side helpers in
@@ -23,9 +27,12 @@
  * Check 3 sees direct imports only. A browser file that reaches a config
  * module through another module is stopped by check 4: `server-only` fails
  * `next build` for any client import, direct or not. Checks 1 and 2 match
- * `process.env.NAME` and `process.env["NAME"]`, not a server file's reads
- * through a variable key or destructuring. If a setting is added, renamed or
- * read by another module, update the lists below.
+ * `process.env.NAME`, `process.env["NAME"]`, `process['env']` and the `?.`
+ * forms. They do not match a read through destructuring, an alias or a
+ * variable key: for the retired names check 1a covers those, and for a new
+ * NEXT_PUBLIC_ name or a current setting read outside the config modules,
+ * review has to. If a setting is added, renamed or read by another module,
+ * update the lists below.
  */
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -42,10 +49,13 @@ const ENV_READERS: Record<string, string> = {
   "src/lib/config/app-url.ts": "reads and validates MGM_APP_URL per call",
 };
 
+/** The one module that may name the retired settings in code: it lists them. */
+const RETIRED_LIST = "src/lib/config/retired-names.ts";
+
 /** Server-only modules a browser file may import types from, never values. */
 const CONFIG_MODULES = [
   ...Object.keys(ENV_READERS),
-  "src/lib/config/retired-names.ts",
+  RETIRED_LIST,
 ];
 
 /** Browser-side modules without a "use client" directive, and why each is one. */
@@ -61,11 +71,13 @@ const RETIRED =
 const CURRENT = "MGM_PUBLIC_SUPABASE_[A-Z_]+|MGM_APP_URL|SUPABASE_INTERNAL_URL";
 const ANY_NEXT_PUBLIC = "NEXT_PUBLIC_[A-Z0-9_]+";
 
-const envRead = (names: string) =>
-  new RegExp(`process\\.env(?:\\.|\\[\\s*["'\`])(?:${names})\\b`);
+const PROCESS_ENV = `process\\s*(?:\\?\\.\\s*env|\\.\\s*env|\\[\\s*["'\`]env["'\`]\\s*\\])`;
+const MEMBER = `\\s*(?:\\?\\.\\s*|\\.\\s*|(?:\\?\\.)?\\[\\s*["'\`])`;
+const envRead = (names: string) => new RegExp(`${PROCESS_ENV}${MEMBER}(?:${names})\\b`);
 const NEXT_PUBLIC_READ = envRead(`${RETIRED}|${ANY_NEXT_PUBLIC}`);
 const CURRENT_READ = envRead(CURRENT);
 const SETTING_NAME = new RegExp(`\\b(?:${RETIRED}|${CURRENT}|${ANY_NEXT_PUBLIC})\\b`);
+const RETIRED_NAME = new RegExp(`\\b(?:${RETIRED})\\b`);
 const USE_CLIENT = /^\s*(["'])use client\1\s*;?\s*$/m;
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -152,6 +164,16 @@ describe("browser code does not read deployment settings from process.env", () =
     ).toEqual([]);
   });
 
+  it("names a retired setting in code only in the module that lists them", () => {
+    const found = files.filter(
+      (file) => file !== RETIRED_LIST && RETIRED_NAME.test(stripComments(read(file)))
+    );
+    expect(
+      found,
+      "These names are no longer read (docs/setup.md, \"Upgrading from v0.0.1 or v0.0.2\"); use the MGM_ names through src/lib/config"
+    ).toEqual([]);
+  });
+
   it("reads the Supabase and application-URL settings only in the config modules", () => {
     const found = files.filter((file) => !ENV_READERS[file] && CURRENT_READ.test(read(file)));
     expect(
@@ -192,6 +214,24 @@ describe("browser code does not read deployment settings from process.env", () =
     expect(CURRENT_READ.test("process.env.MGM_PUBLIC_SUPABASE_ANON_KEY")).toBe(true);
     expect(CURRENT_READ.test("process.env['MGM_APP_URL']")).toBe(true);
     expect(CURRENT_READ.test("process.env.MGM_CREDENTIAL_KEY")).toBe(false);
+    expect(NEXT_PUBLIC_READ.test("process['env'].NEXT_PUBLIC_APP_URL")).toBe(true);
+    expect(NEXT_PUBLIC_READ.test("process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY")).toBe(true);
+    expect(NEXT_PUBLIC_READ.test('process?.env?.["NEXT_PUBLIC_SUPABASE_URL"]')).toBe(true);
+    expect(CURRENT_READ.test("process.env?.MGM_APP_URL")).toBe(true);
+
+    // Check 1a: forms checks 1 and 2 cannot see.
+    for (const source of [
+      "const { NEXT_PUBLIC_APP_URL } = process.env;",
+      "const e = process.env; const url = e.NEXT_PUBLIC_SUPABASE_URL;",
+      "const url = process['env'].NEXT_PUBLIC_PAYMENT_CALLBACK_URL;",
+      "const key = process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY;",
+      'const name = "NEXT_PUBLIC_SUPABASE_COOKIE_NAME"; const v = process.env[name];',
+    ]) {
+      expect(RETIRED_NAME.test(stripComments(source)), source).toBe(true);
+    }
+    expect(RETIRED_NAME.test(stripComments("// NEXT_PUBLIC_APP_URL is no longer read\nconst x = 1;"))).toBe(false);
+    expect(RETIRED_NAME.test(stripComments("/** The former NEXT_PUBLIC_SUPABASE_URL */ const y = 2;"))).toBe(false);
+    expect(RETIRED_NAME.test("process.env.NEXT_PUBLIC_SITE_URL")).toBe(false);
 
     expect(SETTING_NAME.test(stripComments("const { MGM_PUBLIC_SUPABASE_URL } = process.env;"))).toBe(true);
     expect(SETTING_NAME.test(stripComments("// set MGM_APP_URL\nconst x = 1;"))).toBe(false);
