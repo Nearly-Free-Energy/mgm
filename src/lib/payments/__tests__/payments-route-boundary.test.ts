@@ -2,10 +2,10 @@
  * Requests reach payment providers and payment records only through the
  * Payments capability.
  *
- * The route-surface test counts a call to `composePayments` or
- * `composePaymentsPublic` as gating a route, although neither composer
- * checks plugin state: the capability refuses new checkouts itself
- * (`capability-gating.test.ts`). That holds only while nothing a request
+ * Neither `composePayments` nor `composePaymentsPublic` checks plugin
+ * state: the capability refuses new checkouts itself and keeps history,
+ * verification and reconciliation running while Payments is off
+ * (`capability-gating.test.ts`). That is safe only while nothing a request
  * runs can contact a provider or write payment records another way. From
  * every entry point Next.js loads (everything under src/app, the middleware
  * and the instrumentation hook) this follows each runtime import, and fails
@@ -19,17 +19,23 @@
  *      cannot read (a variable, a spread) written to a table with payment
  *      columns fails too, unless an exception says why it holds none.
  *
- * The route-surface credit covers the whole handler, so a route Payments
- * or Pesapal owns that composes the capability is held to more:
+ * A route Payments or Pesapal owns that composes the capability runs while
+ * those plugins are off: route-surface.test.ts exempts its write handlers
+ * from the gate, each pinned to the one capability method it calls, and
+ * its GETs are never gated. So it is held to more:
  *
- *   4. the code it runs writes no table, calls no database function and
- *      makes no outbound call (`fetch` or an HTTP client), except through
- *      the capability.
+ *   4. the code it runs writes no table, calls no database function,
+ *      invokes no Edge Function, makes no Supabase Auth call but a read,
+ *      makes no outbound call (`fetch`) and imports no package but those in
+ *      `ROUTE_PACKAGES`, except through the capability; and no module it
+ *      runs but the route file itself loads the composer, so every
+ *      capability call the request makes is in the route file, where
+ *      route-surface.test.ts pins an exempt route to one method.
  *
  * Each exception says what it reaches, why that is allowed while Payments
  * is off, and what would make the reason wrong.
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
@@ -122,20 +128,48 @@ const WRITE_METHODS = new Set(["insert", "upsert", "update", "delete"]);
 const PAYMENT_NAME = /payment|merchant|pesapal|paid/i;
 
 /**
- * The plugins whose routes route-surface.test.ts credits through a payments
- * composer (check 4): its `COMPOSERS` entries for `composePayments` and
- * `composePaymentsPublic`. If those entries change, change this.
+ * The plugins whose composing routes check 4 holds: Payments, and Pesapal,
+ * whose webhook is delivered through the Payments capability.
+ * route-surface.test.ts accepts a `PaymentExemption` only for a route one
+ * of them owns, relying on this check for what the route writes and calls
+ * and for the route file being the only module that composes the
+ * capability; if this set changes, change its `BOUNDARY_OWNERS` too.
  */
 const COMPOSER_OWNERS = new Set<string>([PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME]);
 
-/** The capability's composer; a route that reaches it composes the capability (check 4). */
+/**
+ * The capability's composer; a route that reaches it composes the
+ * capability, and only the route file itself may load it (check 4).
+ */
 const PAYMENTS_COMPOSER = "src/lib/payments/compose.ts";
 
-/** Packages that make outbound calls (check 4), with or without a `node:` prefix. */
-const OUTBOUND_PACKAGES = new Set(["http", "https", "http2", "net", "tls", "undici", "axios", "node-fetch", "got", "ky"]);
+/**
+ * The packages code a composing route runs may import (check 4), by import
+ * specifier, and why none of them calls out. Any other package might: an
+ * SDK wraps `fetch` where the checks here cannot see it.
+ */
+const ROUTE_PACKAGES: Record<string, string> = {
+  "next/server":
+    "The handler's request and response classes (NextRequest, NextResponse), which call out to nothing. Wrong once a route uses one of its exports that fetches, such as ImageResponse.",
+  "next/headers":
+    "Reads the incoming request's cookies and headers for the Supabase session; calls out to nothing. Wrong once a route uses an export of it that does.",
+  "server-only":
+    "A build-time marker that keeps a module out of client bundles; it exports nothing and runs nothing. Wrong once the package gains runtime code.",
+  "@supabase/supabase-js":
+    "The database client. Check 4 reads its table writes and database function calls (`directAccess`) and its Edge Function and Auth calls (`supabaseCalls`). Wrong once a route uses a part of the client neither reads, such as Realtime channels.",
+  "@supabase/ssr":
+    "Builds the same Supabase client bound to the request's cookies (createServerClient). Wrong for the same reason as @supabase/supabase-js.",
+};
 
 /** Globals `fetch` can be reached through. */
 const GLOBALS = new Set(["globalThis", "window", "self", "global"]);
+
+/**
+ * Supabase Auth calls (`<client>.auth.<method>`, auth-js) that only read.
+ * Every other Auth call counts as a side effect (check 4), so a method
+ * auth-js adds is one until it is listed here.
+ */
+const AUTH_READS = new Set(["getUser", "getSession", "getClaims"]);
 
 function relative(file: string): string {
   return path.relative(REPO_ROOT, file).split(path.sep).join("/");
@@ -299,6 +333,28 @@ function walk(entry: string): { modules: Set<string>; reaches: Reach[] } {
   return { modules, reaches };
 }
 
+/**
+ * The repository modules a module's own runtime imports load, followed
+ * through barrels to the modules that define the names it uses.
+ */
+function loadedModules(source: ts.SourceFile): Set<string> {
+  const loaded = new Set<string>();
+  const seen = new Set<string>();
+  const queue = runtimeImports(source).flatMap(({ specifier, names }) => {
+    const file = resolveModule(source.fileName, specifier);
+    return file ? [{ file, names }] : [];
+  });
+  while (queue.length) {
+    const { file, names } = queue.shift() as (typeof queue)[number];
+    const key = `${file} ${JSON.stringify(names)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (/\.tsx?$/.test(file) && isBarrel(parse(file))) queue.push(...forwarded(file, names));
+    else loaded.add(relative(file));
+  }
+  return loaded;
+}
+
 function collectEntries(): string[] {
   const entries: string[] = [];
   const visit = (target: string) => {
@@ -411,49 +467,87 @@ function rowKeys(argument: ts.Expression | undefined): string[] | null {
 }
 
 /**
+ * The member read off `node` (`node.name`, `node["name"]`) and the name it
+ * spells; `name` is null under a computed key.
+ */
+function memberOf(node: ts.Node): { access: ts.Expression; name: string | null } | undefined {
+  const parent = node.parent;
+  if (!parent) return undefined;
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
+    return { access: parent, name: parent.name.text };
+  }
+  if (ts.isElementAccessExpression(parent) && parent.expression === node) {
+    const key = parent.argumentExpression;
+    return { access: parent, name: ts.isStringLiteralLike(key) ? key.text : null };
+  }
+  return undefined;
+}
+
+/** The call `node` is the callee of, if any. */
+function calledAt(node: ts.Node): ts.CallExpression | undefined {
+  return node.parent && ts.isCallExpression(node.parent) && node.parent.expression === node ? node.parent : undefined;
+}
+
+/** Ways to call a method other than calling it directly. */
+const INDIRECT_CALLS = new Set(["call", "apply", "bind"]);
+
+/**
  * Supabase table writes and database function calls in a module. A `from()`
  * chain counts as a read only when it selects and never writes, so a builder
- * kept in a variable and written later counts as a write.
+ * kept in a variable and written later counts as a write. A member may be
+ * spelled `.from` or `["from"]`, and a method in the chain may be called
+ * through `.call`, `.apply` or `.bind`. A `from` or `rpc` itself called that
+ * way counts with a target that cannot be read (`name: null`).
  */
 function directAccess(source: ts.SourceFile): DirectAccess[] {
   const found: DirectAccess[] = [];
+  const text = (node: ts.Node) => node.getText(source).split("\n")[0];
+  // `Array.from(…)`, `Buffer.from(…)`: static methods, not query builders.
+  const staticCall = (receiver: ts.Node) => ts.isIdentifier(receiver) && /^[A-Z]/.test(receiver.text);
   const visit = (node: ts.Node) => {
-    if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      ["from", "rpc"].includes(node.expression.name.text)
-    ) {
-      const receiver = node.expression.expression;
-      const kind = node.expression.name.text === "rpc" ? "function" : "table";
-      // `Array.from(…)`, `Buffer.from(…)`: static methods, not query builders.
-      const staticCall = ts.isIdentifier(receiver) && /^[A-Z]/.test(receiver.text);
-      if (!staticCall) {
+    const read = memberOf(node);
+    const kind = read?.name === "rpc" ? "function" : read?.name === "from" ? "table" : null;
+    if (read && kind && !staticCall(node)) {
+      const call = calledAt(read.access);
+      const indirect = memberOf(read.access);
+      if (call) {
         const chain: string[] = [];
         let columns: string[] | null = [];
-        let call: ts.Expression = node;
-        while (
-          ts.isPropertyAccessExpression(call.parent) &&
-          ts.isCallExpression(call.parent.parent) &&
-          call.parent.parent.expression === call.parent
-        ) {
-          const method = call.parent.name.text;
-          chain.push(method);
-          if (method !== "delete" && WRITE_METHODS.has(method)) {
-            const keys = rowKeys(call.parent.parent.arguments[0]);
+        let link: ts.Expression = call;
+        for (;;) {
+          const method = memberOf(link);
+          if (!method?.name) break;
+          let next = calledAt(method.access);
+          if (!next) {
+            // `.update.call(q, row)`, `.update.apply(q, [row])`, `.update.bind(q)`.
+            const via = memberOf(method.access);
+            if (!via?.name || !INDIRECT_CALLS.has(via.name)) break;
+            chain.push(method.name);
+            if (method.name !== "delete" && WRITE_METHODS.has(method.name)) columns = null;
+            next = via.name === "bind" ? undefined : calledAt(via.access);
+            if (!next) break;
+            link = next;
+            continue;
+          }
+          chain.push(method.name);
+          if (method.name !== "delete" && WRITE_METHODS.has(method.name)) {
+            const keys = rowKeys(next.arguments[0]);
             columns = columns && keys ? [...columns, ...keys] : null;
           }
-          call = call.parent.parent;
+          link = next;
         }
         const writes =
           kind === "function" ||
           chain.some((method) => WRITE_METHODS.has(method)) ||
           !chain.includes("select");
         if (writes) {
-          const argument = node.arguments[0];
+          const argument = call.arguments[0];
           const values = argument ? literalValues(argument) : null;
-          const text = node.getText(source).split("\n")[0];
-          for (const name of values ?? [null]) found.push({ kind, name, text, columns });
+          for (const name of values ?? [null]) found.push({ kind, name, text: text(call), columns });
         }
+      } else if (indirect?.name && INDIRECT_CALLS.has(indirect.name)) {
+        // `x.rpc.call(x, "fn")`: the target is an argument after `this`.
+        found.push({ kind, name: null, text: text(indirect.access.parent), columns: null });
       }
     }
     ts.forEachChild(node, visit);
@@ -464,8 +558,9 @@ function directAccess(source: ts.SourceFile): DirectAccess[] {
 
 /**
  * Outbound calls a module can make: any reference to the global `fetch`
- * (called, passed on or reached through `globalThis`), and imports of
- * packages that make HTTP or socket connections.
+ * (called, passed on, or reached through `globalThis.fetch` or
+ * `globalThis["fetch"]`). Packages, which may call out where this cannot
+ * see, are `packageImports`.
  */
 function outboundCalls(source: ts.SourceFile): string[] {
   const found: string[] = [];
@@ -480,14 +575,52 @@ function outboundCalls(source: ts.SourceFile): string[] {
         parent.name === node;
       if ((!member || viaGlobal) && !declares) found.push(`fetch: ${parent.getText(source).split("\n")[0]}`);
     }
-    if (ts.isStringLiteralLike(node) && ts.isImportDeclaration(node.parent) && !node.parent.importClause?.isTypeOnly) {
-      const name = node.text.replace(/^node:/, "").split("/")[0];
-      if (OUTBOUND_PACKAGES.has(name)) found.push(`imports ${node.text}`);
+    if (
+      ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression) && GLOBALS.has(node.expression.text) &&
+      ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "fetch"
+    ) {
+      found.push(`fetch: ${node.getText(source)}`);
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
   return found;
+}
+
+/**
+ * Supabase calls that leave the database but are not table or function
+ * access: every Edge Function use (`<client>.functions…`) and every Auth
+ * call but a read (`AUTH_READS`), named by the path it is called through
+ * (`auth.admin.deleteUser`). An `auth` member that is not called straight
+ * (destructured, held in a variable, under a computed key) counts too.
+ */
+function supabaseCalls(source: ts.SourceFile): string[] {
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    const read = memberOf(node);
+    if (read?.name === "functions") {
+      found.push(`functions: ${read.access.getText(source)}`);
+    } else if (read?.name === "auth") {
+      const path: string[] = [];
+      let access: ts.Node = read.access;
+      for (let next = memberOf(access); !calledAt(access) && next?.name; next = memberOf(access)) {
+        path.push(next.name);
+        access = next.access;
+      }
+      if (!path.length || !calledAt(access)) found.push(`auth: ${access.getText(source).split("\n")[0]}`);
+      else if (!AUTH_READS.has(path.join("."))) found.push(`auth.${path.join(".")}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** Packages a module imports at runtime that `ROUTE_PACKAGES` does not allow (check 4). */
+function packageImports(source: ts.SourceFile): string[] {
+  return runtimeImports(source)
+    .filter(({ specifier }) => resolveModule(source.fileName, specifier) === null && !Object.hasOwn(ROUTE_PACKAGES, specifier))
+    .map(({ specifier }) => `imports ${specifier}`);
 }
 
 function registryReferences(source: ts.SourceFile): string[] {
@@ -550,6 +683,12 @@ function sourceOf(text: string): ts.SourceFile {
 }
 
 describe("payments route boundary", () => {
+  // The walk every check below shares; seconds of parsing when other test
+  // files run alongside, so it gets its own time budget.
+  beforeAll(() => {
+    analyse();
+  }, 30_000);
+
   it("reads imports, barrels and database access the way the checks rely on", () => {
     expect(
       runtimeImports(
@@ -596,16 +735,56 @@ describe("payments route boundary", () => {
     expect(columns('db.from("t").update(patch).eq("id", id);')).toEqual([null]);
     expect(columns('db.from("t").update({ ...patch }).eq("id", id);')).toEqual([null]);
 
+    // The same, spelled with element access or called through `.call`, `.apply` or `.bind`.
+    expect(accesses('db["from"]("payment_attempts").update({}).eq("id", id);')).toEqual(["table payment_attempts"]);
+    expect(accesses('db["rpc"]("fn_apply_payment_event", {});')).toEqual(["function fn_apply_payment_event"]);
+    expect(accesses('db.from("payment_attempts").select("id")["update"]({});')).toEqual(["table payment_attempts"]);
+    expect(accesses('db.from("payment_attempts").select("id").update.call(q, {});')).toEqual(["table payment_attempts"]);
+    expect(accesses('db.from("payment_attempts").select("id").delete.bind(q);')).toEqual(["table payment_attempts"]);
+    expect(accesses('db.rpc.call(db, "fn_apply_payment_event", {});')).toEqual(["function null"]);
+    expect(accesses('db["rpc"].apply(db, ["fn_apply_payment_event", {}]);')).toEqual(["function null"]);
+    expect(accesses("const open = db.from.bind(db);")).toEqual(["table null"]);
+    expect(accesses('db.from("t").select("id").eq.call(q, "id", id);')).toEqual([]);
+    expect(accesses("const from = range.from; Array.from.call(null, rows);")).toEqual([]);
+    expect(columns('db.from("billing_line_items").select("id").update.call(q, { paid_at: now });')).toEqual([null]);
+
     const outbound = (text: string) => outboundCalls(sourceOf(text));
     expect(outbound('await fetch("https://pay.pesapal.com/v3");')).toHaveLength(1);
     expect(outbound('await globalThis.fetch(url);')).toHaveLength(1);
+    expect(outbound('await globalThis["fetch"](url); await window[\'fetch\'](url);')).toHaveLength(2);
     expect(outbound("const send = fetch; createClient(url, key, { global: { fetch } });")).toHaveLength(2);
-    expect(outbound('import { request } from "node:https"; import axios from "axios";')).toEqual([
-      "imports node:https",
-      "imports axios",
+    expect(outbound('client.fetch(url); const options = { fetch: custom }; class A { fetch() {} } headers["fetch"];')).toEqual([]);
+
+    const calls = (text: string) => supabaseCalls(sourceOf(text));
+    expect(calls('await db.functions.invoke("settle", { body: {} });')).toEqual(["functions: db.functions"]);
+    expect(calls('await db["functions"].invoke("settle");')).toEqual(['functions: db["functions"]']);
+    expect(calls("await db.auth.admin.deleteUser(id); await db.auth.signOut();")).toEqual([
+      "auth.admin.deleteUser",
+      "auth.signOut",
     ]);
-    expect(outbound('import type { Agent } from "undici";')).toEqual([]);
-    expect(outbound("client.fetch(url); const options = { fetch: custom }; class A { fetch() {} }")).toEqual([]);
+    expect(calls('await db["auth"]["admin"].updateUserById(id, {});')).toEqual(["auth.admin.updateUserById"]);
+    expect(calls("const { admin } = db.auth; const a = db.auth.admin;")).toEqual(["auth: db.auth", "auth: db.auth.admin"]);
+    expect(calls("await db.auth.getUser(); await db.auth.getSession(); await db.auth.getClaims();")).toEqual([]);
+
+    const packages = (text: string) => packageImports(sourceOf(text));
+    expect(
+      packages(
+        'import { request } from "node:https"; import axios from "axios"; import { Resend } from "resend"; import type { Agent } from "undici"; import "server-only"; import { NextResponse } from "next/server"; import { createClient } from "@/lib/supabase/server";'
+      )
+    ).toEqual(["imports node:https", "imports axios", "imports resend"]);
+    expect(packages('export { send } from "resend"; void import("resend"); require("node:http");')).toEqual([
+      "imports resend",
+      "imports resend",
+      "imports node:http",
+    ]);
+
+    // The composer loaded directly, lazily or re-exported; a barrel followed to the names used.
+    const loads = (text: string) => [...loadedModules(sourceOf(text))];
+    expect(loads('import { composePayments } from "@/lib/payments/compose"; import type { X } from "@/lib/payments/scope";'))
+      .toEqual([PAYMENTS_COMPOSER]);
+    expect(loads('void import("@/lib/payments/compose"); export { composePayments as open } from "@/lib/payments/compose";'))
+      .toEqual([PAYMENTS_COMPOSER]);
+    expect(loads('import { PaymentError } from "@/lib/payments"; import "server-only";')).toEqual(["src/lib/payments/errors.ts"]);
   });
 
   it("walks every entry point, through the payment routes to the composer", () => {
@@ -708,11 +887,16 @@ describe("payments route boundary", () => {
           }
         }
         for (const call of outboundCalls(source)) offenders.add(`${where}: ${call}`);
+        for (const call of supabaseCalls(source)) offenders.add(`${where}: ${call}`);
+        for (const found of packageImports(source)) offenders.add(`${where}: ${found}`);
+        if (modulePath !== entry && loadedModules(source).has(PAYMENTS_COMPOSER)) {
+          offenders.add(`${where}: loads ${PAYMENTS_COMPOSER} outside the route file`);
+        }
       }
     }
     expect(
       [...offenders],
-      "Do this through a Payments capability method, or document an exception in ALLOWED_DIRECT_ACCESS"
+      "Do this through a Payments capability method the route file calls, or document an exception in ALLOWED_DIRECT_ACCESS or ROUTE_PACKAGES"
     ).toEqual([]);
   });
 
@@ -742,6 +926,14 @@ describe("payments route boundary", () => {
         .filter((name) => !used.has(name))
         .map((name) => `${modulePath}: ${name}`);
     });
-    expect([...staleImports, ...staleAccess], "Remove exceptions nothing needs any more").toEqual([]);
+    const imported = new Set(
+      composingRoutes().flatMap((entry) =>
+        [...(analyse().runs.get(entry) ?? [])]
+          .filter((modulePath) => !STOPS[modulePath])
+          .flatMap((modulePath) => runtimeImports(parse(path.join(REPO_ROOT, modulePath))).map(({ specifier }) => specifier))
+      )
+    );
+    const stalePackages = Object.keys(ROUTE_PACKAGES).filter((specifier) => !imported.has(specifier));
+    expect([...staleImports, ...staleAccess, ...stalePackages], "Remove exceptions nothing needs any more").toEqual([]);
   });
 });
