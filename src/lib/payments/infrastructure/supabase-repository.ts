@@ -52,6 +52,11 @@ export function createSupabasePaymentsRepository(
   writer: SupabaseClient = supabase
 ): PaymentsRepository {
   return {
+    // Both reads reject when plugin state cannot be read, a database error
+    // included, so the capability can tell "off" from "unknown" and fail
+    // closed. They are not the plugins/state.ts helpers of the same names,
+    // which read a database error as `false`; checkout would then answer
+    // 409 where it must answer 503.
     async isPaymentsEnabled(organizationId: string) {
       return isPluginEnabledForOrg(supabase, organizationId, "payments");
     },
