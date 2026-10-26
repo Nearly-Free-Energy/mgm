@@ -118,8 +118,12 @@ export const config = {
   // configuration from the real process environment, as the server does,
   // instead of the Edge sandbox's environment, so one build or container
   // image serves any installation. Supported for middleware.ts by the
-  // installed Next.js (16.x); proxy.ts would also be Node.js-only but means
-  // renaming the file and its export.
+  // installed Next.js (16.x). Moving to proxy.ts (always Node.js) means
+  // renaming the file and its export AND deleting this `runtime` line and
+  // the `config.runtime` assertion in src/lib/__tests__/middleware.test.ts:
+  // Next.js 16 fails `next build` on a `runtime` in a Proxy file ("Route
+  // segment config is not allowed in Proxy file"). If Next.js drops that
+  // check, revisit.
   runtime: "nodejs",
   matcher: [
     /*

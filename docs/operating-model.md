@@ -40,16 +40,16 @@ discussion first, not a PR.
 
 An installation is configured entirely by its server environment, read at
 request time, so the same build or container image serves any installation
-(#46; `docs/adr/ADR-003-runtime-public-configuration.md`; variables and the
-migration from the old names in `docs/setup.md`, "Runtime configuration").
+(#46; `docs/adr/ADR-003-runtime-public-configuration.md`; variables, and
+upgrading from the old names, in `docs/setup.md`, "Runtime configuration").
 
 - **Public allowlist.** Exactly three values reach the browser:
   `MGM_PUBLIC_SUPABASE_URL`, `MGM_PUBLIC_SUPABASE_ANON_KEY` and the optional
   `MGM_PUBLIC_SUPABASE_COOKIE_NAME`. They are validated on the server
   (`src/lib/config/public-runtime-config.ts`) and passed from the root layout
   to `PublicRuntimeConfigProvider`. Browser code never reads `process.env`
-  for them, and no new value joins the allowlist without the same review as a
-  credential change.
+  for them (`src/lib/__tests__/no-browser-env-config.test.ts`), and no new
+  value joins the allowlist without the same review as a credential change.
 - **Server-only settings.** `MGM_APP_URL` (public origin for payment links
   and payment-notification registration, `src/lib/config/app-url.ts`),
   `SUPABASE_INTERNAL_URL`, the service-role key, the credential encryption
@@ -67,8 +67,10 @@ migration from the old names in `docs/setup.md`, "Runtime configuration").
   is only logged at start and fails payments on first use.
 - **No `NEXT_PUBLIC_` for deployment settings.** Next.js inlines those at
   build time. The former `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL` and
-  `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names are a documented fallback for one
-  release only.
+  `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names were accepted by v0.0.1 and v0.0.2
+  only and are no longer read; one still set without its replacement gets a
+  warning at server start. The release build refuses to run with any
+  `NEXT_PUBLIC_*` variable set (`docs/releasing.md`).
 
 ## How work moves
 

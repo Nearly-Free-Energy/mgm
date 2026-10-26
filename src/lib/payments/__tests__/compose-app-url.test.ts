@@ -26,17 +26,11 @@ describe("defaultAppUrl", () => {
     expect(defaultAppUrl("/payment/callback")).toBe("https://beta.example.net/payment/callback");
   });
 
-  it("keeps its previous legacy behaviour: NEXT_PUBLIC_APP_URL origin first", () => {
+  it("throws when no application URL is configured, whatever retired names are set (#79)", () => {
     vi.stubEnv("MGM_APP_URL", "");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.org/x");
+    expect(() => defaultAppUrl("/payment/callback")).toThrow(/MGM_APP_URL/);
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.org");
     vi.stubEnv("NEXT_PUBLIC_PAYMENT_CALLBACK_URL", "https://pay.example.net/custom/return");
-    expect(defaultAppUrl("/payment/callback")).toBe("https://app.example.org/payment/callback");
-  });
-
-  it("throws when no application URL is configured", () => {
-    vi.stubEnv("MGM_APP_URL", "");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
-    vi.stubEnv("NEXT_PUBLIC_PAYMENT_CALLBACK_URL", "");
     expect(() => defaultAppUrl("/payment/callback")).toThrow(/MGM_APP_URL/);
   });
 });

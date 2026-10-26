@@ -59,8 +59,6 @@ describe("testMerchantConfiguration IPN registration", () => {
 
   it("returns callback_url_unknown, without registering, when no application URL is set", async () => {
     vi.stubEnv("MGM_APP_URL", "");
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
-    vi.stubEnv("NEXT_PUBLIC_PAYMENT_CALLBACK_URL", "");
     const result = await testMerchantConfiguration(INPUT);
     expect(result).toEqual({
       ok: false,

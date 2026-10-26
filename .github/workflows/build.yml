@@ -11,11 +11,12 @@ name: Build
 # hosting provider and no secrets:
 #   - it never talks to Vercel, so a fork pull request does not wait on a
 #     hosting-preview deployment authorization;
-#   - it reads no repository secret. The two Supabase values below are
-#     obviously fake placeholders: `next build` only needs them to be present
-#     and well-formed, and nothing at build time contacts a database.
-#     If a future change makes the build need a real service, fix the build,
-#     do not add a secret here.
+#   - it reads no repository secret and sets no installation setting.
+#     Supabase and application-URL settings are read at request time
+#     (docs/adr/ADR-003-runtime-public-configuration.md), so `next build`
+#     needs none, and nothing at build time contacts a database. If a future
+#     change makes the build need a real service or a setting, fix the build,
+#     do not add a secret or a placeholder here.
 #   - the token is read-only, and untrusted fork code is built under the
 #     `pull_request` event (never `pull_request_target`).
 #
@@ -60,6 +61,3 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
-          # Placeholders only. Not credentials; they point nowhere.
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.invalid
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key-not-a-secret

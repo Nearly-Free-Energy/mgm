@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "service-role-test-key";
-process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://localhost:54321";
+process.env.MGM_PUBLIC_SUPABASE_URL ??= "http://localhost:54321";
 
 const gateRoute = vi.fn();
 vi.mock("@/lib/runtime/gate", () => ({ gateRoute }));
