@@ -70,6 +70,8 @@ vi.mock("next/link", () => ({
 // ── Import page (after mocks) ─────────────────────────────────────────────────
 
 import MicrogridDashboardPage from "../page";
+import * as accessModule from "@/lib/auth/access";
+import * as configModule from "@/lib/openems/config";
 
 // ── Query builder helpers ─────────────────────────────────────────────────────
 //
@@ -255,5 +257,19 @@ describe("MicrogridDashboardPage", () => {
 
     expect(html).toContain("/microgrids/mg-1/billing/bp-1");
     expect(html).toContain("Open draft period");
+  });
+
+  it("does not decrypt the stored credentials when the access check fails", async () => {
+    // currentUserCanAccessMicrogrid asks Auth (getUser), which refuses a
+    // session signed out elsewhere even while its token still verifies.
+    vi.mocked(accessModule.currentUserCanAccessMicrogrid).mockResolvedValueOnce(
+      false,
+    );
+    mockFrom.mockImplementation(makeFrom([OPENEMS_EDGE_ONLINE]));
+
+    await MicrogridDashboardPage({ params: Promise.resolve({ id: "mg-1" }) });
+
+    expect(configModule.getMicrogridEmsConfig).not.toHaveBeenCalled();
+    expect(getEdgesStatusMock).not.toHaveBeenCalled();
   });
 });

@@ -75,15 +75,37 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() refreshes an expiring session through setAll as getUser()
+  // did, then verifies the access token's signature and expiry locally
+  // against the project's published keys, which auth-js caches for ten
+  // minutes. Middleware runs in the Vercel region nearest the visitor, not
+  // beside the database, so this saves a cross-region Auth call per request.
+  // It does not ask Auth whether the session still exists: a session signed
+  // out elsewhere passes until its access token expires. That is safe only
+  // while every page and route that reaches the service role or a stored
+  // credential asks Auth itself first; service-role-session-check.test.ts
+  // lists them, and a new one that does not breaks this. Local verification
+  // needs an asymmetric signing key (the project's is ES256); with a
+  // shared-secret key getClaims() falls back to getUser() and saves nothing.
+  // If the project's key type changes, revisit.
+  let subject: string | undefined;
+  try {
+    const { data } = await supabase.auth.getClaims();
+    subject = data?.claims.sub;
+  } catch {
+    // getClaims() throws, rather than returning an error, on some malformed
+    // tokens (no exp claim, an unsupported alg, a payload that is not JSON)
+    // that getUser() reported as no user. Treat them as signed out so a bad
+    // cookie reaches /login instead of failing every route.
+    subject = undefined;
+  }
+  const signedIn = typeof subject === "string" && subject !== "";
 
   const isPublicPath =
     PUBLIC_PATHS.some((p) => request.nextUrl.pathname === p) ||
     isPublicPaymentRoute(request.nextUrl.pathname);
 
-  if (!user && !isPublicPath) {
+  if (!signedIn && !isPublicPath) {
     // API routes return 401 JSON instead of redirecting to login
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json(
@@ -96,10 +118,23 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && request.nextUrl.pathname.startsWith("/login")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    return NextResponse.redirect(url);
+  if (signedIn && request.nextUrl.pathname.startsWith("/login")) {
+    // Claims cannot tell a live session from one signed out elsewhere
+    // (signOut() ends the user's sessions on every device), so ask Auth
+    // before sending the user away from /login. The (dashboard) layout and
+    // /setup call getUser() and send a dead session here; redirecting on
+    // claims alone would bounce between them until the token expired. For a
+    // dead session the failed getUser() also clears its cookies through
+    // setAll, on the supabaseResponse returned below. If those pages stop
+    // calling getUser(), revisit.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
   }
 
   // Existing management links target the old microgrid overview, which
