@@ -4,6 +4,7 @@ import type { Organization, Microgrid } from "@/lib/types/domain";
 import { COMMUNITY_MANAGEMENT_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { getCurrentUserRoles } from "@/lib/auth/access";
 import { SUPER_ADMIN } from "@/lib/roles";
+import { microgridHref } from "@/lib/microgrid-links";
 
 type MicrogridWithHouseholdCount = {
   id: string;
@@ -174,7 +175,7 @@ export async function OrgCard({
           {microgridsWithCounts.map((mg) => (
             <Link
               key={mg.id}
-              href={`/microgrids/${mg.id}`}
+              href={microgridHref(mg.id)}
               className="block rounded-md border border-border bg-muted p-4 transition-colors hover:bg-card hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <h3 className="font-medium text-foreground">{mg.name}</h3>

@@ -9,16 +9,46 @@
  *   - Invoice tab visibility gated by `showInvoiceTab` prop (#204)
  *   - Active-tab derivation includes /invoice when shown (#204)
  *   - ArrowRight cycling covers Invoice tab when shown (#204)
+ *   - Tabs render through next/link and announce clicks to NavigationProgress
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { MGM_NAVIGATION_START_EVENT } from "@/components/ui/navigation-progress";
 
 let mockPathname = "/communities/comm-abc";
 const routerPushMock = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
   useRouter: () => ({ push: routerPushMock }),
+}));
+
+// Stand-in for next/link that marks its anchor, so the tests can tell a Link
+// from a raw <a>, and stops jsdom from attempting a real navigation.
+vi.mock("next/link", () => ({
+  default: ({
+    href,
+    children,
+    onClick,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+    onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+    [key: string]: unknown;
+  }) => (
+    <a
+      href={href}
+      data-next-link=""
+      onClick={(e) => {
+        onClick?.(e);
+        e.preventDefault();
+      }}
+      {...rest}
+    >
+      {children}
+    </a>
+  ),
 }));
 
 import { CommunitySubNav } from "../community-subnav";
@@ -119,5 +149,24 @@ describe("CommunitySubNav", () => {
     const invoice = screen.getByRole("tab", { name: /invoice/i });
     fireEvent.keyDown(invoice, { key: "ArrowRight" });
     expect(routerPushMock).toHaveBeenLastCalledWith("/communities/comm-abc");
+  });
+
+  it("renders tabs as client-side Links and announces a click elsewhere", () => {
+    mockPathname = "/communities/comm-abc";
+    const announced: string[] = [];
+    const onStart = (e: Event) =>
+      announced.push((e as CustomEvent<string>).detail);
+    window.addEventListener(MGM_NAVIGATION_START_EVENT, onStart);
+    try {
+      render(<CommunitySubNav communityId="comm-abc" />);
+      for (const t of screen.getAllByRole("tab")) {
+        expect(t.hasAttribute("data-next-link")).toBe(true);
+      }
+      fireEvent.click(screen.getByRole("tab", { name: /overview/i }));
+      fireEvent.click(screen.getByRole("tab", { name: /payment/i }));
+      expect(announced).toEqual(["/communities/comm-abc/payment"]);
+    } finally {
+      window.removeEventListener(MGM_NAVIGATION_START_EVENT, onStart);
+    }
   });
 });

@@ -39,6 +39,7 @@ import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Banner } from "@/components/ui/banner";
 import { BlastRadiusList } from "@/components/entity-deletion/BlastRadiusList";
+import { microgridHref } from "@/lib/microgrid-links";
 import type {
   DescendantCounts,
   EntityKind,
@@ -98,7 +99,7 @@ function parentPathFor(entity: EntityKind, parent: Parent): string {
     case "microgrid":
       // For edge deletes, redirect back to the edges sub-route.
       if (entity === "edge") return `/microgrids/${parent.id}/setup/edges`;
-      return `/microgrids/${parent.id}`;
+      return microgridHref(parent.id);
   }
 }
 

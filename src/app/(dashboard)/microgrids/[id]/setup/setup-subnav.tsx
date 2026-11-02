@@ -1,8 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, type KeyboardEvent } from "react";
 import { StatusChip } from "@/components/ui/status-chip";
+import {
+  announceNavigationStart,
+  isSameTabClick,
+} from "@/components/ui/navigation-progress";
 import type { OpenemsBackendHealth } from "./openems-backend/health";
 
 // Setup sub-nav (D2 / #53, extended #102).
@@ -17,6 +22,9 @@ import type { OpenemsBackendHealth } from "./openems-backend/health";
 //     at the content region id.
 //   - ArrowLeft / ArrowRight cycle between tabs and move focus + navigate.
 //   - Home / End jump to first / last tab.
+//   - Tabs are next/link <Link>s (each renders one <a>), so clicks and arrow
+//     keys are client-side navigations: the microgrid header and this sub-nav
+//     stay mounted while setup/loading.tsx stands in for the new tab.
 //   - The OpenEMS Backend tab chip is rendered INSIDE the single <a> element.
 //     Radix Tooltip wraps the chip and adds a focusable span (tabindex=0)
 //     inside the anchor. Screen readers follow the anchor as the primary
@@ -100,7 +108,9 @@ export function SetupSubNav({
     e.preventDefault();
     const el = tabRefs.current[next];
     el?.focus();
-    router.push(`${base}/${TABS[next].segment}`);
+    const href = `${base}/${TABS[next].segment}`;
+    if (href !== pathname) announceNavigationStart(href);
+    router.push(href);
   }
 
   return (
@@ -115,7 +125,7 @@ export function SetupSubNav({
         const chipData =
           tab.segment === "openems-backend" ? openemsBackendHealth : undefined;
         return (
-          <a
+          <Link
             key={tab.segment}
             ref={(el) => {
               tabRefs.current[i] = el;
@@ -125,6 +135,11 @@ export function SetupSubNav({
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
+            onClick={(event) => {
+              if (href !== pathname && isSameTabClick(event)) {
+                announceNavigationStart(href);
+              }
+            }}
             className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isActive
                 ? "bg-card text-foreground font-semibold shadow-elev-1"
@@ -140,7 +155,7 @@ export function SetupSubNav({
                 tooltip={tooltipFor(chipData)}
               />
             )}
-          </a>
+          </Link>
         );
       })}
     </nav>

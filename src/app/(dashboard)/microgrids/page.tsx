@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { MicrogridPublic } from "@/lib/types/microgrid-columns";
 import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
+import { microgridHref } from "@/lib/microgrid-links";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { CommunityOption } from "@/components/forms/AddEntityButton";
 
@@ -294,9 +296,9 @@ export default async function MicrogridsPage({
           const locationLabel = locationParts.length > 0 ? locationParts.join(", ") : null;
 
           return (
-            <a
+            <Link
               key={mg.id}
-              href={`/microgrids/${mg.id}`}
+              href={microgridHref(mg.id)}
               className="block rounded-lg border border-border bg-card p-6 transition-colors hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <h2 className="font-medium text-foreground">{mg.name}</h2>
@@ -309,7 +311,7 @@ export default async function MicrogridsPage({
                 </span>
                 <span className="text-muted-foreground">{mg.currency}</span>
               </div>
-            </a>
+            </Link>
           );
         })}
       </div>

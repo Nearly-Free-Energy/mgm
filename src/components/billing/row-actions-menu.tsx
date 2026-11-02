@@ -177,7 +177,7 @@ export function computeMenuItems(input: {
     onMarkAsUnpaid: () => void;
     onCancelLink: () => void;
     onMarkAsFailed: () => void;
-    /** PDF3 (#205) — fires the bill-PDF download flow (probe-then-anchor). */
+    /** PDF3 (#205) — fires the bill-PDF download flow (one fetch, saved as a blob). */
     onDownloadPdf: () => void;
   };
 }): MenuItem[] {
@@ -388,7 +388,7 @@ export function computeMenuItems(input: {
   // ── PDF3 (#205) — Download bill (PDF) ──────────────────────────────────────
   // Always visible (including terminal/refunded rows — refunded bills still
   // want a paper trail). MenuItem kind: "action" so the host can run the
-  // probe-then-anchor flow; "link" would render via Next.js <Link> and
+  // fetch-then-save flow; "link" would render via Next.js <Link> and
   // intercept the PDF response client-side.
   if (items.length > 0) {
     items.push({ kind: "separator", key: "sep-download" });
@@ -420,6 +420,21 @@ export function computeMenuItems(input: {
   });
 
   return items;
+}
+
+/**
+ * The filename a `Content-Disposition` header names (`filename="…"` or a bare
+ * `filename=…` token), or `fallback` when the header is missing or names none.
+ */
+export function pdfFilenameFromContentDisposition(
+  header: string | null,
+  fallback: string,
+): string {
+  const match = header
+    ? /filename\s*=\s*(?:"([^"]*)"|([^;\s]+))/i.exec(header)
+    : null;
+  const name = (match?.[1] ?? match?.[2] ?? "").trim();
+  return name || fallback;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -638,16 +653,16 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
 
   // ── PDF3 (#205) — Download bill (PDF) ─────────────────────────────────────
   //
-  // Probe-then-anchor pattern. Why probe first:
-  //   - A 422 response body is `{ error, reason }` JSON. If we let an anchor
-  //     fire directly, the browser would surface its native error page
-  //     instead of letting us push a row banner with the upstream reason.
-  //   - The route's `Content-Disposition: attachment` header is the
-  //     cross-browser source of truth for the filename — so the second hit
-  //     uses a fresh GET via a hidden <a>, NOT a blob URL.
-  //   - The double-hit is fine: PDF1a's ensurePaymentLinkForLineItem() is
-  //     idempotent, and the invoice_number first-render persistence already
-  //     happened on the probe.
+  // One request: fetch the PDF, then save the body it returned.
+  //   - fetch (not a bare anchor) so a 422 `{ error, reason }` body becomes a
+  //     row banner with the upstream reason instead of the browser's native
+  //     error page.
+  //   - On success the body is saved from a blob URL. The route renders the
+  //     whole bill on every request, so asking for it a second time through
+  //     an anchor would make the user wait for two renders.
+  //   - The filename comes from the route's `Content-Disposition` header
+  //     (readable here because the request is same-origin) and is set as the
+  //     anchor's `download` attribute, since a blob URL carries no headers.
   const handleDownloadPdf = React.useCallback(async () => {
     const pdfUrl = `/api/billing-line-items/${lineItem.id}/pdf`;
     try {
@@ -672,16 +687,22 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         });
         return;
       }
-      // Trigger a fresh GET via a hidden anchor — no `download` attribute,
-      // so the route's `Content-Disposition: attachment; filename="…"`
-      // drives the filename across all browsers.
+      const blob = await res.blob();
+      const filename = pdfFilenameFromContentDisposition(
+        res.headers.get("Content-Disposition"),
+        `bill-${lineItem.id}.pdf`,
+      );
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = pdfUrl;
-      a.target = "_self";
+      a.href = objectUrl;
+      a.download = filename;
       a.style.display = "none";
       document.body.appendChild(a);
       a.click();
       a.remove();
+      // Safari may not have started consuming the Blob URL by the time
+      // click() returns. Revoke on a later task to keep the download alive.
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     } catch {
       onRowBanner({
         id: `${lineItem.id}-pdf-net-${Date.now()}`,
@@ -714,7 +735,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
           onMarkAsUnpaid: () => void patchStatus("unpaid", null),
           onCancelLink: () => setCancelLinkOpen(true),
           onMarkAsFailed: () => setMarkFailedOpen(true),
-          // PDF3 (#205) — fire the probe-then-anchor download flow.
+          // PDF3 (#205) — fire the fetch-then-save download flow.
           onDownloadPdf: () => void handleDownloadPdf(),
         },
       }),
