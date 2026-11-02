@@ -15,6 +15,7 @@ import { LocaleProvider } from "@/components/format/locale-context";
 import {
   RowActionsMenu,
   computeMenuItems,
+  pdfFilenameFromContentDisposition,
   type RowActionsMenuProps,
 } from "../row-actions-menu";
 import type { RowBannerEntry } from "../row-banner-stack";
@@ -791,5 +792,137 @@ describe("RowActionsMenu — bill download error", () => {
     expect(last.message).toMatch(/pesapal_unreachable/);
     // Download retry surface IS the menu item itself; no inline action btn.
     expect(last.action).toBeUndefined();
+  });
+});
+
+// ── PDF3 (#205) — bill download: one request, saved as a blob ────────────────
+
+describe("pdfFilenameFromContentDisposition", () => {
+  it.each([
+    ['attachment; filename="INV-2026-0042.pdf"', "INV-2026-0042.pdf"],
+    ["attachment; filename=INV-2026-0042.pdf", "INV-2026-0042.pdf"],
+    ['attachment;filename="INV 7.pdf"; size=100', "INV 7.pdf"],
+  ])("reads the filename from %j", (header, expected) => {
+    expect(pdfFilenameFromContentDisposition(header, "bill.pdf")).toBe(expected);
+  });
+
+  it.each([[null], ["attachment"], ['attachment; filename=""'], ["inline; name=x"]])(
+    "falls back when the header is %j",
+    (header) => {
+      expect(pdfFilenameFromContentDisposition(header, "bill.pdf")).toBe("bill.pdf");
+    },
+  );
+});
+
+describe("RowActionsMenu — bill download", () => {
+  const BLOB_URL = "blob:http://localhost/bill";
+  const createObjectURL = vi.fn<(blob: Blob) => string>(() => BLOB_URL);
+  const revokeObjectURL = vi.fn<(url: string) => void>();
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  // jsdom implements neither blob URLs nor navigation: record what the hidden
+  // anchor would have saved instead of letting it navigate.
+  let saved: { href: string; download: string }[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    saved = [];
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        saved.push({ href: this.href, download: this.download });
+      },
+    );
+  });
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function pdfResponse(contentDisposition: string | null) {
+    return {
+      ok: true,
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === "content-disposition" ? contentDisposition : null,
+      },
+      blob: () => Promise.resolve(new Blob(["%PDF-1.7"], { type: "application/pdf" })),
+    };
+  }
+
+  async function clickDownload() {
+    await act(async () => {
+      openMenu(screen.getByRole("button", { name: /row actions for/i }));
+    });
+    await waitFor(() => screen.getByText(/download bill \(pdf\)/i));
+    await act(async () => {
+      fireEvent.click(screen.getByText(/download bill \(pdf\)/i));
+    });
+  }
+
+  it("requests the bill once and saves that response under the route's filename", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRowBanner = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(pdfResponse('attachment; filename="INV-2026-0042.pdf"'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderMenu(makeProps({ onRowBanner }));
+    await clickDownload();
+    await waitFor(() => expect(saved).toHaveLength(1));
+
+    // One request: the body that was fetched is the body that is saved.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/billing-line-items/li-1/pdf", {
+      method: "GET",
+    });
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(saved[0]).toEqual({ href: BLOB_URL, download: "INV-2026-0042.pdf" });
+    expect(document.querySelector("a[download]")).toBeNull();
+    expect(onRowBanner).not.toHaveBeenCalled();
+
+    // The blob URL outlives click() so the browser can read it, then is freed.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(revokeObjectURL).toHaveBeenCalledWith(BLOB_URL);
+  });
+
+  it("falls back to a bill-<line item id> filename when the header names none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(pdfResponse(null)));
+
+    renderMenu(makeProps());
+    await clickDownload();
+    await waitFor(() => expect(saved).toHaveLength(1));
+
+    expect(saved[0]).toEqual({ href: BLOB_URL, download: "bill-li-1.pdf" });
+  });
+
+  it("a body that cannot be read pushes the network banner and saves nothing", async () => {
+    const onRowBanner = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ...pdfResponse('attachment; filename="INV-1.pdf"'),
+        blob: () => Promise.reject(new TypeError("network error")),
+      }),
+    );
+
+    renderMenu(makeProps({ onRowBanner }));
+    await clickDownload();
+    await waitFor(() => expect(onRowBanner).toHaveBeenCalledTimes(1));
+
+    const entry = onRowBanner.mock.calls[0][0] as RowBannerEntry;
+    expect(entry.tone).toBe("destructive");
+    expect(entry.message).toMatch(/network error/i);
+    expect(saved).toHaveLength(0);
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

@@ -1,8 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, type KeyboardEvent } from "react";
 import { StatusChip } from "@/components/ui/status-chip";
+import {
+  announceNavigationStart,
+  isSameTabClick,
+} from "@/components/ui/navigation-progress";
 import type { PaymentHealth } from "./payment/health";
 
 // Community sub-nav (#119).
@@ -18,6 +23,8 @@ import type { PaymentHealth } from "./payment/health";
 //   - role="tablist" + aria-label
 //   - each link is role="tab" + aria-selected
 //   - ArrowLeft/Right cycle; Home/End jump to first/last
+//   - Tabs are next/link <Link>s, so clicks and arrow keys are client-side
+//     navigations that keep the surrounding layout mounted.
 //   - The Payment tab chip is rendered INSIDE the anchor; Radix Tooltip
 //     wraps the chip and adds a focusable span (tabindex=0). Screen readers
 //     follow the anchor as the primary control.
@@ -119,7 +126,9 @@ export function CommunitySubNav({
     e.preventDefault();
     const el = tabRefs.current[next];
     el?.focus();
-    router.push(hrefFor(visibleTabs[next]));
+    const href = hrefFor(visibleTabs[next]);
+    if (href !== pathname) announceNavigationStart(href);
+    router.push(href);
   }
 
   return (
@@ -131,17 +140,23 @@ export function CommunitySubNav({
       {visibleTabs.map((tab, i) => {
         const isActive = i === activeIndex;
         const chipData = tab.segment === "payment" ? paymentHealth : undefined;
+        const href = hrefFor(tab);
         return (
-          <a
+          <Link
             key={tab.segment || "overview"}
             ref={(el) => {
               tabRefs.current[i] = el;
             }}
-            href={hrefFor(tab)}
+            href={href}
             role="tab"
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
+            onClick={(event) => {
+              if (href !== pathname && isSameTabClick(event)) {
+                announceNavigationStart(href);
+              }
+            }}
             className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isActive
                 ? "bg-card text-foreground font-semibold shadow-elev-1"
@@ -157,7 +172,7 @@ export function CommunitySubNav({
                 tooltip={tooltipFor(chipData)}
               />
             )}
-          </a>
+          </Link>
         );
       })}
     </nav>

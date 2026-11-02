@@ -193,7 +193,7 @@ describe("MicrogridsPage", () => {
     const html = renderToStaticMarkup(jsx as React.ReactElement);
 
     expect(html).toContain("Kisakye MG-1");
-    expect(html).toContain("/microgrids/mg-1");
+    expect(html).toContain('href="/microgrids/mg-1/setup/households"');
   });
 
   it("renders Add Microgrid button in single-community URL context (locked mode)", async () => {

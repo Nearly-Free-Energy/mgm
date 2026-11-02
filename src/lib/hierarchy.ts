@@ -14,6 +14,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { HierarchyLevel } from "@/components/ui/hierarchy-nav";
+import { microgridHref } from "@/lib/microgrid-links";
 
 export type HierarchyScope =
   | { kind: "communities"; orgId?: string }
@@ -180,13 +181,13 @@ async function fetchMicrogridLevel(
     kind: "Microgrid",
     label: microgrid.name,
     count,
-    href: `/microgrids/${microgridId}`,
+    href: microgridHref(microgridId),
     active,
     siblings:
       count > 1
         ? siblingList
             .filter((s) => s.id !== microgridId)
-            .map((s) => ({ label: s.name ?? s.id, href: `/microgrids/${s.id}` }))
+            .map((s) => ({ label: s.name ?? s.id, href: microgridHref(s.id) }))
         : undefined,
   };
 
