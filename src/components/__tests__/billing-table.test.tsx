@@ -14,7 +14,7 @@
 //     (f) Gate banner absent when isPaymentConfigured=true
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BillingTable } from "../BillingTable";
 import { LocaleProvider } from "../format/locale-context";
 import type {
@@ -26,9 +26,17 @@ import type {
 
 // Mock next/navigation (BillingTable calls useRouter inside)
 const refreshSpy = vi.fn();
+const pushSpy = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: refreshSpy }),
+  useRouter: () => ({ push: pushSpy, refresh: refreshSpy }),
 }));
+
+// Result of `from("billing_periods").delete().eq(...)`; the delete-period
+// tests override it per case.
+const deleteEqMock = vi.fn(
+  (): Promise<{ error: { code?: string; message: string; details?: string } | null }> =>
+    Promise.resolve({ error: null }),
+);
 
 // Mock Supabase client (BillingTable calls createClient() on render)
 // Phase B (#157): also stubs `select().eq()` for the IPN-paid poller
@@ -37,7 +45,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     from: () => ({
-      delete: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      delete: () => ({ eq: () => deleteEqMock() }),
       update: () => ({ eq: () => Promise.resolve({ error: null }) }),
       select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }),
     }),
@@ -966,5 +974,113 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
       expect(screen.getByText(/Billing is disabled/i)).toBeTruthy()
     );
     expect(refreshSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("BillingTable — delete period", () => {
+  beforeEach(() => {
+    pushSpy.mockClear();
+    deleteEqMock.mockReset();
+    deleteEqMock.mockResolvedValue({ error: null });
+  });
+
+  function deleteButton() {
+    return screen.queryByRole("button", { name: /^Delete$/ });
+  }
+
+  it("offers Delete on a draft period", () => {
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    expect(deleteButton()).not.toBeNull();
+  });
+
+  it("does not offer Delete on a closed period", () => {
+    render(
+      <Wrapper>
+        <BillingTable
+          {...baseProps}
+          period={{ ...period, status: "closed", closed_at: "2026-04-01T00:00:00Z" }}
+        />
+      </Wrapper>
+    );
+    expect(deleteButton()).toBeNull();
+  });
+
+  it("does not offer Delete on a draft with a paid line item", () => {
+    render(
+      <Wrapper>
+        <BillingTable
+          {...baseProps}
+          lineItems={lineItems.map((li, i) =>
+            i === 0 ? { ...li, payment_status: "paid", paid_at: "2026-03-20T10:00:00Z" } : li,
+          )}
+        />
+      </Wrapper>
+    );
+    expect(deleteButton()).toBeNull();
+  });
+
+  it("does not offer Delete on a draft with a line item that has paid_at set", () => {
+    render(
+      <Wrapper>
+        <BillingTable
+          {...baseProps}
+          lineItems={lineItems.map((li, i) =>
+            i === 1 ? { ...li, paid_at: "2026-03-20T10:00:00Z" } : li,
+          )}
+        />
+      </Wrapper>
+    );
+    expect(deleteButton()).toBeNull();
+  });
+
+  it("the confirm dialog says what the delete removes", () => {
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    expect(
+      screen.getByText(
+        /removes the draft period, its generated bills and its history entries/i,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("returns to the period list after a successful delete", async () => {
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(pushSpy).toHaveBeenCalledWith("/microgrids/mg-1/billing"));
+  });
+
+  it("explains a refused delete and stays on the period", async () => {
+    deleteEqMock.mockResolvedValue({
+      error: {
+        code: "23514",
+        message: "billing_period_kept: a billing period with recorded payments cannot be deleted",
+        details: "payment_activity",
+      },
+    });
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.getByText(/has recorded payments, so it is kept/i)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/billing_period_kept/)).toBeNull();
+    expect(pushSpy).not.toHaveBeenCalled();
   });
 });

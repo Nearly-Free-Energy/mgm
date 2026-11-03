@@ -10,6 +10,10 @@ import { Currency } from "@/components/format/currency";
 import { Kwh } from "@/components/format/kwh";
 import { LocalDate } from "@/components/format/local-date";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DELETE_DRAFT_PERIOD_DESCRIPTION,
+  periodDeleteErrorMessage,
+} from "@/lib/billing/period-delete";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -79,7 +83,10 @@ export function BillingPeriodList({
       .delete()
       .eq("id", deletingPeriod.id);
     if (deleteError) {
-      throw new Error(deleteError.message);
+      // fn_billing_period_before_delete_guard keeps a closed period or a
+      // draft with recorded payments; the dialog says why instead of showing
+      // the raw error.
+      throw new Error(periodDeleteErrorMessage(deleteError));
     }
     router.refresh();
   }
@@ -140,13 +147,7 @@ export function BillingPeriodList({
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Delete period?"
-        description={
-          deletingPeriod
-            ? deletingPeriod.status === "closed"
-              ? "This permanently removes the closed billing period and all its finalized bills. This cannot be undone."
-              : "This removes the draft billing period and any generated bills. This cannot be undone."
-            : "This action cannot be undone."
-        }
+        description={DELETE_DRAFT_PERIOD_DESCRIPTION}
         confirmLabel="Delete"
         tone="destructive"
         onConfirm={handleDeletePeriod}
@@ -308,12 +309,18 @@ export function BillingPeriodList({
                     >
                       View
                     </Link>
-                    <button
-                      onClick={() => openDeleteDialog(period)}
-                      className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Delete
-                    </button>
+                    {/* Delete is offered on drafts only: a closed period is
+                        the billing record and fn_billing_period_before_delete_guard
+                        keeps it (src/lib/billing/period-delete.ts). If that
+                        trigger's rule changes, revisit. */}
+                    {period.status === "draft" && (
+                      <button
+                        onClick={() => openDeleteDialog(period)}
+                        className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
