@@ -84,10 +84,10 @@ export async function middleware(request: NextRequest) {
   // out elsewhere passes until its access token expires. That is safe only
   // while every page and route that reaches the service role or a stored
   // credential asks Auth itself first; service-role-session-check.test.ts
-  // lists them, and a new one that does not breaks this. Local verification
-  // needs an asymmetric signing key (the project's is ES256); with a
-  // shared-secret key getClaims() falls back to getUser() and saves nothing.
-  // If the project's key type changes, revisit.
+  // finds them through the import graph, and a new one that does not breaks
+  // this. Local verification needs an asymmetric signing key (the project's
+  // is ES256); with a shared-secret key getClaims() falls back to getUser()
+  // and saves nothing. If the project's key type changes, revisit.
   let subject: string | undefined;
   try {
     const { data } = await supabase.auth.getClaims();

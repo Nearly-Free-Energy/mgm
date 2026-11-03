@@ -11,8 +11,14 @@
  * the mock client a token that verifies and data RLS would return, with an
  * Auth that has ended the session, so a helper that trusted the claims or
  * the rows instead would fail them.
+ *
+ * The composers that run authorizeOrganization are trusted the same way:
+ * service-role-session-check.test.ts does not list the routes that call
+ * them, because they settle the session before they open a request scope,
+ * and only a scope loads the plugins that build providers or a service-role
+ * repository. The last tests check that ordering.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getCurrentUserRoles,
@@ -22,6 +28,25 @@ import {
   currentUserCanAccessMicrogrid,
 } from "../access";
 import { authorizeOrganization } from "@/lib/runtime/scope";
+import { composeBilling } from "@/lib/billing/compose";
+import { composeCommunityManagement } from "@/lib/community-management/compose";
+import { composeBillingReview } from "@/lib/cordis/billing-review";
+import { composeMetering } from "@/lib/metering/compose";
+import { composePayments } from "@/lib/payments/compose";
+
+// Counts request scopes. Every composer imports openOrganizationScope from
+// this module, so a scope opened anywhere inside one is counted.
+const opened = vi.hoisted(() => ({ scopes: 0 }));
+vi.mock("@/lib/runtime/scope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/runtime/scope")>();
+  return {
+    ...actual,
+    openOrganizationScope: (...args: Parameters<typeof actual.openOrganizationScope>) => {
+      opened.scopes += 1;
+      return actual.openOrganizationScope(...args);
+    },
+  };
+});
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -94,5 +119,38 @@ describe("a session signed out elsewhere, whose token still verifies", () => {
       ok: false,
       reason: "unauthenticated",
     });
+  });
+});
+
+describe("the composers that check the session themselves", () => {
+  beforeEach(() => {
+    opened.scopes = 0;
+  });
+
+  it.each([
+    ["composeMetering", () => composeMetering({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
+    ["composeBilling", () => composeBilling({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
+    [
+      "composeBilling with readOnly",
+      () => composeBilling({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID, readOnly: true }),
+    ],
+    [
+      "composeCommunityManagement",
+      () => composeCommunityManagement({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID }),
+    ],
+    ["composePayments", () => composePayments({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
+  ])("%s answers 401 without opening a request scope", async (_name, compose) => {
+    expect(await compose()).toMatchObject({ ok: false, status: 401 });
+    expect(opened.scopes).toBe(0);
+  });
+
+  it("composeBillingReview, which leaves the check to its caller, opens one", async () => {
+    const composition = await composeBillingReview({
+      supabase: sessionEndedElsewhere(),
+      organizationId: ORG_ID,
+      userId: "u1",
+    });
+    await composition.dispose();
+    expect(opened.scopes).toBe(1);
   });
 });
