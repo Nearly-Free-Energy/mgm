@@ -42,7 +42,23 @@ export default async function SettingsUsersPage() {
   );
 
   // Fetch rows. No args → list all visible users (per the RPC contract).
-  const { data: rowsData } = await supabase.rpc("fn_list_visible_users");
+  // An error is not an empty list: render the load-failure state rather
+  // than "No users yet", and log the PostgREST error for the operator.
+  const { data: rowsData, error: rowsError } = await supabase.rpc(
+    "fn_list_visible_users"
+  );
+  if (rowsError) {
+    console.error(
+      JSON.stringify({
+        event: "settings_users.list_error",
+        code: rowsError.code,
+        message: rowsError.message,
+        details: rowsError.details,
+        hint: rowsError.hint,
+        at: new Date().toISOString(),
+      })
+    );
+  }
   const rows: UserVisibleRow[] = ((rowsData ?? []) as UserVisibleRow[]).filter(
     (r) => r.user_id != null
   );
@@ -68,6 +84,7 @@ export default async function SettingsUsersPage() {
   return (
     <UsersPageClient
       rows={rows}
+      loadFailed={rowsError != null}
       orgs={orgs}
       callerRole={callerRole}
       callerOrgIds={callerOrgIds}
