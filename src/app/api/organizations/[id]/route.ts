@@ -152,6 +152,12 @@ export async function PATCH(
  * confirm is acceptable — the caller has explicitly typed the name and
  * committed to "destroy everything under {name}."
  *
+ * Closed billing and billing with recorded payments are never deleted: the
+ * database refuses the delete while the organization holds either
+ * (migration 20261103160000), the delete preview reports it before the
+ * dialog opens, and `mapPgError` turns a refusal here into a 409 that says
+ * why.
+ *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7). Document rather
  * than chase 204-on-already-gone.
  *

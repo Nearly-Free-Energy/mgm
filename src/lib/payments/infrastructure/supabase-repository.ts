@@ -236,14 +236,34 @@ export function createSupabasePaymentsRepository(
     },
 
     async loadMerchantAccountPublic({ orgId, communityId }) {
-      const { data: community, error: scopeError } = await supabase.from("communities").select("id").eq("id", communityId).eq("org_id", orgId).maybeSingle();
+      // The scope check, the override and the org default are independent
+      // reads, so they load together. They are judged in the order below, so
+      // the outcome is the same as reading them one at a time; the default
+      // is used, and its error raised, only when the community has no
+      // override row.
+      const [
+        { data: community, error: scopeError },
+        { data: override, error: overrideError },
+        { data: defaultAccount, error: defaultAccountError },
+      ] = await Promise.all([
+        supabase.from("communities").select("id").eq("id", communityId).eq("org_id", orgId).maybeSingle(),
+        supabase
+          .from("community_payment_overrides")
+          .select("id, merchant_account_id")
+          .eq("community_id", communityId)
+          .maybeSingle<{ id: string; merchant_account_id: string | null }>(),
+        supabase
+          .from("payment_merchant_accounts")
+          .select(ACCOUNT_COLUMNS)
+          .eq("org_id", orgId)
+          .eq("provider", "pesapal")
+          .eq("is_default", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle<Record<string, unknown>>(),
+      ]);
       if (scopeError) throw new Error("Could not authorize community");
       if (!community) return { ok: false as const, code: "payments_scope_mismatch", message: "Community not available in this organization." };
-      const { data: override, error: overrideError } = await supabase
-        .from("community_payment_overrides")
-        .select("id, merchant_account_id")
-        .eq("community_id", communityId)
-        .maybeSingle<{ id: string; merchant_account_id: string | null }>();
       if (overrideError) throw new Error("Could not load community payment override");
       if (override?.merchant_account_id) {
         const { data: account, error: accountError } = await supabase
@@ -264,20 +284,11 @@ export function createSupabasePaymentsRepository(
       if (override && !override.merchant_account_id) {
         return { ok: true as const, account: null, hasOverride: true };
       }
-      const { data: account, error: accountError } = await supabase
-        .from("payment_merchant_accounts")
-        .select(ACCOUNT_COLUMNS)
-        .eq("org_id", orgId)
-        .eq("provider", "pesapal")
-        .eq("is_default", true)
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle<Record<string, unknown>>();
-      if (accountError) throw new Error("Could not load payment account");
-      if (!account) return { ok: true as const, account: null, hasOverride: false };
+      if (defaultAccountError) throw new Error("Could not load payment account");
+      if (!defaultAccount) return { ok: true as const, account: null, hasOverride: false };
       return {
         ok: true as const,
-        account: toPublic(account as Record<string, unknown>, "org_default", null),
+        account: toPublic(defaultAccount, "org_default", null),
         hasOverride: false,
       };
     },

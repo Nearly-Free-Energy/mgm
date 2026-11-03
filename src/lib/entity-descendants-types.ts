@@ -25,6 +25,13 @@ export type DescendantCounts =
       household_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
+      /**
+       * Draft billing periods with payment activity, also counted in
+       * `billing_periods_draft`. Like a closed period, one of these makes the
+       * database refuse the delete (migration 20261103160000), so the
+       * delete-preview route reports it instead of opening the dialog.
+       */
+      billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
       user_roles: number;
@@ -39,6 +46,7 @@ export type DescendantCounts =
       household_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
+      billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
     }
@@ -51,6 +59,7 @@ export type DescendantCounts =
       household_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
+      billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
     }
@@ -64,6 +73,14 @@ export type DescendantCounts =
        * survive per schema design (00001_schema.sql:241).
        */
       billing_line_items_nulled: number;
+      /**
+       * Meter readings of the edge's devices taken during one of its
+       * microgrid's closed billing periods. They cascade away with the
+       * devices (meter_readings.device_id is ON DELETE CASCADE). The closed
+       * bills keep their own start and end readings and totals, so the
+       * dialog warns rather than refusing.
+       */
+      readings_in_closed_periods: number;
     };
 
 /**
@@ -84,6 +101,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.household_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
+        counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
         counts.rate_schedules === 0 &&
         counts.user_roles === 0
@@ -98,6 +116,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.household_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
+        counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
         counts.rate_schedules === 0
       );
@@ -110,6 +129,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.household_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
+        counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
         counts.rate_schedules === 0
       );
@@ -117,7 +137,8 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
       return (
         counts.devices === 0 &&
         counts.household_devices === 0 &&
-        counts.billing_line_items_nulled === 0
+        counts.billing_line_items_nulled === 0 &&
+        counts.readings_in_closed_periods === 0
       );
   }
 }

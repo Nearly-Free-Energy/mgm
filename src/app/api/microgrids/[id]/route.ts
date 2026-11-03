@@ -120,6 +120,11 @@ export async function PATCH(
  * surfaces draft vs closed counts distinctly and the operator committed
  * to "destroy everything under {name}" by typing the name.
  *
+ * Closed billing and billing with recorded payments are never deleted: the
+ * database refuses the delete while the microgrid holds either (migration
+ * 20261103160000), the delete preview reports it before the dialog opens,
+ * and `mapPgError` turns a refusal here into a 409 that says why.
+ *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
  * Revalidation (AC-UI-6): both `/communities/<community_id>` and

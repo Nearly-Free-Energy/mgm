@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PERIOD_KEPT_CLOSED_MESSAGE,
+  PERIOD_KEPT_MESSAGE,
   PERIOD_KEPT_PAYMENTS_MESSAGE,
   isPeriodKeptError,
   lineItemHasRecordedPayment,
@@ -26,6 +27,18 @@ describe("periodDeleteErrorMessage", () => {
         details: "payment_activity",
       }),
     ).toBe(PERIOD_KEPT_PAYMENTS_MESSAGE);
+  });
+
+  it("says the period is kept, without naming a reason, for a DETAIL it does not know", () => {
+    for (const details of ["truncate", "", null, undefined]) {
+      expect(
+        periodDeleteErrorMessage({
+          code: "23514",
+          message: "billing_period_kept: kept for a reason added later",
+          details,
+        }),
+      ).toBe(PERIOD_KEPT_MESSAGE);
+    }
   });
 
   it("passes any other error through unchanged", () => {
