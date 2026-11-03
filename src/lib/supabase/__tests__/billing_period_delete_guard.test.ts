@@ -1,5 +1,6 @@
 /**
- * billing_period_delete_guard.test.ts (migration 20261103090100)
+ * billing_period_delete_guard.test.ts (migrations 20261103090100 and
+ * 20261103160000)
  *
  * Verifies the BEFORE DELETE guard on billing_periods against a live local
  * Supabase through PostgREST, as an org manager except where noted (the
@@ -12,7 +13,10 @@
  *   - a draft period with a payment event is kept;
  *   - service_role is held to the same rule;
  *   - deleting the microgrid (fn_entity_delete_microgrid) or the organization
- *     still removes their periods, closed ones and payment records included.
+ *     is refused while it holds a closed period, and its periods and payment
+ *     records stay (20261103160000).
+ *
+ * keep_closed_and_paid_billing.test.ts covers the rest of 20261103160000.
  *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.
  */
@@ -38,11 +42,12 @@ if (skip) {
 const FIXTURE = {
   org: "b0d00000-0000-4000-8000-00000000000a",
   community: "b0d00000-0000-4000-8001-00000000000a",
-  // mgKeep holds the periods deleted one at a time; mgGone is deleted whole.
+  // mgKeep holds the periods deleted one at a time; mgParent is the
+  // microgrid a whole-microgrid delete is tried on.
   mgKeep: "b0d00000-0000-4000-8002-00000000000a",
-  mgGone: "b0d00000-0000-4000-8002-00000000000b",
+  mgParent: "b0d00000-0000-4000-8002-00000000000b",
   hhKeep: "b0d00000-0000-4000-8005-00000000000a",
-  hhGone: "b0d00000-0000-4000-8005-00000000000b",
+  hhParent: "b0d00000-0000-4000-8005-00000000000b",
   merchant: "b0d00000-0000-4000-8008-00000000000a",
 
   periodDraftEmpty: "b0d00000-0000-4000-8006-000000000001",
@@ -50,23 +55,23 @@ const FIXTURE = {
   periodDraftPaid: "b0d00000-0000-4000-8006-000000000003",
   periodDraftAttempt: "b0d00000-0000-4000-8006-000000000004",
   periodDraftEvent: "b0d00000-0000-4000-8006-000000000005",
-  periodGoneClosed: "b0d00000-0000-4000-8006-000000000006",
+  periodParentClosed: "b0d00000-0000-4000-8006-000000000006",
 
   lineDraftEmpty: "b0d00000-0000-4000-8007-000000000001",
   lineClosed: "b0d00000-0000-4000-8007-000000000002",
   lineDraftPaid: "b0d00000-0000-4000-8007-000000000003",
   lineDraftAttempt: "b0d00000-0000-4000-8007-000000000004",
   lineDraftEvent: "b0d00000-0000-4000-8007-000000000005",
-  lineGoneClosed: "b0d00000-0000-4000-8007-000000000006",
+  lineParentClosed: "b0d00000-0000-4000-8007-000000000006",
 
   attemptKeep: "b0d00000-0000-4000-8009-000000000004",
-  attemptGone: "b0d00000-0000-4000-8009-000000000006",
+  attemptParent: "b0d00000-0000-4000-8009-000000000006",
 
-  // A second organization, deleted whole by the last test.
-  orgGone: "b0d00000-0000-4000-8000-00000000000b",
-  communityOrgGone: "b0d00000-0000-4000-8001-00000000000b",
-  mgOrgGone: "b0d00000-0000-4000-8002-00000000000c",
-  periodOrgGoneClosed: "b0d00000-0000-4000-8006-000000000007",
+  // A second organization, which the last test tries to delete whole.
+  orgParent: "b0d00000-0000-4000-8000-00000000000b",
+  communityOrgParent: "b0d00000-0000-4000-8001-00000000000b",
+  mgOrgParent: "b0d00000-0000-4000-8002-00000000000c",
+  periodOrgParentClosed: "b0d00000-0000-4000-8006-000000000007",
 };
 
 const EMAIL_ORG_MANAGER = `bpdg-orgmgr-${Date.now()}@test.local`;
@@ -131,18 +136,19 @@ function lineItem(
 // references organizations without ON DELETE CASCADE, so its rows go first;
 // otherwise the organization delete in cleanupTestData fails and the fixed
 // fixture ids collide on the next run. If that foreign key gains a cascade,
-// the first delete becomes a no-op.
+// the first delete becomes a no-op. Both organizations hold closed periods,
+// so cleanupTestData purges them as the database owner.
 async function cleanupFixtures(): Promise<void> {
   const svc = await serviceClient();
   const { error } = await svc
     .from("payment_merchant_versions")
     .delete()
-    .in("org_id", [FIXTURE.org, FIXTURE.orgGone]);
+    .in("org_id", [FIXTURE.org, FIXTURE.orgParent]);
   if (error) {
     throw new Error(`[billing_period_delete_guard] cleanup failed: ${error.message}`);
   }
   await cleanupTestData({
-    orgIds: [FIXTURE.org, FIXTURE.orgGone],
+    orgIds: [FIXTURE.org, FIXTURE.orgParent],
     userEmails: [EMAIL_ORG_MANAGER],
   });
 }
@@ -157,16 +163,16 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
 
     await insertOrThrow(svc, "organizations", [
       { id: FIXTURE.org, name: "Delete Guard Org" },
-      { id: FIXTURE.orgGone, name: "Delete Guard Org (deleted)" },
+      { id: FIXTURE.orgParent, name: "Delete Guard Org (parent)" },
     ]);
     await insertOrThrow(svc, "communities", [
       { id: FIXTURE.community, org_id: FIXTURE.org, name: "DG Comm" },
-      { id: FIXTURE.communityOrgGone, org_id: FIXTURE.orgGone, name: "DG Comm (deleted org)" },
+      { id: FIXTURE.communityOrgParent, org_id: FIXTURE.orgParent, name: "DG Comm (parent org)" },
     ]);
     await insertOrThrow(svc, "microgrids", [
       { id: FIXTURE.mgKeep, community_id: FIXTURE.community, name: "DG MG keep", currency: "UGX" },
-      { id: FIXTURE.mgGone, community_id: FIXTURE.community, name: "DG MG gone", currency: "UGX" },
-      { id: FIXTURE.mgOrgGone, community_id: FIXTURE.communityOrgGone, name: "DG MG org", currency: "UGX" },
+      { id: FIXTURE.mgParent, community_id: FIXTURE.community, name: "DG MG parent", currency: "UGX" },
+      { id: FIXTURE.mgOrgParent, community_id: FIXTURE.communityOrgParent, name: "DG MG org", currency: "UGX" },
     ]);
     await insertOrThrow(svc, "households", [
       {
@@ -176,9 +182,9 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
         primary_phone: "+256700000001",
       },
       {
-        id: FIXTURE.hhGone,
-        microgrid_id: FIXTURE.mgGone,
-        display_name: "DG Household gone",
+        id: FIXTURE.hhParent,
+        microgrid_id: FIXTURE.mgParent,
+        display_name: "DG Household parent",
         primary_phone: "+256700000002",
       },
     ]);
@@ -189,8 +195,8 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
       period(FIXTURE.periodDraftPaid, FIXTURE.mgKeep, "2026-03", "draft"),
       period(FIXTURE.periodDraftAttempt, FIXTURE.mgKeep, "2026-04", "draft"),
       period(FIXTURE.periodDraftEvent, FIXTURE.mgKeep, "2026-05", "draft"),
-      period(FIXTURE.periodGoneClosed, FIXTURE.mgGone, "2026-01", "closed"),
-      period(FIXTURE.periodOrgGoneClosed, FIXTURE.mgOrgGone, "2026-01", "closed"),
+      period(FIXTURE.periodParentClosed, FIXTURE.mgParent, "2026-01", "closed"),
+      period(FIXTURE.periodOrgParentClosed, FIXTURE.mgOrgParent, "2026-01", "closed"),
     ]);
 
     await insertOrThrow(svc, "billing_line_items", [
@@ -202,7 +208,7 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
       }),
       lineItem(FIXTURE.lineDraftAttempt, FIXTURE.periodDraftAttempt, FIXTURE.hhKeep),
       lineItem(FIXTURE.lineDraftEvent, FIXTURE.periodDraftEvent, FIXTURE.hhKeep),
-      lineItem(FIXTURE.lineGoneClosed, FIXTURE.periodGoneClosed, FIXTURE.hhGone, {
+      lineItem(FIXTURE.lineParentClosed, FIXTURE.periodParentClosed, FIXTURE.hhParent, {
         payment_status: "paid",
         paid_at: new Date().toISOString(),
       }),
@@ -227,14 +233,14 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
         merchant_reference: `DG-${FIXTURE.attemptKeep}`,
       },
       {
-        id: FIXTURE.attemptGone,
+        id: FIXTURE.attemptParent,
         org_id: FIXTURE.org,
-        line_item_id: FIXTURE.lineGoneClosed,
+        line_item_id: FIXTURE.lineParentClosed,
         community_id: FIXTURE.community,
         merchant_account_id: FIXTURE.merchant,
         merchant_account_version: 1,
         amount: 5000,
-        merchant_reference: `DG-${FIXTURE.attemptGone}`,
+        merchant_reference: `DG-${FIXTURE.attemptParent}`,
       },
     ]);
     await insertOrThrow(svc, "payment_events", {
@@ -333,26 +339,30 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
     expect(await periodExists(FIXTURE.periodClosed)).toBe(true);
   });
 
-  it("deleting the microgrid still removes its closed periods and payment records", async () => {
+  it("deleting the microgrid is refused while it holds a closed period, and its payment records stay", async () => {
     const { data, error } = await manager.client.rpc("fn_entity_delete_microgrid", {
-      p_id: FIXTURE.mgGone,
+      p_id: FIXTURE.mgParent,
     });
-    expect(error).toBeNull();
-    expect(data).toBe(1);
-    expect(await periodExists(FIXTURE.periodGoneClosed)).toBe(false);
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/^billing_period_kept/);
+    expect(error?.details).toBe("closed");
+    expect(data).toBeNull();
+    expect(await periodExists(FIXTURE.periodParentClosed)).toBe(true);
 
     const svc = await serviceClient();
     const { data: attempts } = await svc
       .from("payment_attempts")
       .select("id")
-      .eq("id", FIXTURE.attemptGone);
-    expect(attempts ?? []).toHaveLength(0);
+      .eq("id", FIXTURE.attemptParent);
+    expect(attempts ?? []).toHaveLength(1);
   });
 
-  it("deleting the organization still removes its closed periods", async () => {
+  it("deleting the organization is refused while it holds a closed period", async () => {
     const svc = await serviceClient();
-    const { error } = await svc.from("organizations").delete().eq("id", FIXTURE.orgGone);
-    expect(error).toBeNull();
-    expect(await periodExists(FIXTURE.periodOrgGoneClosed)).toBe(false);
+    const { error } = await svc.from("organizations").delete().eq("id", FIXTURE.orgParent);
+    expect(error?.code).toBe("23514");
+    expect(error?.message).toMatch(/^billing_period_kept/);
+    expect(error?.details).toBe("closed");
+    expect(await periodExists(FIXTURE.periodOrgParentClosed)).toBe(true);
   });
 });

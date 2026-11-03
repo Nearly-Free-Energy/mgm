@@ -21,8 +21,10 @@
  * (#51) may not have shipped yet. When C lands, replace literals with imports.
  */
 
+import { spawnSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SignJWT } from "jose";
+import { isPeriodKeptError } from "@/lib/billing/period-delete";
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -288,8 +290,103 @@ export async function cleanupTestData(opts: {
     }
   }
 
-  // Delete orgs — cascades to everything underneath.
+  // Delete orgs — cascades to everything underneath. The database refuses
+  // to delete an org that still holds closed billing or billing with
+  // recorded payments (20261103160000), whoever asks; those are purged as
+  // the database owner instead.
+  const kept: string[] = [];
   for (const orgId of opts.orgIds) {
-    await svc.from("organizations").delete().eq("id", orgId);
+    const { error } = await svc.from("organizations").delete().eq("id", orgId);
+    if (error && isPeriodKeptError(error)) kept.push(orgId);
+  }
+  purgeOrganizationsAsOwner(kept);
+}
+
+// ── Database-owner access (fixture cleanup) ───────────────────────────────
+
+/**
+ * Runs one SQL statement against the local database as its owner
+ * (`postgres`), through `supabase db query`. PostgREST never connects as
+ * the owner, so this is the only way a suite can do owner-only work: purge
+ * fixtures the billing retention guards keep, or check what the guards do
+ * to the owner itself. `supabase db query` sends one statement, so several
+ * steps go in one `DO` block, which also makes them atomic.
+ *
+ * Uses whichever `supabase` comes first on PATH (see dek-bootstrap.test.ts)
+ * and the local project in the working directory, or SUPABASE_WORKDIR.
+ */
+export function runAsDatabaseOwner(sql: string): {
+  ok: boolean;
+  stdout: string;
+  output: string;
+} {
+  const result = spawnSync(
+    "supabase",
+    ["db", "query", "--local", "--agent=no", "-o", "json", sql],
+    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 60_000 }
+  );
+  if (result.error) {
+    throw new Error(
+      `[RLS tests] Could not run the supabase CLI for owner SQL: ${result.error.message}`
+    );
+  }
+  return {
+    ok: result.status === 0,
+    stdout: result.stdout,
+    output: `${result.stdout}${result.stderr}`,
+  };
+}
+
+/**
+ * The triggers that refuse deleting closed billing or billing with recorded
+ * payments, which a purge disables inside its own statement. A purge fails
+ * if one of them is renamed or dropped, so update this list in the same
+ * commit as the migration that does it.
+ */
+const BILLING_RETENTION_TRIGGERS: ReadonlyArray<readonly [table: string, trigger: string]> = [
+  ["organizations", "trg_billing_kept_before_delete"],
+  ["communities", "trg_billing_kept_before_delete"],
+  ["microgrids", "trg_billing_kept_before_delete"],
+  ["billing_periods", "trg_billing_period_before_delete_guard"],
+  ["billing_line_items", "trg_billing_line_item_before_delete_guard"],
+];
+
+const FIXTURE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Deletes fixture organizations, with everything that cascades from them,
+ * as the database owner with the billing retention triggers disabled. The
+ * triggers are disabled and re-enabled inside one statement, so no other
+ * session ever sees them off. Also deletes the organizations'
+ * payment_merchant_versions rows, whose foreign key does not cascade.
+ *
+ * Test cleanup only: nothing in the application has, or needs, a way to do this.
+ */
+export function purgeOrganizationsAsOwner(orgIds: string[]): void {
+  if (orgIds.length === 0) return;
+  for (const id of orgIds) {
+    if (!FIXTURE_UUID_RE.test(id)) {
+      throw new Error(`[RLS tests] Not a fixture organization id: ${id}`);
+    }
+  }
+  const ids = `ARRAY[${orgIds.map((id) => `'${id}'`).join(", ")}]::uuid[]`;
+  const toggle = (action: "DISABLE" | "ENABLE") =>
+    BILLING_RETENTION_TRIGGERS.map(
+      ([table, trigger]) => `  ALTER TABLE ${table} ${action} TRIGGER ${trigger};`
+    ).join("\n");
+  const result = runAsDatabaseOwner(
+    [
+      "DO $purge$",
+      "BEGIN",
+      toggle("DISABLE"),
+      `  DELETE FROM payment_merchant_versions WHERE org_id = ANY (${ids});`,
+      `  DELETE FROM organizations WHERE id = ANY (${ids});`,
+      toggle("ENABLE"),
+      "END",
+      "$purge$",
+    ].join("\n")
+  );
+  if (!result.ok) {
+    throw new Error(`[RLS tests] Owner purge of ${orgIds.join(", ")} failed:\n${result.output}`);
   }
 }

@@ -60,10 +60,15 @@ vi.mock("@/lib/plugins/state", () => ({
 // lookup (maybeSingle) result. Other .from() calls default to an empty
 // "no rows" shape — descendant counters and similar calls just come back
 // with `count: 0`.
-function configureEntityLookup(result: {
-  data: { id: string; name: string } | null;
-  error: { code?: string; message: string } | null;
-}) {
+function configureEntityLookup(
+  result: {
+    data: { id: string; name: string } | null;
+    error: { code?: string; message: string } | null;
+  },
+  // The descendant counters' non-count reads per table; every other read
+  // returns no rows.
+  rows: Record<string, unknown[]> = {}
+) {
   // Build a thenable stub that also supports unlimited `.eq()` chaining
   // and an `.in()` terminator. Both count-style (head:true) and non-count
   // calls resolve to an empty shape — exact counts don't affect the HTTP
@@ -78,6 +83,7 @@ function configureEntityLookup(result: {
     const stub: {
       eq: (...args: unknown[]) => typeof stub;
       in: (...args: unknown[]) => typeof stub;
+      or: (...args: unknown[]) => typeof stub;
       maybeSingle: () => Promise<unknown>;
       then: (
         onFulfilled: (v: unknown) => unknown
@@ -85,6 +91,7 @@ function configureEntityLookup(result: {
     } = {
       eq: () => stub,
       in: () => stub,
+      or: () => stub,
       maybeSingle: () => Promise.resolve(result),
       then: (onFulfilled) => Promise.resolve(result).then(onFulfilled),
     };
@@ -106,7 +113,7 @@ function configureEntityLookup(result: {
         if (opts?.head) {
           return chainable({ data: null, error: null, count: 0 });
         }
-        return chainable({ data: [], error: null });
+        return chainable({ data: rows[table] ?? [], error: null });
       },
     };
   });
@@ -196,6 +203,29 @@ describe("DELETE /api/organizations/[id]", () => {
     expect(logged.at).toMatch(/\d{4}-\d{2}-\d{2}T/);
 
     infoSpy.mockRestore();
+  });
+
+  it("returns 409 that says why when the database keeps the organization's billing", async () => {
+    configureEntityLookup({
+      data: { id: VALID_UUID, name: "NFE" },
+      error: null,
+    });
+    mockRpcImpl.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23514",
+        message: "billing_period_kept: an organization with recorded payments cannot be deleted",
+        details: "payment_activity",
+      },
+    });
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(makeRequest(), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "This organization has billing with recorded payments, which is kept with its payment records, so it cannot be deleted."
+    );
   });
 
   it("returns 409 when community management is disabled — records are preserved", async () => {
@@ -295,5 +325,26 @@ describe("GET /api/organizations/[id]/delete-preview", () => {
     expect(typeof json.as_of).toBe("string");
     // parent is null for Org per AC-ROUTE-3.
     expect(json.parent).toBeNull();
+  });
+
+  it("returns 409 with the reason when the organization holds closed billing", async () => {
+    configureEntityLookup(
+      { data: { id: VALID_UUID, name: "NFE" }, error: null },
+      {
+        communities: [{ id: "comm-1" }],
+        microgrids: [{ id: "mg-1" }],
+        billing_periods: [{ id: "period-1", status: "closed" }],
+      }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/organizations/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "This organization has 1 closed billing period. Closed billing and billing with recorded payments are kept, so this organization cannot be deleted."
+    );
   });
 });

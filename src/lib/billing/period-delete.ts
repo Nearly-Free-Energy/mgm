@@ -3,12 +3,14 @@
  *
  * Only draft periods with no payment activity can be deleted. The database
  * enforces that with a BEFORE DELETE trigger on billing_periods
- * (migration 20261103090100, fn_billing_period_before_delete_guard), which
- * refuses with SQLSTATE 23514, a message starting `billing_period_kept`, and
- * DETAIL `closed` or `payment_activity`. If that migration changes its code,
- * message prefix or DETAIL values, update `isPeriodKeptError` to match; if
- * it changes which line items count as payment activity, update
- * `lineItemHasRecordedPayment`.
+ * (fn_billing_period_before_delete_guard, last issued by migration
+ * 20261103160000), which refuses with SQLSTATE 23514, a message starting
+ * `billing_period_kept`, and DETAIL `closed` or `payment_activity`. The
+ * guards that 20261103160000 adds for bills and for organization, community
+ * and microgrid deletes refuse the same way. If those migrations change the
+ * code, message prefix or DETAIL values, update `isPeriodKeptError` and
+ * `periodDeleteErrorMessage` to match; if they change which line items count
+ * as payment activity, update `lineItemHasRecordedPayment`.
  */
 
 /** What a confirmed delete removes, shown in the confirm dialog. */
@@ -20,6 +22,10 @@ export const PERIOD_KEPT_CLOSED_MESSAGE =
 
 export const PERIOD_KEPT_PAYMENTS_MESSAGE =
   "This period has recorded payments, so it is kept with its payment records and cannot be deleted.";
+
+/** For a refusal whose DETAIL names neither reason above. */
+export const PERIOD_KEPT_MESSAGE =
+  "This period is kept as part of the billing record and cannot be deleted.";
 
 /**
  * True when a line item carries a recorded payment the trigger counts: a
@@ -52,9 +58,9 @@ export function isPeriodKeptError(error: PeriodDeleteError): boolean {
 /** The message to show when a delete is refused or fails. */
 export function periodDeleteErrorMessage(error: PeriodDeleteError): string {
   if (isPeriodKeptError(error)) {
-    return error.details === "closed"
-      ? PERIOD_KEPT_CLOSED_MESSAGE
-      : PERIOD_KEPT_PAYMENTS_MESSAGE;
+    if (error.details === "closed") return PERIOD_KEPT_CLOSED_MESSAGE;
+    if (error.details === "payment_activity") return PERIOD_KEPT_PAYMENTS_MESSAGE;
+    return PERIOD_KEPT_MESSAGE;
   }
   return error.message || "Could not delete the period.";
 }

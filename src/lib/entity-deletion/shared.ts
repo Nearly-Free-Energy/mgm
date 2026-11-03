@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DescendantCounts, EntityKind } from "@/lib/entity-descendants";
 import { SUPER_ADMIN } from "@/lib/roles";
 import { getCurrentUserRoles } from "@/lib/auth/access";
+import { isPeriodKeptError } from "@/lib/billing/period-delete";
 
 export const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,6 +107,62 @@ export function errorBody(message: string): { error: string } {
   return { error: message };
 }
 
+function plural(n: number, singular: string, pluralForm: string): string {
+  return `${n} ${n === 1 ? singular : pluralForm}`;
+}
+
+/**
+ * Billing the database keeps, which makes it refuse the delete: closed
+ * periods, and draft periods with payment activity (migration
+ * 20261103160000). `null` for an edge, whose delete never removes billing
+ * periods, and when there is none.
+ */
+export function keptBillingCounts(
+  counts: DescendantCounts
+): { closed: number; withPayments: number } | null {
+  if (counts.kind === "edge") return null;
+  const kept = {
+    closed: counts.billing_periods_closed,
+    withPayments: counts.billing_periods_with_payments,
+  };
+  return kept.closed > 0 || kept.withPayments > 0 ? kept : null;
+}
+
+/** Why the delete-preview route will not open the delete dialog. */
+export function keptBillingMessage(
+  entityLabel: string,
+  kept: { closed: number; withPayments: number }
+): string {
+  const held = [
+    kept.closed > 0
+      ? plural(kept.closed, "closed billing period", "closed billing periods")
+      : null,
+    kept.withPayments > 0
+      ? `${plural(kept.withPayments, "billing period", "billing periods")} with recorded payments`
+      : null,
+  ].filter(Boolean);
+  return (
+    `This ${entityLabel} has ${held.join(" and ")}. Closed billing and billing ` +
+    `with recorded payments are kept, so this ${entityLabel} cannot be deleted.`
+  );
+}
+
+/**
+ * The message for the database's own refusal (`billing_period_kept`, DETAIL
+ * `closed` or `payment_activity`), which the DELETE route gets when billing
+ * appeared after the preview, or when the caller's RLS hid it from the
+ * preview's counts.
+ */
+function keptBillingRefusalMessage(entityLabel: string, details?: string | null): string {
+  if (details === "closed") {
+    return `This ${entityLabel} has closed billing periods, which are kept as the billing record, so it cannot be deleted.`;
+  }
+  if (details === "payment_activity") {
+    return `This ${entityLabel} has billing with recorded payments, which is kept with its payment records, so it cannot be deleted.`;
+  }
+  return `This ${entityLabel} holds billing that is kept as the billing record, so it cannot be deleted.`;
+}
+
 /**
  * Map a Postgres error surfaced by supabase-js into an HTTP status code
  * and human-readable message. Used by the DELETE routes for their
@@ -115,11 +172,18 @@ export function errorBody(message: string): { error: string } {
  * we do NOT leak raw SQLSTATEs or stack traces to the client.
  */
 export function mapPgError(
-  err: { code?: string; message?: string },
+  err: { code?: string; message?: string; details?: string | null },
   entityLabel: string
 ): { status: number; message: string } {
   const code = err.code;
   const msg = err.message ?? "";
+
+  // The billing retention guards (migration 20261103160000) refuse deleting
+  // an organization, community or microgrid that holds closed billing or
+  // billing with recorded payments.
+  if (isPeriodKeptError(err)) {
+    return { status: 409, message: keptBillingRefusalMessage(entityLabel, err.details) };
+  }
 
   if (code === "42501" || msg.includes("row-level security")) {
     return {
