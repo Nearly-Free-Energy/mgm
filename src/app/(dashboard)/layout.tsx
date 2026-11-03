@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { LogoutButton } from "./logout-button";
-import { SidebarNav } from "./sidebar-nav";
+import { preloadSidebarNav, SidebarNav } from "./sidebar-nav";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 
 export default async function DashboardLayout({
@@ -10,10 +10,21 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // SidebarNav renders only after this layout returns. Its reads need nothing
+  // from the checks below, so they start now instead of after them.
+  preloadSidebarNav();
+
+  // The organization check is global and does not depend on the user, so it
+  // runs alongside the user and role read; the redirects below still apply
+  // in their original order. A failed check surfaces where it is awaited,
+  // after the user check, so a signed-out visitor still goes to /login; the
+  // no-op catch only stops it counting as unhandled until then.
+  const hasOrganization = organizationExists();
+  hasOrganization.catch(() => {});
+
+  // One read of the user and their user_roles rows, shared with SidebarNav
+  // and the page in this render (`@/lib/auth/request-access`).
+  const { user, roles } = await getRequestUserAccess();
 
   if (!user) {
     redirect("/login");
@@ -24,7 +35,7 @@ export default async function DashboardLayout({
   // send them to /setup instead of /no-access. Once the first organization
   // exists, unassigned users fall through to the revoked-user gate below
   // and /no-access is retained for them.
-  if (!(await organizationExists())) {
+  if (!(await hasOrganization)) {
     redirect("/setup");
   }
 
@@ -33,12 +44,8 @@ export default async function DashboardLayout({
   // Send them to /no-access (outside this route group) so they get a
   // clear message + logout action instead of a broken sidebar. The
   // user_roles "Users can view their own roles" SELECT policy lets the
-  // caller see their own rows, so this COUNT is accurate.
-  const { count: roleCount } = await supabase
-    .from("user_roles")
-    .select("id", { head: true, count: "exact" })
-    .eq("user_id", user.id);
-  if ((roleCount ?? 0) === 0) {
+  // caller see their own rows, so this check is accurate.
+  if (roles.length === 0) {
     redirect("/no-access");
   }
 

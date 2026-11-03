@@ -13,8 +13,11 @@
  *     `{ lineItems: 0, errors: [] }` (AC3 explicit no-op).
  *   - Cross-microgrid manualReadings entry surfaces in errors[] with
  *     code='unknown_household' (AC3 attack defense).
- *   - bulk-regenerate of a manual-source household without manualReadings
- *     surfaces in errors[] with code='currently_manual' (AC3 Q5).
+ *   - a manual-source household named in householdIds without a
+ *     manualReadings entry surfaces in errors[] with code='currently_manual'
+ *     (AC3 Q5); a bulk run without householdIds keeps it instead.
+ *   - revertToEdgeHouseholdIds is validated and forwarded; kept households
+ *     are returned in kept[], not errors[].
  *
  * Test pattern: the route is mocked at the supabase + auth + composeBilling
  * boundaries — the capability internals are unit-tested at
@@ -39,6 +42,7 @@ let lastCapabilityCall: {
   billingPeriodId?: string;
   householdIds?: string[];
   manualReadings?: unknown[];
+  revertToEdgeHouseholdIds?: string[];
   seedReadings?: unknown[];
 } | null = null;
 let periodRow: { id: string; microgrid_id: string } | null = {
@@ -83,12 +87,14 @@ vi.mock("@/lib/billing/compose", () => ({
             billingPeriodId: string;
             householdIds?: string[];
             manualReadings?: unknown[];
+            revertToEdgeHouseholdIds?: string[];
             seedReadings?: unknown[];
           }) => {
             lastCapabilityCall = {
               billingPeriodId: input.billingPeriodId,
               householdIds: input.householdIds,
               manualReadings: input.manualReadings,
+              revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
               seedReadings: input.seedReadings,
             };
             return mockCapabilityResult;
@@ -355,6 +361,71 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     const json = await res.json();
     expect(json.code).toBe("billing_disabled");
     expect(lastCapabilityCall).toBeNull();
+  });
+
+  describe("revertToEdgeHouseholdIds", () => {
+    async function post(body: Record<string, unknown>) {
+      const { POST } = await import("../route");
+      return POST(makePostRequest({ billingPeriodId: PERIOD_ID, ...body }));
+    }
+
+    it("forwards a well-formed array to the billing capability", async () => {
+      const res = await post({ householdIds: [HH_A], revertToEdgeHouseholdIds: [HH_A] });
+      expect(res.status).toBe(200);
+      expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toEqual([HH_A]);
+    });
+
+    it("leaves it undefined when omitted", async () => {
+      const res = await post({});
+      expect(res.status).toBe(200);
+      expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toBeUndefined();
+    });
+
+    it("400 when it is not an array", async () => {
+      const res = await post({ revertToEdgeHouseholdIds: HH_A });
+      expect(res.status).toBe(400);
+      expect(lastCapabilityCall).toBeNull();
+    });
+
+    it("400 on a non-UUID entry", async () => {
+      const res = await post({ revertToEdgeHouseholdIds: ["not-a-uuid"] });
+      expect(res.status).toBe(400);
+      expect(lastCapabilityCall).toBeNull();
+    });
+
+    it("400 when a household is also in manualReadings", async () => {
+      const res = await post({
+        manualReadings: [{ householdId: HH_A, startKwh: 1, endKwh: 2 }],
+        revertToEdgeHouseholdIds: [HH_A],
+      });
+      expect(res.status).toBe(400);
+      expect(lastCapabilityCall).toBeNull();
+    });
+  });
+
+  it("returns kept households in kept[], not errors[]", async () => {
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          {
+            kind: "kept",
+            householdId: HH_A,
+            householdName: "HH A",
+            readingSource: "manual",
+          },
+        ],
+      },
+    };
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({
+      lineItems: 0,
+      kept: [{ householdId: HH_A, householdName: "HH A" }],
+      errors: [],
+    });
   });
 
   // #339 — seedReadings validation. The validator shipped with no tests, and

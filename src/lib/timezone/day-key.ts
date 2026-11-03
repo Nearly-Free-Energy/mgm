@@ -59,3 +59,29 @@ export function addDaysToDateKey(dateKey: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * The first instant of calendar day `dateKey` in `timezone` (IANA id): local
+ * midnight, or on a day whose DST change skips midnight, the first instant
+ * that day has. Used to window energy-data timestamps by a period's dates.
+ *
+ * Throws RangeError on an unknown zone id, as `dayKeyInZone` does, and on a
+ * malformed date key.
+ */
+export function startOfDayInZone(dateKey: string, timezone: string): Date {
+  const utcMidnight = Date.parse(`${dateKey}T00:00:00Z`);
+  if (!Number.isFinite(utcMidnight)) {
+    throw new RangeError(`Invalid date key: ${dateKey}`);
+  }
+  // Every IANA offset is within a day of UTC, so the local day starts
+  // within a day either side of UTC midnight. Binary-search the first
+  // millisecond whose local day is not before `dateKey`.
+  let low = utcMidnight - 86_400_000;
+  let high = utcMidnight + 86_400_000;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (dayKeyInZone(mid, timezone) < dateKey) low = mid + 1;
+    else high = mid;
+  }
+  return new Date(low);
+}
