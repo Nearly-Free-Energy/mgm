@@ -24,7 +24,9 @@
  *   The component renders its own button + ConfirmDialog as a React Fragment.
  *   We render it outside the DropdownMenu.Portal to avoid z-index/portal
  *   conflicts and trigger it from the menu item's `onSelect` via an
- *   imperative ref click on the inner button.
+ *   imperative ref click on the inner button. Because that wrapper is
+ *   hidden, a failed delete preview is reported back through
+ *   `onPreviewError` and shown as a banner here, outside the wrapper.
  */
 
 import * as React from "react";
@@ -32,6 +34,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useRouter } from "next/navigation";
 import { DeleteEntityButton } from "@/components/forms/DeleteEntityButton";
 import { EdgeFormModal } from "@/components/forms/EdgeForm";
+import { Banner } from "@/components/ui/banner";
 import type { Edge } from "@/lib/types/domain";
 
 interface EdgeRowActionsProps {
@@ -47,6 +50,7 @@ export function EdgeRowActions({
 }: EdgeRowActionsProps) {
   const router = useRouter();
   const [configureOpen, setConfigureOpen] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
   // Ref on a wrapper div that contains DeleteEntityButton's internal button.
   // onSelect in the Delete menu item imperatively clicks it so the
   // DeleteEntityButton's handleOpen fires after the menu closes.
@@ -113,7 +117,28 @@ export function EdgeRowActions({
             entity="edge"
             id={edge.id}
             name={edge.name}
+            onPreviewError={setDeleteError}
           />
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="mt-2 text-left">
+          <Banner
+            tone="destructive"
+            title={`Couldn’t open delete dialog`}
+            action={
+              <button
+                type="button"
+                onClick={() => setDeleteError(null)}
+                className="text-[13px] font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Dismiss
+              </button>
+            }
+          >
+            {deleteError}
+          </Banner>
         </div>
       )}
 
