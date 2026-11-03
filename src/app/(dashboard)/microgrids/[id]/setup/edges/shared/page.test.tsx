@@ -4,7 +4,7 @@
 // (10 households × 10 consumption_meter devices, all linked). So the
 // primary test path is the empty state.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type React from "react";
 
@@ -50,9 +50,57 @@ function buildSharedDevicesQuery(devices: unknown[]) {
   };
 }
 
+function buildErrorQuery() {
+  return {
+    select: () => ({
+      eq: () => ({
+        order: () => ({
+          returns: () =>
+            Promise.resolve({
+              data: null,
+              error: {
+                code: "42501",
+                message: "permission denied for view microgrid_shared_devices",
+                details: null,
+                hint: null,
+              },
+            }),
+        }),
+      }),
+    }),
+  };
+}
+
 describe("SharedDevicesPage", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  it("shows a plain message and logs the error when the view query fails", async () => {
+    mockFrom.mockImplementation(() => buildErrorQuery());
+
+    const jsx = await SharedDevicesPage({
+      params: Promise.resolve({ id: "mg-1" }),
+    });
+    const html = renderToStaticMarkup(jsx as React.ReactElement);
+
+    expect(html).toContain("Could not load shared devices");
+    expect(html).not.toContain("permission denied");
+    expect(html).not.toContain("microgrid_shared_devices");
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(consoleError.mock.calls[0]![0] as string);
+    expect(logged).toMatchObject({
+      event: "shared_devices.query_error",
+      microgridId: "mg-1",
+      code: "42501",
+    });
   });
 
   it("renders the empty-state copy when every device is linked to a household", async () => {
