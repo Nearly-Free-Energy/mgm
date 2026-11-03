@@ -292,6 +292,140 @@ describe("RegenerateRowDialog — edge paid path (2b)", () => {
   });
 });
 
+describe("RegenerateRowDialog — switch a manual row back to edge data", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    refreshMock.mockClear();
+  });
+
+  it("unpaid: the generate POST names the household in revertToEdgeHouseholdIds", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lineItems: 1, kept: [], errors: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const props = makeProps({
+      lineItem: { id: "li-1", payment_status: "unpaid", reading_source: "manual" },
+    });
+    render(
+      <Wrap>
+        <RegenerateRowDialog {...props} />
+      </Wrap>,
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const generateCall = fetchMock.mock.calls.find((c) => c[0] === "/api/billing/generate");
+    expect(JSON.parse(generateCall![1].body as string)).toEqual({
+      billingPeriodId: "p-1",
+      householdIds: ["h-1"],
+      revertToEdgeHouseholdIds: ["h-1"],
+    });
+    await waitFor(() => expect(props.onSuccess).toHaveBeenCalledWith("li-1"));
+
+    vi.unstubAllGlobals();
+  });
+
+  it("unpaid edge row: no revertToEdgeHouseholdIds is sent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lineItems: 1, kept: [], errors: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const props = makeProps({
+      lineItem: { id: "li-1", payment_status: "unpaid", reading_source: "edge" },
+    });
+    render(
+      <Wrap>
+        <RegenerateRowDialog {...props} />
+      </Wrap>,
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).not.toHaveProperty("revertToEdgeHouseholdIds");
+
+    vi.unstubAllGlobals();
+  });
+
+  it("paid: both the preview and the confirmed generate name the household", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === "/api/billing/regenerate-preview") {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              preview: [
+                {
+                  householdId: "h-1",
+                  householdName: "Alice",
+                  startKwh: 100,
+                  endKwh: 145,
+                  usageKwh: 45,
+                  tierBreakdown: [],
+                  totalAmount: 22000,
+                  previousTotalAmount: 20000,
+                  previousPaymentStatus: "paid",
+                },
+              ],
+              kept: [],
+              errors: [],
+            }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ lineItems: 1, kept: [], errors: [] }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const props = makeProps({
+      lineItem: { id: "li-1", payment_status: "paid", reading_source: "manual" },
+    });
+    render(
+      <Wrap>
+        <RegenerateRowDialog {...props} />
+      </Wrap>,
+    );
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-testid="regenerate-preview-diff"]'),
+      ).not.toBeNull(),
+    );
+    const previewCall = fetchMock.mock.calls.find(
+      (c) => c[0] === "/api/billing/regenerate-preview",
+    );
+    expect(JSON.parse(previewCall![1].body as string)).toEqual({
+      billingPeriodId: "p-1",
+      householdIds: ["h-1"],
+      revertToEdgeHouseholdIds: ["h-1"],
+    });
+
+    const confirmBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent === "Regenerate");
+    await act(async () => {
+      fireEvent.click(confirmBtn!);
+    });
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter((c) => c[0] === "/api/billing/generate").length,
+      ).toBe(1);
+    });
+    const generateCall = fetchMock.mock.calls.find((c) => c[0] === "/api/billing/generate");
+    expect(JSON.parse(generateCall![1].body as string)).toEqual({
+      billingPeriodId: "p-1",
+      householdIds: ["h-1"],
+      revertToEdgeHouseholdIds: ["h-1"],
+    });
+
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("RegenerateRowDialog — manual entry path (2c)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

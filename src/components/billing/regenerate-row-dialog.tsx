@@ -16,6 +16,11 @@
  *       confirms to fire the actual write. The diff includes a closed-period
  *       audit-revision warn-banner when period.status === 'closed' (AC6).
  *
+ *       In both edge paths a row whose `reading_source` is 'manual' is being
+ *       switched back to edge data, so the request names it in
+ *       `revertToEdgeHouseholdIds`; without that the engine keeps the manual
+ *       row and refuses with `currently_manual`.
+ *
  *   2c. mode='manual':
  *       Inline form with start_kwh / end_kwh / reason. Validation enforced
  *       client-side: both kWh values non-negative finite numbers and
@@ -39,6 +44,7 @@ import type { RowBannerEntry } from "@/components/billing/row-banner-stack";
 import type {
   BillingLineItemPaymentStatus,
   BillingPeriodStatus,
+  ReadingSource,
 } from "@/lib/types/domain";
 
 export type RegenerateRowMode = "edge" | "manual";
@@ -53,6 +59,29 @@ export interface RegenerateRowDialogPeriod {
 export interface RegenerateRowDialogLineItem {
   id: string;
   payment_status: BillingLineItemPaymentStatus;
+  /** The row's current source; 'manual' makes edge mode a switch back. */
+  reading_source?: ReadingSource;
+}
+
+/**
+ * Request body for an edge-mode regenerate of one household. A manual row
+ * is reverted explicitly; an edge row is not named, so a row that turned
+ * manual since the table rendered is refused rather than overwritten — that
+ * relies on the engine's manual-row guard ("Manual rows" in
+ * `src/lib/billing/generate.ts`); if the guard changes, revisit.
+ */
+function edgeRegenerateBody(
+  periodId: string,
+  householdId: string,
+  readingSource: ReadingSource | undefined,
+) {
+  return {
+    billingPeriodId: periodId,
+    householdIds: [householdId],
+    ...(readingSource === "manual"
+      ? { revertToEdgeHouseholdIds: [householdId] }
+      : {}),
+  };
 }
 
 export interface RegenerateRowDialogHousehold {
@@ -142,10 +171,9 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
       const res = await fetch("/api/billing/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          billingPeriodId: period.id,
-          householdIds: [household.id],
-        }),
+        body: JSON.stringify(
+          edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+        ),
       });
       const body = (await res.json().catch(() => ({}))) as {
         errors?: Array<{ householdId: string; error: string; code?: string }>;
@@ -190,7 +218,7 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
       });
       onOpenChange(false);
     }
-  }, [household.id, period.id, lineItem.id, pushBanner, onOpenChange, onSuccess, router]);
+  }, [household.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange, onSuccess, router]);
 
   // Keep the ref up-to-date with the latest closure each render.
   React.useEffect(() => {
@@ -256,10 +284,9 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
         const res = await fetch("/api/billing/regenerate-preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            billingPeriodId: period.id,
-            householdIds: [household.id],
-          }),
+          body: JSON.stringify(
+            edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+          ),
         });
         const body = (await res.json().catch(() => ({}))) as {
           preview?: PreviewRow[];
@@ -306,7 +333,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
         onOpenChange(false);
       }
     })();
-  }, [household.id, period.id, lineItem.id, pushBanner, onOpenChange]);
+  }, [household.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange]);
 
   const periodLabel =
     period.start_date === period.end_date
@@ -317,10 +344,9 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
     const res = await fetch("/api/billing/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        billingPeriodId: period.id,
-        householdIds: [household.id],
-      }),
+      body: JSON.stringify(
+        edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+      ),
     });
     const body = (await res.json().catch(() => ({}))) as {
       errors?: Array<{ householdId: string; error: string; code?: string }>;
@@ -334,7 +360,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
     }
     onSuccess?.(lineItem.id);
     router.refresh();
-  }, [household.id, period.id, lineItem.id, onSuccess, router]);
+  }, [household.id, period.id, lineItem.id, lineItem.reading_source, onSuccess, router]);
 
   // Body content varies by state.
   const previewBody = (() => {

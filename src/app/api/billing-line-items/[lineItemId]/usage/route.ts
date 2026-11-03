@@ -372,6 +372,14 @@ export async function PATCH(
       { status: 500 }
     );
   }
+  if (result.kind === "kept") {
+    // Should never happen — a manualReadings entry for the household lifts
+    // the engine's keep-manual guard, and this route always sends one.
+    return NextResponse.json(
+      { error: "Internal error: line item was not rewritten.", reason: "unknown_error" },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ lineItem: result.lineItem }, { status: 200 });
 }
