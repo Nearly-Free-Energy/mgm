@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PaymentsCapability } from "../capability";
 import { PaymentError } from "../errors";
-import type { ProviderFactory } from "../repository";
+import { ATTEMPT_NOT_OPEN, type ProviderFactory } from "../repository";
 import {
   ATTEMPT,
   COMMUNITY,
@@ -247,8 +247,8 @@ describe("PaymentsCapability checkout start failures", () => {
     const repo = baseRepo(); const track = vi.spyOn(repo, "updateAttemptTracking");
     expect((await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).ok).toBe(true);
     expect(track.mock.calls.map(([input]) => input)).toEqual([
-      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1" },
-      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1", checkoutUrl: "https://pay.example/checkout" },
+      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1", requireOpen: true },
+      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1", checkoutUrl: "https://pay.example/checkout", requireOpen: true },
     ]);
   });
 
@@ -263,9 +263,31 @@ describe("PaymentsCapability checkout start failures", () => {
     const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
     const track = vi.spyOn(repo, "updateAttemptTracking").mockImplementation(async input => (input.checkoutUrl ? { message: "write failed" } : null));
     expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
-    expect(track).toHaveBeenCalledWith({ attemptId: ATTEMPT, providerTrackingId: "TRACK-1" });
+    expect(track).toHaveBeenCalledWith({ attemptId: ATTEMPT, providerTrackingId: "TRACK-1", requireOpen: true });
     expect(track).toHaveBeenCalledTimes(3);
     expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmation_pending", failureMessage: "Checkout URL could not be persisted" }));
+  });
+
+  it("hands out no checkout URL when the attempt was superseded before the tracking write", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    const track = vi.spyOn(repo, "updateAttemptTracking").mockResolvedValue({ code: ATTEMPT_NOT_OPEN, message: "closed" });
+    const result = await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "payments_checkout_superseded" });
+    expect(JSON.stringify(result)).not.toContain("pay.example");
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).not.toHaveBeenCalledWith(expect.objectContaining({ checkoutUrl: expect.anything() }));
+    expect(mark).not.toHaveBeenCalled();
+  });
+
+  it("hands out no checkout URL when the attempt is closed between the tracking and URL writes", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    vi.spyOn(repo, "updateAttemptTracking").mockImplementation(async input =>
+      input.checkoutUrl ? { code: ATTEMPT_NOT_OPEN, message: "closed" } : null
+    );
+    const result = await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "payments_checkout_superseded" });
+    expect(JSON.stringify(result)).not.toContain("pay.example");
+    expect(mark).not.toHaveBeenCalled();
   });
 
   it("holds for confirmation without a URL write when the tracking ID cannot be saved", async () => {

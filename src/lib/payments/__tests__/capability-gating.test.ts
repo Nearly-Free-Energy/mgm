@@ -194,6 +194,7 @@ const PRIVATE_HELPERS = [
   "applySnapshot",
   "parseEnvelope",
   "holdForConfirmation",
+  "checkoutSuperseded",
   "writeWithRetry",
 ] as const;
 

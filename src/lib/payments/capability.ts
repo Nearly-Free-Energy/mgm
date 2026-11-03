@@ -22,6 +22,7 @@ import type {
   ProviderFactory,
   RepositoryError,
 } from "./repository";
+import { ATTEMPT_NOT_OPEN } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
 
@@ -433,18 +434,28 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     }
     // The tracking ID is written first and on its own, so refresh and the
     // worker can follow the order even when the checkout URL write fails.
+    // Both writes require the attempt to be still open: a request that took
+    // longer than the supersede window may find its attempt already replaced
+    // by a newer checkout, and must not hand out a second payable URL.
     const tracked = await this.writeWithRetry(() =>
-      this.repo.updateAttemptTracking({ attemptId, providerTrackingId: checkout.providerTrackingId })
+      this.repo.updateAttemptTracking({
+        attemptId,
+        providerTrackingId: checkout.providerTrackingId,
+        requireOpen: true,
+      })
     );
-    if (!tracked) return this.holdForConfirmation(attemptId, "Checkout tracking ID could not be persisted");
+    if (tracked === "closed") return this.checkoutSuperseded();
+    if (tracked === "failed") return this.holdForConfirmation(attemptId, "Checkout tracking ID could not be persisted");
     const linked = await this.writeWithRetry(() =>
       this.repo.updateAttemptTracking({
         attemptId,
         providerTrackingId: checkout.providerTrackingId,
         checkoutUrl: checkout.redirectUrl,
+        requireOpen: true,
       })
     );
-    if (!linked) return this.holdForConfirmation(attemptId, "Checkout URL could not be persisted");
+    if (linked === "closed") return this.checkoutSuperseded();
+    if (linked === "failed") return this.holdForConfirmation(attemptId, "Checkout URL could not be persisted");
     const attempt = (await this.repo.getAttempt(attemptId).catch(() => null)) ?? {
       ...created.attempt,
       provider_tracking_id: checkout.providerTrackingId,
@@ -471,16 +482,36 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     };
   }
 
-  /** Runs a repository write, retrying once; a throw counts as a failure. */
-  private async writeWithRetry(write: () => Promise<RepositoryError | null>): Promise<boolean> {
+  /**
+   * This request's attempt was closed while the provider call was running:
+   * another checkout superseded it, or it settled. Nothing is written and no
+   * checkout URL is returned; the next tap finds the current attempt.
+   */
+  private checkoutSuperseded() {
+    return {
+      ok: false as const, status: 409 as const, code: "payments_checkout_superseded",
+      message: "This checkout was replaced by a newer one. Open the payment link again.",
+    };
+  }
+
+  /**
+   * Runs a repository write, retrying once; a throw counts as a failure.
+   * "closed" means the write found the attempt no longer open, which a retry
+   * cannot change.
+   */
+  private async writeWithRetry(
+    write: () => Promise<RepositoryError | null>
+  ): Promise<"written" | "closed" | "failed"> {
     for (let tries = 0; tries < 2; tries++) {
       try {
-        if (!(await write())) return true;
+        const error = await write();
+        if (!error) return "written";
+        if (error.code === ATTEMPT_NOT_OPEN) return "closed";
       } catch {
         // Counted as a failed write.
       }
     }
-    return false;
+    return "failed";
   }
 
   async refreshPaymentStatus(attemptId: string) {

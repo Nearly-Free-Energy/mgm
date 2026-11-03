@@ -33,6 +33,9 @@ export function paymentsFailure(
 
 export type RepositoryError = { code?: string; message: string };
 
+/** updateAttemptTracking({ requireOpen: true }) found the attempt no longer open. */
+export const ATTEMPT_NOT_OPEN = "attempt_not_open";
+
 export type MerchantAccountPublic = {
   id: string;
   org_id: string;
@@ -172,7 +175,15 @@ export interface PaymentsRepository {
     /** Omitted: leave the stored checkout URL unchanged. */
     checkoutUrl?: string;
     status?: AttemptStatus;
+    /**
+     * Write only while the attempt is still open (pending or
+     * confirmation_pending). When it is not — another request superseded
+     * it, or it settled — nothing is written and the error carries code
+     * ATTEMPT_NOT_OPEN, so the caller knows the attempt is no longer its own.
+     */
+    requireOpen?: boolean;
   }): Promise<RepositoryError | null>;
+  /** Changes the status of an open attempt only; a closed one is left as it is. */
   markAttemptStatus(input: {
     attemptId: string;
     status: AttemptStatus;
