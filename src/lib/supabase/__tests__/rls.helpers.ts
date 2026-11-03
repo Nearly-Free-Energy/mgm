@@ -21,7 +21,7 @@
  * (#51) may not have shipped yet. When C lands, replace literals with imports.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { SignJWT } from "jose";
 import { isPeriodKeptError } from "@/lib/billing/period-delete";
@@ -337,6 +337,96 @@ export function runAsDatabaseOwner(sql: string): {
   };
 }
 
+type OwnerQueryResult = ReturnType<typeof runAsDatabaseOwner>;
+
+/** `runAsDatabaseOwner` in a connection of its own, without waiting for it. */
+function runAsDatabaseOwnerInBackground(sql: string): {
+  done: Promise<OwnerQueryResult>;
+  finished: () => boolean;
+} {
+  let finished = false;
+  const done = new Promise<OwnerQueryResult>((resolve, reject) => {
+    const child = spawn("supabase", ["db", "query", "--local", "--agent=no", "-o", "json", sql]);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", (err) =>
+      reject(new Error(`[RLS tests] Could not run the supabase CLI for owner SQL: ${err.message}`))
+    );
+    child.on("close", (code) => {
+      finished = true;
+      resolve({ ok: code === 0, stdout, output: `${stdout}${stderr}` });
+    });
+  });
+  return { done, finished: () => finished };
+}
+
+let raceLockKey = 970_000;
+
+/**
+ * Races two connections deterministically. `holderSql` runs as the database
+ * owner in a transaction of its own and takes its row locks. Once it holds
+ * them, `contender` runs (an API call through PostgREST). The holder commits
+ * only after another backend is waiting on its transaction, so the
+ * contender's statement is known to have blocked on the holder's locks
+ * rather than finished before them. The holder fails after 30 seconds if
+ * nothing waits on it; that failure means the contender never touched the
+ * locked rows.
+ *
+ * `holderSql` is one or more PL/pgSQL statements, each ending in `;`.
+ */
+export async function raceAgainstHeldTransaction<T>(
+  holderSql: string,
+  contender: () => PromiseLike<T>
+): Promise<{ holder: OwnerQueryResult; contender: T }> {
+  const key = raceLockKey++;
+  const holder = runAsDatabaseOwnerInBackground(
+    [
+      "DO $race$",
+      "DECLARE",
+      "  deadline timestamptz := clock_timestamp() + interval '30 seconds';",
+      "BEGIN",
+      holderSql,
+      // Tells the test the locks are held. Released at commit.
+      `  PERFORM pg_advisory_xact_lock(${key});`,
+      "  LOOP",
+      "    EXIT WHEN EXISTS (",
+      "      SELECT 1 FROM pg_locks",
+      "      WHERE locktype = 'transactionid'",
+      "        AND transactionid = pg_current_xact_id()::xid",
+      "        AND NOT granted",
+      "    );",
+      "    IF clock_timestamp() > deadline THEN",
+      "      RAISE EXCEPTION 'race holder: nothing waited on this transaction';",
+      "    END IF;",
+      "    PERFORM pg_sleep(0.05);",
+      "  END LOOP;",
+      "END",
+      "$race$",
+    ].join("\n")
+  );
+
+  const started = Date.now();
+  for (;;) {
+    const probe = runAsDatabaseOwner(
+      `SELECT count(*)::int AS held FROM pg_locks
+       WHERE locktype = 'advisory' AND objid = ${key} AND objsubid = 1 AND granted`
+    );
+    if (probe.ok && (JSON.parse(probe.stdout) as { held: number }[])[0]?.held === 1) break;
+    if (holder.finished()) {
+      throw new Error(`[RLS tests] Race holder ended before taking its locks:\n${(await holder.done).output}`);
+    }
+    if (Date.now() - started > 20_000) {
+      throw new Error("[RLS tests] Race holder did not take its locks within 20 seconds");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  const contenderResult = await contender();
+  return { holder: await holder.done, contender: contenderResult };
+}
+
 /**
  * The triggers that refuse deleting closed billing or billing with recorded
  * payments, which a purge disables inside its own statement. A purge fails
@@ -349,6 +439,8 @@ const BILLING_RETENTION_TRIGGERS: ReadonlyArray<readonly [table: string, trigger
   ["microgrids", "trg_billing_kept_before_delete"],
   ["billing_periods", "trg_billing_period_before_delete_guard"],
   ["billing_line_items", "trg_billing_line_item_before_delete_guard"],
+  ["payment_attempts", "trg_payment_record_kept"],
+  ["payment_events", "trg_payment_record_kept"],
 ];
 
 const FIXTURE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

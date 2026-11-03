@@ -19,9 +19,24 @@
 --      status. 00029 already keeps a period closed when its bills are
 --      regenerated.
 --   5. TRUNCATE skips row triggers, so trg_billing_before_truncate_guard
---      refuses TRUNCATE on billing_periods and billing_line_items for every
---      role, including TRUNCATE ... CASCADE from a parent table, and the
---      TRUNCATE privilege on both tables is revoked from the API roles.
+--      refuses TRUNCATE on billing_periods, billing_line_items,
+--      payment_attempts and payment_events for every role, including
+--      TRUNCATE ... CASCADE from a parent table, and the TRUNCATE privilege on
+--      those tables is revoked from the API roles.
+--
+-- Guards 1 to 3 key on a period being closed and on payment activity, so
+-- the rows they read must not be changed first and deleted afterwards:
+--
+--   6. trg_billing_line_item_closed_period_guard keeps a bill in a closed
+--      period there, with its household. Its amount changes only when
+--      fn_record_line_item_with_audit regenerates it.
+--   7. trg_billing_line_item_payment_fields_guard refuses a direct write of
+--      a bill's payment_status or paid_at by the API roles. The payment
+--      functions, which run as their owner, still write them.
+--   8. trg_payment_record_kept refuses deleting payment_attempts and
+--      payment_events rows, and moving a payment event to another bill.
+--   9. fn_record_line_item_with_audit is re-issued to announce its write to
+--      guard 6.
 --
 -- Payment activity means the same as in 20261103090100. A line item has it
 -- when its payment_status is not 'unpaid', its paid_at is set, or a
@@ -34,15 +49,33 @@
 -- 'billing_period_kept', and DETAIL 'closed' or 'payment_activity', as
 -- 20261103090100 does. src/lib/billing/period-delete.ts and
 -- src/lib/entity-deletion/shared.ts map these to the messages the app shows.
--- A refused reopen raises 23514 'billing_period_closed'. A refused TRUNCATE
--- raises 23514 'billing_truncate_refused'.
+-- A refused reopen, or a refused change to a bill in a closed period, raises
+-- 23514 'billing_period_closed' with DETAIL 'closed'. A refused change to a
+-- payment record raises 23514 'payment_record_kept' with DETAIL
+-- 'payment_activity'. A refused TRUNCATE raises 23514
+-- 'billing_truncate_refused'. The application makes none of the writes that
+-- guards 4 and 6 to 8 refuse, so it maps none of these three.
 --
 -- No caller is exempt from these guards, service_role and the database owner
--- included. For the reason, see fn_billing_period_before_delete_guard.
+-- included, with two exceptions that each guard states: guard 6 lets the
+-- audited regeneration change a closed bill's amount, and guard 7 refuses
+-- only the API roles. For the reason no caller is exempt, see
+-- fn_billing_period_before_delete_guard.
 --
 -- Rollback, in this order:
---   GRANT TRUNCATE ON billing_periods, billing_line_items
+--   DROP TRIGGER IF EXISTS trg_payment_record_kept ON payment_events;
+--   DROP TRIGGER IF EXISTS trg_payment_record_kept ON payment_attempts;
+--   DROP FUNCTION IF EXISTS fn_payment_record_kept();
+--   DROP TRIGGER IF EXISTS trg_billing_line_item_payment_fields_guard ON billing_line_items;
+--   DROP FUNCTION IF EXISTS fn_billing_line_item_payment_fields_guard();
+--   DROP TRIGGER IF EXISTS trg_billing_line_item_closed_period_guard ON billing_line_items;
+--   DROP FUNCTION IF EXISTS fn_billing_line_item_closed_period_guard();
+--   then re-run the CREATE OR REPLACE FUNCTION fn_record_line_item_with_audit
+--   from 20260929093017, with its REVOKE and GRANT;
+--   GRANT TRUNCATE ON billing_periods, billing_line_items, payment_attempts, payment_events
 --     TO anon, authenticated, service_role;
+--   DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON payment_events;
+--   DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON payment_attempts;
 --   DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON billing_line_items;
 --   DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON billing_periods;
 --   DROP FUNCTION IF EXISTS fn_billing_before_truncate_guard();
@@ -353,15 +386,16 @@ CREATE TRIGGER trg_billing_period_stays_closed
   EXECUTE FUNCTION fn_billing_period_stays_closed();
 
 -- ═════════════════════════════════════════════════════════════════════════════
--- 5. No TRUNCATE on billing_periods or billing_line_items.
+-- 5. No TRUNCATE on billing_periods, billing_line_items, payment_attempts or
+--    payment_events.
 -- ═════════════════════════════════════════════════════════════════════════════
 --
--- TRUNCATE removes rows without firing the row triggers above. The
--- statement-level trigger refuses it for every role. Postgres fires it for
--- every table a TRUNCATE ... CASCADE reaches, so truncating a parent such as
--- microgrids or households is refused as well. Nothing in the application or
--- the maintenance scripts truncates these tables. A local database is reset
--- with `supabase db reset`, which recreates it.
+-- TRUNCATE removes rows without firing the row triggers above and in section
+-- 8. The statement-level trigger refuses it for every role. Postgres fires it
+-- for every table a TRUNCATE ... CASCADE reaches, so truncating a parent such
+-- as microgrids or households is refused as well. Nothing in the application
+-- or the maintenance scripts truncates these tables. A local database is
+-- reset with `supabase db reset`, which recreates it.
 --
 -- The revoke removes a privilege the API roles never use, through PostgREST
 -- or any function they call. The trigger is what holds if a later
@@ -395,4 +429,415 @@ CREATE TRIGGER trg_billing_before_truncate_guard
   FOR EACH STATEMENT
   EXECUTE FUNCTION fn_billing_before_truncate_guard();
 
-REVOKE TRUNCATE ON billing_periods, billing_line_items FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON payment_attempts;
+CREATE TRIGGER trg_billing_before_truncate_guard
+  BEFORE TRUNCATE ON payment_attempts
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_billing_before_truncate_guard();
+
+DROP TRIGGER IF EXISTS trg_billing_before_truncate_guard ON payment_events;
+CREATE TRIGGER trg_billing_before_truncate_guard
+  BEFORE TRUNCATE ON payment_events
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_billing_before_truncate_guard();
+
+REVOKE TRUNCATE ON billing_periods, billing_line_items, payment_attempts, payment_events
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 6. A bill in a closed period stays there, with its household.
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- Guards 2 and 3 refuse deleting a bill whose period is closed. Moving the
+-- bill into a draft first would get around them, so a bill cannot be moved
+-- into or out of a closed period, and a bill in a closed period keeps its
+-- household.
+--
+-- Its amount changes only when fn_record_line_item_with_audit regenerates
+-- it. That is the audited correction after close: it records
+-- period_was_closed in billing_audit_log. The function is SECURITY INVOKER,
+-- so the role a statement runs as cannot tell its write from a direct
+-- UPDATE. Instead it names the bill's period and household in the
+-- transaction-local setting mgm.audited_bill_write for the length of its
+-- write (section 9). The API roles cannot set it: PostgREST has no way to
+-- run SET, and set_config is not in a schema it exposes. That stops holding
+-- if a role that can run SQL of its own is given UPDATE on billing_line_items,
+-- so revisit this exemption then.
+--
+-- UPDATE OF fires for any statement that names one of the columns, including
+-- a resend of the same value, so the body compares values. Moving a bill
+-- between draft periods, and the device_id that an edge or device delete
+-- sets to NULL, are unaffected.
+
+CREATE OR REPLACE FUNCTION fn_billing_line_item_closed_period_guard()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+-- DEFINER so the period lookups see the period whatever the caller's RLS.
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_old_closed BOOLEAN;
+  v_new_closed BOOLEAN;
+BEGIN
+  -- Lock the periods first, so a period being closed concurrently either
+  -- commits first (and is seen below) or waits for this write. Id order
+  -- keeps two such writes from deadlocking. fn_record_line_item_with_audit
+  -- already holds this lock on its period.
+  PERFORM 1 FROM billing_periods
+  WHERE id IN (OLD.billing_period_id, NEW.billing_period_id)
+  ORDER BY id
+  FOR SHARE;
+
+  SELECT bp.status = 'closed' INTO v_old_closed
+  FROM billing_periods bp WHERE bp.id = OLD.billing_period_id;
+  v_old_closed := coalesce(v_old_closed, false);
+
+  IF NEW.billing_period_id IS DISTINCT FROM OLD.billing_period_id THEN
+    SELECT bp.status = 'closed' INTO v_new_closed
+    FROM billing_periods bp WHERE bp.id = NEW.billing_period_id;
+    IF v_old_closed OR coalesce(v_new_closed, false) THEN
+      RAISE EXCEPTION 'billing_period_closed: a bill cannot be moved into or out of a closed billing period'
+        USING ERRCODE = '23514',
+              DETAIL = 'closed',
+              HINT = 'Closed periods keep the bills they were closed with.';
+    END IF;
+  END IF;
+
+  IF v_old_closed AND NEW.household_id IS DISTINCT FROM OLD.household_id THEN
+    RAISE EXCEPTION 'billing_period_closed: a bill in a closed billing period keeps its household'
+      USING ERRCODE = '23514',
+            DETAIL = 'closed',
+            HINT = 'Closed periods keep the bills they were closed with.';
+  END IF;
+
+  IF v_old_closed
+     AND NEW.total_amount IS DISTINCT FROM OLD.total_amount
+     AND coalesce(current_setting('mgm.audited_bill_write', true), '')
+         <> OLD.billing_period_id::text || '/' || OLD.household_id::text
+  THEN
+    RAISE EXCEPTION 'billing_period_closed: a bill in a closed billing period changes amount only when it is regenerated'
+      USING ERRCODE = '23514',
+            DETAIL = 'closed',
+            HINT = 'Regenerate the bill, which records the correction in billing_audit_log.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION fn_billing_line_item_closed_period_guard() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_billing_line_item_closed_period_guard() TO service_role;
+
+DROP TRIGGER IF EXISTS trg_billing_line_item_closed_period_guard ON billing_line_items;
+CREATE TRIGGER trg_billing_line_item_closed_period_guard
+  BEFORE UPDATE OF billing_period_id, household_id, total_amount ON billing_line_items
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_billing_line_item_closed_period_guard();
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 7. A bill's payment_status and paid_at change only through the payment
+--    functions.
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- Guards 1 to 3 count a payment_status other than 'unpaid', or a paid_at, as
+-- payment activity, so resetting them directly would make a paid bill look
+-- unpaid. Their writers are fn_apply_payment_event, the payment state
+-- machine (00064), and fn_payment_commit_verification and
+-- fn_payment_reconcile (20261010202643). All three are SECURITY DEFINER, so
+-- their writes run as their owner. A statement that runs as one of the roles
+-- API requests use (anon, authenticated, service_role) is a direct write,
+-- and this guard refuses it. fn_record_line_item_with_audit leaves these
+-- columns alone.
+--
+-- fn_apply_payment_event's manual undo (paid back to unpaid) keeps working.
+-- It records a payment_events row, which section 8 keeps, so the bill stays
+-- kept. If a SECURITY INVOKER function ever needs to write these columns,
+-- route it through fn_apply_payment_event or change this guard with it.
+
+CREATE OR REPLACE FUNCTION fn_billing_line_item_payment_fields_guard()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+-- INVOKER, so current_user is the role the statement runs as: an API role
+-- for a direct write, the owner inside the payment functions.
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF current_user IN ('anon', 'authenticated', 'service_role')
+     AND (NEW.payment_status IS DISTINCT FROM OLD.payment_status
+          OR NEW.paid_at IS DISTINCT FROM OLD.paid_at)
+  THEN
+    RAISE EXCEPTION 'payment_record_kept: a bill''s payment status changes only through the payment functions'
+      USING ERRCODE = '23514',
+            DETAIL = 'payment_activity',
+            HINT = 'Record or undo a payment with fn_apply_payment_event, which records a payment event with it.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION fn_billing_line_item_payment_fields_guard() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_billing_line_item_payment_fields_guard() TO service_role;
+
+DROP TRIGGER IF EXISTS trg_billing_line_item_payment_fields_guard ON billing_line_items;
+CREATE TRIGGER trg_billing_line_item_payment_fields_guard
+  BEFORE UPDATE OF payment_status, paid_at ON billing_line_items
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_billing_line_item_payment_fields_guard();
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 8. Payment attempts and payment events are kept, on their bill.
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- Guards 1 to 3 count a bill's payment_attempts and payment_events rows as
+-- payment activity. Deleting them, or moving them to another bill, would make
+-- the bill deletable again. So neither table allows a delete, and a payment
+-- event's line_item_id cannot change. A payment attempt's line_item_id
+-- already cannot change: fn_payment_check_scope (20261010202643) refuses it.
+--
+-- No caller is exempt, as in guards 1 to 3. Nothing in the application
+-- deletes these rows. A cascade does not reach them either, because guard 3
+-- refuses deleting a bill that has any.
+
+CREATE OR REPLACE FUNCTION fn_payment_record_kept()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'payment_record_kept: % rows cannot be deleted', TG_TABLE_NAME
+      USING ERRCODE = '23514',
+            DETAIL = 'payment_activity',
+            HINT = 'Payment records are kept with the bill they belong to.';
+  END IF;
+
+  IF NEW.line_item_id IS DISTINCT FROM OLD.line_item_id THEN
+    RAISE EXCEPTION 'payment_record_kept: a % row stays on its bill', TG_TABLE_NAME
+      USING ERRCODE = '23514',
+            DETAIL = 'payment_activity',
+            HINT = 'Payment records are kept with the bill they belong to.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION fn_payment_record_kept() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION fn_payment_record_kept() TO service_role;
+
+DROP TRIGGER IF EXISTS trg_payment_record_kept ON payment_attempts;
+CREATE TRIGGER trg_payment_record_kept
+  BEFORE DELETE ON payment_attempts
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_payment_record_kept();
+
+DROP TRIGGER IF EXISTS trg_payment_record_kept ON payment_events;
+CREATE TRIGGER trg_payment_record_kept
+  BEFORE DELETE OR UPDATE OF line_item_id ON payment_events
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_payment_record_kept();
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- 9. fn_record_line_item_with_audit announces its write to guard 6.
+-- ═════════════════════════════════════════════════════════════════════════════
+--
+-- Re-issued from 20260929093017 with two additions: it sets
+-- mgm.audited_bill_write to the bill's period and household before its
+-- UPSERT, and clears it right after. The rest of the body, the signature and
+-- the grants are unchanged. A later change to this function keeps both
+-- set_config calls, or a bill in a closed period can no longer be
+-- regenerated.
+
+CREATE OR REPLACE FUNCTION fn_record_line_item_with_audit(
+  _billing_period_id   UUID,
+  _household_id        UUID,
+  _device_id           UUID,
+  _usage_kwh           NUMERIC,
+  _start_kwh           NUMERIC,
+  _end_kwh             NUMERIC,
+  _tier_breakdown      JSONB,
+  _total_amount        NUMERIC,
+  _reading_source      billing_line_item_reading_source,
+  _entered_by_user_id  UUID,
+  _manual_reason       TEXT,
+  _actor_user_id       UUID,
+  _audit_details       JSONB,
+  _rate_schedule_id    UUID,
+  _actor_kind          TEXT DEFAULT 'human',
+  _actor_ref           TEXT DEFAULT NULL
+) RETURNS billing_line_items
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_row                     billing_line_items%ROWTYPE;
+  v_was_inserted            BOOLEAN;
+  v_period_status           billing_period_status;
+  v_pinned_rate_schedule_id UUID;
+  v_event_type              billing_audit_event_type;
+  v_entered_at              TIMESTAMPTZ;
+  v_audit_details           JSONB := COALESCE(_audit_details, '{}'::jsonb)
+    || jsonb_build_object('rate_schedule_id', _rate_schedule_id);
+  v_line_item_id            UUID;
+  v_tier_breakdown_rounded  JSONB;
+BEGIN
+  -- Hold a share lock through the line-item UPSERT and audit insert. A
+  -- concurrent empty-draft re-pin needs FOR UPDATE and must wait. If it
+  -- committed before this call, reject the stale calculation instead.
+  SELECT rate_schedule_id, status
+  INTO v_pinned_rate_schedule_id, v_period_status
+  FROM billing_periods
+  WHERE id = _billing_period_id
+  FOR SHARE;
+  IF NOT FOUND OR _rate_schedule_id IS NULL
+     OR v_pinned_rate_schedule_id IS DISTINCT FROM _rate_schedule_id THEN
+    RAISE EXCEPTION 'Billing period tariff changed; recalculate before writing bill'
+      USING ERRCODE = '23514';
+  END IF;
+
+  -- Resolve entered_at only when the new reading is manual (otherwise NULL,
+  -- per AC1 of #173).
+  IF _reading_source = 'manual' THEN
+    v_entered_at := now();
+  ELSE
+    v_entered_at := NULL;
+  END IF;
+
+  -- Round each tier-breakdown element. WITH ORDINALITY preserves the
+  -- tier sequence (T1 → T2 → …); jsonb_agg without ORDER BY does not
+  -- guarantee element order. Shape MUST remain {label, kwh, amount}.
+  v_tier_breakdown_rounded := COALESCE(
+    (SELECT jsonb_agg(
+       jsonb_build_object(
+         'label',  elem->>'label',
+         'kwh',    ROUND((elem->>'kwh')::numeric, 3),
+         'amount', ROUND((elem->>'amount')::numeric, 0)
+       )
+       ORDER BY ord
+     )
+     FROM jsonb_array_elements(COALESCE(_tier_breakdown, '[]'::jsonb))
+       WITH ORDINALITY AS t(elem, ord)),
+    '[]'::jsonb);
+
+  -- Announce this audited write to fn_billing_line_item_closed_period_guard
+  -- (20261103160000), which lets a bill in a closed period take a new amount
+  -- only while this names its period and household. Cleared right after.
+  PERFORM set_config('mgm.audited_bill_write',
+                     _billing_period_id::text || '/' || _household_id::text, true);
+
+  -- UPSERT on (billing_period_id, household_id) — body unchanged from 00039.
+  INSERT INTO billing_line_items (
+    billing_period_id,
+    household_id,
+    device_id,
+    usage_kwh,
+    start_kwh,
+    end_kwh,
+    tier_breakdown,
+    total_amount,
+    reading_source,
+    entered_by_user_id,
+    entered_at,
+    manual_reason
+  )
+  VALUES (
+    _billing_period_id,
+    _household_id,
+    _device_id,
+    ROUND(_usage_kwh, 3),
+    ROUND(_start_kwh, 3),
+    ROUND(_end_kwh,   3),
+    COALESCE(v_tier_breakdown_rounded, '[]'::jsonb),
+    ROUND(_total_amount, 0),
+    _reading_source,
+    CASE WHEN _reading_source = 'manual' THEN _entered_by_user_id ELSE NULL END,
+    v_entered_at,
+    CASE WHEN _reading_source = 'manual' THEN _manual_reason ELSE NULL END
+  )
+  ON CONFLICT (billing_period_id, household_id) DO UPDATE SET
+    device_id            = EXCLUDED.device_id,
+    usage_kwh            = EXCLUDED.usage_kwh,
+    start_kwh            = EXCLUDED.start_kwh,
+    end_kwh              = EXCLUDED.end_kwh,
+    tier_breakdown       = EXCLUDED.tier_breakdown,
+    total_amount         = EXCLUDED.total_amount,
+    reading_source       = EXCLUDED.reading_source,
+    entered_by_user_id   = EXCLUDED.entered_by_user_id,
+    entered_at           = EXCLUDED.entered_at,
+    manual_reason        = EXCLUDED.manual_reason,
+    pesapal_redirect_url = CASE
+      WHEN EXCLUDED.total_amount IS DISTINCT FROM billing_line_items.total_amount
+      THEN NULL
+      ELSE billing_line_items.pesapal_redirect_url
+    END,
+    pesapal_order_id     = CASE
+      WHEN EXCLUDED.total_amount IS DISTINCT FROM billing_line_items.total_amount
+      THEN NULL
+      ELSE billing_line_items.pesapal_order_id
+    END,
+    payment_failed_at    = CASE
+      WHEN EXCLUDED.total_amount IS DISTINCT FROM billing_line_items.total_amount
+      THEN NULL
+      ELSE billing_line_items.payment_failed_at
+    END
+    -- DELIBERATELY OMITTED — owned by fn_apply_payment_event:
+    --   payment_status, paid_at, paid_by_user_id, payment_notes,
+    --   payment_refunded_at
+  RETURNING (xmax = 0), id
+  INTO v_was_inserted, v_line_item_id;
+
+  PERFORM set_config('mgm.audited_bill_write', '', true);
+
+  -- Re-read as a composite.
+  SELECT * INTO v_row
+  FROM billing_line_items
+  WHERE id = v_line_item_id;
+
+  -- Period-was-closed audit hint (Q4=B).
+  SELECT status INTO v_period_status
+  FROM billing_periods
+  WHERE id = _billing_period_id;
+
+  IF v_period_status = 'closed' THEN
+    v_audit_details := v_audit_details || jsonb_build_object('period_was_closed', true);
+  END IF;
+
+  v_event_type := CASE
+    WHEN v_was_inserted THEN 'line_item_generated'::billing_audit_event_type
+    ELSE 'line_item_regenerated'::billing_audit_event_type
+  END;
+
+  INSERT INTO billing_audit_log (
+    billing_period_id,
+    billing_line_item_id,
+    event_type,
+    actor_user_id,
+    actor_kind,
+    actor_ref,
+    details
+  )
+  VALUES (
+    _billing_period_id,
+    v_row.id,
+    v_event_type,
+    _actor_user_id,
+    COALESCE(_actor_kind, 'human'),
+    _actor_ref,
+    v_audit_details
+  );
+
+  RETURN v_row;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.fn_record_line_item_with_audit(
+  UUID, UUID, UUID, NUMERIC, NUMERIC, NUMERIC, JSONB, NUMERIC,
+  billing_line_item_reading_source, UUID, TEXT, UUID, JSONB, UUID, TEXT, TEXT
+) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fn_record_line_item_with_audit(
+  UUID, UUID, UUID, NUMERIC, NUMERIC, NUMERIC, JSONB, NUMERIC,
+  billing_line_item_reading_source, UUID, TEXT, UUID, JSONB, UUID, TEXT, TEXT
+) TO authenticated, service_role;

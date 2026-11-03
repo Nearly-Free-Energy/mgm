@@ -18,14 +18,25 @@
  *   - a closed period cannot be reopened, by service_role either, while a
  *     resend of its status and a post-close bill regeneration
  *     (fn_record_line_item_with_audit) still work;
+ *   - a bill cannot be moved into or out of a closed period, and a bill in
+ *     one keeps its household and changes amount only by regeneration;
+ *   - a bill's payment_status and paid_at cannot be written directly, by
+ *     service_role either, while fn_apply_payment_event still records and
+ *     undoes a manual payment, and the undone payment keeps the bill;
+ *   - payment events cannot be deleted or moved to another bill, and payment
+ *     attempts cannot be deleted;
  *   - TRUNCATE is refused for the database owner too, directly and through a
  *     parent table's CASCADE, and the API roles hold no TRUNCATE privilege;
+ *   - a microgrid delete and a payment racing on two connections end with
+ *     one of them refused, in both orders, for a payment recorded on a bill
+ *     and for a payment attempt;
  *   - the delete preview's counts (countEntityDescendants, through the
  *     caller's RLS) see the kept billing, and the meter readings an edge
  *     delete would remove from a closed period.
  *
  * billing_period_delete_guard.test.ts covers the direct period deletes.
- * The TRUNCATE cases run as the database owner (runAsDatabaseOwner).
+ * The TRUNCATE cases run as the database owner (runAsDatabaseOwner), and so
+ * does the first connection of each race (raceAgainstHeldTransaction).
  *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.
  */
@@ -41,6 +52,7 @@ import {
   cleanupTestData,
   createTestUser,
   runAsDatabaseOwner,
+  raceAgainstHeldTransaction,
   type TestUser,
 } from "./rls.helpers";
 
@@ -96,6 +108,36 @@ const FIXTURE = {
   billAttempt: "cb11ed00-0000-4000-8007-00000000000f",
   merchantAttempt: "cb11ed00-0000-4000-8008-00000000000b",
   attempt: "cb11ed00-0000-4000-8009-00000000000b",
+
+  // commRace holds microgrids that each start with one unpaid bill in a
+  // draft period: mgUndo for the manual payment and its undo, and one per
+  // race between a payment and a delete.
+  commRace: "cb11ed00-0000-4000-8001-0000000000f0",
+  merchantKeep: "cb11ed00-0000-4000-8008-00000000000a",
+  mgUndo: "cb11ed00-0000-4000-8002-0000000000f0",
+  mgRacePaid: "cb11ed00-0000-4000-8002-0000000000f1",
+  mgRaceDeletePaid: "cb11ed00-0000-4000-8002-0000000000f2",
+  mgRaceAttempt: "cb11ed00-0000-4000-8002-0000000000f3",
+  mgRaceDeleteAttempt: "cb11ed00-0000-4000-8002-0000000000f4",
+  attemptRace: "cb11ed00-0000-4000-8009-0000000000f3",
+  attemptRaceDelete: "cb11ed00-0000-4000-8009-0000000000f4",
+};
+
+/** The household, draft period and unpaid bill of each commRace microgrid. */
+const RACE_MICROGRIDS = [
+  FIXTURE.mgUndo,
+  FIXTURE.mgRacePaid,
+  FIXTURE.mgRaceDeletePaid,
+  FIXTURE.mgRaceAttempt,
+  FIXTURE.mgRaceDeleteAttempt,
+] as const;
+const raceIds = (microgridId: string) => {
+  const suffix = microgridId.slice(-12);
+  return {
+    household: `cb11ed00-0000-4000-8005-${suffix}`,
+    period: `cb11ed00-0000-4000-8006-${suffix}`,
+    bill: `cb11ed00-0000-4000-8007-${suffix}`,
+  };
 };
 
 const EMAIL_ORG_MANAGER = `kcpb-orgmgr-${Date.now()}@test.local`;
@@ -331,6 +373,47 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       merchant_reference: `KB-${FIXTURE.attempt}`,
     });
 
+    await insertOrThrow(svc, "communities", {
+      id: FIXTURE.commRace,
+      org_id: FIXTURE.org,
+      name: "KB Comm race",
+    });
+    await insertOrThrow(svc, "payment_merchant_accounts", {
+      id: FIXTURE.merchantKeep,
+      org_id: FIXTURE.org,
+      display_name: "KB merchant keep",
+    });
+    await insertOrThrow(
+      svc,
+      "microgrids",
+      RACE_MICROGRIDS.map((id, i) => ({
+        id,
+        community_id: FIXTURE.commRace,
+        name: `KB MG race ${i}`,
+        currency: "UGX",
+      })),
+    );
+    await insertOrThrow(
+      svc,
+      "households",
+      RACE_MICROGRIDS.map((id, i) => ({
+        id: raceIds(id).household,
+        microgrid_id: id,
+        display_name: `KB race ${i}`,
+        primary_phone: `+25670000031${i}`,
+      })),
+    );
+    await insertOrThrow(
+      svc,
+      "billing_periods",
+      RACE_MICROGRIDS.map((id) => period(raceIds(id).period, id, "draft")),
+    );
+    await insertOrThrow(
+      svc,
+      "billing_line_items",
+      RACE_MICROGRIDS.map((id) => bill(raceIds(id).bill, raceIds(id).period, raceIds(id).household)),
+    );
+
     manager = await createTestUser({
       email: EMAIL_ORG_MANAGER,
       role: "org_manager",
@@ -489,6 +572,146 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     expect(await exists("billing_line_items", FIXTURE.billUnpaid)).toBe(false);
   });
 
+  // ── Kept billing cannot be changed first and deleted afterwards ───────────
+
+  it("a bill cannot be moved out of a closed period, or into one", async () => {
+    const out = await manager.client
+      .from("billing_line_items")
+      .update({ billing_period_id: FIXTURE.periodPaid })
+      .eq("id", FIXTURE.billClosed);
+    expectKept(out.error, "closed", "billing_period_closed: a bill cannot be moved");
+
+    const into = await manager.client
+      .from("billing_line_items")
+      .update({ billing_period_id: FIXTURE.periodClosed })
+      .eq("id", FIXTURE.billPaid);
+    expectKept(into.error, "closed", "billing_period_closed: a bill cannot be moved");
+
+    const svc = await serviceClient();
+    const { data } = await svc
+      .from("billing_line_items")
+      .select("id, billing_period_id")
+      .in("id", [FIXTURE.billClosed, FIXTURE.billPaid])
+      .order("id");
+    expect(data).toEqual([
+      { id: FIXTURE.billClosed, billing_period_id: FIXTURE.periodClosed },
+      { id: FIXTURE.billPaid, billing_period_id: FIXTURE.periodPaid },
+    ]);
+  });
+
+  it("a bill in a closed period keeps its household", async () => {
+    const { error } = await manager.client
+      .from("billing_line_items")
+      .update({ household_id: FIXTURE.hhPaid })
+      .eq("id", FIXTURE.billClosed);
+    expectKept(error, "closed", "billing_period_closed: a bill in a closed billing period keeps");
+    expect(await exists("billing_line_items", FIXTURE.billClosed)).toBe(true);
+  });
+
+  it("a bill in a closed period changes amount only when it is regenerated, for service_role too", async () => {
+    const svc = await serviceClient();
+    for (const client of [manager.client, svc]) {
+      const { error } = await client
+        .from("billing_line_items")
+        .update({ total_amount: 1 })
+        .eq("id", FIXTURE.billClosed);
+      expectKept(error, "closed", "billing_period_closed: a bill in a closed billing period changes amount");
+    }
+    const { data } = await svc
+      .from("billing_line_items")
+      .select("total_amount")
+      .eq("id", FIXTURE.billClosed);
+    expect(data).toEqual([{ total_amount: 5000 }]);
+  });
+
+  it("a paid bill cannot be reset to unpaid directly, by service_role either", async () => {
+    const svc = await serviceClient();
+    for (const client of [manager.client, svc]) {
+      const { error } = await client
+        .from("billing_line_items")
+        .update({ payment_status: "unpaid", paid_at: null })
+        .eq("id", FIXTURE.billPaid);
+      expectKept(error, "payment_activity", "payment_record_kept");
+    }
+    const { data } = await svc
+      .from("billing_line_items")
+      .select("payment_status")
+      .eq("id", FIXTURE.billPaid);
+    expect(data).toEqual([{ payment_status: "paid" }]);
+
+    const { error: deleteError } = await manager.client.rpc("fn_entity_delete_microgrid", {
+      p_id: FIXTURE.mgPaid,
+    });
+    expectKept(deleteError, "payment_activity", "billing_period_kept: a microgrid");
+  });
+
+  it("a bill cannot be marked paid directly either", async () => {
+    const { error } = await manager.client
+      .from("billing_line_items")
+      .update({ payment_status: "paid", paid_at: new Date().toISOString() })
+      .eq("id", raceIds(FIXTURE.mgUndo).bill);
+    expectKept(error, "payment_activity", "payment_record_kept");
+  });
+
+  it("fn_apply_payment_event still records and undoes a manual payment, and the bill stays kept", async () => {
+    const billId = raceIds(FIXTURE.mgUndo).bill;
+    for (const toStatus of ["paid", "unpaid"]) {
+      const { error } = await manager.client.rpc("fn_apply_payment_event", {
+        _line_item_id: billId,
+        _to_status: toStatus,
+        _source: "manual",
+        _actor_user_id: manager.userId,
+        _raw_payload: {},
+      });
+      expect(error).toBeNull();
+    }
+
+    const svc = await serviceClient();
+    const { data: bills } = await svc
+      .from("billing_line_items")
+      .select("payment_status, paid_at")
+      .eq("id", billId);
+    expect(bills).toEqual([{ payment_status: "unpaid", paid_at: null }]);
+    const { data: events } = await svc
+      .from("payment_events")
+      .select("to_status")
+      .eq("line_item_id", billId)
+      .order("at");
+    expect(events).toEqual([{ to_status: "paid" }, { to_status: "unpaid" }]);
+
+    // The undone payment is still payment activity.
+    const { error } = await manager.client.rpc("fn_entity_delete_microgrid", {
+      p_id: FIXTURE.mgUndo,
+    });
+    expectKept(error, "payment_activity", "billing_period_kept: a microgrid");
+  });
+
+  it("payment events cannot be deleted or moved to another bill", async () => {
+    const billId = raceIds(FIXTURE.mgUndo).bill;
+    const deleted = await manager.client
+      .from("payment_events")
+      .delete()
+      .eq("line_item_id", billId);
+    expectKept(deleted.error, "payment_activity", "payment_record_kept: payment_events rows cannot be deleted");
+
+    const moved = await manager.client
+      .from("payment_events")
+      .update({ line_item_id: FIXTURE.billClosed })
+      .eq("line_item_id", billId);
+    expectKept(moved.error, "payment_activity", "payment_record_kept: a payment_events row stays on its bill");
+
+    const svc = await serviceClient();
+    const { data } = await svc.from("payment_events").select("id").eq("line_item_id", billId);
+    expect(data).toHaveLength(2);
+  });
+
+  it("payment attempts cannot be deleted, by service_role either", async () => {
+    const svc = await serviceClient();
+    const { error } = await svc.from("payment_attempts").delete().eq("id", FIXTURE.attempt);
+    expectKept(error, "payment_activity", "payment_record_kept: payment_attempts rows cannot be deleted");
+    expect(await exists("payment_attempts", FIXTURE.attempt)).toBe(true);
+  });
+
   // ── Closed periods stay closed ────────────────────────────────────────────
 
   it("an org manager cannot reopen a closed period", async () => {
@@ -558,13 +781,15 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
   // ── TRUNCATE ──────────────────────────────────────────────────────────────
 
   it("TRUNCATE is refused for the database owner too, directly and through a parent's CASCADE", () => {
-    // Without CASCADE, Postgres refuses to truncate either table before any
-    // trigger runs, because other tables reference them.
+    // Without CASCADE, Postgres refuses to truncate a referenced table before
+    // any trigger runs.
     for (const [statement, table] of [
       ["TRUNCATE billing_periods CASCADE", "billing_periods"],
       ["TRUNCATE billing_line_items CASCADE", "billing_line_items"],
       ["TRUNCATE microgrids CASCADE", "billing_periods"],
       ["TRUNCATE households CASCADE", "billing_line_items"],
+      ["TRUNCATE payment_attempts CASCADE", "payment_attempts"],
+      ["TRUNCATE payment_events CASCADE", "payment_events"],
     ]) {
       // The block always ends in an error, so it rolls back whatever the
       // TRUNCATE did if the guard ever stops refusing it.
@@ -587,21 +812,118 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
         `probe refused: billing_truncate_refused: ${table} cannot be truncated`,
       );
     }
-  });
+  }, 30_000);
 
-  it("the API roles hold no TRUNCATE privilege on the billing tables", () => {
+  it("the API roles hold no TRUNCATE privilege on the billing and payment tables", () => {
     const query = runAsDatabaseOwner(
       `SELECT r AS role,
               has_table_privilege(r, 'billing_periods', 'TRUNCATE') AS periods,
-              has_table_privilege(r, 'billing_line_items', 'TRUNCATE') AS bills
+              has_table_privilege(r, 'billing_line_items', 'TRUNCATE') AS bills,
+              has_table_privilege(r, 'payment_attempts', 'TRUNCATE') AS attempts,
+              has_table_privilege(r, 'payment_events', 'TRUNCATE') AS events
        FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) AS r
        ORDER BY r`,
     );
     expect(query.ok, query.output).toBe(true);
+    const none = { periods: false, bills: false, attempts: false, events: false };
     expect(JSON.parse(query.stdout)).toEqual([
-      { role: "anon", periods: false, bills: false },
-      { role: "authenticated", periods: false, bills: false },
-      { role: "service_role", periods: false, bills: false },
+      { role: "anon", ...none },
+      { role: "authenticated", ...none },
+      { role: "service_role", ...none },
     ]);
   });
+
+  // ── Payments and deletes racing on two connections ────────────────────────
+  //
+  // raceAgainstHeldTransaction commits the first connection only once the
+  // second is waiting on its locks, so each test runs the interleaving it
+  // names rather than whichever one the scheduler picks.
+
+  it("a microgrid delete racing a bill being marked paid waits for the payment, then is refused", async () => {
+    const { bill: billId } = raceIds(FIXTURE.mgRacePaid);
+    const race = await raceAgainstHeldTransaction(
+      [
+        // fn_apply_payment_event as service_role calls it.
+        `  PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);`,
+        `  PERFORM fn_apply_payment_event('${billId}'::uuid, 'paid', 'manual',`,
+        `    '${manager.userId}'::uuid, '{}'::jsonb);`,
+      ].join("\n"),
+      () => manager.client.rpc("fn_entity_delete_microgrid", { p_id: FIXTURE.mgRacePaid }),
+    );
+    expect(race.holder.ok, race.holder.output).toBe(true);
+    expectKept(race.contender.error, "payment_activity");
+    expect(await exists("microgrids", FIXTURE.mgRacePaid)).toBe(true);
+
+    const svc = await serviceClient();
+    const { data } = await svc.from("billing_line_items").select("payment_status").eq("id", billId);
+    expect(data).toEqual([{ payment_status: "paid" }]);
+  }, 30_000);
+
+  it("a bill being marked paid while its microgrid is deleted waits for the delete, then finds no bill", async () => {
+    const { bill: billId } = raceIds(FIXTURE.mgRaceDeletePaid);
+    const race = await raceAgainstHeldTransaction(
+      `  DELETE FROM microgrids WHERE id = '${FIXTURE.mgRaceDeletePaid}';`,
+      () =>
+        manager.client.rpc("fn_apply_payment_event", {
+          _line_item_id: billId,
+          _to_status: "paid",
+          _source: "manual",
+          _actor_user_id: manager.userId,
+          _raw_payload: {},
+        }),
+    );
+    expect(race.holder.ok, race.holder.output).toBe(true);
+    expect(race.contender.error?.code).toBe("P0002");
+    expect(race.contender.error?.message).toMatch(/^line_item_not_found/);
+    expect(await exists("microgrids", FIXTURE.mgRaceDeletePaid)).toBe(false);
+
+    const svc = await serviceClient();
+    const { data } = await svc.from("payment_events").select("id").eq("line_item_id", billId);
+    expect(data).toEqual([]);
+  }, 30_000);
+
+  // The attempts are inserted directly. fn_payment_reserve_checkout inserts
+  // them the same way, after more checks than these fixtures set up, and its
+  // insert takes the same foreign-key lock on the bill.
+
+  it("a microgrid delete racing a payment attempt being created waits for it, then is refused", async () => {
+    const { bill: billId } = raceIds(FIXTURE.mgRaceAttempt);
+    const race = await raceAgainstHeldTransaction(
+      [
+        "  INSERT INTO payment_attempts (id, org_id, line_item_id, community_id,",
+        "    merchant_account_id, merchant_account_version, amount, merchant_reference)",
+        `  VALUES ('${FIXTURE.attemptRace}', '${FIXTURE.org}', '${billId}', '${FIXTURE.commRace}',`,
+        `    '${FIXTURE.merchantKeep}', 1, 5000, 'KB-${FIXTURE.attemptRace}');`,
+      ].join("\n"),
+      () => manager.client.rpc("fn_entity_delete_microgrid", { p_id: FIXTURE.mgRaceAttempt }),
+    );
+    expect(race.holder.ok, race.holder.output).toBe(true);
+    expectKept(race.contender.error, "payment_activity");
+    expect(await exists("microgrids", FIXTURE.mgRaceAttempt)).toBe(true);
+    expect(await exists("payment_attempts", FIXTURE.attemptRace)).toBe(true);
+  }, 30_000);
+
+  it("a payment attempt created while its microgrid is deleted waits for the delete, then fails", async () => {
+    const { bill: billId } = raceIds(FIXTURE.mgRaceDeleteAttempt);
+    const svc = await serviceClient();
+    const race = await raceAgainstHeldTransaction(
+      `  DELETE FROM microgrids WHERE id = '${FIXTURE.mgRaceDeleteAttempt}';`,
+      () =>
+        svc.from("payment_attempts").insert({
+          id: FIXTURE.attemptRaceDelete,
+          org_id: FIXTURE.org,
+          line_item_id: billId,
+          community_id: FIXTURE.commRace,
+          merchant_account_id: FIXTURE.merchantKeep,
+          merchant_account_version: 1,
+          amount: 5000,
+          merchant_reference: `KB-${FIXTURE.attemptRaceDelete}`,
+        }),
+    );
+    expect(race.holder.ok, race.holder.output).toBe(true);
+    // The bill is gone by the time the insert's foreign key check gets it.
+    expect(race.contender.error?.code).toBe("23503");
+    expect(await exists("microgrids", FIXTURE.mgRaceDeleteAttempt)).toBe(false);
+    expect(await exists("payment_attempts", FIXTURE.attemptRaceDelete)).toBe(false);
+  }, 30_000);
 });
