@@ -3,7 +3,7 @@
  *
  * Coverage per AC6 (refined 2026-04-29):
  *   - Happy path → 200 PDF stream + correct headers.
- *   - Forbidden (currentUserCanAccessMicrogrid → false) → 403.
+ *   - Forbidden (caller's role rows do not reach the row's org) → 403.
  *   - Not-found (line item missing / RLS-hidden) → 404.
  *   - Unauthorized (no session) → 401.
  *   - Bad UUID → 400.
@@ -20,6 +20,11 @@
  *
  * The renderer is mocked because route tests assert routing/auth behavior,
  * not visual layout — the renderer's own tests cover PDF correctness.
+ *
+ * Loading: the user is read once, the role rows load alongside the line
+ * item, and the meter, tariff, "entered by" and logo reads start before the
+ * payment link resolves, while the invoice number is still allocated after
+ * it and every check keeps its order.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -43,7 +48,12 @@ vi.mock("@/lib/payments/compose", () => ({ composePayments: async () => ({ ok: t
 const renderInvoicePdfMock = vi.fn();
 const mintShortSlugMock = vi.fn();
 
-let canAccessMicrogridReturn = true;
+type RoleRow = { user_id: string; role: string; scope_type: string; scope_id: string | null };
+const ORG_MANAGER_ROWS: RoleRow[] = [
+  { user_id: "actor-user-1", role: "org_manager", scope_type: "org", scope_id: ORG_ID },
+];
+let callerRoles: RoleRow[] = ORG_MANAGER_ROWS;
+const getCurrentUserRolesMock = vi.fn(async () => callerRoles);
 
 vi.mock("@/lib/payments/ensure-payment-link", () => ({
   ensurePaymentLinkForLineItem: ensurePaymentLinkMock,
@@ -53,8 +63,10 @@ vi.mock("@/lib/payments/short-slug", () => ({
   mintUniqueShortSlug: mintShortSlugMock,
 }));
 
-vi.mock("@/lib/auth/access", () => ({
-  currentUserCanAccessMicrogrid: async () => canAccessMicrogridReturn,
+// Role rows are mocked; the access check itself (rolesCanAccessMicrogrid) is real.
+vi.mock("@/lib/auth/access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/access")>()),
+  getCurrentUserRoles: getCurrentUserRolesMock,
 }));
 
 vi.mock("@/lib/invoices/render", () => ({
@@ -272,6 +284,26 @@ function lineItemRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** A line item whose community has a logo configured. */
+function lineItemRowWithLogo() {
+  const base = lineItemRow();
+  const period = base.billing_periods;
+  const microgrid = period.microgrids;
+  return {
+    ...base,
+    billing_periods: {
+      ...period,
+      microgrids: {
+        ...microgrid,
+        communities: {
+          ...microgrid.communities,
+          invoice_config: { branding: { logo_storage_path: "community/logo.png" } },
+        },
+      },
+    },
+  };
+}
+
 const RATE_SCHEDULE_ROW = {
   id: "rs-1",
   microgrid_id: MICROGRID_ID,
@@ -289,7 +321,7 @@ beforeEach(() => {
   releasedRouteMock.mockReturnValue(true);
   vi.clearAllMocks();
   rateScheduleFilters.length = 0;
-  canAccessMicrogridReturn = true;
+  callerRoles = ORG_MANAGER_ROWS;
   capturedUpdates.length = 0;
   rpcCalls = [];
   rpcCounter = 1;
@@ -354,7 +386,9 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
   });
 
   it("403: caller cannot access microgrid (defense-in-depth after row load)", async () => {
-    canAccessMicrogridReturn = false;
+    callerRoles = [
+      { user_id: "actor-user-1", role: "org_manager", scope_type: "org", scope_id: "another-org" },
+    ];
     const { GET } = await import("../route");
     const res = await GET(makeReq(), {
       params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
@@ -528,5 +562,127 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     expect(res.headers.get("Content-Disposition")).toContain(
       "NFE-2026-99999.pdf",
     );
+  });
+
+  it("403: caller with no role rows", async () => {
+    callerRoles = [];
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(403);
+    expect((await res.json()).reason).toBe("forbidden");
+  });
+
+  it("200: a super_admin downloads any org's bill", async () => {
+    callerRoles = [{ user_id: "actor-user-1", role: "super_admin", scope_type: "org", scope_id: null }];
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+  });
+
+  it("reads the user once and the role rows for that user", async () => {
+    const { GET } = await import("../route");
+    await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(mockGetUser).toHaveBeenCalledOnce();
+    expect(getCurrentUserRolesMock).toHaveBeenCalledOnce();
+    expect(getCurrentUserRolesMock).toHaveBeenCalledWith(expect.anything(), { id: "actor-user-1" });
+  });
+
+  it("starts the meter, tariff and logo reads before the payment link resolves, and allocates the invoice number after it", async () => {
+    fromState.lineItem = { data: lineItemRowWithLogo(), error: null };
+    let releaseReadiness: (value: unknown) => void = () => {};
+    readinessMock.mockReturnValue(new Promise((resolve) => { releaseReadiness = resolve; }));
+
+    const { GET } = await import("../route");
+    const response = GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    await vi.waitFor(() => {
+      expect(readinessMock).toHaveBeenCalled();
+      expect(mockFrom).toHaveBeenCalledWith("household_devices");
+      expect(rateScheduleFilters).toContainEqual(["id", SCHEDULE_ID]);
+      expect(serviceDownloadMock).toHaveBeenCalledWith("community/logo.png");
+    });
+    expect(rpcCalls.filter((c) => c.fn === "fn_next_invoice_number")).toHaveLength(0);
+    expect(capturedUpdates).toHaveLength(0);
+
+    releaseReadiness({ ok: true, data: { state: "sandbox" } });
+    const res = await response;
+    expect(res.status).toBe(200);
+    expect(rpcCalls.filter((c) => c.fn === "fn_next_invoice_number")).toHaveLength(1);
+    expect(capturedUpdates).toHaveLength(1);
+  });
+
+  it("allocates no invoice number when the payment link step fails", async () => {
+    readinessMock.mockRejectedValue(new Error("Could not load payment account"));
+    const { GET } = await import("../route");
+    await expect(
+      GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) }),
+    ).rejects.toThrow("Could not load payment account");
+    expect(rpcCalls.filter((c) => c.fn === "fn_next_invoice_number")).toHaveLength(0);
+    expect(capturedUpdates).toHaveLength(0);
+  });
+
+  describe("logo", () => {
+    const withLogo = lineItemRowWithLogo;
+
+    it("passes the downloaded logo bytes to the renderer", async () => {
+      fromState.lineItem = { data: withLogo(), error: null };
+      serviceDownloadMock.mockResolvedValue({ data: new Blob([Buffer.from("png")]), error: null });
+      const { GET } = await import("../route");
+      const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(200);
+      expect(renderInvoicePdfMock.mock.calls[0][0].logoBytes?.toString()).toBe("png");
+    });
+
+    it("renders without a logo, and logs it, when the download fails", async () => {
+      fromState.lineItem = { data: withLogo(), error: null };
+      serviceDownloadMock.mockResolvedValue({ data: null, error: { message: "gone" } });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { GET } = await import("../route");
+      const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(200);
+      expect(renderInvoicePdfMock.mock.calls[0][0].logoBytes).toBeNull();
+      expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining("pdf.logo_download_failed")]);
+      warn.mockRestore();
+    });
+
+    it("renders without a logo, and logs it, when the download throws", async () => {
+      fromState.lineItem = { data: withLogo(), error: null };
+      serviceDownloadMock.mockRejectedValue(new Error("network"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { GET } = await import("../route");
+      const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(200);
+      expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining("pdf.logo_download_threw")]);
+      warn.mockRestore();
+    });
+
+    it("logs nothing about the logo when the request is refused before step 9", async () => {
+      const row = withLogo();
+      fromState.lineItem = {
+        data: { ...row, billing_periods: { ...(row.billing_periods as Record<string, unknown>), rate_schedule_id: null } },
+        error: null,
+      };
+      serviceDownloadMock.mockRejectedValue(new Error("network"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { GET } = await import("../route");
+      const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(409);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  it("resolves the entered-by name for a manual reading", async () => {
+    fromState.lineItem = {
+      data: lineItemRow({ reading_source: "manual", entered_by_user_id: "aaaaaaaa-1111-4111-8111-000000000001" }),
+      error: null,
+    };
+    fromState.fnListVisibleUsers = {
+      data: [{ user_id: "aaaaaaaa-1111-4111-8111-000000000001", first_name: "Aaron", last_name: "T", email: "a@example.com" }],
+      error: null,
+    };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    expect(renderInvoicePdfMock.mock.calls[0][0].enteredByUserName).toBe("Aaron T");
   });
 });
