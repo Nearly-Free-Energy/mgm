@@ -51,8 +51,10 @@ const RELEASE_2_API_ROUTES = [
   /^\/api\/microgrids\/[^/]+\/openems-backend(?:\/(?:discover|test))?$/,
   // Explicit edge registration.
   /^\/api\/microgrids\/[^/]+\/edges\/register$/,
-  // Edge device discovery.
-  /^\/api\/edges(?:\/[^/]+(?:\/discover-devices)?)?$/,
+  // Edge device discovery and the delete-preview read DeleteEntityButton
+  // fetches before it sends DELETE /api/edges/<id>. If DeleteEntityButton
+  // stops fetching the preview first, delete-preview can come out of here.
+  /^\/api\/edges(?:\/[^/]+(?:\/(?:discover-devices|delete-preview))?)?$/,
   // Device registration and reclassification.
   /^\/api\/devices(?:\/[^/]+)?$/,
   // Metering capability reads and writes.

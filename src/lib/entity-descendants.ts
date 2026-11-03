@@ -39,6 +39,14 @@ import "server-only";
  *     `billing_period_status` enum has no other values (see
  *     00001_schema.sql:49). Never use the word `'open'`.
  *
+ *   * `billing_periods_with_payments` counts the drafts with payment
+ *     activity. With `billing_periods_closed`, it tells the preview that
+ *     the database will refuse the delete (migration 20261103160000).
+ *
+ *   * For an `edge`, `readings_in_closed_periods` counts the meter
+ *     readings that go with its devices and were taken during a closed
+ *     billing period, so the dialog can warn about them.
+ *
  *   * `user_roles` counts (org-scoped only) rely on the FK+CASCADE from
  *     00015_entity_deletion_safeguards.sql; we filter by `scope_type='org'
  *     AND scope_id=<org_id>` which matches exactly the rows that will be
@@ -46,6 +54,7 @@ import "server-only";
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 
 // Types + pure helpers live in a client-safe module so client components
 // (BlastRadiusList, DeleteEntityButton) can import them without pulling
@@ -85,6 +94,91 @@ async function countTableWith(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const res = (await apply(qb as any)) as { count: number | null };
   return n(res.count);
+}
+
+/**
+ * How many of the given draft periods have payment activity: a bill whose
+ * payment_status is not 'unpaid' or whose paid_at is set, or a payment
+ * attempt or payment event for one of their bills. The same definition as
+ * the database guards in migration 20261103160000; change them together.
+ *
+ * Reads through the caller's RLS, so it can only undercount. The database
+ * guard is the authoritative check, and the DELETE route explains its
+ * refusal too.
+ */
+async function countDraftPeriodsWithPayments(
+  supabase: SupabaseClient,
+  draftPeriodIds: string[]
+): Promise<number> {
+  if (draftPeriodIds.length === 0) return 0;
+  const [paidBills, attempts, events] = await Promise.all([
+    supabase
+      .from("billing_line_items")
+      .select("billing_period_id")
+      .in("billing_period_id", draftPeriodIds)
+      .or("payment_status.neq.unpaid,paid_at.not.is.null"),
+    supabase
+      .from("payment_attempts")
+      .select("billing_line_items!inner(billing_period_id)")
+      .in("billing_line_items.billing_period_id", draftPeriodIds),
+    supabase
+      .from("payment_events")
+      .select("billing_line_items!inner(billing_period_id)")
+      .in("billing_line_items.billing_period_id", draftPeriodIds),
+  ]);
+  type Bill = { billing_period_id: string };
+  const periodIds = new Set<string>(
+    ((paidBills.data ?? []) as Bill[]).map((row) => row.billing_period_id)
+  );
+  // PostgREST embeds the bill of a payment row as one object (many-to-one);
+  // the untyped client cannot know that, so accept a list as well.
+  for (const row of [...(attempts.data ?? []), ...(events.data ?? [])] as unknown as {
+    billing_line_items: Bill | Bill[] | null;
+  }[]) {
+    for (const bill of [row.billing_line_items].flat()) {
+      if (bill) periodIds.add(bill.billing_period_id);
+    }
+  }
+  return periodIds.size;
+}
+
+/**
+ * Meter readings of `deviceIds` taken during a closed billing period of
+ * `microgridId`: from the first instant of the period's start date to the
+ * first instant after its end date, both included so the opening and
+ * closing registers count. The dates are read in the period's own
+ * `timezone`, the zone billing windows the period in (generate.ts, #355);
+ * if billing changes how it windows a period, change this to match.
+ */
+async function countReadingsInClosedPeriods(
+  supabase: SupabaseClient,
+  microgridId: string,
+  deviceIds: string[]
+): Promise<number> {
+  if (deviceIds.length === 0) return 0;
+  const { data: periods } = await supabase
+    .from("billing_periods")
+    .select("start_date, end_date, timezone")
+    .eq("microgrid_id", microgridId)
+    .eq("status", "closed");
+  const windows = (
+    (periods ?? []) as { start_date: string; end_date: string; timezone: string }[]
+  ).map((period) => {
+    const from = startOfDayInZone(period.start_date, period.timezone).toISOString();
+    const to = startOfDayInZone(
+      addDaysToDateKey(period.end_date, 1),
+      period.timezone
+    ).toISOString();
+    // Quoted: `.` and `:` in the timestamps are PostgREST reserved characters.
+    return `and(read_at.gte."${from}",read_at.lte."${to}")`;
+  });
+  if (windows.length === 0) return 0;
+  const { count } = await supabase
+    .from("meter_readings")
+    .select("id", { count: "exact", head: true })
+    .in("device_id", deviceIds)
+    .or(windows.join(","));
+  return n(count);
 }
 
 // ── Per-entity counters ──────────────────────────────────────────────────
@@ -129,6 +223,9 @@ async function countForOrganization(
   const billingPeriodIds = (billingPeriods ?? []).map((r) => r.id as string);
   const bpDraft = (billingPeriods ?? []).filter((r) => r.status === "draft").length;
   const bpClosed = (billingPeriods ?? []).filter((r) => r.status === "closed").length;
+  const draftPeriodIds = (billingPeriods ?? [])
+    .filter((r) => r.status === "draft")
+    .map((r) => r.id as string);
 
   const [
     householdDevicesCount,
@@ -136,6 +233,7 @@ async function countForOrganization(
     billingLineItemsCount,
     rateSchedulesCount,
     userRolesCount,
+    bpWithPayments,
   ] = await Promise.all([
     householdIds.length
       ? countTable(supabase, "household_devices", {
@@ -165,6 +263,7 @@ async function countForOrganization(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (qb as any).eq("scope_type", "org").eq("scope_id", orgId)
     ),
+    countDraftPeriodsWithPayments(supabase, draftPeriodIds),
   ]);
 
   return {
@@ -178,6 +277,7 @@ async function countForOrganization(
     household_users: householdUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
+    billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
     user_roles: userRolesCount,
@@ -218,12 +318,16 @@ async function countForCommunity(
   const billingPeriodIds = (billingPeriods ?? []).map((r) => r.id as string);
   const bpDraft = (billingPeriods ?? []).filter((r) => r.status === "draft").length;
   const bpClosed = (billingPeriods ?? []).filter((r) => r.status === "closed").length;
+  const draftPeriodIds = (billingPeriods ?? [])
+    .filter((r) => r.status === "draft")
+    .map((r) => r.id as string);
 
   const [
     householdDevicesCount,
     householdUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
+    bpWithPayments,
   ] = await Promise.all([
     householdIds.length
       ? countTable(supabase, "household_devices", {
@@ -249,6 +353,7 @@ async function countForCommunity(
           values: microgridIds,
         })
       : Promise.resolve(0),
+    countDraftPeriodsWithPayments(supabase, draftPeriodIds),
   ]);
 
   // For this scope we count edges/devices via the resolved id trees
@@ -263,6 +368,7 @@ async function countForCommunity(
     household_users: householdUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
+    billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
   };
@@ -296,12 +402,16 @@ async function countForMicrogrid(
   const billingPeriodIds = (billingPeriods ?? []).map((r) => r.id as string);
   const bpDraft = (billingPeriods ?? []).filter((r) => r.status === "draft").length;
   const bpClosed = (billingPeriods ?? []).filter((r) => r.status === "closed").length;
+  const draftPeriodIds = (billingPeriods ?? [])
+    .filter((r) => r.status === "draft")
+    .map((r) => r.id as string);
 
   const [
     householdDevicesCount,
     householdUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
+    bpWithPayments,
   ] = await Promise.all([
     householdIds.length
       ? countTable(supabase, "household_devices", {
@@ -325,6 +435,7 @@ async function countForMicrogrid(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (qb as any).eq("microgrid_id", microgridId)
     ),
+    countDraftPeriodsWithPayments(supabase, draftPeriodIds),
   ]);
 
   return {
@@ -336,6 +447,7 @@ async function countForMicrogrid(
     household_users: householdUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
+    billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
   };
@@ -345,32 +457,41 @@ async function countForEdge(
   supabase: SupabaseClient,
   edgeId: string
 ): Promise<Extract<DescendantCounts, { kind: "edge" }>> {
-  const { data: devices } = await supabase
-    .from("devices")
-    .select("id")
-    .eq("edge_id", edgeId);
+  const [{ data: devices }, { data: edge }] = await Promise.all([
+    supabase.from("devices").select("id").eq("edge_id", edgeId),
+    supabase
+      .from("edges")
+      .select("microgrid_id")
+      .eq("id", edgeId)
+      .maybeSingle<{ microgrid_id: string }>(),
+  ]);
   const deviceIds = (devices ?? []).map((r) => r.id as string);
 
-  const [householdDevicesCount, billingLineItemsNulled] = await Promise.all([
-    deviceIds.length
-      ? countTable(supabase, "household_devices", {
-          column: "device_id",
-          values: deviceIds,
-        })
-      : Promise.resolve(0),
-    deviceIds.length
-      ? countTable(supabase, "billing_line_items", {
-          column: "device_id",
-          values: deviceIds,
-        })
-      : Promise.resolve(0),
-  ]);
+  const [householdDevicesCount, billingLineItemsNulled, readingsInClosedPeriods] =
+    await Promise.all([
+      deviceIds.length
+        ? countTable(supabase, "household_devices", {
+            column: "device_id",
+            values: deviceIds,
+          })
+        : Promise.resolve(0),
+      deviceIds.length
+        ? countTable(supabase, "billing_line_items", {
+            column: "device_id",
+            values: deviceIds,
+          })
+        : Promise.resolve(0),
+      edge
+        ? countReadingsInClosedPeriods(supabase, edge.microgrid_id, deviceIds)
+        : Promise.resolve(0),
+    ]);
 
   return {
     kind: "edge",
     devices: deviceIds.length,
     household_devices: householdDevicesCount,
     billing_line_items_nulled: billingLineItemsNulled,
+    readings_in_closed_periods: readingsInClosedPeriods,
   };
 }
 

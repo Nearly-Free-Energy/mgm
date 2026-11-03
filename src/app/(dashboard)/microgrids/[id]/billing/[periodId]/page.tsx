@@ -11,7 +11,45 @@ import type {
 import { BillingTable } from "@/components/BillingTable";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
-import { currentUserIsSuperAdmin } from "@/lib/auth/access";
+import { requestUserIsSuperAdmin } from "@/lib/auth/request-access";
+
+type PaymentCommunity = {
+  id: string;
+  payment_provider: string | null;
+  org_id: string;
+};
+
+// Normalize PostgREST join (may be array or single object)
+function firstCommunity(
+  communities: PaymentCommunity | PaymentCommunity[] | null | undefined,
+): PaymentCommunity | null {
+  if (!communities) return null;
+  return Array.isArray(communities) ? (communities[0] ?? null) : communities;
+}
+
+/**
+ * Whether the community's payments are ready to offer a payment link.
+ *
+ * Composes Payments on a Supabase client of its own: authorizeOrganization
+ * calls `auth.getUser()`, and supabase-js holds a client's auth lock for that
+ * whole network call, so on the page's client it would hold back the
+ * breadcrumb and table reads queued there by a round trip. If supabase-js
+ * stops queueing queries behind getUser, the page's client would do.
+ */
+async function paymentLinkAvailable(community: PaymentCommunity): Promise<boolean> {
+  const composed = await composePayments({
+    supabase: await createClient(),
+    organizationId: community.org_id,
+    allowDisabled: true,
+  });
+  if (!composed.ok) return false;
+  try {
+    const readiness = await composed.data.payments.getReadiness(community.id);
+    return readiness.ok && ["ready", "sandbox"].includes(readiness.data.state);
+  } finally {
+    await composed.data.dispose();
+  }
+}
 
 export default async function BillingPeriodDetailPage({
   params,
@@ -21,13 +59,8 @@ export default async function BillingPeriodDetailPage({
   const { id, periodId } = await params;
   const supabase = await createClient();
 
-  const levels = await getHierarchyLevels(supabase, {
-    kind: "microgrid",
-    microgridId: id,
-  });
-
   type MicrogridWithCommunity = Microgrid & {
-    communities: { id: string; payment_provider: string | null } | null;
+    communities: PaymentCommunity | PaymentCommunity[] | null;
   };
 
   // BC2 (#174) — type for the household-edge join used to compute
@@ -45,27 +78,39 @@ export default async function BillingPeriodDetailPage({
     }>;
   };
 
-  const [
-    { data: period, error: periodError },
-    { data: lineItems, error: lineItemsError },
-    { data: households, error: householdsError },
-    { data: householdEdges, error: householdEdgesError },
-    { data: microgrid, error: microgridError },
-    isSuperAdmin,
-  ] = await Promise.all([
+  // Every read below depends only on the route params or on another read
+  // here, so they all start now; the breadcrumb's dependent queries are the
+  // longest chain. The results are checked further down in the same order
+  // as before, so each outcome (404, error banner, page) is unchanged.
+  const periodRead = Promise.resolve(
     supabase
       .from("billing_periods")
       .select("*")
       .eq("id", periodId)
       .eq("microgrid_id", id)
-      .single()
-      .then((res) => ({ ...res, data: res.data as BillingPeriod | null })),
-    // BC2 (#174) — line items without the actor join. The
-    // `user_directory!entered_by_user_id(...)` PostgREST shorthand was
-    // dropped when the underlying view was replaced by the
-    // `fn_list_visible_users` RPC in #269 (no FK metadata on a function).
-    // We resolve the actor display name in a second step below using
-    // the same RPC, batched on the collected entered_by_user_id set.
+      .single(),
+  ).then((res) => ({ ...res, data: res.data as BillingPeriod | null }));
+
+  // Amounts on historical bills must be explained by the period's own
+  // tariff. Never show the latest microgrid tariff beside older charges.
+  const scheduleRead = periodRead.then(async ({ data: period }) => {
+    if (!period?.rate_schedule_id) return { data: null, error: null };
+    const res = await supabase
+      .from("rate_schedules")
+      .select("*")
+      .eq("id", period.rate_schedule_id)
+      .eq("microgrid_id", id)
+      .maybeSingle();
+    return { ...res, data: res.data as RateSchedule | null };
+  });
+
+  // BC2 (#174) — line items without the actor join. The
+  // `user_directory!entered_by_user_id(...)` PostgREST shorthand was
+  // dropped when the underlying view was replaced by the
+  // `fn_list_visible_users` RPC in #269 (no FK metadata on a function).
+  // We resolve the actor display name in a second step below using
+  // the same RPC, batched on the collected entered_by_user_id set.
+  const lineItemsRead = Promise.resolve(
     supabase
       .from("billing_line_items")
       .select(
@@ -73,6 +118,62 @@ export default async function BillingPeriodDetailPage({
       )
       .eq("billing_period_id", periodId)
       .returns<BillingLineItem[]>(),
+  );
+
+  // BC2 (#174) — resolve the actor display name per line item via a
+  // second call to the `fn_list_visible_users` RPC (#269 replaced the
+  // user_directory view). Collect the entered_by_user_id set and ask the
+  // RPC for those rows in one batch; the actor map is built below.
+  const actorRowsRead = lineItemsRead.then(async ({ data: rows }) => {
+    const enteredByIds = Array.from(
+      new Set(
+        (rows ?? [])
+          .map((li) => li.entered_by_user_id)
+          .filter((v): v is string => typeof v === "string" && v.length > 0),
+      ),
+    );
+    if (enteredByIds.length === 0) return { data: null };
+    return await supabase.rpc("fn_list_visible_users", {
+      _target_user_ids: enteredByIds,
+    });
+  });
+
+  const microgridRead = Promise.resolve(
+    supabase
+      .from("microgrids")
+      .select("id, name, currency, communities!inner(id, payment_provider, org_id)")
+      .eq("id", id)
+      .single(),
+  ).then((res) => ({ ...res, data: res.data as MicrogridWithCommunity | null }));
+
+  // Payment readiness needs only the community (and its org, from the same
+  // embed), so it starts as soon as the microgrid row is back. Its result,
+  // or its error, is taken at the same point as before; the no-op catch
+  // only stops an early failure counting as unhandled until then.
+  const paymentConfiguredRead = microgridRead.then(({ data }) => {
+    const community = firstCommunity(data?.communities);
+    return community ? paymentLinkAvailable(community) : false;
+  });
+  paymentConfiguredRead.catch(() => {});
+
+  const [
+    levels,
+    { data: period, error: periodError },
+    { data: schedule, error: scheduleError },
+    { data: lineItems, error: lineItemsError },
+    { data: households, error: householdsError },
+    { data: householdEdges, error: householdEdgesError },
+    { data: microgrid, error: microgridError },
+    isSuperAdmin,
+    { data: actorRows },
+  ] = await Promise.all([
+    getHierarchyLevels(supabase, {
+      kind: "microgrid",
+      microgridId: id,
+    }),
+    periodRead,
+    scheduleRead,
+    lineItemsRead,
     supabase
       .from("households")
       .select("*")
@@ -95,30 +196,14 @@ export default async function BillingPeriodDetailPage({
       .eq("microgrid_id", id)
       .eq("household_devices.role", "primary_consumption_meter")
       .returns<HouseholdEdgeRow[]>(),
-    supabase
-      .from("microgrids")
-      .select("id, name, currency, communities!inner(id, payment_provider)")
-      .eq("id", id)
-      .single()
-      .then((res) => ({ ...res, data: res.data as MicrogridWithCommunity | null })),
-    currentUserIsSuperAdmin(supabase),
+    microgridRead,
+    requestUserIsSuperAdmin(),
+    actorRowsRead,
   ]);
 
   if (periodError || !period) {
     notFound();
   }
-
-  // Amounts on historical bills must be explained by the period's own
-  // tariff. Never show the latest microgrid tariff beside older charges.
-  const { data: schedule, error: scheduleError } = period.rate_schedule_id
-    ? await supabase
-        .from("rate_schedules")
-        .select("*")
-        .eq("id", period.rate_schedule_id)
-        .eq("microgrid_id", id)
-        .maybeSingle()
-        .then((res) => ({ ...res, data: res.data as RateSchedule | null }))
-    : { data: null, error: null };
 
   if (microgridError || !microgrid) {
     return (
@@ -173,25 +258,8 @@ export default async function BillingPeriodDetailPage({
     );
   }
 
-  // Normalize PostgREST join (may be array or single object)
-  const community = microgrid.communities
-    ? Array.isArray(microgrid.communities)
-      ? (microgrid.communities as { id: string; payment_provider: string | null }[])[0]
-      : (microgrid.communities as { id: string; payment_provider: string | null })
-    : null;
-
-  let isPaymentConfigured = false;
-  if (community) {
-    const { data: scope } = await supabase.from("communities").select("org_id").eq("id", community.id).maybeSingle<{ org_id: string }>();
-    if (scope) {
-      const composed = await composePayments({ supabase, organizationId: scope.org_id, allowDisabled: true });
-      if (composed.ok) {
-        try { const readiness = await composed.data.payments.getReadiness(community.id); isPaymentConfigured = readiness.ok && ["ready", "sandbox"].includes(readiness.data.state); }
-        finally { await composed.data.dispose(); }
-      }
-    }
-  }
-  const communityId = community?.id;
+  const isPaymentConfigured = await paymentConfiguredRead;
+  const communityId = firstCommunity(microgrid.communities)?.id;
 
   // BC2 (#174) — compute edgeAvailable per household. Mirrors the gate
   // in `runGenerationFor` (src/lib/billing/generate.ts:289-311):
@@ -211,38 +279,22 @@ export default async function BillingPeriodDetailPage({
       edge.openems_edge_id != null;
   }
 
-  // BC2 (#174) — resolve the actor display name per line item via a
-  // second call to the `fn_list_visible_users` RPC (#269 replaced the
-  // user_directory view). Collect the entered_by_user_id set, ask the
-  // RPC for those rows in one batch, then index by user id and build
-  // the actor map. RLS-hidden actors (e.g. super_admin invisible to an
-  // org_manager caller) simply don't appear in the response → null
+  // BC2 (#174) — index the batched fn_list_visible_users rows by user id
+  // and build the actor map. RLS-hidden actors (e.g. super_admin invisible
+  // to an org_manager caller) simply don't appear in the response → null
   // entry, matching the previous LEFT-JOIN-miss semantics.
   const cleanLineItems = (lineItems ?? []) as BillingLineItem[];
-  const enteredByIds = Array.from(
-    new Set(
-      cleanLineItems
-        .map((li) => li.entered_by_user_id)
-        .filter((v): v is string => typeof v === "string" && v.length > 0),
-    ),
-  );
-
   const actorById = new Map<
     string,
     { first_name: string | null; last_name: string | null; email: string | null }
   >();
-  if (enteredByIds.length > 0) {
-    const { data: actorRows } = await supabase.rpc("fn_list_visible_users", {
-      _target_user_ids: enteredByIds,
+  for (const r of actorRows ?? []) {
+    if (!r.user_id) continue;
+    actorById.set(r.user_id, {
+      first_name: r.first_name,
+      last_name: r.last_name,
+      email: r.email,
     });
-    for (const r of actorRows ?? []) {
-      if (!r.user_id) continue;
-      actorById.set(r.user_id, {
-        first_name: r.first_name,
-        last_name: r.last_name,
-        email: r.email,
-      });
-    }
   }
 
   const actorByLineItemId: Record<string, string | null> = {};

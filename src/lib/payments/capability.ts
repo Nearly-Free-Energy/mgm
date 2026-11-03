@@ -121,10 +121,20 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       };
     }
     // Reads stay available while plugins are disabled — readiness reports it.
-    const loaded = await this.repo.loadMerchantAccountPublic({
-      orgId: this.scope.organizationId,
-      communityId,
-    });
+    // The account and both plugin states are independent reads, so they load
+    // together; the results are still applied in the order below.
+    const [loaded, paymentsOn, pesapalOn] = await Promise.all([
+      this.repo.loadMerchantAccountPublic({
+        orgId: this.scope.organizationId,
+        communityId,
+      }),
+      // An unreadable state reads as disabled. The invoice PDF route and the
+      // billing period page offer a payment link only for `ready`/`sandbox`,
+      // so they render without one instead of failing; if a caller starts
+      // treating `disabled` as an error, revisit.
+      this.repo.isPaymentsEnabled(this.scope.organizationId).catch(() => false),
+      this.repo.isPesapalEnabled(this.scope.organizationId).catch(() => false),
+    ]);
     if (!loaded.ok) {
       return {
         ok: false as const,
@@ -132,17 +142,6 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         code: "payments_unavailable",
         message: loaded.message,
       };
-    }
-    let paymentsOn = false;
-    let pesapalOn = false;
-    try {
-      paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
-      pesapalOn = await this.repo.isPesapalEnabled(this.scope.organizationId);
-    } catch {
-      // An unreadable state reads as disabled. The invoice PDF route and the
-      // billing period page offer a payment link only for `ready`/`sandbox`,
-      // so they render without one instead of failing; if a caller starts
-      // treating `disabled` as an error, revisit.
     }
     if (!paymentsOn || !pesapalOn) {
       return {

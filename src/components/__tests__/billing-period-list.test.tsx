@@ -8,23 +8,31 @@
 //     (b) Selecting an option calls router.push with the correct URL.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { LocaleProvider } from "../format/locale-context";
 import type { BillingPeriod } from "@/lib/types/domain";
 
 // Mock next/navigation BEFORE any component imports that use it
 const pushSpy = vi.fn();
+const refreshSpy = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushSpy, refresh: vi.fn() }),
+  useRouter: () => ({ push: pushSpy, refresh: refreshSpy }),
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/microgrids/mg-1/billing",
 }));
+
+// Result of `from("billing_periods").delete().eq(...)`; the delete-period
+// tests override it per case.
+const deleteEqMock = vi.fn(
+  (): Promise<{ error: { code?: string; message: string; details?: string } | null }> =>
+    Promise.resolve({ error: null }),
+);
 
 // Mock Supabase client (BillingPeriodList calls createClient() on render)
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     from: () => ({
-      delete: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      delete: () => ({ eq: () => deleteEqMock() }),
       insert: () => ({
         select: () => ({
           single: () => Promise.resolve({ data: { id: "new-period" }, error: null }),
@@ -436,5 +444,91 @@ describe("BillingPeriodList — create via capability API (issue #5, review P1)"
       ).toBeTruthy()
     );
     expect(pushSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("BillingPeriodList — delete period", () => {
+  beforeEach(() => {
+    refreshSpy.mockClear();
+    deleteEqMock.mockReset();
+    deleteEqMock.mockResolvedValue({ error: null });
+  });
+
+  function renderList(periods: BillingPeriod[]) {
+    return render(
+      <Wrapper>
+        <BillingPeriodList
+          microgridId={MICROGRID_ID}
+          periods={periods}
+          summaries={SUMMARIES}
+          currency="UGX"
+          canManage={true}
+        />
+      </Wrapper>
+    );
+  }
+
+  function confirmDelete() {
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+  }
+
+  it("offers Delete only on the draft period's row", () => {
+    renderList([PERIOD_1, PERIOD_2]);
+    const buttons = screen.getAllByRole("button", { name: /^Delete$/ });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].closest("tr")?.textContent).toMatch(/draft/i);
+  });
+
+  it("offers no Delete when every period is closed", () => {
+    renderList([PERIOD_1]);
+    expect(screen.queryByRole("button", { name: /^Delete$/ })).toBeNull();
+  });
+
+  it("the confirm dialog says what the delete removes", () => {
+    renderList([PERIOD_2]);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    expect(
+      screen.getByText(
+        /removes the draft period, its generated bills and its history entries/i,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("refreshes the list after a successful delete", async () => {
+    renderList([PERIOD_2]);
+    confirmDelete();
+    await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
+  });
+
+  it("explains a delete refused because the period has recorded payments", async () => {
+    deleteEqMock.mockResolvedValue({
+      error: {
+        code: "23514",
+        message: "billing_period_kept: a billing period with recorded payments cannot be deleted",
+        details: "payment_activity",
+      },
+    });
+    renderList([PERIOD_2]);
+    confirmDelete();
+    await waitFor(() =>
+      expect(screen.getByText(/has recorded payments, so it is kept/i)).toBeTruthy(),
+    );
+    expect(refreshSpy).not.toHaveBeenCalled();
+  });
+
+  it("explains a delete refused because the period was closed meanwhile", async () => {
+    deleteEqMock.mockResolvedValue({
+      error: {
+        code: "23514",
+        message: "billing_period_kept: a closed billing period cannot be deleted",
+        details: "closed",
+      },
+    });
+    renderList([PERIOD_2]);
+    confirmDelete();
+    await waitFor(() =>
+      expect(screen.getByText(/is closed, so it is kept as the billing record/i)).toBeTruthy(),
+    );
   });
 });

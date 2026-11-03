@@ -48,6 +48,9 @@ const FIXTURE = {
   deviceA: "dddddddd-dddd-4000-8004-00000000000a",
   hhA: "dddddddd-dddd-4000-8005-00000000000a",
   periodA: "dddddddd-dddd-4000-8006-00000000000a",
+  // Closed from the start: a closed period stays closed (20261103160000),
+  // so the period_was_closed case cannot close periodA and reopen it.
+  periodAClosed: "dddddddd-dddd-4000-8006-00000000002a",
   rateA: "dddddddd-dddd-4000-8007-00000000000a",
 
   // Extra households on mgA, isolated from hhA so the link-invalidation
@@ -162,6 +165,14 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       start_date: "2026-04-01",
       end_date: "2026-04-30",
       status: "draft",
+    });
+    await svc.from("billing_periods").insert({
+      id: FIXTURE.periodAClosed,
+      microgrid_id: FIXTURE.mgA,
+      start_date: "2026-03-01",
+      end_date: "2026-03-31",
+      status: "closed",
+      closed_at: new Date().toISOString(),
     });
 
     // Org / community / microgrid / household / period — B (cross-org)
@@ -438,14 +449,8 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
   it("fn_record_line_item_with_audit: appends details.period_was_closed=true when period is closed", async () => {
     const svc = await serviceClient();
 
-    // Flip period A to closed.
-    await svc
-      .from("billing_periods")
-      .update({ status: "closed", closed_at: new Date().toISOString() })
-      .eq("id", FIXTURE.periodA);
-
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
-      _billing_period_id: FIXTURE.periodA,
+      _billing_period_id: FIXTURE.periodAClosed,
       _rate_schedule_id: FIXTURE.rateA,
       _household_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
@@ -471,17 +476,11 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { data: lastAudit } = await svc
       .from("billing_audit_log")
       .select("details")
-      .eq("billing_period_id", FIXTURE.periodA)
+      .eq("billing_period_id", FIXTURE.periodAClosed)
       .order("created_at", { ascending: false })
       .limit(1);
     const details = lastAudit?.[0]?.details as Record<string, unknown>;
     expect(details?.period_was_closed).toBe(true);
-
-    // Reset for downstream tests.
-    await svc
-      .from("billing_periods")
-      .update({ status: "draft", closed_at: null })
-      .eq("id", FIXTURE.periodA);
   });
 
   // ── #217 / 00037 — payment-link auto-invalidation on amount change ────────

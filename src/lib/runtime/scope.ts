@@ -61,7 +61,7 @@ export async function authorizeOrganization(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, reason: "unauthenticated" };
-  const roles = await getCurrentUserRoles(supabase);
+  const roles = await getCurrentUserRoles(supabase, user);
   const canAccess =
     roles.some((role) => role.role === SUPER_ADMIN) ||
     roles.some(

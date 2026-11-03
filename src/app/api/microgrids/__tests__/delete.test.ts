@@ -47,21 +47,28 @@ function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const stub: {
     eq: (...args: unknown[]) => typeof stub;
     in: (...args: unknown[]) => typeof stub;
+    or: (...args: unknown[]) => typeof stub;
     maybeSingle: () => Promise<unknown>;
     then: (onFulfilled: (v: unknown) => unknown) => Promise<unknown>;
   } = {
     eq: () => stub,
     in: () => stub,
+    or: () => stub,
     maybeSingle: () => Promise.resolve(result),
     then: (onFulfilled) => Promise.resolve(result).then(onFulfilled),
   };
   return stub;
 }
 
-function configureEntityLookup(result: {
-  data: { id: string; name: string; community_id: string } | null;
-  error: { code?: string; message: string } | null;
-}) {
+// `rows` gives the descendant counters' non-count reads per table; every
+// other read returns no rows.
+function configureEntityLookup(
+  result: {
+    data: { id: string; name: string; community_id: string } | null;
+    error: { code?: string; message: string } | null;
+  },
+  rows: Record<string, unknown[]> = {}
+) {
   mockFromImpl.mockImplementation((table: string) => {
     if (table === "microgrids") {
       return {
@@ -87,7 +94,7 @@ function configureEntityLookup(result: {
       select: (_cols: string, opts?: { count?: string; head?: boolean }) =>
         opts?.head
           ? chainable({ data: null, error: null, count: 0 })
-          : chainable({ data: [], error: null }),
+          : chainable({ data: rows[table] ?? [], error: null }),
     };
   });
 }
@@ -157,6 +164,37 @@ describe("DELETE /api/microgrids/[id]", () => {
     infoSpy.mockRestore();
   });
 
+  it("409 that says why when the database keeps the microgrid's billing", async () => {
+    const kisakye = { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" };
+    const cases = [
+      {
+        details: "closed",
+        message: "billing_period_kept: a microgrid with closed billing periods cannot be deleted",
+        expected:
+          "This microgrid has closed billing periods, which are kept as the billing record, so it cannot be deleted.",
+      },
+      {
+        details: "payment_activity",
+        message: "billing_period_kept: a microgrid with recorded payments cannot be deleted",
+        expected:
+          "This microgrid has billing with recorded payments, which is kept with its payment records, so it cannot be deleted.",
+      },
+    ];
+    const { DELETE } = await import("../[id]/route");
+    for (const refusal of cases) {
+      configureEntityLookup({ data: kisakye, error: null });
+      mockRpcImpl.mockResolvedValueOnce({
+        data: null,
+        error: { code: "23514", message: refusal.message, details: refusal.details },
+      });
+      const res = await DELETE(makeDelete(VALID_UUID), {
+        params: Promise.resolve({ id: VALID_UUID }),
+      });
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe(refusal.expected);
+    }
+  });
+
   it("409 when community management is disabled — records are preserved", async () => {
     configureEntityLookup({
       data: {
@@ -203,5 +241,68 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
     const json = await res.json();
     expect(json.descendant_counts.kind).toBe("microgrid");
     expect(json.parent).toEqual({ kind: "community", id: "comm-1" });
+  });
+
+  it("409 with the reason, and no counts, when the microgrid has a closed billing period", async () => {
+    configureEntityLookup(
+      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      {
+        billing_periods: [
+          { id: "period-1", status: "closed" },
+          { id: "period-2", status: "closed" },
+          { id: "period-3", status: "draft" },
+        ],
+      }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/microgrids/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error:
+        "This microgrid has 2 closed billing periods. Closed billing and billing with recorded payments are kept, so this microgrid cannot be deleted.",
+    });
+  });
+
+  it("409 when a draft period has recorded payments", async () => {
+    configureEntityLookup(
+      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      {
+        billing_periods: [{ id: "period-3", status: "draft" }],
+        // The paid bill of the draft period, and a payment event on it.
+        billing_line_items: [{ billing_period_id: "period-3" }],
+        payment_events: [{ billing_line_items: { billing_period_id: "period-3" } }],
+      }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/microgrids/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "This microgrid has 1 billing period with recorded payments. Closed billing and billing with recorded payments are kept, so this microgrid cannot be deleted."
+    );
+  });
+
+  it("200 with the counts when its only billing is an unpaid draft", async () => {
+    configureEntityLookup(
+      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      { billing_periods: [{ id: "period-3", status: "draft" }] }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/microgrids/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.descendant_counts.billing_periods_draft).toBe(1);
+    expect(json.descendant_counts.billing_periods_with_payments).toBe(0);
   });
 });

@@ -49,21 +49,28 @@ function chainable(result: { data: unknown; error: unknown; count?: number }) {
   const stub: {
     eq: (...args: unknown[]) => typeof stub;
     in: (...args: unknown[]) => typeof stub;
+    or: (...args: unknown[]) => typeof stub;
     maybeSingle: () => Promise<unknown>;
     then: (onFulfilled: (v: unknown) => unknown) => Promise<unknown>;
   } = {
     eq: () => stub,
     in: () => stub,
+    or: () => stub,
     maybeSingle: () => Promise.resolve(result),
     then: (onFulfilled) => Promise.resolve(result).then(onFulfilled),
   };
   return stub;
 }
 
-function configureEntityLookup(result: {
-  data: { id: string; name: string; org_id: string } | null;
-  error: { code?: string; message: string } | null;
-}) {
+// `rows` gives the descendant counters' non-count reads per table; every
+// other read returns no rows.
+function configureEntityLookup(
+  result: {
+    data: { id: string; name: string; org_id: string } | null;
+    error: { code?: string; message: string } | null;
+  },
+  rows: Record<string, unknown[]> = {}
+) {
   mockFromImpl.mockImplementation((table: string) => {
     if (table === "communities") {
       return {
@@ -76,7 +83,7 @@ function configureEntityLookup(result: {
       select: (_cols: string, opts?: { count?: string; head?: boolean }) =>
         opts?.head
           ? chainable({ data: null, error: null, count: 0 })
-          : chainable({ data: [], error: null }),
+          : chainable({ data: rows[table] ?? [], error: null }),
     };
   });
 }
@@ -142,6 +149,29 @@ describe("DELETE /api/communities/[id]", () => {
     infoSpy.mockRestore();
   });
 
+  it("409 that says why when the database keeps the community's billing", async () => {
+    configureEntityLookup({
+      data: { id: VALID_UUID, name: "Kisakye", org_id: "org-1" },
+      error: null,
+    });
+    mockRpcImpl.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23514",
+        message: "billing_period_kept: a community with closed billing periods cannot be deleted",
+        details: "closed",
+      },
+    });
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(makeDelete(VALID_UUID), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "This community has closed billing periods, which are kept as the billing record, so it cannot be deleted."
+    );
+  });
+
   it("409 when community management is disabled — records are preserved", async () => {
     configureEntityLookup({
       data: { id: VALID_UUID, name: "Kisakye", org_id: "org-1" },
@@ -183,5 +213,29 @@ describe("GET /api/communities/[id]/delete-preview", () => {
     expect(typeof json.as_of).toBe("string");
     // Parent resolves to organization for a community.
     expect(json.parent).toEqual({ kind: "organization", id: "org-1" });
+  });
+
+  it("409 with the reason when one of its microgrids has closed or paid billing", async () => {
+    configureEntityLookup(
+      { data: { id: VALID_UUID, name: "Kisakye", org_id: "org-1" }, error: null },
+      {
+        microgrids: [{ id: "mg-1" }, { id: "mg-2" }],
+        billing_periods: [
+          { id: "period-1", status: "closed" },
+          { id: "period-2", status: "draft" },
+        ],
+        payment_attempts: [{ billing_line_items: { billing_period_id: "period-2" } }],
+      }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/communities/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe(
+      "This community has 1 closed billing period and 1 billing period with recorded payments. Closed billing and billing with recorded payments are kept, so this community cannot be deleted."
+    );
   });
 });

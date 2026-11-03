@@ -340,3 +340,42 @@ describe("UsersPageClient — banner tone per feedback kind", () => {
     expect(screen.getByText(/resend failed: boom/i)).toBeDefined();
   });
 });
+
+// ── Load failure ─────────────────────────────────────────────────────
+
+describe("UsersPageClient — user list load failure", () => {
+  it("shows the load-failure banner instead of the empty state", () => {
+    render(
+      <UsersPageClient
+        rows={[]}
+        loadFailed
+        orgs={[{ id: ORG_A, name: "Org A" }]}
+        callerRole="super_admin"
+        callerOrgIds={[]}
+        currentUserId={CALLER}
+      />
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(within(alert).getByText(/could not load users/i)).toBeDefined();
+    expect(
+      within(alert).getByText(/the user list could not be loaded/i)
+    ).toBeDefined();
+    expect(screen.queryByText(/no users yet/i)).toBeNull();
+  });
+
+  it("still shows the empty state when the list loaded with no rows", () => {
+    render(
+      <UsersPageClient
+        rows={[]}
+        orgs={[{ id: ORG_A, name: "Org A" }]}
+        callerRole="super_admin"
+        callerOrgIds={[]}
+        currentUserId={CALLER}
+      />
+    );
+
+    expect(screen.getByText(/no users yet/i)).toBeDefined();
+    expect(screen.queryByText(/could not load users/i)).toBeNull();
+  });
+});
