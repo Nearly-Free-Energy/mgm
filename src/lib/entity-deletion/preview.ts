@@ -21,6 +21,11 @@ import "server-only";
  * Permission parity with DELETE: AC-ROUTE-4. Exposing descendant counts
  * to a caller who can't delete would leak scope info; gate at the same
  * level as the DELETE sibling.
+ *
+ * Kept billing: while the entity holds a closed billing period, or a draft
+ * with recorded payments, the database refuses the delete (migration
+ * 20261103160000). The preview then answers 409 with `{ error }` saying
+ * why, and `DeleteEntityButton` shows that instead of opening the dialog.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -30,7 +35,14 @@ import {
   countEntityDescendants,
   type EntityKind,
 } from "@/lib/entity-descendants";
-import { UUID_RE, errorBody, mapPgError, resolveParent } from "./shared";
+import {
+  UUID_RE,
+  errorBody,
+  keptBillingCounts,
+  keptBillingMessage,
+  mapPgError,
+  resolveParent,
+} from "./shared";
 
 export interface PreviewHandlerOptions {
   kind: EntityKind;
@@ -104,6 +116,14 @@ export function buildDeletePreviewHandler(opts: PreviewHandlerOptions) {
       countEntityDescendants(supabase, opts.kind, id),
       resolveParent(supabase, opts.kind, id),
     ]);
+
+    const kept = keptBillingCounts(descendantCounts);
+    if (kept) {
+      return NextResponse.json(
+        errorBody(keptBillingMessage(opts.entityLabel, kept)),
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json(
       {
