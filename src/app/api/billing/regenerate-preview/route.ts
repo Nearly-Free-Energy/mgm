@@ -32,6 +32,7 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *       endKwh: number;
  *       reason?: string;
  *     }>;
+ *     revertToEdgeHouseholdIds?: string[];
  *   }
  *
  * Response:
@@ -40,6 +41,7 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *       tierBreakdown, totalAmount,
  *       previousTotalAmount, previousPaymentStatus,
  *     }>;
+ *     kept: Array<{ householdId, householdName }>;
  *     errors: Array<{ householdId, householdName, error, code? }>;
  *   }
  *
@@ -77,6 +79,7 @@ type ParsedBody = {
   billingPeriodId: string;
   householdIds?: string[];
   manualReadings?: ManualReadingInput[];
+  revertToEdgeHouseholdIds?: string[];
 };
 
 /** Same shape as the generate route's parser — kept inline because the
@@ -163,7 +166,30 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
     manualReadings = out;
   }
 
-  return { parsed: { billingPeriodId, householdIds, manualReadings } };
+  // revertToEdgeHouseholdIds — optional UUID array. Lets a currently-manual
+  // row be replaced by an OpenEMS reading; without it such a row is kept.
+  // A household in manualReadings too is a contradiction and refused.
+  let revertToEdgeHouseholdIds: string[] | undefined;
+  if (rec.revertToEdgeHouseholdIds !== undefined) {
+    if (!Array.isArray(rec.revertToEdgeHouseholdIds)) {
+      return { error: "revertToEdgeHouseholdIds must be an array of UUIDs" };
+    }
+    for (const h of rec.revertToEdgeHouseholdIds) {
+      if (typeof h !== "string" || !UUID_RE.test(h)) {
+        return { error: "revertToEdgeHouseholdIds entries must be UUID strings" };
+      }
+      if (manualReadings?.some((m) => m.householdId === h)) {
+        return {
+          error: `Household ${h} cannot be in both manualReadings and revertToEdgeHouseholdIds`,
+        };
+      }
+    }
+    revertToEdgeHouseholdIds = rec.revertToEdgeHouseholdIds as string[];
+  }
+
+  return {
+    parsed: { billingPeriodId, householdIds, manualReadings, revertToEdgeHouseholdIds },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -250,6 +276,7 @@ export async function POST(request: NextRequest) {
       billingPeriodId: parsed.billingPeriodId,
       householdIds: parsed.householdIds,
       manualReadings: parsed.manualReadings,
+      revertToEdgeHouseholdIds: parsed.revertToEdgeHouseholdIds,
     });
     if (!result.ok) return mapError(result);
 
@@ -267,6 +294,12 @@ export async function POST(request: NextRequest) {
         previousPaymentStatus: p.previousPaymentStatus,
       }));
 
+    // Currently-manual households a bulk run left as they were. Not errors:
+    // nothing was asked of them that did not happen.
+    const kept = result.data.results
+      .filter((r) => r.kind === "kept")
+      .map((k) => ({ householdId: k.householdId, householdName: k.householdName }));
+
     const errors = result.data.results
       .filter((r) => r.kind === "error")
       .map((e) => ({
@@ -276,7 +309,7 @@ export async function POST(request: NextRequest) {
         code: e.code,
       }));
 
-    return NextResponse.json({ preview, errors });
+    return NextResponse.json({ preview, kept, errors });
   } finally {
     await composed.data.dispose();
   }
