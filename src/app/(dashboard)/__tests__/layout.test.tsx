@@ -85,3 +85,42 @@ describe("DashboardLayout first-run routing", () => {
     expect(tree).toBeTruthy();
   });
 });
+
+type Node = { type?: unknown; props?: { className?: string; children?: unknown } };
+
+function childrenOf(node: Node): Node[] {
+  const c = node.props?.children;
+  if (c == null) return [];
+  return (Array.isArray(c) ? c.flat(Infinity) : [c]).filter(
+    (x): x is Node => typeof x === "object" && x !== null
+  );
+}
+
+function findParentOf(node: Node, type: string): Node | null {
+  const kids = childrenOf(node);
+  if (kids.some((k) => k.type === type)) return node;
+  for (const k of kids) {
+    const found = findParentOf(k, type);
+    if (found) return found;
+  }
+  return null;
+}
+
+describe("DashboardLayout content column", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // A flex item's default min-width is its content's width, so without
+  // min-w-0 a wide table stretches the column (and the page) instead of
+  // scrolling inside its own overflow-auto container.
+  it("lets the content column shrink below its content's width", async () => {
+    wire({ user: { id: "user-1" }, orgCount: 1, roleCount: 1 });
+    const tree = (await DashboardLayout({ children: "child" })) as Node;
+    const column = findParentOf(tree, "main");
+    expect(column).not.toBeNull();
+    const classes = (column!.props?.className ?? "").split(/\s+/);
+    expect(classes).toContain("flex-1");
+    expect(classes).toContain("min-w-0");
+  });
+});
