@@ -27,9 +27,15 @@
 --   4. as an org manager and as a super admin, exactly as PostgREST would
 --      (JWT claims + session user authenticator + SET ROLE authenticated):
 --      the RPC lists the caller and the users they may see; profile updates
---      follow the self-or-super-admin policy; a super admin can remove
---      another user's role row while self-revocation is still refused; the
---      shared-devices view returns only rows the caller may see.
+--      follow the self-or-super-admin policy and reach only first_name,
+--      last_name and phone; an org manager removes no one else's role row
+--      (not the super admin's, not a same-org peer's, not another org's); a
+--      super admin can remove another user's role row while self-revocation
+--      is still refused; the shared-devices view returns only rows the caller
+--      may see.
+--   5. the bridge's preflight passes here and refuses each kind of mismatch:
+--      row level security off, an extra UPDATE policy, a disabled delete
+--      guard, a changed helper, a view that is not security_invoker.
 
 \set ON_ERROR_STOP on
 \echo '======================================================================'
@@ -213,11 +219,20 @@ BEGIN
     RAISE EXCEPTION 'anon can execute fn_list_visible_users';
   END IF;
   IF has_table_privilege('authenticated', 'public.user_profiles', 'INSERT')
+     OR has_table_privilege('authenticated', 'public.user_profiles', 'UPDATE')
      OR has_table_privilege('authenticated', 'public.user_roles', 'INSERT')
      OR has_table_privilege('authenticated', 'public.user_roles', 'UPDATE') THEN
-    RAISE EXCEPTION 'bridge granted more than UPDATE on user_profiles and DELETE on user_roles';
+    RAISE EXCEPTION 'bridge granted more than column UPDATE on user_profiles and DELETE on user_roles';
   END IF;
-  RAISE NOTICE 'OK: bridge applied (function created, anon denied, no extra verbs)';
+  IF NOT (has_column_privilege('authenticated', 'public.user_profiles', 'first_name', 'UPDATE')
+          AND has_column_privilege('authenticated', 'public.user_profiles', 'last_name', 'UPDATE')
+          AND has_column_privilege('authenticated', 'public.user_profiles', 'phone', 'UPDATE'))
+     OR has_column_privilege('authenticated', 'public.user_profiles', 'user_id', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.user_profiles', 'created_at', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.user_profiles', 'updated_at', 'UPDATE') THEN
+    RAISE EXCEPTION 'user_profiles UPDATE is not limited to first_name, last_name and phone';
+  END IF;
+  RAISE NOTICE 'OK: bridge applied (function created, anon denied, profile UPDATE limited to three columns, no extra verbs)';
 END;
 $$;
 
@@ -276,6 +291,26 @@ BEGIN
   END IF;
   RAISE NOTICE 'OK: org manager updates own profile, not another user''s';
 
+  -- Own row, other columns: phone is granted; user_id and created_at are not.
+  UPDATE user_profiles SET phone = '+256700000009' WHERE user_id = v_m;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION 'org manager could not update own phone (% rows)', v_rows;
+  END IF;
+  BEGIN
+    UPDATE user_profiles SET created_at = now() - interval '1 year' WHERE user_id = v_m;
+    RAISE EXCEPTION 'org manager changed own created_at';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE user_profiles SET user_id = v_n WHERE user_id = v_m;
+    RAISE EXCEPTION 'org manager changed own user_id';
+  EXCEPTION WHEN insufficient_privilege THEN
+    NULL;
+  END;
+  RAISE NOTICE 'OK: org manager updates own phone, not own user_id or created_at';
+
   -- Role rows: self-revocation refused by the guard trigger; another org's
   -- row is outside the delete policy.
   BEGIN
@@ -293,6 +328,27 @@ BEGIN
     RAISE EXCEPTION 'org manager removed a role row in another org (% rows)', v_rows;
   END IF;
   RAISE NOTICE 'OK: org manager cannot remove a role row in another org';
+
+  -- The super admin's row: its scope_id is NULL, so the org-manager DELETE
+  -- policy never covers it. Step 4b finds the row still there.
+  DELETE FROM user_roles WHERE user_id = v_s;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'org manager removed the super admin''s role row (% rows)', v_rows;
+  END IF;
+  RAISE NOTICE 'OK: org manager cannot remove the super admin''s role row';
+
+  -- A same-org peer's row: refused too, as the base policies already behave.
+  -- A DELETE with a WHERE clause only reaches rows the SELECT policies show,
+  -- and those show an org manager their own role rows only, so the 00013
+  -- org-manager DELETE policy never applies to a peer. Step 4b removes the
+  -- same row as a super admin, which shows it was still there.
+  DELETE FROM user_roles WHERE user_id = v_n;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  IF v_rows <> 0 THEN
+    RAISE EXCEPTION 'org manager removed a same-org peer''s role row (% rows)', v_rows;
+  END IF;
+  RAISE NOTICE 'OK: org manager cannot remove a same-org peer''s role row (unchanged base behaviour)';
 
   -- Shared devices: org A's unlinked device only.
   SELECT array_agg(id) INTO v_devices FROM microgrid_shared_devices;
@@ -373,6 +429,90 @@ END;
 $$;
 
 RESET ROLE;
+SET SESSION AUTHORIZATION postgres;
+
+-- ── 5. The preflight refuses a database that does not match ─────────────────
+-- pg_temp.pilot_user_directory_preflight() was created by the bridge in step
+-- 3. Each drift is made inside a savepoint and rolled back.
+\echo '-- [5] bridge preflight against matching and drifted databases'
+
+DO $$
+DECLARE
+  v_problems TEXT[] := pg_temp.pilot_user_directory_preflight();
+BEGIN
+  IF cardinality(v_problems) <> 0 THEN
+    RAISE EXCEPTION 'preflight reports problems on the rehearsal database: %', v_problems;
+  END IF;
+  RAISE NOTICE 'OK: preflight passes on the bridged rehearsal database';
+END;
+$$;
+
+SAVEPOINT drift;
+ALTER TABLE public.user_profiles DISABLE ROW LEVEL SECURITY;
+DO $$
+DECLARE v TEXT := array_to_string(pg_temp.pilot_user_directory_preflight(), '; ');
+BEGIN
+  IF v NOT LIKE '%row level security is not enabled on user_profiles%' THEN
+    RAISE EXCEPTION 'preflight missed RLS off on user_profiles: %', v;
+  END IF;
+  RAISE NOTICE 'OK: preflight refuses RLS off (%)', v;
+END;
+$$;
+ROLLBACK TO SAVEPOINT drift;
+
+CREATE POLICY "rehearsal drift: anyone updates profiles"
+  ON public.user_profiles FOR UPDATE USING (true);
+DO $$
+DECLARE v TEXT := array_to_string(pg_temp.pilot_user_directory_preflight(), '; ');
+BEGIN
+  IF v NOT LIKE '%UPDATE policies on user_profiles%' THEN
+    RAISE EXCEPTION 'preflight missed an extra UPDATE policy: %', v;
+  END IF;
+  RAISE NOTICE 'OK: preflight refuses an extra UPDATE policy (%)', v;
+END;
+$$;
+ROLLBACK TO SAVEPOINT drift;
+
+ALTER TABLE public.user_roles DISABLE TRIGGER trg_user_roles_before_delete_guard;
+DO $$
+DECLARE v TEXT := array_to_string(pg_temp.pilot_user_directory_preflight(), '; ');
+BEGIN
+  IF v NOT LIKE '%delete guard trigger%' THEN
+    RAISE EXCEPTION 'preflight missed a disabled delete guard: %', v;
+  END IF;
+  RAISE NOTICE 'OK: preflight refuses a disabled delete guard (%)', v;
+END;
+$$;
+ROLLBACK TO SAVEPOINT drift;
+
+CREATE OR REPLACE FUNCTION public.user_can_see_user_profile(_target_user_id UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $fn$ SELECT TRUE $fn$;
+DO $$
+DECLARE v TEXT := array_to_string(pg_temp.pilot_user_directory_preflight(), '; ');
+BEGIN
+  IF v NOT LIKE '%user_can_see_user_profile(uuid) is missing or is not the version%' THEN
+    RAISE EXCEPTION 'preflight missed a changed helper: %', v;
+  END IF;
+  RAISE NOTICE 'OK: preflight refuses a changed helper (%)', v;
+END;
+$$;
+ROLLBACK TO SAVEPOINT drift;
+
+ALTER VIEW public.microgrid_shared_devices SET (security_invoker = false);
+DO $$
+DECLARE v TEXT := array_to_string(pg_temp.pilot_user_directory_preflight(), '; ');
+BEGIN
+  IF v NOT LIKE '%microgrid_shared_devices is missing or is not security_invoker%' THEN
+    RAISE EXCEPTION 'preflight missed a view without security_invoker: %', v;
+  END IF;
+  RAISE NOTICE 'OK: preflight refuses a view without security_invoker (%)', v;
+END;
+$$;
+ROLLBACK TO SAVEPOINT drift;
+RELEASE SAVEPOINT drift;
+
 RESET SESSION AUTHORIZATION;
 
 ROLLBACK;
