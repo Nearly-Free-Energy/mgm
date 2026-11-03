@@ -25,6 +25,9 @@ import type { UserVisibleRow, UserRole } from "@/lib/types/domain";
 
 export interface UsersPageClientProps {
   rows: UserVisibleRow[];
+  /** True when the user list query failed; `rows` is then empty but does
+   *  not mean there are no users. */
+  loadFailed?: boolean;
   orgs: OrgOption[];
   callerRole: "super_admin" | "org_manager";
   callerOrgIds: string[];
@@ -199,7 +202,11 @@ export function UsersPageClient(props: UsersPageClientProps) {
         </Banner>
       )}
 
-      {props.rows.length === 0 ? (
+      {props.loadFailed ? (
+        <Banner tone="destructive" title="Could not load users">
+          The user list could not be loaded. Refresh the page to try again.
+        </Banner>
+      ) : props.rows.length === 0 ? (
         <div className="rounded-md border border-border bg-card p-6 text-center text-sm text-muted-foreground">
           <p>No users yet. Invite the first one.</p>
           <button
