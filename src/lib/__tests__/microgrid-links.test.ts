@@ -9,9 +9,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import { microgridHref, microgridSetupHref } from "../microgrid-links";
 
-const getUserMock = vi.fn();
+// Middleware verifies the session with getClaims().
+const getClaimsMock = vi.fn();
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: () => ({ auth: { getUser: getUserMock } }),
+  createServerClient: () => ({ auth: { getClaims: getClaimsMock } }),
 }));
 
 const redirectMock = vi.fn();
@@ -21,7 +22,7 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+  getClaimsMock.mockResolvedValue({ data: { claims: { sub: "u1" } }, error: null });
   // Minimal request-time runtime configuration for the middleware (#46).
   vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "http://localhost:54321");
   vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_test");

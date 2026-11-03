@@ -101,11 +101,19 @@ export default async function SetupEdgesPage({
     .filter((e) => !!e.openems_edge_id)
     .map((e) => e.openems_edge_id as string);
 
+  // Decrypting the stored credentials runs on the service role, so it waits
+  // for canManage: currentUserCanAccessMicrogrid asks Supabase Auth through
+  // getUser(), which refuses a session signed out elsewhere, while middleware
+  // only verifies the token's signature and the (dashboard) layout renders
+  // alongside this page rather than before it. If that helper stops calling
+  // getUser(), revisit. With no OpenEMS edges there is nothing to look up.
   let emsConfig: OpenEmsClientConfig | null = null;
-  try {
-    emsConfig = await getMicrogridEmsConfig(supabase, id);
-  } catch {
-    emsConfig = null;
+  if (canManage && openemsEdgeIds.length > 0) {
+    try {
+      emsConfig = await getMicrogridEmsConfig(supabase, id);
+    } catch {
+      emsConfig = null;
+    }
   }
 
   const { map: onlineMap, error: onlineError } =

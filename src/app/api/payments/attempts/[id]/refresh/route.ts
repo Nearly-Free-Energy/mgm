@@ -24,6 +24,21 @@ export async function POST(
       { status: 400 }
     );
   }
+  const supabase = await createClient();
+  // The lookup below runs on the service role, so confirm the session with
+  // Supabase Auth first: middleware only verifies the token's signature,
+  // which a session signed out elsewhere still passes. composePayments asks
+  // Auth again; if the lookup moves after it, this check can go.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    // The same answer composePayments gives a missing session.
+    return NextResponse.json(
+      { error: "Authentication required.", reason: "payments_unauthenticated" },
+      { status: 401 }
+    );
+  }
   // Resolve the owning org with the service client (RLS-independent lookup),
   // then compose with the caller session so org scope is enforced.
   const service = createServiceClient();
@@ -38,7 +53,6 @@ export async function POST(
       { status: 404 }
     );
   }
-  const supabase = await createClient();
   const composed = await composePayments({
     supabase,
     organizationId: attempt.org_id,
