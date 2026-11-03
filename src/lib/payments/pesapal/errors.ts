@@ -1,4 +1,5 @@
 import { PaymentError } from "../errors";
+import type { CheckoutSubmission } from "../providers/types";
 
 /**
  * Pesapal-specific errors. Extends `PaymentError` so the route handler only
@@ -15,8 +16,9 @@ export class PesapalError extends PaymentError {
     code: string,
     statusCode: number = 500,
     details?: unknown,
+    submission?: CheckoutSubmission,
   ) {
-    super(message, code, statusCode, details);
+    super(message, code, statusCode, details, submission);
     this.name = "PesapalError";
   }
 }
@@ -29,7 +31,7 @@ export class PesapalError extends PaymentError {
 //                                          (legacy; post-#121 parsePesapalConfig
 //                                          rejects upstream with PAYMENT_INVALID_CONFIG)
 // "PESAPAL_REGISTER_IPN_FAILED"   (502) — RegisterIPN endpoint failed or returned no ipn_id
-// "PESAPAL_UNREACHABLE"           (503) — network/fetch failure
+// "PESAPAL_UNREACHABLE"           (503) — network/fetch failure or request timeout
 // "PESAPAL_MISSING_CONTACT"       (400) — household has neither email nor phone
 // "PESAPAL_ZERO_AMOUNT"           (400) — line item total is <= 0
 // "PESAPAL_LINE_ITEM_NOT_FOUND"   (404) — line item lookup returned no row

@@ -10,6 +10,7 @@ import "server-only";
 import {
   canReuseAttempt,
   isBlockedForNewCheckout,
+  isSupersedableAttempt,
   validateReceiptAgainstAttempt,
 } from "./reconciliation";
 import type {
@@ -19,8 +20,10 @@ import type {
   PaymentsResult,
   PaymentsScope,
   ProviderFactory,
+  RepositoryError,
 } from "./repository";
-import { snapshotToAttemptOutcome } from "./providers/types";
+import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
+import type { CheckoutResult } from "./providers/types";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -290,7 +293,24 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     if (history.some(h => ["verified", "resolved", "reversed"].includes(h.status))) {
       return { ok: false as const, status: 409 as const, code: "payments_needs_reconciliation", message: "A receipt already exists for this bill. Reconcile its balance before collecting again." };
     }
-    if (history.some(h => ["pending", "confirmation_pending"].includes(h.status) && (!h.checkout_url || Number(h.amount) !== bill.totalAmount || h.bill_revision_updated_at !== bill.updatedAt))) {
+    // An open attempt that never recorded a checkout URL or tracking ID
+    // cannot collect payment; once old enough, fail it so this checkout can
+    // replace it (`isSupersedableAttempt`). The write is conditional, so an
+    // attempt another request has linked or closed since it was read stays.
+    const now = Date.now();
+    const superseded = history.filter(h => isSupersedableAttempt(h, now));
+    for (const stale of superseded) {
+      const { failed, error } = await this.repo.failUnlinkedAttempt({
+        attemptId: stale.id,
+        failureCode: "checkout_superseded",
+        failureMessage: "No checkout URL or tracking ID was recorded; replaced by a new checkout.",
+      });
+      if (error || !failed) {
+        return { ok: false as const, status: 409 as const, code: "payments_confirmation_pending", message: "An existing checkout may still collect payment. Refresh its status; do not submit another payment." };
+      }
+    }
+    const remaining = history.filter(h => !superseded.includes(h));
+    if (remaining.some(h => ["pending", "confirmation_pending"].includes(h.status) && (!h.checkout_url || Number(h.amount) !== bill.totalAmount || h.bill_revision_updated_at !== bill.updatedAt))) {
       return { ok: false as const, status: 409 as const, code: "payments_confirmation_pending", message: "An existing checkout may still collect payment. Refresh its status; do not submit another payment." };
     }
     // Repeated clicks reuse the active attempt while the bill is unchanged.
@@ -376,9 +396,11 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       };
     }
 
+    const attemptId = created.attempt.id;
     const names = splitName(`${bill.contactFirstName} ${bill.contactLastName}`.trim());
+    let checkout: CheckoutResult;
     try {
-      const checkout = await provider.provider.createCheckout({
+      checkout = await provider.provider.createCheckout({
         merchantReference,
         amount: bill.totalAmount,
         currency: bill.currency,
@@ -391,33 +413,74 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
           lastName: names.last,
         },
       });
-      const trackingError = await this.repo.updateAttemptTracking({
-        attemptId: created.attempt.id,
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (checkoutWasNotSubmitted(err)) {
+        // No order exists at the provider, so nothing can collect against
+        // this attempt; failing it lets the next tap reserve a fresh one.
+        await this.repo.markAttemptStatus({
+          attemptId,
+          status: "failed",
+          failureCode: "checkout_not_submitted",
+          failureMessage: message.slice(0, 500),
+        });
+        return {
+          ok: false as const, status: 503 as const, code: "payments_checkout_unavailable",
+          message: "Online payment is unavailable right now. Try again in a few minutes.",
+        };
+      }
+      return this.holdForConfirmation(attemptId, message);
+    }
+    // The tracking ID is written first and on its own, so refresh and the
+    // worker can follow the order even when the checkout URL write fails.
+    const tracked = await this.writeWithRetry(() =>
+      this.repo.updateAttemptTracking({ attemptId, providerTrackingId: checkout.providerTrackingId })
+    );
+    if (!tracked) return this.holdForConfirmation(attemptId, "Checkout tracking ID could not be persisted");
+    const linked = await this.writeWithRetry(() =>
+      this.repo.updateAttemptTracking({
+        attemptId,
         providerTrackingId: checkout.providerTrackingId,
         checkoutUrl: checkout.redirectUrl,
-      });
-      if (trackingError) throw new Error("Checkout confirmation could not be persisted");
-      const attempt = (await this.repo.getAttempt(created.attempt.id)) ?? {
-        ...created.attempt,
-        provider_tracking_id: checkout.providerTrackingId,
-        checkout_url: checkout.redirectUrl,
-      };
-      return { ok: true as const, data: { redirectUrl: checkout.redirectUrl, attempt, reused: false } };
-    } catch (err) {
-      // Ambiguous provider timeouts become "confirmation pending" — do not
-      // blindly submit another charge.
-      const message = err instanceof Error ? err.message : String(err);
-      await this.repo.markAttemptStatus({
-        attemptId: created.attempt.id,
-        status: "confirmation_pending",
-        failureCode: "confirmation_pending",
-        failureMessage: message.slice(0, 500),
-      });
-      return {
-        ok: false as const, status: 503 as const, code: "payments_confirmation_pending",
-        message: "Checkout confirmation is pending. Refresh the saved attempt before trying again.",
-      };
+      })
+    );
+    if (!linked) return this.holdForConfirmation(attemptId, "Checkout URL could not be persisted");
+    const attempt = (await this.repo.getAttempt(attemptId).catch(() => null)) ?? {
+      ...created.attempt,
+      provider_tracking_id: checkout.providerTrackingId,
+      checkout_url: checkout.redirectUrl,
+    };
+    return { ok: true as const, data: { redirectUrl: checkout.redirectUrl, attempt, reused: false } };
+  }
+
+  /**
+   * Ambiguous provider outcomes become "confirmation pending" — do not
+   * blindly submit another charge. A tracking ID already written stays, so
+   * the attempt can still be refreshed and polled.
+   */
+  private async holdForConfirmation(attemptId: string, message: string) {
+    await this.repo.markAttemptStatus({
+      attemptId,
+      status: "confirmation_pending",
+      failureCode: "confirmation_pending",
+      failureMessage: message.slice(0, 500),
+    });
+    return {
+      ok: false as const, status: 503 as const, code: "payments_confirmation_pending",
+      message: "Checkout confirmation is pending. Refresh the saved attempt before trying again.",
+    };
+  }
+
+  /** Runs a repository write, retrying once; a throw counts as a failure. */
+  private async writeWithRetry(write: () => Promise<RepositoryError | null>): Promise<boolean> {
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        if (!(await write())) return true;
+      } catch {
+        // Counted as a failed write.
+      }
     }
+    return false;
   }
 
   async refreshPaymentStatus(attemptId: string) {

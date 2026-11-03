@@ -331,7 +331,7 @@ export function createSupabasePaymentsRepository(
         .from("payment_attempts")
         .update({
           provider_tracking_id: input.providerTrackingId,
-          checkout_url: input.checkoutUrl,
+          ...(input.checkoutUrl !== undefined ? { checkout_url: input.checkoutUrl } : {}),
           ...(input.status ? { status: input.status } : {}),
         })
         .eq("id", input.attemptId);
@@ -348,6 +348,23 @@ export function createSupabasePaymentsRepository(
         })
         .eq("id", input.attemptId);
       return error ? toError(error) : null;
+    },
+
+    async failUnlinkedAttempt(input) {
+      const { data, error } = await writer
+        .from("payment_attempts")
+        .update({
+          status: "failed",
+          failure_code: input.failureCode,
+          failure_message: input.failureMessage,
+        })
+        .eq("id", input.attemptId)
+        .in("status", ["pending", "confirmation_pending"])
+        .is("provider_tracking_id", null)
+        .is("checkout_url", null)
+        .select("id");
+      if (error) return { failed: false, error: toError(error) };
+      return { failed: (data ?? []).length > 0, error: null };
     },
 
     async getAttempt(attemptId: string) {

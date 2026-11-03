@@ -169,7 +169,8 @@ export interface PaymentsRepository {
   updateAttemptTracking(input: {
     attemptId: string;
     providerTrackingId: string;
-    checkoutUrl: string;
+    /** Omitted: leave the stored checkout URL unchanged. */
+    checkoutUrl?: string;
     status?: AttemptStatus;
   }): Promise<RepositoryError | null>;
   markAttemptStatus(input: {
@@ -178,6 +179,17 @@ export interface PaymentsRepository {
     failureCode?: string | null;
     failureMessage?: string | null;
   }): Promise<RepositoryError | null>;
+  /**
+   * Marks an attempt failed only while it is still open and still has
+   * neither a tracking ID nor a checkout URL, in one conditional update.
+   * `failed` is false when the row no longer matches, because another
+   * request linked or closed it in the meantime.
+   */
+  failUnlinkedAttempt(input: {
+    attemptId: string;
+    failureCode: string;
+    failureMessage: string;
+  }): Promise<{ failed: boolean; error: RepositoryError | null }>;
   getAttempt(attemptId: string): Promise<PaymentAttempt | null>;
   listAttemptsForLineItem(lineItemId: string): Promise<PaymentAttempt[]>;
   recordReceipt(input: {

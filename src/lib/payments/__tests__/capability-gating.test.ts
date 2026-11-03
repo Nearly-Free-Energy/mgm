@@ -193,6 +193,8 @@ const PRIVATE_HELPERS = [
   "billToDescription",
   "applySnapshot",
   "parseEnvelope",
+  "holdForConfirmation",
+  "writeWithRetry",
 ] as const;
 
 /** Every repository method, so "nothing was written" cannot miss a new one. */
@@ -210,6 +212,7 @@ const REPOSITORY_ACCESS = {
   createAttempt: "write",
   updateAttemptTracking: "write",
   markAttemptStatus: "write",
+  failUnlinkedAttempt: "write",
   getAttempt: "read",
   listAttemptsForLineItem: "read",
   recordReceipt: "write",
