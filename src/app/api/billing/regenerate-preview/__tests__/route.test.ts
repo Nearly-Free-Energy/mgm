@@ -53,6 +53,7 @@ let lastCapabilityCall: {
   billingPeriodId?: string;
   householdIds?: string[];
   manualReadings?: unknown[];
+  revertToEdgeHouseholdIds?: string[];
 } | null = null;
 let periodRow: { id: string; microgrid_id: string } | null = {
   id: "660e8400-e29b-41d4-a716-446655441000",
@@ -67,11 +68,13 @@ const previewBills = vi.fn(async (input: {
   billingPeriodId: string;
   householdIds?: string[];
   manualReadings?: unknown[];
+  revertToEdgeHouseholdIds?: string[];
 }) => {
   lastCapabilityCall = {
     billingPeriodId: input.billingPeriodId,
     householdIds: input.householdIds,
     manualReadings: input.manualReadings,
+    revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
   };
   return mockCapabilityResult;
 });
@@ -389,5 +392,55 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     expect(json.preview).toEqual([]);
     expect(json.errors).toHaveLength(1);
     expect(json.errors[0].code).toBe("currently_manual");
+  });
+
+  it("forwards revertToEdgeHouseholdIds to the billing capability", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        billingPeriodId: PERIOD_ID,
+        householdIds: [HH_A],
+        revertToEdgeHouseholdIds: [HH_A],
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toEqual([HH_A]);
+  });
+
+  it("400 invalid_body for a malformed revertToEdgeHouseholdIds", async () => {
+    const { POST } = await import("../route");
+    for (const revertToEdgeHouseholdIds of [HH_A, ["not-a-uuid"]]) {
+      const res = await POST(
+        makePostRequest({ billingPeriodId: PERIOD_ID, revertToEdgeHouseholdIds })
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_body");
+    }
+    const both = await POST(
+      makePostRequest({
+        billingPeriodId: PERIOD_ID,
+        manualReadings: [{ householdId: HH_A, startKwh: 1, endKwh: 2 }],
+        revertToEdgeHouseholdIds: [HH_A],
+      })
+    );
+    expect(both.status).toBe(400);
+    expect(previewBills).not.toHaveBeenCalled();
+  });
+
+  it("returns kept households in kept[], not errors[]", async () => {
+    mockCapabilityResult = {
+      ok: true,
+      data: {
+        results: [
+          { kind: "kept", householdId: HH_A, householdName: "HH A", readingSource: "manual" },
+        ],
+      },
+    };
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.kept).toEqual([{ householdId: HH_A, householdName: "HH A" }]);
+    expect(json.errors).toEqual([]);
   });
 });

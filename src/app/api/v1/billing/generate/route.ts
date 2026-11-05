@@ -197,6 +197,13 @@ export async function POST(request: NextRequest) {
       usageKwh: r.lineItem.usage_kwh,
     }));
 
+  // Households already on a manual reading for this period are not re-read
+  // from OpenEMS by this bulk path (see "Manual rows" in generate.ts); they
+  // are listed so the caller can tell them from households that failed.
+  const kept = out.results
+    .filter((r) => r.kind === "kept")
+    .map((k) => ({ householdId: k.householdId, householdName: k.householdName }));
+
   const errors = out.results
     .filter((r) => r.kind === "error")
     .map((e) => ({
@@ -206,5 +213,5 @@ export async function POST(request: NextRequest) {
       code: e.code,
     }));
 
-  return NextResponse.json({ lineItems, errors });
+  return NextResponse.json({ lineItems, kept, errors });
 }

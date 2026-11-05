@@ -14,6 +14,10 @@ import "server-only";
  *      overrides — implicit add to the processed set; the OpenEMS call is
  *      skipped for these households.
  *
+ *      `revertToEdgeHouseholdIds`: households whose current manual row may
+ *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
+ *      that guard only; it does not add a household to the processed set.
+ *
  *   2. `POST /api/billing/regenerate-preview` — same body, mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
@@ -34,13 +38,24 @@ import "server-only";
  * The legacy bulk-only delete-then-insert path is REMOVED — this is the
  * critical AC3 change. UPSERT-preserve is the only write path.
  *
- * ── Q5 enforcement (`currently_manual` skip) ───────────────────────────────
+ * ── Manual rows (Q5) ───────────────────────────────────────────────────────
  *
- * When a household is in `householdIds` AND has `reading_source='manual'`
- * already AND is NOT in `manualReadings`, the household is skipped and
- * surfaced in `errors` with `code: 'currently_manual'`. This protects
- * against accidental manual-row clobber via bulk regenerate. BC3's per-row
- * regenerate dialog is the only blessed path to switch a row back to edge.
+ * A household whose line item in this period already has
+ * `reading_source='manual'` is left untouched unless the request either
+ * supplies a `manualReadings` entry for it (a new manual reading) or names
+ * it in `revertToEdgeHouseholdIds` (switch back to OpenEMS). Otherwise:
+ *
+ *   - bulk run (`householdIds` undefined): the household is reported as
+ *     `kind: 'kept'`. Refresh Readings re-reads every metered household, and
+ *     a saved manual reading is not a stale one — keeping it is the expected
+ *     outcome, not a failure.
+ *   - explicit `householdIds` naming it: reported as an error with
+ *     `code: 'currently_manual'`, because the caller asked for that
+ *     household specifically and did not get what it asked for.
+ *
+ * Kept and refused households are not read from the metering provider.
+ * BC3's per-row "Switch back to edge data" is the path that sends
+ * `revertToEdgeHouseholdIds`.
  *
  * ── Cross-microgrid attack defense ─────────────────────────────────────────
  *
@@ -160,6 +175,14 @@ export type PreviewHouseholdResult = {
   previousPaymentStatus: BillingLineItemPaymentStatus | null;
 };
 
+/** A currently-manual household that a bulk run left as it was (Q5). */
+export type KeptHouseholdResult = {
+  kind: "kept";
+  householdId: string;
+  householdName: string;
+  readingSource: "manual";
+};
+
 export type ErrorHouseholdResult = {
   kind: "error";
   householdId: string;
@@ -171,6 +194,7 @@ export type ErrorHouseholdResult = {
 export type HouseholdResult =
   | WrittenHouseholdResult
   | PreviewHouseholdResult
+  | KeptHouseholdResult
   | ErrorHouseholdResult;
 
 export type GenerationResult = {
@@ -185,6 +209,10 @@ export type RunGenerationParams = {
   /** Per-household reading overrides. Households here are implicitly added
    *  to the processed set. */
   manualReadings?: ManualReadingInput[];
+  /** Households whose current manual row may be replaced by an OpenEMS
+   *  reading. Lifts the manual-row guard only; does NOT add a household to
+   *  the processed set. */
+  revertToEdgeHouseholdIds?: string[];
   /** Operator-supplied starting readings, keyed by device (#339). */
   seedReadings?: SeedReadingInput[];
   mode: GenerationMode;
@@ -291,6 +319,7 @@ export async function runGenerationFor(
   const actorRef = params.actorRef ?? null;
   const householdIdsParam = params.householdIds;
   const manualReadingsParam = params.manualReadings ?? [];
+  const revertToEdgeSet = new Set(params.revertToEdgeHouseholdIds ?? []);
   // #339. Keyed by device, not household: a seed is a reading of a specific
   // physical meter, and the same household can change meters.
   const seedByDevice = new Map<string, SeedReadingInput>();
@@ -559,10 +588,19 @@ export async function runGenerationFor(
     existingByHousehold.set(r.household_id, r);
   }
 
+  // Q5: a currently-manual row the request neither re-enters nor reverts
+  // stays as it is. Decided here so those households are also left out of
+  // the prior-reading and metering lookups below.
+  const isGuardedManual = (hid: string): boolean =>
+    !manualByHousehold.has(hid) &&
+    existingByHousehold.get(hid)?.reading_source === "manual" &&
+    !revertToEdgeSet.has(hid);
+
   // Prior-period device → last end_kwh (start_kwh derivation).
   const deviceIdsForLookup: string[] = [];
   for (const hid of processedSet) {
     if (manualByHousehold.has(hid)) continue; // start/end come from override
+    if (isGuardedManual(hid)) continue;
     const dev = householdToDevice.get(hid);
     if (dev) deviceIdsForLookup.push(dev.deviceId);
   }
@@ -603,6 +641,7 @@ export async function runGenerationFor(
   const householdsNeedingMetering: string[] = [];
   for (const hid of processedSet) {
     if (manualByHousehold.has(hid)) continue;
+    if (isGuardedManual(hid)) continue;
     const dev = householdToDevice.get(hid);
     if (dev) householdsNeedingMetering.push(hid);
   }
@@ -667,13 +706,19 @@ export async function runGenerationFor(
     const manual = manualByHousehold.get(hid);
     const assignmentError = householdAssignmentErrors.get(hid);
 
-    // Q5: bulk-regenerate hit a manual row without a manual override → skip.
-    if (
-      manual === undefined &&
-      prior?.reading_source === "manual" &&
-      householdIdsParam !== undefined &&
-      householdIdsParam.includes(hid)
-    ) {
+    // Q5: a manual row with no new manual reading and no explicit revert.
+    // `processedSet` only holds ids from `householdIds` or `manualReadings`
+    // when `householdIds` is given, so a guarded household there was named.
+    if (isGuardedManual(hid)) {
+      if (householdIdsParam === undefined) {
+        results.push({
+          kind: "kept",
+          householdId: hid,
+          householdName,
+          readingSource: "manual",
+        });
+        continue;
+      }
       results.push({
         kind: "error",
         householdId: hid,

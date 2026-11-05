@@ -3,7 +3,7 @@ import type { BillingPeriod } from "@/lib/types/domain";
 import { BillingPeriodList } from "@/components/BillingPeriodList";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
-import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import { requestUserCanAccessMicrogrid } from "@/lib/auth/request-access";
 
 export default async function BillingPage({
   params,
@@ -13,21 +13,55 @@ export default async function BillingPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [canManage, levels] = await Promise.all([
-    currentUserCanAccessMicrogrid(supabase, id),
+  // Step 1: Fetch periods
+  const periodsRead = Promise.resolve(
+    supabase
+      .from("billing_periods")
+      .select("*")
+      .eq("microgrid_id", id)
+      .order("start_date", { ascending: false })
+      .returns<BillingPeriod[]>()
+  );
+
+  // Step 2: Fetch line item summaries for those periods
+  const lineItemsRead = periodsRead.then(async ({ data: periods, error }) => {
+    const periodIds = (periods ?? []).map((p) => p.id);
+    if (error || periodIds.length === 0) {
+      return {
+        data: [] as {
+          billing_period_id: string;
+          usage_kwh: number;
+          total_amount: number;
+        }[],
+        error: null,
+      };
+    }
+    return await supabase
+      .from("billing_line_items")
+      .select("billing_period_id, usage_kwh, total_amount")
+      .in("billing_period_id", periodIds);
+  });
+
+  // None of these reads waits on the access check or the breadcrumb: RLS
+  // decides which rows come back and canManage only shapes the UI. A read
+  // that canManage had to gate would need to wait for it. The breadcrumb's
+  // dependent queries are the longest chain.
+  const [
+    canManage,
+    levels,
+    { data: periods, error },
+    lineItemsResult,
+    microgridResult,
+  ] = await Promise.all([
+    requestUserCanAccessMicrogrid(supabase, id),
     getHierarchyLevels(supabase, {
       kind: "microgrid",
       microgridId: id,
     }),
+    periodsRead,
+    lineItemsRead,
+    supabase.from("microgrids").select("currency, timezone").eq("id", id).single(),
   ]);
-
-  // Step 1: Fetch periods
-  const { data: periods, error } = await supabase
-    .from("billing_periods")
-    .select("*")
-    .eq("microgrid_id", id)
-    .order("start_date", { ascending: false })
-    .returns<BillingPeriod[]>();
 
   if (error) {
     return (
@@ -36,26 +70,6 @@ export default async function BillingPage({
       </div>
     );
   }
-
-  // Step 2: Fetch line item summaries + microgrid in parallel
-  const periodIds = (periods ?? []).map((p) => p.id);
-
-  const [lineItemsResult, microgridResult] = await Promise.all([
-    periodIds.length > 0
-      ? supabase
-          .from("billing_line_items")
-          .select("billing_period_id, usage_kwh, total_amount")
-          .in("billing_period_id", periodIds)
-      : Promise.resolve({
-          data: [] as {
-            billing_period_id: string;
-            usage_kwh: number;
-            total_amount: number;
-          }[],
-          error: null,
-        }),
-    supabase.from("microgrids").select("currency").eq("id", id).single(),
-  ]);
 
   // Step 3: Aggregate client-side
   const summaries: Record<string, { totalKwh: number; totalAmount: number }> =
@@ -78,6 +92,7 @@ export default async function BillingPage({
         periods={periods ?? []}
         summaries={summaries}
         currency={microgridResult.data?.currency ?? "UGX"}
+        timezone={microgridResult.data?.timezone}
         canManage={canManage}
       />
     </>

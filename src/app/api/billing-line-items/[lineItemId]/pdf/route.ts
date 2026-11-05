@@ -10,9 +10,11 @@
  *   - Session-bound Supabase client (`@/lib/supabase/server`) — RLS via
  *     `user_can_access_microgrid()` is the access gate. Service-role is used
  *     only for the storage logo download.
- *   - Permission gate (`currentUserCanAccessMicrogrid`) — defense-in-depth
- *     after the row load. Production: RLS hides the row → 404 fires first;
- *     unit tests: row visible, helper toggled to assert 403.
+ *   - Permission gate (`rolesCanAccessMicrogrid` on the row's org, with the
+ *     role rows read alongside the row) — defense-in-depth after the row
+ *     load.
+ *     Production: RLS hides the row → 404 fires first; unit tests: row
+ *     visible, role rows toggled to assert 403.
  *   - Proactively `ensurePaymentLinkForLineItem()` when community has a
  *     payment provider AND the line item has no cached redirect URL. Pesapal
  *     failure → 422 with the upstream reason in the body. No-provider →
@@ -33,10 +35,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { ZodError } from "zod";
 
-import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import {
+  getCurrentUserRoles,
+  rolesCanAccessMicrogrid,
+} from "@/lib/auth/access";
 import { composePayments } from "@/lib/payments/compose";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -89,8 +95,9 @@ export async function GET(
   // 2. Resolve line item + scope joins. RLS hides cross-org rows → 404.
   //    The shape of this select is the union of all fields the renderer
   //    needs PLUS the IDs needed for downstream queries (org_id, microgrid_id,
-  //    rate-schedule lookup, household-device join).
-  const { data: scopedRaw, error: scopedErr } = await supabase
+  //    rate-schedule lookup, household-device join). The caller's role rows
+  //    for step 3 load alongside it, for the user read above.
+  const scopedRead = supabase
     .from("billing_line_items")
     .select(
       `
@@ -171,6 +178,10 @@ export async function GET(
     )
     .eq("id", lineItemId)
     .maybeSingle();
+  const [{ data: scopedRaw, error: scopedErr }, roles] = await Promise.all([
+    scopedRead,
+    getCurrentUserRoles(supabase, user),
+  ]);
 
   if (scopedErr) {
     return NextResponse.json(
@@ -209,7 +220,10 @@ export async function GET(
 
   // 3. Defense-in-depth permission check. Tests exercise this branch with
   //    a mocked-visible row; production would have already 404'd via RLS.
-  if (!(await currentUserCanAccessMicrogrid(supabase, microgridId))) {
+  //    The row's microgrid → community join has already resolved the org,
+  //    so this decides with currentUserCanAccessMicrogrid's own predicate
+  //    instead of having that helper look the org up again.
+  if (!rolesCanAccessMicrogrid(roles, community.org_id as string)) {
     return NextResponse.json(
       {
         error: "You do not have permission to download this bill.",
@@ -218,6 +232,36 @@ export async function GET(
       { status: 403 },
     );
   }
+
+  // Steps 6-9 read the meter, the pinned tariff, the "entered by" name and
+  // the logo. They need only the row above and write nothing, so they start
+  // now and load while the payment link and invoice number resolve; each
+  // result is still checked at its own step, in the original order, so a
+  // request gets the same response as when they ran one after another.
+  const meterDeviceRead = readMeterDevice(supabase, household.id as string);
+  const pinnedScheduleId = period.rate_schedule_id as string | null;
+  const rateScheduleRead = pinnedScheduleId
+    ? Promise.resolve(
+        supabase
+          .from("rate_schedules")
+          .select(
+            "id, created_at, microgrid_id, service_charge, service_charge_description, tax_rate, tiers",
+          )
+          .eq("id", pinnedScheduleId)
+          .eq("microgrid_id", microgridId)
+          .maybeSingle(),
+      )
+    : null;
+  const enteredByUserNameRead = readEnteredByUserName(supabase, scoped);
+  const logoDownload = downloadInvoiceLogo(community);
+  // Each read is awaited at its own step, which still sees its failure (the
+  // logo's is logged at step 9). A request can end before then, by returning
+  // early or because the payment link step throws; the no-op catches stop a
+  // read that failed meanwhile counting as an unhandled rejection.
+  meterDeviceRead.catch(() => {});
+  rateScheduleRead?.catch(() => {});
+  enteredByUserNameRead.catch(() => {});
+  logoDownload.catch(() => {});
 
   // Invoice rendering never creates a checkout. Embed only a stable MGM
   // link; provider submission happens when the customer follows that link.
@@ -310,49 +354,16 @@ export async function GET(
   }
 
   // 6. Resolve meter device (first consumption_meter by created_at, ASC).
-  const { data: meterRows } = await supabase
-    .from("household_devices")
-    .select(
-      `
-      device_id,
-      devices!inner (
-        id,
-        config,
-        created_at,
-        device_type,
-        edge_id,
-        name,
-        openems_component_id
-      )
-    `,
-    )
-    .eq("household_id", household.id as string)
-    .eq("devices.device_type", "consumption_meter")
-    .order("created_at", { ascending: true })
-    .limit(1);
-
-  let meterDevice: Device | null = null;
-  if (meterRows && meterRows.length > 0) {
-    const dev = unwrap((meterRows[0] as Record<string, unknown>).devices);
-    if (dev) meterDevice = dev as unknown as Device;
-  }
+  const meterDevice = await meterDeviceRead;
 
   // 7. Render only the tariff that was used to calculate this period.
-  const pinnedScheduleId = period.rate_schedule_id as string | null;
-  if (!pinnedScheduleId) {
+  if (!rateScheduleRead) {
     return NextResponse.json(
       { error: "This billed period needs historical tariff reconciliation.", reason: "rate_schedule_unpinned" },
       { status: 409 },
     );
   }
-  const { data: rateScheduleRow } = await supabase
-    .from("rate_schedules")
-    .select(
-      "id, created_at, microgrid_id, service_charge, service_charge_description, tax_rate, tiers",
-    )
-    .eq("id", pinnedScheduleId)
-    .eq("microgrid_id", microgridId)
-    .maybeSingle();
+  const { data: rateScheduleRow } = await rateScheduleRead;
 
   if (!rateScheduleRow) {
     return NextResponse.json(
@@ -365,43 +376,14 @@ export async function GET(
   }
 
   // 8. Resolve "entered by" display name (BC1 — manual readings).
-  //
-  // #269: the prior `user_directory` view was replaced by the
-  // `fn_list_visible_users` RPC. The old select asked for a
-  // `display_name` column that never existed on the view (returned
-  // null silently); we drop it from the projection here. The RPC's
-  // visibility predicate is identical to the view's WHERE clause, so
-  // an RLS-hidden actor still surfaces as an empty row set → null name.
-  let enteredByUserName: string | null = null;
-  const enteredById = scoped.entered_by_user_id as string | null;
-  if (enteredById && scoped.reading_source === "manual") {
-    const { data: dirRows } = await supabase.rpc("fn_list_visible_users", {
-      _target_user_ids: [enteredById],
-    });
-    const dirRow = dirRows?.[0];
-    if (dirRow) {
-      const composed = [dirRow.first_name, dirRow.last_name]
-        .filter((s): s is string => Boolean(s && s.trim()))
-        .join(" ")
-        .trim();
-      enteredByUserName =
-        (composed.length > 0 ? composed : null) ??
-        (dirRow.email as string | null) ??
-        null;
-    }
-  }
+  const enteredByUserName = await enteredByUserNameRead;
 
   // 9. Logo download via SERVICE ROLE (RLS bypass; renderer takes a Buffer).
   let logoBytes: Buffer | null = null;
   try {
-    const invoiceConfigRaw = community.invoice_config as Record<string, unknown> | null;
-    const branding = (invoiceConfigRaw?.branding ?? {}) as Record<string, unknown>;
-    const logoPath = branding.logo_storage_path as string | null;
-    if (logoPath && logoPath.trim().length > 0) {
-      const svc = createServiceClient();
-      const { data: blob, error: dlErr } = await svc.storage
-        .from("invoice-logos")
-        .download(logoPath);
+    const download = await logoDownload;
+    if (download) {
+      const { data: blob, error: dlErr } = download;
       if (dlErr) {
         // Continue without a logo — an unbranded bill is better than no bill.
         console.warn(
@@ -560,4 +542,84 @@ function unwrap<T = Record<string, unknown>>(
     return (candidate[0] ?? null) as (T & Record<string, unknown>) | null;
   }
   return candidate as T & Record<string, unknown>;
+}
+
+/** Step 6: the household's first consumption_meter device by created_at, ASC. */
+async function readMeterDevice(
+  supabase: SupabaseClient,
+  householdId: string,
+): Promise<Device | null> {
+  const { data: meterRows } = await supabase
+    .from("household_devices")
+    .select(
+      `
+      device_id,
+      devices!inner (
+        id,
+        config,
+        created_at,
+        device_type,
+        edge_id,
+        name,
+        openems_component_id
+      )
+    `,
+    )
+    .eq("household_id", householdId)
+    .eq("devices.device_type", "consumption_meter")
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (meterRows && meterRows.length > 0) {
+    const dev = unwrap((meterRows[0] as Record<string, unknown>).devices);
+    if (dev) return dev as unknown as Device;
+  }
+  return null;
+}
+
+/**
+ * Step 8: the "entered by" display name (BC1 — manual readings).
+ *
+ * #269: the prior `user_directory` view was replaced by the
+ * `fn_list_visible_users` RPC. The old select asked for a
+ * `display_name` column that never existed on the view (returned
+ * null silently); we drop it from the projection here. The RPC's
+ * visibility predicate is identical to the view's WHERE clause, so
+ * an RLS-hidden actor still surfaces as an empty row set → null name.
+ */
+async function readEnteredByUserName(
+  supabase: SupabaseClient,
+  scoped: Record<string, unknown>,
+): Promise<string | null> {
+  const enteredById = scoped.entered_by_user_id as string | null;
+  if (!enteredById || scoped.reading_source !== "manual") return null;
+
+  const { data: dirRows } = await supabase.rpc("fn_list_visible_users", {
+    _target_user_ids: [enteredById],
+  });
+  const dirRow = dirRows?.[0];
+  if (!dirRow) return null;
+  const composed = [dirRow.first_name, dirRow.last_name]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .join(" ")
+    .trim();
+  return (
+    (composed.length > 0 ? composed : null) ??
+    (dirRow.email as string | null) ??
+    null
+  );
+}
+
+/**
+ * Step 9: start the service-role download of the community's invoice logo,
+ * or resolve null when no logo is configured. The caller handles the
+ * download error, or a throw, by rendering without a logo.
+ */
+async function downloadInvoiceLogo(community: Record<string, unknown>) {
+  const invoiceConfigRaw = community.invoice_config as Record<string, unknown> | null;
+  const branding = (invoiceConfigRaw?.branding ?? {}) as Record<string, unknown>;
+  const logoPath = branding.logo_storage_path as string | null;
+  if (!logoPath || logoPath.trim().length === 0) return null;
+  const svc = createServiceClient();
+  return svc.storage.from("invoice-logos").download(logoPath);
 }

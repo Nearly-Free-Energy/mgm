@@ -801,7 +801,11 @@ export function BillingTable({
               start_date: period.start_date,
               end_date: period.end_date,
             }}
-            lineItem={{ id: li.id, payment_status: li.payment_status }}
+            lineItem={{
+              id: li.id,
+              payment_status: li.payment_status,
+              reading_source: li.reading_source,
+            }}
             pushBanner={pushRowBanner}
             dismissBanner={dismissRowBanner}
             onSuccess={(lineItemId) => {
@@ -1070,6 +1074,11 @@ export function BillingTable({
           households={households}
           edgeAvailableByHouseholdId={edgeAvailableByHouseholdId ?? {}}
           seedNeededByHouseholdId={seedNeededByHouseholdId ?? {}}
+          currentlyManualByHouseholdId={Object.fromEntries(
+            lineItems
+              .filter((item) => item.reading_source === "manual")
+              .map((item) => [item.household_id, true]),
+          )}
           allowUsageOnlyReadings={allowUsageOnlyReadings}
           priorHintByHouseholdId={priorHintByHouseholdId ?? {}}
           deviceIdByHouseholdId={deviceIdByHouseholdId ?? {}}

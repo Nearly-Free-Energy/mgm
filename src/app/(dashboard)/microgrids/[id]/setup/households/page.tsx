@@ -3,7 +3,7 @@ import type { Device, Household } from "@/lib/types/domain";
 import { HouseholdsSection } from "./households-section";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
-import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import { requestUserCanAccessMicrogrid } from "@/lib/auth/request-access";
 import type { AvailableMeter } from "@/components/forms/HouseholdWizard";
 import type { BillingDeviceOption } from "@/components/HouseholdTable";
 
@@ -21,40 +21,45 @@ export default async function SetupHouseholdsPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [canManage, levels] = await Promise.all([
-    currentUserCanAccessMicrogrid(supabase, id),
-    getHierarchyLevels(supabase, {
-      kind: "households-listing",
-      microgridId: id,
-    }),
-  ]);
+  // The microgrid's edges feed both the device query and the edge names.
+  const edgesRead = Promise.resolve(
+    supabase
+      .from("edges")
+      .select("id, name, openems_edge_id")
+      .eq("microgrid_id", id)
+  );
 
+  // None of these reads waits on the access check or the breadcrumb: RLS
+  // decides which rows come back and canManage only shapes the UI. A read
+  // that canManage had to gate would need to wait for it. The breadcrumb's
+  // dependent queries are the longest chain.
   const [
+    canManage,
+    levels,
     { data: households, error: householdsError },
     { data: devices, error: devicesError },
     { data: primaryAssignments, error: assignmentsError },
     { data: edgesForMg, error: edgesError },
   ] = await Promise.all([
+    requestUserCanAccessMicrogrid(supabase, id),
+    getHierarchyLevels(supabase, {
+      kind: "households-listing",
+      microgridId: id,
+    }),
     supabase
       .from("households")
       .select("*")
       .eq("microgrid_id", id)
       .order("display_name")
       .returns<Household[]>(),
-    supabase
-      .from("devices")
-      .select("*")
-      .in(
-        "edge_id",
-        (
-          await supabase
-            .from("edges")
-            .select("id")
-            .eq("microgrid_id", id)
-        ).data?.map((e) => e.id) ?? [],
-      )
-      .order("name")
-      .returns<Device[]>(),
+    edgesRead.then(({ data: edges }) =>
+      supabase
+        .from("devices")
+        .select("*")
+        .in("edge_id", edges?.map((e) => e.id) ?? [])
+        .order("name")
+        .returns<Device[]>()
+    ),
     supabase
       .from("household_devices")
       .select("household_id, device_id")
@@ -62,10 +67,7 @@ export default async function SetupHouseholdsPage({
       // Open links only: closed replacement history must not reserve the
       // device (issue #4). A replaced meter is assignable again.
       .is("effective_to", null),
-    supabase
-      .from("edges")
-      .select("id, name, openems_edge_id")
-      .eq("microgrid_id", id),
+    edgesRead,
   ]);
 
   if (householdsError || devicesError || assignmentsError || edgesError) {
