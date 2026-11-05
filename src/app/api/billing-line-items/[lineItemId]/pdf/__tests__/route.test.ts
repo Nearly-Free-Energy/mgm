@@ -620,6 +620,45 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     expect(capturedUpdates).toHaveLength(0);
   });
 
+  it("leaves no unhandled rejection when the payment link step fails and the early reads fail too", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      fromState.lineItem = {
+        data: lineItemRow({ reading_source: "manual", entered_by_user_id: "actor-user-1" }),
+        error: null,
+      };
+      // A thenable, so the rejection exists only once the route reads it.
+      fromState.fnListVisibleUsers = {
+        then: (_resolve: unknown, reject: (reason: Error) => void) =>
+          reject(new Error("directory read failed")),
+      } as never;
+      mockFrom.mockImplementation((table: string) => {
+        if (table === "household_devices") {
+          const limit = () => Promise.reject(new Error("meter read failed"));
+          return { select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit }) }) }) }) };
+        }
+        if (table === "rate_schedules") {
+          const maybeSingle = () => Promise.reject(new Error("tariff read failed"));
+          return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle }) }) }) };
+        }
+        return makeFromImpl(table);
+      });
+      readinessMock.mockRejectedValue(new Error("Could not load payment account"));
+
+      const { GET } = await import("../route");
+      await expect(
+        GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) }),
+      ).rejects.toThrow("Could not load payment account");
+      // Node reports an unhandled rejection after the microtask queue drains.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   describe("logo", () => {
     const withLogo = lineItemRowWithLogo;
 
