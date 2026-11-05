@@ -62,6 +62,28 @@ export interface ConnectionTestResult {
   message: string;
 }
 
+/**
+ * Whether a failed provider request could have created an order:
+ * `not_submitted` when the order request was never sent or the provider
+ * answered without creating one, `unknown` when it may have arrived and no
+ * usable answer came back. Providers set it on the error `createCheckout`
+ * throws (`PaymentError.submission`).
+ */
+export type CheckoutSubmission = "not_submitted" | "unknown";
+
+/**
+ * True only when the error says no order was created. Errors without the
+ * field read as `unknown`, so an unclassified failure keeps the cautious
+ * confirmation-pending path.
+ */
+export function checkoutWasNotSubmitted(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { submission?: unknown }).submission === "not_submitted"
+  );
+}
+
 export interface PaymentProviderClient {
   readonly provider: PaymentProviderKind;
   testConnection(): Promise<ConnectionTestResult>;

@@ -311,6 +311,39 @@ describe("BillingCapability", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview" }));
   });
 
+  it("passes revertToEdgeHouseholdIds to the generation delegate", async () => {
+    const HH = "990e8400-e29b-41d4-a716-446655440000";
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    const result = await capability.generateBills({
+      billingPeriodId: PERIOD_ID,
+      householdIds: [HH],
+      revertToEdgeHouseholdIds: [HH],
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "write", revertToEdgeHouseholdIds: [HH] })
+    );
+  });
+
+  it("rejects a household in both manualReadings and revertToEdgeHouseholdIds", async () => {
+    const HH = "990e8400-e29b-41d4-a716-446655440000";
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    const result = await capability.generateBills({
+      billingPeriodId: PERIOD_ID,
+      manualReadings: [{ householdId: HH, startKwh: 1, endKwh: 2 }],
+      revertToEdgeHouseholdIds: [HH],
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      code: "billing_invalid_body",
+      field: "revertToEdgeHouseholdIds",
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("records manual paid/unpaid with trimmed notes", async () => {
     const record = vi.fn(async () => ({ updated: { id: ITEM_ID }, error: null }));
     const { capability } = setup({ recordManualPayment: record });

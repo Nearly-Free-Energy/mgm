@@ -11,12 +11,16 @@
  * re-throw as a plain `PaymentError` — both are caught by the same route
  * handler `instanceof PaymentError` check.
  */
+import type { CheckoutSubmission } from "./providers/types";
+
 export class PaymentError extends Error {
   constructor(
     message: string,
     public readonly code: string,
     public readonly statusCode: number = 500,
     public readonly details?: unknown,
+    /** Set on provider request failures; see `CheckoutSubmission`. */
+    public readonly submission?: CheckoutSubmission,
   ) {
     super(message);
     this.name = "PaymentError";

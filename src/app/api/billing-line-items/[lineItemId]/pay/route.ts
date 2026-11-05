@@ -56,6 +56,16 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
 
+/**
+ * Seconds this function may run. Declared rather than left to the hosting
+ * default so the Pesapal client's per-request timeout
+ * (`PESAPAL_REQUEST_TIMEOUT_MS`, two requests per checkout) and the window
+ * after which an unpayable attempt is superseded
+ * (`UNPAYABLE_ATTEMPT_WINDOW_MS`) can be sized against it. Changing it means
+ * revisiting both.
+ */
+export const maxDuration = 30;
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

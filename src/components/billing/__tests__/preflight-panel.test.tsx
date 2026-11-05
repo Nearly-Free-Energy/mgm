@@ -609,6 +609,94 @@ describe("PreflightPanel — Generate button label", () => {
   });
 });
 
+describe("PreflightPanel — households kept as manual entry", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    refreshMock.mockClear();
+  });
+
+  function renderKept() {
+    const households = [
+      makeHousehold("h-1", "Alice"),
+      makeHousehold("h-2", "Bob"),
+      makeHousehold("h-3", "Carol"),
+    ];
+    render(
+      <Wrap>
+        <PreflightPanel
+          open
+          onClose={vi.fn()}
+          billingPeriodId="p-1"
+          households={households}
+          edgeAvailableByHouseholdId={{ "h-1": true, "h-2": true, "h-3": true }}
+          seedNeededByHouseholdId={{ "h-2": true }}
+          currentlyManualByHouseholdId={{ "h-2": true }}
+        />
+      </Wrap>,
+    );
+  }
+
+  it("lists a currently-manual household as kept, not as read from OpenEMS", () => {
+    renderKept();
+
+    const ready = screen.getByTestId("preflight-ready-section");
+    expect(ready.textContent).toContain("2 households will be read from OpenEMS.");
+    fireEvent.click(ready.querySelector("button")!);
+    expect(ready.textContent).toContain("Alice");
+    expect(ready.textContent).toContain("Carol");
+    expect(ready.textContent).not.toContain("Bob");
+
+    const kept = screen.getByTestId("preflight-kept-manual-section");
+    expect(kept.textContent).toContain("1 household will keep its manual reading.");
+    fireEvent.click(kept.querySelector("button")!);
+    expect(screen.getByTestId("preflight-kept-manual-row-h-2").textContent).toContain("Bob");
+
+    // A kept household is not asked for a starting reading and not counted.
+    expect(screen.queryByTestId("preflight-needs-seed-section")).toBeNull();
+    expect(screen.getByTestId("preflight-generate-button").textContent).toContain(
+      "Generate (2 households)",
+    );
+  });
+
+  it("does not send the kept household as a manual reading", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          lineItems: 2,
+          kept: [{ householdId: "h-2", householdName: "Bob" }],
+          errors: [],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderKept();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("preflight-generate-button"));
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).toEqual({ billingPeriodId: "p-1", manualReadings: [] });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("omits the section when no household is currently manual", () => {
+    render(
+      <Wrap>
+        <PreflightPanel
+          open
+          onClose={vi.fn()}
+          billingPeriodId="p-1"
+          households={[makeHousehold("h-1", "Alice")]}
+          edgeAvailableByHouseholdId={{ "h-1": true }}
+        />
+      </Wrap>,
+    );
+    expect(screen.queryByTestId("preflight-kept-manual-section")).toBeNull();
+  });
+});
+
 // #339 — the seed section. Shipped without tests in the first pass; these pin
 // the three things that decide whether real readings get collected or zeroes
 // get typed to clear a form.

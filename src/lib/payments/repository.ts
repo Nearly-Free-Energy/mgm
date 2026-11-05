@@ -33,6 +33,9 @@ export function paymentsFailure(
 
 export type RepositoryError = { code?: string; message: string };
 
+/** updateAttemptTracking({ requireOpen: true }) found the attempt no longer open. */
+export const ATTEMPT_NOT_OPEN = "attempt_not_open";
+
 export type MerchantAccountPublic = {
   id: string;
   org_id: string;
@@ -169,15 +172,35 @@ export interface PaymentsRepository {
   updateAttemptTracking(input: {
     attemptId: string;
     providerTrackingId: string;
-    checkoutUrl: string;
+    /** Omitted: leave the stored checkout URL unchanged. */
+    checkoutUrl?: string;
     status?: AttemptStatus;
+    /**
+     * Write only while the attempt is still open (pending or
+     * confirmation_pending). When it is not — another request superseded
+     * it, or it settled — nothing is written and the error carries code
+     * ATTEMPT_NOT_OPEN, so the caller knows the attempt is no longer its own.
+     */
+    requireOpen?: boolean;
   }): Promise<RepositoryError | null>;
+  /** Changes the status of an open attempt only; a closed one is left as it is. */
   markAttemptStatus(input: {
     attemptId: string;
     status: AttemptStatus;
     failureCode?: string | null;
     failureMessage?: string | null;
   }): Promise<RepositoryError | null>;
+  /**
+   * Marks an attempt failed only while it is still open and still has
+   * neither a tracking ID nor a checkout URL, in one conditional update.
+   * `failed` is false when the row no longer matches, because another
+   * request linked or closed it in the meantime.
+   */
+  failUnlinkedAttempt(input: {
+    attemptId: string;
+    failureCode: string;
+    failureMessage: string;
+  }): Promise<{ failed: boolean; error: RepositoryError | null }>;
   getAttempt(attemptId: string): Promise<PaymentAttempt | null>;
   listAttemptsForLineItem(lineItemId: string): Promise<PaymentAttempt[]>;
   recordReceipt(input: {
