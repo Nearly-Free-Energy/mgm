@@ -11,8 +11,8 @@
  *     organization whose only payment activity is a payment attempt;
  *   - a direct microgrid delete, and a service_role organization delete, are
  *     refused the same way;
- *   - a microgrid or community whose only billing is unpaid drafts can still
- *     be deleted;
+ *   - an organization, community or microgrid whose only billing is unpaid
+ *     drafts can still be deleted;
  *   - a bill in a closed period, a paid bill, and a household with a bill in
  *     a closed period cannot be deleted, while an unpaid bill in a draft can;
  *   - a closed period cannot be reopened, by service_role either, while a
@@ -21,8 +21,8 @@
  *   - a bill cannot be moved into or out of a closed period, and a bill in
  *     one keeps its household and changes amount only by regeneration;
  *   - a bill's payment_status and paid_at cannot be written directly, by
- *     service_role either, while fn_apply_payment_event still records and
- *     undoes a manual payment, and the undone payment keeps the bill;
+ *     service_role either, while fn_apply_payment_event still records,
+ *     undoes and refunds a manual payment, and the bill stays kept;
  *   - payment events cannot be deleted or moved to another bill, and payment
  *     attempts cannot be deleted;
  *   - TRUNCATE is refused for the database owner too, directly and through a
@@ -121,6 +121,15 @@ const FIXTURE = {
   mgRaceDeleteAttempt: "cb11ed00-0000-4000-8002-0000000000f4",
   attemptRace: "cb11ed00-0000-4000-8009-0000000000f3",
   attemptRaceDelete: "cb11ed00-0000-4000-8009-0000000000f4",
+
+  // A third organization whose only billing is an unpaid draft, which the
+  // super admin deletes.
+  orgDraft: "cb11ed00-0000-4000-8000-00000000000c",
+  commOrgDraft: "cb11ed00-0000-4000-8001-00000000000d",
+  mgOrgDraft: "cb11ed00-0000-4000-8002-000000000010",
+  hhOrgDraft: "cb11ed00-0000-4000-8005-000000000010",
+  periodOrgDraft: "cb11ed00-0000-4000-8006-000000000010",
+  billOrgDraft: "cb11ed00-0000-4000-8007-000000000010",
 };
 
 /** The household, draft period and unpaid bill of each commRace microgrid. */
@@ -226,12 +235,12 @@ async function cleanupFixtures(): Promise<void> {
   const { error } = await svc
     .from("payment_merchant_versions")
     .delete()
-    .in("org_id", [FIXTURE.org, FIXTURE.orgAttempt]);
+    .in("org_id", [FIXTURE.org, FIXTURE.orgAttempt, FIXTURE.orgDraft]);
   if (error) {
     throw new Error(`[keep_closed_and_paid_billing] cleanup failed: ${error.message}`);
   }
   await cleanupTestData({
-    orgIds: [FIXTURE.org, FIXTURE.orgAttempt],
+    orgIds: [FIXTURE.org, FIXTURE.orgAttempt, FIXTURE.orgDraft],
     userEmails: [EMAIL_ORG_MANAGER, EMAIL_SUPER_ADMIN],
   });
 }
@@ -247,11 +256,13 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     await insertOrThrow(svc, "organizations", [
       { id: FIXTURE.org, name: "Keep Billing Org" },
       { id: FIXTURE.orgAttempt, name: "Keep Billing Org (attempt)" },
+      { id: FIXTURE.orgDraft, name: "Keep Billing Org (draft)" },
     ]);
     await insertOrThrow(svc, "communities", [
       { id: FIXTURE.commKeep, org_id: FIXTURE.org, name: "KB Comm keep" },
       { id: FIXTURE.commDraft, org_id: FIXTURE.org, name: "KB Comm draft" },
       { id: FIXTURE.commAttempt, org_id: FIXTURE.orgAttempt, name: "KB Comm attempt" },
+      { id: FIXTURE.commOrgDraft, org_id: FIXTURE.orgDraft, name: "KB Comm org draft" },
     ]);
     // East of UTC, so the readings window cannot pass by reading the dates as
     // UTC. Inserted on its own: a multi-row insert sends the union of the
@@ -278,6 +289,12 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
         name: "KB MG attempt",
         currency: "UGX",
       },
+      {
+        id: FIXTURE.mgOrgDraft,
+        community_id: FIXTURE.commOrgDraft,
+        name: "KB MG org draft",
+        currency: "UGX",
+      },
     ]);
     // Before the closed period, which pins it on insert: the regeneration
     // test writes a bill against that pinned tariff.
@@ -300,6 +317,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
         primary_phone: "+256700000305",
       },
       { id: FIXTURE.hhAttempt, microgrid_id: FIXTURE.mgAttempt, display_name: "KB attempt", primary_phone: "+256700000306" },
+      { id: FIXTURE.hhOrgDraft, microgrid_id: FIXTURE.mgOrgDraft, display_name: "KB org draft", primary_phone: "+256700000307" },
     ]);
     await insertOrThrow(svc, "billing_periods", [
       period(FIXTURE.periodClosed, FIXTURE.mgClosed, "closed"),
@@ -307,6 +325,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       period(FIXTURE.periodDraft, FIXTURE.mgDraft, "draft"),
       period(FIXTURE.periodDraftInComm, FIXTURE.mgDraftInComm, "draft"),
       period(FIXTURE.periodAttempt, FIXTURE.mgAttempt, "draft"),
+      period(FIXTURE.periodOrgDraft, FIXTURE.mgOrgDraft, "draft"),
     ]);
     await insertOrThrow(svc, "billing_line_items", [
       bill(FIXTURE.billClosed, FIXTURE.periodClosed, FIXTURE.hhClosed),
@@ -318,6 +337,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       bill(FIXTURE.billDraft, FIXTURE.periodDraft, FIXTURE.hhDraft),
       bill(FIXTURE.billDraftInComm, FIXTURE.periodDraftInComm, FIXTURE.hhDraftInComm),
       bill(FIXTURE.billAttempt, FIXTURE.periodAttempt, FIXTURE.hhAttempt),
+      bill(FIXTURE.billOrgDraft, FIXTURE.periodOrgDraft, FIXTURE.hhOrgDraft),
     ]);
 
     await insertOrThrow(svc, "edges", {
@@ -524,6 +544,15 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     expect(await exists("billing_line_items", FIXTURE.billDraft)).toBe(false);
   });
 
+  it("an organization whose only billing is an unpaid draft can still be deleted", async () => {
+    const { error } = await superAdmin.client.rpc("fn_entity_delete_org", {
+      p_id: FIXTURE.orgDraft,
+    });
+    expect(error).toBeNull();
+    expect(await exists("organizations", FIXTURE.orgDraft)).toBe(false);
+    expect(await exists("billing_line_items", FIXTURE.billOrgDraft)).toBe(false);
+  });
+
   it("a community whose only billing is an unpaid draft can still be deleted", async () => {
     const { data, error } = await manager.client.rpc("fn_entity_delete_community", {
       p_id: FIXTURE.commDraft,
@@ -638,6 +667,30 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       .select("payment_status")
       .eq("id", FIXTURE.billPaid);
     expect(data).toEqual([{ payment_status: "paid" }]);
+
+    const { error: deleteError } = await manager.client.rpc("fn_entity_delete_microgrid", {
+      p_id: FIXTURE.mgPaid,
+    });
+    expectKept(deleteError, "payment_activity", "billing_period_kept: a microgrid");
+  });
+
+  it("fn_apply_payment_event can still refund a paid bill, and the bill stays kept", async () => {
+    const { error } = await manager.client.rpc("fn_apply_payment_event", {
+      _line_item_id: FIXTURE.billPaid,
+      _to_status: "refunded",
+      _source: "manual",
+      _actor_user_id: manager.userId,
+      _raw_payload: {},
+    });
+    expect(error).toBeNull();
+
+    const svc = await serviceClient();
+    const { data } = await svc
+      .from("billing_line_items")
+      .select("payment_status, paid_at")
+      .eq("id", FIXTURE.billPaid);
+    expect(data?.[0]?.payment_status).toBe("refunded");
+    expect(data?.[0]?.paid_at).not.toBeNull();
 
     const { error: deleteError } = await manager.client.rpc("fn_entity_delete_microgrid", {
       p_id: FIXTURE.mgPaid,
