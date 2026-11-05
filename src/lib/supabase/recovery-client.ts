@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getBrowserPublicRuntimeConfig } from "@/lib/config/browser-config-store";
 
 /**
  * Recovery emails may be opened in a different browser (e.g. Gmail on a phone).
@@ -6,18 +7,17 @@ import { createClient } from "@supabase/supabase-js";
  * in the requesting browser. The reset page validates the returned tokens and
  * installs the session with the ordinary SSR client. This request-only client
  * must neither read nor persist a session.
+ *
+ * URL and anon key come from the request-time public configuration (#46).
  */
 export function createRecoveryRequestClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: {
-        flowType: "implicit",
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    }
-  );
+  const config = getBrowserPublicRuntimeConfig();
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      flowType: "implicit",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }

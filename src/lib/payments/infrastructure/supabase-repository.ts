@@ -9,7 +9,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isPaymentsEnabled, isPesapalEnabled } from "@/lib/plugins/state";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import type {
   BillSnapshot,
   MerchantAccountPublic,
@@ -19,6 +19,7 @@ import type {
   PaymentsRepository,
   RepositoryError,
 } from "../repository";
+import { ATTEMPT_NOT_OPEN } from "../repository";
 
 const ACCOUNT_COLUMNS = "id, org_id, provider, display_name, sandbox, consumer_key, base_url, ipn_id, ipn_url, version, disabled, last_tested_at, last_test_status, last_test_message";
 
@@ -52,12 +53,17 @@ export function createSupabasePaymentsRepository(
   writer: SupabaseClient = supabase
 ): PaymentsRepository {
   return {
+    // Both reads reject when plugin state cannot be read, a database error
+    // included, so the capability can tell "off" from "unknown" and fail
+    // closed. They are not the plugins/state.ts helpers of the same names,
+    // which read a database error as `false`; checkout would then answer
+    // 409 where it must answer 503.
     async isPaymentsEnabled(organizationId: string) {
-      return isPaymentsEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "payments");
     },
 
     async isPesapalEnabled(organizationId: string) {
-      return isPesapalEnabled(supabase, organizationId);
+      return isPluginEnabledForOrg(supabase, organizationId, "pesapal");
     },
 
     async getLineItemOrganization(lineItemId: string) {
@@ -231,14 +237,34 @@ export function createSupabasePaymentsRepository(
     },
 
     async loadMerchantAccountPublic({ orgId, communityId }) {
-      const { data: community, error: scopeError } = await supabase.from("communities").select("id").eq("id", communityId).eq("org_id", orgId).maybeSingle();
+      // The scope check, the override and the org default are independent
+      // reads, so they load together. They are judged in the order below, so
+      // the outcome is the same as reading them one at a time; the default
+      // is used, and its error raised, only when the community has no
+      // override row.
+      const [
+        { data: community, error: scopeError },
+        { data: override, error: overrideError },
+        { data: defaultAccount, error: defaultAccountError },
+      ] = await Promise.all([
+        supabase.from("communities").select("id").eq("id", communityId).eq("org_id", orgId).maybeSingle(),
+        supabase
+          .from("community_payment_overrides")
+          .select("id, merchant_account_id")
+          .eq("community_id", communityId)
+          .maybeSingle<{ id: string; merchant_account_id: string | null }>(),
+        supabase
+          .from("payment_merchant_accounts")
+          .select(ACCOUNT_COLUMNS)
+          .eq("org_id", orgId)
+          .eq("provider", "pesapal")
+          .eq("is_default", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle<Record<string, unknown>>(),
+      ]);
       if (scopeError) throw new Error("Could not authorize community");
       if (!community) return { ok: false as const, code: "payments_scope_mismatch", message: "Community not available in this organization." };
-      const { data: override, error: overrideError } = await supabase
-        .from("community_payment_overrides")
-        .select("id, merchant_account_id")
-        .eq("community_id", communityId)
-        .maybeSingle<{ id: string; merchant_account_id: string | null }>();
       if (overrideError) throw new Error("Could not load community payment override");
       if (override?.merchant_account_id) {
         const { data: account, error: accountError } = await supabase
@@ -259,20 +285,11 @@ export function createSupabasePaymentsRepository(
       if (override && !override.merchant_account_id) {
         return { ok: true as const, account: null, hasOverride: true };
       }
-      const { data: account, error: accountError } = await supabase
-        .from("payment_merchant_accounts")
-        .select(ACCOUNT_COLUMNS)
-        .eq("org_id", orgId)
-        .eq("provider", "pesapal")
-        .eq("is_default", true)
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle<Record<string, unknown>>();
-      if (accountError) throw new Error("Could not load payment account");
-      if (!account) return { ok: true as const, account: null, hasOverride: false };
+      if (defaultAccountError) throw new Error("Could not load payment account");
+      if (!defaultAccount) return { ok: true as const, account: null, hasOverride: false };
       return {
         ok: true as const,
-        account: toPublic(account as Record<string, unknown>, "org_default", null),
+        account: toPublic(defaultAccount, "org_default", null),
         hasOverride: false,
       };
     },
@@ -322,18 +339,30 @@ export function createSupabasePaymentsRepository(
     },
 
     async updateAttemptTracking(input) {
-      const { error } = await writer
+      const update = writer
         .from("payment_attempts")
         .update({
           provider_tracking_id: input.providerTrackingId,
-          checkout_url: input.checkoutUrl,
+          ...(input.checkoutUrl !== undefined ? { checkout_url: input.checkoutUrl } : {}),
           ...(input.status ? { status: input.status } : {}),
         })
         .eq("id", input.attemptId);
-      return error ? toError(error) : null;
+      if (!input.requireOpen) {
+        const { error } = await update;
+        return error ? toError(error) : null;
+      }
+      const { data, error } = await update
+        .in("status", ["pending", "confirmation_pending"])
+        .select("id");
+      if (error) return toError(error);
+      return (data ?? []).length > 0
+        ? null
+        : { code: ATTEMPT_NOT_OPEN, message: "Payment attempt is no longer open" };
     },
 
     async markAttemptStatus(input) {
+      // An attempt another request has already closed (superseded, settled)
+      // keeps its status; reopening it would block the bill again.
       const { error } = await writer
         .from("payment_attempts")
         .update({
@@ -341,8 +370,26 @@ export function createSupabasePaymentsRepository(
           failure_code: input.failureCode ?? null,
           failure_message: input.failureMessage ?? null,
         })
-        .eq("id", input.attemptId);
+        .eq("id", input.attemptId)
+        .in("status", ["pending", "confirmation_pending"]);
       return error ? toError(error) : null;
+    },
+
+    async failUnlinkedAttempt(input) {
+      const { data, error } = await writer
+        .from("payment_attempts")
+        .update({
+          status: "failed",
+          failure_code: input.failureCode,
+          failure_message: input.failureMessage,
+        })
+        .eq("id", input.attemptId)
+        .in("status", ["pending", "confirmation_pending"])
+        .is("provider_tracking_id", null)
+        .is("checkout_url", null)
+        .select("id");
+      if (error) return { failed: false, error: toError(error) };
+      return { failed: (data ?? []).length > 0, error: null };
     },
 
     async getAttempt(attemptId: string) {

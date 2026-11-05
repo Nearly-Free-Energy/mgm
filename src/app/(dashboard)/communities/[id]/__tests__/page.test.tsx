@@ -153,8 +153,8 @@ describe("CommunityDetailPage", () => {
     // Microgrid listing
     expect(html).toContain("Block A");
     expect(html).toContain("Block B");
-    expect(html).toContain("/microgrids/mg-1");
-    expect(html).toContain("/microgrids/mg-2");
+    expect(html).toContain('href="/microgrids/mg-1/setup/households"');
+    expect(html).toContain('href="/microgrids/mg-2/setup/households"');
     // Edit button rendered
     expect(html).toContain("Edit");
     // View microgrids link

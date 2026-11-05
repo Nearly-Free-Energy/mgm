@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Context, Plugin } from "cordis";
+import * as cordis from "cordis";
+import type { Context, Fiber, Plugin } from "cordis";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
-import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
+import { FIBER_ACTIVE, getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { openOrganizationScope, REQUEST_SERVICES } from "../scope";
-import { PaymentProviderRegistry } from "../services";
+import { PaymentProviderRegistry, type MgmRequest } from "../services";
 import "../services";
 
 vi.mock("@/lib/metering/openems-provider", () => ({
@@ -16,7 +17,17 @@ const ORG_B = "550e8400-e29b-41d4-a716-44665544000b";
 declare module "cordis" {
   interface Context {
     probe?: { organizationId: string; active(): boolean };
+    decoy?: string;
   }
+}
+
+// The runtime object behind Cordis's ambient const enum (see FIBER_ACTIVE).
+const FiberState = (cordis as unknown as { FiberState: Record<string, number> }).FiberState;
+
+/** Listeners registered on the root's event bus, for leak checks. */
+function rootListenerCount(root: Context): number {
+  const hooks = (root.events as unknown as { _hooks: Record<string, unknown[]> })._hooks;
+  return Object.values(hooks).reduce((total, list) => total + list.length, 0);
 }
 
 const ProbePlugin = {
@@ -134,6 +145,99 @@ describe("organization request scopes", () => {
     await scope.dispose();
   });
 
+  it("unloads everything when a capability load fails and the scope is disposed", async () => {
+    const runtime = await getMgmRuntime();
+    const before = runtime.root.registry.size;
+    const scope = await openOrganizationScope(request(ORG_A), { isolate: ["probe", "broken"] });
+    const probeFiber = await scope.load(ProbePlugin);
+    const probe = scope.ctx.get("probe");
+
+    // Provides a request service, then fails — the composers' failure path.
+    let brokenFiber: Fiber | undefined;
+    const Broken = {
+      name: "broken",
+      inject: ["probe"],
+      apply(ctx: Context) {
+        brokenFiber = ctx.fiber;
+        ctx.provide("broken", {});
+        throw new Error("capability failed to start");
+      },
+    };
+    await expect(scope.load(Broken)).rejects.toThrow("capability failed to start");
+
+    // Between the rejected load and dispose: the half-provided service is not
+    // served, and the capabilities that did start are untouched.
+    expect(brokenFiber).toBeDefined();
+    expect(brokenFiber?.state).toBe(FiberState.FAILED);
+    expect(scope.ctx.get("broken")).toBeUndefined();
+    expect(probe?.active()).toBe(true);
+    expect(scope.ctx.get("mgmRequest")?.organizationId).toBe(ORG_A);
+
+    await scope.dispose();
+
+    expect(probe?.active()).toBe(false);
+    expect(scope.ctx.get("mgmRequest")).toBeUndefined();
+    expect(scope.ctx.get("broken")).toBeUndefined();
+    expect(runtime.root.registry.size).toBe(before);
+    // cordiverse/cordis#133: a failed fiber settles to DISPOSED too (rc.10 left it FAILED).
+    expect(brokenFiber?.state).toBe(FiberState.DISPOSED);
+    expect(probeFiber.state).toBe(FiberState.DISPOSED);
+
+    // The next request on the same root starts clean.
+    const next = await openOrganizationScope(request(ORG_B), { isolate: ["probe"] });
+    await next.load(ProbePlugin);
+    expect(next.ctx.get("probe")?.organizationId).toBe(ORG_B);
+    await next.dispose();
+    expect(runtime.root.registry.size).toBe(before);
+  });
+
+  it("keeps mgmRequest private across many concurrent scopes", async () => {
+    const runtime = await getMgmRuntime();
+    const before = runtime.root.registry.size;
+    const requests = Array.from({ length: 40 }, (_, i) => ({
+      ...request(i % 2 ? ORG_A : ORG_B),
+      userId: `user-${i}`,
+    }));
+
+    // Reads mgmRequest again after yielding. Fixed delays of 0–6 ms by position
+    // make the reads resume in a different order from the loads, every run.
+    const mismatches: MgmRequest[] = [];
+    const delay = new Map<MgmRequest, number>(requests.map((r, i) => [r, (requests.length - i) % 7]));
+    const Reader = {
+      name: "reader",
+      inject: ["mgmRequest"],
+      async apply(ctx: Context, expected: MgmRequest) {
+        await new Promise((resolve) => setTimeout(resolve, delay.get(expected)));
+        if (ctx.mgmRequest !== expected) mismatches.push(expected);
+      },
+    } satisfies Plugin.Object<MgmRequest>;
+
+    const scopes = await Promise.all(
+      requests.map((r) => openOrganizationScope(r, { isolate: ["probe"] }))
+    );
+    await Promise.all(
+      scopes.map((scope) => Promise.all([scope.load(ProbePlugin), scope.load(Reader, scope.request)]))
+    );
+    expect(mismatches).toEqual([]);
+
+    const check = (live: typeof scopes) => {
+      for (const scope of live) {
+        expect(scope.ctx.get("mgmRequest")).toBe(scope.request);
+        expect(scope.ctx.get("probe")?.organizationId).toBe(scope.request.organizationId);
+      }
+    };
+    check(scopes);
+
+    // Dispose every third scope concurrently; the rest still see only their own request.
+    const [gone, kept] = [scopes.filter((_, i) => i % 3 === 0), scopes.filter((_, i) => i % 3 !== 0)];
+    await Promise.all(gone.map((scope) => scope.dispose()));
+    for (const scope of gone) expect(scope.ctx.get("mgmRequest")).toBeUndefined();
+    check(kept);
+
+    await Promise.all(kept.map((scope) => scope.dispose()));
+    expect(runtime.root.registry.size).toBe(before);
+  });
+
   it("refuses loads after dispose", async () => {
     const scope = await openOrganizationScope(request(ORG_A));
     await scope.dispose();
@@ -145,6 +249,117 @@ describe("organization request scopes", () => {
     expect(REQUEST_SERVICES).toContain("mgmRequest");
   });
 });
+
+describe("Cordis guarantees the request scopes rely on", () => {
+  it("gates on the ACTIVE state Cordis exports", () => {
+    // The state assertions below compare against these; a missing key would pass vacuously.
+    for (const state of ["ACTIVE", "FAILED", "DISPOSED"]) {
+      expect(FiberState[state]).toEqual(expect.any(Number));
+    }
+    expect(FIBER_ACTIVE).toBe(FiberState.ACTIVE);
+  });
+
+  it("does not serve a root service through a name the scope isolates", async () => {
+    const runtime = await getMgmRuntime();
+    const decoy = await loadRootDecoy(runtime.root);
+    try {
+      const scope = await openOrganizationScope(request(ORG_A), { isolate: ["decoy"] });
+      try {
+        expect(scope.ctx.get("decoy")).toBeUndefined();
+        const Wants = { name: "wants-decoy", inject: ["decoy"], apply() {} };
+        await expect(scope.load(Wants)).rejects.toThrow('Cordis plugin "wants-decoy" did not activate');
+        expect(runtime.root.get("decoy")).toBe("SENTINEL");
+      } finally {
+        await scope.dispose();
+      }
+    } finally {
+      await decoy.dispose();
+    }
+  });
+
+  async function loadProviderAndDependent(order: string[]) {
+    const scope = await openOrganizationScope(request(ORG_A), { isolate: ["shared"] });
+    // Effects unwind in reverse, so this one, registered before provide(),
+    // records the provider only once its provision has been released.
+    const provider = await scope.load({
+      name: "provider",
+      apply(ctx: Context) {
+        ctx.effect(() => () => void order.push("provider"));
+        ctx.provide("shared", {});
+      },
+    });
+    await scope.load({
+      name: "dependent",
+      inject: ["shared"],
+      apply(ctx: Context) {
+        ctx.effect(() => () => void order.push("dependent"));
+      },
+    });
+    return { scope, provider };
+  }
+
+  it("disposes a dependent before the provider it injects", async () => {
+    const order: string[] = [];
+    const { scope, provider } = await loadProviderAndDependent(order);
+    // cordiverse/cordis#196: rc.10 tore the provider down first.
+    await provider.dispose();
+    expect(order).toEqual(["dependent", "provider"]);
+    await scope.dispose();
+  });
+
+  it("disposes a dependent before its provider through scope.dispose()", async () => {
+    const order: string[] = [];
+    const { scope } = await loadProviderAndDependent(order);
+    await scope.dispose();
+    expect(order).toEqual(["dependent", "provider"]);
+  });
+
+  it("removes a request plugin's listeners when the scope is disposed", async () => {
+    const runtime = await getMgmRuntime();
+    const before = rootListenerCount(runtime.root);
+    const scope = await openOrganizationScope(request(ORG_A));
+    const listener = await scope.load({
+      name: "listener",
+      apply(ctx: Context) {
+        ctx.on("internal/update", () => {});
+        ctx.on("mgm/test-event" as never, (() => {}) as never);
+      },
+    });
+    expect(rootListenerCount(runtime.root)).toBe(before + 1);
+    expect(listener._hooks["internal/update"]).toHaveLength(1);
+
+    await scope.dispose();
+    expect(rootListenerCount(runtime.root)).toBe(before);
+    // cordiverse/cordis#56: rc.10 kept the internal/update hook after dispose.
+    expect(listener._hooks["internal/update"]).toHaveLength(0);
+  });
+
+  it("disposes a scope once, however many callers ask", async () => {
+    const runtime = await getMgmRuntime();
+    const before = runtime.root.registry.size;
+    const scope = await openOrganizationScope(request(ORG_A), { isolate: ["probe"] });
+    const fiber = await scope.load(ProbePlugin);
+    const probe = scope.ctx.get("probe");
+
+    await Promise.all([scope.dispose(), scope.dispose()]);
+    await scope.dispose();
+
+    expect(probe?.active()).toBe(false);
+    expect(fiber.state).toBe(FiberState.DISPOSED);
+    expect(runtime.root.registry.size).toBe(before);
+  });
+});
+
+async function loadRootDecoy(root: Context): Promise<Fiber> {
+  const fiber = root.plugin({
+    name: "decoy",
+    apply(ctx: Context) {
+      ctx.provide("decoy", "SENTINEL");
+    },
+  });
+  await fiber;
+  return fiber;
+}
 
 describe("PaymentProviderRegistry", () => {
   it("returns payments_unknown_provider for an unregistered provider", async () => {

@@ -84,7 +84,9 @@ describe("DashboardPage org-panel microgrid cards", () => {
     const tree = await OrgCard({ org: ORG as never });
     const html = renderToStaticMarkup(tree as React.ReactElement);
 
-    expect(html).toContain('href="/microgrids/mg-1"');
+    // The household list, where /microgrids/<id> redirects: linking there
+    // directly saves the redirect's round trip.
+    expect(html).toContain('href="/microgrids/mg-1/setup/households"');
     expect(html).toContain("North Grid");
   });
 

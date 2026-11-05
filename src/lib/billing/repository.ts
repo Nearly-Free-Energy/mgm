@@ -94,6 +94,7 @@ export interface BillingGeneration {
     periodId: string;
     householdIds?: string[];
     manualReadings?: ManualReadingInput[];
+    revertToEdgeHouseholdIds?: string[];
     seedReadings?: SeedReadingInput[];
     mode: "write" | "preview";
     actorUserId: string;
@@ -118,6 +119,7 @@ export type ManualPaymentStatus = "paid" | "unpaid";
 export interface BillingRepository {
   getAuthenticatedUserId(): Promise<string | null>;
   getUserRoles(): Promise<UserRoleRecord[]>;
+  /** Rejects when plugin state cannot be read; the capability answers 503. */
   isPluginEnabled(organizationId: string): Promise<boolean>;
   getMicrogridOrganization(
     microgridId: string

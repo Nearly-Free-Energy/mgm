@@ -10,8 +10,13 @@ import { Currency } from "@/components/format/currency";
 import { Kwh } from "@/components/format/kwh";
 import { LocalDate } from "@/components/format/local-date";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DELETE_DRAFT_PERIOD_DESCRIPTION,
+  periodDeleteErrorMessage,
+} from "@/lib/billing/period-delete";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { EmptyState } from "@/components/ui/empty-state";
+import { dayKeyInZone } from "@/lib/timezone/day-key";
 
 function toPeriodOption(
   period: BillingPeriod,
@@ -26,16 +31,45 @@ function toPeriodOption(
   };
 }
 
-function getDefaultDates() {
-  const now = new Date();
-  const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-  const month = now.getMonth() === 0 ? 11 : now.getMonth() - 1; // previous month (0-indexed)
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * The previous calendar month as `YYYY-MM-DD` start and end dates, for
+ * pre-filling the new-period form. "Today" is read in `timezone` (the
+ * microgrid's IANA zone) when given, otherwise from the browser's local
+ * date parts. Neither path goes through `toISOString()`, which names the
+ * UTC day and moves both dates back a day east of UTC.
+ */
+export function getDefaultDates(
+  now: Date = new Date(),
+  timezone?: string,
+): { start: string; end: string } {
+  let year = now.getFullYear();
+  let month = now.getMonth() + 1; // 1-12
+  if (timezone) {
+    // dayKeyInZone reads the calendar day of an instant (now), not a stored
+    // billing DATE, so this stays inside the scope its header sets.
+    try {
+      const [y, m] = dayKeyInZone(now, timezone).split("-");
+      year = Number(y);
+      month = Number(m);
+    } catch {
+      // Unknown zone id (RangeError): keep the local date parts rather than
+      // fail the whole billing page over a form's default dates.
+    }
+  }
+
+  const prevYear = month === 1 ? year - 1 : year;
+  const prevMonth = month === 1 ? 12 : month - 1;
+  // Day 0 of the following month is the last day of prevMonth. UTC keeps
+  // this pure calendar arithmetic, free of any local-zone shift.
+  const lastDay = new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate();
 
   return {
-    start: firstDay.toISOString().split("T")[0],
-    end: lastDay.toISOString().split("T")[0],
+    start: `${prevYear}-${pad2(prevMonth)}-01`,
+    end: `${prevYear}-${pad2(prevMonth)}-${pad2(lastDay)}`,
   };
 }
 
@@ -44,19 +78,22 @@ export function BillingPeriodList({
   periods,
   summaries,
   currency,
+  timezone,
   canManage = false,
 }: {
   microgridId: string;
   periods: BillingPeriod[];
   summaries: Record<string, { totalKwh: number; totalAmount: number } | undefined>;
   currency: string;
+  /** The microgrid's IANA timezone; the default period dates follow its calendar. */
+  timezone?: string;
   /** Whether the current user can manage billing periods. Defaults to false. */
   canManage?: boolean;
 }) {
   const router = useRouter();
   const supabase = createClient();
 
-  const defaults = getDefaultDates();
+  const defaults = getDefaultDates(new Date(), timezone);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [startDate, setStartDate] = useState(defaults.start);
   const [endDate, setEndDate] = useState(defaults.end);
@@ -79,7 +116,10 @@ export function BillingPeriodList({
       .delete()
       .eq("id", deletingPeriod.id);
     if (deleteError) {
-      throw new Error(deleteError.message);
+      // fn_billing_period_before_delete_guard keeps a closed period or a
+      // draft with recorded payments; the dialog says why instead of showing
+      // the raw error.
+      throw new Error(periodDeleteErrorMessage(deleteError));
     }
     router.refresh();
   }
@@ -140,13 +180,7 @@ export function BillingPeriodList({
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Delete period?"
-        description={
-          deletingPeriod
-            ? deletingPeriod.status === "closed"
-              ? "This permanently removes the closed billing period and all its finalized bills. This cannot be undone."
-              : "This removes the draft billing period and any generated bills. This cannot be undone."
-            : "This action cannot be undone."
-        }
+        description={DELETE_DRAFT_PERIOD_DESCRIPTION}
         confirmLabel="Delete"
         tone="destructive"
         onConfirm={handleDeletePeriod}
@@ -308,12 +342,18 @@ export function BillingPeriodList({
                     >
                       View
                     </Link>
-                    <button
-                      onClick={() => openDeleteDialog(period)}
-                      className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Delete
-                    </button>
+                    {/* Delete is offered on drafts only: a closed period is
+                        the billing record and fn_billing_period_before_delete_guard
+                        keeps it (src/lib/billing/period-delete.ts). If that
+                        trigger's rule changes, revisit. */}
+                    {period.status === "draft" && (
+                      <button
+                        onClick={() => openDeleteDialog(period)}
+                        className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

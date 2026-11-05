@@ -15,8 +15,9 @@ import "server-only";
  *   - Uses `@supabase/supabase-js` `createClient()` — NOT `@supabase/ssr`.
  *     No cookies to propagate; this is a pure HTTP client with a
  *     static service-role JWT.
- *   - URL: prefers SUPABASE_INTERNAL_URL (Docker mode) over
- *     NEXT_PUBLIC_SUPABASE_URL — mirrors `server.ts:10`.
+ *   - URL: `getServerSupabaseUrl()` — the server-only SUPABASE_INTERNAL_URL
+ *     override when set, otherwise the validated public runtime URL
+ *     (MGM_PUBLIC_SUPABASE_URL; see src/lib/config/public-runtime-config.ts).
  *   - Throws from `createServiceClient()` (not at module load) when
  *     SUPABASE_SERVICE_ROLE_KEY is unset. Module-load throws would fail
  *     `next build` page-data collection for every route that imports this
@@ -28,6 +29,10 @@ import "server-only";
  * tenant-API privileged writes.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  getServerSupabaseUrl,
+  RuntimeConfigError,
+} from "@/lib/config/public-runtime-config";
 
 export function createServiceClient(): SupabaseClient {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -39,13 +44,17 @@ export function createServiceClient(): SupabaseClient {
         "Production / Preview / Development."
     );
   }
-  const supabaseUrl =
-    process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) {
-    throw new Error(
-      "Supabase URL is not set. Expected NEXT_PUBLIC_SUPABASE_URL or " +
-        "SUPABASE_INTERNAL_URL (Docker mode)."
-    );
+  let supabaseUrl: string;
+  try {
+    supabaseUrl = getServerSupabaseUrl();
+  } catch (error) {
+    if (error instanceof RuntimeConfigError) {
+      throw new Error(
+        `Supabase URL is not configured: ${error.message} ` +
+          "Set MGM_PUBLIC_SUPABASE_URL (or SUPABASE_INTERNAL_URL for container networking)."
+      );
+    }
+    throw error;
   }
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {

@@ -1,6 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  announceNavigationStart,
+  isSameTabClick,
+} from "@/components/ui/navigation-progress";
+import { microgridHref, microgridSetupHref } from "@/lib/microgrid-links";
 
 // Microgrid tab nav (D2 / #53).
 //
@@ -9,6 +15,17 @@ import { usePathname } from "next/navigation";
 //   2. Billing    — the monthly close job (primary working surface).
 //   3. Setup      — configure-once (edges, households, rate schedule).
 //
+// Tabs are next/link <Link>s so a click is a client-side navigation: the
+// dashboard layout and this microgrid header stay mounted, and
+// [id]/loading.tsx shows while the new tab renders.
+//
+// Each tab links to the page a click lands on (src/lib/microgrid-links.ts),
+// not to a URL that redirects:
+//   - Dashboard links to the household list, where middleware sends the
+//     microgrid index. It therefore never highlights while that redirect
+//     exists; if the index renders again, link Dashboard back to `base`.
+//   - Setup links to its first sub-tab rather than the /setup index.
+//
 // Active-tab match:
 //   - Dashboard is the microgrid index (/microgrids/[id]) with no child segment.
 //     A raw `startsWith` on the index href would also match /billing and /setup.
@@ -16,9 +33,9 @@ import { usePathname } from "next/navigation";
 //   - Billing + Setup use `startsWith` so their nested routes stay highlighted.
 
 const tabs = [
-  { label: "Dashboard", segment: "" },
-  { label: "Billing",   segment: "billing" },
-  { label: "Setup",     segment: "setup" },
+  { label: "Dashboard", segment: "",        href: microgridHref },
+  { label: "Billing",   segment: "billing", href: (id: string) => `/microgrids/${id}/billing` },
+  { label: "Setup",     segment: "setup",   href: microgridSetupHref },
 ] as const;
 
 export function TabNav({ microgridId }: { microgridId: string }) {
@@ -32,17 +49,22 @@ export function TabNav({ microgridId }: { microgridId: string }) {
       aria-label="Microgrid sections"
     >
       {tabs.map((tab) => {
-        const href = tab.segment ? `${base}/${tab.segment}` : base;
+        const href = tab.href(microgridId);
         const isActive = tab.segment
-          ? pathname.startsWith(href)
+          ? pathname.startsWith(`${base}/${tab.segment}`)
           : pathname === base || pathname === `${base}/`;
 
         return (
-          <a
+          <Link
             key={tab.label}
             href={href}
             role="tab"
             aria-selected={isActive}
+            onClick={(event) => {
+              if (href !== pathname && isSameTabClick(event)) {
+                announceNavigationStart(href);
+              }
+            }}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? "border-primary text-primary"
@@ -50,7 +72,7 @@ export function TabNav({ microgridId }: { microgridId: string }) {
             }`}
           >
             {tab.label}
-          </a>
+          </Link>
         );
       })}
     </nav>

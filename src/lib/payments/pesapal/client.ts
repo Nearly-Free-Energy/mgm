@@ -1,4 +1,5 @@
 import { PesapalError } from "./errors";
+import type { CheckoutSubmission } from "../providers/types";
 import type {
   AuthTokenResponse,
   GetTransactionStatusResponse,
@@ -25,9 +26,50 @@ export interface PesapalClientConfig {
   consumerKey: string;
   consumerSecret: string;
   baseUrl: string;
+  /** Per-request limit; defaults to `PESAPAL_REQUEST_TIMEOUT_MS`. */
+  timeoutMs?: number;
+}
+
+/**
+ * Per-request time limit. A checkout makes two requests in sequence (token,
+ * then order), so both must fit inside the pay route's `maxDuration` of 30 s
+ * (src/app/api/billing-line-items/[lineItemId]/pay/route.ts) for a hung
+ * request to fail here rather than outlive the function and leave its
+ * attempt open. If that limit drops below twice this value, lower this.
+ */
+export const PESAPAL_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Connection failures that happen before any request byte is sent, read from
+ * the `code` Node's fetch puts on the error's `cause`.
+ */
+const PRE_SEND_ERROR_CODES = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+function causeCode(err: unknown): string | undefined {
+  let current: unknown = err;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+function isTimeout(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === "TimeoutError" || name === "AbortError";
 }
 
 export class PesapalClient {
+  private readonly timeoutMs: number;
+
   constructor(private readonly config: PesapalClientConfig) {
     if (
       !config.consumerKey ||
@@ -41,28 +83,45 @@ export class PesapalClient {
         503,
       );
     }
+    this.timeoutMs = config.timeoutMs ?? PESAPAL_REQUEST_TIMEOUT_MS;
   }
 
   /**
    * Thin JSON fetch wrapper that surfaces non-2xx responses as PesapalErrors
-   * with the upstream body attached for debugging. Network failures surface
-   * as PESAPAL_UNREACHABLE; non-2xx responses as the caller-supplied
-   * errorCode.
+   * with the upstream body attached for debugging. Network failures and
+   * timeouts surface as PESAPAL_UNREACHABLE; non-2xx responses as the
+   * caller-supplied errorCode.
+   *
+   * Every error says whether the request could have created an order
+   * (`submission`). Only the order request can; for it, a connection that
+   * never opened or a 4xx answer means no order, while a timeout, a dropped
+   * connection, a 5xx or an unreadable body leave the outcome unknown.
    */
   private async pesapalFetch<T>(
     path: string,
     init: RequestInit,
     errorCode: string,
+    orderRequest = false,
   ): Promise<T> {
+    const submission = (mayHaveArrived: boolean): CheckoutSubmission =>
+      orderRequest && mayHaveArrived ? "unknown" : "not_submitted";
     let res: Response;
     try {
-      res = await fetch(`${this.config.baseUrl}${path}`, init);
+      res = await fetch(`${this.config.baseUrl}${path}`, {
+        ...init,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
     } catch (cause) {
+      const timedOut = isTimeout(cause);
+      const code = causeCode(cause);
       throw new PesapalError(
-        `Pesapal request failed: ${String(cause)}`,
+        timedOut
+          ? `Pesapal ${path} timed out after ${this.timeoutMs} ms`
+          : `Pesapal request failed: ${String(cause)}`,
         "PESAPAL_UNREACHABLE",
         503,
         cause,
+        submission(timedOut || code === undefined || !PRE_SEND_ERROR_CODES.has(code)),
       );
     }
     if (!res.ok) {
@@ -72,9 +131,23 @@ export class PesapalClient {
         errorCode,
         502,
         { status: res.status, body },
+        submission(res.status >= 500),
       );
     }
-    return (await res.json()) as T;
+    try {
+      return (await res.json()) as T;
+    } catch (cause) {
+      const timedOut = isTimeout(cause);
+      throw new PesapalError(
+        timedOut
+          ? `Pesapal ${path} timed out after ${this.timeoutMs} ms`
+          : `Pesapal ${path} returned an unreadable body`,
+        timedOut ? "PESAPAL_UNREACHABLE" : errorCode,
+        502,
+        cause,
+        submission(true),
+      );
+    }
   }
 
   /** Step 1: Request access token. */
@@ -95,12 +168,13 @@ export class PesapalClient {
       "PESAPAL_AUTH_FAILED",
     );
 
-    if (!data.token) {
+    if (!data?.token) {
       throw new PesapalError(
-        `Pesapal auth returned no token: ${data.message ?? JSON.stringify(data)}`,
+        `Pesapal auth returned no token: ${data?.message ?? JSON.stringify(data)}`,
         "PESAPAL_AUTH_FAILED",
         401,
         data,
+        "not_submitted",
       );
     }
     return data.token;
@@ -243,6 +317,7 @@ export class PesapalClient {
         }),
       },
       "PESAPAL_HTTP_ERROR",
+      true,
     );
   }
 }

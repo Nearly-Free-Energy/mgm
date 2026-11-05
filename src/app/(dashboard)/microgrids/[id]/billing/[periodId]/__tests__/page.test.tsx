@@ -30,6 +30,10 @@
  *   2. first_name only → "Alejandro"
  *   3. email-only fallback (both names null) → "alejandro@example.com"
  *   4. entered_by_user_id IS NULL or RLS-hidden actor → null actor
+ *
+ * Also covers how the page loads: its reads start together rather than
+ * after the breadcrumb, payment readiness composes for the org embedded in
+ * the microgrid row, and the outcomes keep their old precedence.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -51,6 +55,8 @@ const LI_NO_JOIN = "990e8400-e29b-41d4-a716-446655444004";
 const ACTOR_FULL = "aaaaaaaa-1111-4111-8111-000000000001";
 const ACTOR_FIRST_ONLY = "aaaaaaaa-1111-4111-8111-000000000002";
 const ACTOR_EMAIL_ONLY = "aaaaaaaa-1111-4111-8111-000000000003";
+const COMMUNITY_ID = "880e8400-e29b-41d4-a716-446655443000";
+const ORG_ID = "440e8400-e29b-41d4-a716-446655445000";
 
 // Holders we mutate per-test.
 let MOCK_LINE_ITEMS: Array<Record<string, unknown>> = [];
@@ -59,6 +65,8 @@ let LAST_LINE_ITEMS_SELECT = "";
 let LAST_RPC_ARGS: Record<string, unknown> | null = null;
 let LAST_SCHEDULE_FILTERS: Array<[string, unknown]> = [];
 let MOCK_PERIOD_RATE_SCHEDULE_ID: string | null = SCHEDULE_ID;
+let MOCK_PERIOD_FOUND = true;
+let TABLES_READ: string[] = [];
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -115,9 +123,14 @@ function buildLineItemsQuery() {
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: (table: string) => {
+      TABLES_READ.push(table);
       if (table === "billing_line_items") return buildLineItemsQuery();
       if (table === "billing_periods")
-        return buildQuery({ id: PERIOD_ID, microgrid_id: MICROGRID_ID, rate_schedule_id: MOCK_PERIOD_RATE_SCHEDULE_ID });
+        return buildQuery(
+          MOCK_PERIOD_FOUND
+            ? { id: PERIOD_ID, microgrid_id: MICROGRID_ID, rate_schedule_id: MOCK_PERIOD_RATE_SCHEDULE_ID }
+            : null,
+        );
       if (table === "households") return buildQuery([]);
       if (table === "rate_schedules") return buildQuery(
         { id: SCHEDULE_ID, tiers: [] },
@@ -128,9 +141,9 @@ vi.mock("@/lib/supabase/server", () => ({
           id: MICROGRID_ID,
           name: "Test MG",
           currency: "UGX",
-          communities: { id: "comm-1", payment_provider: null },
+          communities: { id: COMMUNITY_ID, payment_provider: null, org_id: ORG_ID },
         });
-      // Fallback (e.g. user_roles via currentUserIsSuperAdmin).
+      // Fallback for any other table.
       return buildQuery([]);
     },
     // #269: actor resolution moved from a PostgREST FK-join into a
@@ -150,15 +163,25 @@ vi.mock("@/lib/hierarchy", () => ({
   getHierarchyLevels: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("@/lib/auth/access", () => ({
-  currentUserIsSuperAdmin: vi.fn().mockResolvedValue(false),
+vi.mock("@/lib/auth/request-access", () => ({
+  requestUserIsSuperAdmin: vi.fn().mockResolvedValue(false),
+}));
+
+// Payment readiness. Not composed by default, so no payment link.
+const composePaymentsMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/payments/compose", () => ({
+  composePayments: composePaymentsMock,
 }));
 
 // Stub the BillingTable so we can read the actor map back out of the
 // rendered HTML. The stub serializes the prop as JSON inside a hidden
 // span — assertions then parse + inspect.
 vi.mock("@/components/BillingTable", () => ({
-  BillingTable: (props: { actorByLineItemId?: Record<string, string | null> }) =>
+  BillingTable: (props: {
+    actorByLineItemId?: Record<string, string | null>;
+    isPaymentConfigured?: boolean;
+    communityId?: string;
+  }) =>
     React.createElement(
       "div",
       { "data-testid": "billing-table-stub" },
@@ -166,6 +189,14 @@ vi.mock("@/components/BillingTable", () => ({
         "span",
         { "data-testid": "actor-map" },
         JSON.stringify(props.actorByLineItemId ?? {})
+      ),
+      React.createElement(
+        "span",
+        { "data-testid": "payment" },
+        JSON.stringify({
+          isPaymentConfigured: props.isPaymentConfigured,
+          communityId: props.communityId,
+        })
       )
     ),
 }));
@@ -183,12 +214,21 @@ vi.mock("next/navigation", () => ({
 // ── Import page (after mocks) ─────────────────────────────────────────────────
 
 import BillingPeriodDetailPage from "../page";
+import { getHierarchyLevels } from "@/lib/hierarchy";
 
 beforeEach(() => {
   LAST_LINE_ITEMS_SELECT = "";
   LAST_RPC_ARGS = null;
   LAST_SCHEDULE_FILTERS = [];
   MOCK_PERIOD_RATE_SCHEDULE_ID = SCHEDULE_ID;
+  MOCK_PERIOD_FOUND = true;
+  TABLES_READ = [];
+  composePaymentsMock.mockReset().mockResolvedValue({
+    ok: false,
+    status: 403,
+    code: "payments_forbidden",
+    message: "Not authorized to act on this organization.",
+  });
   MOCK_LINE_ITEMS = [
     { id: LI_FULL, entered_by_user_id: ACTOR_FULL },
     { id: LI_FIRST_ONLY, entered_by_user_id: ACTOR_FIRST_ONLY },
@@ -219,6 +259,22 @@ beforeEach(() => {
     },
   ];
 });
+
+function extractPayment(html: string): { isPaymentConfigured: boolean; communityId: string } {
+  const m = html.match(/data-testid="payment"[^>]*>([^<]*)<\/span>/);
+  if (!m) throw new Error("payment span not found in rendered HTML");
+  return JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+}
+
+function readyComposition(state: string) {
+  const dispose = vi.fn(async () => {});
+  const getReadiness = vi.fn(async () => ({ ok: true, data: { state } }));
+  composePaymentsMock.mockResolvedValue({
+    ok: true,
+    data: { payments: { getReadiness }, dispose },
+  });
+  return { dispose, getReadiness };
+}
 
 function extractActorMap(html: string): Record<string, string | null> {
   const m = html.match(
@@ -330,5 +386,83 @@ describe("BillingPeriodDetailPage — fn_list_visible_users actor mapping (#269)
     const html = renderToStaticMarkup(node as React.ReactElement);
     const actorMap = extractActorMap(html);
     expect(actorMap[HIDDEN_LI]).toBeNull();
+  });
+});
+
+describe("BillingPeriodDetailPage — loading", () => {
+  const render = async () =>
+    renderToStaticMarkup(
+      (await BillingPeriodDetailPage({
+        params: Promise.resolve({ id: MICROGRID_ID, periodId: PERIOD_ID }),
+      })) as React.ReactElement,
+    );
+
+  it("starts the period, line-item and microgrid reads without waiting for the breadcrumb", async () => {
+    let releaseBreadcrumb: (levels: never[]) => void = () => {};
+    vi.mocked(getHierarchyLevels).mockImplementationOnce(
+      () => new Promise((resolve) => { releaseBreadcrumb = resolve; }),
+    );
+    const page = BillingPeriodDetailPage({
+      params: Promise.resolve({ id: MICROGRID_ID, periodId: PERIOD_ID }),
+    });
+    await vi.waitFor(() => {
+      expect(TABLES_READ).toEqual(
+        expect.arrayContaining(["billing_periods", "billing_line_items", "households", "microgrids", "rate_schedules"]),
+      );
+      expect(LAST_RPC_ARGS).not.toBeNull();
+    });
+    releaseBreadcrumb([]);
+    renderToStaticMarkup((await page) as React.ReactElement);
+  });
+
+  it("offers a payment link when readiness is ready, composing for the org embedded in the microgrid row", async () => {
+    const { dispose, getReadiness } = readyComposition("ready");
+    const payment = extractPayment(await render());
+    expect(payment).toEqual({ isPaymentConfigured: true, communityId: COMMUNITY_ID });
+    expect(composePaymentsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: ORG_ID, allowDisabled: true }),
+    );
+    expect(getReadiness).toHaveBeenCalledWith(COMMUNITY_ID);
+    expect(dispose).toHaveBeenCalledOnce();
+    // The org comes from the microgrid embed, not a second communities read.
+    expect(TABLES_READ).not.toContain("communities");
+  });
+
+  it.each(["disabled", "unconfigured", "connection_error"])(
+    "offers no payment link when readiness is %s",
+    async (state) => {
+      const { dispose } = readyComposition(state);
+      expect(extractPayment(await render()).isPaymentConfigured).toBe(false);
+      expect(dispose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("offers no payment link when Payments cannot be composed", async () => {
+    expect(extractPayment(await render()).isPaymentConfigured).toBe(false);
+  });
+
+  it("still fails the page when readiness throws", async () => {
+    const dispose = vi.fn(async () => {});
+    composePaymentsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        payments: { getReadiness: async () => { throw new Error("Could not load payment account"); } },
+        dispose,
+      },
+    });
+    await expect(render()).rejects.toThrow("Could not load payment account");
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("answers 404 for a missing period even when readiness throws", async () => {
+    MOCK_PERIOD_FOUND = false;
+    composePaymentsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        payments: { getReadiness: async () => { throw new Error("Could not load payment account"); } },
+        dispose: async () => {},
+      },
+    });
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 });

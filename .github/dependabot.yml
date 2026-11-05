@@ -1,0 +1,15 @@
+# Dependabot version updates, for GitHub Actions only.
+#
+# The Release workflow (.github/workflows/release.yml) pins each action to a
+# full commit SHA, with the version in a comment, so an action changes only
+# when a pull request changes its pin. Dependabot opens those pull requests
+# weekly, updating the SHA and the comment together, and the Release dry run
+# runs on them. The publish job's actions run with permission to write
+# releases and sign attestations: read an update's changes before merging it.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -13,6 +13,7 @@ import "server-only";
 import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BILLING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
 import { BillingCapability } from "./capability";
@@ -65,6 +66,7 @@ export const BillingPlugin = {
           periodId: input.periodId,
           householdIds: input.householdIds,
           manualReadings: input.manualReadings,
+          revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
           seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,
@@ -93,6 +95,12 @@ export const BillingPlugin = {
 export async function composeBilling(options: {
   supabase: SupabaseClient;
   organizationId: string;
+  /**
+   * Skip the plugin check. Only for callers that gate the request themselves
+   * (`checkGate`/`gateRoute`); `route-surface.test.ts` does not count a call
+   * with this set as gating, so the route must. If that test stops reading
+   * this option, revisit.
+   */
   readOnly?: boolean;
 }): Promise<BillingResult<BillingComposition>> {
   const access = await authorizeOrganization(options.supabase, options.organizationId);
@@ -121,13 +129,36 @@ export async function composeBilling(options: {
   }
 
   const repository = createSupabaseBillingRepository(options.supabase);
-  if (!options.readOnly && !(await repository.isPluginEnabled(options.organizationId))) {
-    return billingFailure({
-      status: 409,
-      code: "billing_disabled",
-      message:
-        "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
-    });
+  if (!options.readOnly) {
+    // Read through `isPluginEnabledForOrg`, as `MgmGate.check` does, not
+    // `isBillingEnabled`: supabase-js resolves a failed read as `{ error }`
+    // rather than rejecting, which that helper reads as disabled (409) and
+    // this call throws on. So an unreadable state fails closed with the
+    // gate's 503 code and copy, before any scope opens. Each write re-checks
+    // with the same codes and copy (`requirePlugin` in capability.ts). If the
+    // gate's read, code or copy changes, change them here and there too.
+    let enabled: boolean;
+    try {
+      enabled = await isPluginEnabledForOrg(
+        options.supabase,
+        options.organizationId,
+        BILLING_PLUGIN_NAME
+      );
+    } catch {
+      return billingFailure({
+        status: 503,
+        code: "billing_gate_unavailable",
+        message: "Could not verify whether Billing is enabled. Retry the request.",
+      });
+    }
+    if (!enabled) {
+      return billingFailure({
+        status: 409,
+        code: "billing_disabled",
+        message:
+          "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
+      });
+    }
   }
 
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;

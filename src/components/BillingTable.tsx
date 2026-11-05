@@ -15,6 +15,11 @@ import { useLocale } from "@/components/format/locale-context";
 import { StatusChip } from "@/components/ui/status-chip";
 import { CopyTable, type ColumnDef } from "@/components/ui/copy-table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DELETE_DRAFT_PERIOD_DESCRIPTION,
+  lineItemHasRecordedPayment,
+  periodDeleteErrorMessage,
+} from "@/lib/billing/period-delete";
 import { ClosePeriodDialog, type ClosePeriodSummaryRow } from "@/components/ui/close-period-dialog";
 import { Banner } from "@/components/ui/banner";
 import { RowActionsMenu } from "@/components/billing/row-actions-menu";
@@ -135,6 +140,7 @@ export function BillingTable({
   const seenPaidRef = useRef<Set<string>>(new Set());
 
   const isDraft = period.status === "draft";
+  const hasRecordedPayment = lineItems.some(lineItemHasRecordedPayment);
 
   // #229 — CSV export download trigger. Colocated (not extracted to a
   // shared util) because both call sites — the close-dialog button and
@@ -423,7 +429,10 @@ export function BillingTable({
       .eq("id", period.id);
     if (deleteError) {
       setDeleting(false);
-      throw new Error(deleteError.message);
+      // fn_billing_period_before_delete_guard keeps a closed period or a
+      // draft with recorded payments; the dialog says why instead of showing
+      // the raw error.
+      throw new Error(periodDeleteErrorMessage(deleteError));
     }
     router.push(`/microgrids/${microgridId}/billing`);
   }
@@ -753,7 +762,7 @@ export function BillingTable({
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Delete period?"
-        description="This permanently removes the period and all its line items."
+        description={DELETE_DRAFT_PERIOD_DESCRIPTION}
         confirmLabel="Delete"
         tone="destructive"
         onConfirm={handleDelete}
@@ -792,7 +801,11 @@ export function BillingTable({
               start_date: period.start_date,
               end_date: period.end_date,
             }}
-            lineItem={{ id: li.id, payment_status: li.payment_status }}
+            lineItem={{
+              id: li.id,
+              payment_status: li.payment_status,
+              reading_source: li.reading_source,
+            }}
             pushBanner={pushRowBanner}
             dismissBanner={dismissRowBanner}
             onSuccess={(lineItemId) => {
@@ -907,15 +920,23 @@ export function BillingTable({
                 >
                   {closing ? "Closing..." : "Close Period"}
                 </button>
+                {/* Delete is offered on drafts with no recorded payment on
+                    a loaded line item: fn_billing_period_before_delete_guard
+                    keeps closed periods and periods with payment activity
+                    (src/lib/billing/period-delete.ts). If that trigger's rule
+                    changes, revisit. Payment attempts and events are not
+                    loaded here, so the refusal message still covers them. */}
+                {!hasRecordedPayment && (
+                  <button
+                    onClick={() => setDeleteDialogOpen(true)}
+                    disabled={generating || closing || deleting}
+                    className="rounded-md border border-destructive bg-card px-4 py-2 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting..." : "Delete"}
+                  </button>
+                )}
               </>
             )}
-            <button
-              onClick={() => setDeleteDialogOpen(true)}
-              disabled={generating || closing || deleting}
-              className="rounded-md border border-destructive bg-card px-4 py-2 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </button>
           </div>
         </div>
       </div>
@@ -1053,6 +1074,11 @@ export function BillingTable({
           households={households}
           edgeAvailableByHouseholdId={edgeAvailableByHouseholdId ?? {}}
           seedNeededByHouseholdId={seedNeededByHouseholdId ?? {}}
+          currentlyManualByHouseholdId={Object.fromEntries(
+            lineItems
+              .filter((item) => item.reading_source === "manual")
+              .map((item) => [item.household_id, true]),
+          )}
           allowUsageOnlyReadings={allowUsageOnlyReadings}
           priorHintByHouseholdId={priorHintByHouseholdId ?? {}}
           deviceIdByHouseholdId={deviceIdByHouseholdId ?? {}}

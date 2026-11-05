@@ -17,6 +17,9 @@
  *     that rows SURVIVE (linkage severed, not destroyed). Same for
  *     `edge.household_devices` — households themselves are preserved
  *     but their meter linkage breaks.
+ *   * `edge.readings_in_closed_periods` renders as a warning banner below
+ *     the list: those meter readings are deleted with the devices, while
+ *     the closed bills keep their own start and end readings and totals.
  *   * Numerals format via `Intl.NumberFormat` with `Accept-Language` or
  *     the default browser locale (pilot numbers <1000 render identically
  *     across locales — AC-UI-5 note). Do NOT hand-roll a formatter.
@@ -26,6 +29,7 @@
  */
 
 import * as React from "react";
+import { Banner } from "@/components/ui/banner";
 import type { DescendantCounts } from "@/lib/entity-descendants-types";
 import { descendantCountsAreEmpty } from "@/lib/entity-descendants-types";
 
@@ -328,6 +332,9 @@ export function BlastRadiusList({ counts, asOf }: BlastRadiusListProps) {
     asOfLabel = asOf;
   }
 
+  const closedPeriodReadings =
+    counts.kind === "edge" ? counts.readings_in_closed_periods : 0;
+
   return (
     <div>
       {empty ? (
@@ -336,6 +343,14 @@ export function BlastRadiusList({ counts, asOf }: BlastRadiusListProps) {
         </ul>
       ) : (
         <ul className="my-2 list-disc space-y-0.5 pl-5">{items}</ul>
+      )}
+      {closedPeriodReadings > 0 && (
+        <Banner tone="warn" title="Readings from closed billing periods" className="mt-3">
+          {fmt(closedPeriodReadings)} meter{" "}
+          {pluralize(closedPeriodReadings, "reading")} taken during closed
+          billing periods will be deleted with this edge’s devices. The
+          closed bills keep their recorded start and end readings and totals.
+        </Banner>
       )}
       <p className="mt-2 text-[11px] text-muted-foreground">
         Counts as of {asOfLabel}

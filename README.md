@@ -4,7 +4,7 @@ An operating system for microgrid operators. Organizations manage their communit
 
 **Stack:** Next.js (App Router) + [Cordis](https://github.com/cordiverse/cordis) plugin runtime + Supabase (Postgres, Auth, RLS) + OpenEMS (meter data via its B2B API) + Pesapal (payments)
 
-**Docs:** [operating model](docs/operating-model.md) · [Cordis runtime](docs/cordis-runtime.md) · [entity model](docs/entity-model.md) · [setup](docs/setup.md) · [runbooks](docs/runbooks/)
+**Docs:** [operating model](docs/operating-model.md) · [Cordis runtime](docs/cordis-runtime.md) · [entity model](docs/entity-model.md) · [setup](docs/setup.md) · [releasing](docs/releasing.md) · [runbooks](docs/runbooks/)
 
 ## Getting Started
 

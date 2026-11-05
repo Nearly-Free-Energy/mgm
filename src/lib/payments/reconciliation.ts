@@ -49,6 +49,41 @@ export function canReuseAttempt(
   );
 }
 
+/**
+ * How long an open attempt with neither a tracking ID nor a checkout URL
+ * blocks a new checkout. Such an attempt cannot be paid: the customer never
+ * received a checkout URL. The window is meant to outlast the request that
+ * created it. On Vercel the pay route's `maxDuration` (30 s) caps that
+ * request; if that limit grows toward this window, lengthen it. Other
+ * hosts (the container image) do not enforce `maxDuration`, and database
+ * writes have no timeout of their own, so a slow request could still be
+ * running after the window: the supersede write is therefore conditional
+ * (`failUnlinkedAttempt`) and leaves an attempt that has since gained a
+ * tracking ID or checkout URL alone.
+ */
+export const UNPAYABLE_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * An open attempt that a new checkout may supersede: no tracking ID, no
+ * checkout URL, and older than `UNPAYABLE_ATTEMPT_WINDOW_MS`. Attempts with
+ * a tracking ID are never superseded, since the provider can still report
+ * them paid.
+ */
+export function isSupersedableAttempt(
+  attempt: {
+    status: AttemptStatus;
+    provider_tracking_id: string | null;
+    checkout_url: string | null;
+    created_at: string;
+  },
+  now: number
+): boolean {
+  if (attempt.status !== "pending" && attempt.status !== "confirmation_pending") return false;
+  if (attempt.provider_tracking_id || attempt.checkout_url) return false;
+  const created = Date.parse(attempt.created_at);
+  return Number.isFinite(created) && now - created >= UNPAYABLE_ATTEMPT_WINDOW_MS;
+}
+
 /** A shortfall/overpayment/duplicate blocks further automated checkout. */
 export function isBlockedForNewCheckout(attempts: AttemptLike[]): boolean {
   return attempts.some((a) => a.status === "needs_reconciliation");

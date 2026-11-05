@@ -74,11 +74,17 @@ export default async function EdgeDetailPage({
 
   // Fetch edge online status for the devices empty-state tone (#139 P6).
   // Treat emsConfig fetch failure or missing openems_edge_id as offline.
+  // The credential decrypt runs on the service role, so it waits for
+  // canManage, whose getUser() refuses a session signed out elsewhere;
+  // middleware only verifies the token's signature. If
+  // currentUserCanAccessMicrogrid stops calling getUser(), revisit.
   let emsConfig: OpenEmsClientConfig | null = null;
-  try {
-    emsConfig = await getMicrogridEmsConfig(supabase, id);
-  } catch {
-    emsConfig = null;
+  if (canManage && edge.openems_edge_id) {
+    try {
+      emsConfig = await getMicrogridEmsConfig(supabase, id);
+    } catch {
+      emsConfig = null;
+    }
   }
   const edgeOnline = await fetchEdgeOnlineStatus(emsConfig, edge.openems_edge_id ?? null);
 

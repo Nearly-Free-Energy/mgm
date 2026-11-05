@@ -18,7 +18,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { announceNavigationStart } from "@/components/ui/navigation-progress";
+import {
+  announceNavigationStart,
+  isSameTabClick,
+} from "@/components/ui/navigation-progress";
 import { NavSpinner } from "@/components/ui/nav-spinner";
 
 export type SidebarEntry = {
@@ -57,8 +60,8 @@ export function SidebarNavLinks({ entries }: { entries: SidebarEntry[] }) {
             aria-current={active ? "page" : undefined}
             aria-busy={pending || undefined}
             data-pending={pending || undefined}
-            onClick={() => {
-              if (entry.href !== pathname) {
+            onClick={(event) => {
+              if (entry.href !== pathname && isSameTabClick(event)) {
                 setPendingHref(entry.href);
                 announceNavigationStart(entry.href);
               }

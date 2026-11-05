@@ -6,31 +6,51 @@
  *   - Unauthenticated GET on /reset-password is NOT redirected to /login.
  *   - Public-paths check still allows /login and /accept-invite (UX5c).
  *   - Unauthenticated GET on a private path (/dashboard) IS redirected.
+ *   - The session check verifies the token with getClaims(), treats its
+ *     errors and throws as signed out, and asks Auth (getUser) before
+ *     sending a session away from /login.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, and
  * src/app).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// Mock @supabase/ssr so getUser() resolves to a deterministic value.
+// Mock @supabase/ssr so getClaims() (every request) and getUser() (a
+// signed-in visit to /login) resolve to deterministic values.
+const getClaimsMock = vi.fn();
 const getUserMock = vi.fn();
+const createServerClientMock = vi.fn((..._args: unknown[]) => ({
+  auth: {
+    getClaims: getClaimsMock,
+    getUser: getUserMock,
+  },
+}));
+
+function signedIn(sub = "u1") {
+  getClaimsMock.mockResolvedValue({ data: { claims: { sub } }, error: null });
+}
+
+function signedOut() {
+  getClaimsMock.mockResolvedValue({ data: null, error: null });
+}
 
 vi.mock("@supabase/ssr", () => ({
-  createServerClient: () => ({
-    auth: {
-      getUser: getUserMock,
-    },
-  }),
+  createServerClient: (...args: unknown[]) => createServerClientMock(...args),
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getClaimsMock.mockReset();
   getUserMock.mockReset();
-  // Provide minimal env for the middleware to construct a client.
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost:54321";
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
+  // Provide minimal request-time runtime configuration (#46).
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "http://localhost:54321");
+  vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_test");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 async function loadMiddleware() {
@@ -44,14 +64,14 @@ function makeRequest(pathname: string) {
 
 describe("middleware PUBLIC_PATHS", () => {
   it("keeps the health endpoint available without a session", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest("/api/mgm/health"));
     expect(res.status).toBe(200);
   });
 
   it("allows the old review bookmark to reach its dashboard redirect", async () => {
-    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest("/review"));
     expect(res.status).toBe(200);
@@ -60,7 +80,7 @@ describe("middleware PUBLIC_PATHS", () => {
     "/api/v1/billing/generate",
     "/api/openems/energy",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
-    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest(path));
     expect(res.status).toBe(404);
@@ -87,21 +107,21 @@ describe("middleware PUBLIC_PATHS", () => {
     "/microgrids/grid-1/billing/period-1",
     "/microgrids/grid-1/setup/rates",
   ])("permits released management route %s", async (path) => {
-    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest(path));
     expect(res.status).toBe(200);
   });
 
   it("redirects microgrid detail away from the legacy OpenEMS overview", async () => {
-    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest("/microgrids/grid-1"));
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe("http://localhost/microgrids/grid-1/setup/households");
   });
   it("allows unauthenticated GET on /forgot-password (no redirect)", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/forgot-password"));
@@ -112,7 +132,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("allows unauthenticated GET on /reset-password (no redirect)", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/reset-password"));
@@ -122,7 +142,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("allows unauthenticated GET on /login (regression)", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/login"));
@@ -132,7 +152,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("allows unauthenticated GET on /accept-invite (regression — UX5c)", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/accept-invite"));
@@ -142,7 +162,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("redirects unauthenticated GET on an available private path to /login", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/communities"));
@@ -157,7 +177,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // indirection. Customers arrive with no MGM session; the middleware MUST
   // pass-through (the route's service-role SELECT is the access gate).
   it("passes public payment links through without a session", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/p/Kp9XrA"));
@@ -166,10 +186,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("passes payment links for authenticated users too", async () => {
-    getUserMock.mockResolvedValue({
-      data: { user: { id: "u1" } },
-      error: null,
-    });
+    signedIn();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/p/Kp9XrA"));
@@ -185,7 +202,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // the route handler runs and payments never auto-mark. Same class as the
   // /api/v1/ hotfix (#267).
   it("passes the payment webhook through without a session", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/api/payments/ipn"));
@@ -201,7 +218,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // unauthenticated API request. Guards against a broad /api/payments/
   // prefix silently exposing them.
   it("keeps sibling payment routes session-gated", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(makeRequest("/api/payments/status"));
@@ -212,7 +229,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("passes the public customer pay redirect without a session", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(
@@ -224,7 +241,7 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it("keeps the operator payment-url mint session-gated", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(
@@ -234,14 +251,193 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.status).toBe(401);
   });
   it.each(["/api/payments/reconcile-worker", "/payment/callback"])("lets %s reach its own server-side validation without a session", async path => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
     expect((await middleware(makeRequest(path))).status).toBe(200);
   });
   it("does not exempt worker sibling paths", async () => {
-    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    signedOut();
     const middleware = await loadMiddleware();
     expect((await middleware(makeRequest("/api/payments/reconcile-worker/extra"))).status).toBe(404);
   });
 
+});
+
+describe("middleware session check", () => {
+  it.each(["/settings/plugins", "/api/communities"])(
+    "lets a verified token through to %s without asking Auth",
+    async (path) => {
+      signedIn();
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest(path));
+      expect(res.status).toBe(200);
+      expect(getUserMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("treats an error from getClaims (such as an unreachable key set) as signed out", async () => {
+    getClaimsMock.mockResolvedValue({
+      data: null,
+      error: { name: "AuthRetryableFetchError", message: "fetch failed", status: 0 },
+    });
+    const middleware = await loadMiddleware();
+    const page = await middleware(makeRequest("/communities"));
+    expect(page.headers.get("location")).toMatch(/\/login$/);
+    expect((await middleware(makeRequest("/api/communities"))).status).toBe(401);
+  });
+
+  it.each([
+    new Error("Missing exp claim"),
+    new Error("Invalid alg claim"),
+    new SyntaxError("Unexpected token"),
+  ])("treats a token getClaims throws on ($message) as signed out", async (thrown) => {
+    getClaimsMock.mockRejectedValue(thrown);
+    const middleware = await loadMiddleware();
+    const page = await middleware(makeRequest("/communities"));
+    expect(page.headers.get("location")).toMatch(/\/login$/);
+    expect((await middleware(makeRequest("/api/communities"))).status).toBe(401);
+    // The login page and the public webhook still answer instead of failing.
+    expect((await middleware(makeRequest("/login"))).status).toBe(200);
+    expect((await middleware(makeRequest("/api/payments/ipn"))).status).toBe(200);
+  });
+
+  it.each([
+    { claims: { role: "anon" } },
+    { claims: { sub: "" } },
+  ])("treats verified claims without a subject as signed out (%j)", async (data) => {
+    getClaimsMock.mockResolvedValue({ data, error: null });
+    const middleware = await loadMiddleware();
+    expect((await middleware(makeRequest("/api/communities"))).status).toBe(401);
+  });
+
+  it("sends a live session away from /login after asking Auth", async () => {
+    signedIn();
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/login"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("http://localhost/");
+    expect(getUserMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows /login to a session Auth no longer knows, instead of redirecting back to /", async () => {
+    // A session signed out on another device keeps a validly signed token
+    // until it expires. The dashboard layout's getUser() sends it to /login;
+    // redirecting it back to / would loop.
+    signedIn();
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/login"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("does not ask Auth on /login when there is no session", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+    await middleware(makeRequest("/login"));
+    expect(getUserMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the cookies a token refresh writes", async () => {
+    // getClaims() refreshes an expiring session and hands the new cookies
+    // to setAll; the response must carry them.
+    getClaimsMock.mockImplementation(async () => {
+      const options = createServerClientMock.mock.calls.at(-1)?.[2] as {
+        cookies: {
+          setAll(cookies: { name: string; value: string; options: object }[]): void;
+        };
+      };
+      options.cookies.setAll([
+        { name: "sb-test-auth-token", value: "refreshed", options: { path: "/" } },
+      ]);
+      return { data: { claims: { sub: "u1" } }, error: null };
+    });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/settings/plugins"));
+    expect(res.status).toBe(200);
+    expect(res.cookies.get("sb-test-auth-token")?.value).toBe("refreshed");
+  });
+});
+
+describe("middleware runtime configuration (#46)", () => {
+  it.each([
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "https://alpha.example.test",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_alpha",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-alpha-auth-token",
+        SUPABASE_INTERNAL_URL: "",
+      },
+      url: "https://alpha.example.test",
+      key: "sb_publishable_alpha",
+      cookie: { cookieOptions: { name: "sb-alpha-auth-token" } },
+    },
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_beta",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-beta-auth-token",
+        SUPABASE_INTERNAL_URL: "http://kong:8000",
+      },
+      url: "http://kong:8000",
+      key: "sb_publishable_beta",
+      cookie: { cookieOptions: { name: "sb-beta-auth-token" } },
+    },
+    {
+      env: {
+        MGM_PUBLIC_SUPABASE_URL: "http://localhost:54321",
+        MGM_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_gamma",
+        MGM_PUBLIC_SUPABASE_COOKIE_NAME: "",
+        SUPABASE_INTERNAL_URL: "",
+      },
+      url: "http://localhost:54321",
+      key: "sb_publishable_gamma",
+      cookie: {},
+    },
+  ])("builds its Supabase client from the request-time settings ($url)", async ({ env, url, key, cookie }) => {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    signedIn();
+    const middleware = await loadMiddleware();
+    await middleware(makeRequest("/settings/plugins"));
+    const [calledUrl, calledKey, options] = createServerClientMock.mock.calls.at(-1) as [
+      string,
+      string,
+      Record<string, unknown>,
+    ];
+    expect(calledUrl).toBe(url);
+    expect(calledKey).toBe(key);
+    expect(options.cookieOptions).toEqual((cookie as { cookieOptions?: unknown }).cookieOptions);
+  });
+
+  it("refuses an internal URL on another host without a shared cookie name", async () => {
+    vi.stubEnv("SUPABASE_INTERNAL_URL", "http://kong:8000");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+    const middleware = await loadMiddleware();
+    await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
+      /MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set/
+    );
+  });
+
+  // Delete this test with the `runtime` line when moving to proxy.ts: Next.js
+  // 16 refuses route segment config in a Proxy file (see src/middleware.ts).
+  it("runs on the Node.js runtime so it reads the real process environment", async () => {
+    vi.resetModules();
+    const { config } = await import("../../middleware");
+    expect(config.runtime).toBe("nodejs");
+  });
+
+  it("fails closed, naming the variable, when configuration is missing", async () => {
+    for (const name of ["MGM_PUBLIC_SUPABASE_URL", "MGM_PUBLIC_SUPABASE_ANON_KEY"]) {
+      vi.stubEnv(name, "");
+    }
+    // A retired name does not stand in for a missing MGM_ name (#79).
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://legacy.example.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_legacy");
+    const middleware = await loadMiddleware();
+    await expect(middleware(makeRequest("/settings/plugins"))).rejects.toThrow(
+      /MGM_PUBLIC_SUPABASE_URL/
+    );
+    expect(createServerClientMock).not.toHaveBeenCalled();
+  });
 });

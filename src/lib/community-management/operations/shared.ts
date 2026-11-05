@@ -60,15 +60,40 @@ export async function requireScopedAccess(
   // created; RLS remains the final authority at write time. Re-check the
   // plugin gate here because an operator can flip it between composition
   // and the write.
-  if (!(await repo.isPluginEnabled(organizationId))) {
+  return requireCommunityPlugin(repo, organizationId);
+}
+
+/**
+ * The plugin re-check, with composeCommunityManagement's policy. An
+ * unreadable state fails closed with the gate's 503 code and wording
+ * (`MgmGate.check`, src/lib/runtime/gate.ts); if the gate's codes or wording
+ * change, change them here. The 503 relies on the repository rejecting when
+ * it cannot read the state, as the Supabase repository does through
+ * `isPluginEnabledForOrg`; a repository that turns a failed read into
+ * `false` answers 409 `community_management_disabled` instead.
+ */
+export async function requireCommunityPlugin(
+  repo: CommunityManagementRepository,
+  organizationId: string
+): Promise<CommunityManagementError | null> {
+  let enabled: boolean;
+  try {
+    enabled = await repo.isPluginEnabled(organizationId);
+  } catch {
     return communityFailure({
-      status: 409,
-      code: "community_management_disabled",
+      status: 503,
+      code: "community_management_gate_unavailable",
       message:
-        "Community management is disabled for this organization. Enable it in Settings → Plugins; existing records are preserved.",
+        "Could not verify whether Community management is enabled. Retry the request.",
     });
   }
-  return null;
+  if (enabled) return null;
+  return communityFailure({
+    status: 409,
+    code: "community_management_disabled",
+    message:
+      "Community management is disabled for this organization. Enable it in Settings → Plugins; existing records are preserved.",
+  });
 }
 
 export function accessDenied(message: string): CommunityManagementError {

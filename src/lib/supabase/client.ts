@@ -1,13 +1,17 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { getBrowserPublicRuntimeConfig } from "@/lib/config/browser-config-store";
+import { cookieOptionsFor } from "@/lib/config/cookie-options";
 
-// When SUPABASE_INTERNAL_URL is set (Docker mode), the server uses a different
-// URL than the browser. Force the same cookie name so both sides find the session.
-const cookieName = process.env.NEXT_PUBLIC_SUPABASE_COOKIE_NAME;
-
+/**
+ * Browser Supabase client. URL, anon key and cookie name come from the
+ * request-time configuration the root layout passed to
+ * `PublicRuntimeConfigProvider` (#46), never from `process.env` in the
+ * bundle. The cookie name matches the server and middleware clients so both
+ * sides find the session even when the server uses SUPABASE_INTERNAL_URL.
+ */
 export function createClient() {
-  return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    cookieName ? { cookieOptions: { name: cookieName } } : undefined
-  );
+  const config = getBrowserPublicRuntimeConfig();
+  return createBrowserClient(config.supabaseUrl, config.supabaseAnonKey, {
+    ...cookieOptionsFor(config),
+  });
 }

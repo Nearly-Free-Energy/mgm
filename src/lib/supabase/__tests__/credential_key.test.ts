@@ -20,6 +20,7 @@ import {
   serviceClient,
   shouldSkip,
   type TestUser,
+  testAnonKey,
 } from "./rls.helpers";
 import { createClient } from "@supabase/supabase-js";
 
@@ -84,7 +85,7 @@ describe.skipIf(shouldSkip())("credential encryption key", () => {
   it("denies anonymous callers both functions", async () => {
     const anon = createClient(
       process.env.MGM_TEST_SUPABASE_URL ?? "http://localhost:54321",
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
+      testAnonKey() as string,
       { auth: { persistSession: false, autoRefreshToken: false } }
     );
     const encrypted = await anon.rpc("fn_ems_encrypt_secret", { p_plaintext: "x" });

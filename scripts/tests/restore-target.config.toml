@@ -1,0 +1,45 @@
+# The restore target for scripts/tests/test_export_restore_e2e.py: a fresh
+# Supabase project, with no migrations and no seed, on ports that do not
+# collide with the repository's own stack (supabase/config.toml).
+#
+# Start it from a directory of its own, so the CLI's state files stay out of
+# the repository:
+#
+#   mkdir -p "$dir/supabase" && cp scripts/tests/restore-target.config.toml "$dir/supabase/config.toml"
+#   npx supabase start --workdir "$dir"
+#
+# Keep db.major_version equal to supabase/config.toml's: the test stops if
+# the two servers' major versions differ.
+project_id = "mgm-restore-target"
+
+[api]
+port = 54331
+
+[db]
+port = 54332
+shadow_port = 54330
+major_version = 17
+
+[db.migrations]
+enabled = false
+
+[db.seed]
+enabled = false
+
+# Auth and Storage stay on: their services create the auth and storage tables
+# the export's data is loaded into, at the versions a new project would have.
+# Nothing else is needed for a restore.
+[realtime]
+enabled = false
+
+[studio]
+enabled = false
+
+[inbucket]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

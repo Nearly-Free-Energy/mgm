@@ -28,6 +28,18 @@ export function announceNavigationStart(href: string) {
   );
 }
 
+// A modified or non-primary click opens the link in a new tab or window and
+// leaves this page where it is, so it must not start the bar.
+export function isSameTabClick(event: React.MouseEvent): boolean {
+  return (
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
 export function NavigationProgress() {
   const pathname = usePathname();
   const [visible, setVisible] = React.useState(false);

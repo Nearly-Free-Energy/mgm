@@ -18,11 +18,20 @@
  * service. Future `microgrid_manager` may need per-role visibility —
  * not now.
  *
+ * Tabs are next/link <Link>s, so clicks and arrow keys are client-side
+ * navigations: the dashboard layout and this sub-nav stay mounted while
+ * settings/loading.tsx stands in for the new tab.
+ *
  * Copy-paste-adapted per ticket Dev Notes ("don't extract a shared
  * <TabNav> until a third caller appears — YAGNI").
  */
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, type KeyboardEvent } from "react";
+import {
+  announceNavigationStart,
+  isSameTabClick,
+} from "@/components/ui/navigation-progress";
 
 type SubTab = { label: string; segment: string };
 
@@ -72,7 +81,9 @@ export function SettingsSubNav() {
     e.preventDefault();
     const el = tabRefs.current[next];
     el?.focus();
-    router.push(`${base}/${TABS[next].segment}`);
+    const href = `${base}/${TABS[next].segment}`;
+    if (href !== pathname) announceNavigationStart(href);
+    router.push(href);
   }
 
   return (
@@ -85,7 +96,7 @@ export function SettingsSubNav() {
         const isActive = i === activeIndex;
         const href = `${base}/${tab.segment}`;
         return (
-          <a
+          <Link
             key={tab.segment}
             ref={(el) => {
               tabRefs.current[i] = el;
@@ -96,6 +107,11 @@ export function SettingsSubNav() {
             aria-controls="settings-panel"
             tabIndex={isActive ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
+            onClick={(event) => {
+              if (href !== pathname && isSameTabClick(event)) {
+                announceNavigationStart(href);
+              }
+            }}
             className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isActive
                 ? "bg-card text-foreground font-semibold shadow-elev-1"
@@ -103,7 +119,7 @@ export function SettingsSubNav() {
             }`}
           >
             {tab.label}
-          </a>
+          </Link>
         );
       })}
     </nav>
