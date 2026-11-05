@@ -238,9 +238,11 @@ checks are run by hand:
   from a repository secret or from its `GITHUB_TOKEN`, they use a local,
   disposable value, never a real secret, or leave the step out if it only
   authenticates a download. Today no workflow reads a repository secret,
-  and the only step given the job token is that GHCR login (`github.token`
-  and `github.actor`). Search the workflow files for `secrets.` and
-  `github.token` each time, because this changes with them.
+  and the only pull-request step given the job token is that GHCR login
+  (`github.token` and `github.actor`); `release.yml` also gives it to two
+  steps that run only when a release is published. Search the
+  workflow files for `secrets.` and `github.token` each time, because this
+  changes with them.
 - They confirm every commit is signed and signed off. When they merge,
   `main` and every head must still be at the recorded commits, with no pull
   request opened or closed since. If anything has moved, they record,
@@ -264,8 +266,9 @@ exists until the fix has merged. After the merge, the patch release is
 published and its artifacts are verified usable before the advisory is
 published; if that fails, the advisory stays in draft until the release is
 repaired and verified again. No installation is upgraded ahead of the
-release. Before 0.1.0 there is no patch release: the merged commit on
-`main` takes its place, as `SECURITY.md` describes.
+release. Before 0.1.0 the patch release is the next `v0.0.N` pre-release,
+and its artifact is the deployment asset that `docs/releasing.md`
+describes, checked as `SECURITY.md` sets out.
 
 ## Where things are recorded
 
