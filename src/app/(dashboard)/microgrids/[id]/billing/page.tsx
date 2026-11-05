@@ -60,7 +60,7 @@ export default async function BillingPage({
     }),
     periodsRead,
     lineItemsRead,
-    supabase.from("microgrids").select("currency").eq("id", id).single(),
+    supabase.from("microgrids").select("currency, timezone").eq("id", id).single(),
   ]);
 
   if (error) {
@@ -92,6 +92,7 @@ export default async function BillingPage({
         periods={periods ?? []}
         summaries={summaries}
         currency={microgridResult.data?.currency ?? "UGX"}
+        timezone={microgridResult.data?.timezone}
         canManage={canManage}
       />
     </>

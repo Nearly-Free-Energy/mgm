@@ -16,6 +16,7 @@ import {
 } from "@/lib/billing/period-delete";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { EmptyState } from "@/components/ui/empty-state";
+import { dayKeyInZone } from "@/lib/timezone/day-key";
 
 function toPeriodOption(
   period: BillingPeriod,
@@ -30,16 +31,45 @@ function toPeriodOption(
   };
 }
 
-function getDefaultDates() {
-  const now = new Date();
-  const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-  const month = now.getMonth() === 0 ? 11 : now.getMonth() - 1; // previous month (0-indexed)
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * The previous calendar month as `YYYY-MM-DD` start and end dates, for
+ * pre-filling the new-period form. "Today" is read in `timezone` (the
+ * microgrid's IANA zone) when given, otherwise from the browser's local
+ * date parts. Neither path goes through `toISOString()`, which names the
+ * UTC day and moves both dates back a day east of UTC.
+ */
+export function getDefaultDates(
+  now: Date = new Date(),
+  timezone?: string,
+): { start: string; end: string } {
+  let year = now.getFullYear();
+  let month = now.getMonth() + 1; // 1-12
+  if (timezone) {
+    // dayKeyInZone reads the calendar day of an instant (now), not a stored
+    // billing DATE, so this stays inside the scope its header sets.
+    try {
+      const [y, m] = dayKeyInZone(now, timezone).split("-");
+      year = Number(y);
+      month = Number(m);
+    } catch {
+      // Unknown zone id (RangeError): keep the local date parts rather than
+      // fail the whole billing page over a form's default dates.
+    }
+  }
+
+  const prevYear = month === 1 ? year - 1 : year;
+  const prevMonth = month === 1 ? 12 : month - 1;
+  // Day 0 of the following month is the last day of prevMonth. UTC keeps
+  // this pure calendar arithmetic, free of any local-zone shift.
+  const lastDay = new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate();
 
   return {
-    start: firstDay.toISOString().split("T")[0],
-    end: lastDay.toISOString().split("T")[0],
+    start: `${prevYear}-${pad2(prevMonth)}-01`,
+    end: `${prevYear}-${pad2(prevMonth)}-${pad2(lastDay)}`,
   };
 }
 
@@ -48,19 +78,22 @@ export function BillingPeriodList({
   periods,
   summaries,
   currency,
+  timezone,
   canManage = false,
 }: {
   microgridId: string;
   periods: BillingPeriod[];
   summaries: Record<string, { totalKwh: number; totalAmount: number } | undefined>;
   currency: string;
+  /** The microgrid's IANA timezone; the default period dates follow its calendar. */
+  timezone?: string;
   /** Whether the current user can manage billing periods. Defaults to false. */
   canManage?: boolean;
 }) {
   const router = useRouter();
   const supabase = createClient();
 
-  const defaults = getDefaultDates();
+  const defaults = getDefaultDates(new Date(), timezone);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [startDate, setStartDate] = useState(defaults.start);
   const [endDate, setEndDate] = useState(defaults.end);
