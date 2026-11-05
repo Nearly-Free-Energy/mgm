@@ -49,6 +49,7 @@ let mockTargetProfile: {
   last_name: string | null;
   phone: string | null;
 } | null = null;
+let mockTargetProfileError: { message: string } | null = null;
 
 function svcFromImpl(table: string) {
   if (table === "user_roles") {
@@ -62,7 +63,10 @@ function svcFromImpl(table: string) {
     return {
       select: () => ({
         eq: () => ({
-          maybeSingle: async () => ({ data: mockTargetProfile, error: null }),
+          maybeSingle: async () =>
+            mockTargetProfileError
+              ? { data: null, error: mockTargetProfileError }
+              : { data: mockTargetProfile, error: null },
         }),
       }),
     };
@@ -164,6 +168,7 @@ beforeEach(() => {
   mockListUsers = { data: { users: [] }, error: null };
   mockTargetRoles = [];
   mockTargetProfile = null;
+  mockTargetProfileError = null;
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
   mockRpcResult = { error: null };
   mockInviteResult = {
@@ -430,6 +435,27 @@ describe("POST /api/users/invite", () => {
         p_first_name: "New",
         p_last_name: "Person",
       });
+    });
+
+    it("stops without changing the account when its profile cannot be read", async () => {
+      existingAccount(true);
+      mockTargetRoles = [];
+      mockTargetProfileError = { message: "canceling statement due to statement timeout" };
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          first_name: "Typed",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(500);
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(deleteUserSpy).not.toHaveBeenCalled();
     });
 
     it("leaves an account that existed before the request in place when finalizing fails", async () => {

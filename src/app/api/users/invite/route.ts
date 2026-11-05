@@ -259,7 +259,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // fills fields that are empty, because the user_profiles UPDATE policy
     // (00012) lets only the person or a super admin edit a profile — if
     // that policy changes, revisit.
-    const current = await profileOf(svc, existing.id);
+    const profileRead = await profileOf(svc, existing.id);
+    if (!profileRead.ok) {
+      // Stop rather than treat a failed read as an empty profile: step 3
+      // writes all three fields, so guessing would overwrite what they have.
+      return NextResponse.json(
+        { error: "Could not read the account's profile. Please retry." },
+        { status: 500 }
+      );
+    }
+    const current = profileRead.profile;
     profileValues = {
       first_name: current?.first_name || profileValues.first_name,
       last_name: current?.last_name || profileValues.last_name,
@@ -439,15 +448,22 @@ function grantsRequestedAccess(
 async function profileOf(
   svc: SupabaseClient,
   userId: string
-): Promise<{
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-} | null> {
-  const { data } = await svc
+): Promise<
+  | {
+      ok: true;
+      profile: {
+        first_name: string | null;
+        last_name: string | null;
+        phone: string | null;
+      } | null;
+    }
+  | { ok: false }
+> {
+  const { data, error } = await svc
     .from("user_profiles")
     .select("first_name, last_name, phone")
     .eq("user_id", userId)
     .maybeSingle();
-  return data ?? null;
+  if (error) return { ok: false };
+  return { ok: true, profile: data ?? null };
 }
