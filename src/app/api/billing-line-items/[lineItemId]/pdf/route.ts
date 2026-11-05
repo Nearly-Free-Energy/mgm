@@ -254,8 +254,13 @@ export async function GET(
     : null;
   const enteredByUserNameRead = readEnteredByUserName(supabase, scoped);
   const logoDownload = downloadInvoiceLogo(community);
-  // Awaited, and a failure logged, at step 9; until then the no-op catch
-  // only stops an early failure counting as unhandled.
+  // Each read is awaited at its own step, which still sees its failure (the
+  // logo's is logged at step 9). A request can end before then, by returning
+  // early or because the payment link step throws; the no-op catches stop a
+  // read that failed meanwhile counting as an unhandled rejection.
+  meterDeviceRead.catch(() => {});
+  rateScheduleRead?.catch(() => {});
+  enteredByUserNameRead.catch(() => {});
   logoDownload.catch(() => {});
 
   // Invoice rendering never creates a checkout. Embed only a stable MGM
