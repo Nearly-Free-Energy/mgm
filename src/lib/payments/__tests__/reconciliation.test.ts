@@ -16,7 +16,9 @@ import {
   canReuseAttempt,
   classifyVerification,
   isBlockedForNewCheckout,
+  isSupersedableAttempt,
   nextRetryDelaySeconds,
+  UNPAYABLE_ATTEMPT_WINDOW_MS,
   receiptDifference,
   validateReceiptAgainstAttempt,
 } from "../reconciliation";
@@ -63,6 +65,32 @@ describe("checkout reuse", () => {
         { amount: 100, currency: "UGX", bill_revision_total: 90, status: "pending" },
       ])
     ).toBe(false);
+  });
+});
+
+describe("superseding an unpayable attempt", () => {
+  const NOW = Date.parse("2026-11-02T12:00:00Z");
+  const old = new Date(NOW - UNPAYABLE_ATTEMPT_WINDOW_MS).toISOString();
+  const recent = new Date(NOW - UNPAYABLE_ATTEMPT_WINDOW_MS + 1000).toISOString();
+  const base = { status: "pending" as const, provider_tracking_id: null, checkout_url: null, created_at: old };
+
+  it.each(["pending", "confirmation_pending"] as const)("supersedes an old %s attempt with no tracking ID or checkout URL", status => {
+    expect(isSupersedableAttempt({ ...base, status }, NOW)).toBe(true);
+  });
+  it("waits out the window", () => {
+    expect(isSupersedableAttempt({ ...base, created_at: recent }, NOW)).toBe(false);
+  });
+  it("never supersedes an attempt the provider can still report on", () => {
+    expect(isSupersedableAttempt({ ...base, provider_tracking_id: "TRACK-1" }, NOW)).toBe(false);
+  });
+  it("never supersedes an attempt whose checkout URL reached the customer", () => {
+    expect(isSupersedableAttempt({ ...base, checkout_url: "https://pay.example.test/x" }, NOW)).toBe(false);
+  });
+  it.each(["failed", "verified", "needs_reconciliation", "resolved", "reversed"] as const)("leaves a %s attempt alone", status => {
+    expect(isSupersedableAttempt({ ...base, status }, NOW)).toBe(false);
+  });
+  it("leaves an attempt with an unreadable creation time alone", () => {
+    expect(isSupersedableAttempt({ ...base, created_at: "not a date" }, NOW)).toBe(false);
   });
 });
 

@@ -87,6 +87,11 @@ export class PesapalPaymentProvider implements PaymentProviderClient {
     }
   }
 
+  /**
+   * Errors carry `submission`: a failed token request is always
+   * `not_submitted` (the order request was never sent); order-request
+   * failures are classified by the client and below.
+   */
   async createCheckout(request: CheckoutRequest): Promise<CheckoutResult> {
     const token = await this.client.getAccessToken();
     const response = await this.client.submitOrder({
@@ -112,12 +117,17 @@ export class PesapalPaymentProvider implements PaymentProviderClient {
       },
       currency: request.currency,
     });
-    if (!response.redirect_url || !response.order_tracking_id || response.merchant_reference !== request.merchantReference) {
+    if (!response?.redirect_url || !response.order_tracking_id || response.merchant_reference !== request.merchantReference) {
+      // An answer without an order tracking ID is Pesapal's error envelope:
+      // no order exists. One that names an order we cannot use stays unknown.
+      const answeredWithoutOrder =
+        typeof response === "object" && response !== null && !response.order_tracking_id;
       throw new PesapalError(
         "Pesapal submitOrder did not return a redirect_url",
         "PESAPAL_NO_REDIRECT",
         502,
-        response
+        response,
+        answeredWithoutOrder ? "not_submitted" : "unknown"
       );
     }
     return {

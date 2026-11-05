@@ -19,6 +19,7 @@ import type {
   PaymentsRepository,
   RepositoryError,
 } from "../repository";
+import { ATTEMPT_NOT_OPEN } from "../repository";
 
 const ACCOUNT_COLUMNS = "id, org_id, provider, display_name, sandbox, consumer_key, base_url, ipn_id, ipn_url, version, disabled, last_tested_at, last_test_status, last_test_message";
 
@@ -338,18 +339,30 @@ export function createSupabasePaymentsRepository(
     },
 
     async updateAttemptTracking(input) {
-      const { error } = await writer
+      const update = writer
         .from("payment_attempts")
         .update({
           provider_tracking_id: input.providerTrackingId,
-          checkout_url: input.checkoutUrl,
+          ...(input.checkoutUrl !== undefined ? { checkout_url: input.checkoutUrl } : {}),
           ...(input.status ? { status: input.status } : {}),
         })
         .eq("id", input.attemptId);
-      return error ? toError(error) : null;
+      if (!input.requireOpen) {
+        const { error } = await update;
+        return error ? toError(error) : null;
+      }
+      const { data, error } = await update
+        .in("status", ["pending", "confirmation_pending"])
+        .select("id");
+      if (error) return toError(error);
+      return (data ?? []).length > 0
+        ? null
+        : { code: ATTEMPT_NOT_OPEN, message: "Payment attempt is no longer open" };
     },
 
     async markAttemptStatus(input) {
+      // An attempt another request has already closed (superseded, settled)
+      // keeps its status; reopening it would block the bill again.
       const { error } = await writer
         .from("payment_attempts")
         .update({
@@ -357,8 +370,26 @@ export function createSupabasePaymentsRepository(
           failure_code: input.failureCode ?? null,
           failure_message: input.failureMessage ?? null,
         })
-        .eq("id", input.attemptId);
+        .eq("id", input.attemptId)
+        .in("status", ["pending", "confirmation_pending"]);
       return error ? toError(error) : null;
+    },
+
+    async failUnlinkedAttempt(input) {
+      const { data, error } = await writer
+        .from("payment_attempts")
+        .update({
+          status: "failed",
+          failure_code: input.failureCode,
+          failure_message: input.failureMessage,
+        })
+        .eq("id", input.attemptId)
+        .in("status", ["pending", "confirmation_pending"])
+        .is("provider_tracking_id", null)
+        .is("checkout_url", null)
+        .select("id");
+      if (error) return { failed: false, error: toError(error) };
+      return { failed: (data ?? []).length > 0, error: null };
     },
 
     async getAttempt(attemptId: string) {
