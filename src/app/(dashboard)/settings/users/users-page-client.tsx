@@ -40,6 +40,7 @@ export interface UsersPageClientProps {
  */
 type PageFeedback =
   | { kind: "invite"; email: string }
+  | { kind: "access-restored"; email: string }
   | { kind: "resend"; email: string }
   | { kind: "rate-limit"; email: string }
   | { kind: "error"; email: string; message: string };
@@ -186,6 +187,12 @@ export function UsersPageClient(props: UsersPageClientProps) {
           Invitation sent to {feedback.email}.
         </Banner>
       )}
+      {feedback?.kind === "access-restored" && (
+        <Banner tone="success" title="Access restored">
+          {feedback.email} already had an account. They can sign in with it
+          now; no invitation email was sent.
+        </Banner>
+      )}
       {feedback?.kind === "resend" && (
         <Banner tone="success" title="Invitation resent">
           Invitation resent to {feedback.email}.
@@ -311,7 +318,9 @@ export function UsersPageClient(props: UsersPageClientProps) {
         callerRole={props.callerRole}
         orgs={props.orgs}
         callerOrgIds={props.callerOrgIds}
-        onSuccess={({ email }) => setFeedback({ kind: "invite", email })}
+        onSuccess={({ email, emailSent }) =>
+          setFeedback({ kind: emailSent ? "invite" : "access-restored", email })
+        }
       />
 
       {editTarget && editTarget.user_id && (
