@@ -32,6 +32,47 @@ let mockInviteResult: {
 
 const inviteUserByEmailSpy = vi.fn();
 const rpcSpy = vi.fn();
+const deleteUserSpy = vi.fn();
+
+// Service-role view of existing accounts (step 2 of the route).
+let mockListUsers: {
+  data: { users: Array<{ id: string; email: string; email_confirmed_at: string | null }> } | null;
+  error: { message: string } | null;
+} = { data: { users: [] }, error: null };
+let mockTargetRoles: Array<{
+  role: "super_admin" | "org_manager";
+  scope_type: "org";
+  scope_id: string | null;
+}> = [];
+let mockTargetProfile: {
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+} | null = null;
+let mockTargetProfileError: { message: string } | null = null;
+
+function svcFromImpl(table: string) {
+  if (table === "user_roles") {
+    return {
+      select: () => ({
+        eq: async () => ({ data: mockTargetRoles, error: null }),
+      }),
+    };
+  }
+  if (table === "user_profiles") {
+    return {
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () =>
+            mockTargetProfileError
+              ? { data: null, error: mockTargetProfileError }
+              : { data: mockTargetProfile, error: null },
+        }),
+      }),
+    };
+  }
+  throw new Error(`Unexpected table in service client: ${table}`);
+}
 
 function userClientFromImpl(table: string) {
   if (table === "user_profiles") {
@@ -95,18 +136,14 @@ vi.mock("@/lib/supabase/service", () => ({
           inviteUserByEmailSpy(...args);
           return mockInviteResult;
         }),
-        listUsers: vi.fn(async () => ({
-          data: { users: [] },
-          error: null,
-        })),
-        deleteUser: vi.fn(async () => ({ error: null })),
+        listUsers: vi.fn(async () => mockListUsers),
+        deleteUser: vi.fn(async (...args: unknown[]) => {
+          deleteUserSpy(...args);
+          return { error: null };
+        }),
       },
     },
-    from: vi.fn(() => {
-      throw new Error(
-        "service client `.from(...)` should not be called in invite happy paths"
-      );
-    }),
+    from: vi.fn(svcFromImpl),
   }),
 }));
 
@@ -127,6 +164,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   inviteUserByEmailSpy.mockReset();
   rpcSpy.mockReset();
+  deleteUserSpy.mockReset();
+  mockListUsers = { data: { users: [] }, error: null };
+  mockTargetRoles = [];
+  mockTargetProfile = null;
+  mockTargetProfileError = null;
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
   mockRpcResult = { error: null };
   mockInviteResult = {
@@ -254,5 +296,246 @@ describe("POST /api/users/invite", () => {
 
     expect(res.status).toBe(403);
     expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Existing accounts (looked up before inviting) ────────────────
+  describe("when the email already has an account", () => {
+    const EXISTING_ID = "22222222-2222-4000-8000-000000000002";
+    const ORG_B = "bbbbbbbb-bbbb-4000-8000-000000000002";
+
+    function existingAccount(confirmed: boolean) {
+      mockListUsers = {
+        data: {
+          users: [
+            {
+              id: EXISTING_ID,
+              email: "Member@Example.com",
+              email_confirmed_at: confirmed ? "2026-10-06T08:00:00Z" : null,
+            },
+          ],
+        },
+        error: null,
+      };
+    }
+
+    beforeEach(() => {
+      mockCallerRoles = [
+        { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+      ];
+    });
+
+    it("says the person already has access when they hold the requested role in this org", async () => {
+      existingAccount(true);
+      mockTargetRoles = [
+        { role: "org_manager", scope_type: "org", scope_id: ORG_B },
+        { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+      ];
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toMatchObject({ code: "already_member", field: "email" });
+      expect(body.error).toBe(
+        "member@example.com already has access to this organization."
+      );
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(deleteUserSpy).not.toHaveBeenCalled();
+    });
+
+    it("refuses with a role-change hint when the account holds other access", async () => {
+      existingAccount(true);
+      mockTargetRoles = [
+        { role: "super_admin", scope_type: "org", scope_id: null },
+      ];
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe("other_access");
+      expect(body.error).toContain("different role");
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(rpcSpy).not.toHaveBeenCalled();
+    });
+
+    it("restores access for a confirmed account with no roles, without an email, keeping its profile", async () => {
+      existingAccount(true);
+      mockTargetRoles = [];
+      mockTargetProfile = { first_name: "Kept", last_name: "Name", phone: null };
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          first_name: "Typed",
+          last_name: "",
+          phone: "+256700000000",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({
+        user_id: EXISTING_ID,
+        existing_account: true,
+        email_sent: false,
+      });
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(rpcSpy).toHaveBeenCalledWith("fn_finalize_user_invitation", {
+        p_user_id: EXISTING_ID,
+        p_first_name: "Kept",
+        p_last_name: "Name",
+        p_phone: "+256700000000",
+        p_role: "org_manager",
+        p_scope_id: ORG_A,
+      });
+    });
+
+    it("re-sends the invitation to an unconfirmed account with no roles", async () => {
+      existingAccount(false);
+      mockTargetRoles = [];
+      mockTargetProfile = { first_name: null, last_name: null, phone: null };
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          first_name: "New",
+          last_name: "Person",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({
+        existing_account: true,
+        email_sent: true,
+      });
+      expect(inviteUserByEmailSpy).toHaveBeenCalledTimes(1);
+      expect(rpcSpy.mock.calls[0]![1]).toMatchObject({
+        p_user_id: EXISTING_ID,
+        p_first_name: "New",
+        p_last_name: "Person",
+      });
+    });
+
+    it("stops without changing the account when its profile cannot be read", async () => {
+      existingAccount(true);
+      mockTargetRoles = [];
+      mockTargetProfileError = { message: "canceling statement due to statement timeout" };
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          first_name: "Typed",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(500);
+      expect(rpcSpy).not.toHaveBeenCalled();
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(deleteUserSpy).not.toHaveBeenCalled();
+    });
+
+    it("leaves an account that existed before the request in place when finalizing fails", async () => {
+      existingAccount(true);
+      mockTargetRoles = [];
+      mockRpcResult = { error: { code: "42501", message: "denied" } };
+
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          email: "member@example.com",
+          role: "org_manager",
+          scope_id: ORG_A,
+        })
+      );
+
+      expect(res.status).toBe(403);
+      expect(deleteUserSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("removes the account it just created when finalizing fails", async () => {
+    mockCallerRoles = [
+      { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+    ];
+    mockRpcResult = { error: { code: "42501", message: "denied" } };
+
+    const { POST } = await import("../route");
+    const res = await POST(
+      makeRequest({
+        email: "brand-new@example.com",
+        role: "org_manager",
+        scope_id: ORG_A,
+      })
+    );
+
+    expect(res.status).toBe(403);
+    expect(deleteUserSpy).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000099"
+    );
+  });
+
+  it("returns 500 without inviting when the account lookup fails", async () => {
+    mockCallerRoles = [
+      { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+    ];
+    mockListUsers = { data: null, error: { message: "boom" } };
+
+    const { POST } = await import("../route");
+    const res = await POST(
+      makeRequest({
+        email: "someone@example.com",
+        role: "org_manager",
+        scope_id: ORG_A,
+      })
+    );
+
+    expect(res.status).toBe(500);
+    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports a new account as invited with an email", async () => {
+    mockCallerRoles = [
+      { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+    ];
+
+    const { POST } = await import("../route");
+    const res = await POST(
+      makeRequest({
+        email: "brand-new@example.com",
+        role: "org_manager",
+        scope_id: ORG_A,
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      user_id: "00000000-0000-4000-8000-000000000099",
+      existing_account: false,
+      email_sent: true,
+    });
   });
 });

@@ -42,7 +42,11 @@ export interface InviteUserDialogProps {
   orgs: OrgOption[];
   /** Fallback org ids for an org_manager caller (first item used). */
   callerOrgIds: string[];
-  onSuccess?: (payload: { email: string }) => void;
+  /**
+   * `emailSent` is false when the email belonged to an account that can
+   * already sign in: its access was restored and no invitation was sent.
+   */
+  onSuccess?: (payload: { email: string; emailSent: boolean }) => void;
 }
 
 type FieldErrors = Partial<Record<string, string>>;
@@ -126,6 +130,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         field?: string;
+        email_sent?: boolean;
       };
 
       if (!res.ok) {
@@ -146,7 +151,10 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
         return;
       }
 
-      props.onSuccess?.({ email: email.trim() });
+      props.onSuccess?.({
+        email: email.trim(),
+        emailSent: data.email_sent !== false,
+      });
       router.refresh();
       props.onOpenChange(false);
     } catch {
