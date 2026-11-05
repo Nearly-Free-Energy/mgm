@@ -96,6 +96,7 @@ type GenerationBody = {
   billingPeriodId: string;
   householdIds?: string[];
   manualReadings?: { householdId: string; startKwh: number; endKwh: number; reason?: string }[];
+  revertToEdgeHouseholdIds?: string[];
   seedReadings?: { deviceId: string; dialReadingKwh: number; readAt: string; startKwh: number }[];
 };
 
@@ -169,6 +170,34 @@ function parseGenerationBody(raw: unknown):
     }
     manualReadings = out;
   }
+  // Households whose manual row may switch back to an OpenEMS reading. A
+  // household cannot be both re-entered manually and reverted to OpenEMS in
+  // one request; which one would win is not something a caller should have
+  // to guess.
+  let revertToEdgeHouseholdIds: string[] | undefined;
+  if (rec.revertToEdgeHouseholdIds !== undefined) {
+    if (!Array.isArray(rec.revertToEdgeHouseholdIds)) {
+      return {
+        error: "revertToEdgeHouseholdIds must be an array of UUIDs",
+        field: "revertToEdgeHouseholdIds",
+      };
+    }
+    for (const h of rec.revertToEdgeHouseholdIds) {
+      if (typeof h !== "string" || !UUID_RE.test(h)) {
+        return {
+          error: "revertToEdgeHouseholdIds entries must be UUID strings",
+          field: "revertToEdgeHouseholdIds",
+        };
+      }
+      if (manualReadings?.some((m) => m.householdId === h)) {
+        return {
+          error: `Household ${h} cannot be in both manualReadings and revertToEdgeHouseholdIds`,
+          field: "revertToEdgeHouseholdIds",
+        };
+      }
+    }
+    revertToEdgeHouseholdIds = rec.revertToEdgeHouseholdIds as string[];
+  }
   let seedReadings: GenerationBody["seedReadings"];
   if (rec.seedReadings !== undefined) {
     if (!Array.isArray(rec.seedReadings)) {
@@ -223,6 +252,7 @@ function parseGenerationBody(raw: unknown):
       billingPeriodId: rec.billingPeriodId as string,
       ...(householdIds !== undefined ? { householdIds } : {}),
       ...(manualReadings !== undefined ? { manualReadings } : {}),
+      ...(revertToEdgeHouseholdIds !== undefined ? { revertToEdgeHouseholdIds } : {}),
       ...(seedReadings !== undefined ? { seedReadings } : {}),
     },
   };
@@ -256,11 +286,32 @@ export class BillingCapability implements BillingCapabilityContract {
     };
   }
 
+  /**
+   * The plugin can be turned off between composition and a write, so each
+   * write reads its state again here, with composeBilling's policy. An
+   * unreadable state fails closed with the gate's 503 code and wording
+   * (`MgmGate.check`, src/lib/runtime/gate.ts); if the gate's codes or
+   * wording change, change them here. The 503 relies on the repository
+   * rejecting when it cannot read the state, as the Supabase repository does
+   * through `isPluginEnabledForOrg`; a repository that turns a failed read
+   * into `false` answers 409 `billing_disabled` instead.
+   */
   private async requirePlugin(): Promise<Extract<
     BillingResult<never>,
     { ok: false }
   > | null> {
-    if (await this.repo.isPluginEnabled(this.scope.organizationId)) return null;
+    let enabled: boolean;
+    try {
+      enabled = await this.repo.isPluginEnabled(this.scope.organizationId);
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: "billing_gate_unavailable",
+        message: "Could not verify whether Billing is enabled. Retry the request.",
+      };
+    }
+    if (enabled) return null;
     return {
       ok: false,
       status: 409,
@@ -570,6 +621,7 @@ export class BillingCapability implements BillingCapabilityContract {
       periodId: parsed.parsed.billingPeriodId,
       householdIds: parsed.parsed.householdIds,
       manualReadings: parsed.parsed.manualReadings,
+      revertToEdgeHouseholdIds: parsed.parsed.revertToEdgeHouseholdIds,
       seedReadings: parsed.parsed.seedReadings,
       mode,
       actorUserId: this.scope.userId,

@@ -10,6 +10,7 @@ import { currentUserCanAccessCommunity } from "@/lib/auth/access";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { Community } from "@/lib/types/domain";
+import { microgridHref } from "@/lib/microgrid-links";
 
 /**
  * /communities/[id] — community detail page (#87).
@@ -216,7 +217,7 @@ export default async function CommunityDetailPage({
             {microgrids.map((mg) => (
               <li key={mg.id}>
                 <Link
-                  href={`/microgrids/${mg.id}`}
+                  href={microgridHref(mg.id)}
                   className="text-sm text-foreground hover:underline"
                 >
                   {mg.name}

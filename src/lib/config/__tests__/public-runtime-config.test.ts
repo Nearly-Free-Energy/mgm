@@ -3,8 +3,8 @@
  *
  * Covers: a valid configuration, missing and invalid settings (errors name
  * the variable and never echo the value), refusal of privileged keys, the
- * documented one-release legacy fallback, and two independent
- * configurations parsed by the same code with no carry-over.
+ * retired NEXT_PUBLIC_SUPABASE_* names being ignored (#79), and two
+ * independent configurations parsed by the same code with no carry-over.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -55,25 +55,24 @@ function expectConfigError(fn: () => unknown, pattern: RegExp, secret?: string) 
 
 describe("parsePublicRuntimeConfig", () => {
   it("accepts a valid configuration and returns only the three public fields", () => {
-    const parsed = parsePublicRuntimeConfig({
+    const config = parsePublicRuntimeConfig({
       ...INSTALL_A,
       SUPABASE_SERVICE_ROLE_KEY: "service-role-secret",
       MGM_CREDENTIAL_KEY: "credential-secret",
     });
-    expect(parsed.source).toBe("mgm");
-    expect(parsed.config).toEqual({
+    expect(config).toEqual({
       supabaseUrl: "https://alpha.supabase.example.test",
       supabaseAnonKey: ANON_A,
       cookieName: "sb-alpha-auth-token",
     });
-    expect(Object.keys(parsed.config).sort()).toEqual(
+    expect(Object.keys(config).sort()).toEqual(
       ["cookieName", "supabaseAnonKey", "supabaseUrl"]
     );
-    expect(JSON.stringify(parsed.config)).not.toContain("secret");
+    expect(JSON.stringify(config)).not.toContain("secret");
   });
 
   it("treats the cookie name as optional and strips a trailing slash", () => {
-    const { config } = parsePublicRuntimeConfig(INSTALL_B);
+    const config = parsePublicRuntimeConfig(INSTALL_B);
     expect(config).toEqual({
       supabaseUrl: "http://localhost:54321",
       supabaseAnonKey: ANON_B,
@@ -82,9 +81,9 @@ describe("parsePublicRuntimeConfig", () => {
   });
 
   it("parses two independent configurations without carry-over", () => {
-    const a = parsePublicRuntimeConfig(INSTALL_A).config;
-    const b = parsePublicRuntimeConfig(INSTALL_B).config;
-    const aAgain = parsePublicRuntimeConfig(INSTALL_A).config;
+    const a = parsePublicRuntimeConfig(INSTALL_A);
+    const b = parsePublicRuntimeConfig(INSTALL_B);
+    const aAgain = parsePublicRuntimeConfig(INSTALL_A);
     expect(a.supabaseUrl).not.toBe(b.supabaseUrl);
     expect(a.supabaseAnonKey).not.toBe(b.supabaseAnonKey);
     expect(b.cookieName).toBeUndefined();
@@ -154,76 +153,47 @@ describe("parsePublicRuntimeConfig", () => {
     );
   });
 
-  it("falls back to the legacy NEXT_PUBLIC_ set only when no MGM name is set", () => {
-    const legacy = {
+  it("no longer reads the retired NEXT_PUBLIC_SUPABASE_* names (#79)", () => {
+    const retired = {
       NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
       NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy",
     };
-    const parsed = parsePublicRuntimeConfig(legacy);
-    expect(parsed.source).toBe("legacy");
-    expect(parsed.config).toEqual({
-      supabaseUrl: "https://legacy.example.test",
-      supabaseAnonKey: "sb_publishable_legacy",
-      cookieName: "sb-legacy",
+    // On their own they configure nothing: the MGM_ names are reported missing.
+    expectConfigError(
+      () => parsePublicRuntimeConfig(retired),
+      /Missing required runtime configuration: MGM_PUBLIC_SUPABASE_URL, MGM_PUBLIC_SUPABASE_ANON_KEY\./,
+      "legacy"
+    );
+    // They do not complete a partial MGM_ set either.
+    expectConfigError(
+      () => parsePublicRuntimeConfig({ ...retired, MGM_PUBLIC_SUPABASE_URL: "https://new.example.test" }),
+      /Missing required runtime configuration: MGM_PUBLIC_SUPABASE_ANON_KEY\./
+    );
+    expectConfigError(
+      () => getServerSupabaseUrl(retired),
+      /Missing required runtime configuration: MGM_PUBLIC_SUPABASE_URL\./
+    );
+    // Next to a complete MGM_ set they are ignored, cookie name included:
+    // neither refused nor used.
+    expect(parsePublicRuntimeConfig({ ...retired, ...INSTALL_B })).toEqual({
+      supabaseUrl: "http://localhost:54321",
+      supabaseAnonKey: ANON_B,
     });
-
-    // The sets never mix: an MGM URL with only a legacy key is incomplete.
-    expectConfigError(
-      () => parsePublicRuntimeConfig({ ...legacy, MGM_PUBLIC_SUPABASE_URL: "https://new.example.test" }),
-      /MGM_PUBLIC_SUPABASE_ANON_KEY/
+    expect(parsePublicRuntimeConfig({ ...retired, ...INSTALL_A }).cookieName).toBe(
+      "sb-alpha-auth-token"
     );
-    // A complete MGM set wins over the legacy set.
-    const both = parsePublicRuntimeConfig({ ...legacy, ...INSTALL_A });
-    expect(both.source).toBe("mgm");
-    expect(both.config.cookieName).toBe("sb-alpha-auth-token");
-  });
-
-  it("refuses a legacy cookie name that the new MGM settings would silently ignore", () => {
+    // The internal-host rule asks for the MGM_ cookie name; the retired one
+    // does not satisfy it.
     expectConfigError(
-      () =>
-        parsePublicRuntimeConfig({
-          ...INSTALL_B,
-          NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy",
-        }),
-      /NEXT_PUBLIC_SUPABASE_COOKIE_NAME is set but ignored.*MGM_PUBLIC_SUPABASE_COOKIE_NAME/,
-      "sb-legacy"
+      () => getServerSupabaseSettings({ ...retired, ...INSTALL_B, SUPABASE_INTERNAL_URL: "http://kong:8000" }),
+      /MGM_PUBLIC_SUPABASE_URL, so MGM_PUBLIC_SUPABASE_COOKIE_NAME must be set/
     );
-  });
-
-  it("refuses an MGM cookie name next to the legacy URL and key", () => {
-    expectConfigError(
-      () =>
-        parsePublicRuntimeConfig({
-          NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
-          MGM_PUBLIC_SUPABASE_COOKIE_NAME: "sb-new",
-        }),
-      /MGM_PUBLIC_SUPABASE_COOKIE_NAME is set but ignored until/,
-      "sb-new"
-    );
-  });
-
-  it("names the legacy variables in legacy mode for an internal host on another host", () => {
-    const legacy = {
-      NEXT_PUBLIC_SUPABASE_URL: "https://legacy.example.test",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_legacy",
-      SUPABASE_INTERNAL_URL: "http://kong:8000",
-    };
-    expectConfigError(
-      () => getServerSupabaseSettings(legacy),
-      /NEXT_PUBLIC_SUPABASE_URL.*NEXT_PUBLIC_SUPABASE_COOKIE_NAME must be set/
-    );
-    // With the legacy cookie name set, the same configuration is accepted.
-    expect(
-      getServerSupabaseSettings({ ...legacy, NEXT_PUBLIC_SUPABASE_COOKIE_NAME: "sb-legacy" }).url
-    ).toBe("http://kong:8000");
   });
 });
 
 describe("live environment readers", () => {
   it("read the process environment at call time, not at module load", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     for (const [k, v] of Object.entries(INSTALL_A)) vi.stubEnv(k, v);
     expect(getPublicRuntimeConfig().supabaseUrl).toBe(INSTALL_A.MGM_PUBLIC_SUPABASE_URL);
     vi.unstubAllEnvs();
@@ -233,6 +203,16 @@ describe("live environment readers", () => {
       supabaseUrl: "http://localhost:54321",
       supabaseAnonKey: ANON_B,
     });
+  });
+
+  it("do not read the retired names from the process environment", () => {
+    for (const name of ["MGM_PUBLIC_SUPABASE_URL", "MGM_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_INTERNAL_URL"]) {
+      vi.stubEnv(name, "");
+    }
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://legacy.example.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_legacy");
+    expectConfigError(() => getPublicRuntimeConfig(), /MGM_PUBLIC_SUPABASE_URL, MGM_PUBLIC_SUPABASE_ANON_KEY/);
+    expectConfigError(() => getServerSupabaseUrl(), /MGM_PUBLIC_SUPABASE_URL/);
   });
 
   it("keeps the server-only internal URL override out of the public config", () => {

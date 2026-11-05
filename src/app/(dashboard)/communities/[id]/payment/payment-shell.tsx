@@ -47,11 +47,9 @@ type CommunityProps = {
     ipn_id: string;
   };
   /**
-   * Server-derived public IPN callback URL: `${MGM_APP_URL}/api/payments/ipn`,
-   * or in legacy mode (MGM_APP_URL unset) the legacy origin plus that path.
-   * Empty string when
-   * the setting is unset (e.g. in some test setups). Read-only display field;
-   * never round-tripped through the form.
+   * Server-derived public IPN callback URL: `${MGM_APP_URL}/api/payments/ipn`.
+   * Empty string when MGM_APP_URL is unset or invalid (e.g. in some test
+   * setups). Read-only display field; never round-tripped through the form.
    */
   callback_url: string;
 };

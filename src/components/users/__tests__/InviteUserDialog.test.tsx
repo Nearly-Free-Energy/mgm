@@ -167,3 +167,81 @@ describe("InviteUserDialog — validation", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("InviteUserDialog — existing accounts", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function submitWith(response: Response) {
+    vi.spyOn(global, "fetch").mockResolvedValue(response);
+    const onSuccess = vi.fn();
+    render(
+      <InviteUserDialog
+        open
+        onOpenChange={() => {}}
+        callerRole="org_manager"
+        orgs={orgList()}
+        callerOrgIds={[ORG_A]}
+        onSuccess={onSuccess}
+      />
+    );
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: "member@nfe.local" },
+    });
+    fireEvent.submit(screen.getByRole("button", { name: /send invitation/i }));
+    return onSuccess;
+  }
+
+  it("reports emailSent: false when access was restored without an email", async () => {
+    const onSuccess = await submitWith(
+      new Response(
+        JSON.stringify({
+          user_id: "u3",
+          existing_account: true,
+          email_sent: false,
+        }),
+        { status: 201 }
+      )
+    );
+    await waitFor(() =>
+      expect(onSuccess).toHaveBeenCalledWith({
+        email: "member@nfe.local",
+        emailSent: false,
+      })
+    );
+  });
+
+  it("reports emailSent: true for a new account", async () => {
+    const onSuccess = await submitWith(
+      new Response(JSON.stringify({ user_id: "u4" }), { status: 201 })
+    );
+    await waitFor(() =>
+      expect(onSuccess).toHaveBeenCalledWith({
+        email: "member@nfe.local",
+        emailSent: true,
+      })
+    );
+  });
+
+  it("shows the route's already-a-member message under the email field", async () => {
+    const onSuccess = await submitWith(
+      new Response(
+        JSON.stringify({
+          error: "member@nfe.local already has access to this organization.",
+          field: "email",
+          code: "already_member",
+        }),
+        { status: 409 }
+      )
+    );
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(
+          "member@nfe.local already has access to this organization."
+        ).length
+      ).toBeGreaterThan(0)
+    );
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+});

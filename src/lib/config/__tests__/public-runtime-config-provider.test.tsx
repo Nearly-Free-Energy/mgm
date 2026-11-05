@@ -1,7 +1,15 @@
 /**
- * Browser side of the request-time configuration (#46): the provider passes
- * only the allowlisted public values, and browser Supabase clients take
- * their settings from it rather than from process.env.
+ * Browser side of the request-time configuration (#46): the provider's
+ * context value and the browser store hold only the allowlisted public
+ * fields, and browser Supabase clients take their settings from them rather
+ * than from process.env.
+ *
+ * This file does not guard what reaches the page. The provider re-picks
+ * the fields only after Next.js has serialized the root layout's props into
+ * the page payload, and renderToString below skips that serialization. The
+ * guard is the root layout passing parsePublicRuntimeConfig's fresh
+ * three-field object, checked in src/app/__tests__/root-layout.test.tsx
+ * ("passes only the three public fields to the provider").
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as React from "react";
@@ -23,37 +31,41 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { PublicRuntimeConfig } from "../public-runtime-config";
 
+const seenContext = vi.fn<(value: PublicRuntimeConfig) => void>();
+
 afterEach(() => {
+  seenContext.mockClear();
   resetBrowserPublicRuntimeConfig();
   createBrowserClientMock.mockClear();
   vi.unstubAllEnvs();
 });
 
 function Probe() {
-  const config = usePublicRuntimeConfig();
-  return <pre>{JSON.stringify(config)}</pre>;
+  seenContext(usePublicRuntimeConfig());
+  return null;
 }
 
 describe("PublicRuntimeConfigProvider", () => {
-  it("exposes only the allowlisted public fields", () => {
+  it("context value and browser store hold only the allowlisted fields", () => {
     const widened = {
       supabaseUrl: "https://alpha.example.test",
       supabaseAnonKey: "anon-alpha",
       cookieName: "sb-alpha",
       serviceRoleKey: "must-not-leak",
     } as unknown as PublicRuntimeConfig;
-    const html = renderToString(
+    renderToString(
       <PublicRuntimeConfigProvider config={widened}>
         <Probe />
       </PublicRuntimeConfigProvider>
     );
-    expect(html).toContain("anon-alpha");
-    expect(html).not.toContain("must-not-leak");
-    expect(getBrowserPublicRuntimeConfig()).toEqual({
+    const allowlisted = {
       supabaseUrl: "https://alpha.example.test",
       supabaseAnonKey: "anon-alpha",
       cookieName: "sb-alpha",
-    });
+    };
+    expect(seenContext).toHaveBeenCalledTimes(1);
+    expect(seenContext.mock.calls[0][0]).toEqual(allowlisted);
+    expect(getBrowserPublicRuntimeConfig()).toEqual(allowlisted);
   });
 
   it("fails clearly when a browser client is created before the provider rendered", () => {
@@ -61,8 +73,8 @@ describe("PublicRuntimeConfigProvider", () => {
   });
 
   it("configures browser clients from the provider, not from process.env", () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://baked.example.test");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "baked-anon");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://baked.example.test");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "baked-anon");
     for (const config of [
       { supabaseUrl: "https://alpha.example.test", supabaseAnonKey: "anon-alpha", cookieName: "sb-alpha" },
       { supabaseUrl: "http://localhost:54321", supabaseAnonKey: "anon-beta" },

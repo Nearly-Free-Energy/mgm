@@ -33,6 +33,7 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("@/lib/plugins/state", () => ({
   isBillingEnabled: async () => true,
+  isPluginEnabledForOrg: async () => true,
 }));
 
 vi.mock("@/lib/billing/generate", () => ({
@@ -111,6 +112,30 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
       mode: "write",
       requireEffectiveDatedAssignments: true,
       allowUsageOnlyReadings: true,
+    });
+  });
+
+  it("generateBills passes revertToEdgeHouseholdIds through to the engine", async () => {
+    const HH = "880e8400-e29b-41d4-a716-446655440000";
+    const composed = await composeBilling({
+      supabase: makeSupabase(),
+      organizationId: ORG_ID,
+    });
+    if (!composed.ok) throw new Error("expected composition");
+
+    try {
+      await composed.data.billing.generateBills({
+        billingPeriodId: PERIOD_ID,
+        householdIds: [HH],
+        revertToEdgeHouseholdIds: [HH],
+      });
+    } finally {
+      await composed.data.dispose();
+    }
+
+    expect(capturedParams).toMatchObject({
+      householdIds: [HH],
+      revertToEdgeHouseholdIds: [HH],
     });
   });
 

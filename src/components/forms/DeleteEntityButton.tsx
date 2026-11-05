@@ -39,6 +39,7 @@ import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Banner } from "@/components/ui/banner";
 import { BlastRadiusList } from "@/components/entity-deletion/BlastRadiusList";
+import { microgridHref } from "@/lib/microgrid-links";
 import type {
   DescendantCounts,
   EntityKind,
@@ -62,6 +63,13 @@ export interface DeleteEntityButtonProps {
   entity: EntityKind;
   id: string;
   name: string;
+  /**
+   * When set, a failed preview is reported here (and `null` when a new
+   * attempt starts) instead of rendering the inline banner. For callers that
+   * keep this component in a hidden wrapper and trigger it from elsewhere,
+   * where the inline banner would never be seen.
+   */
+  onPreviewError?: (message: string | null) => void;
 }
 
 const KIND_LABEL: Record<EntityKind, string> = {
@@ -98,11 +106,16 @@ function parentPathFor(entity: EntityKind, parent: Parent): string {
     case "microgrid":
       // For edge deletes, redirect back to the edges sub-route.
       if (entity === "edge") return `/microgrids/${parent.id}/setup/edges`;
-      return `/microgrids/${parent.id}`;
+      return microgridHref(parent.id);
   }
 }
 
-export function DeleteEntityButton({ entity, id, name }: DeleteEntityButtonProps) {
+export function DeleteEntityButton({
+  entity,
+  id,
+  name,
+  onPreviewError,
+}: DeleteEntityButtonProps) {
   const router = useRouter();
   const [isOpening, setIsOpening] = React.useState(false);
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -111,8 +124,13 @@ export function DeleteEntityButton({ entity, id, name }: DeleteEntityButtonProps
 
   const kindLabel = KIND_LABEL[entity];
 
+  function reportError(message: string | null) {
+    if (onPreviewError) onPreviewError(message);
+    else setTopError(message);
+  }
+
   async function handleOpen() {
-    setTopError(null);
+    reportError(null);
     setIsOpening(true);
     try {
       const res = await fetch(`${apiBaseFor(entity)}/${id}/delete-preview`, {
@@ -127,7 +145,7 @@ export function DeleteEntityButton({ entity, id, name }: DeleteEntityButtonProps
         } catch {
           // body not JSON — stick with default message.
         }
-        setTopError(errMsg);
+        reportError(errMsg);
         setIsOpening(false);
         return;
       }
@@ -136,7 +154,7 @@ export function DeleteEntityButton({ entity, id, name }: DeleteEntityButtonProps
       setDialogOpen(true);
       setIsOpening(false);
     } catch (err) {
-      setTopError(
+      reportError(
         err instanceof Error
           ? err.message
           : "Unable to load delete preview."

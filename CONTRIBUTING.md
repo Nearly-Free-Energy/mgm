@@ -29,8 +29,7 @@ Never commit credentials, project URLs, or keys. `.env.local` is gitignored.
 npx tsc --noEmit   # types
 npm run lint       # lint
 npm test           # unit tests, plus database tests against local Supabase
-npm run build      # production build (needs NEXT_PUBLIC_SUPABASE_URL and
-                   # NEXT_PUBLIC_SUPABASE_ANON_KEY set to any well-formed value)
+npm run build      # production build (needs no Supabase or app-URL settings)
 ```
 
 The database-backed suites need `supabase start` first; see `CLAUDE.md`

@@ -93,6 +93,7 @@ vi.mock("@/lib/auth/access", () => ({
 
 vi.mock("@/lib/plugins/state", () => ({
   isCommunityManagementEnabled: async () => pluginEnabled,
+  isPluginEnabledForOrg: async () => pluginEnabled,
 }));
 
 vi.mock("next/cache", () => ({

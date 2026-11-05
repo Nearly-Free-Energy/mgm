@@ -206,7 +206,8 @@ describe("getHierarchyLevels — siblings branch", () => {
     // Self-exclusion: siblings should NOT contain mg-1.
     const siblingHrefs = mgLevel!.siblings!.map((s) => s.href);
     expect(siblingHrefs.some((h) => h.includes("mg-1"))).toBe(false);
-    expect(siblingHrefs.some((h) => h.includes("mg-2"))).toBe(true);
+    // Straight to the household list, not via the /microgrids/<id> redirect.
+    expect(siblingHrefs).toEqual(["/microgrids/mg-2/setup/households"]);
   });
 
   it("microgrid count = 1 → no siblings for Microgrid level", async () => {
@@ -333,13 +334,13 @@ describe("getHierarchyLevels — href contracts", () => {
     expect(commLevel!.href).toBe("/communities/comm-k");
   });
 
-  it("Microgrid href points to /microgrids/<id>", async () => {
+  it("Microgrid href points to the household list /microgrids/<id> redirects to", async () => {
     const levels = await getHierarchyLevels(supabase, {
       kind: "microgrid",
       microgridId: "mg-1",
     });
     const mgLevel = levels.find((l) => l.kind === "Microgrid");
-    expect(mgLevel!.href).toBe("/microgrids/mg-1");
+    expect(mgLevel!.href).toBe("/microgrids/mg-1/setup/households");
   });
 
   it("Edge href points to /microgrids/<mgId>/setup/edges/<edgeId>", async () => {

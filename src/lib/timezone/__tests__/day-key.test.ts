@@ -1,7 +1,7 @@
 // day-key.test.ts — tz-aware calendar-day keys (#359, anchor #353).
 
 import { describe, it, expect } from "vitest";
-import { dayKeyInZone, addDaysToDateKey } from "../day-key";
+import { dayKeyInZone, addDaysToDateKey, startOfDayInZone } from "../day-key";
 
 describe("dayKeyInZone", () => {
   it("names the UTC day for the literal 'UTC' zone", () => {
@@ -66,5 +66,43 @@ describe("addDaysToDateKey", () => {
     expect(dates[0]).toBe("2026-02-15");
     expect(dates[29]).toBe("2026-03-16");
     expect(new Set(dates).size).toBe(30);
+  });
+});
+
+describe("startOfDayInZone", () => {
+  it("is local midnight east of UTC", () => {
+    // Midnight in Kampala (UTC+3) is 21:00 the previous day in UTC.
+    expect(startOfDayInZone("2026-03-10", "Africa/Kampala").toISOString()).toBe(
+      "2026-03-09T21:00:00.000Z",
+    );
+  });
+
+  it("is UTC midnight for the literal 'UTC' zone", () => {
+    expect(startOfDayInZone("2026-03-10", "UTC").toISOString()).toBe(
+      "2026-03-10T00:00:00.000Z",
+    );
+  });
+
+  it("follows daylight saving time west of UTC", () => {
+    // New York is on EDT (UTC-4) in July.
+    expect(startOfDayInZone("2026-07-01", "America/New_York").toISOString()).toBe(
+      "2026-07-01T04:00:00.000Z",
+    );
+  });
+
+  it("is the first instant of a day whose DST change skips midnight", () => {
+    // Havana moves its clocks from 00:00 to 01:00 in March, so local midnight
+    // does not exist that day. Checked as a property, not a fixed instant, so
+    // a tz-data update cannot break it.
+    for (const day of ["2026-03-08", "2026-03-09"]) {
+      const start = startOfDayInZone(day, "America/Havana");
+      expect(dayKeyInZone(start, "America/Havana")).toBe(day);
+      expect(dayKeyInZone(start.getTime() - 1, "America/Havana") < day).toBe(true);
+    }
+  });
+
+  it("throws on a malformed date key or an unknown zone id", () => {
+    expect(() => startOfDayInZone("2026-13-45", "UTC")).toThrow(RangeError);
+    expect(() => startOfDayInZone("2026-03-10", "Mars/OlympusMons")).toThrow(RangeError);
   });
 });

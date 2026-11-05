@@ -140,10 +140,9 @@ const inflight = new Map<string, Promise<EnsurePaymentLinkResult>>();
 
 // ── Internals ────────────────────────────────────────────────────────────────
 
-// Resolved per call (#46): `${MGM_APP_URL}/payment/callback`, or in legacy
-// mode the full NEXT_PUBLIC_PAYMENT_CALLBACK_URL exactly as before. No
-// localhost default, so a missing setting fails instead of sending payers
-// to the wrong host.
+// Resolved per call (#46): `${MGM_APP_URL}/payment/callback`. No localhost
+// default, so a missing setting fails instead of sending payers to the
+// wrong host.
 function defaultCallbackUrl(): string {
   return paymentReturnUrl();
 }

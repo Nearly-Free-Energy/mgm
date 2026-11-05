@@ -256,11 +256,17 @@ export default async function MicrogridDashboardPage({
   // Resolve microgrid-level OpenEMS config. Silent-null on error so the page
   // still renders (strips fall back to "unknown" health chips + "unreachable"
   // banner when openemsEdgeIds are present).
+  // The credential decrypt runs on the service role, so it waits for
+  // canManage, whose getUser() refuses a session signed out elsewhere;
+  // middleware only verifies the token's signature. If
+  // currentUserCanAccessMicrogrid stops calling getUser(), revisit.
   let emsConfig: OpenEmsClientConfig | null = null;
-  try {
-    emsConfig = await getMicrogridEmsConfig(supabase, id);
-  } catch {
-    emsConfig = null;
+  if (canManage) {
+    try {
+      emsConfig = await getMicrogridEmsConfig(supabase, id);
+    } catch {
+      emsConfig = null;
+    }
   }
 
   const { map: edgeStatusMap, unreachable, error: statusError } =

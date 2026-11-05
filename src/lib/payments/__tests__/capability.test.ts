@@ -9,123 +9,19 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { PaymentsCapability } from "../capability";
-import type { PaymentsRepository, PaymentsScope, ProviderFactory } from "../repository";
-
-const ORG = "11111111-1111-1111-1111-111111111111";
-const COMMUNITY = "22222222-2222-2222-2222-222222222222";
-const LINE_ITEM = "33333333-3333-3333-3333-333333333333";
-
-function scope(): PaymentsScope {
-  return { organizationId: ORG, userId: "user-1", roles: [] };
-}
-
-function baseRepo(overrides: Partial<PaymentsRepository> = {}): PaymentsRepository {
-  return {
-    isPaymentsEnabled: async () => true,
-    isPesapalEnabled: async () => true,
-    getLineItemOrganization: async () => ({ lineItemId: LINE_ITEM, orgId: ORG }),
-    loadBillSnapshot: async () => ({
-      lineItemId: LINE_ITEM,
-      orgId: ORG,
-      communityId: COMMUNITY,
-      totalAmount: 5000,
-      currency: "UGX",
-      updatedAt: null,
-      paymentStatus: "unpaid",
-      periodStatus: "draft",
-      contactEmail: "aaron@example.com",
-      contactPhone: null,
-      contactFirstName: "Aaron",
-      contactLastName: "NFE",
-      periodLabel: "2026-09-01 – 2026-09-30",
-    }),
-    resolveMerchantAccount: async () => ({
-      ok: true as const,
-      origin: "org_default" as const,
-      account: {
-        id: "acc-1",
-        org_id: ORG,
-        provider: "pesapal" as const,
-        display_name: "Default Pesapal account",
-        sandbox: true,
-        consumer_key: "key",
-        base_url: "https://cybqa.pesapal.com/pesapalv3",
-        ipn_id: "ipn-1",
-        ipn_url: null,
-        version: 1,
-        disabled: false,
-        last_tested_at: null,
-        last_test_status: "success",
-        last_test_message: null,
-        origin: "org_default" as const,
-        community_id: null,
-        secret: "shh",
-      },
-    }),
-    loadAttemptAccount: async () => { const account = await baseRepo().resolveMerchantAccount({ orgId: ORG, communityId: COMMUNITY }); return account.ok ? account.account : null; },
-    commitVerification: async () => ({ error: null }),
-    loadMerchantAccountPublic: async () => ({ ok: true as const, account: null, hasOverride: false }),
-    findActiveAttempt: async () => null,
-    findBlockedAttempt: async () => null,
-    createAttempt: async (input) => ({
-      attempt: {
-        id: "44444444-4444-4444-4444-444444444444",
-        org_id: input.orgId,
-        line_item_id: input.lineItemId,
-        community_id: input.communityId,
-        merchant_account_id: input.merchantAccountId,
-        merchant_account_version: input.merchantAccountVersion,
-        amount: input.amount,
-        currency: input.currency,
-        bill_revision_total: input.billRevisionTotal,
-        bill_revision_updated_at: input.billRevisionUpdatedAt,
-        merchant_reference: input.merchantReference,
-        provider_tracking_id: null,
-        provider: "pesapal" as const,
-        status: "pending" as const,
-        checkout_url: null,
-        failure_code: null,
-        failure_message: null,
-        created_at: new Date().toISOString(),
-      },
-      error: null,
-    }),
-    updateAttemptTracking: async () => null,
-    markAttemptStatus: async () => null,
-    getAttempt: async () => null,
-    listAttemptsForLineItem: async () => [],
-    recordReceipt: async () => ({ created: true, error: null }),
-    listExternalAdjustments: async () => [],
-    listReceiptsForAttempt: async () => [],
-    upsertNotification: async () => ({ id: "notif-1", error: null }),
-    markNotification: async () => null,
-    dueNotifications: async () => [],
-    findAttemptByReference: async () => null,
-    findAttemptByTracking: async () => null,
-    applyBillPayment: async () => ({ error: null }),
-    reconcileAttempt: async () => ({ error: null }),
-    ...overrides,
-  };
-}
-
-function providers(): ProviderFactory {
-  return {
-    forAccount: async () => ({
-      ok: true as const,
-      provider: {
-        provider: "pesapal" as const,
-        testConnection: async () => ({ ok: true, reason: "success", message: "ok" }),
-        createCheckout: async (req) => ({
-          redirectUrl: "https://pay.example/checkout",
-          providerTrackingId: "TRACK-1",
-          merchantReference: req.merchantReference,
-        }),
-        getTransaction: async () => ({ trackingId: "TRACK-1", status: "pending" as const, raw: {} }),
-        parseNotification: () => null,
-      },
-    }),
-  };
-}
+import { PaymentError } from "../errors";
+import { ATTEMPT_NOT_OPEN, type ProviderFactory } from "../repository";
+import {
+  ATTEMPT,
+  COMMUNITY,
+  LINE_ITEM,
+  ORG,
+  attempt,
+  baseRepo,
+  providers,
+  scope,
+  verifiedProvider,
+} from "./fixtures";
 
 describe("PaymentsCapability access gates", () => {
   it("stops new checkouts when payments is disabled but keeps history readable", async () => {
@@ -222,25 +118,6 @@ describe("PaymentsCapability access gates", () => {
   });
 });
 
-const ATTEMPT = "44444444-4444-4444-4444-444444444444";
-function attempt(status: import("../repository").AttemptStatus = "pending"): import("../repository").PaymentAttempt {
-  return { id: ATTEMPT, org_id: ORG, line_item_id: LINE_ITEM, community_id: COMMUNITY,
-    merchant_account_id: "acc-1", merchant_account_version: 1, amount: 5000, currency: "UGX",
-    bill_revision_total: 5000, bill_revision_updated_at: null, merchant_reference: "MGM-test",
-    provider_tracking_id: "TRACK-1", provider: "pesapal", status, checkout_url: "https://pay.example/checkout",
-    failure_code: null, failure_message: null, created_at: "2026-10-01T00:00:00Z" };
-}
-function verifiedProvider(snapshot: Partial<import("../providers/types").TransactionSnapshot> = {}) {
-  const getTransaction = vi.fn(async () => ({ trackingId: "TRACK-1", status: "completed" as const, amount: 5000, currency: "UGX", merchantReference: "MGM-test", raw: {}, ...snapshot }));
-  const factory = providers();
-  const original = factory.forAccount;
-  const forAccount = vi.fn(async (account: import("../repository").MerchantAccountSecret) => {
-    const result = await original(account);
-    return result.ok ? { ...result, provider: { ...result.provider, getTransaction } } : result;
-  });
-  return { factory: { forAccount }, getTransaction, forAccount };
-}
-
 describe("PaymentsCapability verified payment regressions", () => {
   it.each(["pending", "confirmation_pending"] as const)("never resubmits a %s attempt without a checkout URL, even with force", async status => {
     const saved = { ...attempt(status), checkout_url: null };
@@ -321,5 +198,137 @@ describe("PaymentsCapability verified payment regressions", () => {
     expect(reconcile).not.toHaveBeenCalled();
     expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally" })).ok).toBe(true);
     expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ externalAmount: -500, actorUserId: "user-1" }));
+  });
+});
+
+describe("PaymentsCapability checkout start failures", () => {
+  function failingProvider(error: unknown): ProviderFactory {
+    const factory = providers();
+    return {
+      forAccount: async account => {
+        const result = await factory.forAccount(account);
+        return result.ok
+          ? { ...result, provider: { ...result.provider, createCheckout: async () => { throw error; } } }
+          : result;
+      },
+    };
+  }
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const untracked = (createdAt: string) => ({ ...attempt("confirmation_pending"), provider_tracking_id: null, checkout_url: null, created_at: createdAt });
+
+  it("fails the attempt when no order was submitted, so the next tap reserves a fresh one", async () => {
+    const repo = baseRepo();
+    const mark = vi.spyOn(repo, "markAttemptStatus"); const track = vi.spyOn(repo, "updateAttemptTracking");
+    const cap = new PaymentsCapability(repo, scope(), failingProvider(new PaymentError("token refused", "PESAPAL_AUTH_FAILED", 401, undefined, "not_submitted")), () => true, p => p);
+    expect(await cap.ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, status: 503, code: "payments_checkout_unavailable" });
+    expect(mark).toHaveBeenCalledWith(expect.objectContaining({ attemptId: ATTEMPT, status: "failed", failureCode: "checkout_not_submitted" }));
+    expect(mark).not.toHaveBeenCalledWith(expect.objectContaining({ status: "confirmation_pending" }));
+    expect(track).not.toHaveBeenCalled();
+
+    repo.listAttemptsForLineItem = async () => [{ ...attempt("failed"), provider_tracking_id: null, checkout_url: null }];
+    const create = vi.spyOn(repo, "createAttempt");
+    const retried = await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM);
+    expect(retried).toMatchObject({ ok: true, data: { reused: false, redirectUrl: "https://pay.example/checkout" } });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["an order request that may have arrived", new PaymentError("timed out", "PESAPAL_UNREACHABLE", 503, undefined, "unknown")],
+    ["an unclassified error", new Error("socket hang up")],
+  ])("holds %s for confirmation instead of failing it", async (_label, error) => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    const cap = new PaymentsCapability(repo, scope(), failingProvider(error), () => true, p => p);
+    expect(await cap.ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmation_pending" }));
+    expect(mark).not.toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("writes the tracking ID on its own before the checkout URL", async () => {
+    const repo = baseRepo(); const track = vi.spyOn(repo, "updateAttemptTracking");
+    expect((await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).ok).toBe(true);
+    expect(track.mock.calls.map(([input]) => input)).toEqual([
+      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1", requireOpen: true },
+      { attemptId: ATTEMPT, providerTrackingId: "TRACK-1", checkoutUrl: "https://pay.example/checkout", requireOpen: true },
+    ]);
+  });
+
+  it("retries a failed tracking write once", async () => {
+    const repo = baseRepo();
+    const track = vi.spyOn(repo, "updateAttemptTracking").mockResolvedValueOnce({ message: "connection reset" });
+    expect((await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).ok).toBe(true);
+    expect(track).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the tracking ID when the checkout URL cannot be saved, so the attempt can be refreshed", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    const track = vi.spyOn(repo, "updateAttemptTracking").mockImplementation(async input => (input.checkoutUrl ? { message: "write failed" } : null));
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(track).toHaveBeenCalledWith({ attemptId: ATTEMPT, providerTrackingId: "TRACK-1", requireOpen: true });
+    expect(track).toHaveBeenCalledTimes(3);
+    expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmation_pending", failureMessage: "Checkout URL could not be persisted" }));
+  });
+
+  it("hands out no checkout URL when the attempt was superseded before the tracking write", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    const track = vi.spyOn(repo, "updateAttemptTracking").mockResolvedValue({ code: ATTEMPT_NOT_OPEN, message: "closed" });
+    const result = await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "payments_checkout_superseded" });
+    expect(JSON.stringify(result)).not.toContain("pay.example");
+    expect(track).toHaveBeenCalledTimes(1);
+    expect(track).not.toHaveBeenCalledWith(expect.objectContaining({ checkoutUrl: expect.anything() }));
+    expect(mark).not.toHaveBeenCalled();
+  });
+
+  it("hands out no checkout URL when the attempt is closed between the tracking and URL writes", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    vi.spyOn(repo, "updateAttemptTracking").mockImplementation(async input =>
+      input.checkoutUrl ? { code: ATTEMPT_NOT_OPEN, message: "closed" } : null
+    );
+    const result = await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM);
+    expect(result).toMatchObject({ ok: false, status: 409, code: "payments_checkout_superseded" });
+    expect(JSON.stringify(result)).not.toContain("pay.example");
+    expect(mark).not.toHaveBeenCalled();
+  });
+
+  it("holds for confirmation without a URL write when the tracking ID cannot be saved", async () => {
+    const repo = baseRepo(); const mark = vi.spyOn(repo, "markAttemptStatus");
+    const track = vi.spyOn(repo, "updateAttemptTracking").mockRejectedValue(new Error("network"));
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(track).toHaveBeenCalledTimes(2);
+    expect(track).not.toHaveBeenCalledWith(expect.objectContaining({ checkoutUrl: expect.anything() }));
+    expect(mark).toHaveBeenCalledWith(expect.objectContaining({ status: "confirmation_pending", failureMessage: "Checkout tracking ID could not be persisted" }));
+  });
+
+  it("supersedes an old attempt that has neither a tracking ID nor a checkout URL", async () => {
+    const stale = { ...untracked(minutesAgo(20)), id: "66666666-6666-6666-6666-666666666666" };
+    const repo = baseRepo({ listAttemptsForLineItem: async () => [stale] });
+    const fail = vi.spyOn(repo, "failUnlinkedAttempt"); const create = vi.spyOn(repo, "createAttempt");
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: true, data: { reused: false } });
+    expect(fail).toHaveBeenCalledWith(expect.objectContaining({ attemptId: stale.id, failureCode: "checkout_superseded" }));
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps blocking such an attempt inside the window", async () => {
+    const repo = baseRepo({ listAttemptsForLineItem: async () => [untracked(minutesAgo(5))] });
+    const fail = vi.spyOn(repo, "failUnlinkedAttempt"); const create = vi.spyOn(repo, "createAttempt");
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(fail).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled();
+  });
+
+  it("never supersedes an attempt that has a tracking ID", async () => {
+    const repo = baseRepo({ listAttemptsForLineItem: async () => [{ ...untracked(minutesAgo(60)), provider_tracking_id: "TRACK-1" }] });
+    const fail = vi.spyOn(repo, "failUnlinkedAttempt"); const create = vi.spyOn(repo, "createAttempt");
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(fail).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the write fails", { failed: false, error: { message: "write failed" } }],
+    ["another request linked or closed the attempt first", { failed: false, error: null }],
+  ])("does not reserve a new checkout when superseding does not apply because %s", async (_label, outcome) => {
+    const repo = baseRepo({ listAttemptsForLineItem: async () => [untracked(minutesAgo(20))], failUnlinkedAttempt: async () => outcome });
+    const create = vi.spyOn(repo, "createAttempt");
+    expect(await new PaymentsCapability(repo, scope(), providers(), () => true, p => p).ensureCheckout(LINE_ITEM)).toMatchObject({ ok: false, code: "payments_confirmation_pending" });
+    expect(create).not.toHaveBeenCalled();
   });
 });

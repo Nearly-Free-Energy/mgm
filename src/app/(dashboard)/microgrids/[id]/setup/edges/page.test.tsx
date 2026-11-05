@@ -70,6 +70,7 @@ vi.mock("@/lib/auth/access", async () => {
 
 import SetupEdgesPage from "./page";
 import * as accessModule from "@/lib/auth/access";
+import * as configModule from "@/lib/openems/config";
 
 function buildEdgesQuery(data: unknown) {
   return {
@@ -174,6 +175,47 @@ describe("SetupEdgesPage", () => {
 
     expect(html).toContain("Live edge status unavailable");
     expect(html).toContain("Unknown");
+  });
+
+  // ── Stored credentials are decrypted only after the Auth-backed check ───
+
+  it("does not decrypt the stored credentials when the access check fails", async () => {
+    // currentUserCanAccessMicrogrid asks Auth (getUser), which refuses a
+    // session signed out elsewhere even while its token still verifies.
+    vi.mocked(accessModule.currentUserCanAccessMicrogrid).mockResolvedValueOnce(
+      false,
+    );
+    mockFrom.mockImplementation(
+      mockFromDispatcher({
+        edges: [
+          {
+            id: "edge-1",
+            name: "Metering Pi",
+            openems_edge_id: "edge0",
+            role: "metering",
+          },
+        ],
+      }),
+    );
+
+    await SetupEdgesPage({ params: Promise.resolve({ id: "mg-1" }) });
+
+    expect(configModule.getMicrogridEmsConfig).not.toHaveBeenCalled();
+    expect(getEdgesStatusMock).not.toHaveBeenCalled();
+  });
+
+  it("does not look up credentials when no edge is linked to OpenEMS", async () => {
+    mockFrom.mockImplementation(
+      mockFromDispatcher({
+        edges: [
+          { id: "edge-1", name: "Spare", openems_edge_id: null, role: null },
+        ],
+      }),
+    );
+
+    await SetupEdgesPage({ params: Promise.resolve({ id: "mg-1" }) });
+
+    expect(configModule.getMicrogridEmsConfig).not.toHaveBeenCalled();
   });
 
   // ── Gate banner / button gating (#103) ──────────────────────────────────

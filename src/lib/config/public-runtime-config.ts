@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Request-time public runtime configuration (#46, RFC #30 §3 "Container
  * runtime configuration mechanism").
@@ -14,18 +16,14 @@
  *   MGM_PUBLIC_SUPABASE_COOKIE_NAME  (optional)
  *
  * The names deliberately avoid Next.js's `NEXT_PUBLIC_` prefix, which would
- * inline build-time values into the bundles.
+ * inline build-time values into the bundles. The former NEXT_PUBLIC_SUPABASE_*
+ * names are no longer read (#79); retired-names.ts only warns about them at
+ * server start.
  *
- * Legacy fallback (one release, documented in docs/setup.md): when neither
- * MGM_PUBLIC_SUPABASE_URL nor MGM_PUBLIC_SUPABASE_ANON_KEY is set, the
- * former NEXT_PUBLIC_SUPABASE_URL / _ANON_KEY / _COOKIE_NAME are read as a
- * set. The two sets are never mixed.
- *
- * This module is imported by server code and by the middleware (Node.js
- * runtime) only.
- * Do not import it from a "use client" module: the browser gets its values
- * from the provider, never from here. It carries no `server-only` import
- * because the middleware bundle imports it.
+ * Server-only: the server, the middleware (Node.js runtime) and
+ * instrumentation import it, and Next.js builds all three as server code, so
+ * `server-only` fails `next build` only for a client import. Browser code
+ * imports its type alone and gets the values from the provider.
  *
  * Errors name the offending variable and never echo its value.
  */
@@ -47,16 +45,10 @@ export class RuntimeConfigError extends Error {
   }
 }
 
-const MGM_NAMES = {
+const NAMES = {
   url: "MGM_PUBLIC_SUPABASE_URL",
   anonKey: "MGM_PUBLIC_SUPABASE_ANON_KEY",
   cookieName: "MGM_PUBLIC_SUPABASE_COOKIE_NAME",
-} as const;
-
-const LEGACY_NAMES = {
-  url: "NEXT_PUBLIC_SUPABASE_URL",
-  anonKey: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
-  cookieName: "NEXT_PUBLIC_SUPABASE_COOKIE_NAME",
 } as const;
 
 const COOKIE_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -64,6 +56,13 @@ const COOKIE_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/;
 function present(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function missingConfiguration(names: string[]): RuntimeConfigError {
+  return new RuntimeConfigError(
+    `Missing required runtime configuration: ${names.join(", ")}. ` +
+      "See docs/setup.md, section \"Runtime configuration\"."
+  );
 }
 
 /**
@@ -122,81 +121,32 @@ function assertPublicKey(value: string, variable: string): void {
   if (role !== "anon") refuse();
 }
 
-export type ParsedPublicRuntimeConfig = {
-  config: PublicRuntimeConfig;
-  /** Which variable set supplied the values. Server-side only. */
-  source: "mgm" | "legacy";
-};
-
-function selectNames(env: RuntimeEnv): { names: typeof MGM_NAMES | typeof LEGACY_NAMES; useMgm: boolean } {
-  const hasMgm =
-    present(env[MGM_NAMES.url]) !== undefined ||
-    present(env[MGM_NAMES.anonKey]) !== undefined;
-  const hasLegacy =
-    present(env[LEGACY_NAMES.url]) !== undefined ||
-    present(env[LEGACY_NAMES.anonKey]) !== undefined;
-  // MGM names win whenever either is set; with nothing set, report the MGM
-  // names as the ones to configure. The two sets are never mixed.
-  const useMgm = hasMgm || !hasLegacy;
-  return { names: useMgm ? MGM_NAMES : LEGACY_NAMES, useMgm };
-}
-
 /**
  * Pure parser over an environment record, for tests and for
  * `getPublicRuntimeConfig()`.
  */
-export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeConfig {
-  const { names, useMgm } = selectNames(env);
-
-  const rawUrl = present(env[names.url]);
-  const rawKey = present(env[names.anonKey]);
+export function parsePublicRuntimeConfig(env: RuntimeEnv): PublicRuntimeConfig {
+  const rawUrl = present(env[NAMES.url]);
+  const rawKey = present(env[NAMES.anonKey]);
   const missing: string[] = [];
-  if (!rawUrl) missing.push(names.url);
-  if (!rawKey) missing.push(names.anonKey);
-  if (missing.length > 0) {
-    throw new RuntimeConfigError(
-      `Missing required runtime configuration: ${missing.join(", ")}. ` +
-        "See docs/setup.md, section \"Runtime configuration\"."
-    );
-  }
+  if (!rawUrl) missing.push(NAMES.url);
+  if (!rawKey) missing.push(NAMES.anonKey);
+  if (missing.length > 0) throw missingConfiguration(missing);
 
-  const supabaseUrl = parseHttpUrl(rawUrl!, names.url);
-  assertPublicKey(rawKey!, names.anonKey);
+  const supabaseUrl = parseHttpUrl(rawUrl!, NAMES.url);
+  assertPublicKey(rawKey!, NAMES.anonKey);
 
-  const rawCookie = present(env[names.cookieName]);
-  // A legacy cookie name next to the new URL/key would be ignored, and the
-  // session cookie would silently change name. Refuse instead.
-  if (
-    useMgm &&
-    rawCookie === undefined &&
-    present(env[LEGACY_NAMES.cookieName]) !== undefined
-  ) {
-    throw new RuntimeConfigError(
-      `${LEGACY_NAMES.cookieName} is set but ignored because ${MGM_NAMES.url}/${MGM_NAMES.anonKey} are in use. ` +
-        `Rename it to ${MGM_NAMES.cookieName} (or remove it).`
-    );
-  }
-  // The reverse: an MGM cookie name next to the legacy URL/key. It must not
-  // switch the set on its own, and silently ignoring it would log everyone out.
-  if (!useMgm && present(env[MGM_NAMES.cookieName]) !== undefined) {
-    throw new RuntimeConfigError(
-      `${MGM_NAMES.cookieName} is set but ignored until ${MGM_NAMES.url} and ` +
-        `${MGM_NAMES.anonKey} are set too. Rename the three Supabase variables together.`
-    );
-  }
+  const rawCookie = present(env[NAMES.cookieName]);
   if (rawCookie !== undefined && !COOKIE_NAME_PATTERN.test(rawCookie)) {
     throw new RuntimeConfigError(
-      `${names.cookieName} may contain only letters, digits, '.', '_' and '-' (at most 128).`
+      `${NAMES.cookieName} may contain only letters, digits, '.', '_' and '-' (at most 128).`
     );
   }
 
   return {
-    config: {
-      supabaseUrl,
-      supabaseAnonKey: rawKey!,
-      ...(rawCookie !== undefined ? { cookieName: rawCookie } : {}),
-    },
-    source: useMgm ? "mgm" : "legacy",
+    supabaseUrl,
+    supabaseAnonKey: rawKey!,
+    ...(rawCookie !== undefined ? { cookieName: rawCookie } : {}),
   };
 }
 
@@ -207,22 +157,13 @@ export function parsePublicRuntimeConfig(env: RuntimeEnv): ParsedPublicRuntimeCo
  * environment like the rest of the server.
  */
 function readEnv(): RuntimeEnv {
-  // Read the legacy names through an alias so Next's define plugin cannot
-  // inline NEXT_PUBLIC_* at build time. If Next starts tracing aliases of
-  // process.env, revisit.
-  const env = process.env;
   return {
     MGM_PUBLIC_SUPABASE_URL: process.env.MGM_PUBLIC_SUPABASE_URL,
     MGM_PUBLIC_SUPABASE_ANON_KEY: process.env.MGM_PUBLIC_SUPABASE_ANON_KEY,
     MGM_PUBLIC_SUPABASE_COOKIE_NAME: process.env.MGM_PUBLIC_SUPABASE_COOKIE_NAME,
-    NEXT_PUBLIC_SUPABASE_URL: env[LEGACY_NAMES.url],
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: env[LEGACY_NAMES.anonKey],
-    NEXT_PUBLIC_SUPABASE_COOKIE_NAME: env[LEGACY_NAMES.cookieName],
     SUPABASE_INTERNAL_URL: process.env.SUPABASE_INTERNAL_URL,
   };
 }
-
-let legacyWarned = false;
 
 /**
  * Validates the whole server-side configuration once at server start
@@ -238,16 +179,7 @@ export function validatePublicRuntimeConfigAtStartup(env: RuntimeEnv = readEnv()
  * Throws `RuntimeConfigError` on missing or invalid settings.
  */
 export function getPublicRuntimeConfig(env: RuntimeEnv = readEnv()): PublicRuntimeConfig {
-  const parsed = parsePublicRuntimeConfig(env);
-  if (parsed.source === "legacy" && !legacyWarned) {
-    legacyWarned = true;
-    console.warn(
-      "[mgm] NEXT_PUBLIC_SUPABASE_* configuration is deprecated; rename to " +
-        "MGM_PUBLIC_SUPABASE_URL, MGM_PUBLIC_SUPABASE_ANON_KEY and " +
-        "MGM_PUBLIC_SUPABASE_COOKIE_NAME (docs/setup.md)."
-    );
-  }
-  return parsed.config;
+  return parsePublicRuntimeConfig(env);
 }
 
 /**
@@ -259,15 +191,9 @@ export function getServerSupabaseUrl(env: RuntimeEnv = readEnv()): string {
   const internal = present(env.SUPABASE_INTERNAL_URL);
   if (internal) return parseHttpUrl(internal, "SUPABASE_INTERNAL_URL");
   // Service-role callers need the URL only, not the anon key.
-  const { names } = selectNames(env);
-  const publicUrl = present(env[names.url]);
-  if (!publicUrl) {
-    throw new RuntimeConfigError(
-      `Missing required runtime configuration: ${names.url}. ` +
-        "See docs/setup.md, section \"Runtime configuration\"."
-    );
-  }
-  return parseHttpUrl(publicUrl, names.url);
+  const publicUrl = present(env[NAMES.url]);
+  if (!publicUrl) throw missingConfiguration([NAMES.url]);
+  return parseHttpUrl(publicUrl, NAMES.url);
 }
 
 /**
@@ -281,7 +207,6 @@ export function getServerSupabaseSettings(env: RuntimeEnv = readEnv()): {
   publicConfig: PublicRuntimeConfig;
 } {
   const publicConfig = getPublicRuntimeConfig(env);
-  const { names } = selectNames(env);
   const rawInternal = present(env.SUPABASE_INTERNAL_URL);
   const internal = rawInternal ? parseHttpUrl(rawInternal, "SUPABASE_INTERNAL_URL") : undefined;
   // @supabase/ssr derives its default cookie name from the URL it is given.
@@ -297,8 +222,8 @@ export function getServerSupabaseSettings(env: RuntimeEnv = readEnv()): {
     new URL(internal).host !== new URL(publicConfig.supabaseUrl).host
   ) {
     throw new RuntimeConfigError(
-      `SUPABASE_INTERNAL_URL points at a different host than ${names.url}, ` +
-        `so ${names.cookieName} must be set (e.g. sb-mgm-auth-token).`
+      `SUPABASE_INTERNAL_URL points at a different host than ${NAMES.url}, ` +
+        `so ${NAMES.cookieName} must be set (e.g. sb-mgm-auth-token).`
     );
   }
   return {

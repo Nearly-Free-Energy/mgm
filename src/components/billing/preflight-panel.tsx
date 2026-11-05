@@ -6,13 +6,19 @@
  * Renders inline under the period header, between the action buttons and
  * the CopyTable (or empty-state). NOT a modal.
  *
- * Three sections:
+ * Sections, in render order:
  *   1. "Ready (edge data)" — collapsed by default; lists households whose
  *      `edgeAvailable` is true and have not been override-toggled to manual.
  *   2. "Needs manual entry" — expanded by default; lists households with
  *      `edgeAvailable === false`. Each row has start/end kWh inputs and an
  *      optional reason textarea.
- *   3. "Override available" — collapsed disclosure; lists edge-available
+ *   3. "Kept as manual entry" — collapsed disclosure, shown only when some
+ *      edge-available household already has a manual reading this period.
+ *      The bulk POST below leaves those rows untouched (see "Manual rows" in
+ *      `src/lib/billing/generate.ts`), so they are listed here instead of
+ *      under "will be read from OpenEMS". If the engine stops keeping manual
+ *      rows on a bulk run, this section becomes a false promise.
+ *   4. "Override available" — collapsed disclosure; lists edge-available
  *      households with a per-row toggle. Toggling expands inline kWh inputs.
  *
  * The Generate button is DISABLED until every needs-manual row AND every
@@ -53,6 +59,8 @@ export interface PreflightPanelProps {
   edgeAvailableByHouseholdId: Record<string, boolean>;
   /** #339 — households whose meter has no prior MGM reading. */
   seedNeededByHouseholdId?: Record<string, boolean>;
+  /** Households whose line item in this period has reading_source 'manual'. */
+  currentlyManualByHouseholdId?: Record<string, boolean>;
   /** Bill measured OpenEMS usage even when an absolute starting dial is unknown. */
   allowUsageOnlyReadings?: boolean;
   /** #339 — the household's last recorded end_kwh. Hint text only; never
@@ -165,6 +173,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
     households,
     edgeAvailableByHouseholdId,
     seedNeededByHouseholdId = {},
+    currentlyManualByHouseholdId = {},
     allowUsageOnlyReadings = false,
     priorHintByHouseholdId = {},
     deviceIdByHouseholdId = {},
@@ -179,6 +188,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [readyExpanded, setReadyExpanded] = React.useState(false);
   const [overrideExpanded, setOverrideExpanded] = React.useState(false);
+  const [keptExpanded, setKeptExpanded] = React.useState(false);
   const [view, setView] = React.useState<"form" | "result">("form");
   const [result, setResult] = React.useState<ResultState | null>(null);
   const [retryHouseholdIds, setRetryHouseholdIds] = React.useState<string[] | null>(null);
@@ -191,6 +201,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
       setErrorMsg(null);
       setReadyExpanded(false);
       setOverrideExpanded(false);
+      setKeptExpanded(false);
       setView("form");
       setResult(null);
       setRetryHouseholdIds(null);
@@ -228,15 +239,27 @@ export function PreflightPanel(props: PreflightPanelProps) {
   const needsManual = selectedHouseholds.filter(
     (h) => edgeAvailableByHouseholdId[h.id] === false || retryHouseholdIds?.includes(h.id),
   );
-  const edgeReady = selectedHouseholds.filter(
+  const edgeAvailableSelected = selectedHouseholds.filter(
     (h) => edgeAvailableByHouseholdId[h.id] !== false && !retryHouseholdIds?.includes(h.id),
+  );
+  // An edge-available household already on a manual reading is not sent in
+  // manualReadings, so the engine keeps its row as it is. Households with no
+  // edge stay in needsManual above: the panel asks for their reading anyway.
+  const keptManual = edgeAvailableSelected.filter(
+    (h) => currentlyManualByHouseholdId[h.id] === true,
+  );
+  const edgeReady = edgeAvailableSelected.filter(
+    (h) => currentlyManualByHouseholdId[h.id] !== true,
   );
 
   // #339 — households whose meter has no prior reading. Disjoint from
   // needsManual by construction: a seed is only meaningful for an
   // edge-available device, and needsManual is exactly the not-available set.
   const needsSeed = selectedHouseholds.filter(
-    (h) => !allowUsageOnlyReadings && seedNeededByHouseholdId[h.id] === true,
+    (h) =>
+      !allowUsageOnlyReadings &&
+      seedNeededByHouseholdId[h.id] === true &&
+      currentlyManualByHouseholdId[h.id] !== true,
   );
 
   /**
@@ -350,7 +373,8 @@ export function PreflightPanel(props: PreflightPanelProps) {
     return null;
   }
 
-  const totalCount = selectedHouseholds.length;
+  // Kept households are not generated, so they are not counted as attempted.
+  const totalCount = selectedHouseholds.length - keptManual.length;
 
   async function handleSubmit() {
     // BOTH gates, not just the manual one. The button is disabled on
@@ -712,7 +736,39 @@ export function PreflightPanel(props: PreflightPanelProps) {
           )}
         </section>
 
-        {/* Section 3: Override available — collapsed disclosure */}
+        {/* Section 3: Kept as manual entry — rendered only when non-empty */}
+        {keptManual.length > 0 && (
+          <Disclosure
+            testId="preflight-kept-manual-section"
+            summary={`${keptManual.length} household${keptManual.length === 1 ? "" : "s"} will keep ${keptManual.length === 1 ? "its" : "their"} manual reading.`}
+            expanded={keptExpanded}
+            onToggle={() => setKeptExpanded((e) => !e)}
+          >
+            <p className="px-2 pt-1 text-[12px] text-muted-foreground">
+              These are not read from OpenEMS. To use edge data for one, choose
+              “Switch back to edge data” on its row.
+            </p>
+            <ul className="space-y-1 px-2 py-1">
+              {keptManual.map((h) => (
+                <li
+                  key={h.id}
+                  data-testid={`preflight-kept-manual-row-${h.id}`}
+                  className="flex items-center gap-2 text-[13px]"
+                >
+                  <span className="font-medium text-foreground">
+                    {h.display_name}
+                  </span>
+                  <StatusChip
+                    kind="billingLineItemReadingSource"
+                    status="manual"
+                  />
+                </li>
+              ))}
+            </ul>
+          </Disclosure>
+        )}
+
+        {/* Section 4: Override available — collapsed disclosure */}
         <Disclosure
           testId="preflight-override-section"
           summary={`Override available — ${edgeReady.length} edge-connected household${edgeReady.length === 1 ? "" : "s"}.`}

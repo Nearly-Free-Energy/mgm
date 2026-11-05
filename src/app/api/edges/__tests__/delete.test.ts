@@ -42,27 +42,44 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-function chainable(result: { data: unknown; error: unknown; count?: number }) {
+// Records the filter each `.or()` call receives, by table.
+const orFilters: { table: string; filter: unknown }[] = [];
+
+function chainable(
+  table: string,
+  result: { data: unknown; error: unknown; count?: number }
+) {
   const stub: {
     eq: (...args: unknown[]) => typeof stub;
     in: (...args: unknown[]) => typeof stub;
+    or: (filter: unknown) => typeof stub;
     maybeSingle: () => Promise<unknown>;
     then: (onFulfilled: (v: unknown) => unknown) => Promise<unknown>;
   } = {
     eq: () => stub,
     in: () => stub,
+    or: (filter) => {
+      orFilters.push({ table, filter });
+      return stub;
+    },
     maybeSingle: () => Promise.resolve(result),
     then: (onFulfilled) => Promise.resolve(result).then(onFulfilled),
   };
   return stub;
 }
 
-function configureEdgeLookup(result: {
-  data:
-    | { id: string; name: string; microgrid_id: string }
-    | null;
-  error: { code?: string; message: string } | null;
-}) {
+// `rows` gives the descendant counters' non-count reads per table, and
+// `counts` their exact counts; everything else is empty.
+function configureEdgeLookup(
+  result: {
+    data:
+      | { id: string; name: string; microgrid_id: string }
+      | null;
+    error: { code?: string; message: string } | null;
+  },
+  rows: Record<string, unknown[]> = {},
+  counts: Record<string, number> = {}
+) {
   mockFromImpl.mockImplementation((table: string) => {
     if (table === "edges") {
       return {
@@ -74,8 +91,8 @@ function configureEdgeLookup(result: {
     return {
       select: (_cols: string, opts?: { count?: string; head?: boolean }) =>
         opts?.head
-          ? chainable({ data: null, error: null, count: 0 })
-          : chainable({ data: [], error: null }),
+          ? chainable(table, { data: null, error: null, count: counts[table] ?? 0 })
+          : chainable(table, { data: rows[table] ?? [], error: null }),
     };
   });
 }
@@ -180,6 +197,7 @@ describe("GET /api/edges/[id]/delete-preview", () => {
     vi.clearAllMocks();
     canAccessReturn = true;
     isSuperAdminReturn = true;
+    orFilters.length = 0;
   });
 
   it("404 when edge does not exist (not 403) — Nit #3", async () => {
@@ -210,5 +228,55 @@ describe("GET /api/edges/[id]/delete-preview", () => {
     const json = await res.json();
     expect(json.descendant_counts.kind).toBe("edge");
     expect(json.parent).toEqual({ kind: "microgrid", id: "mg-1" });
+  });
+
+  it("counts the device readings taken during the microgrid's closed periods", async () => {
+    configureEdgeLookup(
+      { data: { id: VALID_UUID, name: "Edge-1", microgrid_id: "mg-1" }, error: null },
+      {
+        devices: [{ id: "dev-1" }, { id: "dev-2" }],
+        billing_periods: [
+          { start_date: "2026-01-01", end_date: "2026-01-31", timezone: "Africa/Kampala" },
+          { start_date: "2026-02-01", end_date: "2026-02-28", timezone: "UTC" },
+        ],
+      },
+      { meter_readings: 7 }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/edges/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.descendant_counts.readings_in_closed_periods).toBe(7);
+    // Each closed period's whole local days, opening and closing registers
+    // included: Kampala midnight is 21:00 UTC the day before.
+    expect(orFilters).toEqual([
+      {
+        table: "meter_readings",
+        filter:
+          'and(read_at.gte."2025-12-31T21:00:00.000Z",read_at.lte."2026-01-31T21:00:00.000Z"),' +
+          'and(read_at.gte."2026-02-01T00:00:00.000Z",read_at.lte."2026-03-01T00:00:00.000Z")',
+      },
+    ]);
+  });
+
+  it("counts no readings when the microgrid has no closed period", async () => {
+    configureEdgeLookup(
+      { data: { id: VALID_UUID, name: "Edge-1", microgrid_id: "mg-1" }, error: null },
+      { devices: [{ id: "dev-1" }] },
+      { meter_readings: 7 }
+    );
+
+    const { GET } = await import("../[id]/delete-preview/route");
+    const res = await GET(
+      new NextRequest(`http://localhost/api/edges/${VALID_UUID}/delete-preview`),
+      { params: Promise.resolve({ id: VALID_UUID }) }
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).descendant_counts.readings_in_closed_periods).toBe(0);
+    expect(orFilters).toEqual([]);
   });
 });

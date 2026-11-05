@@ -36,6 +36,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *     - implicitly adds each household to the processed set
  *     - skips the OpenEMS call for that household; uses startKwh/endKwh
  *       as provided; usage_kwh is server-derived (endKwh - startKwh)
+ *   revertToEdgeHouseholdIds?: string[]
+ *     - households whose current manual row may be replaced by an OpenEMS
+ *       reading ("Switch back to edge data"); does not add them to the
+ *       processed set, and may not repeat a manualReadings household
  *
  * AC3 changes from the legacy route:
  *   - Closed periods are NOT rejected (Q4=B logs `period_was_closed: true`).
@@ -44,9 +48,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *     paid_by_user_id, payment_notes, pesapal_order_id, payment_failed_at,
  *     payment_refunded_at — and the payment_events history that would
  *     otherwise CASCADE away).
- *   - A bulk-regenerate target with reading_source='manual' currently AND no
- *     manualReadings entry → skipped + surfaced in errors[] with
- *     code='currently_manual'. Q5 enforcement.
+ *   - A household with reading_source='manual' currently, no manualReadings
+ *     entry and not in revertToEdgeHouseholdIds is not rewritten (Q5). With
+ *     householdIds omitted it is listed in kept[]; named in householdIds it
+ *     is surfaced in errors[] with code='currently_manual'.
  *   - manualReadings for a household NOT in the period's microgrid → skipped
  *     + surfaced in errors[] with code='unknown_household'. Cross-microgrid
  *     attack defense.
@@ -61,7 +66,8 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * meter-assignment coverage before the engine sees the request.
  *
  * Response:
- *   { lineItems: number; errors: Array<...> }
+ *   { lineItems: number; kept: Array<{ householdId, householdName }>;
+ *     errors: Array<...> }
  */
 
 const UUID_RE =
@@ -80,6 +86,7 @@ type ParsedBody = {
   billingPeriodId: string;
   householdIds?: string[];
   manualReadings?: ManualReadingInput[];
+  revertToEdgeHouseholdIds?: string[];
   seedReadings?: SeedReadingInput[];
 };
 
@@ -173,6 +180,27 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
     manualReadings = out;
   }
 
+  // revertToEdgeHouseholdIds — optional UUID array. Lets a currently-manual
+  // row be replaced by an OpenEMS reading; without it such a row is kept.
+  // A household in manualReadings too is a contradiction and refused.
+  let revertToEdgeHouseholdIds: string[] | undefined;
+  if (rec.revertToEdgeHouseholdIds !== undefined) {
+    if (!Array.isArray(rec.revertToEdgeHouseholdIds)) {
+      return { error: "revertToEdgeHouseholdIds must be an array of UUIDs" };
+    }
+    for (const h of rec.revertToEdgeHouseholdIds) {
+      if (typeof h !== "string" || !UUID_RE.test(h)) {
+        return { error: "revertToEdgeHouseholdIds entries must be UUID strings" };
+      }
+      if (manualReadings?.some((m) => m.householdId === h)) {
+        return {
+          error: `Household ${h} cannot be in both manualReadings and revertToEdgeHouseholdIds`,
+        };
+      }
+    }
+    revertToEdgeHouseholdIds = rec.revertToEdgeHouseholdIds as string[];
+  }
+
   // seedReadings — optional array of { deviceId, dialReadingKwh, readAt, startKwh } (#339).
   //
   // All four are required together. `startKwh` is derived by the client as
@@ -243,7 +271,15 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
     seedReadings = out;
   }
 
-  return { parsed: { billingPeriodId, householdIds, manualReadings, seedReadings } };
+  return {
+    parsed: {
+      billingPeriodId,
+      householdIds,
+      manualReadings,
+      revertToEdgeHouseholdIds,
+      seedReadings,
+    },
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -311,12 +347,18 @@ export async function POST(request: NextRequest) {
       billingPeriodId: parsed.billingPeriodId,
       householdIds: parsed.householdIds,
       manualReadings: parsed.manualReadings,
+      revertToEdgeHouseholdIds: parsed.revertToEdgeHouseholdIds,
       seedReadings: parsed.seedReadings,
     });
     if (!result.ok) return mapError(result);
 
     // Shape the response: split written + errors.
     const lineItems = result.data.results.filter((r) => r.kind === "written").length;
+    // Currently-manual households a bulk run left as they were. Not errors:
+    // nothing was asked of them that did not happen.
+    const kept = result.data.results
+      .filter((r) => r.kind === "kept")
+      .map((k) => ({ householdId: k.householdId, householdName: k.householdName }));
     const errors = result.data.results
       .filter((r) => r.kind === "error")
       .map((e) => ({
@@ -326,7 +368,7 @@ export async function POST(request: NextRequest) {
         code: e.code,
       }));
 
-    return NextResponse.json({ lineItems, errors });
+    return NextResponse.json({ lineItems, kept, errors });
   } finally {
     await composed.data.dispose();
   }

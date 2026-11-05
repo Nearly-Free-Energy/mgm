@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { Device } from "@/lib/types/domain";
+import { Banner } from "@/components/ui/banner";
 import { StatusChip } from "@/components/ui/status-chip";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
@@ -39,10 +40,24 @@ export default async function SharedDevicesPage({
     .returns<SharedDeviceRow[]>();
 
   if (devErr) {
+    // The raw PostgREST message names database objects; log it for the
+    // operator and show the user a plain message instead.
+    console.error(
+      JSON.stringify({
+        event: "shared_devices.query_error",
+        microgridId: id,
+        code: devErr.code,
+        message: devErr.message,
+        details: devErr.details,
+        hint: devErr.hint,
+        at: new Date().toISOString(),
+      }),
+    );
     return (
-      <div className="rounded-md bg-destructive-muted p-4 text-sm text-destructive-fg">
-        Error loading shared devices: {devErr.message}
-      </div>
+      <Banner tone="destructive" title="Could not load shared devices">
+        The shared devices for this microgrid could not be loaded. Refresh the
+        page to try again.
+      </Banner>
     );
   }
 

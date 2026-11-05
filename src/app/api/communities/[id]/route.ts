@@ -104,7 +104,9 @@ export async function PATCH(
  *
  * Cascade policy (trust-preview per AC-ROUTE-6): no pre-DELETE re-count;
  * the UI friction layer is the safety net. See organization DELETE header
- * for full rationale; the identical pattern applies here.
+ * for full rationale; the identical pattern applies here, including the
+ * 409 for a community that holds closed billing or billing with recorded
+ * payments.
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *

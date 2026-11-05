@@ -10,6 +10,7 @@ import "server-only";
 import {
   canReuseAttempt,
   isBlockedForNewCheckout,
+  isSupersedableAttempt,
   validateReceiptAgainstAttempt,
 } from "./reconciliation";
 import type {
@@ -19,8 +20,11 @@ import type {
   PaymentsResult,
   PaymentsScope,
   ProviderFactory,
+  RepositoryError,
 } from "./repository";
-import { snapshotToAttemptOutcome } from "./providers/types";
+import { ATTEMPT_NOT_OPEN } from "./repository";
+import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
+import type { CheckoutResult } from "./providers/types";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,11 +56,34 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     };
   }
 
+  /**
+   * New checkouts only; every other method stays available while the
+   * plugins are off (`__tests__/capability-gating.test.ts`). An unreadable
+   * state fails closed with the gate's 503 code and wording (`checkGate`,
+   * src/lib/runtime/gate.ts); if the gate's wording changes, change it here.
+   * The 503 relies on the repository rejecting when it cannot read the
+   * state, as the Supabase repository does through `isPluginEnabledForOrg`.
+   * A repository that turns a failed read into `false` answers 409
+   * `payments_disabled` instead; the gating test runs the real one.
+   */
   private async requirePlugins(): Promise<Extract<
     PaymentsResult<never>,
     { ok: false }
   > | null> {
-    if (!(await this.repo.isPaymentsEnabled(this.scope.organizationId))) {
+    let paymentsOn: boolean;
+    let pesapalOn: boolean;
+    try {
+      paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
+      pesapalOn = paymentsOn && (await this.repo.isPesapalEnabled(this.scope.organizationId));
+    } catch {
+      return {
+        ok: false,
+        status: 503,
+        code: "payments_gate_unavailable",
+        message: "Could not verify whether Payments is enabled. Retry the request.",
+      };
+    }
+    if (!paymentsOn) {
       return {
         ok: false,
         status: 409,
@@ -65,7 +92,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
           "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
       };
     }
-    if (!(await this.repo.isPesapalEnabled(this.scope.organizationId))) {
+    if (!pesapalOn) {
       return {
         ok: false,
         status: 409,
@@ -98,10 +125,20 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       };
     }
     // Reads stay available while plugins are disabled — readiness reports it.
-    const loaded = await this.repo.loadMerchantAccountPublic({
-      orgId: this.scope.organizationId,
-      communityId,
-    });
+    // The account and both plugin states are independent reads, so they load
+    // together; the results are still applied in the order below.
+    const [loaded, paymentsOn, pesapalOn] = await Promise.all([
+      this.repo.loadMerchantAccountPublic({
+        orgId: this.scope.organizationId,
+        communityId,
+      }),
+      // An unreadable state reads as disabled. The invoice PDF route and the
+      // billing period page offer a payment link only for `ready`/`sandbox`,
+      // so they render without one instead of failing; if a caller starts
+      // treating `disabled` as an error, revisit.
+      this.repo.isPaymentsEnabled(this.scope.organizationId).catch(() => false),
+      this.repo.isPesapalEnabled(this.scope.organizationId).catch(() => false),
+    ]);
     if (!loaded.ok) {
       return {
         ok: false as const,
@@ -110,8 +147,6 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         message: loaded.message,
       };
     }
-    const paymentsOn = await this.repo.isPaymentsEnabled(this.scope.organizationId);
-    const pesapalOn = await this.repo.isPesapalEnabled(this.scope.organizationId);
     if (!paymentsOn || !pesapalOn) {
       return {
         ok: true as const,
@@ -258,7 +293,24 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     if (history.some(h => ["verified", "resolved", "reversed"].includes(h.status))) {
       return { ok: false as const, status: 409 as const, code: "payments_needs_reconciliation", message: "A receipt already exists for this bill. Reconcile its balance before collecting again." };
     }
-    if (history.some(h => ["pending", "confirmation_pending"].includes(h.status) && (!h.checkout_url || Number(h.amount) !== bill.totalAmount || h.bill_revision_updated_at !== bill.updatedAt))) {
+    // An open attempt that never recorded a checkout URL or tracking ID
+    // cannot collect payment; once old enough, fail it so this checkout can
+    // replace it (`isSupersedableAttempt`). The write is conditional, so an
+    // attempt another request has linked or closed since it was read stays.
+    const now = Date.now();
+    const superseded = history.filter(h => isSupersedableAttempt(h, now));
+    for (const stale of superseded) {
+      const { failed, error } = await this.repo.failUnlinkedAttempt({
+        attemptId: stale.id,
+        failureCode: "checkout_superseded",
+        failureMessage: "No checkout URL or tracking ID was recorded; replaced by a new checkout.",
+      });
+      if (error || !failed) {
+        return { ok: false as const, status: 409 as const, code: "payments_confirmation_pending", message: "An existing checkout may still collect payment. Refresh its status; do not submit another payment." };
+      }
+    }
+    const remaining = history.filter(h => !superseded.includes(h));
+    if (remaining.some(h => ["pending", "confirmation_pending"].includes(h.status) && (!h.checkout_url || Number(h.amount) !== bill.totalAmount || h.bill_revision_updated_at !== bill.updatedAt))) {
       return { ok: false as const, status: 409 as const, code: "payments_confirmation_pending", message: "An existing checkout may still collect payment. Refresh its status; do not submit another payment." };
     }
     // Repeated clicks reuse the active attempt while the bill is unchanged.
@@ -344,9 +396,11 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       };
     }
 
+    const attemptId = created.attempt.id;
     const names = splitName(`${bill.contactFirstName} ${bill.contactLastName}`.trim());
+    let checkout: CheckoutResult;
     try {
-      const checkout = await provider.provider.createCheckout({
+      checkout = await provider.provider.createCheckout({
         merchantReference,
         amount: bill.totalAmount,
         currency: bill.currency,
@@ -359,33 +413,104 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
           lastName: names.last,
         },
       });
-      const trackingError = await this.repo.updateAttemptTracking({
-        attemptId: created.attempt.id,
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (checkoutWasNotSubmitted(err)) {
+        // No order exists at the provider, so nothing can collect against
+        // this attempt; failing it lets the next tap reserve a fresh one.
+        await this.repo.markAttemptStatus({
+          attemptId,
+          status: "failed",
+          failureCode: "checkout_not_submitted",
+          failureMessage: message.slice(0, 500),
+        });
+        return {
+          ok: false as const, status: 503 as const, code: "payments_checkout_unavailable",
+          message: "Online payment is unavailable right now. Try again in a few minutes.",
+        };
+      }
+      return this.holdForConfirmation(attemptId, message);
+    }
+    // The tracking ID is written first and on its own, so refresh and the
+    // worker can follow the order even when the checkout URL write fails.
+    // Both writes require the attempt to be still open: a request that took
+    // longer than the supersede window may find its attempt already replaced
+    // by a newer checkout, and must not hand out a second payable URL.
+    const tracked = await this.writeWithRetry(() =>
+      this.repo.updateAttemptTracking({
+        attemptId,
+        providerTrackingId: checkout.providerTrackingId,
+        requireOpen: true,
+      })
+    );
+    if (tracked === "closed") return this.checkoutSuperseded();
+    if (tracked === "failed") return this.holdForConfirmation(attemptId, "Checkout tracking ID could not be persisted");
+    const linked = await this.writeWithRetry(() =>
+      this.repo.updateAttemptTracking({
+        attemptId,
         providerTrackingId: checkout.providerTrackingId,
         checkoutUrl: checkout.redirectUrl,
-      });
-      if (trackingError) throw new Error("Checkout confirmation could not be persisted");
-      const attempt = (await this.repo.getAttempt(created.attempt.id)) ?? {
-        ...created.attempt,
-        provider_tracking_id: checkout.providerTrackingId,
-        checkout_url: checkout.redirectUrl,
-      };
-      return { ok: true as const, data: { redirectUrl: checkout.redirectUrl, attempt, reused: false } };
-    } catch (err) {
-      // Ambiguous provider timeouts become "confirmation pending" — do not
-      // blindly submit another charge.
-      const message = err instanceof Error ? err.message : String(err);
-      await this.repo.markAttemptStatus({
-        attemptId: created.attempt.id,
-        status: "confirmation_pending",
-        failureCode: "confirmation_pending",
-        failureMessage: message.slice(0, 500),
-      });
-      return {
-        ok: false as const, status: 503 as const, code: "payments_confirmation_pending",
-        message: "Checkout confirmation is pending. Refresh the saved attempt before trying again.",
-      };
+        requireOpen: true,
+      })
+    );
+    if (linked === "closed") return this.checkoutSuperseded();
+    if (linked === "failed") return this.holdForConfirmation(attemptId, "Checkout URL could not be persisted");
+    const attempt = (await this.repo.getAttempt(attemptId).catch(() => null)) ?? {
+      ...created.attempt,
+      provider_tracking_id: checkout.providerTrackingId,
+      checkout_url: checkout.redirectUrl,
+    };
+    return { ok: true as const, data: { redirectUrl: checkout.redirectUrl, attempt, reused: false } };
+  }
+
+  /**
+   * Ambiguous provider outcomes become "confirmation pending" — do not
+   * blindly submit another charge. A tracking ID already written stays, so
+   * the attempt can still be refreshed and polled.
+   */
+  private async holdForConfirmation(attemptId: string, message: string) {
+    await this.repo.markAttemptStatus({
+      attemptId,
+      status: "confirmation_pending",
+      failureCode: "confirmation_pending",
+      failureMessage: message.slice(0, 500),
+    });
+    return {
+      ok: false as const, status: 503 as const, code: "payments_confirmation_pending",
+      message: "Checkout confirmation is pending. Refresh the saved attempt before trying again.",
+    };
+  }
+
+  /**
+   * This request's attempt was closed while the provider call was running:
+   * another checkout superseded it, or it settled. Nothing is written and no
+   * checkout URL is returned; the next tap finds the current attempt.
+   */
+  private checkoutSuperseded() {
+    return {
+      ok: false as const, status: 409 as const, code: "payments_checkout_superseded",
+      message: "This checkout was replaced by a newer one. Open the payment link again.",
+    };
+  }
+
+  /**
+   * Runs a repository write, retrying once; a throw counts as a failure.
+   * "closed" means the write found the attempt no longer open, which a retry
+   * cannot change.
+   */
+  private async writeWithRetry(
+    write: () => Promise<RepositoryError | null>
+  ): Promise<"written" | "closed" | "failed"> {
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        const error = await write();
+        if (!error) return "written";
+        if (error.code === ATTEMPT_NOT_OPEN) return "closed";
+      } catch {
+        // Counted as a failed write.
+      }
     }
+    return "failed";
   }
 
   async refreshPaymentStatus(attemptId: string) {
