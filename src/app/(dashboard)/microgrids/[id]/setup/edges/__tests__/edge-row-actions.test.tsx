@@ -15,6 +15,8 @@
  *   (b) canManage=false → "Configure…" present, "Delete edge" absent.
  *   (c) Clicking "Configure…" makes EdgeFormModal open (configureOpen → true).
  *   (d) Clicking "Delete edge" calls the DeleteEntityButton stub click.
+ *   (f) A failed delete preview shows a banner outside the hidden wrapper.
+ *   (g) The banner's Dismiss action removes it.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -46,23 +48,31 @@ vi.mock("next/link", () => ({
 }));
 
 // Sentinel: renders a visible button so we can assert presence and simulate clicks.
+// When set, a stub click reports this message through onPreviewError, the
+// way the real button reports a failed delete-preview fetch.
 const mockDeleteEntityButtonClick = vi.fn();
+let mockPreviewError: string | null = null;
 vi.mock("@/components/forms/DeleteEntityButton", () => ({
   DeleteEntityButton: ({
     entity,
     id,
     name,
+    onPreviewError,
   }: {
     entity: string;
     id: string;
     name: string;
+    onPreviewError?: (message: string | null) => void;
   }) => (
     <button
       data-testid="delete-entity-button"
       data-entity={entity}
       data-id={id}
       data-name={name}
-      onClick={mockDeleteEntityButtonClick}
+      onClick={() => {
+        mockDeleteEntityButtonClick();
+        if (mockPreviewError) onPreviewError?.(mockPreviewError);
+      }}
     >
       Delete Edge stub
     </button>
@@ -104,6 +114,7 @@ function openMenu() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPreviewError = null;
 });
 
 describe("EdgeRowActions", () => {
@@ -187,6 +198,39 @@ describe("EdgeRowActions", () => {
     expect(stub.getAttribute("data-entity")).toBe("edge");
     expect(stub.getAttribute("data-id")).toBe("edge-abc");
     expect(stub.getAttribute("data-name")).toBe("Metering Pi");
+    expect(mockDeleteEntityButtonClick).toHaveBeenCalledTimes(1);
+  });
+
+  // (f) A failed preview is visible even though the button sits in a hidden wrapper
+  it("(f) a failed delete preview shows a banner outside the hidden wrapper", () => {
+    mockPreviewError = "You do not have permission to delete this edge.";
+    render(
+      <EdgeRowActions edge={testEdge} microgridId="mg-1" canManage={true} />
+    );
+    openMenu();
+
+    fireEvent.click(within(screen.getByRole("menu")).getByText(/delete edge/i));
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(mockPreviewError);
+    expect(screen.getByTestId("delete-entity-wrapper").contains(alert)).toBe(
+      false
+    );
+  });
+
+  // (g) The banner can be dismissed without starting another delete attempt
+  it("(g) the delete preview banner's Dismiss action removes it", () => {
+    mockPreviewError = "Edge not found.";
+    render(
+      <EdgeRowActions edge={testEdge} microgridId="mg-1" canManage={true} />
+    );
+    openMenu();
+    fireEvent.click(within(screen.getByRole("menu")).getByText(/delete edge/i));
+
+    const alert = screen.getByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: /dismiss/i }));
+
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(mockDeleteEntityButtonClick).toHaveBeenCalledTimes(1);
   });
 });

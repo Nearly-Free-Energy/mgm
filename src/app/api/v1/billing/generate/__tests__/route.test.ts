@@ -343,6 +343,21 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     ).toBeUndefined();
   });
 
+  it("lists households kept on their manual reading in kept[], not errors[]", async () => {
+    mockGenerationOutput = {
+      results: [
+        { kind: "kept", householdId: "hh-2", householdName: "Bob", readingSource: "manual" },
+      ],
+    };
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody()));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.kept).toEqual([{ householdId: "hh-2", householdName: "Bob" }]);
+    expect(json.errors).toEqual([]);
+    expect(json.lineItems).toEqual([]);
+  });
+
   it("bills through the runtime's metering provider registry", async () => {
     const { POST } = await import("../route");
     const res = await POST(makePostRequest(validBody()));

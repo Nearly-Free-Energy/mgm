@@ -94,6 +94,7 @@ export interface BillingGeneration {
     periodId: string;
     householdIds?: string[];
     manualReadings?: ManualReadingInput[];
+    revertToEdgeHouseholdIds?: string[];
     seedReadings?: SeedReadingInput[];
     mode: "write" | "preview";
     actorUserId: string;

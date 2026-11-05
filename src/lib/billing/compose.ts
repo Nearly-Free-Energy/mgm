@@ -66,6 +66,7 @@ export const BillingPlugin = {
           periodId: input.periodId,
           householdIds: input.householdIds,
           manualReadings: input.manualReadings,
+          revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
           seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,
