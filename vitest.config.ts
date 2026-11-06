@@ -53,8 +53,29 @@ export default defineConfig({
             "src/lib/__tests__/invite-user-rpc.test.ts",
             "src/lib/runtime/__tests__/gate.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
+            // Component tests of the interface kit and host run in the
+            // "gui" project below, in jsdom. Without this line each would
+            // also run here, in node, and fail.
+            "src/lib/gui/**/*.test.tsx",
           ],
           environment: "node",
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "gui",
+          // Interface code: interface packages under src/gui, and the
+          // component tests of the interface kit and host under src/lib/gui.
+          // Node-only tests under src/lib/gui (*.test.ts) stay in "lib".
+          include: ["src/gui/**/*.test.{ts,tsx}", "src/lib/gui/**/*.test.tsx"],
+          environment: "jsdom",
+          // Stand-ins for the browser APIs jsdom lacks, and a matchMedia
+          // whose viewport width a test can set.
+          setupFiles: ["src/test/gui-setup.ts"],
+          // Same headroom as "components": these tests open menus, sheets
+          // and dialogs through several fireEvent + waitFor steps.
+          testTimeout: 15_000,
         },
       },
       {
