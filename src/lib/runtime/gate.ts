@@ -22,15 +22,22 @@ import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { getMgmRuntime } from "./root";
 import type { MgmCatalog } from "./services";
 
+/**
+ * The records a route can gate on, one case per kind in CORE_ENTITY_KINDS
+ * (src/lib/plugins/bundled.ts). gate.test.ts fails while the two lists
+ * differ, so a kind is added to both in the same change.
+ */
 export type GateTarget =
   | { kind: "organization"; id: string }
   | { kind: "community"; id: string }
   | { kind: "microgrid"; id: string }
   | { kind: "edge"; id: string }
   | { kind: "device"; id: string }
+  | { kind: "household"; id: string }
   | { kind: "billingPeriod"; id: string }
   | { kind: "lineItem"; id: string }
-  | { kind: "rateSchedule"; id: string };
+  | { kind: "rateSchedule"; id: string }
+  | { kind: "paymentAttempt"; id: string };
 
 export type GateRequest = {
   plugin: MgmPluginName;
@@ -142,6 +149,20 @@ export async function resolveTargetOrganization(
       );
       return one(one(one(row?.edges)?.microgrids)?.communities)?.org_id ?? null;
     }
+    case "household": {
+      // "Authorized users can access households" (00002_rls.sql) shows a
+      // household through user_can_access_microgrid(microgrid_id). The
+      // microgrid policy (00057_mgm_pilot_schema_bridge.sql) and the
+      // community policy (00002) decide on the same organization, so this
+      // join finds every household the caller can see. If any of the three
+      // policies stops deciding on that organization, revisit.
+      const row = await single<{ microgrids: Embedded<MicrogridRow> }>(
+        "households",
+        "id, microgrids!inner(communities!inner(org_id))",
+        target.id
+      );
+      return one(one(row?.microgrids)?.communities)?.org_id ?? null;
+    }
     case "billingPeriod": {
       const row = await single<{ microgrids: Embedded<MicrogridRow> }>(
         "billing_periods",
@@ -167,6 +188,18 @@ export async function resolveTargetOrganization(
         target.id
       );
       return one(one(row?.microgrids)?.communities)?.org_id ?? null;
+    }
+    case "paymentAttempt": {
+      // payment_attempts_all (00065_payments_capability.sql) shows an attempt
+      // through user_can_access_org(org_id), so the gate reads that column
+      // rather than joining through the bill: it then names the organization
+      // the policy decides on. The payment_attempt_scope trigger
+      // (20261010202643_payments_integrity.sql) checks that org_id is the
+      // bill's organization when an attempt is written, and refuses changing
+      // it afterwards. If that policy stops deciding on org_id, change this
+      // lookup with it.
+      const row = await single<OrgRow>("payment_attempts", "id, org_id", target.id);
+      return row?.org_id ?? null;
     }
   }
 }
