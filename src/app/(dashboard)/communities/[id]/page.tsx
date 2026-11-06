@@ -17,8 +17,9 @@ import { microgridHref } from "@/lib/microgrid-links";
  *
  * Shows community address/geography info, aggregated stats (microgrid count,
  * household count, device count) and a list of its microgrids. The Edit button
- * in the header is shown only when `currentUserCanAccessCommunity` resolves
- * truthy — explicit check, not RLS-implicit.
+ * in the header and the Invoice branding link are shown only when
+ * `currentUserCanAccessCommunity` resolves truthy — explicit check, not
+ * RLS-implicit.
  */
 
 type MicrogridRow = {
@@ -181,6 +182,20 @@ export default async function CommunityDetailPage({
             </div>
           )}
         </dl>
+        {/* Same condition as the Edit button. The invoice page answers 404
+            to anyone without access to the community's organization, which
+            is what `canEdit` checks; if that page's gate changes, change
+            this condition with it. */}
+        {canEdit && (
+          <div className="mt-4 border-t border-border pt-4">
+            <Link
+              href={`/communities/${community.id}/invoice`}
+              className="text-sm text-foreground hover:underline"
+            >
+              Invoice branding &rarr;
+            </Link>
+          </div>
+        )}
       </section>
 
       {/* Microgrids listing */}

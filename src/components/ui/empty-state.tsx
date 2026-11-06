@@ -1,14 +1,13 @@
 // EmptyState — reusable empty-state primitive for list/section surfaces (#139).
 //
 // The "gold standard" we're rhyming with:
-//   - microgrids/[id]/setup/openems-backend/openems-backend-shell.tsx  (lines 465–507)
-//   - communities/[id]/payment/payment-shell.tsx                       (lines 256–286)
+//   - microgrids/[id]/setup/openems-backend/openems-backend-shell.tsx  (its `mode === "empty"` branch)
 //
 // Shared shape (pinned by designer per #137):
 //   max-w-[560px] · mx-auto · rounded-md · border border-border · bg-card ·
 //   p-6 · shadow-elev-1
 //
-// Typography mirrors the shell empties:
+// Typography mirrors that shell's empty state:
 //   - Eyebrow:  text-[10px] font-semibold uppercase tracking-wide text-muted-foreground
 //   - Title:    text-lg font-semibold text-foreground
 //   - Body:     text-sm text-muted-foreground  (mt-2)
@@ -18,8 +17,6 @@
 // Escape hatches (stay bespoke; DO NOT convert to this primitive):
 //   - openems-backend empty-state: needs the segmented "Cloud (AWS) / Direct URL"
 //     toggle. Unique shape.
-//   - payment empty-state: single provider Connect Pesapal button + provider
-//     roadmap footnote. Close enough; PM chose to leave it.
 //
 // Role-aware:
 //   When `cta` is null/undefined, callers can pass a `footnote` string instead

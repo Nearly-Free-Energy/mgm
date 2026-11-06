@@ -79,7 +79,7 @@ src/
 │   ├── (dashboard)/         ← authenticated pages (organizations, communities, microgrids, billing, settings)
 │   ├── login/, setup/, …    ← public auth and first-run pages
 │   └── api/                 ← route handlers; every write enters the Cordis runtime
-├── components/              ← React components (BillingTable, DeviceManager, HouseholdTable, etc.)
+├── components/              ← React components (BillingTable, DiscoverDevices, HouseholdTable, etc.)
 │   └── format/              ← format primitives (Currency, Kwh, LocalDate, locale-context)
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
