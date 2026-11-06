@@ -80,6 +80,7 @@ describe("isReleasedRoute", () => {
     "/api/payments/attempts",
     "/api/payments/reconcile-worker",
     "/p/abc123",
+    "/payment/callback",
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",

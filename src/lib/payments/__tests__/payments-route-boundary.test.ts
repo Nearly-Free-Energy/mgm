@@ -793,7 +793,7 @@ describe("payments route boundary", () => {
       expect.arrayContaining([
         "src/app/api/billing-line-items/[lineItemId]/pay/route.ts",
         "src/app/api/payments/ipn/route.ts",
-        "src/app/payment/callback/page.tsx",
+        "src/app/payment/callback/route.ts",
         "src/middleware.ts",
       ])
     );
