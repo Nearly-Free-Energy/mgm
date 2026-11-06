@@ -61,7 +61,7 @@ export function Kwh({
   const ctx = useLocale();
   const lc = locale ?? ctx.locale;
   return (
-    <span className={cn("font-mono tabular-nums", className)} {...props}>
+    <span className={cn("tabular-nums", className)} {...props}>
       {formatKwh(value, lc, { digits })}
       {!bareNumber && " kWh"}
     </span>

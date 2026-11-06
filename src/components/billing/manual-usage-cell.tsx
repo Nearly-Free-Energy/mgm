@@ -7,8 +7,8 @@
  *
  * Spec (#158 AC-6 + AC-7):
  *   - Renders as a `<input type="number" step="0.001" min="0">` styled to
- *     look like a copy-cell when not focused (right-aligned monospace,
- *     subtle hover outline).
+ *     look like a copy-cell when not focused (right-aligned tabular
+ *     figures, subtle hover outline).
  *   - Save semantics: blur OR Enter fires PATCH /api/billing-line-items/
  *     [lineItemId]/usage. Esc reverts and unfocuses.
  *   - Optimistic UI: the local value updates on blur/Enter; spinner shows
@@ -114,12 +114,12 @@ export function ManualUsageCell({
   }, [value]);
 
   // Read-only path — match the surrounding CopyTable visual (right-aligned
-  // monospace) so metered rows render identically to before.
+  // tabular figures) so metered rows render identically to before.
   if (!editable) {
     return (
       <span
         className={cn(
-          "inline-block w-full text-right font-mono text-[12px] tabular-nums",
+          "inline-block w-full text-right text-[12px] tabular-nums",
           className
         )}
       >
@@ -215,7 +215,7 @@ export function ManualUsageCell({
         disabled={saving}
         aria-label={`${field === "end_kwh" ? "End kWh" : "Usage kWh"} for line item ${lineItemId}`}
         className={cn(
-          "w-full bg-transparent text-right font-mono text-[12px] tabular-nums",
+          "w-full bg-transparent text-right text-[12px] tabular-nums",
           "rounded-sm px-1 py-0.5 outline-none",
           "hover:ring-1 hover:ring-border focus:ring-2 focus:ring-ring",
           "disabled:opacity-60",

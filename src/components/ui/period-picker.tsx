@@ -108,7 +108,7 @@ export function PeriodPicker({
         >
           {current ? (
             <>
-              <span className="font-mono">{formatRange(current.startDate, current.endDate)}</span>
+              <span className="tabular-nums">{formatRange(current.startDate, current.endDate)}</span>
               <StatusChip kind="billingPeriod" status={current.status} size="sm" />
             </>
           ) : (
@@ -175,7 +175,7 @@ export function PeriodPicker({
                   )}
                 >
                   <StatusChip kind="billingPeriod" status={p.status} size="sm" />
-                  <span className="font-mono text-[12px] text-foreground">
+                  <span className="text-[12px] tabular-nums text-foreground">
                     {formatRange(p.startDate, p.endDate)}
                   </span>
                   <Currency
