@@ -21,6 +21,20 @@ export interface PublicCopy {
     body: string;
     startPage: string;
   };
+  /**
+   * The page a household returns to after a hosted checkout. "Checked"
+   * covers a failed payment too, so no string here may say the bill is
+   * paid. `{name}` is the operator's name and `{number}` their WhatsApp
+   * number as they stored it.
+   */
+  receipt: {
+    checkedHeading: string;
+    checked: string;
+    pendingHeading: string;
+    pending: string;
+    whatsappPrompt: string;
+    whatsappButton: string;
+  };
 }
 
 export const PUBLIC_COPY = {
@@ -30,6 +44,15 @@ export const PUBLIC_COPY = {
       heading: "Not available in this release",
       body: "This page is not part of the MGM release installed here.",
       startPage: "Go to the start page",
+    },
+    receipt: {
+      checkedHeading: "Payment checked",
+      checked:
+        "Your payment status has been checked. Your operator can confirm the receipt and any outstanding balance.",
+      pendingHeading: "Payment not confirmed yet",
+      pending: "Payment confirmation is pending. Please contact your operator before trying again.",
+      whatsappPrompt: "Questions about this payment? Message {name} on WhatsApp.",
+      whatsappButton: "WhatsApp {number}",
     },
   },
 } as const satisfies Record<PublicLanguage, PublicCopy>;

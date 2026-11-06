@@ -25,6 +25,23 @@ describe("public page copy", () => {
   it("names the product Microgrid Manager", () => {
     expect(PUBLIC_COPY.en.productName).toBe("Microgrid Manager");
   });
+
+  it("keeps each payment return placeholder exactly once, in every language", () => {
+    for (const lang of PUBLIC_LANGUAGES) {
+      const { whatsappPrompt, whatsappButton } = PUBLIC_COPY[lang].receipt;
+      expect(whatsappPrompt.match(/\{\w+\}/g), lang).toEqual(["{name}"]);
+      expect(whatsappButton.match(/\{\w+\}/g), lang).toEqual(["{number}"]);
+    }
+  });
+
+  it("keeps the payment return page's English sentences as they were", () => {
+    expect(PUBLIC_COPY.en.receipt.checked).toBe(
+      "Your payment status has been checked. Your operator can confirm the receipt and any outstanding balance.",
+    );
+    expect(PUBLIC_COPY.en.receipt.pending).toBe(
+      "Payment confirmation is pending. Please contact your operator before trying again.",
+    );
+  });
 });
 
 describe("pickPublicLanguage", () => {
