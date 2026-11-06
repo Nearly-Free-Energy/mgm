@@ -50,6 +50,7 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { Currency } from "@/components/format/currency";
 
 export type ClosePeriodSummaryRow = {
@@ -140,8 +141,8 @@ export function ClosePeriodDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55 data-[state=open]:animate-in data-[state=closed]:animate-out" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           // Cancel-first focus order: when the dialog opens, Radix tries to
           // focus the first focusable element inside (the checkbox in the
           // collapsed surface). We explicitly forward initial focus to the
@@ -151,11 +152,7 @@ export function ClosePeriodDialog({
             cancelRef.current?.focus();
           }}
           aria-describedby="close-period-desc"
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3",
-            "outline-none",
-          )}
+          className="w-[480px]"
         >
           {/* primary top-rail — 6px, token color (commit moment, not destruction) */}
           <div aria-hidden="true" className="h-[6px] bg-primary" />
@@ -250,8 +247,10 @@ export function ClosePeriodDialog({
             </div>
           )}
 
-          <div className="mt-3 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
-            <div className="mr-auto text-[11px] text-muted-foreground">
+          <DialogFooter className="mt-3">
+            {/* Under 600px the status line takes its own row so Cancel and
+                the confirm button stay side by side beneath it. */}
+            <div className="mr-auto text-[11px] text-muted-foreground max-[600px]:basis-full">
               {phase === 3 ? (
                 <span className="inline-flex items-center gap-1 font-semibold text-success-fg">
                   ✓ Closed · read-only
@@ -304,8 +303,8 @@ export function ClosePeriodDialog({
                 Retry close
               </button>
             )}
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

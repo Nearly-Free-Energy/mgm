@@ -3,7 +3,7 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Banner } from "@/components/ui/banner";
-import { cn } from "@/lib/utils";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 
 export interface TokenRevealModalProps {
   open: boolean;
@@ -59,15 +59,8 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
   return (
     <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          role="alertdialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3 outline-none"
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel role="alertdialog" className="w-[560px]">
           <div aria-hidden="true" className="h-[6px] bg-warning" />
 
           <div className="px-6 pt-5">
@@ -114,7 +107,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+          <DialogFooter className="mt-4">
             <Dialog.Close asChild>
               <button
                 type="button"
@@ -123,8 +116,8 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
                 Done — token saved
               </button>
             </Dialog.Close>
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

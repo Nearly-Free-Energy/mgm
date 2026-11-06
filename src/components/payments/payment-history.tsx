@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import * as Dialog from "@radix-ui/react-dialog";
+import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import type { PaymentAttempt, PaymentReceipt } from "@/lib/payments/repository";
 
 export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
@@ -34,9 +36,9 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
   } catch (error) { setError(error instanceof Error ? error.message : "Payment action failed"); }
   finally { setBusy(false); }
  }
- return <span><button className="text-xs underline" onClick={show} disabled={busy}>Payment history</button>{open && <div role="dialog" aria-label="Payment history" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"><section className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded bg-background p-6 shadow-lg">
-  <button className="float-right underline" onClick={() => setOpen(false)}>Close</button><h2 className="text-xl font-semibold">Payment history</h2>
-  <p>Receipts remain available when online payments are disabled.</p>
+ return <span><Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger asChild><button className="text-xs underline" onClick={show} disabled={busy}>Payment history</button></Dialog.Trigger><Dialog.Portal><DialogOverlay /><DialogPanel className="w-[672px] p-6">
+  <Dialog.Close asChild><button className="float-right underline">Close</button></Dialog.Close><Dialog.Title className="text-xl font-semibold">Payment history</Dialog.Title>
+  <Dialog.Description>Receipts remain available when online payments are disabled.</Dialog.Description>
   {balance && <p className="my-3">Current bill: {balance.currentTotal} {balance.currency} · Received: {balance.received} {balance.currency} · Difference: {balance.difference} {balance.currency}</p>}
   {error && <p role="alert" className="my-2 text-destructive">{error}</p>}
   {busy && <p>Loading…</p>}{!busy && !attempts.length && <p>No online payment attempts.</p>}
@@ -53,5 +55,5 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
     <button disabled={busy} className="rounded border p-2">Record completed adjustment</button><button type="button" disabled={busy} className="ml-2 rounded border p-2" onClick={() => act(attempt, "accept_exact")}>Accept exact receipts</button>
    </form>}
   </article>)}
- </section></div>}</span>;
+ </DialogPanel></Dialog.Portal></Dialog.Root></span>;
 }

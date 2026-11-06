@@ -41,3 +41,19 @@ it("shows reconciliation amounts and records only the entered external adjustmen
  const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
  expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager" });
 });
+it("opens payment history as a dialog that keeps focus inside and closes on Escape", async () => {
+ fetchMock.mockImplementation(async () => response(history));
+ render(<PaymentHistory lineItemId="bill-1" />);
+ const trigger = screen.getByRole("button", { name: "Payment history" });
+ fireEvent.click(trigger);
+ const dialog = await screen.findByRole("dialog", { name: "Payment history" });
+ await screen.findByText(/Difference: 20 UGX/);
+ expect(dialog.getAttribute("aria-modal")).toBe("true");
+ await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+ trigger.focus();
+ await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+ fireEvent.keyDown(dialog, { key: "Escape" });
+ await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+ await waitFor(() => expect(document.activeElement).toBe(trigger));
+ expect(fetchMock.mock.calls.every(call => call[1] === undefined)).toBe(true);
+});

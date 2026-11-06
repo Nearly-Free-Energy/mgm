@@ -9,6 +9,7 @@
 //   (f) locked=true: Esc does NOT fire onOpenChange.
 //   (g) Body region carries aria-live="polite".
 //   (h) onOpenAutoFocus override honored.
+//   (i) Under 600px the list caps lower and the footer stays pinned.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
@@ -165,5 +166,26 @@ describe("SelectionDialog", () => {
     await waitFor(() => {
       expect(handler).toHaveBeenCalled();
     });
+  });
+
+  it("(i) the list is shorter on a phone, so the title and the buttons fit the sheet", () => {
+    render(
+      <SelectionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        title="Add edges"
+        footer={<button>Cancel</button>}
+      >
+        <div data-testid="inner">Body</div>
+      </SelectionDialog>,
+    );
+
+    const body = screen.getByTestId("inner").closest("[aria-live]");
+    const classes = (body?.getAttribute("class") ?? "").split(/\s+/);
+    expect(classes).toEqual(
+      expect.arrayContaining(["overflow-y-auto", "max-h-[70vh]", "max-[600px]:max-h-[55dvh]"]),
+    );
+    // The Cancel button sits in the frame's pinned footer row.
+    expect(screen.getByRole("button", { name: "Cancel" }).closest(".sticky")).not.toBeNull();
   });
 });
