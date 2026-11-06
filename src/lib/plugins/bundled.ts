@@ -31,8 +31,37 @@ export const BILLING_PLUGIN_VERSION = "0.1.0";
 export const PAYMENTS_PLUGIN_VERSION = "0.1.0";
 export const PESAPAL_PLUGIN_VERSION = "0.1.0";
 
+/**
+ * The kinds of core record whose owning organization MGM can resolve. Kept
+ * here, in a file with no imports, so client code can name a kind.
+ * GateTarget in src/lib/runtime/gate.ts has one case per kind, and
+ * gate.test.ts fails while the two lists differ, so add a kind to both in
+ * the same change.
+ */
+export const CORE_ENTITY_KINDS = [
+  "organization",
+  "community",
+  "microgrid",
+  "edge",
+  "device",
+  "household",
+  "rateSchedule",
+  "billingPeriod",
+  "lineItem",
+  "paymentAttempt",
+] as const;
+
+export type CoreEntityKind = (typeof CORE_ENTITY_KINDS)[number];
+
 export interface BundledPlugin {
   name: MgmPluginName;
+  /**
+   * Short prefix for the ids this plugin names, as in "billing.period":
+   * lowercase letters, digits and hyphens, starting with a letter, and
+   * unique in the catalog. bundled.test.ts checks both. getPluginByAlias
+   * finds the plugin from it.
+   */
+  alias: string;
   version: string;
   displayName: string;
   description: string;
@@ -46,6 +75,7 @@ export interface BundledPlugin {
 
 export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
   name: ORGANIZATION_DIRECTORY_PLUGIN_NAME,
+  alias: "org",
   version: ORGANIZATION_DIRECTORY_PLUGIN_VERSION,
   displayName: "Organization directory",
   description:
@@ -73,6 +103,7 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
 
 export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
   name: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+  alias: "community",
   version: COMMUNITY_MANAGEMENT_PLUGIN_VERSION,
   displayName: "Community management",
   description:
@@ -98,6 +129,7 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
 
 export const METERING_PLUGIN: BundledPlugin = {
   name: METERING_PLUGIN_NAME,
+  alias: "metering",
   version: METERING_PLUGIN_VERSION,
   displayName: "Metering",
   description:
@@ -130,6 +162,7 @@ export const METERING_PLUGIN: BundledPlugin = {
 
 export const BILLING_PLUGIN: BundledPlugin = {
   name: BILLING_PLUGIN_NAME,
+  alias: "billing",
   version: BILLING_PLUGIN_VERSION,
   displayName: "Billing",
   description:
@@ -169,6 +202,7 @@ export const BILLING_PLUGIN: BundledPlugin = {
 
 export const PAYMENTS_PLUGIN: BundledPlugin = {
   name: PAYMENTS_PLUGIN_NAME,
+  alias: "payments",
   version: PAYMENTS_PLUGIN_VERSION,
   displayName: "Payments",
   description:
@@ -202,6 +236,7 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
 
 export const PESAPAL_PLUGIN: BundledPlugin = {
   name: PESAPAL_PLUGIN_NAME,
+  alias: "pesapal",
   version: PESAPAL_PLUGIN_VERSION,
   displayName: "Pesapal",
   description:
@@ -233,6 +268,10 @@ export function getBundledPlugin(
   pluginName: string
 ): BundledPlugin | undefined {
   return MGM_BUNDLED_PLUGINS.find((plugin) => plugin.name === pluginName);
+}
+
+export function getPluginByAlias(alias: string): BundledPlugin | undefined {
+  return MGM_BUNDLED_PLUGINS.find((plugin) => plugin.alias === alias);
 }
 
 export function getPluginDependents(
@@ -364,12 +403,16 @@ function routeSegments(route: string): string[] {
  * The bundled plugin that owns an API or page route: the plugin whose
  * `routes` entry is the longest segment-prefix of the path. Bracketed
  * segments (`[id]`) match any one segment. Undefined when no plugin claims
- * the route.
+ * the route. `plugins` defaults to the bundled catalog; a test passes its
+ * own list to check ownership against a catalog with other routes.
  */
-export function getRouteOwner(route: string): BundledPlugin | undefined {
+export function getRouteOwner(
+  route: string,
+  plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS
+): BundledPlugin | undefined {
   const path = routeSegments(route);
   let best: { plugin: BundledPlugin; length: number } | undefined;
-  for (const plugin of MGM_BUNDLED_PLUGINS) {
+  for (const plugin of plugins) {
     for (const pattern of plugin.routes) {
       const segments = routeSegments(pattern);
       if (segments.length > path.length) continue;

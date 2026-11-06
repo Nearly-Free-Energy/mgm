@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { MgmGate, resolveTargetOrganization, type GateTarget } from "../gate";
-import { MGM_BUNDLED_PLUGINS, getBundledPlugin } from "@/lib/plugins/bundled";
+import {
+  CORE_ENTITY_KINDS,
+  MGM_BUNDLED_PLUGINS,
+  getBundledPlugin,
+  type CoreEntityKind,
+} from "@/lib/plugins/bundled";
 import type { MgmCatalog } from "../services";
 
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -59,10 +64,22 @@ const CASES: Array<[GateTarget["kind"], string, Row]> = [
   ["microgrid", "microgrids", { id: TARGET_ID, communities: [org] }],
   ["edge", "edges", { id: TARGET_ID, microgrids: microgrid }],
   ["device", "devices", { id: TARGET_ID, edges: edge }],
+  ["household", "households", { id: TARGET_ID, microgrids: [microgrid] }],
   ["billingPeriod", "billing_periods", { id: TARGET_ID, microgrids: microgrid }],
   ["lineItem", "billing_line_items", { id: TARGET_ID, billing_periods: { microgrids: microgrid } }],
   ["rateSchedule", "rate_schedules", { id: TARGET_ID, microgrids: microgrid }],
+  ["paymentAttempt", "payment_attempts", { id: TARGET_ID, org_id: ORG_ID }],
 ];
+
+describe("gate target kinds", () => {
+  it("has one gate target per core entity kind", () => {
+    expectTypeOf<GateTarget["kind"]>().toEqualTypeOf<CoreEntityKind>();
+    // Every kind but organization, which resolves without a query, has a row above.
+    expect(["organization", ...CASES.map(([kind]) => kind)].sort()).toEqual(
+      [...CORE_ENTITY_KINDS].sort()
+    );
+  });
+});
 
 describe("resolveTargetOrganization", () => {
   it.each(CASES)("resolves a %s through %s", async (kind, table, row) => {
@@ -185,6 +202,18 @@ describe("MgmGate", () => {
         method: "PUT",
       })
     ).resolves.toEqual({ ok: true, organizationId: ORG_ID });
+  });
+
+  it("gates a write on a payment attempt by the attempt's organization", async () => {
+    const { supabase, calls, rpc } = makeSupabase({ row: { id: TARGET_ID, org_id: ORG_ID }, enabled: false });
+    await expect(
+      gate.check(supabase, { plugin: "payments", target: { kind: "paymentAttempt", id: TARGET_ID }, method: "POST" })
+    ).resolves.toMatchObject({ ok: false, status: 409, code: "payments_disabled" });
+    expect(calls).toEqual([{ table: "payment_attempts", columns: "id, org_id", id: TARGET_ID }]);
+    expect(rpc).toHaveBeenCalledWith("mgm_plugin_enabled_for_org", {
+      _org_id: ORG_ID,
+      _plugin_name: "payments",
+    });
   });
 
   it("leaves an invisible target to the route's own 404/403", async () => {

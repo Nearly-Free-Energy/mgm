@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   BILLING_PLUGIN_NAME,
+  COMMUNITY_MANAGEMENT_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+  CORE_ENTITY_KINDS,
+  METERING_PLUGIN,
   METERING_PLUGIN_NAME,
+  MGM_BUNDLED_PLUGINS,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
+  getPluginByAlias,
+  getRouteOwner,
   resolvePluginStatuses,
   validatePluginToggle,
 } from "../bundled";
@@ -239,5 +245,68 @@ describe("getRouteOwner", () => {
   it("does not let the root page claim every route", async () => {
     const { getRouteOwner } = await import("../bundled");
     expect(getRouteOwner("/api/unclaimed")).toBeUndefined();
+  });
+});
+
+describe("getRouteOwner with a plugin list", () => {
+  it("reads ownership from the list it is given", () => {
+    const plugins = [
+      COMMUNITY_MANAGEMENT_PLUGIN,
+      { ...METERING_PLUGIN, routes: ["/api/communities/[id]/readings"] },
+    ];
+    expect(getRouteOwner("/api/communities/abc/readings", plugins)?.name).toBe(
+      METERING_PLUGIN_NAME
+    );
+    expect(getRouteOwner("/api/communities/abc", plugins)?.name).toBe(
+      COMMUNITY_MANAGEMENT_PLUGIN_NAME
+    );
+    // The bundled catalog gives the same path to community management.
+    expect(getRouteOwner("/api/communities/abc/readings")?.name).toBe(
+      COMMUNITY_MANAGEMENT_PLUGIN_NAME
+    );
+  });
+
+  it("finds no owner in an empty list", () => {
+    expect(getRouteOwner("/api/communities/abc", [])).toBeUndefined();
+  });
+});
+
+describe("plugin aliases", () => {
+  it("gives each plugin its alias", () => {
+    expect(MGM_BUNDLED_PLUGINS.map((plugin) => [plugin.name, plugin.alias])).toEqual([
+      [ORGANIZATION_DIRECTORY_PLUGIN_NAME, "org"],
+      [COMMUNITY_MANAGEMENT_PLUGIN_NAME, "community"],
+      [METERING_PLUGIN_NAME, "metering"],
+      [BILLING_PLUGIN_NAME, "billing"],
+      [PAYMENTS_PLUGIN_NAME, "payments"],
+      [PESAPAL_PLUGIN_NAME, "pesapal"],
+    ]);
+  });
+
+  it("uses lowercase letters, digits and hyphens, starting with a letter", () => {
+    for (const plugin of MGM_BUNDLED_PLUGINS) {
+      expect(plugin.alias, plugin.name).toMatch(/^[a-z][a-z0-9-]*$/);
+    }
+  });
+
+  it("is unique in the catalog", () => {
+    const aliases = MGM_BUNDLED_PLUGINS.map((plugin) => plugin.alias);
+    expect(new Set(aliases).size).toBe(aliases.length);
+  });
+
+  it("finds a plugin by its alias and not by its name", () => {
+    for (const plugin of MGM_BUNDLED_PLUGINS) {
+      expect(getPluginByAlias(plugin.alias)).toBe(plugin);
+    }
+    expect(getPluginByAlias("org")?.name).toBe(ORGANIZATION_DIRECTORY_PLUGIN_NAME);
+    expect(getPluginByAlias("community")?.name).toBe(COMMUNITY_MANAGEMENT_PLUGIN_NAME);
+    expect(getPluginByAlias(ORGANIZATION_DIRECTORY_PLUGIN_NAME)).toBeUndefined();
+    expect(getPluginByAlias("")).toBeUndefined();
+  });
+});
+
+describe("core entity kinds", () => {
+  it("lists each kind once", () => {
+    expect(new Set(CORE_ENTITY_KINDS).size).toBe(CORE_ENTITY_KINDS.length);
   });
 });
