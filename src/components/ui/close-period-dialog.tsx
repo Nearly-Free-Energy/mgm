@@ -209,7 +209,7 @@ export function ClosePeriodDialog({
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {r.label}
                 </div>
-                <div className="mt-0.5 font-mono text-sm font-semibold tabular-nums">
+                <div className="mt-0.5 text-sm font-semibold tabular-nums">
                   {r.value}
                 </div>
               </div>

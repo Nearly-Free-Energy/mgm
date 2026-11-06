@@ -71,7 +71,7 @@ export function LocalDate({ value, locale, opts, relative, className, ...props }
   const d = value instanceof Date ? value : new Date(value);
   const text = relative ? timeAgo(d, lc) : formatLocalDate(d, lc, opts);
   return (
-    <span className={cn("font-mono tabular-nums", className)} {...props}>
+    <span className={cn("tabular-nums", className)} {...props}>
       {text}
     </span>
   );

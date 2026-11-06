@@ -1,6 +1,12 @@
 /* ─────────────────────────────────────────────────────────────────────────
    MGM Design System — Tokens (globals.css)
-   Drop this into src/app/globals.css (overwriting the file shadcn init writes).
+
+   Tailwind 4 reads its configuration from this file only: there is no
+   tailwind.config.* and no @config directive. A value a utility needs
+   (colour, font, type size, radius, elevation, motion) is a theme variable
+   here, or the utility generates no CSS and Tailwind reports no error.
+   src/lib/__tests__/design-tokens.test.ts compiles this file and fails
+   instead.
 
    ## Themability contract
 
@@ -25,11 +31,15 @@
 
    ## Token consumption
 
-   Spacing scale lives in tailwind.config.ts (`theme.extend.spacing`).
-   Elevation in `theme.extend.boxShadow` as `elev-1/2/3`. Components
-   should use `bg-success-muted`, `text-warning-fg`, `shadow-elev-2`,
-   `rounded-md` — never inline boxShadow or hex/oklch literals.
+   Components use the utilities these tokens generate (`bg-card`,
+   `text-warning-fg`, `shadow-elev-2`, `rounded-pill`, `text-caption`) —
+   never hex/oklch literals or an inline box-shadow. Tailwind's default
+   spacing scale (`--spacing: 0.25rem`) is the MGM 4px scale; it is not
+   redefined here.
 ───────────────────────────────────────────────────────────────────────── */
+
+@import "tailwindcss";
+@import "tw-animate-css";
 
 :root {
   /* Surfaces */
@@ -67,10 +77,10 @@
   --destructive-fg: oklch(34.0% 0.13 27);
 
   --radius: 0.5rem;
-  --font-sans: var(--font-inter-tight), ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SF Mono, Menlo, Consolas, monospace;
 }
 
+/* Colours: `inline`, so each utility reads the token itself rather than a
+   copy taken on :root. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -97,28 +107,73 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-muted: var(--destructive-muted);
   --color-destructive-fg: var(--destructive-fg);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-@import "tailwindcss";
-@import "tw-animate-css";
+@theme {
+  /* Fonts. next/font sets `--font-inter` on <html> (src/app/layout.tsx).
+     It must be <html>: this value is resolved on :root, which cannot see a
+     variable set on <body>. Without the variable the system stack renders.
+     If the class moves, revisit; root-layout.test.tsx checks it. Numbers
+     use Inter's tabular figures (`tabular-nums`); `font-mono` is for
+     identifiers such as component ids, URLs and token prefixes. */
+  --font-sans: var(--font-inter, ui-sans-serif), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale. Body and dense switch to 16px on coarse pointers below.
+     TYPE_SCALE in src/lib/utils.ts lists the same names so cn() keeps
+     them; if a size is added or renamed here, change it there too.
+     design-tokens.test.ts fails until both agree. */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.45;
+  --text-dense: 0.8125rem;
+  --text-dense--line-height: 1.45;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.45;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.25;
+  --text-headline: 1.375rem;
+  --text-headline--line-height: 1.25;
+  --text-kpi: 2rem;
+  --text-kpi--line-height: 1.1;
+
+  --radius-pill: 9999px;
+
+  --shadow-elev-1: 0 1px 2px rgb(24 24 27 / 0.04), 0 1px 1px rgb(24 24 27 / 0.03);
+  --shadow-elev-2: 0 2px 4px rgb(24 24 27 / 0.05), 0 4px 10px rgb(24 24 27 / 0.04);
+  --shadow-elev-3: 0 6px 14px rgb(24 24 27 / 0.08), 0 14px 32px rgb(24 24 27 / 0.06);
+
+  /* Motion: one duration for state changes and one easing. A
+     `transition-*` utility uses these unless it has its own `duration-*`
+     or `ease-*`. */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --text-body: 1rem;
+    --text-dense: 1rem;
+  }
+  /* iOS zooms into a focused field whose text is under 16px. Unlayered,
+     so it wins over a `text-xs`/`text-sm` utility on the field. Controls
+     that hold no typed text keep their size. */
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+}
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
-}
-
-/* Use Tailwind's `font-mono tabular-nums` utility pair in components.
-   This back-compat class is kept only for any inline existing usage. */
-.tabular {
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
 }
 
 /* Animations used by Chip (loading) + skeletons + navigation progress. */

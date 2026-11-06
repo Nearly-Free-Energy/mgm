@@ -257,7 +257,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
           onClick={handleRediscover}
           disabled={rediscovering || saving}
           className={cn(
-            "rounded-md bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground hover:opacity-90",
+            "rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted",
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >
