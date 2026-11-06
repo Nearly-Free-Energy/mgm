@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Input } from "@/components/ui/input";
 import { Banner } from "@/components/ui/banner";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -166,14 +167,8 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
   return (
     <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "max-h-[90vh] overflow-y-auto rounded-md border border-border bg-card shadow-elev-3 outline-none"
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel className="w-[480px]">
           <div className="px-6 pt-5">
             <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
               Invite user
@@ -326,7 +321,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
               </p>
             )}
 
-            <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px] -mx-6 -mb-2">
+            <DialogFooter className="-mx-6 -mb-2 mt-4">
               <Dialog.Close asChild>
                 <button
                   type="button"
@@ -342,9 +337,9 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
               >
                 {submitting ? "Sending..." : "Send invitation"}
               </button>
-            </div>
+            </DialogFooter>
           </form>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );
