@@ -34,7 +34,7 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
   } catch (error) { setError(error instanceof Error ? error.message : "Payment action failed"); }
   finally { setBusy(false); }
  }
- return <span><button className="text-xs underline" onClick={show} disabled={busy}>Payment history</button>{open && <div role="dialog" aria-label="Payment history" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"><section className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded bg-background p-6 shadow-lg">
+ return <span><button className="text-xs underline" onClick={show} disabled={busy}>Payment history</button>{open && <div role="dialog" aria-label="Payment history" className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/55"><section className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded bg-background p-6 shadow-lg">
   <button className="float-right underline" onClick={() => setOpen(false)}>Close</button><h2 className="text-xl font-semibold">Payment history</h2>
   <p>Receipts remain available when online payments are disabled.</p>
   {balance && <p className="my-3">Current bill: {balance.currentTotal} {balance.currency} · Received: {balance.received} {balance.currency} · Difference: {balance.difference} {balance.currency}</p>}
