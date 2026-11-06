@@ -228,7 +228,7 @@ export function ClosePeriodDialog({
                   type="checkbox"
                   checked={confirmed}
                   onChange={(e) => setConfirmed(e.target.checked)}
-                  className="mt-0.5 accent-[color:var(--primary)]"
+                  className="mt-0.5 accent-primary"
                 />
                 <span>
                   I have copied the tier values into URA&apos;s portal and confirm these
