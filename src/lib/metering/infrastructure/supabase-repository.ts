@@ -20,6 +20,12 @@ import type {
   StoredConnection,
 } from "../repository";
 
+/** A calendar day, as `getHouseMeterIds` puts it into a PostgREST filter. */
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Household link roles whose meter measures what the house itself used. */
+const HOUSE_METER_ROLES = ["primary_consumption_meter", "secondary_meter"];
+
 function toError(error: { code?: string; message?: string }): RepositoryError {
   return { code: error.code, message: error.message ?? "Unknown database error" };
 }
@@ -172,6 +178,38 @@ export function createSupabaseMeteringRepository(
         edgeOpenemsId: edgeOpenemsById.get(d.edge_id) ?? "",
         componentId: d.openems_component_id ?? "",
       })) satisfies ManagedDevice[];
+    },
+
+    async getHouseMeterIds(microgridId: string, date: string) {
+      if (!DATE_KEY_RE.test(date)) throw new Error(`Invalid date key: ${date}`);
+      const failed = (what: string, error: { code?: string; message?: string }) => {
+        const { code, message } = toError(error);
+        return new Error(`Could not read ${what}: ${message}${code ? ` (${code})` : ""}`);
+      };
+      const { data: edges, error: edgesError } = await supabase
+        .from("edges")
+        .select("id")
+        .eq("microgrid_id", microgridId);
+      if (edgesError) throw failed("edges", edgesError);
+      const edgeIds = (edges ?? []).map((e) => e.id as string);
+      if (edgeIds.length === 0) return [];
+      const { data: devices, error: devicesError } = await supabase
+        .from("devices")
+        .select("id")
+        .in("edge_id", edgeIds);
+      if (devicesError) throw failed("devices", devicesError);
+      const deviceIds = (devices ?? []).map((d) => d.id as string);
+      if (deviceIds.length === 0) return [];
+      // Links in force on `date`: half-open periods, as 00058 defines them.
+      const { data: links, error: linksError } = await supabase
+        .from("household_devices")
+        .select("device_id")
+        .in("device_id", deviceIds)
+        .in("role", HOUSE_METER_ROLES)
+        .lte("effective_from", date)
+        .or(`effective_to.is.null,effective_to.gt.${date}`);
+      if (linksError) throw failed("household meter links", linksError);
+      return [...new Set(((links ?? []) as { device_id: string }[]).map((l) => l.device_id))];
     },
 
     async getMicrogridEdges(microgridId: string) {

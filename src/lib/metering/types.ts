@@ -21,7 +21,72 @@ export type MeteringReadRequest = {
 /** A request-scoped metering dependency for the billing engine. */
 export interface MeteringProvider {
   getReadings(request: MeteringReadRequest): Promise<DeviceReading[]>;
+  /**
+   * Site power and battery samples for whole local days. Optional: a source
+   * that cannot provide them leaves it out, and the daily operations view
+   * says so instead of showing zeros.
+   */
+  getSiteSamples?(request: SiteSamplesRequest): Promise<SiteSamples>;
 }
+
+/**
+ * The site devices a daily operations view reads, by what they are rather
+ * than by vendor channel. A provider maps each one to its own channels.
+ */
+export type SiteSources = {
+  battery: DeviceConfig | null;
+  gridMeter: DeviceConfig | null;
+  load: DeviceConfig | null;
+  pv: DeviceConfig | null;
+  /**
+   * The household meters (consumption meters linked to a household as its
+   * primary or secondary meter on the day read): what the houses themselves
+   * used.
+   */
+  houseMeters: DeviceConfig[];
+  /**
+   * Linked household meters that cannot be read because they have no edge
+   * or component id. Not requested; reported so a total that leaves them
+   * out does not look complete.
+   */
+  houseMetersUnreadable: number;
+};
+
+export type SiteSamplesRequest = {
+  microgridId: string;
+  sources: SiteSources;
+  /** Whole local days in `timezone`, `endDate` inclusive. */
+  startDate: string;
+  endDate: string;
+  timezone: string;
+  resolutionMinutes: number;
+};
+
+/**
+ * Bin-aligned samples, each array the same length as `timestamps` (epoch
+ * milliseconds, bin start). `null` means no value reached the provider for
+ * that bin — never a substituted zero. Power is in W (battery: + discharge,
+ * − charge; grid: + import, − export), state of charge in %, voltage in V.
+ */
+export type SiteSamples = {
+  timestamps: number[];
+  batterySocPct: (number | null)[];
+  batteryPowerW: (number | null)[];
+  gridPowerW: (number | null)[];
+  /**
+   * Lowest phase voltage of the grid meter in the bin, over the phases that
+   * reported (a phase with no value is ignored), so one phase down shows.
+   */
+  gridVoltageV: (number | null)[];
+  loadPowerW: (number | null)[];
+  pvPowerW: (number | null)[];
+  /**
+   * Each house meter's cumulative consumption counter in Wh, keyed by MGM
+   * device id: one series per house meter in the request, bin-aligned like
+   * the others, all null when the meter gave nothing.
+   */
+  houseEnergyWh: Record<string, (number | null)[]>;
+};
 
 /**
  * Operator-facing consumption query (issue #4). MGM-owned meter IDs in,

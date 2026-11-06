@@ -49,6 +49,16 @@ export function dayKeyInZone(instant: Date | number, timezone: string): string {
   return getFormatter(timezone).format(instant);
 }
 
+/** True iff `value` is a `YYYY-MM-DD` key naming a day that exists. */
+export function isCalendarDateKey(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return (
+    date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
+  );
+}
+
 /**
  * Add `days` (may be negative) to a plain `YYYY-MM-DD` calendar date.
  * Pure calendar arithmetic — routed through UTC so no local/session zone

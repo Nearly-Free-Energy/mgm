@@ -1208,4 +1208,286 @@ describe("OpenEmsClient", () => {
     });
   });
 
+  describe("queryHistoricSamples", () => {
+    const samplesResponse = (result: unknown) =>
+      mockResponse({
+        jsonrpc: "2.0",
+        id: "outer-id",
+        result: { payload: { jsonrpc: "2.0", id: "inner-id", result } },
+      });
+
+    it("sends queryHistoricTimeseriesData through edgeRpc with the requested resolution", async () => {
+      fetchSpy.mockResolvedValue(
+        samplesResponse({ timestamps: [], data: {} })
+      );
+
+      await client.queryHistoricSamples(
+        "edge7",
+        ["ess0/Soc", "meter0/ActivePower"],
+        "2026-11-01",
+        "2026-11-01",
+        "Africa/Kampala",
+        5
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.method).toBe("edgeRpc");
+      expect(body.params.edgeId).toBe("edge7");
+      const payload = body.params.payload;
+      expect(payload.jsonrpc).toBe("2.0");
+      expect(payload.id).toBeDefined();
+      expect(payload.method).toBe("queryHistoricTimeseriesData");
+      expect(payload.params).toEqual({
+        fromDate: "2026-11-01",
+        toDate: "2026-11-01",
+        channels: ["ess0/Soc", "meter0/ActivePower"],
+        timezone: "Africa/Kampala",
+        resolution: { value: 5, unit: "Minutes" },
+      });
+    });
+
+    it("returns the inner payload result unchanged, nulls and string timestamps included", async () => {
+      const result = {
+        timestamps: ["2026-11-01T00:00:00+03:00", "2026-11-01T00:05:00+03:00"],
+        data: { "ess0/Soc": [55, null] },
+      };
+      fetchSpy.mockResolvedValue(samplesResponse(result));
+
+      await expect(
+        client.queryHistoricSamples(
+          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5
+        )
+      ).resolves.toEqual(result);
+    });
+
+    it("surfaces an OpenEMS HTTP 400 as OPENEMS_HTTP_ERROR carrying the status", async () => {
+      fetchSpy.mockResolvedValue(
+        mockRawResponse(
+          JSON.stringify({ error: { message: "Energy values are not available for query" } }),
+          400,
+          "application/json"
+        )
+      );
+
+      await expect(
+        client.queryHistoricSamples(
+          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5
+        )
+      ).rejects.toMatchObject({
+        code: "OPENEMS_HTTP_ERROR",
+        details: { status: 400 },
+      });
+    });
+
+    it("exposes a 20-second page read timeout", () => {
+      expect(OpenEmsClient.PAGE_READ_TIMEOUT_MS).toBe(20_000);
+    });
+
+    it("passes no abort signal to fetch when no timeout is given", async () => {
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5
+      );
+
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(init?.signal).toBeUndefined();
+      expect(init && "signal" in init).toBe(false);
+    });
+
+    it("passes AbortSignal.timeout(timeoutMs) to fetch when a timeout is given", async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 12_345 }
+      );
+
+      expect(timeoutSpy).toHaveBeenCalledTimes(1);
+      expect(timeoutSpy).toHaveBeenCalledWith(12_345);
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      expect(init?.signal).toBe(timeoutSpy.mock.results[0].value);
+      // The timeout does not change what is sent.
+      expect(init?.redirect).toBe("manual");
+    });
+
+    it.each([
+      ["a DOMException", () => new DOMException("The operation was aborted due to timeout", "TimeoutError")],
+      ["an Error", () => Object.assign(new Error("signal timed out"), { name: "TimeoutError" })],
+    ])("turns a TimeoutError (%s) into OPENEMS_UNREACHABLE 503 naming the seconds", async (_label, make) => {
+      const cause = make();
+      fetchSpy.mockRejectedValue(cause);
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 20_000 }
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(OpenEmsError);
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      expect((error as OpenEmsError).details).toBe(cause);
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within 20 s"
+      );
+    });
+
+    it("rounds the seconds in the timeout message", async () => {
+      fetchSpy.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+
+      await expect(
+        client.queryHistoricSamples(
+          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 7_600 }
+        )
+      ).rejects.toThrow("did not answer within 8 s");
+    });
+
+    it("passes the caller's signal to fetch as it is when there is no timeout", async () => {
+      const controller = new AbortController();
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal }
+      );
+
+      expect(fetchSpy.mock.calls[0][1]?.signal).toBe(controller.signal);
+      expect(timeoutSpy).not.toHaveBeenCalled();
+    });
+
+    it("combines the caller's signal with its own timeout, whichever ends first", async () => {
+      const controller = new AbortController();
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      const anySpy = vi.spyOn(AbortSignal, "any");
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal, timeoutMs: 5_000 }
+      );
+
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      expect(anySpy).toHaveBeenCalledWith([controller.signal, timeoutSpy.mock.results[0].value]);
+      const signal = fetchSpy.mock.calls[0][1]?.signal as AbortSignal;
+      expect(signal).toBe(anySpy.mock.results[0].value);
+      expect(signal.aborted).toBe(false);
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+    });
+
+    it("starts no request once the caller's signal has aborted", async () => {
+      const controller = new AbortController();
+      controller.abort(new DOMException("signal timed out", "TimeoutError"));
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal }
+      ).catch((caught: unknown) => caught);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+    });
+
+    it.each([
+      ["a TimeoutError", () => new DOMException("signal timed out", "TimeoutError")],
+      ["an AbortError", () => new DOMException("This operation was aborted", "AbortError")],
+    ])("turns the caller's signal ending (%s) into OPENEMS_UNREACHABLE, never 'NaN s'", async (_label, make) => {
+      const controller = new AbortController();
+      fetchSpy.mockImplementation(async () => {
+        const reason = make();
+        controller.abort(reason);
+        throw reason;
+      });
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal, timeoutMs: 20_000 }
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      const message = (error as OpenEmsError).message;
+      expect(message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+      expect(message).not.toContain("NaN");
+    });
+
+    it("says 'the time allowed', not 'NaN s', for a timeout with no timeout of its own", async () => {
+      fetchSpy.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5
+      ).catch((caught: unknown) => caught);
+
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+    });
+
+    it("keeps other network failures as the generic OPENEMS_UNREACHABLE message", async () => {
+      fetchSpy.mockRejectedValue(new Error("ECONNREFUSED"));
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 20_000 }
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      expect((error as OpenEmsError).message).toBe(
+        "Failed to reach OpenEMS at http://localhost:8075: ECONNREFUSED"
+      );
+    });
+  });
+
+  describe("queryHistoricCoverageSamples", () => {
+    it("passes no timeout: fetch is called without an abort signal", async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      fetchSpy.mockResolvedValue(
+        mockResponse({
+          jsonrpc: "2.0",
+          result: { payload: { jsonrpc: "2.0", result: { timestamps: [], data: {} } } },
+        })
+      );
+
+      await client.queryHistoricCoverageSamples(
+        "edge0",
+        ["meter0/ActiveConsumptionEnergy"],
+        "2026-09-01",
+        "2026-09-30",
+        "Africa/Kampala"
+      );
+
+      const [, init] = fetchSpy.mock.calls[0];
+      expect(init?.signal).toBeUndefined();
+      expect(timeoutSpy).not.toHaveBeenCalled();
+    });
+
+    it("still requests fifteen-minute resolution after delegating to queryHistoricSamples", async () => {
+      fetchSpy.mockResolvedValue(
+        mockResponse({
+          jsonrpc: "2.0",
+          result: { payload: { jsonrpc: "2.0", result: { timestamps: [], data: {} } } },
+        })
+      );
+
+      await client.queryHistoricCoverageSamples(
+        "edge0",
+        ["meter0/ActiveConsumptionEnergy"],
+        "2026-09-01",
+        "2026-09-30",
+        "Africa/Kampala"
+      );
+
+      const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string).params.payload;
+      expect(payload.method).toBe("queryHistoricTimeseriesData");
+      expect(payload.params.resolution).toEqual({ value: 15, unit: "Minutes" });
+      expect(payload.params.timezone).toBe("Africa/Kampala");
+      expect(payload.params.channels).toEqual(["meter0/ActiveConsumptionEnergy"]);
+    });
+  });
+
 });

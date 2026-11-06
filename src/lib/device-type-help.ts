@@ -41,7 +41,7 @@ export const DEVICE_TYPE_HELP: Record<DeviceType, DeviceTypeHelp> = {
   inverter: {
     label: "Inverter",
     description:
-      "A power conversion device that converts DC (from solar or batteries) to AC for your microgrid loads. Inverters are infrastructure components — they are not assigned to households for billing but may be monitored for efficiency and fault detection.",
+      "A power conversion device that converts DC (from solar or batteries) to AC for your microgrid loads. Inverters are infrastructure components — they are not assigned to households for billing but may be monitored for efficiency and fault detection. Give the meter on a hybrid inverter's output (its backup meter) this type: the Operations view reads it as the site's load to estimate solar.",
   },
   ev_charger: {
     label: "EV charger",

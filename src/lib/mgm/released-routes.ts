@@ -13,6 +13,9 @@
  * Release 4 (payments): Pesapal as the first provider plugin — org-default
  * merchant accounts with community overrides, stable payment links, hosted
  * checkout, verified receipts, and manager reconciliation.
+ * Operations: the daily operations view of a microgrid (battery level, power
+ * cuts, dark time and who served the houses), read through the metering
+ * capability.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -112,6 +115,10 @@ const RELEASE_4_API_ROUTES = [
   /^\/api\/communities\/[^/]+\/payment(?:\/override)?$/,
 ];
 
+const OPERATIONS_PAGE_ROUTES = [
+  /^\/microgrids\/[^/]+\/operations$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -119,6 +126,7 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_2_PAGE_ROUTES,
     ...RELEASE_3_PAGE_ROUTES,
     ...RELEASE_4_PAGE_ROUTES,
+    ...OPERATIONS_PAGE_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
     ...RELEASE_3_API_ROUTES,

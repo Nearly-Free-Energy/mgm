@@ -11,7 +11,10 @@ import "server-only";
 import { validateTimezone } from "@/lib/validation/timezone";
 import { MeteringError } from "./errors";
 import { computeAssignmentGaps } from "./assignment-gaps";
+import { computeSiteDay, type SiteDayOperations } from "./site-operations";
+import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
 import type {
+  ManagedDevice,
   MeteringCapabilityContract,
   MeteringConnection,
   MeteringRepository,
@@ -24,6 +27,7 @@ import type {
   DeviceConsumption,
   DiscoveredMeter,
   OpeningRegisterInput,
+  SiteSources,
 } from "./types";
 import type { MeteringProviderName } from "./registry";
 import { MeteringRegistry } from "./registry";
@@ -31,6 +35,58 @@ import { MeteringRegistry } from "./registry";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The daily operations view reads 5-minute bins (what OpenEMS keeps). */
+const SITE_RESOLUTION_MINUTES = 5;
+
+/**
+ * The site devices the daily operations view reads, chosen by device type.
+ * The first of each type wins, by name; a second battery or grid meter is
+ * not added up.
+ *
+ * The load is the inverter's AC output: a device of type `inverter` (for an
+ * SRNE hybrid, its backup meter). With the battery's DC power and the grid
+ * meter it gives solar where no solar meter exists. Household consumption
+ * meters are not the load: they miss the site's own use and unmetered loads.
+ *
+ * The house meters are the consumption meters in `houseMeterIds` (those
+ * linked to a household on the day read), all of them, by name: what the
+ * houses used is their sum. A linked device of another type (a site's grid
+ * meter standing in as a "shared" meter for un-metered houses, say) is not
+ * a house meter. Linked meters without
+ * an edge or component id cannot be read; they are counted, not dropped.
+ */
+export function pickSiteSources(
+  devices: ManagedDevice[],
+  houseMeterIds: string[] = []
+): SiteSources {
+  const sorted = [...devices].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+  );
+  const readable = (d: ManagedDevice) => Boolean(d.edgeOpenemsId && d.componentId);
+  const usable = sorted.filter(readable);
+  const config = (device: ManagedDevice) => ({
+    id: device.id,
+    edgeOpenemsId: device.edgeOpenemsId,
+    componentId: device.componentId,
+  });
+  const first = (type: string) => {
+    const device = usable.find((d) => d.deviceType === type);
+    return device ? config(device) : null;
+  };
+  // Only consumption meters: the site sources are other types, so no device
+  // is read both as a site source and as a house.
+  const houses = new Set(houseMeterIds);
+  const linked = sorted.filter((d) => houses.has(d.id) && d.deviceType === "consumption_meter");
+  return {
+    battery: first("battery"),
+    gridMeter: first("grid_meter"),
+    load: first("inverter"),
+    pv: first("pv_meter"),
+    houseMeters: linked.filter(readable).map(config),
+    houseMetersUnreadable: linked.filter((d) => !readable(d)).length,
+  };
+}
 
 function isRealDate(value: string): boolean {
   if (!DATE_RE.test(value)) return false;
@@ -467,5 +523,141 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
     return { ok: true as const, data: { id } };
+  }
+
+  /**
+   * One local day of the site's battery, grid and supply (the daily
+   * operations view). Query: `{ microgrid_id, date: "YYYY-MM-DD" }`; the day
+   * is in the microgrid's timezone. Reads the vendor, so it is gated like
+   * `getConsumption`.
+   */
+  async getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>> {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    if (!query || typeof query !== "object" || Array.isArray(query)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "metering_invalid_query",
+        message: "Invalid site day query.",
+      };
+    }
+    const q = query as Record<string, unknown>;
+    const microgridId = typeof q.microgrid_id === "string" ? q.microgrid_id : "";
+    const resolved = await this.resolveMicrogridOrg(microgridId);
+    if (!resolved.ok) return resolved;
+    const gated = await this.requirePlugin();
+    if (gated) return gated;
+
+    const stored = await this.repo.getMicrogridTimezone(microgridId);
+    const timezone = stored && !validateTimezone(stored) ? stored : "UTC";
+    const nowMs = Date.now();
+    const date = typeof q.date === "string" ? q.date : "";
+    if (!isCalendarDateKey(date) || date > dayKeyInZone(nowMs, timezone)) {
+      return {
+        ok: false as const,
+        status: 422 as const,
+        code: "metering_invalid_date",
+        message: "date must be a YYYY-MM-DD day that has started in the microgrid's timezone.",
+        field: "date",
+      };
+    }
+
+    let provider;
+    try {
+      provider = this.registry.resolve("openems");
+    } catch {
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "METERING_CONFIGURATION",
+        message: "Metering provider is not available.",
+      };
+    }
+    if (!provider.getSiteSamples) {
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "METERING_CONFIGURATION",
+        message: "This metering source does not provide site samples.",
+      };
+    }
+
+    let devices: ManagedDevice[];
+    let houseMeterIds: string[];
+    try {
+      [devices, houseMeterIds] = await Promise.all([
+        this.repo.getManagedDevices(microgridId),
+        this.repo.getHouseMeterIds(microgridId, date),
+      ]);
+    } catch (error) {
+      console.error("MGM site devices could not be read", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "metering_site_devices_unavailable",
+        message: "This microgrid's meters could not be read. Try again shortly.",
+      };
+    }
+    const sources = pickSiteSources(devices, houseMeterIds);
+    const availability = {
+      battery: sources.battery !== null,
+      gridMeter: sources.gridMeter !== null,
+      load: sources.load !== null,
+      pv: sources.pv !== null,
+      houses: sources.houseMeters.length + sources.houseMetersUnreadable > 0,
+      houseMetersUnreadable: sources.houseMetersUnreadable,
+    };
+    if (!availability.battery && !availability.gridMeter) {
+      return {
+        ok: false as const,
+        status: 404 as const,
+        code: "metering_no_site_devices",
+        message:
+          "No battery or grid meter is registered on this microgrid. Add them under Setup → Edges.",
+      };
+    }
+
+    try {
+      // The previous day's tail tells whether this day began in a cut.
+      const samples = await provider.getSiteSamples({
+        microgridId,
+        sources,
+        startDate: addDaysToDateKey(date, -1),
+        endDate: date,
+        timezone,
+        resolutionMinutes: SITE_RESOLUTION_MINUTES,
+      });
+      return {
+        ok: true as const,
+        data: computeSiteDay({
+          date,
+          timezone,
+          samples,
+          sources: availability,
+          resolutionMinutes: SITE_RESOLUTION_MINUTES,
+          nowMs,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof MeteringError) return this.fromMeteringError(error);
+      // A day the computation cannot handle is one failed view, not a
+      // failed page: report it like any other unavailable read.
+      console.error("MGM site day could not be computed", {
+        date,
+        timezone,
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      return {
+        ok: false as const,
+        status: 500 as const,
+        code: "metering_site_day_failed",
+        message: "This day's operations could not be worked out. Try another day.",
+      };
+    }
   }
 }

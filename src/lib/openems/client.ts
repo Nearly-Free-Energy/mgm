@@ -21,6 +21,8 @@ function consumptionChannelAddress(componentId: string): string {
   return `${componentId}/ActiveConsumptionEnergy`;
 }
 
+type RpcOptions = { timeoutMs?: number; signal?: AbortSignal };
+
 export class OpenEmsClient implements DeviceDataAdapter {
   constructor(
     private readonly baseUrl: string,
@@ -32,7 +34,8 @@ export class OpenEmsClient implements DeviceDataAdapter {
    */
   private async rpc<T = Record<string, unknown>>(
     method: string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    options: RpcOptions = {}
   ): Promise<T> {
     // INVARIANT: the same `body` string MUST be passed to both `auth.apply`
     // (which hashes it for the SigV4 signature) AND `fetch` (which transmits it).
@@ -66,7 +69,29 @@ export class OpenEmsClient implements DeviceDataAdapter {
     }
     const url = checked.url;
 
+    // The caller's signal (a deadline shared by several requests, say) and
+    // this request's own timeout, whichever ends first.
+    const ownTimeout = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
+    const signals = [options.signal, ownTimeout].filter(
+      (signal): signal is AbortSignal => signal !== undefined
+    );
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+    const timedOut = (cause: unknown) =>
+      new OpenEmsError(
+        `OpenEMS at ${this.baseUrl} did not answer within ` +
+          // Name the seconds only when it was this request's own timeout.
+          (options.timeoutMs && (ownTimeout?.aborted || !options.signal?.aborted)
+            ? `${Math.round(options.timeoutMs / 1000)} s`
+            : "the time allowed"),
+        "OPENEMS_UNREACHABLE",
+        503,
+        cause
+      );
+    // A deadline that has already passed starts no request.
+    if (signal?.aborted) throw timedOut(signal.reason);
+
     const headers = await this.auth.apply({ url, method: "POST", body });
+    if (signal?.aborted) throw timedOut(signal.reason);
 
     let response: Response;
     try {
@@ -84,8 +109,15 @@ export class OpenEmsClient implements DeviceDataAdapter {
         headers,
         body,
         redirect: "manual",
+        ...(signal ? { signal } : {}),
       });
     } catch (err) {
+      if (
+        err instanceof Error &&
+        (err.name === "TimeoutError" || err.name === "AbortError")
+      ) {
+        throw timedOut(err);
+      }
       throw new OpenEmsError(
         `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
         "OPENEMS_UNREACHABLE",
@@ -527,6 +559,34 @@ export class OpenEmsClient implements DeviceDataAdapter {
     toDate: string,
     timezone: string
   ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
+    return this.queryHistoricSamples(edgeId, channels, fromDate, toDate, timezone, 15);
+  }
+
+  /**
+   * How long a page's history read may wait for OpenEMS, all of its
+   * requests together.
+   */
+  static readonly PAGE_READ_TIMEOUT_MS = 20_000;
+
+  /**
+   * Channel samples at a fixed resolution in minutes, as OpenEMS aggregates
+   * them (the mean of each bin; `null` where the edge sent nothing). The
+   * dates are whole local days in `timezone`, `toDate` inclusive.
+   */
+  async queryHistoricSamples(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string,
+    resolutionMinutes: number,
+    /**
+     * `timeoutMs`: give up on this request after this long. `signal`: give
+     * up when it aborts (a deadline shared by several requests). Neither
+     * set waits as long as the platform allows.
+     */
+    options: RpcOptions = {}
+  ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
     const result = await this.rpc<{
       payload: JsonRpcResponse<{
         timestamps: Array<number | string>;
@@ -543,10 +603,10 @@ export class OpenEmsClient implements DeviceDataAdapter {
           toDate,
           channels,
           timezone,
-          resolution: { value: 15, unit: "Minutes" },
+          resolution: { value: resolutionMinutes, unit: "Minutes" },
         },
       },
-    });
+    }, options);
     return result.payload.result;
   }
 }

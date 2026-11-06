@@ -81,6 +81,8 @@ describe("isReleasedRoute", () => {
     "/api/payments/reconcile-worker",
     "/p/abc123",
     "/communities/abc/payment",
+    // Operations: the daily operations view (?date= is a query, not a path).
+    "/microgrids/mg-1/operations",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -96,6 +98,7 @@ describe("isReleasedRoute", () => {
     "/api/meter-readings",
     "/settings",
     "/admin",
+    "/microgrids/mg-1/operations/extra",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -103,5 +106,6 @@ describe("isReleasedRoute", () => {
   it("tolerates a trailing slash", () => {
     expect(isReleasedRoute("/microgrids/abc/setup/edges/")).toBe(true);
     expect(isReleasedRoute("/api/metering/readings/")).toBe(true);
+    expect(isReleasedRoute("/microgrids/mg-1/operations/")).toBe(true);
   });
 });

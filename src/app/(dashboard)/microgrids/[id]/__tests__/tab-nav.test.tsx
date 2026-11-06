@@ -7,7 +7,8 @@
  *     instead of a full document reload.
  *   - Each tab links to the page a click lands on, not to a URL that
  *     redirects (/microgrids/<id> → household list, /setup → Edges).
- *   - The highlighted tab for every sub-route.
+ *   - The highlighted tab for every sub-route, including Operations, whose
+ *     ?date= query is not part of the pathname usePathname() returns.
  *   - A click announces the navigation to NavigationProgress, except on the
  *     page the user is already on and on a click that opens a new tab.
  */
@@ -51,6 +52,8 @@ vi.mock("next/link", () => ({
 
 import { TabNav } from "../tab-nav";
 
+const TAB_NAMES = ["Dashboard", "Operations", "Billing", "Setup"];
+
 let announced: string[];
 const onNavigationStart = (e: Event) =>
   announced.push((e as CustomEvent<string>).detail);
@@ -69,9 +72,14 @@ function tab(name: string) {
 }
 
 describe("TabNav", () => {
+  it("renders the tabs in workflow order", () => {
+    render(<TabNav microgridId="mg-1" />);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(TAB_NAMES);
+  });
+
   it("renders every tab as a client-side Link", () => {
     render(<TabNav microgridId="mg-1" />);
-    for (const name of ["Dashboard", "Billing", "Setup"]) {
+    for (const name of TAB_NAMES) {
       expect(tab(name).hasAttribute("data-next-link")).toBe(true);
     }
   });
@@ -81,12 +89,19 @@ describe("TabNav", () => {
     expect(tab("Dashboard").getAttribute("href")).toBe(
       "/microgrids/mg-1/setup/households",
     );
+    expect(tab("Operations").getAttribute("href")).toBe(
+      "/microgrids/mg-1/operations",
+    );
     expect(tab("Billing").getAttribute("href")).toBe("/microgrids/mg-1/billing");
     expect(tab("Setup").getAttribute("href")).toBe("/microgrids/mg-1/setup/edges");
   });
 
   it.each([
     ["/microgrids/mg-1", "Dashboard"],
+    ["/microgrids/mg-1/", "Dashboard"],
+    // usePathname() never includes the query, so /operations?date=… arrives
+    // as the bare path and must still highlight Operations.
+    ["/microgrids/mg-1/operations", "Operations"],
     ["/microgrids/mg-1/billing", "Billing"],
     ["/microgrids/mg-1/billing/p-1", "Billing"],
     ["/microgrids/mg-1/billing/p-1/history", "Billing"],
@@ -98,11 +113,33 @@ describe("TabNav", () => {
   ])("on %s highlights only %s", (pathname, selected) => {
     mockPathname = pathname;
     render(<TabNav microgridId="mg-1" />);
-    for (const name of ["Dashboard", "Billing", "Setup"]) {
+    for (const name of TAB_NAMES) {
       expect(tab(name).getAttribute("aria-selected")).toBe(
         String(name === selected),
       );
     }
+  });
+
+  it("highlights nothing on a page outside the four tabs", () => {
+    mockPathname = "/microgrids/mg-1/tenants";
+    render(<TabNav microgridId="mg-1" />);
+    for (const name of TAB_NAMES) {
+      expect(tab(name).getAttribute("aria-selected")).toBe("false");
+    }
+  });
+
+  it("announces the navigation to Operations from another tab", () => {
+    mockPathname = "/microgrids/mg-1/billing";
+    render(<TabNav microgridId="mg-1" />);
+    fireEvent.click(tab("Operations"));
+    expect(announced).toEqual(["/microgrids/mg-1/operations"]);
+  });
+
+  it("does not announce a click on Operations while it is shown", () => {
+    mockPathname = "/microgrids/mg-1/operations";
+    render(<TabNav microgridId="mg-1" />);
+    fireEvent.click(tab("Operations"));
+    expect(announced).toEqual([]);
   });
 
   it("announces the navigation when a tab leads somewhere else", () => {

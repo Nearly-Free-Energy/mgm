@@ -1,7 +1,12 @@
 // day-key.test.ts — tz-aware calendar-day keys (#359, anchor #353).
 
 import { describe, it, expect } from "vitest";
-import { dayKeyInZone, addDaysToDateKey, startOfDayInZone } from "../day-key";
+import {
+  dayKeyInZone,
+  addDaysToDateKey,
+  isCalendarDateKey,
+  startOfDayInZone,
+} from "../day-key";
 
 describe("dayKeyInZone", () => {
   it("names the UTC day for the literal 'UTC' zone", () => {
@@ -104,5 +109,52 @@ describe("startOfDayInZone", () => {
   it("throws on a malformed date key or an unknown zone id", () => {
     expect(() => startOfDayInZone("2026-13-45", "UTC")).toThrow(RangeError);
     expect(() => startOfDayInZone("2026-03-10", "Mars/OlympusMons")).toThrow(RangeError);
+  });
+});
+
+describe("isCalendarDateKey", () => {
+  it.each(["2026-01-01", "2026-11-06", "2026-12-31", "1999-06-30", "0100-03-01"])(
+    "accepts the real day %s",
+    (value) => {
+      expect(isCalendarDateKey(value)).toBe(true);
+    },
+  );
+
+  it.each(["2024-02-29", "2000-02-29", "2028-02-29"])(
+    "accepts the leap day %s",
+    (value) => {
+      expect(isCalendarDateKey(value)).toBe(true);
+    },
+  );
+
+  it.each([
+    ["2026-02-29", "not a leap year"],
+    ["1900-02-29", "century not divisible by 400"],
+    ["2026-02-30", "February never has 30 days"],
+    ["2026-04-31", "April has 30 days"],
+    ["2026-01-32", "no month has 32 days"],
+    ["2026-01-00", "day 00"],
+    ["2026-13-01", "month 13"],
+    ["2026-00-10", "month 00"],
+  ])("rejects %s (%s)", (value) => {
+    expect(isCalendarDateKey(value)).toBe(false);
+  });
+
+  it.each([
+    "",
+    "2026-1-05",
+    "2026-01-5",
+    "26-01-05",
+    "20260105",
+    "2026/01/05",
+    "2026-01-05T00:00:00Z",
+    " 2026-01-05",
+    "2026-01-05 ",
+    "2026-01-05\n",
+    "+2026-01-05",
+    "2026-0a-05",
+    "１２３４-01-05",
+  ])("rejects the wrong shape %j", (value) => {
+    expect(isCalendarDateKey(value)).toBe(false);
   });
 });
