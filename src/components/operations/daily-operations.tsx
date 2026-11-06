@@ -254,6 +254,38 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
   );
 }
 
+/** The battery's evening share, and why the houses' figure may be short. */
+function HousesEveningDetail({
+  day,
+  clock,
+}: {
+  day: SiteDayOperations;
+  clock: (ms: number) => string;
+}) {
+  // Before the window opens there is nothing to compare: say when it starts
+  // rather than show the battery's zero beside an empty figure.
+  const battery =
+    day.readUntilMs <= day.eveningStartMs ? (
+      `From ${clock(day.eveningStartMs)}`
+    ) : day.eveningDischargeKwh === null ? (
+      "No battery registered"
+    ) : (
+      <>
+        Battery supplied <Kwh value={day.eveningDischargeKwh} />
+      </>
+    );
+  if (!day.sources.houses) {
+    return <>Needs household meters · {battery}</>;
+  }
+  const missing = day.housesEveningMetersMissing;
+  return (
+    <>
+      {battery}
+      {missing > 0 && ` · ${missing} ${missing === 1 ? "meter" : "meters"} without data`}
+    </>
+  );
+}
+
 export function DailyOperations({ day }: { day: SiteDayOperations }) {
   const clock = useClock(day.timezone);
   const partial = day.readUntilMs < day.dayEndMs;
@@ -281,11 +313,11 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
           tone="warn"
         />
         <Stat
-          label={`Battery discharged ${clock(day.eveningStartMs)}–24:00`}
+          label={`Houses used ${clock(day.eveningStartMs)}–24:00`}
           value={
-            day.eveningDischargeKwh === null ? NOT_AVAILABLE : <Kwh value={day.eveningDischargeKwh} />
+            day.housesEveningKwh === null ? NOT_AVAILABLE : <Kwh value={day.housesEveningKwh} />
           }
-          detail="What the battery supplied in the evening window"
+          detail={<HousesEveningDetail day={day} clock={clock} />}
           tone="success"
         />
         <Stat

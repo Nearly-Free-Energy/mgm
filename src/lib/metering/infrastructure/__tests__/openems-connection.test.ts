@@ -22,6 +22,7 @@ function stubRepo(): MeteringRepository {
     getStoredConnection: async () => null,
     getMicrogridTimezone: async () => null,
     getManagedDevices: async () => [],
+    getHouseMeterIds: async () => [],
     getMicrogridEdges: async () => [],
     getKnownEdgeIds: async () => [],
     getAssignmentLinks: async () => [],

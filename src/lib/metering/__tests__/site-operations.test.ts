@@ -31,6 +31,8 @@ const ALL_SOURCES: SiteSourceAvailability = {
   gridMeter: true,
   load: true,
   pv: false,
+  houses: false,
+  houseMetersUnreadable: 0,
 };
 
 type BinValues = {
@@ -72,6 +74,7 @@ function makeSamples(
     gridVoltageV: [],
     loadPowerW: [],
     pvPowerW: [],
+    houseEnergyWh: {},
   };
   for (let t = startMs; t < endMs; t += binMs) {
     const v = gen((t - DAY_START) / MINUTE, t);
@@ -104,6 +107,26 @@ function concat(...parts: SiteSamples[]): SiteSamples {
   }
   return out;
 }
+
+/**
+ * Adds a cumulative counter series (Wh) per house meter, aligned with
+ * `samples.timestamps`. A generator gets the row's minutes since local
+ * midnight; `null` is a missing reading.
+ */
+function withHouses(
+  samples: SiteSamples,
+  meters: Record<string, (minute: number) => number | null>
+): SiteSamples {
+  const houseEnergyWh = Object.fromEntries(
+    Object.entries(meters).map(([id, gen]) => [
+      id,
+      samples.timestamps.map((t) => gen((t - DAY_START) / MINUTE)),
+    ])
+  );
+  return { ...samples, houseEnergyWh };
+}
+
+const WITH_HOUSES: SiteSourceAvailability = { ...ALL_SOURCES, houses: true };
 
 function run(
   samples: SiteSamples,
@@ -617,6 +640,179 @@ describe("computeSiteDay — energy", () => {
       expect(day.solarKwh).toBeNull();
       expect(day.solarEstimated).toBe(false);
     }
+  });
+});
+
+describe("computeSiteDay — what the houses used in the evening", () => {
+  /** A counter rising `whPerBin` each bin from `base` at midnight. */
+  const counter = (base: number, whPerBin: number) => (m: number) =>
+    base + (m / BIN_MINUTES) * whPerBin;
+  const EVENING = 18 * 60;
+
+  it("reads a steady counter over the full six hours: 72 bins, not 71", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: counter(1_000_000, 10),
+      b: counter(50_000, 5),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    // The 17:55 bin to the 23:55 bin: bin means are mid-bin readings, so
+    // this spans 17:57:30 → 23:57:30, a whole six hours.
+    expect(day.housesEveningKwh).toBeCloseTo((72 * 10 + 72 * 5) / 1000, 10);
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("starts from the last reading in the half hour before 18:00", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: (m) => (inRange(m, 17 * 60 + 45, EVENING + 10) && m !== 17 * 60 + 45 ? null : 1000 + m),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    // Start 17:45 (1000 + 1065), end 23:55 (1000 + 1435).
+    expect(day.housesEveningKwh).toBeCloseTo((1435 - 1065) / 1000, 10);
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("falls back to the 18:00 bin when there is no reading in the half hour before", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: (m) => (inRange(m, 17 * 60 + 20, EVENING) ? null : 1000 + m),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    // 17:20 is more than half an hour before the 17:55 bin: start 18:00.
+    expect(day.housesEveningKwh).toBeCloseTo((1435 - 1080) / 1000, 10);
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("does not start from a reading hours before the window", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: (m) => (m === 12 * 60 || m >= EVENING + 30 ? 1000 + m : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeNull();
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("does not take a start reading from before the day", () => {
+    const yesterday = makeSamples(() => NORMAL, { startMs: DAY_START - HOUR, endMs: DAY_START });
+    const today = makeSamples(() => NORMAL);
+    const samples = withHouses(concat(yesterday, today), {
+      a: (m) => (m < 0 ? 0 : m >= 19 * 60 ? 5000 + m : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeNull();
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("counts a meter with no reading in the window as missing and leaves it out", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: counter(0, 10),
+      silent: (m) => (m < EVENING ? 2000 : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("counts a meter whose only evening reading is at 18:00 as missing, not as zero", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: counter(0, 10),
+      once: (m) => (m === EVENING ? 4000 : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("counts a meter that stopped reporting at 19:00 on a past day as missing", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: counter(0, 10),
+      stopped: (m) => (m <= 19 * 60 ? counter(0, 10)(m) : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("keeps a meter whose last reading is within half an hour of the day's end", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      late: (m) => (m <= 23 * 60 + 30 ? counter(0, 10)(m) : null),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    // 17:55 → 23:30: 67 steps.
+    expect(day.housesEveningKwh).toBeCloseTo(0.67, 10);
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("counts a meter whose counter went backwards (reset or replaced) as missing", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: counter(0, 10),
+      reset: (m) => (m < 20 * 60 ? 900_000 + m : m - 20 * 60),
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
+    expect(day.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("counts linked meters that cannot be read as missing", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
+    const day = run(samples, { sources: { ...WITH_HOUSES, houseMetersUnreadable: 2 } });
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
+    expect(day.housesEveningMetersMissing).toBe(2);
+    const onlyUnreadable = run(makeSamples(() => NORMAL), {
+      sources: { ...WITH_HOUSES, houseMetersUnreadable: 1 },
+    });
+    expect(onlyUnreadable.housesEveningKwh).toBeNull();
+    expect(onlyUnreadable.housesEveningMetersMissing).toBe(1);
+  });
+
+  it("is null when every meter is missing", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), {
+      a: () => null,
+      b: () => null,
+    });
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.housesEveningKwh).toBeNull();
+    expect(day.housesEveningMetersMissing).toBe(2);
+  });
+
+  it("is null, with nothing missing, without house meters", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
+    const day = run(samples);
+    expect(day.housesEveningKwh).toBeNull();
+    expect(day.housesEveningMetersMissing).toBe(0);
+    const none = run(makeSamples(() => NORMAL), { sources: WITH_HOUSES });
+    expect(none.housesEveningKwh).toBeNull();
+    expect(none.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("is null before 18:00 today", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
+    const day = run(samples, {
+      sources: { ...WITH_HOUSES, houseMetersUnreadable: 1 },
+      nowMs: at(17, 58),
+    });
+    expect(day.readUntilMs).toBe(at(18, 0));
+    expect(day.housesEveningKwh).toBeNull();
+    expect(day.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("reads today up to the latest reading so far", () => {
+    const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
+    const day = run(samples, { sources: WITH_HOUSES, nowMs: at(20, 2) });
+    // Bins 17:55 … 20:00: 25 steps of 10 Wh.
+    expect(day.housesEveningKwh).toBeCloseTo(0.25, 10);
+    const opening = run(samples, { sources: WITH_HOUSES, nowMs: at(18, 2) });
+    // Just after 18:00: the 17:55 and 18:00 bins, one step.
+    expect(opening.housesEveningKwh).toBeCloseTo(0.01, 10);
+    expect(opening.housesEveningMetersMissing).toBe(0);
+  });
+
+  it("is reported alongside the battery's evening discharge, which it does not replace", () => {
+    const samples = withHouses(
+      makeSamples((m) => (m >= EVENING ? { ...NORMAL, batteryW: 1200 } : NORMAL)),
+      { a: counter(0, 10) }
+    );
+    const day = run(samples, { sources: WITH_HOUSES });
+    expect(day.eveningDischargeKwh).toBeCloseTo(7.2, 10);
+    expect(day.housesEveningKwh).toBeCloseTo(0.72, 10);
   });
 });
 

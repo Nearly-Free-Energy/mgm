@@ -49,6 +49,7 @@ function stubRepo(overrides: Partial<MeteringRepository> = {}): MeteringReposito
         componentId: "meter0",
       },
     ],
+    getHouseMeterIds: async () => [],
     getMicrogridEdges: async () => [],
     getKnownEdgeIds: async () => [],
     getAssignmentLinks: async () => [],

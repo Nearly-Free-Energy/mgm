@@ -56,7 +56,14 @@ function sent(init: RequestInit | undefined): SentRpc {
 const device = (id: string, edgeOpenemsId: string, componentId: string) =>
   ({ id, edgeOpenemsId, componentId });
 
-const NO_SOURCES: SiteSources = { battery: null, gridMeter: null, load: null, pv: null };
+const NO_SOURCES: SiteSources = {
+  battery: null,
+  gridMeter: null,
+  load: null,
+  pv: null,
+  houseMeters: [],
+  houseMetersUnreadable: 0,
+};
 
 function siteRequest(sources: Partial<SiteSources>, overrides: Partial<SiteSamplesRequest> = {}) {
   return {
@@ -151,6 +158,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
       gridVoltageV: [230, 231],
       loadPowerW: [900, 950],
       pvPowerW: [2_000, 0],
+      houseEnergyWh: {},
     });
   });
 
@@ -375,7 +383,163 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
       gridVoltageV: [],
       loadPowerW: [],
       pvPowerW: [],
+      houseEnergyWh: {},
     });
+  });
+
+  it("requests each house meter's consumption counter, in its own batch per edge, and fills a Wh series per meter", async () => {
+    clearPilotEnv();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const rpc = sent(init);
+      if (rpc.edgeId === "edge-a" && rpc.inner.params.channels.includes("ess0/Soc")) {
+        return response({
+          timestamps: [T0, T0 + FIVE_MIN],
+          data: { "ess0/Soc": [60, 61], "ess0/ActivePower": [100, 200] },
+        });
+      }
+      if (rpc.edgeId === "edge-a") {
+        return response({
+          timestamps: [T0, T0 + FIVE_MIN],
+          data: {
+            "meter1/ActiveConsumptionEnergy": [1_000_000, 1_000_250],
+            "meter2/ActiveConsumptionEnergy": [null, 52_000],
+          },
+        });
+      }
+      return response({
+        timestamps: [T0 + FIVE_MIN],
+        data: { "meter3/ActiveConsumptionEnergy": [7_500] },
+      });
+    });
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-a", "ess0"),
+      houseMeters: [
+        device("house-1", "edge-a", "meter1"),
+        device("house-2", "edge-a", "meter2"),
+        // The same channel listed twice is requested once.
+        device("house-1", "edge-a", "meter1"),
+        device("house-3", "edge-b", "meter3"),
+      ],
+    }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    const batches = fetchSpy.mock.calls.map(([, init]) => {
+      const rpc = sent(init);
+      return [rpc.edgeId, rpc.inner.params.channels];
+    });
+    expect(batches).toEqual(expect.arrayContaining([
+      ["edge-a", ["ess0/Soc", "ess0/ActivePower"]],
+      ["edge-a", ["meter1/ActiveConsumptionEnergy", "meter2/ActiveConsumptionEnergy"]],
+      ["edge-b", ["meter3/ActiveConsumptionEnergy"]],
+    ]));
+    expect(samples.timestamps).toEqual([T0, T0 + FIVE_MIN]);
+    expect(samples.houseEnergyWh).toEqual({
+      "house-1": [1_000_000, 1_000_250],
+      "house-2": [null, 52_000],
+      "house-3": [null, 7_500],
+    });
+    expect(samples.batterySocPct).toEqual([60, 61]);
+  });
+
+  it("gives a house meter with no history an all-null series after the per-channel retry", async () => {
+    clearPilotEnv();
+    const timestamps = [T0, T0 + FIVE_MIN];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const { channels } = sent(init).inner.params;
+      if (channels.length > 1) return missing();
+      const [channel] = channels;
+      if (channel === "meter2/ActiveConsumptionEnergy") return missing();
+      return response({ timestamps, data: { [channel]: [10, 20] } });
+    });
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      houseMeters: [device("house-1", "edge-1", "meter1"), device("house-2", "edge-1", "meter2")],
+    }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1 + 2);
+    expect(samples.houseEnergyWh).toEqual({
+      "house-1": [10, 20],
+      "house-2": [null, null],
+    });
+  });
+
+  it("does not retry the site's channels one by one when only a house meter has no history", async () => {
+    clearPilotEnv();
+    const timestamps = [T0, T0 + FIVE_MIN];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const { channels } = sent(init).inner.params;
+      if (channels.includes("ess0/Soc")) {
+        return response({
+          timestamps,
+          data: { "ess0/Soc": [50, 51], "ess0/ActivePower": [10, 20] },
+        });
+      }
+      if (channels.length > 1 || channels[0] === "meter2/ActiveConsumptionEnergy") return missing();
+      return response({ timestamps, data: { [channels[0]]: [1_000, 1_010] } });
+    });
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+      houseMeters: [device("house-1", "edge-1", "meter1"), device("house-2", "edge-1", "meter2")],
+    }));
+
+    // The site batch once; the house batch, then each house meter alone.
+    expect(fetchSpy).toHaveBeenCalledTimes(1 + 1 + 2);
+    const singles = fetchSpy.mock.calls
+      .map(([, init]) => sent(init).inner.params.channels)
+      .filter((channels) => channels.length === 1)
+      .flat()
+      .sort();
+    expect(singles).toEqual(["meter1/ActiveConsumptionEnergy", "meter2/ActiveConsumptionEnergy"]);
+    expect(samples.batterySocPct).toEqual([50, 51]);
+    expect(samples.houseEnergyWh).toEqual({
+      "house-1": [1_000, 1_010],
+      "house-2": [null, null],
+    });
+  });
+
+  it("retries at most four channels at a time", async () => {
+    clearPilotEnv();
+    let inFlight = 0;
+    let peak = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const { channels } = sent(init).inner.params;
+      if (channels.length > 1) return missing();
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      inFlight -= 1;
+      return response({ timestamps: [T0], data: { [channels[0]]: [1] } });
+    });
+    const meters = Array.from({ length: 10 }, (_, i) =>
+      device(`house-${i}`, "edge-1", `meter${i}`)
+    );
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      houseMeters: meters,
+    }));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1 + 10);
+    expect(peak).toBe(4);
+    expect(Object.values(samples.houseEnergyWh)).toEqual(Array(10).fill([1]));
+  });
+
+  it("skips a house meter without OpenEMS identifiers but still returns its all-null series", async () => {
+    clearPilotEnv();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [T0],
+      data: { "meter1/ActiveConsumptionEnergy": [5] },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      houseMeters: [device("house-1", "edge-1", "meter1"), device("house-2", "edge-1", "")],
+    }));
+
+    expect(sent(fetchSpy.mock.calls[0][1]).inner.params.channels).toEqual([
+      "meter1/ActiveConsumptionEnergy",
+    ]);
+    expect(samples.houseEnergyWh).toEqual({ "house-1": [5], "house-2": [null] });
   });
 
   it("retries channel by channel when the batch has no history and leaves the missing channel null", async () => {

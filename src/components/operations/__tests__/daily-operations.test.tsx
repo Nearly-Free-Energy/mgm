@@ -2,7 +2,7 @@
 //
 // Renders DailyOperations with hand-built SiteDayOperations fixtures (no
 // computeSiteDay) so each assertion pins one field to one piece of copy:
-//   - stat tiles: solar, evening discharge, cuts, lowest battery, 17:00
+//   - stat tiles: solar, houses' evening use (with the battery's share), cuts, lowest battery, 17:00
 //     battery, lights on; em dash and "needs …" copy when a value is null
 //   - the partial-day note for today
 //   - the battery chart's accessible description
@@ -41,10 +41,19 @@ function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations 
     resolutionMinutes: 15,
     eveningStartMs: at(18),
     hourMarks: [0, 3, 6, 9, 12, 15, 18, 21, 24].map((hour) => ({ hour, atMs: at(hour) })),
-    sources: { battery: true, gridMeter: true, load: true, pv: true },
+    sources: {
+      battery: true,
+      gridMeter: true,
+      load: true,
+      pv: true,
+      houses: true,
+      houseMetersUnreadable: 0,
+    },
     solarKwh: 12.34,
     solarEstimated: false,
     eveningDischargeKwh: 4.56,
+    housesEveningKwh: 3.21,
+    housesEveningMetersMissing: 0,
     // Two cuts: 02:00–04:30 (150 min) and 13:00–14:40 (100 min) = 4h 10m.
     cuts: [
       { startMs: at(2), endMs: at(4, 30) },
@@ -77,10 +86,19 @@ function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations 
 }
 
 const NULL_DAY: Partial<SiteDayOperations> = {
-  sources: { battery: false, gridMeter: false, load: false, pv: false },
+  sources: {
+    battery: false,
+    gridMeter: false,
+    load: false,
+    pv: false,
+    houses: false,
+    houseMetersUnreadable: 0,
+  },
   solarKwh: null,
   solarEstimated: false,
   eveningDischargeKwh: null,
+  housesEveningKwh: null,
+  housesEveningMetersMissing: 0,
   cuts: null,
   cutMinutes: null,
   lowestSoc: null,
@@ -138,14 +156,84 @@ describe("formatDuration", () => {
 // ── DailyOperations ───────────────────────────────────────────────────────
 
 describe("DailyOperations", () => {
-  it("shows solar and evening discharge in kWh", () => {
+  it("shows solar, and what the houses used in the evening with the battery's share, in kWh", () => {
     const { root } = render(makeDay());
     expect(tileValue(root, "Solar")).toBe("12.3 kWh");
     expect(tile(root, "Solar")).toContain("Solar meter");
-    expect(tileValue(root, "Battery discharged 18:00–24:00")).toBe("4.6 kWh");
-    expect(tile(root, "Battery discharged 18:00–24:00")).toContain(
-      "What the battery supplied in the evening window",
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("3.2 kWh");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain("Battery supplied 4.6 kWh");
+    expect(tile(root, "Houses used 18:00–24:00")).not.toContain("without data");
+  });
+
+  it("notes house meters left out of the evening figure for want of data", () => {
+    const one = render(makeDay({ housesEveningMetersMissing: 1 })).root;
+    expect(tile(one, "Houses used 18:00–24:00")).toContain(
+      "Battery supplied 4.6 kWh · 1 meter without data",
     );
+    const two = render(makeDay({ housesEveningMetersMissing: 2 })).root;
+    expect(tile(two, "Houses used 18:00–24:00")).toContain("2 meters without data");
+  });
+
+  it("shows an em dash when no house meter has the evening's readings", () => {
+    const { root } = render(
+      makeDay({ housesEveningKwh: null, housesEveningMetersMissing: 3 }),
+    );
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("—");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain(
+      "Battery supplied 4.6 kWh · 3 meters without data",
+    );
+  });
+
+  it("says household meters are needed when there are none, and still gives the battery's share", () => {
+    const { root } = render(
+      makeDay({
+        sources: {
+          battery: true,
+          gridMeter: true,
+          load: true,
+          pv: true,
+          houses: false,
+          houseMetersUnreadable: 0,
+        },
+        housesEveningKwh: null,
+      }),
+    );
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("—");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain(
+      "Needs household meters · Battery supplied 4.6 kWh",
+    );
+  });
+
+  it("before 18:00 today, says when the window starts instead of the battery's zero", () => {
+    const { root } = render(
+      makeDay({
+        readUntilMs: at(17, 45),
+        eveningDischargeKwh: 0,
+        housesEveningKwh: null,
+        housesEveningMetersMissing: 0,
+      }),
+    );
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("—");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain("From 18:00");
+    expect(tile(root, "Houses used 18:00–24:00")).not.toContain("Battery supplied");
+    const noMeters = render(
+      makeDay({
+        readUntilMs: at(17, 45),
+        eveningDischargeKwh: 0,
+        housesEveningKwh: null,
+        sources: { ...makeDay().sources, houses: false },
+      }),
+    ).root;
+    expect(tile(noMeters, "Houses used 18:00–24:00")).toContain(
+      "Needs household meters · From 18:00",
+    );
+  });
+
+  it("says no battery is registered in the evening tile when there is none", () => {
+    const { root } = render(makeDay({ eveningDischargeKwh: null }));
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("3.2 kWh");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain("No battery registered");
+    expect(tile(root, "Houses used 18:00–24:00")).not.toContain("Battery supplied");
   });
 
   it("marks solar as estimated when it is the balance at the inverter", () => {
@@ -202,7 +290,7 @@ describe("DailyOperations", () => {
     const { root } = render(makeDay(NULL_DAY));
     for (const label of [
       "Solar",
-      "Battery discharged 18:00–24:00",
+      "Houses used 18:00–24:00",
       "Power cuts",
       "Lowest battery",
       "Battery at 17:00",
@@ -214,6 +302,9 @@ describe("DailyOperations", () => {
       "Needs a solar meter, or an inverter output meter with the battery and grid meter",
     );
     expect(tile(root, "Power cuts")).toContain("Needs a grid meter");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain(
+      "Needs household meters · No battery registered",
+    );
     expect(tile(root, "Lowest battery")).toContain("Needs a battery");
     expect(tile(root, "Battery at 17:00")).toContain("No reading at 17:00");
   });
@@ -268,7 +359,8 @@ describe("DailyOperations", () => {
     const labels = Array.from(root.querySelectorAll("section")).map(
       (s) => s.querySelector("p")?.textContent,
     );
-    expect(labels).toContain("Battery discharged 18:00\u201324:00");
+    expect(labels).toContain("Houses used 18:00\u201324:00");
+    expect(labels.some((l) => l?.startsWith("Battery discharged"))).toBe(false);
     expect(labels.some((l) => l?.startsWith("Battery sold"))).toBe(false);
   });
 
