@@ -91,6 +91,10 @@ describe("isReleasedRoute", () => {
     "/api/gui/prepare",
     "/api/gui/signals",
     "/api/gui/search",
+    // Operations APIs: grid tariffs and savings settings.
+    "/api/microgrids/mg-1/grid-tariffs",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1",
+    "/api/microgrids/mg-1/savings-settings",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -119,6 +123,9 @@ describe("isReleasedRoute", () => {
     "/api/gui/signals/x",
     "/api/gui/search/extra",
     "/api/gui/searches",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1/extra",
+    "/api/microgrids/mg-1/savings-settings/extra",
+    "/api/grid-tariffs",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -131,5 +138,6 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/api/gui/prepare/")).toBe(true);
     expect(isReleasedRoute("/api/gui/signals/")).toBe(true);
     expect(isReleasedRoute("/api/gui/search/")).toBe(true);
+    expect(isReleasedRoute("/api/microgrids/mg-1/savings-settings/")).toBe(true);
   });
 });

@@ -11,7 +11,11 @@ import "server-only";
 import { validateTimezone } from "@/lib/validation/timezone";
 import { MeteringError } from "./errors";
 import { computeAssignmentGaps } from "./assignment-gaps";
-import { computeSiteDay, type SiteDayOperations } from "./site-operations";
+import {
+  computeSiteDay,
+  type SiteDayOperations,
+  type SiteSourceAvailability,
+} from "./site-operations";
 import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
 import type {
   ManagedDevice,
@@ -26,6 +30,7 @@ import type {
   AssignmentHistoryEntry,
   DeviceConsumption,
   DiscoveredMeter,
+  MeteringProvider,
   OpeningRegisterInput,
   SiteSources,
 } from "./types";
@@ -38,6 +43,18 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The daily operations view reads 5-minute bins (what OpenEMS keeps). */
 const SITE_RESOLUTION_MINUTES = 5;
+/** The longest range `getSiteDays` reads, in days. */
+export const SITE_DAYS_MAX = 366;
+/** How many chunk reads `getSiteDays` runs at once. */
+export const SITE_DAYS_PARALLEL = 3;
+
+/** The most days `getSiteDays` asks the provider for in one call. */
+export const SITE_DAYS_CHUNK = 31;
+
+/** Whole days from `from` to `to` (calendar keys; negative when `to` is earlier). */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
 
 /**
  * The site devices the daily operations view reads, chosen by device type.
@@ -533,12 +550,21 @@ export class MeteringCapability implements MeteringCapabilityContract {
   }
 
   /**
-   * One local day of the site's battery, grid and supply (the daily
-   * operations view). Query: `{ microgrid_id, date: "YYYY-MM-DD" }`; the day
-   * is in the microgrid's timezone. Reads the vendor, so it is gated like
-   * `getConsumption`.
+   * The checks every site read shares, up to the date: disposal, query
+   * shape, microgrid scope, the plugin gate, then the microgrid's timezone
+   * and the clock the dates are checked against.
    */
-  async getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>> {
+  private async openSiteQuery(query: unknown): Promise<
+    | Extract<MeteringResult<never>, { ok: false }>
+    | {
+        ok: true;
+        q: Record<string, unknown>;
+        microgridId: string;
+        timezone: string;
+        nowMs: number;
+        today: string;
+      }
+  > {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     if (!query || typeof query !== "object" || Array.isArray(query)) {
@@ -559,17 +585,28 @@ export class MeteringCapability implements MeteringCapabilityContract {
     const stored = await this.repo.getMicrogridTimezone(microgridId);
     const timezone = stored && !validateTimezone(stored) ? stored : "UTC";
     const nowMs = Date.now();
-    const date = typeof q.date === "string" ? q.date : "";
-    if (!isCalendarDateKey(date) || date > dayKeyInZone(nowMs, timezone)) {
-      return {
-        ok: false as const,
-        status: 422 as const,
-        code: "metering_invalid_date",
-        message: "date must be a YYYY-MM-DD day that has started in the microgrid's timezone.",
-        field: "date",
-      };
-    }
+    return { ok: true, q, microgridId, timezone, nowMs, today: dayKeyInZone(nowMs, timezone) };
+  }
 
+  /**
+   * The provider's site-sample reader and the site devices to read, once the
+   * dates are valid. `houseDate` picks the house meters assigned on that day;
+   * null reads no house meters (a range read, whose days can have different
+   * house meters and whose savings figures do not use them).
+   */
+  private async openSiteReader(
+    microgridId: string,
+    houseDate: string | null
+  ): Promise<
+    | Extract<MeteringResult<never>, { ok: false }>
+    | {
+        ok: true;
+        getSiteSamples: NonNullable<MeteringProvider["getSiteSamples"]>;
+        sources: SiteSources;
+        availability: SiteSourceAvailability;
+        synthetic: boolean;
+      }
+  > {
     let providerName: MeteringProviderName;
     try {
       providerName = await this.selectProvider(microgridId);
@@ -582,7 +619,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
         message: "Metering provider is not available.",
       };
     }
-    let provider;
+    let provider: MeteringProvider;
     try {
       provider = this.registry.resolve(providerName);
     } catch {
@@ -607,7 +644,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
     try {
       [devices, houseMeterIds] = await Promise.all([
         this.repo.getManagedDevices(microgridId),
-        this.repo.getHouseMeterIds(microgridId, date),
+        houseDate === null ? Promise.resolve([]) : this.repo.getHouseMeterIds(microgridId, houseDate),
       ]);
     } catch (error) {
       console.error("MGM site devices could not be read", {
@@ -639,12 +676,62 @@ export class MeteringCapability implements MeteringCapabilityContract {
           "No battery or grid meter is registered on this microgrid. Add them under Setup → Edges.",
       };
     }
+    return {
+      ok: true,
+      getSiteSamples: provider.getSiteSamples.bind(provider),
+      sources,
+      availability,
+      synthetic: provider.synthetic === true,
+    };
+  }
+
+  /** A failure while reading or computing site days, reported as one. */
+  private siteReadFailed(
+    error: unknown,
+    context: Record<string, string>,
+    code: string,
+    message: string
+  ): Extract<MeteringResult<never>, { ok: false }> {
+    if (error instanceof MeteringError) return this.fromMeteringError(error);
+    // A day the computation cannot handle is one failed view, not a
+    // failed page: report it like any other unavailable read.
+    console.error("MGM site day could not be computed", {
+      ...context,
+      name: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : "non-Error thrown",
+    });
+    return { ok: false as const, status: 500 as const, code, message };
+  }
+
+  /**
+   * One local day of the site's battery, grid and supply (the daily
+   * operations view). Query: `{ microgrid_id, date: "YYYY-MM-DD" }`; the day
+   * is in the microgrid's timezone. Reads the vendor, so it is gated like
+   * `getConsumption`.
+   */
+  async getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>> {
+    const opened = await this.openSiteQuery(query);
+    if (!opened.ok) return opened;
+    const { q, microgridId, timezone, nowMs, today } = opened;
+    const date = typeof q.date === "string" ? q.date : "";
+    if (!isCalendarDateKey(date) || date > today) {
+      return {
+        ok: false as const,
+        status: 422 as const,
+        code: "metering_invalid_date",
+        message: "date must be a YYYY-MM-DD day that has started in the microgrid's timezone.",
+        field: "date",
+      };
+    }
+
+    const reader = await this.openSiteReader(microgridId, date);
+    if (!reader.ok) return reader;
 
     try {
       // The previous day's tail tells whether this day began in a cut.
-      const samples = await provider.getSiteSamples({
+      const samples = await reader.getSiteSamples({
         microgridId,
-        sources,
+        sources: reader.sources,
         startDate: addDaysToDateKey(date, -1),
         endDate: date,
         timezone,
@@ -654,30 +741,114 @@ export class MeteringCapability implements MeteringCapabilityContract {
         date,
         timezone,
         samples,
-        sources: availability,
+        sources: reader.availability,
         resolutionMinutes: SITE_RESOLUTION_MINUTES,
         nowMs,
       });
       return {
         ok: true as const,
-        data: provider.synthetic ? { ...day, synthetic: true as const } : day,
+        data: reader.synthetic ? { ...day, synthetic: true as const } : day,
       };
     } catch (error) {
-      if (error instanceof MeteringError) return this.fromMeteringError(error);
-      // A day the computation cannot handle is one failed view, not a
-      // failed page: report it like any other unavailable read.
-      console.error("MGM site day could not be computed", {
-        date,
-        timezone,
-        name: error instanceof Error ? error.name : typeof error,
-        message: error instanceof Error ? error.message : "non-Error thrown",
-      });
-      return {
-        ok: false as const,
-        status: 500 as const,
-        code: "metering_site_day_failed",
-        message: "This day's operations could not be worked out. Try another day.",
-      };
+      return this.siteReadFailed(
+        error,
+        { date, timezone },
+        "metering_site_day_failed",
+        "This day's operations could not be worked out. Try another day."
+      );
     }
+  }
+
+  /**
+   * Every local day from `start_date` to `end_date` inclusive, worked out as
+   * `getSiteDay` does (the savings figures add these up). Query:
+   * `{ microgrid_id, start_date, end_date }`, at most `SITE_DAYS_MAX` days,
+   * ending no later than today in the microgrid's timezone. Reads the vendor
+   * in chunks of at most `SITE_DAYS_CHUNK` days, each from the day before
+   * its first so the first day's carry-in works. Gated like `getSiteDay`;
+   * one failed chunk fails the whole read. Reads no house meters, so each
+   * day's houses figures are empty.
+   */
+  async getSiteDays(query: unknown): Promise<MeteringResult<SiteDayOperations[]>> {
+    const opened = await this.openSiteQuery(query);
+    if (!opened.ok) return opened;
+    const { q, microgridId, timezone, nowMs, today } = opened;
+    const startDate = typeof q.start_date === "string" ? q.start_date : "";
+    const endDate = typeof q.end_date === "string" ? q.end_date : "";
+    const invalid = (field: string, message: string) => ({
+      ok: false as const,
+      status: 422 as const,
+      code: "metering_invalid_date",
+      message,
+      field,
+    });
+    if (!isCalendarDateKey(startDate)) {
+      return invalid("start_date", "start_date must be a YYYY-MM-DD day.");
+    }
+    if (!isCalendarDateKey(endDate) || endDate > today) {
+      return invalid(
+        "end_date",
+        "end_date must be a YYYY-MM-DD day that has started in the microgrid's timezone."
+      );
+    }
+    if (startDate > endDate) {
+      return invalid("start_date", "start_date must not be after end_date.");
+    }
+    const dayCount = daysBetween(startDate, endDate) + 1;
+    if (dayCount > SITE_DAYS_MAX) {
+      return invalid("start_date", `A range may cover at most ${SITE_DAYS_MAX} days.`);
+    }
+
+    const reader = await this.openSiteReader(microgridId, null);
+    if (!reader.ok) return reader;
+
+    const chunks: { start: string; length: number }[] = [];
+    for (let offset = 0; offset < dayCount; offset += SITE_DAYS_CHUNK) {
+      chunks.push({
+        start: addDaysToDateKey(startDate, offset),
+        length: Math.min(SITE_DAYS_CHUNK, dayCount - offset),
+      });
+    }
+    const days: SiteDayOperations[] = [];
+    try {
+      // A few chunks at a time: a long range should not wait for each read
+      // in turn, nor send every read to OpenEMS at once.
+      for (let i = 0; i < chunks.length; i += SITE_DAYS_PARALLEL) {
+        const batch = await Promise.all(
+          chunks.slice(i, i + SITE_DAYS_PARALLEL).map(async (chunk) => ({
+            chunk,
+            samples: await reader.getSiteSamples({
+              microgridId,
+              sources: reader.sources,
+              startDate: addDaysToDateKey(chunk.start, -1),
+              endDate: addDaysToDateKey(chunk.start, chunk.length - 1),
+              timezone,
+              resolutionMinutes: SITE_RESOLUTION_MINUTES,
+            }),
+          }))
+        );
+        for (const { chunk, samples } of batch) {
+          for (let d = 0; d < chunk.length; d++) {
+            const day = computeSiteDay({
+              date: addDaysToDateKey(chunk.start, d),
+              timezone,
+              samples,
+              sources: reader.availability,
+              resolutionMinutes: SITE_RESOLUTION_MINUTES,
+              nowMs,
+            });
+            days.push(reader.synthetic ? { ...day, synthetic: true as const } : day);
+          }
+        }
+      }
+    } catch (error) {
+      return this.siteReadFailed(
+        error,
+        { startDate, endDate, timezone },
+        "metering_site_days_failed",
+        "These days' operations could not be worked out. Try a shorter range."
+      );
+    }
+    return { ok: true as const, data: days };
   }
 }

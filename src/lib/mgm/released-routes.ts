@@ -15,7 +15,7 @@
  * checkout, verified receipts, and manager reconciliation.
  * Operations: the daily operations view of a microgrid (battery level, power
  * cuts, dark time and who served the houses), read through the metering
- * capability.
+ * capability, and the grid tariffs and savings settings that value it.
  * Install metadata: the web app manifest.
  * GUI host: contributed views, signals and search for the signed-in person's
  * organization, and the step that prepares an action's form and
@@ -136,6 +136,13 @@ const PUBLIC_METADATA_ROUTES = [
   /^\/manifest\.webmanifest$/,
 ];
 
+const OPERATIONS_API_ROUTES = [
+  // Grid tariff versions (add, delete) and savings settings (upsert) that
+  // value the operations view's solar savings and battery arbitrage.
+  /^\/api\/microgrids\/[^/]+\/grid-tariffs(?:\/[^/]+)?$/,
+  /^\/api\/microgrids\/[^/]+\/savings-settings$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -150,5 +157,6 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_3_API_ROUTES,
     ...RELEASE_4_API_ROUTES,
     ...GUI_HOST_API_ROUTES,
+    ...OPERATIONS_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

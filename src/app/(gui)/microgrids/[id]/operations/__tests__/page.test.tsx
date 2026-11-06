@@ -1,9 +1,10 @@
 // Microgrid Operations page — server component tests.
 //
-// The page resolves the day and hands it to two children: the DayPicker and
+// The page resolves the day and hands it to three children: the DayPicker,
 // a Suspense boundary (keyed on the day) around SiteDaySection, which reads
-// the day itself. SiteDaySection's own behaviour is covered in
-// site-day-section.test.tsx.
+// the day itself, and a second boundary around SavingsSection, which reads
+// the savings range. Their own behaviour is covered in
+// site-day-section.test.tsx and savings-section.test.tsx.
 //
 // Strategy:
 //   - Mock @/lib/supabase/server to return a fixture microgrid row.
@@ -66,6 +67,7 @@ vi.mock("next/link", () => ({
 
 import OperationsPage from "../page";
 import { SiteDayLoading, SiteDaySection } from "../site-day-section";
+import { SavingsLoading, SavingsSection } from "../savings-section";
 import { DayPicker } from "@/components/operations/day-picker";
 
 // ── Query builder helpers ─────────────────────────────────────────────────────
@@ -189,13 +191,32 @@ describe("OperationsPage", () => {
 
   it("wraps SiteDaySection in a Suspense boundary keyed on the day, with the loading fallback", async () => {
     const tree = await callPage("2026-10-15");
-    const boundary = findOne(tree, Suspense);
+    const boundaries = findAll(tree, Suspense);
+    expect(boundaries).toHaveLength(2);
+    const boundary = boundaries[0];
     expect(boundary.key).toBe("2026-10-15");
     expect(React.isValidElement(boundary.props.fallback)).toBe(true);
     expect((boundary.props.fallback as AnyElement).type).toBe(SiteDayLoading);
     expect(findAll(boundary.props.children as React.ReactNode, SiteDaySection)).toHaveLength(1);
     // The DayPicker sits outside the boundary, so it stays while a day loads.
     expect(findAll(boundary.props.children as React.ReactNode, DayPicker)).toHaveLength(0);
+  });
+
+  it("puts SavingsSection in its own Suspense boundary after the day's, keyed on the day", async () => {
+    const tree = await callPage("2026-10-15");
+    const [dayBoundary, savingsBoundary] = findAll(tree, Suspense);
+
+    expect(savingsBoundary.key).toBe("savings-2026-10-15");
+    expect((savingsBoundary.props.fallback as AnyElement).type).toBe(SavingsLoading);
+    expect(findOne(savingsBoundary.props.children as React.ReactNode, SavingsSection).props).toEqual({
+      organizationId: "org-1",
+      microgridId: "mg-1",
+      date: "2026-10-15",
+    });
+    // Neither boundary holds the other's section, so the day does not wait
+    // for the savings range.
+    expect(findAll(dayBoundary.props.children as React.ReactNode, SavingsSection)).toHaveLength(0);
+    expect(findAll(savingsBoundary.props.children as React.ReactNode, SiteDaySection)).toHaveLength(0);
   });
 
   it("renders the day picker and the loading placeholder while the day is read", async () => {
@@ -208,8 +229,10 @@ describe("OperationsPage", () => {
     expect(html).toContain(`value="${YESTERDAY}"`);
     expect(html).toContain(`max="${TODAY}"`);
     expect(html).toContain(`${BASE}?date=${TODAY}`);
+    expect(html).toContain('aria-label="Loading the savings"');
     // No figures yet.
     expect(html).not.toContain("Battery level (%)");
+    expect(html).not.toContain("What the site saved");
   });
 
   it("falls back to UTC when the stored timezone is not supported", async () => {

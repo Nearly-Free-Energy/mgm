@@ -9,7 +9,7 @@ import {
   GRID_PRESENT_MIN_V,
   LOW_BATTERY_PCT,
   type EveningSupply,
-  type SiteDayOperations,
+  type SiteDaySummary,
   type TimeRange,
 } from "@/lib/metering/site-operations";
 import { formatDuration } from "@/lib/metering/surface/site-day-model";
@@ -77,7 +77,7 @@ const PAD = { left: 36, right: 8, top: 8, bottom: 24 };
 const PLOT_W = W - PAD.left - PAD.right;
 const PLOT_H = H - PAD.top - PAD.bottom;
 
-function BatteryChart({ day }: { day: SiteDayOperations }) {
+function BatteryChart({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const span = day.dayEndMs - day.dayStartMs;
   const x = (ms: number) =>
@@ -199,7 +199,7 @@ const SUPPLY: Record<EveningSupply, { label: string; swatch: string }> = {
   no_data: { label: "No data", swatch: "bg-muted" },
 };
 
-function EveningStrip({ day }: { day: SiteDayOperations }) {
+function EveningStrip({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const span = day.dayEndMs - day.eveningStartMs;
   const order: EveningSupply[] = ["battery", "battery_and_grid", "grid", "dark", "no_data"];
@@ -254,7 +254,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
 }
 
 /** The solar tile's note: where the figure comes from, or why there is none. */
-function solarDetail(day: SiteDayOperations): string {
+function solarDetail(day: SiteDaySummary): string {
   const { pv, load, battery, gridMeter } = day.sources;
   if (day.solarKwh !== null) {
     return day.solarEstimated ? "≈ inverter output − grid − battery" : "Solar meter";
@@ -265,7 +265,7 @@ function solarDetail(day: SiteDayOperations): string {
 }
 
 /** The lights-on tile's note: dark time, how much was inferred, and gaps. */
-function lightsOnDetail(day: SiteDayOperations): string {
+function lightsOnDetail(day: SiteDaySummary): string {
   const dark =
     day.darkMinutes > 0
       ? `Dark ${formatDuration(day.darkMinutes)}` +
@@ -281,7 +281,7 @@ function HousesEveningDetail({
   day,
   clock,
 }: {
-  day: SiteDayOperations;
+  day: SiteDaySummary;
   clock: (ms: number) => string;
 }) {
   // Before the window opens there is nothing to compare: say when it starts
@@ -310,7 +310,7 @@ function HousesEveningDetail({
   );
 }
 
-export function DailyOperations({ day }: { day: SiteDayOperations }) {
+export function DailyOperations({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const partial = day.readUntilMs < day.dayEndMs;
   const cutCount = day.cuts?.length ?? null;

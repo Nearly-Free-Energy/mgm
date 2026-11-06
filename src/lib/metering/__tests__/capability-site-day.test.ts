@@ -922,3 +922,320 @@ describe("pickSiteSources", () => {
     expect(Object.keys(sources.battery ?? {}).sort()).toEqual(["componentId", "edgeOpenemsId", "id"]);
   });
 });
+
+describe("MeteringCapability.getSiteDays", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const range = (start_date: unknown, end_date: unknown) => ({
+    microgrid_id: MG_ID,
+    start_date,
+    end_date,
+  });
+
+  /** Kampala midnight (UTC+3) of a day key. */
+  const kampalaMidnight = (date: string) => Date.parse(`${date}T00:00:00+03:00`);
+
+  /**
+   * One sample per day at local midnight whose state of charge is the day of
+   * the month, so each day's result shows which day's samples it read.
+   */
+  const samplesByDay: SiteSamplesFn = async ({ startDate, endDate }) => {
+    const out = emptySamples();
+    for (let d = startDate; d <= endDate; ) {
+      out.timestamps.push(kampalaMidnight(d));
+      out.batterySocPct.push(Number(d.slice(8)));
+      out.batteryPowerW.push(0);
+      out.gridPowerW.push(0);
+      out.gridVoltageV.push(230);
+      out.loadPowerW.push(null);
+      out.pvPowerW.push(null);
+      const next = new Date(`${d}T00:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 1);
+      d = next.toISOString().slice(0, 10);
+    }
+    return out;
+  };
+
+  describe("query shape and scope", () => {
+    it.each([
+      ["null", null],
+      ["a string", "2026-11-01"],
+      ["an array", [MG_ID]],
+    ])("answers 400 metering_invalid_query for %s", async (_label, query) => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(query);
+      expect(result).toMatchObject({ ok: false, status: 400, code: "metering_invalid_query" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 400 metering_invalid_microgrid for an id that is not a UUID", async () => {
+      const { capability } = setup();
+      const result = await capability.getSiteDays({
+        microgrid_id: "mg-1",
+        start_date: "2026-11-01",
+        end_date: "2026-11-02",
+      });
+      expect(result).toMatchObject({ ok: false, status: 400, code: "metering_invalid_microgrid" });
+    });
+
+    it("answers 403 metering_scope_mismatch for a microgrid in another organization", async () => {
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getMicrogridOrganization: async () => ({
+            microgridId: MG_ID,
+            communityId: "comm-1",
+            orgId: OTHER_ORG_ID,
+          }),
+        },
+      });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 403, code: "metering_scope_mismatch" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 500 metering_composition_disposed once disposed", async () => {
+      const { capability, getSiteSamples } = setup({ active: false });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 500, code: "metering_composition_disposed" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("date validation", () => {
+    it.each([
+      ["a malformed start_date", "2026-11", "2026-11-02", "start_date"],
+      ["a start_date that does not exist", "2026-02-30", "2026-03-02", "start_date"],
+      ["a missing start_date", undefined, "2026-11-02", "start_date"],
+      ["a malformed end_date", "2026-11-01", "02/11/2026", "end_date"],
+      ["a missing end_date", "2026-11-01", undefined, "end_date"],
+    ])("answers 422 for %s", async (_label, start, end, field) => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(range(start, end));
+      expect(result).toMatchObject({
+        ok: false,
+        status: 422,
+        code: "metering_invalid_date",
+        field,
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 422 for an end_date after today in the microgrid's timezone", async () => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-08"));
+      expect(result).toMatchObject({
+        ok: false,
+        status: 422,
+        code: "metering_invalid_date",
+        field: "end_date",
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("allows an end_date of today in the microgrid's timezone though UTC is a day behind", async () => {
+      const { capability } = setup();
+      const result = await capability.getSiteDays(range(UTC_TODAY, KAMPALA_TODAY));
+      expect(result.ok).toBe(true);
+    });
+
+    it("answers 422 when start_date is after end_date", async () => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(range("2026-11-03", "2026-11-02"));
+      expect(result).toMatchObject({
+        ok: false,
+        status: 422,
+        code: "metering_invalid_date",
+        field: "start_date",
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 422 for a range longer than 366 days", async () => {
+      const { capability, getSiteSamples } = setup();
+      // 2025-11-06 to 2026-11-07 inclusive is 367 days.
+      const result = await capability.getSiteDays(range("2025-11-06", KAMPALA_TODAY));
+      expect(result).toMatchObject({
+        ok: false,
+        status: 422,
+        code: "metering_invalid_date",
+        field: "start_date",
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("reads a range of exactly 366 days in 12 provider calls", async () => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(range("2025-11-07", KAMPALA_TODAY));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      expect(result.data).toHaveLength(366);
+      expect(getSiteSamples).toHaveBeenCalledTimes(12);
+    });
+  });
+
+  describe("provider and devices", () => {
+    it("answers 503 METERING_CONFIGURATION when the provider has no getSiteSamples", async () => {
+      const { capability } = setup({ getSiteSamples: null });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 503, code: "METERING_CONFIGURATION" });
+    });
+
+    it("answers 404 metering_no_site_devices without a battery or grid meter", async () => {
+      const { capability, getSiteSamples } = setup({
+        repo: { getManagedDevices: async () => [SITE_DEVICES[0]] },
+      });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 404, code: "metering_no_site_devices" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("chunked reads", () => {
+    it("reads one day with one call from the day before", async () => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-01"));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      expect(result.data.map((d) => d.date)).toEqual(["2026-11-01"]);
+      expect(getSiteSamples).toHaveBeenCalledTimes(1);
+      expect(getSiteSamples).toHaveBeenCalledWith({
+        microgridId: MG_ID,
+        sources: pickSiteSources(SITE_DEVICES),
+        startDate: "2026-10-31",
+        endDate: "2026-11-01",
+        timezone: "Africa/Kampala",
+        resolutionMinutes: 5,
+      });
+    });
+
+    it("reads a 70-day range in three calls, each from the day before its first day", async () => {
+      const { capability, getSiteSamples } = setup();
+      // 1 Aug to 9 Oct 2026 inclusive is 70 days: 31 + 31 + 8.
+      const result = await capability.getSiteDays(range("2026-08-01", "2026-10-09"));
+      expect(result.ok).toBe(true);
+      expect(getSiteSamples).toHaveBeenCalledTimes(3);
+      expect(getSiteSamples.mock.calls.map(([r]) => [r.startDate, r.endDate])).toEqual([
+        ["2026-07-31", "2026-08-31"],
+        ["2026-08-31", "2026-10-01"],
+        ["2026-10-01", "2026-10-09"],
+      ]);
+      for (const [request] of getSiteSamples.mock.calls) {
+        expect(request).toMatchObject({
+          microgridId: MG_ID,
+          timezone: "Africa/Kampala",
+          resolutionMinutes: 5,
+        });
+      }
+    });
+
+    it("returns one day per date, in order, each worked out from its own samples", async () => {
+      const { capability } = setup({ getSiteSamples: samplesByDay });
+      const result = await capability.getSiteDays(range("2026-08-01", "2026-10-09"));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      expect(result.data).toHaveLength(70);
+      expect(result.data[0].date).toBe("2026-08-01");
+      expect(result.data[30].date).toBe("2026-08-31");
+      expect(result.data[31].date).toBe("2026-09-01");
+      expect(result.data[69].date).toBe("2026-10-09");
+      for (let i = 1; i < result.data.length; i++) {
+        expect(result.data[i].date > result.data[i - 1].date).toBe(true);
+      }
+      for (const day of result.data) {
+        expect(day.timezone).toBe("Africa/Kampala");
+        expect(day.dayStartMs).toBe(kampalaMidnight(day.date));
+        expect(day.soc[0]).toEqual({ atMs: day.dayStartMs, pct: Number(day.date.slice(8)) });
+        expect(day.flows).toHaveLength(288);
+      }
+    });
+
+    it("carries a cut into a chunk's first day from the day before it", async () => {
+      // The day before the second chunk ends in a cut; the gateway is then
+      // silent, so that chunk's first day starts dark.
+      const { capability } = setup({
+        getSiteSamples: async ({ startDate }) => {
+          const out = emptySamples();
+          if (startDate === "2026-08-31") {
+            out.timestamps.push(kampalaMidnight("2026-09-01") - 5 * 60_000);
+            out.batterySocPct.push(20);
+            out.batteryPowerW.push(500);
+            out.gridPowerW.push(0);
+            out.gridVoltageV.push(0);
+            out.loadPowerW.push(null);
+            out.pvPowerW.push(null);
+          }
+          return out;
+        },
+      });
+      const result = await capability.getSiteDays(range("2026-08-01", "2026-09-02"));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      const first = result.data.find((d) => d.date === "2026-09-01");
+      expect(first?.darkMinutes).toBe(1440);
+      expect(first?.flows[0].gridPresent).toBe(false);
+    });
+
+    it("stops the last day at now when the range ends today", async () => {
+      const { capability } = setup();
+      const result = await capability.getSiteDays(range("2026-11-06", KAMPALA_TODAY));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      const today = result.data[1];
+      expect(today.date).toBe(KAMPALA_TODAY);
+      // 01:30 in Kampala: 17 five-minute bins closed at least
+      // INGESTION_LAG_MS (two minutes) ago.
+      expect(today.flows).toHaveLength(17);
+    });
+  });
+
+  describe("errors", () => {
+    it("fails the whole read when a later chunk's provider call fails", async () => {
+      let calls = 0;
+      const { capability } = setup({
+        getSiteSamples: async () => {
+          calls += 1;
+          if (calls === 2) throw new MeteringError("provider said no", "METERING_UNAVAILABLE", 503);
+          return emptySamples();
+        },
+      });
+      const result = await capability.getSiteDays(range("2026-08-01", "2026-10-09"));
+      expect(result).toEqual({
+        ok: false,
+        status: 503,
+        code: "METERING_UNAVAILABLE",
+        message: "provider said no",
+      });
+      // The three chunks of this range are read together (SITE_DAYS_PARALLEL).
+      expect(calls).toBe(3);
+    });
+
+    it("answers 500 metering_site_days_failed when something else throws, and logs it", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const { capability } = setup({
+          getSiteSamples: async () => {
+            throw new TypeError("boom");
+          },
+        });
+        const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+        expect(result).toEqual({
+          ok: false,
+          status: 500,
+          code: "metering_site_days_failed",
+          message: "These days' operations could not be worked out. Try a shorter range.",
+        });
+        expect(consoleSpy).toHaveBeenCalledWith("MGM site day could not be computed", {
+          startDate: "2026-11-01",
+          endDate: "2026-11-02",
+          timezone: "Africa/Kampala",
+          name: "TypeError",
+          message: "boom",
+        });
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+  });
+});
