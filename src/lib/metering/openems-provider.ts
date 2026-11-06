@@ -1,14 +1,20 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createOpenEmsClient } from "@/lib/openems";
+import { createOpenEmsClient, OpenEmsClient } from "@/lib/openems";
 import type { OpenEmsClientConfig } from "@/lib/openems";
-import type { DeviceReading } from "@/lib/adapters/types";
+import type { DeviceConfig, DeviceReading } from "@/lib/adapters/types";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
 import { dayKeyInZone } from "@/lib/timezone/day-key";
 import { MeteringError } from "./errors";
-import type { MeteringProvider, MeteringReadRequest } from "./types";
+import type {
+  MeteringProvider,
+  MeteringReadRequest,
+  SiteSamples,
+  SiteSamplesRequest,
+  SiteSources,
+} from "./types";
 
 /**
  * OpenEMS integration. This is the only place in the billing-review path that
@@ -16,6 +22,25 @@ import type { MeteringProvider, MeteringReadRequest } from "./types";
  */
 export class OpenEmsMeteringProvider implements MeteringProvider {
   constructor(private readonly supabase: SupabaseClient) {}
+
+  async getSiteSamples(request: SiteSamplesRequest): Promise<SiteSamples> {
+    try {
+      return await getOpenEmsSiteSamples(this.supabase, request);
+    } catch (error) {
+      if (error instanceof MeteringError) throw error;
+      if (error instanceof OpenEmsError) throw translateOpenEmsError(error);
+      console.error("Unexpected MGM site samples failure", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      throw new MeteringError(
+        "Metering provider failed unexpectedly",
+        "METERING_UNAVAILABLE",
+        503,
+        error
+      );
+    }
+  }
 
   async getReadings(request: MeteringReadRequest) {
     try {
@@ -172,6 +197,145 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
   }
 }
 
+type SampleSet = {
+  timestamps: Array<number | string>;
+  data: Record<string, (number | null)[]>;
+};
+
+/** OpenEMS installations return either epoch milliseconds or ISO strings. */
+function toEpochMs(raw: number | string): number | null {
+  const numeric = typeof raw === "number"
+    ? raw
+    : /^\d{10,13}$/.test(raw) ? Number(raw) : null;
+  const timestamp = numeric === null
+    ? Date.parse(raw as string)
+    : numeric < 1e11 ? numeric * 1000 : numeric;
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+/**
+ * Channels of one site source, as OpenEMS names them. Meter voltages are in
+ * mV, power in W, the ESS state of charge in %.
+ */
+function siteChannels(sources: SiteSources) {
+  const channels: { edgeId: string; channel: string }[] = [];
+  const add = (device: DeviceConfig | null, suffixes: string[]) => {
+    if (!device?.edgeOpenemsId || !device.componentId) return;
+    for (const suffix of suffixes) {
+      channels.push({
+        edgeId: device.edgeOpenemsId,
+        channel: `${device.componentId}/${suffix}`,
+      });
+    }
+  };
+  add(sources.battery, ["Soc", "ActivePower"]);
+  add(sources.gridMeter, ["ActivePower", "VoltageL1", "VoltageL2", "VoltageL3"]);
+  add(sources.load, ["ActivePower"]);
+  add(sources.pv, ["ActivePower"]);
+  return channels;
+}
+
+async function querySiteEdge(
+  client: ReturnType<typeof createOpenEmsClient>,
+  edgeId: string,
+  channels: string[],
+  request: SiteSamplesRequest
+): Promise<SampleSet[]> {
+  const query = (list: string[]) => client.queryHistoricSamples(
+    edgeId, list, request.startDate, request.endDate, request.timezone,
+    request.resolutionMinutes, OpenEmsClient.PAGE_READ_TIMEOUT_MS
+  );
+  try {
+    return [await query(channels)];
+  } catch (error) {
+    if (!isNoEnergyData(error)) throw error;
+    // A channel with no history fails the whole batch; one by one, the
+    // others still answer and the missing one stays null.
+    const single = await Promise.all(channels.map(async (channel) => {
+      try {
+        return await query([channel]);
+      } catch (channelError) {
+        if (!isNoEnergyData(channelError)) throw channelError;
+        return null;
+      }
+    }));
+    return single.filter((set): set is SampleSet => set !== null);
+  }
+}
+
+/** Implements `MeteringProvider.getSiteSamples` for OpenEMS. */
+async function getOpenEmsSiteSamples(
+  supabase: SupabaseClient,
+  request: SiteSamplesRequest
+): Promise<SiteSamples> {
+  const config = await resolveOpenEmsConfig(supabase, request.microgridId);
+  if (!config) {
+    throw new MeteringError(
+      "Metering provider is not configured for this microgrid",
+      "METERING_CONFIGURATION",
+      503,
+      { microgridId: request.microgridId }
+    );
+  }
+  const client = createOpenEmsClient(config);
+  const byEdge = new Map<string, string[]>();
+  for (const { edgeId, channel } of siteChannels(request.sources)) {
+    const list = byEdge.get(edgeId) ?? [];
+    if (!list.includes(channel)) list.push(channel);
+    byEdge.set(edgeId, list);
+  }
+
+  // One value per (edge, channel, instant), keyed by bin start.
+  const values = new Map<string, Map<number, number>>();
+  const instants = new Set<number>();
+  await Promise.all([...byEdge].map(async ([edgeId, channels]) => {
+    for (const set of await querySiteEdge(client, edgeId, channels, request)) {
+      const times = set.timestamps.map(toEpochMs);
+      for (const time of times) if (time !== null) instants.add(time);
+      for (const channel of channels) {
+        const series = set.data[channel];
+        if (!series) continue;
+        const key = `${edgeId}|${channel}`;
+        const map = values.get(key) ?? new Map<number, number>();
+        series.forEach((value, i) => {
+          const time = times[i];
+          if (time !== null && typeof value === "number" && Number.isFinite(value)) {
+            map.set(time, value);
+          }
+        });
+        values.set(key, map);
+      }
+    }
+  }));
+
+  const timestamps = [...instants].sort((a, b) => a - b);
+  const read = (device: DeviceConfig | null, suffix: string, divisor = 1) =>
+    timestamps.map((time) => {
+      if (!device?.edgeOpenemsId || !device.componentId) return null;
+      const value = values
+        .get(`${device.edgeOpenemsId}|${device.componentId}/${suffix}`)
+        ?.get(time);
+      return value === undefined ? null : value / divisor;
+    });
+  const phases = ["VoltageL1", "VoltageL2", "VoltageL3"].map((suffix) =>
+    read(request.sources.gridMeter, suffix, 1000)
+  );
+  return {
+    timestamps,
+    batterySocPct: read(request.sources.battery, "Soc"),
+    batteryPowerW: read(request.sources.battery, "ActivePower"),
+    gridPowerW: read(request.sources.gridMeter, "ActivePower"),
+    gridVoltageV: timestamps.map((_, i) => {
+      const present = phases
+        .map((phase) => phase[i])
+        .filter((value): value is number => value !== null);
+      return present.length ? Math.max(...present) : null;
+    }),
+    loadPowerW: read(request.sources.load, "ActivePower"),
+    pvPowerW: read(request.sources.pv, "ActivePower"),
+  };
+}
+
 function isNoEnergyData(error: unknown): error is OpenEmsError {
   return error instanceof OpenEmsError &&
     error.code === "OPENEMS_HTTP_ERROR" &&
@@ -189,16 +353,9 @@ function recordSamples(
   const byDay = samplesByChannel.get(channel) ?? new Map<string, number[]>();
   for (let i = 0; i < sample.timestamps.length; i++) {
     if (!Number.isFinite(values[i])) continue;
-    // OpenEMS installations return either epoch milliseconds or ISO strings.
     // Invalid instants never provide coverage evidence.
-    const rawTimestamp = sample.timestamps[i];
-    const numeric = typeof rawTimestamp === "number"
-      ? rawTimestamp
-      : /^\d{10,13}$/.test(rawTimestamp) ? Number(rawTimestamp) : null;
-    const timestamp = numeric === null
-      ? Date.parse(rawTimestamp as string)
-      : numeric < 1e11 ? numeric * 1000 : numeric;
-    if (!Number.isFinite(timestamp)) continue;
+    const timestamp = toEpochMs(sample.timestamps[i]);
+    if (timestamp === null) continue;
     const day = dayKeyInZone(timestamp, timezone);
     const bins = byDay.get(day) ?? [];
     bins.push(timestamp);

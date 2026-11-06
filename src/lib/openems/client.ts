@@ -32,7 +32,8 @@ export class OpenEmsClient implements DeviceDataAdapter {
    */
   private async rpc<T = Record<string, unknown>>(
     method: string,
-    params: Record<string, unknown>
+    params: Record<string, unknown>,
+    timeoutMs?: number
   ): Promise<T> {
     // INVARIANT: the same `body` string MUST be passed to both `auth.apply`
     // (which hashes it for the SigV4 signature) AND `fetch` (which transmits it).
@@ -84,8 +85,17 @@ export class OpenEmsClient implements DeviceDataAdapter {
         headers,
         body,
         redirect: "manual",
+        ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
       });
     } catch (err) {
+      if (err instanceof Error && err.name === "TimeoutError") {
+        throw new OpenEmsError(
+          `OpenEMS at ${this.baseUrl} did not answer within ${Math.round(timeoutMs! / 1000)} s`,
+          "OPENEMS_UNREACHABLE",
+          503,
+          err
+        );
+      }
       throw new OpenEmsError(
         `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
         "OPENEMS_UNREACHABLE",
@@ -527,6 +537,27 @@ export class OpenEmsClient implements DeviceDataAdapter {
     toDate: string,
     timezone: string
   ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
+    return this.queryHistoricSamples(edgeId, channels, fromDate, toDate, timezone, 15);
+  }
+
+  /** How long a page's history read may wait for OpenEMS. */
+  static readonly PAGE_READ_TIMEOUT_MS = 20_000;
+
+  /**
+   * Channel samples at a fixed resolution in minutes, as OpenEMS aggregates
+   * them (the mean of each bin; `null` where the edge sent nothing). The
+   * dates are whole local days in `timezone`, `toDate` inclusive.
+   */
+  async queryHistoricSamples(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string,
+    resolutionMinutes: number,
+    /** Give up after this long; unset waits as long as the platform allows. */
+    timeoutMs?: number
+  ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
     const result = await this.rpc<{
       payload: JsonRpcResponse<{
         timestamps: Array<number | string>;
@@ -543,10 +574,10 @@ export class OpenEmsClient implements DeviceDataAdapter {
           toDate,
           channels,
           timezone,
-          resolution: { value: 15, unit: "Minutes" },
+          resolution: { value: resolutionMinutes, unit: "Minutes" },
         },
       },
-    });
+    }, timeoutMs);
     return result.payload.result;
   }
 }

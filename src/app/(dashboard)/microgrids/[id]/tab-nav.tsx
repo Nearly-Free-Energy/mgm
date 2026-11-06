@@ -10,10 +10,12 @@ import { microgridHref, microgridSetupHref } from "@/lib/microgrid-links";
 
 // Microgrid tab nav (D2 / #53).
 //
-// Tab order (Dashboard | Billing | Setup) mirrors the operator workflow:
-//   1. Dashboard — landing / daily orientation.
-//   2. Billing    — the monthly close job (primary working surface).
-//   3. Setup      — configure-once (edges, households, rate schedule).
+// Tab order (Dashboard | Operations | Billing | Setup) mirrors the operator
+// workflow:
+//   1. Dashboard  — landing / daily orientation.
+//   2. Operations — one day of the site: battery, power cuts, dark time.
+//   3. Billing    — the monthly close job (primary working surface).
+//   4. Setup      — configure-once (edges, households, rate schedule).
 //
 // Tabs are next/link <Link>s so a click is a client-side navigation: the
 // dashboard layout and this microgrid header stay mounted, and
@@ -30,12 +32,14 @@ import { microgridHref, microgridSetupHref } from "@/lib/microgrid-links";
 //   - Dashboard is the microgrid index (/microgrids/[id]) with no child segment.
 //     A raw `startsWith` on the index href would also match /billing and /setup.
 //     We detect "on the index" by requiring the URL to end at the microgrid id.
-//   - Billing + Setup use `startsWith` so their nested routes stay highlighted.
+//   - Operations, Billing and Setup use `startsWith` so their nested routes
+//     (and Operations' ?date= days) stay highlighted.
 
 const tabs = [
-  { label: "Dashboard", segment: "",        href: microgridHref },
-  { label: "Billing",   segment: "billing", href: (id: string) => `/microgrids/${id}/billing` },
-  { label: "Setup",     segment: "setup",   href: microgridSetupHref },
+  { label: "Dashboard",  segment: "",           href: microgridHref },
+  { label: "Operations", segment: "operations", href: (id: string) => `/microgrids/${id}/operations` },
+  { label: "Billing",    segment: "billing",    href: (id: string) => `/microgrids/${id}/billing` },
+  { label: "Setup",      segment: "setup",      href: microgridSetupHref },
 ] as const;
 
 export function TabNav({ microgridId }: { microgridId: string }) {

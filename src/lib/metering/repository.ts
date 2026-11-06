@@ -15,6 +15,7 @@ import type {
   DeviceConsumption,
   DiscoveredMeter,
 } from "./types";
+import type { SiteDayOperations } from "./site-operations";
 export type { MeteringProviderName } from "./registry";
 
 export type MeteringScope = {
@@ -148,6 +149,7 @@ export interface MeteringCapabilityContract {
   recordOpeningRegister(
     input: unknown
   ): Promise<MeteringResult<{ id: string }>>;
+  getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>>;
 }
 
 /** Candidate connection for test-without-save (never persisted). */
