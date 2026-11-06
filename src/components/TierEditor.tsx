@@ -437,37 +437,39 @@ export function TierEditor({
             <Currency value={preview.totalAmount} className="font-semibold" />
           </p>
           {preview.tierBreakdown.length > 0 && (
-            <table className="w-full text-left text-xs text-muted-foreground">
-              <tbody>
-                {preview.tierBreakdown.map((row, i) => (
-                  <tr key={i}>
-                    <td className="py-0.5 pr-4">{row.label}</td>
-                    <td className="py-0.5 pr-4">{row.kwh} kWh</td>
-                    <td className="py-0.5">
-                      <Currency value={row.amount} />
-                    </td>
-                  </tr>
-                ))}
-                {preview.serviceCharge > 0 && (
-                  <tr>
-                    <td className="py-0.5 pr-4">Service charge</td>
-                    <td className="py-0.5 pr-4"></td>
-                    <td className="py-0.5">
-                      <Currency value={preview.serviceCharge} />
-                    </td>
-                  </tr>
-                )}
-                {preview.taxAmount > 0 && (
-                  <tr>
-                    <td className="py-0.5 pr-4">Tax</td>
-                    <td className="py-0.5 pr-4"></td>
-                    <td className="py-0.5">
-                      <Currency value={preview.taxAmount} />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-muted-foreground">
+                <tbody>
+                  {preview.tierBreakdown.map((row, i) => (
+                    <tr key={i}>
+                      <td className="py-0.5 pr-4">{row.label}</td>
+                      <td className="py-0.5 pr-4">{row.kwh} kWh</td>
+                      <td className="py-0.5">
+                        <Currency value={row.amount} />
+                      </td>
+                    </tr>
+                  ))}
+                  {preview.serviceCharge > 0 && (
+                    <tr>
+                      <td className="py-0.5 pr-4">Service charge</td>
+                      <td className="py-0.5 pr-4"></td>
+                      <td className="py-0.5">
+                        <Currency value={preview.serviceCharge} />
+                      </td>
+                    </tr>
+                  )}
+                  {preview.taxAmount > 0 && (
+                    <tr>
+                      <td className="py-0.5 pr-4">Tax</td>
+                      <td className="py-0.5 pr-4"></td>
+                      <td className="py-0.5">
+                        <Currency value={preview.taxAmount} />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           )}
           {preview.tierBreakdown.length === 0 && (
             <p className="text-xs text-muted-foreground">
