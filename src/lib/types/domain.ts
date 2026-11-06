@@ -32,6 +32,18 @@ export type RateSchedule = Omit<
 export type BillingPeriod =
   Database["public"]["Tables"]["billing_periods"]["Row"];
 
+/**
+ * grid_tariffs row with JSONB `bands` narrowed to GridTariffBand[]. The
+ * database checks only that `bands` is an array of 1 to 24 entries; the
+ * application validates the bands themselves (validateGridTariffBands).
+ */
+export type GridTariff = Omit<
+  Database["public"]["Tables"]["grid_tariffs"]["Row"],
+  "bands"
+> & { bands: GridTariffBand[] };
+export type MicrogridSavingsSettings =
+  Database["public"]["Tables"]["microgrid_savings_settings"]["Row"];
+
 /** billing_line_items row with JSONB `tier_breakdown` narrowed to TierBreakdown[]. */
 export type BillingLineItem = Omit<
   Database["public"]["Tables"]["billing_line_items"]["Row"],
@@ -117,6 +129,16 @@ export type TierConfig = {
   min_kwh: number;
   max_kwh: number | null;
   rate_per_kwh: number;
+};
+
+/**
+ * One time-of-use band embedded in grid_tariffs.bands JSONB: the rate per
+ * kWh from local hour `from_hour` (inclusive) to `to_hour` (exclusive).
+ */
+export type GridTariffBand = {
+  from_hour: number;
+  to_hour: number;
+  rate: number;
 };
 
 /** Tier breakdown embedded in billing_line_items.tier_breakdown JSONB. */

@@ -15,7 +15,7 @@
  * checkout, verified receipts, and manager reconciliation.
  * Operations: the daily operations view of a microgrid (battery level, power
  * cuts, dark time and who served the houses), read through the metering
- * capability.
+ * capability, and the grid tariffs and savings settings that value it.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -119,6 +119,13 @@ const OPERATIONS_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/operations$/,
 ];
 
+const OPERATIONS_API_ROUTES = [
+  // Grid tariff versions (add, delete) and savings settings (upsert) that
+  // value the operations view's solar savings and battery arbitrage.
+  /^\/api\/microgrids\/[^/]+\/grid-tariffs(?:\/[^/]+)?$/,
+  /^\/api\/microgrids\/[^/]+\/savings-settings$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -131,5 +138,6 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_2_API_ROUTES,
     ...RELEASE_3_API_ROUTES,
     ...RELEASE_4_API_ROUTES,
+    ...OPERATIONS_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

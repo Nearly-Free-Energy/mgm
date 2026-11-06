@@ -83,6 +83,10 @@ describe("isReleasedRoute", () => {
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",
+    // Operations APIs: grid tariffs and savings settings.
+    "/api/microgrids/mg-1/grid-tariffs",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1",
+    "/api/microgrids/mg-1/savings-settings",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -99,6 +103,9 @@ describe("isReleasedRoute", () => {
     "/settings",
     "/admin",
     "/microgrids/mg-1/operations/extra",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1/extra",
+    "/api/microgrids/mg-1/savings-settings/extra",
+    "/api/grid-tariffs",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -107,5 +114,6 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/microgrids/abc/setup/edges/")).toBe(true);
     expect(isReleasedRoute("/api/metering/readings/")).toBe(true);
     expect(isReleasedRoute("/microgrids/mg-1/operations/")).toBe(true);
+    expect(isReleasedRoute("/api/microgrids/mg-1/savings-settings/")).toBe(true);
   });
 });

@@ -155,6 +155,10 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/communities/[id]/invoice-config",
     "/api/communities/[id]/invoice-preview",
     "/api/communities/[id]/invoice-logo",
+    // Grid tariffs and savings settings value a microgrid's own operations
+    // (solar savings, battery arbitrage) against what it pays the grid.
+    "/api/microgrids/[id]/grid-tariffs",
+    "/api/microgrids/[id]/savings-settings",
     "/api/v1/billing-periods",
     "/api/v1/billing",
   ],
@@ -164,6 +168,8 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "billing_line_items",
     "billing_audit_log",
     "payment_events",
+    "grid_tariffs",
+    "microgrid_savings_settings",
   ],
 };
 

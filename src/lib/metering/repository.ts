@@ -150,6 +150,8 @@ export interface MeteringCapabilityContract {
     input: unknown
   ): Promise<MeteringResult<{ id: string }>>;
   getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>>;
+  /** Query `{ microgrid_id, start_date, end_date }`; one entry per day, in order. */
+  getSiteDays(query: unknown): Promise<MeteringResult<SiteDayOperations[]>>;
 }
 
 /** Candidate connection for test-without-save (never persisted). */

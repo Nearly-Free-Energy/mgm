@@ -6,7 +6,7 @@ import { formatLocalDate } from "@/components/format/local-date";
 import { useLocale } from "@/components/format/locale-context";
 import type {
   EveningSupply,
-  SiteDayOperations,
+  SiteDaySummary,
   TimeRange,
 } from "@/lib/metering/site-operations";
 import { cn } from "@/lib/utils";
@@ -78,7 +78,7 @@ const PAD = { left: 36, right: 8, top: 8, bottom: 24 };
 const PLOT_W = W - PAD.left - PAD.right;
 const PLOT_H = H - PAD.top - PAD.bottom;
 
-function BatteryChart({ day }: { day: SiteDayOperations }) {
+function BatteryChart({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const span = day.dayEndMs - day.dayStartMs;
   const x = (ms: number) =>
@@ -200,7 +200,7 @@ const SUPPLY: Record<EveningSupply, { label: string; swatch: string }> = {
   no_data: { label: "No data", swatch: "bg-muted" },
 };
 
-function EveningStrip({ day }: { day: SiteDayOperations }) {
+function EveningStrip({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const span = day.dayEndMs - day.eveningStartMs;
   const order: EveningSupply[] = ["battery", "battery_and_grid", "grid", "dark", "no_data"];
@@ -254,7 +254,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
   );
 }
 
-export function DailyOperations({ day }: { day: SiteDayOperations }) {
+export function DailyOperations({ day }: { day: SiteDaySummary }) {
   const clock = useClock(day.timezone);
   const partial = day.readUntilMs < day.dayEndMs;
   const cutCount = day.cuts?.length ?? null;
