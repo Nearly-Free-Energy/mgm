@@ -73,7 +73,10 @@ export type SiteSamples = {
   batterySocPct: (number | null)[];
   batteryPowerW: (number | null)[];
   gridPowerW: (number | null)[];
-  /** Highest phase voltage of the grid meter in the bin. */
+  /**
+   * Lowest phase voltage of the grid meter in the bin, over the phases that
+   * reported (a phase with no value is ignored), so one phase down shows.
+   */
   gridVoltageV: (number | null)[];
   loadPowerW: (number | null)[];
   pvPowerW: (number | null)[];

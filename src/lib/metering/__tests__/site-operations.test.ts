@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   EVENING_START_HOUR,
   GRID_PRESENT_MIN_V,
+  INGESTION_LAG_MS,
+  LOW_BATTERY_PCT,
   SOC_CHECK_HOUR,
   SUPPLY_MIN_W,
   computeSiteDay,
@@ -157,7 +159,9 @@ const inRange = (m: number, from: number, to: number) => m >= from && m < to;
 
 describe("computeSiteDay — constants", () => {
   it("matches the site report's definitions", () => {
-    expect(GRID_PRESENT_MIN_V).toBe(115);
+    expect(GRID_PRESENT_MIN_V).toBe(170);
+    expect(LOW_BATTERY_PCT).toBe(15);
+    expect(INGESTION_LAG_MS).toBe(2 * MINUTE);
     expect(SUPPLY_MIN_W).toBe(50);
     expect(EVENING_START_HOUR).toBe(18);
     expect(SOC_CHECK_HOUR).toBe(17);
@@ -189,6 +193,7 @@ describe("computeSiteDay — day frame", () => {
     expect(day.cutMinutes).toBe(0);
     expect(day.dark).toEqual([]);
     expect(day.darkMinutes).toBe(0);
+    expect(day.darkInferredMinutes).toBe(0);
     expect(day.noDataMinutes).toBe(0);
     expect(day.lightsOnPct).toBe(100);
   });
@@ -324,10 +329,18 @@ describe("computeSiteDay — grid presence and cuts", () => {
     expect(run(samples).cuts).toEqual(rangesAt([600, 630]));
   });
 
-  it("treats a bin whose highest phase averages below 115 V as a cut and 115 V or above as present", () => {
+  it("counts a bin whose lowest phase was off for a third of it as a cut", () => {
+    // 230 V for two thirds of the bin and 0 V for a third: a mean of 153 V.
+    const samples = makeSamples((m) =>
+      m === 615 ? { ...NORMAL, volts: (230 * 2) / 3 } : NORMAL
+    );
+    expect(run(samples).cuts).toEqual(rangesAt([615, 620]));
+  });
+
+  it("treats a bin whose lowest phase averages below 170 V as a cut and 170 V or above as present", () => {
     const samples = makeSamples((m) => {
-      if (inRange(m, 600, 660)) return { ...NORMAL, volts: 114.9, gridW: 0 };
-      return { ...NORMAL, volts: 115 };
+      if (inRange(m, 600, 660)) return { ...NORMAL, volts: 169.9, gridW: 0 };
+      return { ...NORMAL, volts: 170 };
     });
     const day = run(samples);
     expect(day.cuts).toEqual(rangesAt([600, 660]));
@@ -490,6 +503,133 @@ describe("computeSiteDay — carry-in from the previous day", () => {
   });
 });
 
+describe("computeSiteDay — dark inferred from a low battery", () => {
+  // The gateway runs on the inverter's output. With the battery already at
+  // its floor, it dies within seconds of the grid dropping, so the last
+  // samples still show the grid present.
+  const floorMorning = (socBefore: number) =>
+    makeSamples((m) => {
+      if (inRange(m, 300, 345)) return { ...NORMAL, soc: socBefore, batteryW: 0 };
+      if (inRange(m, 345, 500)) return null; // 05:45–08:20 silent
+      return NORMAL; // 08:20 grid back
+    });
+
+  it("counts a gap that starts with the battery at its floor as dark and as a cut", () => {
+    const day = run(floorMorning(LOW_BATTERY_PCT));
+    expect(day.dark).toEqual(rangesAt([345, 500]));
+    expect(day.darkMinutes).toBe(155);
+    expect(day.darkInferredMinutes).toBe(155);
+    expect(day.noDataMinutes).toBe(0);
+    expect(day.cuts).toEqual(rangesAt([345, 500]));
+    expect(day.cutMinutes).toBe(155);
+    expect(day.lightsOnPct).toBeCloseTo((100 * (1440 - 155)) / 1440, 10);
+  });
+
+  it("keeps a gap that starts with the battery above its floor as no data", () => {
+    const day = run(floorMorning(LOW_BATTERY_PCT + 0.1));
+    expect(day.dark).toEqual([]);
+    expect(day.darkMinutes).toBe(0);
+    expect(day.darkInferredMinutes).toBe(0);
+    expect(day.noDataMinutes).toBe(155);
+    expect(day.cuts).toEqual([]);
+    expect(day.lightsOnPct).toBe(100);
+  });
+
+  it("uses the last known battery level, even from a bin without one just before the gap", () => {
+    const samples = makeSamples((m) => {
+      if (m === 300) return { ...NORMAL, soc: 9 };
+      if (inRange(m, 305, 345)) return { ...NORMAL, soc: null }; // online, no level
+      if (inRange(m, 345, 400)) return null;
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.dark).toEqual(rangesAt([345, 400]));
+    expect(day.darkInferredMinutes).toBe(55);
+  });
+
+  it("does not infer dark without any battery level", () => {
+    const samples = makeSamples((m) => (inRange(m, 345, 400) ? null : { ...NORMAL, soc: null }));
+    const day = run(samples);
+    expect(day.dark).toEqual([]);
+    expect(day.noDataMinutes).toBe(55);
+  });
+
+  it("keeps a gap that starts with the grid known off as dark, not inferred", () => {
+    const samples = makeSamples((m) => {
+      if (inRange(m, 300, 345)) return { ...NORMAL, soc: 12, volts: 0, gridW: 0 };
+      if (inRange(m, 345, 400)) return null;
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.dark).toEqual(rangesAt([345, 400]));
+    expect(day.darkMinutes).toBe(55);
+    expect(day.darkInferredMinutes).toBe(0);
+    expect(day.cuts).toEqual(rangesAt([300, 400]));
+  });
+
+  it("decides a gap when it starts: a level read before an earlier gap does not reach a later one", () => {
+    const samples = makeSamples((m) => {
+      if (m === 300) return { ...NORMAL, soc: 10 };
+      if (inRange(m, 305, 330)) return null; // inferred dark
+      if (inRange(m, 330, 345)) return { ...NORMAL, soc: 60 }; // grid back, recharged
+      if (inRange(m, 345, 400)) return null; // no data
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.dark).toEqual(rangesAt([305, 330]));
+    expect(day.darkInferredMinutes).toBe(25);
+    expect(day.noDataMinutes).toBe(55);
+    expect(day.cuts).toEqual(rangesAt([305, 330]));
+  });
+
+  it("carries the inferred cut past the gap until a voltage reading shows the grid back", () => {
+    const samples = makeSamples((m) => {
+      if (m === 300) return { ...NORMAL, soc: 14 };
+      if (inRange(m, 305, 360)) return null;
+      if (inRange(m, 360, 380)) return { ...NORMAL, volts: null }; // back, no voltage yet
+      return NORMAL; // 06:20 grid reading
+    });
+    const day = run(samples);
+    expect(day.dark).toEqual(rangesAt([305, 360]));
+    expect(day.cuts).toEqual(rangesAt([305, 380]));
+  });
+
+  it("ends the inferred cut at the first voltage reading after the gap", () => {
+    const day = run(floorMorning(10));
+    expect(day.cuts).toEqual(rangesAt([345, 500]));
+    expect(day.soc.find((s) => s.atMs === at(8, 20))?.pct).toBe(80);
+  });
+
+  it("infers dark from 00:00 when the previous day ended with the battery at its floor", () => {
+    const tail = makeSamples(() => ({ ...NORMAL, soc: 11 }), {
+      startMs: at(-1),
+      endMs: DAY_START,
+    });
+    const today = makeSamples((m) => (m < 90 ? null : NORMAL));
+    const day = run(concat(tail, today));
+    expect(day.dark).toEqual(rangesAt([0, 90]));
+    expect(day.darkInferredMinutes).toBe(90);
+    expect(day.cuts).toEqual(rangesAt([0, 90]));
+    expect(day.noDataMinutes).toBe(0);
+  });
+
+  it("shows an inferred-dark evening as dark in the evening strip", () => {
+    const samples = makeSamples((m) => {
+      if (inRange(m, 1080, 1140)) return { ...NORMAL, soc: 15, batteryW: 400, gridW: 0 };
+      if (inRange(m, 1140, 1260)) return null;
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.evening.map((s) => [minuteOf(s.startMs), minuteOf(s.endMs), s.supply])).toEqual([
+      [1080, 1140, "battery"],
+      [1140, 1260, "dark"],
+      [1260, 1440, "grid"],
+    ]);
+    expect(day.eveningHours.dark).toBeCloseTo(2, 10);
+    expect(day.darkInferredMinutes).toBe(120);
+  });
+});
+
 describe("computeSiteDay — lights on", () => {
   it("is (known minutes − dark minutes) / known minutes, leaving no-data time out", () => {
     const samples = makeSamples((m) => {
@@ -539,14 +679,16 @@ describe("computeSiteDay — lights on", () => {
 });
 
 describe("computeSiteDay — a day still in progress", () => {
-  it("rounds readUntil up to the end of the current bin and ignores later samples", () => {
+  it("stops at the last bin that closed at least the ingestion lag ago and ignores later samples", () => {
     const samples = makeSamples((m) => {
       if (inRange(m, 660, 670)) return { ...NORMAL, volts: 0 };
       if (inRange(m, 670, 725)) return null; // dark through now
       if (m >= 725) return { ...NORMAL, soc: 1, volts: 0, batteryW: 5000 }; // future rows
       return NORMAL;
     });
-    const nowMs = at(12, 2);
+    // 12:08 less the 2-minute lag is 12:06: the 12:00 bin has closed and
+    // settled, the 12:05 bin has not.
+    const nowMs = at(12, 8);
     const day = run(samples, { nowMs });
     expect(day.readUntilMs).toBe(at(12, 5));
     expect(day.soc).toHaveLength(145);
@@ -556,18 +698,37 @@ describe("computeSiteDay — a day still in progress", () => {
     // Over the elapsed 725 minutes only, not the whole day.
     expect(day.lightsOnPct).toBeCloseTo((100 * (725 - 55)) / 725, 10);
     expect(day.lowestSoc?.pct).toBe(80);
-    expect(day.eveningDischargeKwh).toBe(0);
+    // Before the evening window: no evening figure, not a zero.
+    expect(day.eveningDischargeKwh).toBeNull();
     expect(day.evening).toEqual([]);
     expect(day.socAtCheckHour).toBeNull();
   });
 
-  it("stops exactly at now when now is on a bin boundary", () => {
-    const day = run(makeSamples(() => NORMAL), { nowMs: at(12, 0) });
-    expect(day.readUntilMs).toBe(at(12, 0));
-    expect(day.soc).toHaveLength(144);
+  it("does not read the bin in progress, nor one that closed less than the lag ago", () => {
+    const samples = makeSamples(() => NORMAL);
+    // 12:02: the 12:00 bin is in progress; 11:55–12:00 closed 2 minutes ago.
+    expect(run(samples, { nowMs: at(12, 2) }).readUntilMs).toBe(at(12, 0));
+    // 12:01:59: the 11:55 bin closed less than 2 minutes ago.
+    expect(run(samples, { nowMs: at(12, 2) - 1 }).readUntilMs).toBe(at(11, 55));
+    // On a bin boundary the bin that just ended is not read yet.
+    const boundary = run(samples, { nowMs: at(12, 0) });
+    expect(boundary.readUntilMs).toBe(at(11, 55));
+    expect(boundary.soc).toHaveLength(143);
+    // Without the lag a bin that just closed would read as a gap.
+    const lagOnly = run(makeSamples((m) => (m < 720 ? NORMAL : null)), { nowMs: at(12, 6) });
+    expect(lagOnly.readUntilMs).toBe(at(12, 0));
+    expect(lagOnly.noDataMinutes).toBe(0);
   });
 
-  it("reads nothing for a day that has not started", () => {
+  it("reads nothing for a day that has not started, or whose first bin has not settled", () => {
+    for (const nowMs of [DAY_START - HOUR, DAY_START + MINUTE, DAY_START + 6 * MINUTE]) {
+      const early = run(makeSamples(() => NORMAL), { nowMs });
+      expect(early.readUntilMs).toBe(DAY_START);
+      expect(early.soc).toEqual([]);
+    }
+    expect(run(makeSamples(() => NORMAL), { nowMs: DAY_START + 7 * MINUTE }).readUntilMs).toBe(
+      at(0, 5)
+    );
     const day = run(makeSamples(() => NORMAL), { nowMs: DAY_START - HOUR });
     expect(day.readUntilMs).toBe(DAY_START);
     expect(day.soc).toEqual([]);
@@ -575,7 +736,11 @@ describe("computeSiteDay — a day still in progress", () => {
     expect(day.lowestSoc).toBeNull();
     expect(day.dark).toEqual([]);
     expect(day.darkMinutes).toBe(0);
+    expect(day.darkInferredMinutes).toBe(0);
     expect(day.noDataMinutes).toBe(0);
+    // Nothing read: no solar and no evening discharge, not zeros.
+    expect(day.solarKwh).toBeNull();
+    expect(day.eveningDischargeKwh).toBeNull();
     // No bin read, so no voltage seen: cuts are unknown, not zero.
     expect(day.cuts).toBeNull();
     expect(day.cutMinutes).toBeNull();
@@ -607,6 +772,26 @@ describe("computeSiteDay — energy", () => {
     expect(day.eveningDischargeKwh).toBeNull();
   });
 
+  it("returns null evening discharge when no evening bin had a battery power reading", () => {
+    const samples = makeSamples((m) =>
+      m >= 18 * 60 ? { ...NORMAL, batteryW: null } : { ...NORMAL, batteryW: 900 }
+    );
+    expect(run(samples).eveningDischargeKwh).toBeNull();
+    // Gateway offline all evening: the same.
+    const offline = makeSamples((m) => (m >= 18 * 60 ? null : NORMAL));
+    expect(run(offline).eveningDischargeKwh).toBeNull();
+  });
+
+  it("returns zero evening discharge when the battery was read and only charged", () => {
+    const samples = makeSamples((m) => (m >= 18 * 60 ? { ...NORMAL, batteryW: -300 } : NORMAL));
+    expect(run(samples).eveningDischargeKwh).toBe(0);
+    // One reading is enough to know.
+    const one = makeSamples((m) =>
+      m === 18 * 60 ? { ...NORMAL, batteryW: 0 } : { ...NORMAL, batteryW: m >= 18 * 60 ? null : 500 }
+    );
+    expect(run(one).eveningDischargeKwh).toBe(0);
+  });
+
   it("uses the solar meter when there is one, clipping negative readings", () => {
     const samples = makeSamples((m) => {
       if (inRange(m, 540, 900)) return { ...NORMAL, pvW: 1000 }; // 6 h × 1 kW
@@ -631,6 +816,30 @@ describe("computeSiteDay — energy", () => {
     const day = run(samples);
     expect(day.solarEstimated).toBe(true);
     expect(day.solarKwh).toBeCloseTo(1.5, 10);
+  });
+
+  it("returns null solar, not zero, when the solar meter gave no reading", () => {
+    const day = run(makeSamples(() => ({ ...NORMAL, pvW: null })), {
+      sources: { ...ALL_SOURCES, pv: true },
+    });
+    expect(day.solarKwh).toBeNull();
+    expect(day.solarEstimated).toBe(false);
+    // A night of readings at or below zero is a real zero.
+    const night = run(makeSamples(() => ({ ...NORMAL, pvW: -5 })), {
+      sources: { ...ALL_SOURCES, pv: true },
+    });
+    expect(night.solarKwh).toBe(0);
+  });
+
+  it("returns null estimated solar, not zero, when no bin had load, grid and battery together", () => {
+    const samples = makeSamples((m) =>
+      m % 10 === 0 ? { ...NORMAL, loadW: null } : { ...NORMAL, gridW: null }
+    );
+    const day = run(samples);
+    expect(day.solarEstimated).toBe(true);
+    expect(day.solarKwh).toBeNull();
+    // Offline all day: the same.
+    expect(run(makeSamples(() => null)).solarKwh).toBeNull();
   });
 
   it("returns null solar when neither a solar meter nor the full balance is available", () => {
@@ -787,19 +996,20 @@ describe("computeSiteDay — what the houses used in the evening", () => {
     const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
     const day = run(samples, {
       sources: { ...WITH_HOUSES, houseMetersUnreadable: 1 },
-      nowMs: at(17, 58),
+      nowMs: at(18, 1),
     });
-    expect(day.readUntilMs).toBe(at(18, 0));
+    // 18:01 less the lag: the 17:55 bin is the last one read.
+    expect(day.readUntilMs).toBe(at(17, 55));
     expect(day.housesEveningKwh).toBeNull();
     expect(day.housesEveningMetersMissing).toBe(0);
   });
 
   it("reads today up to the latest reading so far", () => {
     const samples = withHouses(makeSamples(() => NORMAL), { a: counter(0, 10) });
-    const day = run(samples, { sources: WITH_HOUSES, nowMs: at(20, 2) });
+    const day = run(samples, { sources: WITH_HOUSES, nowMs: at(20, 7) });
     // Bins 17:55 … 20:00: 25 steps of 10 Wh.
     expect(day.housesEveningKwh).toBeCloseTo(0.25, 10);
-    const opening = run(samples, { sources: WITH_HOUSES, nowMs: at(18, 2) });
+    const opening = run(samples, { sources: WITH_HOUSES, nowMs: at(18, 7) });
     // Just after 18:00: the 17:55 and 18:00 bins, one step.
     expect(opening.housesEveningKwh).toBeCloseTo(0.01, 10);
     expect(opening.housesEveningMetersMissing).toBe(0);
@@ -1000,6 +1210,8 @@ describe("computeSiteDay — reference day", () => {
     const day = run(referenceDay());
     expect(day.dark).toEqual(rangesAt([380, 500], [1175, 1300]));
     expect(day.darkMinutes).toBe(245);
+    // Both gaps began with the grid known off: dark, not inferred.
+    expect(day.darkInferredMinutes).toBe(0);
     expect(day.noDataMinutes).toBe(0);
     expect(day.lightsOnPct).not.toBeNull();
     expect(day.lightsOnPct!).toBeGreaterThan(82);

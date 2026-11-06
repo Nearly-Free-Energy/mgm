@@ -9,16 +9,23 @@
  * Definitions (they follow the operator's own daily site report for a
  * hybrid-inverter site whose gateway runs on the inverter's output; if that
  * wiring or the report's definitions change, revisit them):
- * - Grid present: the bin's mean voltage on the grid meter's highest phase
- *   is at or above `GRID_PRESENT_MIN_V`. A bin is a mean, so a bin whose
- *   grid was off for most of it reads well below nominal even if the grid
- *   flickered back: half of nominal keeps such a bin inside its cut rather
- *   than splitting the cut in two (checked against a real day's 1-minute
- *   report). Revisit if the bin length or the nominal voltage changes.
- * - Dark: no samples arrived while the last known grid state was a cut.
- *   The gateway runs on the inverter's output, so it goes quiet when the
- *   battery has cut off during a cut: the houses are without power. A gap
- *   while the grid was present is reported as missing data, not as dark.
+ * - Grid present: the bin's mean voltage on the grid meter's lowest phase
+ *   is at or above `GRID_PRESENT_MIN_V`, so a cut is any phase below it,
+ *   the rule the operator's other reports use. A bin is a mean, so a phase
+ *   off for about a third of the bin or more averages below 170 V, and a
+ *   flicker back stays inside its cut rather than splitting it in two. If
+ *   the other reports' threshold or the bin length changes, revisit this.
+ * - Dark: a gap (bins with no samples) that starts while the last known
+ *   grid state is a cut. The gateway runs on the inverter's output, so it
+ *   goes quiet when the battery has cut off during a cut: the houses are
+ *   without power.
+ * - Dark, inferred: a gap that starts while the last known battery level is
+ *   at or below `LOW_BATTERY_PCT`, whatever the last grid reading said.
+ *   With the battery at its floor the gateway dies within seconds of the
+ *   grid dropping, before any sample shows the cut. Houses dark on such a
+ *   site means the grid was off, so these bins also count as a cut.
+ * - Any other gap is missing data, not dark, and is left out of the
+ *   lights-on share.
  * - A cut continues through a gap until a sample shows the grid back.
  * - Houses used, evening: what the household meters' cumulative consumption
  *   counters advanced over the evening window (the report's "sold 18–24h").
@@ -39,8 +46,23 @@ import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { zonedDateTimeToUtcIso } from "@/lib/timezone/wall-clock";
 import type { SiteSamples } from "./types";
 
-/** A bin's mean voltage below this on every phase is a cut (half of 230 V). */
-export const GRID_PRESENT_MIN_V = 115;
+/** A bin's mean voltage below this on any phase is a cut. */
+export const GRID_PRESENT_MIN_V = 170;
+/**
+ * The battery's discharge floor, %: at or below it the inverter stops
+ * drawing on the battery. The gateway runs on the inverter's output and
+ * cannot outlive the battery, so a gap that starts here is dark. If the
+ * inverter's discharge cut-off setting changes, revisit this.
+ */
+export const LOW_BATTERY_PCT = 15;
+/**
+ * How long after a bin closes before its samples are read. OpenEMS stores
+ * a bin's mean once the edge's values for it have reached the backend, and
+ * the last minute or two of them may still be on the way: reading a bin
+ * that just closed would show it short or empty. If the edges' upload
+ * interval or the backend's write delay grows, revisit this.
+ */
+export const INGESTION_LAG_MS = 2 * 60_000;
 /** Battery discharge or grid import above this counts as supplying. */
 export const SUPPLY_MIN_W = 50;
 /** The evening selling window, local hours [start, end). */
@@ -82,18 +104,28 @@ export type SiteDayOperations = {
   timezone: string;
   dayStartMs: number;
   dayEndMs: number;
-  /** End of the period read: the day's end, or now for today. */
+  /**
+   * End of the period read: the day's end or, for today, the end of the
+   * last bin that closed at least `INGESTION_LAG_MS` ago.
+   */
   readUntilMs: number;
   resolutionMinutes: number;
   /** Start of the evening window, and local hours 0, 3, … 24 for an axis. */
   eveningStartMs: number;
   hourMarks: { hour: number; atMs: number }[];
   sources: SiteSourceAvailability;
-  /** kWh; null when neither a solar meter nor the balance is available. */
+  /**
+   * kWh; null when neither a solar meter nor the balance is available, or
+   * when no bin had a usable reading (never a zero for missing telemetry).
+   */
   solarKwh: number | null;
   /** True when solar is load − grid − battery rather than a solar meter. */
   solarEstimated: boolean;
-  /** Battery discharge during the evening window, kWh. */
+  /**
+   * Battery discharge during the evening window, kWh. Null without a
+   * battery, before the window starts, or when no evening bin had a battery
+   * power reading.
+   */
   eveningDischargeKwh: number | null;
   /**
    * What the houses used in the evening window, kWh: the sum over house
@@ -113,8 +145,17 @@ export type SiteDayOperations = {
   socAtCheckHour: number | null;
   dark: TimeRange[];
   darkMinutes: number;
-  /** Minutes with no samples that were not dark (gateway or link down, or
-   *  no grid reading yet to tell). */
+  /**
+   * The part of `darkMinutes` inferred from a low battery: gaps that began
+   * with the battery at or below `LOW_BATTERY_PCT` and the grid not known
+   * to be off.
+   */
+  darkInferredMinutes: number;
+  /**
+   * Minutes with no samples that were not dark: gaps that began with the
+   * grid not known to be off and the battery above `LOW_BATTERY_PCT` or
+   * unknown (gateway or link down, or nothing yet to tell).
+   */
   noDataMinutes: number;
   /**
    * Share of the period read with power at the houses, 0–100, over the time
@@ -138,6 +179,8 @@ type Bin = {
   /** Grid state, carried through gaps; null while still unknown. */
   gridPresent: boolean | null;
   dark: boolean;
+  /** Dark because the gap began with the battery at its floor. */
+  darkInferred: boolean;
 };
 
 const MINUTE = 60_000;
@@ -209,19 +252,27 @@ export function computeSiteDay(input: {
   const binMs = resolutionMinutes * MINUTE;
   const dayStartMs = startOfDayInZone(date, timezone).getTime();
   const dayEndMs = localInstant(date, 24, timezone);
-  // Only whole bins that have started; today stops at the current bin.
+  // Only whole bins that closed at least the ingestion lag ago; a finished
+  // day reads to its end.
   const readUntilMs = Math.max(
     dayStartMs,
-    Math.min(dayEndMs, dayStartMs + Math.ceil((nowMs - dayStartMs) / binMs) * binMs)
+    Math.min(
+      dayEndMs,
+      dayStartMs + Math.floor((nowMs - INGESTION_LAG_MS - dayStartMs) / binMs) * binMs
+    )
   );
 
-  // Carry-in: the grid state at the last sample before the day.
+  // Carry-in: the grid state and battery level at the last sample before
+  // the day.
   let carried: boolean | null = null;
+  let lastSoc: number | null = null;
   const byBin = new Map<number, number>();
   samples.timestamps.forEach((t, i) => {
     if (t < dayStartMs) {
       const v = samples.gridVoltageV[i];
       if (v !== null) carried = v >= GRID_PRESENT_MIN_V;
+      const soc = samples.batterySocPct[i];
+      if (soc !== null) lastSoc = soc;
       return;
     }
     if (t >= readUntilMs) return;
@@ -231,6 +282,8 @@ export function computeSiteDay(input: {
 
   const bins: Bin[] = [];
   const binCount = Math.round((readUntilMs - dayStartMs) / binMs);
+  // What the current gap is, decided when it starts; null while online.
+  let gap: "dark" | "inferred" | "no_data" | null = null;
   for (let index = 0; index < binCount; index++) {
     const i = byBin.get(index);
     const pick = (series: (number | null)[]) => (i === undefined ? null : series[i] ?? null);
@@ -241,7 +294,19 @@ export function computeSiteDay(input: {
     const loadW = pick(samples.loadPowerW);
     const pvW = pick(samples.pvPowerW);
     const online = [soc, batteryW, gridW, volts, loadW, pvW].some((v) => v !== null);
-    if (volts !== null) carried = volts >= GRID_PRESENT_MIN_V;
+    if (online) {
+      gap = null;
+      if (volts !== null) carried = volts >= GRID_PRESENT_MIN_V;
+      if (soc !== null) lastSoc = soc;
+    } else if (gap === null) {
+      if (carried === false) gap = "dark";
+      else if (lastSoc !== null && lastSoc <= LOW_BATTERY_PCT) {
+        gap = "inferred";
+        // The houses went dark, so the grid was off: a cut from here until
+        // a voltage reading shows the grid back.
+        carried = false;
+      } else gap = "no_data";
+    }
     bins.push({
       startMs: dayStartMs + index * binMs,
       online,
@@ -252,7 +317,8 @@ export function computeSiteDay(input: {
       loadW,
       pvW,
       gridPresent: carried,
-      dark: !online && carried === false,
+      dark: !online && (gap === "dark" || gap === "inferred"),
+      darkInferred: !online && gap === "inferred",
     });
   }
 
@@ -260,26 +326,29 @@ export function computeSiteDay(input: {
 
   // Solar: a solar meter if there is one, else the balance at the inverter
   // (what the load drew that neither the grid nor the battery supplied).
+  // Null rather than zero when no bin had a usable reading.
   let solarKwh: number | null = null;
   let solarEstimated = false;
   if (sources.pv) {
-    solarKwh = bins.reduce((sum, b) => sum + (b.pvW !== null ? kwh(Math.max(0, b.pvW)) : 0), 0);
+    const read = bins.filter((b) => b.pvW !== null);
+    solarKwh = read.length ? read.reduce((sum, b) => sum + kwh(Math.max(0, b.pvW!)), 0) : null;
   } else if (sources.load && sources.battery && sources.gridMeter) {
     solarEstimated = true;
-    solarKwh = bins.reduce((sum, b) => {
-      if (b.loadW === null || b.batteryW === null || b.gridW === null) return sum;
-      return sum + kwh(Math.max(0, b.loadW - b.gridW - b.batteryW));
-    }, 0);
+    const read = bins.filter((b) => b.loadW !== null && b.batteryW !== null && b.gridW !== null);
+    solarKwh = read.length
+      ? read.reduce((sum, b) => sum + kwh(Math.max(0, b.loadW! - b.gridW! - b.batteryW!)), 0)
+      : null;
   }
 
   const eveningStartMs = localInstant(date, EVENING_START_HOUR, timezone);
   const eveningBins = bins.filter((b) => b.startMs >= eveningStartMs);
-  const eveningDischargeKwh = sources.battery
-    ? eveningBins.reduce(
-        (sum, b) => sum + (b.batteryW !== null ? kwh(Math.max(0, b.batteryW)) : 0),
-        0
-      )
-    : null;
+  // Null before the window (no evening bins) and when no evening bin had a
+  // battery power reading.
+  const eveningBattery = eveningBins.filter((b) => b.batteryW !== null);
+  const eveningDischargeKwh =
+    sources.battery && eveningBattery.length
+      ? eveningBattery.reduce((sum, b) => sum + kwh(Math.max(0, b.batteryW!)), 0)
+      : null;
 
   // Houses: each meter's counter rise across the window. OpenEMS gives a
   // bin's mean, so a counter's value in a bin is about its reading at the
@@ -347,6 +416,7 @@ export function computeSiteDay(input: {
   const dark = ranges(bins, (b) => b.dark, binMs);
   const noData = ranges(bins, (b) => !b.online && !b.dark, binMs);
   const darkMinutes = minutesOf(dark);
+  const darkInferredMinutes = minutesOf(ranges(bins, (b) => b.darkInferred, binMs));
   const noDataMinutes = minutesOf(noData);
   // Time with no data and no known cut is neither lit nor dark: it is left
   // out of the share rather than counted as lit.
@@ -416,6 +486,7 @@ export function computeSiteDay(input: {
     socAtCheckHour,
     dark,
     darkMinutes,
+    darkInferredMinutes,
     noDataMinutes,
     lightsOnPct: knownMinutes > 0 ? (100 * (knownMinutes - darkMinutes)) / knownMinutes : null,
     soc: bins.map((b) => ({ atMs: b.startMs, pct: b.soc })),

@@ -162,7 +162,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     });
   });
 
-  it("converts grid voltage from mV to V and takes the highest phase, ignoring missing phases", async () => {
+  it("converts grid voltage from mV to V and takes the lowest phase, ignoring missing phases", async () => {
     clearPilotEnv();
     const timestamps = [T0, T0 + FIVE_MIN, T0 + 2 * FIVE_MIN, T0 + 3 * FIVE_MIN];
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
@@ -180,11 +180,30 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     }));
 
     expect(samples.gridVoltageV).toHaveLength(4);
-    expect(samples.gridVoltageV[0]).toBeCloseTo(232.4, 9);
+    expect(samples.gridVoltageV[0]).toBeCloseTo(229.8, 9);
     expect(samples.gridVoltageV[1]).toBeCloseTo(228, 9);
-    // Every phase missing: no value, never a substituted zero.
+    // All three phases missing: no value, never a substituted zero.
     expect(samples.gridVoltageV[2]).toBeNull();
-    expect(samples.gridVoltageV[3]).toBeCloseTo(240.1, 9);
+    expect(samples.gridVoltageV[3]).toBeCloseTo(231.5, 9);
+  });
+
+  it("reports one phase down as the bin's grid voltage, so any phase off is a cut", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [T0],
+      data: {
+        "meter0/ActivePower": [0],
+        "meter0/VoltageL1": [231_000],
+        "meter0/VoltageL2": [0],
+        "meter0/VoltageL3": [229_000],
+      },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      gridMeter: device("grid-id", "edge-1", "meter0"),
+    }));
+
+    expect(samples.gridVoltageV).toEqual([0]);
   });
 
   it("keeps null and non-numeric bins as null rather than zero", async () => {
@@ -231,6 +250,25 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     expect(samples.batterySocPct).toEqual([10, 11, 12, 13, 14, 15]);
   });
 
+  it("reads a Java zoned timestamp, dropping the bracketed zone after the offset", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [
+        "2026-11-01T00:00+03:00[Africa/Kampala]",
+        "2026-11-01T00:05:00+03:00[Africa/Kampala]",
+        "2026-10-31T21:10Z[UTC]",
+      ],
+      data: { "ess0/Soc": [10, 11, 12] },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    }));
+
+    expect(samples.timestamps).toEqual([T0, T0 + FIVE_MIN, T0 + 2 * FIVE_MIN]);
+    expect(samples.batterySocPct).toEqual([10, 11, 12]);
+  });
+
   it("drops unparseable timestamps instead of inventing an instant", async () => {
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
@@ -244,6 +282,50 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     expect(samples.timestamps).toEqual([T0, T0 + 2 * FIVE_MIN]);
     expect(samples.batterySocPct).toEqual([10, 12]);
+  });
+
+  it("still reads a response when exactly half its timestamps are unreadable", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [T0, "not-a-date"],
+      data: { "ess0/Soc": [10, 11] },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    }));
+
+    expect(samples.timestamps).toEqual([T0]);
+    expect(samples.batterySocPct).toEqual([10]);
+  });
+
+  it("fails with METERING_INVALID_DATA, not an empty day, when most timestamps are unreadable", async () => {
+    clearPilotEnv();
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: ["first bin", "second bin", T0 + 2 * FIVE_MIN],
+      data: { "ess0/Soc": [10, 11, 12] },
+    }));
+
+    const error = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    })).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MeteringError);
+    expect(error).toMatchObject({ code: "METERING_INVALID_DATA", statusCode: 502 });
+    expect((error as MeteringError).message).toBe(
+      "OpenEMS returned this day's data in a form MGM could not read. Try again shortly."
+    );
+    // The details go to the server log.
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "MGM site samples: unreadable OpenEMS timestamps",
+      expect.objectContaining({
+        edgeId: "edge-1",
+        count: 3,
+        unreadable: 2,
+        examples: ["first bin", "second bin"],
+      })
+    );
   });
 
   it("merges two devices on two edges by timestamp, each edge queried for its own channels", async () => {
@@ -299,7 +381,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     expect(samples.batteryPowerW).toEqual([-100, -200, null]);
     expect(samples.gridPowerW).toEqual([null, 500, 700]);
     expect(samples.gridVoltageV[0]).toBeNull();
-    expect(samples.gridVoltageV[1]).toBeCloseTo(231, 9);
+    expect(samples.gridVoltageV[1]).toBeCloseTo(229, 9);
     expect(samples.gridVoltageV[2]).toBeCloseTo(233, 9);
   });
 
@@ -586,8 +668,8 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     expect(samples.batteryPowerW).toEqual([500, 400]);
     expect(samples.gridPowerW).toEqual([-50, -60]);
     // L3 has no history; the other phases still answer.
-    expect(samples.gridVoltageV[0]).toBeCloseTo(231, 9);
-    expect(samples.gridVoltageV[1]).toBeCloseTo(230, 9);
+    expect(samples.gridVoltageV[0]).toBeCloseTo(230, 9);
+    expect(samples.gridVoltageV[1]).toBeCloseTo(229, 9);
   });
 
   it("returns all-null series when every channel of an edge has no history", async () => {
@@ -621,6 +703,9 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     expect(error).toBeInstanceOf(MeteringError);
     expect(error).toMatchObject({ code: "METERING_UNAUTHORIZED", statusCode: 401 });
+    expect((error as MeteringError).message).toBe(
+      "OpenEMS refused MGM's sign-in. Check the OpenEMS connection under Setup."
+    );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -636,6 +721,9 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     expect(error).toBeInstanceOf(MeteringError);
     expect(error).toMatchObject({ code: "METERING_UNAVAILABLE", statusCode: 502 });
+    expect((error as MeteringError).message).toBe(
+      "OpenEMS could not provide this day's data. Try again shortly."
+    );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -665,7 +753,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     }))).rejects.toMatchObject({ code: "METERING_UNAUTHORIZED", statusCode: 403 });
   });
 
-  it("reads with the page read timeout: every fetch carries an abort signal", async () => {
+  it("reads under one page deadline: every request and retry shares the same abort signal", async () => {
     clearPilotEnv();
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
@@ -677,21 +765,63 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
       battery: device("battery-id", "edge-1", "ess0"),
+      houseMeters: [device("house-1", "edge-2", "meter1")],
     }));
 
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy).toHaveBeenCalledTimes(1 + 2 + 1);
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(OpenEmsClient.PAGE_READ_TIMEOUT_MS);
+    const deadline = timeoutSpy.mock.results[0].value;
     for (const [, init] of fetchSpy.mock.calls) {
-      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      expect(init?.signal).toBe(deadline);
     }
-    expect(timeoutSpy).toHaveBeenCalledTimes(3);
-    for (const call of timeoutSpy.mock.calls) {
-      expect(call).toEqual([OpenEmsClient.PAGE_READ_TIMEOUT_MS]);
-    }
+  });
+
+  it("starts no request, retries included, once the page deadline has passed", async () => {
+    clearPilotEnv();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    let startedAfterDeadline = 0;
+    let singles = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      if (deadline.signal.aborted) startedAfterDeadline += 1;
+      const { channels } = sent(init).inner.params;
+      if (channels.length > 1) return missing();
+      singles += 1;
+      if (singles === 1) {
+        // The deadline passes while the first retry is on the way.
+        const reason = new DOMException("signal timed out", "TimeoutError");
+        deadline.abort(reason);
+        throw reason;
+      }
+      // The others in flight end with the deadline.
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal;
+        if (signal.aborted) reject(signal.reason);
+        signal.addEventListener("abort", () => reject(signal.reason));
+      });
+    });
+    const meters = Array.from({ length: 12 }, (_, i) => device(`house-${i}`, "edge-1", `meter${i}`));
+
+    const error = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      houseMeters: meters,
+    })).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "METERING_UNAVAILABLE",
+      statusCode: 503,
+      message: "OpenEMS did not answer in time. Try again shortly.",
+    });
+    expect(startedAfterDeadline).toBe(0);
+    // The batch, then at most the four retries already under way.
+    expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(1 + 4);
   });
 
   it.each([
     ["a DOMException", () => new DOMException("The operation was aborted due to timeout", "TimeoutError")],
     ["an Error", () => Object.assign(new Error("signal timed out"), { name: "TimeoutError" })],
+    ["an AbortError", () => new DOMException("This operation was aborted", "AbortError")],
   ])("translates a read timeout (%s) into METERING_UNAVAILABLE 503 without a per-channel retry", async (_label, make) => {
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -705,11 +835,97 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     expect(error).toBeInstanceOf(MeteringError);
     expect(error).toMatchObject({ code: "METERING_UNAVAILABLE", statusCode: 503 });
     expect((error as MeteringError).message).toBe(
-      "OpenEMS at https://openems.example.test did not answer within 20 s"
+      "OpenEMS did not answer in time. Try again shortly."
     );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    // A known OpenEMS failure, not an unexpected one.
-    expect(consoleSpy).not.toHaveBeenCalled();
+    // The client's own message, with the backend, goes to the server log:
+    // a known OpenEMS failure, logged by its code.
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    expect(consoleSpy).toHaveBeenCalledWith("MGM site samples: OpenEMS failed", {
+      code: "OPENEMS_UNREACHABLE",
+      message: "OpenEMS at https://openems.example.test did not answer within the time allowed",
+    });
+  });
+
+  it.each([
+    [
+      "a network failure",
+      () => Promise.reject(new TypeError("fetch failed")),
+      "METERING_UNAVAILABLE",
+      "OpenEMS did not answer in time. Try again shortly.",
+    ],
+    [
+      "an HTTP error with a body",
+      async () => new Response("<html>https://openems.example.test is down</html>", { status: 500 }),
+      "METERING_UNAVAILABLE",
+      "OpenEMS could not provide this day's data. Try again shortly.",
+    ],
+    [
+      "a reply that is not JSON",
+      async () => new Response("<html>OpenEMS UI</html>", { status: 200 }),
+      "METERING_UNAVAILABLE",
+      "OpenEMS could not provide this day's data. Try again shortly.",
+    ],
+    [
+      "a redirect",
+      async () => new Response(null, {
+        status: 308,
+        headers: { location: "https://openems.example.test/other" },
+      }),
+      "METERING_UNAVAILABLE",
+      "The OpenEMS connection for this microgrid is not set up correctly. Check it under Setup.",
+    ],
+    [
+      "an RPC error",
+      async () => new Response(JSON.stringify({ error: { message: "Edge edge-1 is not connected" } }), {
+        status: 200,
+      }),
+      "METERING_UNAVAILABLE",
+      "OpenEMS could not provide this day's data. Try again shortly.",
+    ],
+    [
+      "a refused sign-in",
+      async () => new Response("", { status: 403 }),
+      "METERING_UNAUTHORIZED",
+      "OpenEMS refused MGM's sign-in. Check the OpenEMS connection under Setup.",
+    ],
+  ])("never shows the backend URL to the page: %s", async (_label, reply, code, message) => {
+    clearPilotEnv();
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(reply);
+
+    const error = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    })).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MeteringError);
+    expect(error).toMatchObject({ code, message });
+    expect((error as MeteringError).message).not.toContain("openems.example.test");
+    expect(JSON.stringify((error as MeteringError).details)).not.toContain("openems.example.test");
+    // The full message stays in the server log.
+    expect(consoleSpy.mock.calls[0][0]).toBe("MGM site samples: OpenEMS failed");
+  });
+
+  it("says the connection is not set up when the saved backend URL is invalid, without the URL", async () => {
+    clearPilotEnv();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    getMicrogridEmsConfig.mockResolvedValueOnce({
+      type: "direct_url",
+      url: "ftp://openems.example.test",
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const error = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    })).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "METERING_CONFIGURATION",
+      statusCode: 503,
+      message:
+        "The OpenEMS connection for this microgrid is not set up correctly. Check it under Setup.",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("reports an unexpected response shape as METERING_UNAVAILABLE 503", async () => {
