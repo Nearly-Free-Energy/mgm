@@ -353,7 +353,7 @@ export function HouseholdTable({
                       ) : (
                         <Link
                           href={`/microgrids/${microgridId}/setup/households/${household.id}`}
-                          className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent"
+                          className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                         >
                           View
                         </Link>
