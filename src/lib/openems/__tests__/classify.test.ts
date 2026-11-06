@@ -8,6 +8,23 @@ describe("classifyDeviceType", () => {
     expect(classifyDeviceType("io.openems.edge.meter.socomec.acuniversal.MeterSocomecAcuniversalGridMeter")).toBe("grid_meter");
   });
 
+  it("returns grid_meter when the words are separated (SRNE factory id)", () => {
+    expect(classifyDeviceType("Srne.Grid-Meter", "io.openems.edge.meter.api.ElectricityMeter")).toBe("grid_meter");
+    expect(classifyDeviceType("Vendor.Grid_Meter")).toBe("grid_meter");
+    expect(classifyDeviceType("Vendor.Grid.Meter")).toBe("grid_meter");
+  });
+
+  // Rule 0: the SRNE backup meter is the inverter's AC output.
+  it("returns inverter for the SRNE backup meter", () => {
+    expect(classifyDeviceType("Srne.Backup-Meter", "io.openems.edge.meter.api.ElectricityMeter")).toBe("inverter");
+    // An alias naming the load does not pull it to consumption_meter.
+    expect(classifyDeviceType("Srne.Backup-Meter", "io.openems.edge.meter.api.ElectricityMeter", "House load")).toBe("inverter");
+  });
+
+  it("keeps rule 0 to the exact SRNE factory id", () => {
+    expect(classifyDeviceType("Vendor.Backup-Meter", "io.openems.edge.meter.api.ElectricityMeter")).toBe("other");
+  });
+
   it("returns grid_meter when nature contains GridMeter", () => {
     expect(classifyDeviceType("io.openems.edge.meter.api.ElectricityMeter", "io.openems.edge.meter.api.GridMeter")).toBe("grid_meter");
   });
@@ -36,6 +53,11 @@ describe("classifyDeviceType", () => {
 
   it("returns battery for factoryId containing Battery", () => {
     expect(classifyDeviceType("io.openems.edge.battery.fenecon.home.BatteryFeneconHome")).toBe("battery");
+  });
+
+  it("returns battery for an ESS reporting the SymmetricEss / HybridEss natures", () => {
+    expect(classifyDeviceType("Srne.Ess", "io.openems.edge.ess.api.SymmetricEss")).toBe("battery");
+    expect(classifyDeviceType("Srne.Ess", "io.openems.edge.ess.api.HybridEss")).toBe("battery");
   });
 
   it("returns battery when nature is Ess API", () => {
