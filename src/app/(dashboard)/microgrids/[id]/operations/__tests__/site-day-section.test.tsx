@@ -65,8 +65,16 @@ function siteDay(date: string) {
       gridVoltageV: [],
       loadPowerW: [],
       pvPowerW: [],
+      houseEnergyWh: {},
     },
-    sources: { battery: true, gridMeter: true, load: false, pv: false },
+    sources: {
+      battery: true,
+      gridMeter: true,
+      load: false,
+      pv: false,
+      houses: false,
+      houseMetersUnreadable: 0,
+    },
     resolutionMinutes: 15,
     nowMs: NOW_MS,
   });

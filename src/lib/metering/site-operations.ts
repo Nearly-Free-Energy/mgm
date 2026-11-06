@@ -20,6 +20,20 @@
  *   battery has cut off during a cut: the houses are without power. A gap
  *   while the grid was present is reported as missing data, not as dark.
  * - A cut continues through a gap until a sample shows the grid back.
+ * - Houses used, evening: what the household meters' cumulative consumption
+ *   counters advanced over the evening window (the report's "sold 18–24h").
+ *   A bin's value is the counter's mean over the bin, about its reading at
+ *   the bin's middle, so a meter's start is its reading in the bin before
+ *   18:00 and its end its reading in the last bin read: a full window,
+ *   half a bin early. A start may come from up to half an hour before that
+ *   bin, or failing that from the window's first bin, never from the day
+ *   before; an end, later than the start, from up to half an hour before
+ *   the last bin. A meter without both, whose counter went backwards (reset
+ *   or replaced), or without the identifiers to be read at all, is counted
+ *   as missing and left out of the sum rather than read as zero.
+ * - Battery supplied, evening: the battery's discharge over the same
+ *   window. It differs from what the houses used by the grid's share,
+ *   conversion losses and the site's own use.
  */
 import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { zonedDateTimeToUtcIso } from "@/lib/timezone/wall-clock";
@@ -31,6 +45,13 @@ export const GRID_PRESENT_MIN_V = 115;
 export const SUPPLY_MIN_W = 50;
 /** The evening selling window, local hours [start, end). */
 export const EVENING_START_HOUR = 18;
+/**
+ * How far a house meter's readings may sit from the window's edges: its
+ * start up to this long before the bin before 18:00, its end up to this
+ * long before the last bin read. A meter with a longer gap is counted as
+ * missing rather than as having used less.
+ */
+export const HOUSE_READING_TOLERANCE_MS = 30 * 60_000;
 /** The hour whose battery level is reported before the evening window. */
 export const SOC_CHECK_HOUR = 17;
 
@@ -39,6 +60,10 @@ export type SiteSourceAvailability = {
   gridMeter: boolean;
   load: boolean;
   pv: boolean;
+  /** At least one household meter is linked, readable or not. */
+  houses: boolean;
+  /** Linked household meters without the identifiers to read them. */
+  houseMetersUnreadable: number;
 };
 
 export type TimeRange = { startMs: number; endMs: number };
@@ -91,6 +116,17 @@ export type SiteDayOperations = {
   solarEstimated: boolean;
   /** Battery discharge during the evening window, kWh. */
   eveningDischargeKwh: number | null;
+  /**
+   * What the houses used in the evening window, kWh: the sum over house
+   * meters of their counter's rise. Null without house meters, before the
+   * window starts, or when no meter has both readings.
+   */
+  housesEveningKwh: number | null;
+  /**
+   * Linked house meters left out of `housesEveningKwh`: without readings at
+   * both ends of the window, counter gone backwards, or not readable at all.
+   */
+  housesEveningMetersMissing: number;
   /** Null without a grid meter, or when it gave no voltage reading. */
   cuts: TimeRange[] | null;
   cutMinutes: number | null;
@@ -303,6 +339,64 @@ export function computeSiteDay(input: {
       )
     : null;
 
+  // Houses: each meter's counter rise across the window. OpenEMS gives a
+  // bin's mean, so a counter's value in a bin is about its reading at the
+  // bin's middle; reading from the bin before 18:00 to the window's last bin
+  // spans the full window, shifted half a bin earlier.
+  let housesEveningKwh: number | null = null;
+  let housesEveningMetersMissing = 0;
+  const houseSeries = sources.houses ? Object.values(samples.houseEnergyWh ?? {}) : [];
+  if (sources.houses && readUntilMs > eveningStartMs) {
+    housesEveningMetersMissing = sources.houseMetersUnreadable;
+    // The window's first bin, and the latest bin read so far.
+    const firstEveningIndex = bins.findIndex((b) => b.startMs >= eveningStartMs);
+    const lastIndex = bins.length - 1;
+    const toleranceBins = Math.round(HOUSE_READING_TOLERANCE_MS / binMs);
+    let total = 0;
+    let counted = 0;
+    for (const series of houseSeries) {
+      const valueAt = (index: number) => {
+        const i = byBin.get(index);
+        return i === undefined ? null : series[i] ?? null;
+      };
+      // Start: the latest reading in the half hour before the window, else
+      // the window's first bin.
+      let startIndex: number | null = null;
+      for (let index = firstEveningIndex - 1; index >= 0; index--) {
+        if (index < firstEveningIndex - 1 - toleranceBins) break;
+        if (valueAt(index) !== null) {
+          startIndex = index;
+          break;
+        }
+      }
+      if (startIndex === null && firstEveningIndex >= 0 && valueAt(firstEveningIndex) !== null) {
+        startIndex = firstEveningIndex;
+      }
+      // End: the latest reading after the start, within the half hour
+      // before the last bin read. A meter that went silent earlier would
+      // otherwise count as having used less.
+      let endIndex: number | null = null;
+      if (startIndex !== null) {
+        for (let index = lastIndex; index > startIndex; index--) {
+          if (index < lastIndex - toleranceBins) break;
+          if (valueAt(index) !== null) {
+            endIndex = index;
+            break;
+          }
+        }
+      }
+      const startWh = startIndex === null ? null : valueAt(startIndex);
+      const endWh = endIndex === null ? null : valueAt(endIndex);
+      if (startWh === null || endWh === null || endWh < startWh) {
+        housesEveningMetersMissing += 1;
+        continue;
+      }
+      total += (endWh - startWh) / 1000;
+      counted += 1;
+    }
+    housesEveningKwh = counted > 0 ? total : null;
+  }
+
   // Cuts need at least one voltage reading; without one they are unknown,
   // not zero.
   const gridKnown = bins.some((b) => b.gridPresent !== null);
@@ -372,6 +466,8 @@ export function computeSiteDay(input: {
     solarKwh,
     solarEstimated,
     eveningDischargeKwh,
+    housesEveningKwh,
+    housesEveningMetersMissing,
     cuts,
     cutMinutes: cuts ? minutesOf(cuts) : null,
     lowestSoc,

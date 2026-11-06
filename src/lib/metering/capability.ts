@@ -65,22 +65,43 @@ function daysBetween(from: string, to: string): number {
  * SRNE hybrid, its backup meter). With the battery's DC power and the grid
  * meter it gives solar where no solar meter exists. Household consumption
  * meters are not the load: they miss the site's own use and unmetered loads.
+ *
+ * The house meters are the consumption meters in `houseMeterIds` (those
+ * linked to a household on the day read), all of them, by name: what the
+ * houses used is their sum. A linked device of another type (a site's grid
+ * meter standing in as a "shared" meter for un-metered houses, say) is not
+ * a house meter. Linked meters without
+ * an edge or component id cannot be read; they are counted, not dropped.
  */
-export function pickSiteSources(devices: ManagedDevice[]): SiteSources {
-  const usable = devices
-    .filter((d) => d.edgeOpenemsId && d.componentId)
-    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+export function pickSiteSources(
+  devices: ManagedDevice[],
+  houseMeterIds: string[] = []
+): SiteSources {
+  const sorted = [...devices].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+  );
+  const readable = (d: ManagedDevice) => Boolean(d.edgeOpenemsId && d.componentId);
+  const usable = sorted.filter(readable);
+  const config = (device: ManagedDevice) => ({
+    id: device.id,
+    edgeOpenemsId: device.edgeOpenemsId,
+    componentId: device.componentId,
+  });
   const first = (type: string) => {
     const device = usable.find((d) => d.deviceType === type);
-    return device
-      ? { id: device.id, edgeOpenemsId: device.edgeOpenemsId, componentId: device.componentId }
-      : null;
+    return device ? config(device) : null;
   };
+  // Only consumption meters: the site sources are other types, so no device
+  // is read both as a site source and as a house.
+  const houses = new Set(houseMeterIds);
+  const linked = sorted.filter((d) => houses.has(d.id) && d.deviceType === "consumption_meter");
   return {
     battery: first("battery"),
     gridMeter: first("grid_meter"),
     load: first("inverter"),
     pv: first("pv_meter"),
+    houseMeters: linked.filter(readable).map(config),
+    houseMetersUnreadable: linked.filter((d) => !readable(d)).length,
   };
 }
 
@@ -562,9 +583,11 @@ export class MeteringCapability implements MeteringCapabilityContract {
 
   /**
    * The provider's site-sample reader and the site devices to read, once the
-   * dates are valid.
+   * dates are valid. `houseMetersOn` is the day whose household links pick
+   * the house meters; null reads no house meters (the multi-day read values
+   * energy and does not use them).
    */
-  private async openSiteReader(microgridId: string): Promise<
+  private async openSiteReader(microgridId: string, houseMetersOn: string | null): Promise<
     | Extract<MeteringResult<never>, { ok: false }>
     | {
         ok: true;
@@ -593,12 +616,35 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
 
-    const sources = pickSiteSources(await this.repo.getManagedDevices(microgridId));
+    let devices: ManagedDevice[];
+    let houseMeterIds: string[];
+    try {
+      [devices, houseMeterIds] = await Promise.all([
+        this.repo.getManagedDevices(microgridId),
+        houseMetersOn === null
+          ? Promise.resolve([])
+          : this.repo.getHouseMeterIds(microgridId, houseMetersOn),
+      ]);
+    } catch (error) {
+      console.error("MGM site devices could not be read", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "metering_site_devices_unavailable",
+        message: "This microgrid's meters could not be read. Try again shortly.",
+      };
+    }
+    const sources = pickSiteSources(devices, houseMeterIds);
     const availability = {
       battery: sources.battery !== null,
       gridMeter: sources.gridMeter !== null,
       load: sources.load !== null,
       pv: sources.pv !== null,
+      houses: sources.houseMeters.length + sources.houseMetersUnreadable > 0,
+      houseMetersUnreadable: sources.houseMetersUnreadable,
     };
     if (!availability.battery && !availability.gridMeter) {
       return {
@@ -656,7 +702,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
 
-    const reader = await this.openSiteReader(microgridId);
+    const reader = await this.openSiteReader(microgridId, date);
     if (!reader.ok) return reader;
 
     try {
@@ -729,7 +775,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
       return invalid("start_date", `A range may cover at most ${SITE_DAYS_MAX} days.`);
     }
 
-    const reader = await this.openSiteReader(microgridId);
+    const reader = await this.openSiteReader(microgridId, null);
     if (!reader.ok) return reader;
 
     const chunks: { start: string; length: number }[] = [];

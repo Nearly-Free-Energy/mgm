@@ -86,8 +86,9 @@ function solarDay(date: string): SiteDayOperations {
       gridVoltageV: [],
       loadPowerW: [],
       pvPowerW: [],
+      houseEnergyWh: {},
     },
-    sources: { battery: true, gridMeter: true, load: false, pv: true },
+    sources: { battery: true, gridMeter: true, load: false, pv: true, houses: false, houseMetersUnreadable: 0 },
     resolutionMinutes: 5,
     nowMs: Date.parse("2026-11-07T09:00:00Z"),
   });

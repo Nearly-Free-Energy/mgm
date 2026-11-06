@@ -90,6 +90,14 @@ export interface MeteringRepository {
   getStoredConnection(microgridId: string): Promise<StoredConnection | null>;
   getMicrogridTimezone(microgridId: string): Promise<string | null>;
   getManagedDevices(microgridId: string): Promise<ManagedDevice[]>;
+  /**
+   * Ids of this microgrid's devices linked to a household as its primary or
+   * secondary consumption meter on `date` (YYYY-MM-DD): links whose
+   * half-open period [effective_from, effective_to) contains the day. Empty
+   * when there are none; throws when a read fails, so a failed read is not
+   * mistaken for a site without household meters.
+   */
+  getHouseMeterIds(microgridId: string, date: string): Promise<string[]>;
   getMicrogridEdges(
     microgridId: string
   ): Promise<{ id: string; openemsEdgeId: string; name: string }[]>;

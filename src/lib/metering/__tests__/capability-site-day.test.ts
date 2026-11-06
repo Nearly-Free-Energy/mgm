@@ -63,6 +63,7 @@ function stubRepo(overrides: Partial<MeteringRepository> = {}): MeteringReposito
     getStoredConnection: async () => null,
     getMicrogridTimezone: async () => "Africa/Kampala",
     getManagedDevices: async () => SITE_DEVICES,
+    getHouseMeterIds: async () => [],
     getMicrogridEdges: async () => [],
     getKnownEdgeIds: async () => [],
     getAssignmentLinks: async () => [],
@@ -89,6 +90,7 @@ function emptySamples(): SiteSamples {
     gridVoltageV: [],
     loadPowerW: [],
     pvPowerW: [],
+    houseEnergyWh: {},
   };
 }
 
@@ -211,8 +213,9 @@ describe("MeteringCapability.getSiteDay", () => {
       const isPluginEnabled = vi.fn(async () => false);
       const getMicrogridTimezone = vi.fn(async () => "Africa/Kampala");
       const getManagedDevices = vi.fn(async () => SITE_DEVICES);
+      const getHouseMeterIds = vi.fn(async () => [METER_ID]);
       const { capability, registry, getSiteSamples } = setup({
-        repo: { isPluginEnabled, getMicrogridTimezone, getManagedDevices },
+        repo: { isPluginEnabled, getMicrogridTimezone, getManagedDevices, getHouseMeterIds },
       });
       const resolve = vi.spyOn(registry, "resolve");
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
@@ -220,6 +223,7 @@ describe("MeteringCapability.getSiteDay", () => {
       expect(isPluginEnabled).toHaveBeenCalledWith(ORG_ID);
       expect(getMicrogridTimezone).not.toHaveBeenCalled();
       expect(getManagedDevices).not.toHaveBeenCalled();
+      expect(getHouseMeterIds).not.toHaveBeenCalled();
       expect(resolve).not.toHaveBeenCalled();
       expect(getSiteSamples).not.toHaveBeenCalled();
     });
@@ -421,6 +425,8 @@ describe("MeteringCapability.getSiteDay", () => {
         gridMeter: { id: GRID_ID, edgeOpenemsId: "edge0", componentId: "meter0" },
         load: null,
         pv: null,
+        houseMeters: [],
+        houseMetersUnreadable: 0,
       });
     });
 
@@ -452,12 +458,16 @@ describe("MeteringCapability.getSiteDay", () => {
         gridMeter: { id: GRID_ID, edgeOpenemsId: "edge0", componentId: "meter0" },
         load: null,
         pv: { id: PV_ID, edgeOpenemsId: "edge0", componentId: "meter2" },
+        houseMeters: [],
+        houseMetersUnreadable: 0,
       });
       expect(result.data.sources).toEqual({
         battery: false,
         gridMeter: true,
         load: false,
         pv: true,
+        houses: false,
+        houseMetersUnreadable: 0,
       });
       expect(result.data.resolutionMinutes).toBe(5);
       expect(result.data.date).toBe("2026-11-01");
@@ -475,7 +485,108 @@ describe("MeteringCapability.getSiteDay", () => {
         gridMeter: false,
         load: false,
         pv: false,
+        houses: false,
+        houseMetersUnreadable: 0,
       });
+    });
+
+    it("reads the house meters after the plugin gate and passes them to the provider", async () => {
+      const order: string[] = [];
+      const isPluginEnabled = vi.fn(async () => {
+        order.push("gate");
+        return true;
+      });
+      const getHouseMeterIds = vi.fn(async () => {
+        order.push("houses");
+        return [METER_ID];
+      });
+      const { capability, getSiteSamples } = setup({ repo: { isPluginEnabled, getHouseMeterIds } });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
+      expect(getHouseMeterIds).toHaveBeenCalledWith(MG_ID, "2026-11-01");
+      expect(order).toEqual(["gate", "houses"]);
+      expect(getSiteSamples.mock.calls[0][0].sources.houseMeters).toEqual([
+        { id: METER_ID, edgeOpenemsId: "edge0", componentId: "meter1" },
+      ]);
+      expect(result.data.sources.houses).toBe(true);
+    });
+
+    it("reports no houses when no device is a linked house meter", async () => {
+      const { capability, getSiteSamples } = setup();
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
+      expect(getSiteSamples.mock.calls[0][0].sources.houseMeters).toEqual([]);
+      expect(result.data.sources.houses).toBe(false);
+      expect(result.data.housesEveningKwh).toBeNull();
+    });
+
+    it("still answers 404 with house meters but no battery or grid meter", async () => {
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getManagedDevices: async () => [
+            device({ id: METER_ID, name: "Meter 01", deviceType: "consumption_meter" }),
+          ],
+          getHouseMeterIds: async () => [METER_ID],
+        },
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      expect(result).toMatchObject({ ok: false, status: 404, code: "metering_no_site_devices" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 503, not a site without household meters, when the meter links cannot be read", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getHouseMeterIds: async () => {
+            throw new Error("Could not read household meter links: boom");
+          },
+        },
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      expect(result).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "metering_site_devices_unavailable",
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("MGM site devices could not be read", {
+        name: "Error",
+        message: "Could not read household meter links: boom",
+      });
+      consoleSpy.mockRestore();
+    });
+
+    it("reports linked house meters that cannot be read", async () => {
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getManagedDevices: async () => [
+            ...SITE_DEVICES,
+            device({ id: "m-no-comp", name: "Meter 02", componentId: "" }),
+          ],
+          getHouseMeterIds: async () => [METER_ID, "m-no-comp"],
+        },
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
+      expect(getSiteSamples.mock.calls[0][0].sources.houseMeters).toHaveLength(1);
+      expect(getSiteSamples.mock.calls[0][0].sources.houseMetersUnreadable).toBe(1);
+      expect(result.data.sources).toMatchObject({ houses: true, houseMetersUnreadable: 1 });
+    });
+
+    it("counts houses when every linked meter is unreadable", async () => {
+      const { capability } = setup({
+        repo: {
+          getManagedDevices: async () => [
+            ...SITE_DEVICES.filter((d) => d.id !== METER_ID),
+            device({ id: "m-no-edge", name: "Meter 02", edgeOpenemsId: "" }),
+          ],
+          getHouseMeterIds: async () => ["m-no-edge"],
+        },
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
+      expect(result.data.sources).toMatchObject({ houses: true, houseMetersUnreadable: 1 });
     });
 
     it("feeds the provider's samples into the day", async () => {
@@ -488,6 +599,7 @@ describe("MeteringCapability.getSiteDay", () => {
         gridVoltageV: [230, 230],
         loadPowerW: [null, null],
         pvPowerW: [null, null],
+        houseEnergyWh: {},
       };
       const { capability } = setup({ getSiteSamples: async () => samples });
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
@@ -618,14 +730,71 @@ describe("pickSiteSources", () => {
       gridMeter: { id: GRID_ID, edgeOpenemsId: "edge7", componentId: "meter0" },
       load: { id: "inv-1", edgeOpenemsId: "edge0", componentId: "inv0" },
       pv: { id: PV_ID, edgeOpenemsId: "edge0", componentId: "meter2" },
+      houseMeters: [],
+      houseMetersUnreadable: 0,
     });
   });
 
   it("returns all nulls when nothing matches", () => {
-    expect(pickSiteSources([])).toEqual({ battery: null, gridMeter: null, load: null, pv: null });
+    const none = {
+      battery: null,
+      gridMeter: null,
+      load: null,
+      pv: null,
+      houseMeters: [],
+      houseMetersUnreadable: 0,
+    };
+    expect(pickSiteSources([])).toEqual(none);
     expect(
       pickSiteSources([device({ id: METER_ID, deviceType: "consumption_meter" })])
-    ).toEqual({ battery: null, gridMeter: null, load: null, pv: null });
+    ).toEqual(none);
+  });
+
+  it("picks every listed house meter with OpenEMS identifiers, by name then id", () => {
+    const devices = [
+      device({ id: "m-3", name: "Meter 02", componentId: "meter3" }),
+      device({ id: "m-2", name: "Meter 01", componentId: "meter2" }),
+      device({ id: "m-1", name: "Meter 01", componentId: "meter1" }),
+      device({ id: "m-unlinked", name: "Meter 00", componentId: "meter9" }),
+      device({ id: "m-no-comp", name: "Meter 00", componentId: "" }),
+      device({ id: BATTERY_ID, name: "Battery", deviceType: "battery", componentId: "ess0" }),
+    ];
+    const sources = pickSiteSources(devices, ["m-3", "m-2", "m-1", "m-no-comp", "not-a-device"]);
+    expect(sources.houseMeters).toEqual([
+      { id: "m-1", edgeOpenemsId: "edge0", componentId: "meter1" },
+      { id: "m-2", edgeOpenemsId: "edge0", componentId: "meter2" },
+      { id: "m-3", edgeOpenemsId: "edge0", componentId: "meter3" },
+    ]);
+    expect(sources.houseMetersUnreadable).toBe(1);
+    expect(sources.battery?.id).toBe(BATTERY_ID);
+  });
+
+  it("does not count a linked grid meter, inverter or battery as a house", () => {
+    const devices = [
+      device({ id: GRID_ID, name: "Grid", deviceType: "grid_meter", componentId: "meter0" }),
+      device({ id: "inv-1", name: "Inverter", deviceType: "inverter", componentId: "inv0" }),
+      device({ id: BATTERY_ID, name: "Battery", deviceType: "battery", componentId: "ess0" }),
+      device({ id: METER_ID, name: "Meter 01", componentId: "meter1" }),
+    ];
+    const sources = pickSiteSources(devices, [GRID_ID, "inv-1", BATTERY_ID, METER_ID]);
+    expect(sources.gridMeter?.id).toBe(GRID_ID);
+    expect(sources.load?.id).toBe("inv-1");
+    expect(sources.houseMeters).toEqual([
+      { id: METER_ID, edgeOpenemsId: "edge0", componentId: "meter1" },
+    ]);
+    expect(sources.houseMetersUnreadable).toBe(0);
+  });
+
+  it("counts linked consumption meters without an edge or component id as unreadable", () => {
+    const devices = [
+      device({ id: "m-1", name: "Meter 01", componentId: "meter1" }),
+      device({ id: "m-no-comp", name: "Meter 02", componentId: "" }),
+      device({ id: "m-no-edge", name: "Meter 03", edgeOpenemsId: "" }),
+      device({ id: "m-unlinked", name: "Meter 04", componentId: "" }),
+    ];
+    const sources = pickSiteSources(devices, ["m-1", "m-no-comp", "m-no-edge"]);
+    expect(sources.houseMeters.map((m) => m.id)).toEqual(["m-1"]);
+    expect(sources.houseMetersUnreadable).toBe(2);
   });
 
   it("ignores devices without a component id or an edge id", () => {
@@ -640,6 +809,8 @@ describe("pickSiteSources", () => {
       gridMeter: null,
       load: null,
       pv: null,
+      houseMeters: [],
+      houseMetersUnreadable: 0,
     });
   });
 
@@ -680,6 +851,19 @@ describe("pickSiteSources", () => {
 });
 
 describe("MeteringCapability.getSiteDays", () => {
+  it("does not read house meters: the multi-day read values energy only", async () => {
+    const getHouseMeterIds = vi.fn(async () => [METER_ID]);
+    const { capability, getSiteSamples } = setup({ repo: { getHouseMeterIds } });
+    const result = await capability.getSiteDays({
+      microgrid_id: MG_ID,
+      start_date: "2026-10-01",
+      end_date: "2026-10-02",
+    });
+    expect(result.ok).toBe(true);
+    expect(getHouseMeterIds).not.toHaveBeenCalled();
+    expect(getSiteSamples.mock.calls[0][0].sources.houseMeters).toEqual([]);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

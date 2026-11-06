@@ -38,6 +38,18 @@ export type SiteSources = {
   gridMeter: DeviceConfig | null;
   load: DeviceConfig | null;
   pv: DeviceConfig | null;
+  /**
+   * The household meters (consumption meters linked to a household as its
+   * primary or secondary meter on the day read): what the houses themselves
+   * used.
+   */
+  houseMeters: DeviceConfig[];
+  /**
+   * Linked household meters that cannot be read because they have no edge
+   * or component id. Not requested; reported so a total that leaves them
+   * out does not look complete.
+   */
+  houseMetersUnreadable: number;
 };
 
 export type SiteSamplesRequest = {
@@ -65,6 +77,12 @@ export type SiteSamples = {
   gridVoltageV: (number | null)[];
   loadPowerW: (number | null)[];
   pvPowerW: (number | null)[];
+  /**
+   * Each house meter's cumulative consumption counter in Wh, keyed by MGM
+   * device id: one series per house meter in the request, bin-aligned like
+   * the others, all null when the meter gave nothing.
+   */
+  houseEnergyWh: Record<string, (number | null)[]>;
 };
 
 /**

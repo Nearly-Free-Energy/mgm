@@ -214,25 +214,49 @@ function toEpochMs(raw: number | string): number | null {
 }
 
 /**
- * Channels of one site source, as OpenEMS names them. Meter voltages are in
- * mV, power in W, the ESS state of charge in %.
+ * Channels of the site sources, as OpenEMS names them, in two groups: the
+ * site's own devices, and the house meters. Meter voltages are in mV, power
+ * in W, the ESS state of charge in %, a meter's consumption counter in Wh.
  */
 function siteChannels(sources: SiteSources) {
-  const channels: { edgeId: string; channel: string }[] = [];
-  const add = (device: DeviceConfig | null, suffixes: string[]) => {
+  const channels: { group: "site" | "houses"; edgeId: string; channel: string }[] = [];
+  const add = (group: "site" | "houses", device: DeviceConfig | null, suffixes: string[]) => {
     if (!device?.edgeOpenemsId || !device.componentId) return;
     for (const suffix of suffixes) {
       channels.push({
+        group,
         edgeId: device.edgeOpenemsId,
         channel: `${device.componentId}/${suffix}`,
       });
     }
   };
-  add(sources.battery, ["Soc", "ActivePower"]);
-  add(sources.gridMeter, ["ActivePower", "VoltageL1", "VoltageL2", "VoltageL3"]);
-  add(sources.load, ["ActivePower"]);
-  add(sources.pv, ["ActivePower"]);
+  add("site", sources.battery, ["Soc", "ActivePower"]);
+  add("site", sources.gridMeter, ["ActivePower", "VoltageL1", "VoltageL2", "VoltageL3"]);
+  add("site", sources.load, ["ActivePower"]);
+  add("site", sources.pv, ["ActivePower"]);
+  for (const meter of sources.houseMeters) add("houses", meter, ["ActiveConsumptionEnergy"]);
   return channels;
+}
+
+/** At most this many one-channel retries of a batch run at once. */
+const SINGLE_CHANNEL_CONCURRENCY = 4;
+
+/** Runs `task` over `items`, at most `limit` at a time, keeping order. */
+async function mapLimited<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 async function querySiteEdge(
@@ -250,15 +274,16 @@ async function querySiteEdge(
   } catch (error) {
     if (!isNoEnergyData(error)) throw error;
     // A channel with no history fails the whole batch; one by one, the
-    // others still answer and the missing one stays null.
-    const single = await Promise.all(channels.map(async (channel) => {
+    // others still answer and the missing one stays null. A few at a time,
+    // so a batch of many house meters does not become a burst of requests.
+    const single = await mapLimited(channels, SINGLE_CHANNEL_CONCURRENCY, async (channel) => {
       try {
         return await query([channel]);
       } catch (channelError) {
         if (!isNoEnergyData(channelError)) throw channelError;
         return null;
       }
-    }));
+    });
     return single.filter((set): set is SampleSet => set !== null);
   }
 }
@@ -278,17 +303,21 @@ async function getOpenEmsSiteSamples(
     );
   }
   const client = createOpenEmsClient(config);
-  const byEdge = new Map<string, string[]>();
-  for (const { edgeId, channel } of siteChannels(request.sources)) {
-    const list = byEdge.get(edgeId) ?? [];
-    if (!list.includes(channel)) list.push(channel);
-    byEdge.set(edgeId, list);
+  // One batch per edge for the site's devices and another for its house
+  // meters, so a meter without history (a new one, say) does not make the
+  // site's channels be retried one by one.
+  const batches = new Map<string, { edgeId: string; channels: string[] }>();
+  for (const { group, edgeId, channel } of siteChannels(request.sources)) {
+    const key = `${group}|${edgeId}`;
+    const batch = batches.get(key) ?? { edgeId, channels: [] };
+    if (!batch.channels.includes(channel)) batch.channels.push(channel);
+    batches.set(key, batch);
   }
 
   // One value per (edge, channel, instant), keyed by bin start.
   const values = new Map<string, Map<number, number>>();
   const instants = new Set<number>();
-  await Promise.all([...byEdge].map(async ([edgeId, channels]) => {
+  await Promise.all([...batches.values()].map(async ({ edgeId, channels }) => {
     for (const set of await querySiteEdge(client, edgeId, channels, request)) {
       const times = set.timestamps.map(toEpochMs);
       for (const time of times) if (time !== null) instants.add(time);
@@ -333,6 +362,12 @@ async function getOpenEmsSiteSamples(
     }),
     loadPowerW: read(request.sources.load, "ActivePower"),
     pvPowerW: read(request.sources.pv, "ActivePower"),
+    houseEnergyWh: Object.fromEntries(
+      request.sources.houseMeters.map((meter) => [
+        meter.id,
+        read(meter, "ActiveConsumptionEnergy"),
+      ])
+    ),
   };
 }
 
