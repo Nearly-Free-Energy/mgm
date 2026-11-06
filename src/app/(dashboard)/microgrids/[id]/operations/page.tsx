@@ -7,9 +7,11 @@ import { DayPicker } from "@/components/operations/day-picker";
 import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
 import { isSupportedTimezone } from "@/lib/validation/timezone";
 import { SiteDayLoading, SiteDaySection } from "./site-day-section";
+import { SavingsLoading, SavingsSection } from "./savings-section";
 
 /**
- * Daily operations: one local day of the site's battery, grid and supply.
+ * Daily operations: one local day of the site's battery, grid and supply,
+ * and below it what the solar and battery saved against the grid tariff.
  *
  * Reads through the metering capability (composeMetering), not a direct
  * OpenEMS client: the capability checks the session and the organization,
@@ -52,6 +54,15 @@ export default async function OperationsPage({
         <DayPicker basePath={`/microgrids/${id}/operations`} date={date} today={today} />
         <Suspense key={date} fallback={<SiteDayLoading />}>
           <SiteDaySection
+            organizationId={microgrid.communities.org_id}
+            microgridId={id}
+            date={date}
+          />
+        </Suspense>
+        {/* Its own boundary: a range read is slower than the day's, and the
+            day should not wait for it. */}
+        <Suspense key={`savings-${date}`} fallback={<SavingsLoading />}>
+          <SavingsSection
             organizationId={microgrid.communities.org_id}
             microgridId={id}
             date={date}

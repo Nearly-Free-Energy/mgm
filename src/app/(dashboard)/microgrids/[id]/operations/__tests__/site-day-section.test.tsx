@@ -45,7 +45,8 @@ vi.mock("next/link", () => ({
 
 // ── Import (after mocks) ──────────────────────────────────────────────────────
 
-import { SiteDayLoading, SiteDaySection } from "../site-day-section";
+import { SiteDayLoading, SiteDaySection, withoutFlows } from "../site-day-section";
+import { DailyOperations } from "@/components/operations/daily-operations";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,23 @@ describe("SiteDaySection", () => {
     expect(disposeMock).toHaveBeenCalledTimes(1);
   });
 
+  it("hands DailyOperations the day without its per-bin flows", async () => {
+    const day = { ...siteDay(DATE), flows: [{ atMs: 1, hour: 0, batteryW: 5, gridW: 1, solarW: 0, gridPresent: true }] };
+    getSiteDayMock.mockResolvedValue({ ok: true, data: day });
+
+    const jsx = (await SiteDaySection({
+      organizationId: "org-1",
+      microgridId: "mg-1",
+      date: DATE,
+    })) as React.ReactElement<{ day: typeof day }>;
+
+    expect(jsx.type).toBe(DailyOperations);
+    expect("flows" in jsx.props.day).toBe(false);
+    const { flows: _ignored, ...rest } = day;
+    void _ignored;
+    expect(jsx.props.day).toEqual(rest);
+  });
+
   it("renders the operations view on success", async () => {
     const html = await renderSection();
 
@@ -237,6 +255,21 @@ describe("SiteDaySection", () => {
     expect(html).toContain("Could not load this day&#x27;s operations");
     expect(html).toContain("Sign in again.");
     expect(getSiteDayMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("withoutFlows", () => {
+  it("drops flows, keeps every other field, and leaves the input alone", () => {
+    const day = {
+      ...siteDay(DATE),
+      flows: [{ atMs: 1, hour: 3, batteryW: -200, gridW: 300, solarW: null, gridPresent: true }],
+    };
+    const stripped = withoutFlows(day);
+
+    expect("flows" in stripped).toBe(false);
+    expect(stripped.knownMinutes).toBe(day.knownMinutes);
+    expect(stripped.date).toBe(DATE);
+    expect(day.flows).toHaveLength(1);
   });
 });
 

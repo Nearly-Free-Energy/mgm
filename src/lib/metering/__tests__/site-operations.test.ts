@@ -1245,3 +1245,159 @@ describe("computeSiteDay — reference day", () => {
     expect(total).toBeCloseTo(6, 10);
   });
 });
+
+describe("computeSiteDay — known minutes", () => {
+  it("is the period read less no-data time", () => {
+    const samples = makeSamples((m) => {
+      if (inRange(m, 300, 310)) return { ...NORMAL, volts: 0 };
+      if (inRange(m, 310, 400)) return null; // dark 90 (known)
+      if (inRange(m, 800, 830)) return null; // no data 30
+      return NORMAL;
+    });
+    expect(run(samples).knownMinutes).toBe(1440 - 30);
+  });
+
+  it("counts only the elapsed part of a day in progress", () => {
+    // At 12:02 the last bin closed at least INGESTION_LAG_MS ago ends at 12:00.
+    const day = run(makeSamples(() => NORMAL), { nowMs: at(12, 2) });
+    expect(day.knownMinutes).toBe(720);
+  });
+
+  it("is 0 when nothing of the day is known, and when the day has not started", () => {
+    expect(run(makeSamples(() => null)).knownMinutes).toBe(0);
+    expect(run(makeSamples(() => NORMAL), { nowMs: DAY_START - HOUR }).knownMinutes).toBe(0);
+  });
+});
+
+describe("computeSiteDay — flows", () => {
+  it("has one flow per bin read, at the bin start, with the local hour", () => {
+    const day = run(makeSamples(() => NORMAL));
+    expect(day.flows).toHaveLength(288);
+    expect(day.flows[0]).toMatchObject({ atMs: DAY_START, hour: 0 });
+    expect(day.flows[11]).toMatchObject({ atMs: at(0, 55), hour: 0 });
+    expect(day.flows[12]).toMatchObject({ atMs: at(1, 0), hour: 1 });
+    expect(day.flows[18 * 12 + 6]).toMatchObject({ atMs: at(18, 30), hour: 18 });
+    expect(day.flows.at(-1)).toMatchObject({ atMs: at(23, 55), hour: 23 });
+    day.flows.forEach((f, i) => {
+      expect(f.atMs).toBe(DAY_START + i * BIN_MS);
+      expect(f.hour).toBe(Math.floor(i / 12));
+    });
+  });
+
+  it("stops at the last settled bin for a day in progress", () => {
+    const day = run(makeSamples(() => NORMAL), { nowMs: at(12, 2) });
+    expect(day.flows).toHaveLength(144);
+    expect(day.flows.at(-1)).toMatchObject({ atMs: at(11, 55), hour: 11 });
+  });
+
+  it("carries the battery and grid power as read, null in a gap", () => {
+    const samples = makeSamples((m) => {
+      if (m === 60) return { ...NORMAL, batteryW: 1500, gridW: -200 };
+      if (m === 65) return null;
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.flows[12]).toMatchObject({ batteryW: 1500, gridW: -200 });
+    expect(day.flows[13]).toEqual({
+      atMs: at(1, 5),
+      hour: 1,
+      batteryW: null,
+      gridW: null,
+      solarW: null,
+      gridPresent: true,
+    });
+    expect(day.flows[14]).toMatchObject({ batteryW: -100, gridW: 400 });
+  });
+
+  it("carries the grid state as cuts do: through gaps, and null until first known", () => {
+    const samples = makeSamples((m) => {
+      if (m < 60) return { ...NORMAL, volts: null };
+      if (inRange(m, 60, 120)) return { ...NORMAL, volts: 0 };
+      if (inRange(m, 120, 180)) return null; // a gap during the cut
+      return NORMAL;
+    });
+    const day = run(samples);
+    expect(day.flows[0].gridPresent).toBeNull();
+    expect(day.flows[11].gridPresent).toBeNull();
+    expect(day.flows[12].gridPresent).toBe(false);
+    expect(day.flows[30].gridPresent).toBe(false);
+    expect(day.flows[36].gridPresent).toBe(true);
+  });
+
+  it("takes the grid state carried in from the previous day", () => {
+    const tail = makeSamples(() => ({ ...NORMAL, volts: 0 }), { startMs: at(-1), endMs: DAY_START });
+    const day = run(concat(tail, makeSamples(() => null)));
+    expect(day.flows[0].gridPresent).toBe(false);
+  });
+
+  it("uses the solar meter clipped at 0 when the site has one", () => {
+    const samples = makeSamples((m) => {
+      if (m === 600) return { ...NORMAL, pvW: 2500 };
+      if (m === 605) return { ...NORMAL, pvW: -20 };
+      if (m === 610) return { ...NORMAL, pvW: null };
+      return { ...NORMAL, pvW: 0 };
+    });
+    const day = run(samples, { sources: { ...ALL_SOURCES, pv: true } });
+    expect(day.flows[120].solarW).toBe(2500);
+    expect(day.flows[121].solarW).toBe(0);
+    expect(day.flows[122].solarW).toBeNull();
+  });
+
+  it("prefers the solar meter over the balance", () => {
+    const samples = makeSamples(() => ({ ...NORMAL, pvW: 700, loadW: 5000, gridW: 0, batteryW: 0 }));
+    const day = run(samples, { sources: { ...ALL_SOURCES, pv: true } });
+    expect(day.flows[0].solarW).toBe(700);
+  });
+
+  it("estimates solar as load − grid − battery clipped at 0, null when one is missing", () => {
+    const samples = makeSamples((m) => {
+      if (m === 600) return { ...NORMAL, loadW: 1000, gridW: 200, batteryW: 300 };
+      if (m === 605) return { ...NORMAL, loadW: 400, gridW: 0, batteryW: -600 };
+      if (m === 610) return { ...NORMAL, loadW: 5000, gridW: null, batteryW: 0 };
+      return { ...NORMAL, loadW: 300, gridW: 400, batteryW: 0 };
+    });
+    const day = run(samples);
+    expect(day.flows[120].solarW).toBe(500);
+    expect(day.flows[121].solarW).toBe(1000);
+    expect(day.flows[122].solarW).toBeNull();
+    expect(day.flows[0].solarW).toBe(0);
+  });
+
+  it("has null solar on every flow when neither a solar meter nor the balance is available", () => {
+    const samples = makeSamples(() => ({ ...NORMAL, pvW: 900 }));
+    const day = run(samples, { sources: { ...ALL_SOURCES, pv: false, load: false } });
+    expect(day.flows.every((f) => f.solarW === null)).toBe(true);
+  });
+
+  it("adds up to the day's solar kWh", () => {
+    const samples = makeSamples((m) =>
+      inRange(m, 540, 900) ? { ...NORMAL, pvW: 1000 } : { ...NORMAL, pvW: -20 }
+    );
+    const day = run(samples, { sources: { ...ALL_SOURCES, pv: true } });
+    const kwh = day.flows.reduce((sum, f) => sum + ((f.solarW ?? 0) * BIN_MINUTES) / 60 / 1000, 0);
+    expect(kwh).toBeCloseTo(day.solarKwh ?? NaN, 10);
+  });
+
+  it("gives local hours across a spring-forward day (Europe/London, 2026-03-29)", () => {
+    const start = Date.parse("2026-03-29T00:00:00Z");
+    const end = Date.parse("2026-03-29T23:00:00Z");
+    const samples = makeSamples(() => NORMAL, { startMs: start, endMs: end });
+    const day = run(samples, { date: "2026-03-29", timezone: "Europe/London", nowMs: end + HOUR });
+    expect(day.flows).toHaveLength(23 * 12);
+    // 01:00 GMT becomes 02:00 BST: local hour 1 is skipped.
+    expect(day.flows[11]).toMatchObject({ atMs: start + 55 * MINUTE, hour: 0 });
+    expect(day.flows[12]).toMatchObject({ atMs: start + HOUR, hour: 2 });
+    expect(day.flows.some((f) => f.hour === 1)).toBe(false);
+    expect(day.flows.at(-1)?.hour).toBe(23);
+  });
+
+  it("gives local hour 1 twice across a fall-back day (Europe/London, 2026-10-25)", () => {
+    const start = Date.parse("2026-10-24T23:00:00Z"); // 00:00 BST
+    const end = Date.parse("2026-10-26T00:00:00Z"); // 00:00 GMT next day
+    const samples = makeSamples(() => NORMAL, { startMs: start, endMs: end });
+    const day = run(samples, { date: "2026-10-25", timezone: "Europe/London", nowMs: end + HOUR });
+    expect(day.flows).toHaveLength(25 * 12);
+    expect(day.flows.filter((f) => f.hour === 1)).toHaveLength(24);
+    expect(day.flows.at(-1)?.hour).toBe(23);
+  });
+});
