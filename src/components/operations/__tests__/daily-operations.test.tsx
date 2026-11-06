@@ -65,6 +65,7 @@ function makeDay(overrides: Partial<SiteDaySummary> = {}): SiteDaySummary {
     socAtCheckHour: 63.6,
     dark: [{ startMs: at(23), endMs: at(24) }],
     darkMinutes: 60,
+    darkInferredMinutes: 0,
     noDataMinutes: 0,
     lightsOnPct: (100 * (1440 - 60)) / 1440, // 95.8333…
     soc: [
@@ -106,6 +107,7 @@ const NULL_DAY: Partial<SiteDaySummary> = {
   socAtCheckHour: null,
   dark: [],
   darkMinutes: 0,
+  darkInferredMinutes: 0,
   lightsOnPct: null,
   soc: [],
 };
@@ -231,10 +233,43 @@ describe("DailyOperations", () => {
   });
 
   it("says no battery is registered in the evening tile when there is none", () => {
-    const { root } = render(makeDay({ eveningDischargeKwh: null }));
+    const { root } = render(
+      makeDay({
+        sources: { ...makeDay().sources, battery: false },
+        eveningDischargeKwh: null,
+      }),
+    );
     expect(tileValue(root, "Houses used 18:00–24:00")).toBe("3.2 kWh");
     expect(tile(root, "Houses used 18:00–24:00")).toContain("No battery registered");
     expect(tile(root, "Houses used 18:00–24:00")).not.toContain("Battery supplied");
+  });
+
+  it("says the battery gave no readings, rather than a zero, when it has none for the evening", () => {
+    const { root } = render(makeDay({ eveningDischargeKwh: null }));
+    expect(tileValue(root, "Houses used 18:00–24:00")).toBe("3.2 kWh");
+    expect(tile(root, "Houses used 18:00–24:00")).toContain("No battery readings");
+    expect(tile(root, "Houses used 18:00–24:00")).not.toContain("Battery supplied");
+    expect(tile(root, "Houses used 18:00–24:00")).not.toContain("No battery registered");
+  });
+
+  it("shows a battery that was read and only charged as having supplied 0 kWh", () => {
+    const { root } = render(makeDay({ eveningDischargeKwh: 0 }));
+    expect(tile(root, "Houses used 18:00–24:00")).toContain("Battery supplied 0.0 kWh");
+  });
+
+  it("shows an em dash, not zero, when the solar meter gave no readings", () => {
+    const { root } = render(makeDay({ solarKwh: null }));
+    expect(tileValue(root, "Solar")).toBe("—");
+    expect(tile(root, "Solar")).toContain("No solar meter readings");
+    expect(tile(root, "Solar")).not.toContain("Needs");
+  });
+
+  it("shows an em dash when the balance had no complete readings to estimate from", () => {
+    const { root } = render(
+      makeDay({ solarKwh: null, sources: { ...makeDay().sources, pv: false } }),
+    );
+    expect(tileValue(root, "Solar")).toBe("—");
+    expect(tile(root, "Solar")).toContain("No complete inverter, grid and battery readings");
   });
 
   it("marks solar as estimated when it is the balance at the inverter", () => {
@@ -269,6 +304,20 @@ describe("DailyOperations", () => {
     expect(tile(root, "Lowest battery")).not.toContain("in a cut");
   });
 
+  it("warns at a lowest level at or below the battery's floor, not above it", () => {
+    const lowestTone = (pct: number) => {
+      const { root } = render(
+        makeDay({ lowestSoc: { pct, atMs: at(7, 15), duringCut: false } }),
+      );
+      const section = Array.from(root.querySelectorAll("section")).find(
+        (el) => el.querySelector("p")?.textContent === "Lowest battery",
+      );
+      return section!.querySelectorAll("p")[1].className;
+    };
+    expect(lowestTone(15)).toContain("text-warning-fg");
+    expect(lowestTone(15.5)).not.toContain("text-warning-fg");
+  });
+
   it("shows the battery level at 17:00", () => {
     const { root } = render(makeDay());
     expect(tileValue(root, "Battery at 17:00")).toBe("64%");
@@ -281,10 +330,33 @@ describe("DailyOperations", () => {
     expect(tile(root, "Lights on")).toContain("Dark 1h 0m");
   });
 
+  it("says how much of the dark time was inferred from a low battery, and the time with no data", () => {
+    const { root } = render(
+      makeDay({ darkMinutes: 250, darkInferredMinutes: 30, noDataMinutes: 15 }),
+    );
+    expect(tile(root, "Lights on")).toContain(
+      "Dark 4h 10m (30m inferred from a low battery) · No data 15m",
+    );
+  });
+
+  it("leaves out the inferred note when no dark time was inferred", () => {
+    const { root } = render(makeDay({ noDataMinutes: 15 }));
+    expect(tile(root, "Lights on")).toContain("Dark 1h 0m · No data 15m");
+    expect(tile(root, "Lights on")).not.toContain("inferred");
+  });
+
+  it("mentions no-data time even on a day with no dark time", () => {
+    const { root } = render(
+      makeDay({ dark: [], darkMinutes: 0, noDataMinutes: 45, lightsOnPct: 100 }),
+    );
+    expect(tile(root, "Lights on")).toContain("No dark time · No data 45m");
+  });
+
   it("says 'No dark time' when the houses never went dark", () => {
     const { root } = render(makeDay({ dark: [], darkMinutes: 0, lightsOnPct: 100 }));
     expect(tileValue(root, "Lights on")).toBe("100.0%");
     expect(tile(root, "Lights on")).toContain("No dark time");
+    expect(tile(root, "Lights on")).not.toContain("No data");
   });
 
   it("shows an em dash and what is needed when values are null", () => {
@@ -335,7 +407,9 @@ describe("DailyOperations", () => {
 
   it("notes missing data that was not counted as dark", () => {
     const { html } = render(makeDay({ noDataMinutes: 30 }));
-    expect(html).toContain("No data for 30m while the grid was on");
+    expect(html).toContain(
+      "No data for 30m (gateway or connection down while the grid was on and the battery above 15%, or not yet known); that time is not counted as dark.",
+    );
   });
 
   it("omits the missing-data note when nothing was missing", () => {
@@ -346,6 +420,18 @@ describe("DailyOperations", () => {
   it("names the timezone in the footnote", () => {
     const { html } = render(makeDay());
     expect(html).toContain("Times are Africa/Kampala.");
+  });
+
+  it("defines a power cut in the footnote as any phase below 170 V over a reading", () => {
+    const { html } = render(makeDay({ resolutionMinutes: 5 }));
+    expect(html).toContain("A power cut is any grid phase below 170 V over a 5-minute reading.");
+  });
+
+  it("explains inferred dark time in the footnote", () => {
+    const { html } = render(makeDay());
+    expect(html).toContain(
+      "When it went silent with the battery at or below 15%, the houses are taken to be dark and the grid off, since the gateway cannot outlive the battery; that time is shown as inferred.",
+    );
   });
 
   it("says in the footnote that lights on leaves out time with no data", () => {

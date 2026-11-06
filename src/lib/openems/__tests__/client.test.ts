@@ -1302,7 +1302,7 @@ describe("OpenEmsClient", () => {
       fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
 
       await client.queryHistoricSamples(
-        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, 12_345
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 12_345 }
       );
 
       expect(timeoutSpy).toHaveBeenCalledTimes(1);
@@ -1322,7 +1322,7 @@ describe("OpenEmsClient", () => {
       fetchSpy.mockRejectedValue(cause);
 
       const error = await client.queryHistoricSamples(
-        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, 20_000
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 20_000 }
       ).catch((caught: unknown) => caught);
 
       expect(error).toBeInstanceOf(OpenEmsError);
@@ -1338,16 +1338,102 @@ describe("OpenEmsClient", () => {
 
       await expect(
         client.queryHistoricSamples(
-          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, 7_600
+          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 7_600 }
         )
       ).rejects.toThrow("did not answer within 8 s");
+    });
+
+    it("passes the caller's signal to fetch as it is when there is no timeout", async () => {
+      const controller = new AbortController();
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal }
+      );
+
+      expect(fetchSpy.mock.calls[0][1]?.signal).toBe(controller.signal);
+      expect(timeoutSpy).not.toHaveBeenCalled();
+    });
+
+    it("combines the caller's signal with its own timeout, whichever ends first", async () => {
+      const controller = new AbortController();
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      const anySpy = vi.spyOn(AbortSignal, "any");
+      fetchSpy.mockResolvedValue(samplesResponse({ timestamps: [], data: {} }));
+
+      await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal, timeoutMs: 5_000 }
+      );
+
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      expect(anySpy).toHaveBeenCalledWith([controller.signal, timeoutSpy.mock.results[0].value]);
+      const signal = fetchSpy.mock.calls[0][1]?.signal as AbortSignal;
+      expect(signal).toBe(anySpy.mock.results[0].value);
+      expect(signal.aborted).toBe(false);
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+    });
+
+    it("starts no request once the caller's signal has aborted", async () => {
+      const controller = new AbortController();
+      controller.abort(new DOMException("signal timed out", "TimeoutError"));
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal }
+      ).catch((caught: unknown) => caught);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+    });
+
+    it.each([
+      ["a TimeoutError", () => new DOMException("signal timed out", "TimeoutError")],
+      ["an AbortError", () => new DOMException("This operation was aborted", "AbortError")],
+    ])("turns the caller's signal ending (%s) into OPENEMS_UNREACHABLE, never 'NaN s'", async (_label, make) => {
+      const controller = new AbortController();
+      fetchSpy.mockImplementation(async () => {
+        const reason = make();
+        controller.abort(reason);
+        throw reason;
+      });
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5,
+        { signal: controller.signal, timeoutMs: 20_000 }
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      const message = (error as OpenEmsError).message;
+      expect(message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+      expect(message).not.toContain("NaN");
+    });
+
+    it("says 'the time allowed', not 'NaN s', for a timeout with no timeout of its own", async () => {
+      fetchSpy.mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+
+      const error = await client.queryHistoricSamples(
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5
+      ).catch((caught: unknown) => caught);
+
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
     });
 
     it("keeps other network failures as the generic OPENEMS_UNREACHABLE message", async () => {
       fetchSpy.mockRejectedValue(new Error("ECONNREFUSED"));
 
       const error = await client.queryHistoricSamples(
-        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, 20_000
+        "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 20_000 }
       ).catch((caught: unknown) => caught);
 
       expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });

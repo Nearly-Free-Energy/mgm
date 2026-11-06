@@ -4,10 +4,12 @@ import * as React from "react";
 import { Kwh } from "@/components/format/kwh";
 import { formatLocalDate } from "@/components/format/local-date";
 import { useLocale } from "@/components/format/locale-context";
-import type {
-  EveningSupply,
-  SiteDaySummary,
-  TimeRange,
+import {
+  GRID_PRESENT_MIN_V,
+  LOW_BATTERY_PCT,
+  type EveningSupply,
+  type SiteDaySummary,
+  type TimeRange,
 } from "@/lib/metering/site-operations";
 import { cn } from "@/lib/utils";
 
@@ -254,6 +256,29 @@ function EveningStrip({ day }: { day: SiteDaySummary }) {
   );
 }
 
+/** The solar tile's note: where the figure comes from, or why there is none. */
+function solarDetail(day: SiteDaySummary): string {
+  const { pv, load, battery, gridMeter } = day.sources;
+  if (day.solarKwh !== null) {
+    return day.solarEstimated ? "≈ inverter output − grid − battery" : "Solar meter";
+  }
+  if (pv) return "No solar meter readings";
+  if (load && battery && gridMeter) return "No complete inverter, grid and battery readings";
+  return "Needs a solar meter, or an inverter output meter with the battery and grid meter";
+}
+
+/** The lights-on tile's note: dark time, how much was inferred, and gaps. */
+function lightsOnDetail(day: SiteDaySummary): string {
+  const dark =
+    day.darkMinutes > 0
+      ? `Dark ${formatDuration(day.darkMinutes)}` +
+        (day.darkInferredMinutes > 0
+          ? ` (${formatDuration(day.darkInferredMinutes)} inferred from a low battery)`
+          : "")
+      : "No dark time";
+  return day.noDataMinutes > 0 ? `${dark} · No data ${formatDuration(day.noDataMinutes)}` : dark;
+}
+
 /** The battery's evening share, and why the houses' figure may be short. */
 function HousesEveningDetail({
   day,
@@ -267,8 +292,10 @@ function HousesEveningDetail({
   const battery =
     day.readUntilMs <= day.eveningStartMs ? (
       `From ${clock(day.eveningStartMs)}`
-    ) : day.eveningDischargeKwh === null ? (
+    ) : !day.sources.battery ? (
       "No battery registered"
+    ) : day.eveningDischargeKwh === null ? (
+      "No battery readings"
     ) : (
       <>
         Battery supplied <Kwh value={day.eveningDischargeKwh} />
@@ -303,13 +330,7 @@ export function DailyOperations({ day }: { day: SiteDaySummary }) {
         <Stat
           label="Solar"
           value={day.solarKwh === null ? NOT_AVAILABLE : <Kwh value={day.solarKwh} />}
-          detail={
-            day.solarKwh === null
-              ? "Needs a solar meter, or an inverter output meter with the battery and grid meter"
-              : day.solarEstimated
-                ? "≈ inverter output − grid − battery"
-                : "Solar meter"
-          }
+          detail={solarDetail(day)}
           tone="warn"
         />
         <Stat
@@ -342,7 +363,7 @@ export function DailyOperations({ day }: { day: SiteDaySummary }) {
               ? `At ${clock(day.lowestSoc.atMs)}${day.lowestSoc.duringCut ? ", in a cut" : ""}`
               : "Needs a battery"
           }
-          tone={day.lowestSoc && day.lowestSoc.pct < 15 ? "warn" : "neutral"}
+          tone={day.lowestSoc && day.lowestSoc.pct <= LOW_BATTERY_PCT ? "warn" : "neutral"}
         />
         <Stat
           label="Battery at 17:00"
@@ -352,11 +373,7 @@ export function DailyOperations({ day }: { day: SiteDaySummary }) {
         <Stat
           label="Lights on"
           value={day.lightsOnPct === null ? NOT_AVAILABLE : <Percent value={day.lightsOnPct} digits={1} />}
-          detail={
-            day.darkMinutes > 0
-              ? `Dark ${formatDuration(day.darkMinutes)}`
-              : "No dark time"
-          }
+          detail={lightsOnDetail(day)}
           tone={day.darkMinutes > 0 ? "alert" : "success"}
         />
       </div>
@@ -401,14 +418,19 @@ export function DailyOperations({ day }: { day: SiteDaySummary }) {
 
       {day.noDataMinutes > 0 && (
         <p className="text-xs text-muted-foreground">
-          No data for {formatDuration(day.noDataMinutes)} while the grid was on (gateway or
-          connection down); that time is not counted as dark.
+          No data for {formatDuration(day.noDataMinutes)} (gateway or connection down while the
+          grid was on and the battery above {LOW_BATTERY_PCT}%, or not yet known); that time is
+          not counted as dark.
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        A power cut is every grid phase off (below half of nominal over a 5-minute reading). Dark means the gateway went silent during a
-        cut: the battery had cut off and the houses had no power. Lights on is the share of the
-        day that was not dark, leaving out time with no data. Times are {day.timezone}.
+        A power cut is any grid phase below {GRID_PRESENT_MIN_V} V over a{" "}
+        {day.resolutionMinutes}-minute reading. Dark means the gateway went silent during a cut:
+        the battery had cut off and the houses had no power. When it went silent with the battery
+        at or below {LOW_BATTERY_PCT}%, the houses are taken to be dark and the grid off, since
+        the gateway cannot outlive the battery; that time is shown as inferred. Lights on is the
+        share of the day that was not dark, leaving out time with no data. Times are{" "}
+        {day.timezone}.
       </p>
     </div>
   );

@@ -78,6 +78,7 @@ function makeDay(
     socAtCheckHour: null,
     dark: [],
     darkMinutes: 0,
+    darkInferredMinutes: 0,
     noDataMinutes: 0,
     lightsOnPct: 100,
     knownMinutes: 1440,

@@ -1124,8 +1124,8 @@ describe("MeteringCapability.getSiteDays", () => {
       if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
       const today = result.data[1];
       expect(today.date).toBe(KAMPALA_TODAY);
-      // 01:30 in Kampala: 18 five-minute bins have started.
-      expect(today.flows).toHaveLength(18);
+      // 01:30 in Kampala: 17 five-minute bins closed at least two minutes ago.
+      expect(today.flows).toHaveLength(17);
     });
   });
 

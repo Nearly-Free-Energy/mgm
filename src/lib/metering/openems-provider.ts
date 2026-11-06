@@ -28,7 +28,7 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       return await getOpenEmsSiteSamples(this.supabase, request);
     } catch (error) {
       if (error instanceof MeteringError) throw error;
-      if (error instanceof OpenEmsError) throw translateOpenEmsError(error);
+      if (error instanceof OpenEmsError) throw siteSamplesError(error);
       console.error("Unexpected MGM site samples failure", {
         name: error instanceof Error ? error.name : typeof error,
         message: error instanceof Error ? error.message : "non-Error thrown",
@@ -202,13 +202,18 @@ type SampleSet = {
   data: Record<string, (number | null)[]>;
 };
 
-/** OpenEMS installations return either epoch milliseconds or ISO strings. */
+/**
+ * OpenEMS installations return either epoch milliseconds or ISO strings. A
+ * Java `ZonedDateTime` string carries its zone after the offset, as in
+ * `2026-11-01T00:00+03:00[Africa/Kampala]`; the offset alone fixes the
+ * instant, so the bracketed zone is dropped before parsing.
+ */
 function toEpochMs(raw: number | string): number | null {
   const numeric = typeof raw === "number"
     ? raw
     : /^\d{10,13}$/.test(raw) ? Number(raw) : null;
   const timestamp = numeric === null
-    ? Date.parse(raw as string)
+    ? Date.parse((raw as string).replace(/\[[^\]]*\]$/, ""))
     : numeric < 1e11 ? numeric * 1000 : numeric;
   return Number.isFinite(timestamp) ? timestamp : null;
 }
@@ -241,7 +246,10 @@ function siteChannels(sources: SiteSources) {
 /** At most this many one-channel retries of a batch run at once. */
 const SINGLE_CHANNEL_CONCURRENCY = 4;
 
-/** Runs `task` over `items`, at most `limit` at a time, keeping order. */
+/**
+ * Runs `task` over `items`, at most `limit` at a time, keeping order. Once a
+ * task fails, no further task starts.
+ */
 async function mapLimited<T, R>(
   items: T[],
   limit: number,
@@ -249,10 +257,16 @@ async function mapLimited<T, R>(
 ): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   const worker = async () => {
-    while (next < items.length) {
+    while (next < items.length && !failed) {
       const index = next++;
-      out[index] = await task(items[index]);
+      try {
+        out[index] = await task(items[index]);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -263,11 +277,13 @@ async function querySiteEdge(
   client: ReturnType<typeof createOpenEmsClient>,
   edgeId: string,
   channels: string[],
-  request: SiteSamplesRequest
+  request: SiteSamplesRequest,
+  /** The page read's one deadline, shared by every request and retry. */
+  signal: AbortSignal
 ): Promise<SampleSet[]> {
   const query = (list: string[]) => client.queryHistoricSamples(
     edgeId, list, request.startDate, request.endDate, request.timezone,
-    request.resolutionMinutes, OpenEmsClient.PAGE_READ_TIMEOUT_MS
+    request.resolutionMinutes, { signal }
   );
   try {
     return [await query(channels)];
@@ -303,6 +319,9 @@ async function getOpenEmsSiteSamples(
     );
   }
   const client = createOpenEmsClient(config);
+  // One deadline for the whole read, however many requests and retries it
+  // takes: once it passes, the client starts no further request.
+  const signal = AbortSignal.timeout(OpenEmsClient.PAGE_READ_TIMEOUT_MS);
   // One batch per edge for the site's devices and another for its house
   // meters, so a meter without history (a new one, say) does not make the
   // site's channels be retried one by one.
@@ -318,8 +337,28 @@ async function getOpenEmsSiteSamples(
   const values = new Map<string, Map<number, number>>();
   const instants = new Set<number>();
   await Promise.all([...batches.values()].map(async ({ edgeId, channels }) => {
-    for (const set of await querySiteEdge(client, edgeId, channels, request)) {
+    for (const set of await querySiteEdge(client, edgeId, channels, request, signal)) {
       const times = set.timestamps.map(toEpochMs);
+      const unreadable = times.filter((time) => time === null).length;
+      // A response whose instants mostly cannot be read is not an empty
+      // day: say so rather than show the day as missing data.
+      if (set.timestamps.length && unreadable * 2 > set.timestamps.length) {
+        console.error("MGM site samples: unreadable OpenEMS timestamps", {
+          edgeId,
+          count: set.timestamps.length,
+          unreadable,
+          examples: set.timestamps
+            .filter((_, i) => times[i] === null)
+            .slice(0, 3)
+            .map((raw) => String(raw).slice(0, 64)),
+        });
+        throw new MeteringError(
+          "OpenEMS returned this day's data in a form MGM could not read. Try again shortly.",
+          "METERING_INVALID_DATA",
+          502,
+          { edgeId, count: set.timestamps.length, unreadable }
+        );
+      }
       for (const time of times) if (time !== null) instants.add(time);
       for (const channel of channels) {
         const series = set.data[channel];
@@ -349,6 +388,8 @@ async function getOpenEmsSiteSamples(
   const phases = ["VoltageL1", "VoltageL2", "VoltageL3"].map((suffix) =>
     read(request.sources.gridMeter, suffix, 1000)
   );
+  // The lowest phase that reported: a cut is any phase down. A phase with
+  // no value (a single-phase meter's L2 and L3, say) is ignored.
   return {
     timestamps,
     batterySocPct: read(request.sources.battery, "Soc"),
@@ -358,7 +399,7 @@ async function getOpenEmsSiteSamples(
       const present = phases
         .map((phase) => phase[i])
         .filter((value): value is number => value !== null);
-      return present.length ? Math.max(...present) : null;
+      return present.length ? Math.min(...present) : null;
     }),
     loadPowerW: read(request.sources.load, "ActivePower"),
     pvPowerW: read(request.sources.pv, "ActivePower"),
@@ -498,6 +539,44 @@ export function createOpenEmsMeteringProvider(
   supabase: SupabaseClient
 ): MeteringProvider {
   return new OpenEmsMeteringProvider(supabase);
+}
+
+/**
+ * What the operations page says when OpenEMS fails a site read. The
+ * client's own messages name the backend URL and quote its replies, so
+ * they go to the server log only; the page gets a plain sentence per kind
+ * of failure, and keeps the MeteringError code and status of
+ * `translateOpenEmsError`.
+ */
+function siteSamplesMessage(code: string): string {
+  switch (code) {
+    case "OPENEMS_UNREACHABLE":
+      return "OpenEMS did not answer in time. Try again shortly.";
+    case "OPENEMS_AUTH_FAILED":
+    case "OPENEMS_FORBIDDEN":
+      return "OpenEMS refused MGM's sign-in. Check the OpenEMS connection under Setup.";
+    case "OPENEMS_NOT_CONFIGURED":
+    case "OPENEMS_INVALID_CONFIG":
+    case "OPENEMS_INVALID_BACKEND_URL":
+    case "OPENEMS_REDIRECT":
+      return "The OpenEMS connection for this microgrid is not set up correctly. Check it under Setup.";
+    default:
+      return "OpenEMS could not provide this day's data. Try again shortly.";
+  }
+}
+
+function siteSamplesError(error: OpenEmsError): MeteringError {
+  console.error("MGM site samples: OpenEMS failed", {
+    code: error.code,
+    message: error.message,
+  });
+  const translated = translateOpenEmsError(error);
+  return new MeteringError(
+    siteSamplesMessage(error.code),
+    translated.code,
+    translated.statusCode,
+    { openemsCode: error.code }
+  );
 }
 
 function translateOpenEmsError(error: OpenEmsError): MeteringError {
