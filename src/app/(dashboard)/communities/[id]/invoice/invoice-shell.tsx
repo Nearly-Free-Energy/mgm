@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * invoice-shell.tsx — Client shell for the community Invoice tab (#204 / PDF2).
+ * invoice-shell.tsx — Client shell for the community's Invoice branding page
+ * (#204 / PDF2).
  *
  * Owns:
- *   - Form state (controlled — useState; no react-hook-form, mirrors the
- *     Payment-shell precedent).
+ *   - Form state (controlled — useState; no react-hook-form).
  *   - Logo-staging state (drafted path + signed thumbnail URL until next save).
  *   - Submit handler (PATCH /api/communities/[id]/invoice-config).
  *   - Preview-button click flow (Pattern A — fetch + blob + popup window).
