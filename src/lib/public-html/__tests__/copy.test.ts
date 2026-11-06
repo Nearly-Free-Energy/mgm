@@ -25,6 +25,25 @@ describe("public page copy", () => {
   it("names the product Microgrid Manager", () => {
     expect(PUBLIC_COPY.en.productName).toBe("Microgrid Manager");
   });
+
+  it("has one {seconds} in every form of the wait sentence, and an `other` form", () => {
+    for (const lang of PUBLIC_LANGUAGES) {
+      const forms: Record<string, string> = PUBLIC_COPY[lang].paymentLink.tooManyTries.body;
+      expect(Object.keys(forms), lang).toContain("other");
+      for (const [form, text] of Object.entries(forms)) {
+        expect(text.split("{seconds}").length - 1, `${lang}.${form}`).toBe(1);
+      }
+    }
+  });
+
+  it("has no {placeholder} outside the wait sentence", () => {
+    for (const lang of PUBLIC_LANGUAGES) {
+      for (const [at, text] of strings(PUBLIC_COPY[lang], lang)) {
+        if (at.startsWith(`${lang}.paymentLink.tooManyTries.body.`)) continue;
+        expect(text, at).not.toMatch(/[{}]/);
+      }
+    }
+  });
 });
 
 describe("pickPublicLanguage", () => {
