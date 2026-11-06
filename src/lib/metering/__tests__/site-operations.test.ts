@@ -134,7 +134,7 @@ const inRange = (m: number, from: number, to: number) => m >= from && m < to;
 
 describe("computeSiteDay — constants", () => {
   it("matches the site report's definitions", () => {
-    expect(GRID_PRESENT_MIN_V).toBe(50);
+    expect(GRID_PRESENT_MIN_V).toBe(115);
     expect(SUPPLY_MIN_W).toBe(50);
     expect(EVENING_START_HOUR).toBe(18);
     expect(SOC_CHECK_HOUR).toBe(17);
@@ -292,10 +292,19 @@ describe("computeSiteDay — day frame", () => {
 });
 
 describe("computeSiteDay — grid presence and cuts", () => {
-  it("treats the highest phase below 50 V as a cut and 50 V or above as present", () => {
+  it("keeps a bin where the grid only flickered back inside its cut", () => {
+    // A 5-minute mean of 80 V: the grid was back for about a minute.
     const samples = makeSamples((m) => {
-      if (inRange(m, 600, 660)) return { ...NORMAL, volts: 49.9, gridW: 0 };
-      return { ...NORMAL, volts: 50 };
+      if (inRange(m, 600, 630)) return { ...NORMAL, volts: m === 615 ? 80 : 0, gridW: 0 };
+      return NORMAL;
+    });
+    expect(run(samples).cuts).toEqual(rangesAt([600, 630]));
+  });
+
+  it("treats a bin whose highest phase averages below 115 V as a cut and 115 V or above as present", () => {
+    const samples = makeSamples((m) => {
+      if (inRange(m, 600, 660)) return { ...NORMAL, volts: 114.9, gridW: 0 };
+      return { ...NORMAL, volts: 115 };
     });
     const day = run(samples);
     expect(day.cuts).toEqual(rangesAt([600, 660]));

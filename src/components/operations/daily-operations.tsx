@@ -374,7 +374,7 @@ export function DailyOperations({ day }: { day: SiteDaySummary }) {
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        A power cut is every grid phase below 50 V. Dark means the gateway went silent during a
+        A power cut is every grid phase off (below half of nominal over a 5-minute reading). Dark means the gateway went silent during a
         cut: the battery had cut off and the houses had no power. Lights on is the share of the
         day that was not dark, leaving out time with no data. Times are {day.timezone}.
       </p>

@@ -9,8 +9,12 @@
  * Definitions (they follow the operator's own daily site report for a
  * hybrid-inverter site whose gateway runs on the inverter's output; if that
  * wiring or the report's definitions change, revisit them):
- * - Grid present: the grid meter's highest phase is at or above
- *   `GRID_PRESENT_MIN_V`. All phases below it is a power cut.
+ * - Grid present: the bin's mean voltage on the grid meter's highest phase
+ *   is at or above `GRID_PRESENT_MIN_V`. A bin is a mean, so a bin whose
+ *   grid was off for most of it reads well below nominal even if the grid
+ *   flickered back: half of nominal keeps such a bin inside its cut rather
+ *   than splitting the cut in two (checked against a real day's 1-minute
+ *   report). Revisit if the bin length or the nominal voltage changes.
  * - Dark: no samples arrived while the last known grid state was a cut.
  *   The gateway runs on the inverter's output, so it goes quiet when the
  *   battery has cut off during a cut: the houses are without power. A gap
@@ -21,8 +25,8 @@ import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { zonedDateTimeToUtcIso } from "@/lib/timezone/wall-clock";
 import type { SiteSamples } from "./types";
 
-/** Below this on every phase, the grid is off. */
-export const GRID_PRESENT_MIN_V = 50;
+/** A bin's mean voltage below this on every phase is a cut (half of 230 V). */
+export const GRID_PRESENT_MIN_V = 115;
 /** Battery discharge or grid import above this counts as supplying. */
 export const SUPPLY_MIN_W = 50;
 /** The evening selling window, local hours [start, end). */
