@@ -8,6 +8,7 @@ Tool-specific config for Claude Code. MGM is a microgrid operating system built 
 - `CONTRIBUTING.md` — contributor setup, sign-off, signed commits, and the required checks.
 - `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
 - `docs/entity-model.md` — the data model and the reasoning behind it.
+- `docs/adr/ADR-006-gui-contract-v0.md` — the GUI contract (v0, experimental): what capabilities contribute, what interfaces render, and the import boundaries between them.
 - Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`, `docs/releasing.md` (publishing a versioned deployment asset; publishing deploys nothing).
 
 ## Build & Dev Commands
@@ -84,6 +85,7 @@ src/
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
 │   ├── plugins/             ← bundled plugin catalog (names, dependencies, owned routes)
+│   ├── gui/                 ← GUI contract v0: contract.ts (client-safe), surface.ts (server-only); host/{server,client,shared}/ layering enforced by gui-boundary.test.ts
 │   ├── community-management/, metering/, billing/, payments/  ← capability plugins
 │   ├── openems/             ← OpenEMS client, types, errors (adapter pattern)
 │   │   └── device-descriptions.ts  ← human-readable device-type labels

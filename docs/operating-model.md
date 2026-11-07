@@ -135,11 +135,12 @@ with these docs.
 
 **Code owners.** The owned areas are database migrations (including the RLS
 helpers), roles, the Cordis runtime gate and plugin catalog, the GUI contract
-types and their type test, request middleware, CI workflows, and the release
-build script. The paths live in `.github/CODEOWNERS`, which is the single
-list; `src/lib/__tests__/codeowners.test.ts` checks that each pattern still
-matches a tracked file. Other changes may be merged by their author once the
-checks pass.
+types with their type and import-boundary tests, request middleware, CI
+workflows, and the release build script. The paths live in
+`.github/CODEOWNERS`, which is the single list;
+`src/lib/__tests__/codeowners.test.ts` checks that each pattern still matches
+a tracked file. Other changes may be merged by their author once the checks
+pass.
 
 **Outside contributions.** Squash-merged. Squashing does **not** waive the
 signature or sign-off items: they apply to every commit on the pull request,
