@@ -14,7 +14,8 @@
 //   3. Empty-microgrids community → "No microgrids yet" placeholder.
 //   4. Zero-stats community (0 hh, 0 devices) → stats strip renders zeros.
 //   5. User without access → Edit button not rendered.
-//   6. Invoice branding link shown with the Edit button, hidden without it.
+//   6. Invoice branding link shown with the Edit button, hidden without it;
+//      44 px tall, with its arrow hidden from screen readers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -248,8 +249,15 @@ describe("CommunityDetailPage", () => {
     });
     const html = renderToStaticMarkup(jsx as React.ReactElement);
 
-    expect(html).toContain('href="/communities/comm-1/invoice"');
-    expect(html).toContain("Invoice branding");
+    const link = html.match(
+      /<a href="\/communities\/comm-1\/invoice" class="([^"]*)">(.*?)<\/a>/,
+    );
+    expect(link).not.toBeNull();
+    // min-h-11 (44 px) needs a box to apply to: an inline <a> ignores it.
+    expect(link![1].split(" ")).toEqual(
+      expect.arrayContaining(["inline-flex", "min-h-11", "items-center"]),
+    );
+    expect(link![2]).toBe('Invoice branding<span aria-hidden="true">→</span>');
   });
 
   it("does NOT link to Invoice branding when the user cannot edit the community", async () => {
