@@ -54,9 +54,32 @@ describe("DialogPanel", () => {
     renderFrame();
     const classes = classesOf(screen.getByRole("alertdialog"));
     expect(classes).toEqual(
-      expect.arrayContaining(["max-h-[90dvh]", "overflow-y-auto", "overscroll-contain"]),
+      expect.arrayContaining([
+        "max-h-[90vh]",
+        "supports-[height:100dvh]:max-h-[90dvh]",
+        "overflow-y-auto",
+        "overscroll-contain",
+      ]),
     );
     expect(classes).not.toContain("overflow-hidden");
+  });
+
+  it("keeps a vh height cap for browsers without dvh, and uses dvh only where it is supported", () => {
+    renderFrame();
+    const classes = classesOf(screen.getByRole("alertdialog"));
+    // The only dvh classes are the two caps, each under the supports variant.
+    const dvhCaps = classes.filter((c) => c.includes("dvh"));
+    expect(dvhCaps).toHaveLength(2);
+    expect(dvhCaps).toEqual(
+      expect.arrayContaining([
+        "supports-[height:100dvh]:max-h-[90dvh]",
+        "max-[600px]:supports-[height:100dvh]:max-h-[92dvh]",
+      ]),
+    );
+    // Each has its vh twin at the same breakpoint, and cn() kept both.
+    for (const c of dvhCaps) {
+      expect(classes).toContain(c.replace("supports-[height:100dvh]:", "").replace("dvh]", "vh]"));
+    }
   });
 
   it("scrolls a focused field clear of the pinned footer", () => {
@@ -74,7 +97,8 @@ describe("DialogPanel", () => {
         "max-[600px]:left-0",
         "max-[600px]:w-full",
         "max-[600px]:max-w-none",
-        "max-[600px]:max-h-[92dvh]",
+        "max-[600px]:max-h-[92vh]",
+        "max-[600px]:supports-[height:100dvh]:max-h-[92dvh]",
         "max-[600px]:translate-x-0",
         "max-[600px]:translate-y-0",
         "max-[600px]:rounded-b-none",

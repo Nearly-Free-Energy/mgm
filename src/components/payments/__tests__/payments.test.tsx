@@ -57,3 +57,28 @@ it("opens payment history as a dialog that keeps focus inside and closes on Esca
  await waitFor(() => expect(document.activeElement).toBe(trigger));
  expect(fetchMock.mock.calls.every(call => call[1] === undefined)).toBe(true);
 });
+it("keeps focus on Payment history after Escape while a request runs, and ignores clicks on it until the request ends", async () => {
+ let finish!: () => void;
+ fetchMock.mockImplementation((_url, options) => options ? new Promise(resolve => { finish = () => resolve(response({})); }) : Promise.resolve(response(history)));
+ render(<PaymentHistory lineItemId="bill-1" />);
+ const trigger = screen.getByRole("button", { name: "Payment history" });
+ fireEvent.click(trigger);
+ const dialog = await screen.findByRole("dialog", { name: "Payment history" });
+ await screen.findByText(/Difference: 20 UGX/);
+ fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+ await waitFor(() => expect(trigger.getAttribute("aria-disabled")).toBe("true"));
+ expect(trigger.hasAttribute("disabled")).toBe(false);
+ fireEvent.keyDown(dialog, { key: "Escape" });
+ await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+ await waitFor(() => expect(document.activeElement).toBe(trigger));
+ const callsBefore = fetchMock.mock.calls.length;
+ fireEvent.click(trigger);
+ expect(screen.queryByRole("dialog")).toBeNull();
+ expect(fetchMock.mock.calls.length).toBe(callsBefore);
+ expect(fetchMock.mock.calls.filter(call => call[1]?.method === "POST")).toHaveLength(1);
+ finish();
+ await waitFor(() => expect(refresh).toHaveBeenCalled());
+ await waitFor(() => expect(trigger.hasAttribute("aria-disabled")).toBe(false));
+ fireEvent.click(trigger);
+ expect(await screen.findByRole("dialog", { name: "Payment history" })).toBeTruthy();
+});

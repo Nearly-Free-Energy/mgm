@@ -36,7 +36,11 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
   } catch (error) { setError(error instanceof Error ? error.message : "Payment action failed"); }
   finally { setBusy(false); }
  }
- return <span><Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger asChild><button className="text-xs underline" onClick={show} disabled={busy}>Payment history</button></Dialog.Trigger><Dialog.Portal><DialogOverlay /><DialogPanel className="w-[672px] p-6">
+ // While a request runs the trigger is aria-disabled rather than disabled: closing the dialog returns focus to it, and a
+ // disabled button cannot take focus, so Esc would leave focus on <body>. A click while busy does nothing. Its
+ // preventDefault is what keeps Dialog.Trigger from opening the dialog, because Radix skips its own click handler on a
+ // default-prevented event; if Radix stops doing that, the busy-click case in payments.test.tsx fails.
+ return <span><Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Trigger asChild><button className="text-xs underline" onClick={event => { if (busy) { event.preventDefault(); return; } void show(); }} aria-disabled={busy || undefined}>Payment history</button></Dialog.Trigger><Dialog.Portal><DialogOverlay /><DialogPanel className="w-[672px] p-6">
   <Dialog.Close asChild><button className="float-right underline">Close</button></Dialog.Close><Dialog.Title className="text-xl font-semibold">Payment history</Dialog.Title>
   <Dialog.Description>Receipts remain available when online payments are disabled.</Dialog.Description>
   {balance && <p className="my-3">Current bill: {balance.currentTotal} {balance.currency} · Received: {balance.received} {balance.currency} · Difference: {balance.difference} {balance.currency}</p>}

@@ -21,6 +21,14 @@
  *      caller's class and drops the frame's, so `overflow-hidden` would
  *      turn the panel's scrolling off without any error. Only class names
  *      written as literals are seen; a className held in a variable is not.
+ *   4. a class sized in `dvh` (or `svh`, `lvh`) is written without the
+ *      `supports-[height:100dvh]:` variant, or without its `vh` twin at the
+ *      same breakpoint in the same file. A browser without these units
+ *      (Chrome and Android WebView before 108, Safari before 15.4) drops
+ *      the declaration, so a `dvh` height cap on its own leaves the panel
+ *      uncapped there. Two plain classes do not work either: `cn()` keeps
+ *      only the last `max-h-*`. Any string literal is checked, so the
+ *      frame's own class lists are covered.
  *
  * Fix: replace `Dialog.Overlay` with `<DialogOverlay />`, `Dialog.Content`
  * with `<DialogPanel className="w-[NNNpx]">`, and the button row with
@@ -49,8 +57,12 @@ const RADIX_FRAME_PARTS = new Set([
 const MODAL_ROLES = new Set(["dialog", "alertdialog"]);
 /** Classes the frame owns. `overflow-x-*` does not displace `overflow-y-auto`. */
 const FRAME_OWNED_CLASS = /^(?:overflow-(?!x-)|max-h-|shadow$|shadow-)/;
+/** A length in a dynamic viewport unit (`90dvh`, `calc(100svh-4rem)`) or Tailwind's `h-dvh`. */
+const DYNAMIC_VIEWPORT = /\d(?:d|s|l)vh\b|-(?:d|s|l)vh$/;
+/** The variant that applies a dynamic viewport length only where the browser has it. */
+const SUPPORTS_DYNAMIC_VIEWPORT = /^supports-\[height:100(?:d|s|l)vh\]$/;
 
-type Finding = { file: string; line: number; rule: 1 | 2 | 3; detail: string };
+type Finding = { file: string; line: number; rule: 1 | 2 | 3 | 4; detail: string };
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -83,17 +95,38 @@ function isFrameModule(rel: string, specifier: string): boolean {
   return target.replace(/\.tsx?$/, "") === FRAME_MODULE;
 }
 
-/** Drops variant prefixes (`max-[600px]:`, `md:`) and the important marker. */
-function baseUtility(token: string): string {
+/** Splits `max-[600px]:supports-[height:100dvh]:max-h-[92dvh]` into its variants and utility. */
+function splitVariants(token: string): { variants: string[]; utility: string } {
+  const variants: string[] = [];
   let depth = 0;
   let start = 0;
   for (let i = 0; i < token.length; i++) {
     const ch = token[i];
     if (ch === "[" || ch === "(") depth++;
     else if (ch === "]" || ch === ")") depth--;
-    else if (ch === ":" && depth === 0) start = i + 1;
+    else if (ch === ":" && depth === 0) {
+      variants.push(token.slice(start, i));
+      start = i + 1;
+    }
   }
-  return token.slice(start).replace(/^!|!$/g, "");
+  return { variants, utility: token.slice(start) };
+}
+
+/** Drops variant prefixes (`max-[600px]:`, `md:`) and the important marker. */
+function baseUtility(token: string): string {
+  return splitVariants(token).utility.replace(/^!|!$/g, "");
+}
+
+/**
+ * The `vh` class a dynamic-viewport class falls back to: the same utility
+ * at the same breakpoint, without the supports variant and in `vh`
+ * (`max-[600px]:supports-[height:100dvh]:max-h-[92dvh]` → `max-[600px]:max-h-[92vh]`,
+ * `supports-[height:100dvh]:min-h-dvh` → `min-h-screen`).
+ */
+function vhTwin(token: string): string {
+  const { variants, utility } = splitVariants(token);
+  const twin = utility.replace(/(\d)(?:d|s|l)vh\b/g, "$1vh").replace(/-(?:d|s|l)vh$/, "-screen");
+  return [...variants.filter((v) => !SUPPORTS_DYNAMIC_VIEWPORT.test(v)), twin].join(":");
 }
 
 /** Every class token written as a literal anywhere inside a className value. */
@@ -147,7 +180,9 @@ function scanSource(rel: string, text: string, opts: { isFrame?: boolean } = {})
   const findings: Finding[] = [];
   const radixNamespaces = new Set<string>();
   const panelNames = new Set<string>();
+  const literalTokens: { node: ts.Node; token: string }[] = [];
   let panels = 0;
+  let dynamicHeights = 0;
 
   const lineOf = (n: ts.Node) => source.getLineAndCharacterOfPosition(n.getStart(source)).line + 1;
   const report = (n: ts.Node, rule: Finding["rule"], detail: string) => {
@@ -199,6 +234,16 @@ function scanSource(rel: string, text: string, opts: { isFrame?: boolean } = {})
 
   const visit = (node: ts.Node) => {
     if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node)
+    ) {
+      for (const token of node.text.split(/\s+/).filter(Boolean)) literalTokens.push({ node, token });
+    }
+
+    if (
       ts.isPropertyAccessExpression(node) &&
       // `</Dialog.Content>` closes an element already reported at its opening tag.
       !ts.isJsxClosingElement(node.parent) &&
@@ -235,29 +280,46 @@ function scanSource(rel: string, text: string, opts: { isFrame?: boolean } = {})
   };
   visit(source);
 
-  return { findings, panels };
+  // Rule 4 needs every literal in the file first: the vh twin may sit in
+  // another string of the same class list.
+  const written = new Set(literalTokens.map((t) => t.token));
+  for (const { node, token } of literalTokens) {
+    const { variants, utility } = splitVariants(token);
+    if (!DYNAMIC_VIEWPORT.test(utility)) continue;
+    dynamicHeights++;
+    if (!variants.some((v) => SUPPORTS_DYNAMIC_VIEWPORT.test(v))) {
+      report(node, 4, `"${token}" is not under supports-[height:100dvh]:`);
+    } else if (!written.has(vhTwin(token))) {
+      report(node, 4, `"${token}" has no "${vhTwin(token)}" beside it`);
+    }
+  }
+
+  return { findings, panels, dynamicHeights };
 }
 
 function scanRepository() {
   const findings: Finding[] = [];
   let files = 0;
   let panels = 0;
+  let dynamicHeights = 0;
   for (const root of ROOTS) {
     for (const file of walk(path.join(REPO_ROOT, root))) {
       const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
       const result = scanSource(rel, readFileSync(file, "utf8"), { isFrame: rel === FRAME_FILE });
       findings.push(...result.findings);
       panels += result.panels;
+      dynamicHeights += result.dynamicHeights;
       files++;
     }
   }
-  return { findings, files, panels };
+  return { findings, files, panels, dynamicHeights };
 }
 
 const RULE_TEXT: Record<Finding["rule"], string> = {
   1: "renders Radix Dialog's Content or Overlay outside the frame",
   2: "hand-made modal",
   3: "panel class the frame owns",
+  4: "dynamic viewport height without a vh fallback",
 };
 
 describe("dialogs use the shared dialog frame", () => {
@@ -281,15 +343,30 @@ describe("dialogs use the shared dialog frame", () => {
   });
 
   it("no dialog bypasses the frame or undoes it", () => {
-    const lines = repo.findings.map(
-      (f) => `${f.file}:${f.line} (${RULE_TEXT[f.rule]}): ${f.detail}`,
-    );
+    const lines = repo.findings
+      .filter((f) => f.rule !== 4)
+      .map((f) => `${f.file}:${f.line} (${RULE_TEXT[f.rule]}): ${f.detail}`);
     expect(
       lines,
       "\nThese dialogs do not use the frame in src/components/ui/dialog.tsx:\n  " +
         lines.join("\n  ") +
         "\nUse <DialogOverlay />, <DialogPanel className=\"w-[NNNpx]\"> and <DialogFooter>," +
         " and leave overflow, max-height and shadow to the panel.\n",
+    ).toEqual([]);
+  });
+
+  it("every dvh height keeps a vh cap for browsers without dvh", () => {
+    // Sanity: the frame's two caps and the selection list's phone cap are seen.
+    expect(repo.dynamicHeights).toBeGreaterThanOrEqual(3);
+    const lines = repo.findings
+      .filter((f) => f.rule === 4)
+      .map((f) => `${f.file}:${f.line}: ${f.detail}`);
+    expect(
+      lines,
+      "\nThese heights have no fallback where dvh is unsupported:\n  " +
+        lines.join("\n  ") +
+        '\nWrite the vh class, then the dvh one under the supports variant:' +
+        ' "max-h-[90vh] supports-[height:100dvh]:max-h-[90dvh]".\n',
     ).toEqual([]);
   });
 });
@@ -341,5 +418,24 @@ describe("the scanner", () => {
           <Panel className="w-[480px] p-6 overflow-x-auto" />
         </>;`, "src/components/forms/example.tsx"),
     ).toEqual([3, 3, 3]);
+  });
+
+  it("flags a dvh class outside the supports variant, or without its vh twin at the same breakpoint", () => {
+    expect(
+      rulesFor(`export const A = [
+        "max-h-[90dvh]",
+        "supports-[height:100dvh]:max-h-[80dvh]",
+        "max-h-[70vh] max-[600px]:supports-[height:100dvh]:max-h-[70dvh]",
+        "h-dvh",
+      ];`),
+    ).toEqual([4, 4, 4, 4]);
+  });
+
+  it("accepts a dvh class under the supports variant with its vh twin anywhere in the file", () => {
+    expect(
+      rulesFor(`const CAPS = ["max-h-[90vh]", "max-[600px]:max-h-[92vh]"];
+        export const A = () => <div className="supports-[height:100dvh]:max-h-[90dvh] max-[600px]:supports-[height:100dvh]:max-h-[92dvh]" />;
+        export const B = "min-h-screen supports-[height:100dvh]:min-h-dvh";`),
+    ).toEqual([]);
   });
 });

@@ -15,6 +15,11 @@
 //     the dialog does NOT resize across states. List content scrolls inside.
 //     Under 600px wide the body caps at 55% of the visible height instead,
 //     so the title, the list and the footer all fit on a phone's sheet.
+//   • The panel is a flex column, and only the body may shrink: on a short
+//     window, such as 1280 x 700, the body gives up the height the panel's
+//     cap leaves no room for, down to its 280px floor. The list is then the
+//     only thing that scrolls, instead of the list inside a panel that
+//     scrolls as well.
 //   • `locked` prop disables Esc + backdrop-click dismissal (used during
 //     the in-flight "adding" window to prevent mid-submit dismiss).
 //   • aria-describedby points at a body region with aria-live="polite" so
@@ -87,9 +92,9 @@ export function SelectionDialog({
           onInteractOutside={(e) => {
             if (locked) e.preventDefault();
           }}
-          className="w-[560px]"
+          className="flex w-[560px] flex-col"
         >
-          <div className="px-6 pb-2 pt-5">
+          <div className="shrink-0 px-6 pb-2 pt-5">
             <Dialog.Title
               id={TITLE_ID}
               className="text-lg font-semibold tracking-tight text-foreground"
@@ -112,12 +117,12 @@ export function SelectionDialog({
           <div
             id={BODY_ID}
             aria-live="polite"
-            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-[13px] leading-relaxed text-foreground max-[600px]:max-h-[55dvh]"
+            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-[13px] leading-relaxed text-foreground max-[600px]:max-h-[55vh] max-[600px]:supports-[height:100dvh]:max-h-[55dvh]"
           >
             {children}
           </div>
 
-          <DialogFooter className="mt-2">{footer}</DialogFooter>
+          <DialogFooter className="mt-2 shrink-0">{footer}</DialogFooter>
         </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>

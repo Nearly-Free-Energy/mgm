@@ -21,6 +21,15 @@
 //     Taller content scrolls inside the card.
 //   • Under 600px: a full-width sheet anchored to the bottom of the screen,
 //     at most 92% of the visible height, content scrolling inside it.
+//   • Each height cap is written twice: in `vh`, then in `dvh` under
+//     `supports-[height:100dvh]:`. A browser without `dvh` (Chrome and
+//     Android WebView before 108, Safari before 15.4) drops a `dvh`
+//     declaration, so on its own it would leave the panel uncapped. One
+//     that reads these styles but not `dvh`, such as Chrome 99 to 107,
+//     keeps the `vh` cap instead. Two plain `max-h-*` classes would not do
+//     it, because `cn()` keeps only the last of them.
+//     src/lib/__tests__/dialog-frame.test.ts fails on a `dvh` class written
+//     without the `supports-` variant or without its `vh` twin.
 //   • The footer is `sticky bottom-0` inside the scrolling panel, so the
 //     Cancel and Confirm buttons stay on screen however long the body is.
 //     It works whether the footer is a direct child of the panel or the
@@ -43,7 +52,7 @@ const OVERLAY_CLASSES =
 const PANEL_CLASSES = [
   // Centred card from 600px up.
   "fixed left-1/2 top-1/2 z-50 max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-  "max-h-[90dvh] overflow-y-auto overscroll-contain",
+  "max-h-[90vh] supports-[height:100dvh]:max-h-[90dvh] overflow-y-auto overscroll-contain",
   // A field reached with Tab, or focused on open, scrolls clear of the
   // pinned footer instead of stopping underneath it. 6rem (96px) covers the
   // footer's 64px row of 32px buttons, or Close period's two rows on a
@@ -52,7 +61,8 @@ const PANEL_CLASSES = [
   "rounded-md border border-border bg-card shadow-elev-3 outline-none",
   // Bottom sheet under 600px.
   "max-[600px]:left-0 max-[600px]:right-0 max-[600px]:top-auto max-[600px]:bottom-0",
-  "max-[600px]:w-full max-[600px]:max-w-none max-[600px]:max-h-[92dvh]",
+  "max-[600px]:w-full max-[600px]:max-w-none",
+  "max-[600px]:max-h-[92vh] max-[600px]:supports-[height:100dvh]:max-h-[92dvh]",
   "max-[600px]:translate-x-0 max-[600px]:translate-y-0",
   "max-[600px]:rounded-b-none max-[600px]:border-x-0 max-[600px]:border-b-0",
 ].join(" ");
