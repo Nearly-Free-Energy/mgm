@@ -136,6 +136,45 @@ describe("the payment link keeps its statuses, headers, redirect and audit lines
     expect(res.headers.get("retry-after")).toBe("60");
   });
 
+  it.each([
+    [0, "1"],
+    [0.2, "1"],
+    [2.3, "3"],
+    [-5, "1"],
+    [Number.NaN, "60"],
+  ])("sends Retry-After as a whole number of seconds, at least 1, when the limiter gives %s", async (retryAfter, header) => {
+    mocks.rateLimit.mockReturnValue({ ok: false, retryAfter });
+    const res = await invoke();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe(header);
+    const seconds = Number(header);
+    expect(await res.text()).toContain(`Wait ${seconds} ${seconds === 1 ? "second" : "seconds"}, then try again.`);
+  });
+
+  it("does not lengthen the wait when Try again is pressed during it", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/rate-limit/in-memory")>("@/lib/rate-limit/in-memory");
+    actual._resetRateLimitStoreForTests();
+    mocks.rateLimit.mockImplementation(actual.checkRateLimit);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-07T08:00:00.000Z"));
+      for (let i = 0; i < 10; i++) expect((await invoke()).status).toBe(302);
+      vi.setSystemTime(new Date("2026-11-07T08:00:30.000Z"));
+      // As many refusals as the limit, so the request after the wait would
+      // be refused if any of them had been counted.
+      for (let i = 0; i < 10; i++) {
+        const res = await invoke();
+        expect(res.status).toBe(429);
+        expect(res.headers.get("retry-after")).toBe("30");
+      }
+      vi.setSystemTime(new Date("2026-11-07T08:01:00.001Z"));
+      expect((await invoke()).status).toBe(302);
+    } finally {
+      vi.useRealTimers();
+      actual._resetRateLimitStoreForTests();
+    }
+  });
+
   it("answers 404 for a bill it cannot find, without an audit line", async () => {
     mocks.resolve.mockResolvedValue(null);
     const res = await invoke();
@@ -317,7 +356,7 @@ describe("the payment link's pages", () => {
     expect(res.headers.get("retry-after")).toBe("42");
     expect(body).toContain("<h1>Too many tries</h1>");
     expect(body).toContain(
-      "<p>This payment link was opened too many times in a short time. Wait 42 seconds, then try again.</p>",
+      "<p>Too many payment links were opened from your network. Wait 42 seconds, then try again.</p>",
     );
     expect(body).toContain(`<a class="btn" href="${PAY_PATH}">Try again</a>`);
   });

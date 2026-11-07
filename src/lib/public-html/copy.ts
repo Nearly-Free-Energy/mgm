@@ -39,7 +39,12 @@ export interface PublicCopy {
     linkUnavailable: PublicNotice;
     /** The short link could not be looked up. */
     lookupFailed: PublicNotice;
-    /** The same address opened the link too often; the body has the wait. */
+    /**
+     * Too many payment links were opened from one network address; the body
+     * has the wait. It speaks of the network, not of this household's link,
+     * because the pay route's limit is keyed by the client's IP address and
+     * many phones on mobile data share one. If that key changes, revisit it.
+     */
     tooManyTries: {
       heading: string;
       /**
@@ -102,9 +107,8 @@ export const PUBLIC_COPY = {
       tooManyTries: {
         heading: "Too many tries",
         body: {
-          one: "This payment link was opened too many times in a short time. Wait {seconds} second, then try again.",
-          other:
-            "This payment link was opened too many times in a short time. Wait {seconds} seconds, then try again.",
+          one: "Too many payment links were opened from your network. Wait {seconds} second, then try again.",
+          other: "Too many payment links were opened from your network. Wait {seconds} seconds, then try again.",
         },
         tryAgain: "Try again",
       },

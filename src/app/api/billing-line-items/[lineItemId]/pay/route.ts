@@ -25,7 +25,11 @@
  *     not cluster-wide; defends against accidental scraping but a coordinated
  *     attacker across instances bypasses it. A future ticket can swap in
  *     Upstash / Vercel KV when abuse signal appears (the call site only
- *     depends on `checkRateLimit(...)`'s contract).
+ *     depends on `checkRateLimit(...)`'s contract). Only allowed requests
+ *     count toward the window: `checkRateLimit` does not record a refused
+ *     one, so pressing Try again on the 429 page cannot lengthen the wait.
+ *     A replacement limiter must keep that, or the page's promise breaks;
+ *     `src/lib/rate-limit/__tests__/in-memory.test.ts` pins it.
  *
  * Status-code map (RFC 7231-aligned):
  *
@@ -68,7 +72,11 @@ import { resolveOrgForLineItem } from "@/lib/payments/resolve-org";
 import { createServiceClient } from "@/lib/supabase/service";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
-import { paymentLinkResponse, type PaymentLinkNotice } from "@/lib/public-html/payment-link";
+import {
+  paymentLinkResponse,
+  wholeSecondsToWait,
+  type PaymentLinkNotice,
+} from "@/lib/public-html/payment-link";
 
 /**
  * Seconds this function may run. Declared rather than left to the hosting
@@ -131,7 +139,9 @@ export async function GET(
       outcome: "429",
       durationMs: Date.now() - startedAt,
     });
-    const retryAfter = rl.retryAfter ?? 60;
+    // Whole seconds and at least 1, so Retry-After is always a valid
+    // positive integer and the page's wait matches it.
+    const retryAfter = wholeSecondsToWait(rl.retryAfter, RATE_LIMIT_WINDOW_MS / 1000);
     // The id passed the UUID check above, so this is a path on this site.
     const tryAgainHref = `/api/billing-line-items/${lineItemId}/pay`;
     return paymentLinkResponse(

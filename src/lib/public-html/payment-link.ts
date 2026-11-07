@@ -24,11 +24,21 @@ export type PaymentLinkPage =
       tryAgainHref: string;
     };
 
+/**
+ * A wait as a whole number of seconds, at least 1, so it is a valid
+ * Retry-After and never reads "0 seconds". `fallback` stands in when there
+ * is no finite wait.
+ */
+export function wholeSecondsToWait(seconds: number | undefined, fallback: number): number {
+  const wait = seconds !== undefined && Number.isFinite(seconds) ? seconds : fallback;
+  return Math.max(1, Math.ceil(wait));
+}
+
 export function renderPaymentLinkPage(lang: PublicLanguage, page: PaymentLinkPage): string {
   const copy: Notices = PUBLIC_COPY[lang].paymentLink;
   if (page.notice === "tooManyTries") {
     const { heading, body, tryAgain } = copy.tooManyTries;
-    const seconds = page.retryAfterSeconds;
+    const seconds = wholeSecondsToWait(page.retryAfterSeconds, 1);
     const sentence = body[new Intl.PluralRules(lang).select(seconds)] ?? body.other;
     return renderPublicPage({
       lang,

@@ -4,6 +4,7 @@ import { escapeHtml, PUBLIC_PAGE_SECURITY_HEADERS } from "../page";
 import {
   paymentLinkResponse,
   renderPaymentLinkPage,
+  wholeSecondsToWait,
   type PaymentLinkNotice,
 } from "../payment-link";
 
@@ -41,20 +42,51 @@ describe("the pages a payment link shows instead of checkout", () => {
     });
     expect(html).toContain("<title>Too many tries</title>");
     expect(html).toContain("<h1>Too many tries</h1>");
-    expect(html).toContain(`<p>This payment link was opened too many times in a short time. ${sentence}</p>`);
+    expect(html).toContain(`<p>Too many payment links were opened from your network. ${sentence}</p>`);
     expect(html).toContain(`<a class="btn" href="${PAY_PATH}">Try again</a>`);
     expect(html).not.toContain("{seconds}");
     expect(Buffer.byteLength(html, "utf8")).toBeLessThanOrEqual(4096);
   });
 
-  it("refuses a Try again link that leaves the site", () => {
-    expect(() =>
-      renderPaymentLinkPage("en", {
-        notice: "tooManyTries",
-        retryAfterSeconds: 5,
-        tryAgainHref: "https://pay.example/checkout",
-      }),
-    ).toThrow();
+  it.each([
+    [0, "Wait 1 second, then try again."],
+    [0.2, "Wait 1 second, then try again."],
+    [2.3, "Wait 3 seconds, then try again."],
+    [-5, "Wait 1 second, then try again."],
+  ])("words a wait of %s as whole seconds, at least 1", (seconds, sentence) => {
+    const html = renderPaymentLinkPage("en", {
+      notice: "tooManyTries",
+      retryAfterSeconds: seconds,
+      tryAgainHref: PAY_PATH,
+    });
+    expect(html).toContain(sentence);
+  });
+
+  it.each(["https://pay.example/checkout", "//evil.example", "/\\evil.example"])(
+    "refuses a Try again link that leaves the site: %j",
+    (tryAgainHref) => {
+      expect(() =>
+        renderPaymentLinkPage("en", { notice: "tooManyTries", retryAfterSeconds: 5, tryAgainHref }),
+      ).toThrow(/path on this site/);
+    },
+  );
+});
+
+describe("wholeSecondsToWait", () => {
+  it.each([
+    [42, 60, 42],
+    [2.3, 60, 3],
+    [0.001, 60, 1],
+    [0, 60, 1],
+    [-5, 60, 1],
+    [undefined, 60, 60],
+    [Number.NaN, 60, 60],
+    [Number.POSITIVE_INFINITY, 60, 60],
+    [undefined, 0, 1],
+  ])("turns %s (fallback %s) into %s", (seconds, fallback, expected) => {
+    const wait = wholeSecondsToWait(seconds, fallback);
+    expect(wait).toBe(expected);
+    expect(Number.isInteger(wait)).toBe(true);
   });
 });
 
@@ -84,6 +116,28 @@ describe("paymentLinkResponse", () => {
     expect(res.headers.get("retry-after")).toBe("7");
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+
+  it("does not let a route's headers replace the security headers, in any case", () => {
+    const res = paymentLinkResponse(
+      429,
+      null,
+      { notice: "tooManyTries", retryAfterSeconds: 7, tryAgainHref: PAY_PATH },
+      {
+        "Retry-After": "7",
+        "content-security-policy": "default-src *",
+        "X-CONTENT-TYPE-OPTIONS": "sniff",
+        "Referrer-Policy": "unsafe-url",
+        "x-robots-tag": "all",
+      },
+    );
+    expect(res.headers.get("retry-after")).toBe("7");
+    for (const [name, value] of Object.entries(PUBLIC_PAGE_SECURITY_HEADERS)) {
+      expect(res.headers.get(name), name).toBe(value);
+    }
+    expect(res.headers.get("content-security-policy")).toBe(PUBLIC_PAGE_SECURITY_HEADERS["Content-Security-Policy"]);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   });
 
   it.each([null, "", "lg-UG", "sw;q=1,fr;q=0.5", '"><script>alert(1)</script>'])(
