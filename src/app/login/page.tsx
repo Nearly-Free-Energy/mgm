@@ -76,21 +76,24 @@ export default function LoginPage() {
             <div className="mt-2 flex justify-end">
               <Link
                 href="/forgot-password"
-                className="text-sm text-primary underline-offset-2 hover:underline"
+                className="inline-flex min-h-11 items-center text-sm text-primary underline-offset-2 hover:underline"
               >
                 Forgot password?
               </Link>
             </div>
           </div>
           {error && (
-            <div className="rounded-md bg-destructive-muted p-3 text-sm text-destructive-fg">
+            <div
+              role="alert"
+              className="rounded-md bg-destructive-muted p-3 text-sm text-destructive-fg"
+            >
               {error}
             </div>
           )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-primary px-4 py-2 text-primary-foreground hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-11 w-full rounded-md bg-primary px-4 py-2 text-primary-foreground hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-card disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
