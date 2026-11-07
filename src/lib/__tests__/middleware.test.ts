@@ -9,6 +9,10 @@
  *   - The session check verifies the token with getClaims(), treats its
  *     errors and throws as signed out, and asks Auth (getUser) before
  *     sending a session away from /login.
+ *   - /microgrids/<id> redirects to its Operations day view, keeping ?date=.
+ *   - A page outside the installed release answers 404 with the
+ *     not-released HTML page; an API path keeps its plain-text 404.
+ *   - The web app manifest loads without a session.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, and
@@ -16,6 +20,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { renderNotReleasedPage } from "@/lib/public-html/not-released";
+import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
 
 // Mock @supabase/ssr so getClaims() (every request) and getUser() (a
 // signed-in visit to /login) resolve to deterministic values.
@@ -58,8 +64,8 @@ async function loadMiddleware() {
   return (await import("../../middleware")).middleware;
 }
 
-function makeRequest(pathname: string) {
-  return new NextRequest(`http://localhost${pathname}`);
+function makeRequest(pathname: string, headers?: Record<string, string>) {
+  return new NextRequest(`http://localhost${pathname}`, { headers });
 }
 
 describe("middleware PUBLIC_PATHS", () => {
@@ -106,6 +112,7 @@ describe("middleware PUBLIC_PATHS", () => {
     "/microgrids/grid-1/billing",
     "/microgrids/grid-1/billing/period-1",
     "/microgrids/grid-1/setup/rates",
+    "/microgrids/grid-1/operations",
   ])("permits released management route %s", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
@@ -113,13 +120,68 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.status).toBe(200);
   });
 
-  it("redirects microgrid detail away from the legacy OpenEMS overview", async () => {
+  it("redirects the microgrid index to its Operations day view", async () => {
     signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest("/microgrids/grid-1"));
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe("http://localhost/microgrids/grid-1/setup/households");
+    expect(res.headers.get("location")).toBe("http://localhost/microgrids/grid-1/operations");
   });
+
+  it("redirects the microgrid index with a trailing slash to Operations too", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1/"));
+    expect(res.status).toBe(307);
+    // Next.js answers a trailing-slash URL with a redirect to the bare path
+    // before middleware runs, so only a direct call sees one. NextURL keeps
+    // the slash on the new path, and the release check accepts either form.
+    expect(new URL(res.headers.get("location")!).pathname).toMatch(
+      /^\/microgrids\/grid-1\/operations\/?$/
+    );
+  });
+
+  it("keeps the day asked for when it redirects the microgrid index", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1?date=2026-11-01"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(
+      "http://localhost/microgrids/grid-1/operations?date=2026-11-01"
+    );
+  });
+
+  it("sends a signed-out visit to the microgrid index to /login, not to Operations", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1?date=2026-11-01"));
+    expect(res.status).toBe(307);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  it.each([
+    { who: "signed in", session: signedIn },
+    { who: "signed out", session: signedOut },
+  ])(
+    "serves the web app manifest without redirecting ($who)",
+    async ({ session }) => {
+      // Browsers fetch the manifest without cookies, so even a signed-in
+      // person's request for it arrives signed out.
+      session();
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest("/manifest.webmanifest"));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("location")).toBeNull();
+    }
+  );
+
+  it("does not serve other manifest names", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/manifest.json"));
+    expect(res.status).toBe(404);
+  });
+
   it("allows unauthenticated GET on /forgot-password (no redirect)", async () => {
     signedOut();
     const middleware = await loadMiddleware();
@@ -261,6 +323,47 @@ describe("middleware PUBLIC_PATHS", () => {
     expect((await middleware(makeRequest("/api/payments/reconcile-worker/extra"))).status).toBe(404);
   });
 
+});
+
+describe("middleware for routes outside the installed release", () => {
+  it.each([
+    { path: "/settings/api-tokens", who: "signed in", session: signedIn },
+    { path: "/settings/api-tokens", who: "signed out", session: signedOut },
+    { path: "/microgrids/grid-1/tenants", who: "signed in", session: signedIn },
+    { path: "/admin?next=%3Cscript%3E", who: "signed out", session: signedOut },
+  ])("answers a page link ($path, $who) with the not-released page and 404", async ({ path, session }) => {
+    session();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path, { "accept-language": "en-GB,en;q=0.9" }));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("content-language")).toBe("en");
+    for (const [name, value] of Object.entries(PUBLIC_PAGE_SECURITY_HEADERS)) {
+      expect(res.headers.get(name), name).toBe(value);
+    }
+    // The page has a way back and shows nothing from the request.
+    const body = await res.text();
+    expect(body).toBe(renderNotReleasedPage("en"));
+    expect(body).toContain('href="/"');
+    // Refused before the session check, as the plain-text answer was.
+    expect(createServerClientMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "/api/v1/billing/generate",
+    "/api/openems/energy",
+    "/api/payments/status",
+  ])("answers an API request (%s) exactly as before", async (path) => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path, { "accept-language": "en" }));
+    expect(res.status).toBe(404);
+    expect([...res.headers.entries()]).toEqual([["content-type", "text/plain;charset=UTF-8"]]);
+    expect(await res.text()).toBe("Not available in this MGM release");
+    expect(createServerClientMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("middleware session check", () => {
