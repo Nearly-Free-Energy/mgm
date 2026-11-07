@@ -9,14 +9,15 @@ import type { InvoiceConfig } from "@/lib/invoices/config-schema";
 import { InvoiceShell } from "./invoice-shell";
 
 /**
- * /communities/[id]/invoice — Invoice configuration tab (#204 / PDF2).
+ * /communities/[id]/invoice — Invoice branding page (#204 / PDF2).
  *
- * Defense-in-depth pattern (matches the layout's hidden-tab behaviour with a
- * 404):
+ * Defense-in-depth pattern (the community page shows its Invoice branding
+ * link only to users who pass both checks; if these checks change, change
+ * that link's condition with them):
  *   - 404 if the user can't read the community (RLS-hidden / non-existent).
  *   - 404 if the user can read but not edit (read-but-not-edit user). Don't
- *     render an empty form or a "you can't edit" message — match the
- *     hidden-tab semantics with a 404.
+ *     render an empty form or a "you can't edit" message — a user who gets
+ *     no link gets a 404.
  *
  * Loads the persisted `invoice_config` JSONB + `invoice_prefix` column +
  * generates a 5-minute signed thumbnail URL when a logo is set, and passes
@@ -53,8 +54,8 @@ export default async function InvoicePage({
 
   if (commErr || !community) notFound();
 
-  // Edit gate (404 for read-but-not-edit users, matching the hidden-tab
-  // semantics). A bookmarked URL still 404s for cross-org.
+  // Edit gate (404 for read-but-not-edit users, who see no link to this
+  // page). A bookmarked URL still 404s for cross-org.
   const canEdit = await currentUserCanAccessOrg(supabase, community.org_id);
   if (!canEdit) notFound();
 
