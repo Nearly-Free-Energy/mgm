@@ -26,7 +26,7 @@ sizes. If one of those pages is removed or renamed, update this list.
 
 - [ ] Nothing renders differently, or I opened at 360 px:
 - [ ] The page does not scroll sideways; a wide table scrolls inside its own box
-- [ ] Each control this PR adds or changes (button, link, field, menu item, a checkbox with its label) is at least 44 px tall
+- [ ] Each control this PR adds or changes (button, link, field, menu item, a checkbox with its label) has a tap target of at least 44 × 44 px
 - [ ] Each dialog this PR opens fits, with its buttons reachable without zooming
 
 ## Before merge
@@ -37,7 +37,9 @@ CLAUDE.md, "Required Merge Controls": when that checklist changes, change
 this list with it.
 -->
 
-- [ ] `Test`, both `CodeQL` entries and `Build` are green
+Leave unticked; the merger ticks these.
+
+- [ ] `Test`, all `CodeQL` entries and `Build` are green
 - [ ] Every commit shows **Verified** and ends with `Signed-off-by:` (`git commit -s`); a merge that only brings in `main` needs no sign-off
 - [ ] If this PR changes a path listed in `.github/CODEOWNERS`: approved on the final head commit by a code owner who did not push that change
 - [ ] Merged by squash or merge commit, never by rebase
