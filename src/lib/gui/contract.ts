@@ -13,6 +13,10 @@
  * the right thing the easy thing, and src/lib/gui/__tests__/contract-types.test.ts
  * pins the rules they express.
  *
+ * Each shape a browser receives also has a strict schema in
+ * src/lib/gui/host/server/model-schema.ts. Its test fails to compile while a
+ * schema and its type here differ, so change them together.
+ *
  * Versioning: GUI_CONTRACT is semver, and a GUI declares the caret range it
  * supports. Through 0.x the contract is experimental: a minor version may
  * change shapes, and a patch only adds optional fields, kinds or values.
