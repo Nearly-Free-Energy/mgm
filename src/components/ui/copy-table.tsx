@@ -327,7 +327,7 @@ export function CopyTable<Row>({
           "focus-visible:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_25%,transparent)]",
         )}
       >
-        <table className="w-full border-collapse font-mono text-[12px] tabular-nums">
+        <table className="w-full border-collapse text-[12px] tabular-nums">
           <caption className="sr-only">
             {caption}. Use arrow keys to move; press C or Enter to copy a cell.
           </caption>
@@ -394,7 +394,7 @@ export function CopyTable<Row>({
                       }}
                       aria-label={`${col.header}, ${rowHeaderText(r)}, ${formatted}${isCopied ? ", copied" : ""}`}
                       className={cn(
-                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors duration-fast",
+                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors",
                         isFocus &&
                           "bg-accent outline outline-[3px] -outline-offset-[3px] outline-ring",
                         isCopied && "bg-success-muted",
