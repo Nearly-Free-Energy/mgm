@@ -70,13 +70,6 @@ const CONTAINED: Record<string, string> = {
 type Exemption = { tables: number; reason: string };
 
 const EXEMPT: Record<string, Exemption> = {
-  "src/components/dashboard/TopHouseholdsLeaderboard.tsx": {
-    tables: 1,
-    reason:
-      "Rendered only by the microgrid overview, src/app/(dashboard)/microgrids/[id]/(overview)/page.tsx, " +
-      "which no one reaches: src/middleware.ts redirects /microgrids/<id> to one of its tabs. " +
-      "If that page renders again, wrap this table instead of keeping this entry.",
-  },
 };
 
 /**

@@ -22,7 +22,7 @@ export function formatDuration(minutes: number): string {
 }
 
 function Percent({ value, digits = 0 }: { value: number; digits?: number }) {
-  return <span className="font-mono tabular-nums">{value.toFixed(digits)}%</span>;
+  return <span className="tabular-nums">{value.toFixed(digits)}%</span>;
 }
 
 function useClock(timezone: string) {
@@ -246,7 +246,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
           <li key={s} className="flex items-center gap-1.5">
             <span aria-hidden="true" className={cn("inline-block size-2.5 rounded-sm", SUPPLY[s].swatch)} />
             {SUPPLY[s].label}{" "}
-            <span className="font-mono tabular-nums text-foreground">
+            <span className="tabular-nums text-foreground">
               {day.eveningHours[s].toFixed(1)} h
             </span>
           </li>
@@ -347,7 +347,7 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
             cutCount === null ? (
               NOT_AVAILABLE
             ) : (
-              <span className="font-mono tabular-nums">
+              <span className="tabular-nums">
                 {cutCount} / {formatDuration(day.cutMinutes ?? 0)}
               </span>
             )

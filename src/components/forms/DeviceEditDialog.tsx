@@ -34,6 +34,7 @@ import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Banner } from "@/components/ui/banner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { StatusChip } from "@/components/ui/status-chip";
 import {
   Select,
@@ -223,18 +224,14 @@ export function DeviceEditDialog({
     <>
       <Dialog.Root open={open} onOpenChange={requestClose}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-          <Dialog.Content
-            aria-modal
+          <DialogOverlay />
+          <DialogPanel
             aria-describedby="dev-edit-desc"
             onOpenAutoFocus={(e) => {
               e.preventDefault();
               firstFieldRef.current?.focus();
             }}
-            className={cn(
-              "fixed left-1/2 top-1/2 z-50 w-[640px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-              "max-h-[92vh] overflow-y-auto rounded-md border border-border bg-card shadow-elev-3 outline-none"
-            )}
+            className="w-[640px]"
           >
             {/* top rail */}
             <div aria-hidden="true" className="h-[6px] bg-primary" />
@@ -338,7 +335,7 @@ export function DeviceEditDialog({
               </div>
             </form>
 
-            <div className="mt-2 flex items-center justify-end gap-2 border-t border-border bg-muted px-6 pb-[18px] pt-[14px]">
+            <DialogFooter className="mt-2 border-t border-border">
               <Dialog.Close asChild>
                 <button
                   type="button"
@@ -356,8 +353,8 @@ export function DeviceEditDialog({
               >
                 {submitting ? "Saving…" : "Save changes"}
               </button>
-            </div>
-          </Dialog.Content>
+            </DialogFooter>
+          </DialogPanel>
         </Dialog.Portal>
       </Dialog.Root>
 

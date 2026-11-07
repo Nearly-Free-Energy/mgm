@@ -113,7 +113,7 @@ export function ConsumptionCell({
       <span className={cn("relative text-[11px] font-semibold", palette.fg)}>{day}</span>
       <span
         className={cn(
-          "relative font-mono text-[11px] font-medium tabular-nums",
+          "relative text-[11px] font-medium tabular-nums",
           palette.fg,
         )}
       >

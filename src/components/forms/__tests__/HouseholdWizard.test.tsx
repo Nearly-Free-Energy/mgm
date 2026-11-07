@@ -669,6 +669,36 @@ describe("HouseholdWizard", () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────
+  // Step bar on a phone: only the current step is named on screen
+  // ──────────────────────────────────────────────────────────────────────
+  describe("step bar under 600px", () => {
+    function labelClasses(name: string): string[] {
+      const progress = screen.getByRole("navigation", { name: "Progress" });
+      const label = Array.from(progress.querySelectorAll("span")).find(
+        (el) => el.textContent === name,
+      );
+      expect(label).toBeDefined();
+      return (label!.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+    }
+
+    it("names the current step and keeps the others for screen readers only", async () => {
+      renderWizard();
+      expect(labelClasses("Basics")).not.toContain("max-[600px]:sr-only");
+      for (const other of ["Address", "Meter", "Review"]) {
+        expect(labelClasses(other)).toContain("max-[600px]:sr-only");
+      }
+
+      fillDisplayName("Household X");
+      fillPhone("+256 700 000 000");
+      fireEvent.click(screen.getByRole("button", { name: /^Next$/ }));
+      await waitFor(() =>
+        expect(labelClasses("Address")).not.toContain("max-[600px]:sr-only"),
+      );
+      expect(labelClasses("Basics")).toContain("max-[600px]:sr-only");
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────
   // (k) #200 — inline DiscoverMeterInline integration
   // URL-dispatching mock pattern: two endpoints
   //   /api/edges/<id>/discover-devices  →  GET — discovery

@@ -599,7 +599,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                       data-testid={`preflight-seed-dial-${h.id}`}
                       type="number"
                       inputMode="decimal"
-                      className="w-40 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
+                      className="w-40 rounded-md border border-border bg-card px-2 py-1 text-xs tabular-nums"
                       value={f.dialReading}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -626,7 +626,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                       id={`seed-read-date-${h.id}`}
                       data-testid={`preflight-seed-read-date-${h.id}`}
                       type="date"
-                      className="w-40 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
+                      className="w-40 rounded-md border border-border bg-card px-2 py-1 text-xs tabular-nums"
                       value={readDate}
                       min={periodStartDate}
                       max={todayLocalDate()}
