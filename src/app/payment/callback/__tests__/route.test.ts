@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { autoImplementMethods } from "next/dist/server/route-modules/app-route/helpers/auto-implement-methods";
 import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
 
 const mocks = vi.hoisted(() => ({
@@ -29,8 +30,8 @@ type Answer = { data: unknown; error: unknown };
 
 let queries: Query[];
 let buckets: string[];
-/** What each table answers; a function may throw to fail the query. */
-let tables: Record<string, (query: Query) => Answer>;
+/** What each table answers; a function may throw to fail the query, or hang to never answer. */
+let tables: Record<string, (query: Query) => Answer | Promise<Answer>>;
 
 /** The requested columns of `row`, as PostgREST would return them. */
 function pick(row: Record<string, unknown>, columns: string): Record<string, unknown> {
@@ -92,8 +93,24 @@ function pngBytes(length: number): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-function request(query: string, headers: Record<string, string> = {}) {
-  return new NextRequest(`https://mgm.test/payment/callback${query}`, { headers });
+function request(query: string, headers: Record<string, string> = {}, init: { method?: string; body?: string } = {}) {
+  return new NextRequest(`https://mgm.test/payment/callback${query}`, { headers, ...init });
+}
+
+/** A promise that never settles: a read that hangs rather than fails. */
+function hang(): Promise<never> {
+  return new Promise(() => {});
+}
+
+/** The route's handlers for every method, as Next.js serves them. */
+function served() {
+  return autoImplementMethods(route);
+}
+
+/** What Next.js answers `req` with, by its method. */
+async function serve(req: NextRequest): Promise<Response> {
+  const methods = served();
+  return (await methods[req.method as keyof typeof methods](req, {})) as Response;
 }
 
 const RETURN = `?OrderTrackingId=${TRACKING}&OrderMerchantReference=${REFERENCE}&OrderNotificationType=CALLBACKURL`;
@@ -359,22 +376,23 @@ describe("GET /payment/callback: the operator's logo", () => {
     expect(mocks.download).not.toHaveBeenCalled();
     expect(html).not.toContain("<img");
     expect(html).toContain(`<p>${CHECKED}</p>`);
+    expect(html).toContain('<p class="name">Example Organization</p>');
   });
 
-  it("stops waiting for the logo after two seconds", async () => {
-    vi.useFakeTimers();
-    withLogo();
-    mocks.info.mockReturnValue(new Promise(() => {}));
-    const pending = route.GET(request(RETURN));
-    await vi.advanceTimersByTimeAsync(1999);
-    let settled = false;
-    void pending.then(() => {
-      settled = true;
-    });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    const html = await (await pending).text();
+  it.each([
+    ["in another community's folder", "c0000000-0000-4000-8000-000000000002/logo.png"],
+    ["outside any community's folder", "logo.png"],
+    ["in a folder that only starts with the community's id", `${COMMUNITY_ID}0/logo.png`],
+    ["in a folder below the community's", `${COMMUNITY_ID}/other/logo.png`],
+    ["that climbs out of the community's folder", `${COMMUNITY_ID}/../c0000000-0000-4000-8000-000000000002/logo.png`],
+  ])("shows no logo stored %s, and does not read it", async (_, path) => {
+    tables.communities = communitiesTable({ branding: { logo_storage_path: path } });
+    mocks.info.mockResolvedValue({ data: { size: 512, contentType: "image/png" }, error: null });
+    mocks.download.mockResolvedValue({ data: new Blob([pngBytes(512)]), error: null });
+    const { html } = await open();
+    expect(buckets).toEqual([]);
+    expect(mocks.info).not.toHaveBeenCalled();
+    expect(mocks.download).not.toHaveBeenCalled();
     expect(html).not.toContain("<img");
     expect(html).toContain('<p class="name">Example Organization</p>');
     expect(html).toContain(`<p>${CHECKED}</p>`);
@@ -383,6 +401,106 @@ describe("GET /payment/callback: the operator's logo", () => {
   it("does not look for a logo when the branding names none", async () => {
     await open();
     expect(buckets).toEqual([]);
+  });
+});
+
+describe("GET /payment/callback: the branding deadline", () => {
+  /** Opens the page with fake timers, and says whether it answered before `ms` had passed. */
+  async function openAgainstTheClock(ms: number) {
+    vi.useFakeTimers();
+    const pending = route.GET(request(RETURN));
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(ms - 1);
+    const early = settled;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    const res = await pending;
+    return { early, res, html: await res.text() };
+  }
+
+  it.each([
+    ["the community read", () => { tables.communities = () => hang(); }],
+    ["the branding's attempt read", () => {
+      let reads = 0;
+      const attempts = attemptsTable();
+      tables.payment_attempts = (query) => {
+        reads += 1;
+        return reads > 1 ? hang() : attempts(query);
+      };
+    }],
+  ])("answers with the check's result, unbranded, two seconds after %s hangs", async (_, arrange) => {
+    arrange();
+    const { early, res, html } = await openAgainstTheClock(2000);
+    expect(early).toBe(false);
+    expect(res.status).toBe(200);
+    expect(html).toContain(`<p>${CHECKED}</p>`);
+    expect(html).not.toContain("<header");
+    expect(mocks.handle).toHaveBeenCalledOnce();
+  });
+
+  it("answers pending, unbranded, when the check fails and the branding hangs", async () => {
+    tables.communities = () => hang();
+    mocks.handle.mockResolvedValue({ ok: true, data: { processed: false, attemptId: "a" } });
+    const { html } = await openAgainstTheClock(2000);
+    expect(html).toContain(`<p>${PENDING}</p>`);
+    expect(html).not.toContain("<header");
+  });
+
+  it.each([
+    ["the logo's details", () => mocks.info.mockReturnValue(hang())],
+    ["the logo's download", () => {
+      mocks.info.mockResolvedValue({ data: { size: 512, contentType: "image/png" }, error: null });
+      mocks.download.mockReturnValue(hang());
+    }],
+  ])("counts the logo within the same two seconds, and keeps the names, when %s hang", async (_, arrange) => {
+    tables.communities = communitiesTable({ branding: { logo_storage_path: `${COMMUNITY_ID}/logo.png` } });
+    arrange();
+    const { early, html } = await openAgainstTheClock(2000);
+    expect(early).toBe(false);
+    expect(html).toContain(`<p>${CHECKED}</p>`);
+    expect(html).toContain('<p class="name">Example Organization</p>');
+    expect(html).not.toContain("<img");
+  });
+});
+
+describe("other methods", () => {
+  it("answers HEAD by running the same check as GET", async () => {
+    expect(served().HEAD).toBe(route.GET);
+    const res = await serve(request(RETURN, {}, { method: "HEAD" }));
+    expect(res.status).toBe(200);
+    expect(mocks.compose).toHaveBeenCalledOnce();
+    expect(mocks.handle.mock.calls).toEqual([[{ OrderTrackingId: TRACKING, OrderMerchantReference: REFERENCE }]]);
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("answers POST with the plain pending page and checks nothing, even with the return parameters", async () => {
+    expect(served().POST).toBe(route.POST);
+    const res = await serve(
+      request(RETURN, { "content-type": "application/x-www-form-urlencoded" }, {
+        method: "POST",
+        body: `OrderTrackingId=${TRACKING}&OrderMerchantReference=${REFERENCE}`,
+      }),
+    );
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("content-language")).toBe("en");
+    expect(html).toContain("<h1>Payment not confirmed yet</h1>");
+    expect(html).toContain(`<p>${PENDING}</p>`);
+    expect(html).not.toContain("<header");
+    expect(mocks.createServiceClient).not.toHaveBeenCalled();
+    expect(mocks.compose).not.toHaveBeenCalled();
+    expect(mocks.handle).not.toHaveBeenCalled();
+  });
+
+  it.each(["PUT", "PATCH", "DELETE"] as const)("refuses %s with 405 and checks nothing", async (method) => {
+    const res = await serve(request(RETURN, {}, { method }));
+    expect(res.status).toBe(405);
+    expect(mocks.createServiceClient).not.toHaveBeenCalled();
   });
 });
 
@@ -416,8 +534,8 @@ describe("GET /payment/callback: the response", () => {
     expect(res.headers.get("vary")).toBe("Accept-Language");
   });
 
-  it("exports GET and its dynamic setting only, so other methods are refused", () => {
-    expect(Object.keys(route).sort()).toEqual(["GET", "dynamic"]);
+  it("exports GET, POST and its dynamic setting only", () => {
+    expect(Object.keys(route).sort()).toEqual(["GET", "POST", "dynamic"]);
     expect(route.dynamic).toBe("force-dynamic");
   });
 });

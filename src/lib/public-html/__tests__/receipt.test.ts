@@ -3,6 +3,7 @@ import { MAX_BRAND_CHARS, MAX_LOGO_BYTES } from "../page";
 import { PALETTE } from "../palette";
 import {
   logoDataUri,
+  logoInCommunity,
   receiptBranding,
   renderReceipt,
   whatsappHref,
@@ -221,6 +222,31 @@ describe("whatsappHref", () => {
     ["١٢٣", null],
   ])("links %j to %j", (number, href) => {
     expect(whatsappHref(number)).toBe(href);
+  });
+});
+
+describe("logoInCommunity", () => {
+  const COMMUNITY = "c0000000-0000-4000-8000-000000000001";
+
+  it("accepts a file in the community's own folder, as the logo upload stores it", () => {
+    expect(logoInCommunity(`${COMMUNITY}/1762500000000-0f8e7d6c-5b4a-4c3d-9e2f-1a0b9c8d7e6f.png`, COMMUNITY)).toBe(true);
+  });
+
+  it.each([
+    ["another community's folder", "c0000000-0000-4000-8000-000000000002/logo.png"],
+    ["no folder", "logo.png"],
+    ["a folder that only starts with the id", `${COMMUNITY}0/logo.png`],
+    ["a folder below the community's", `${COMMUNITY}/other/logo.png`],
+    ["a climb out of the folder", `${COMMUNITY}/../logo.png`],
+    ["the folder's parent", `${COMMUNITY}/..`],
+    ["the folder itself", `${COMMUNITY}/`],
+    ["a backslash", `${COMMUNITY}/other\\logo.png`],
+  ])("refuses %s", (_, path) => {
+    expect(logoInCommunity(path, COMMUNITY)).toBe(false);
+  });
+
+  it("refuses every path when there is no community", () => {
+    expect(logoInCommunity("/logo.png", "")).toBe(false);
   });
 });
 

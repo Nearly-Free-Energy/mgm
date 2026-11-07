@@ -15,14 +15,16 @@
  *
  * For a matched attempt the page also names the operator from its
  * community's invoice branding, read here with enumerated columns. That
- * read runs beside the check, with its own lookup, and swallows its own
- * errors, so branding can never change whether or how a payment is checked.
- * An unmatched reference reads nothing more.
+ * read runs beside the check, with its own lookup, swallows its own errors
+ * and stops waiting after BRAND_TIMEOUT_MS, so branding can never change
+ * whether or how a payment is checked, nor hold up the answer by more than
+ * that. An unmatched reference reads nothing more.
  *
- * Only GET is exported. Next.js answers HEAD by running GET, so a HEAD
- * request checks the payment as a GET does; it answers POST, PUT, PATCH and
- * DELETE with 405 and OPTIONS with the allowed methods. To stop HEAD from
- * checking, export a HEAD that answers without the lookup.
+ * GET checks. Next.js answers HEAD by running GET, so a HEAD request checks
+ * the payment as a GET does; to stop that, export a HEAD that answers
+ * without the lookup. POST shows the plain pending page and checks nothing,
+ * so a household brought back with a POST still sees a page rather than an
+ * error. PUT, PATCH and DELETE get 405, OPTIONS the allowed methods.
  */
 import type { NextRequest } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -32,16 +34,21 @@ import { pickPublicLanguage } from "@/lib/public-html/copy";
 import { MAX_LOGO_BYTES, publicHtmlResponse } from "@/lib/public-html/page";
 import {
   logoDataUri,
+  logoInCommunity,
   RECEIPT_LOGO_CONTENT_TYPES,
   receiptBranding,
   renderReceipt,
   type ReceiptBrand,
+  type ReceiptOutcome,
 } from "@/lib/public-html/receipt";
 
 export const dynamic = "force-dynamic";
 
-/** The longest the page waits for the operator's logo before it goes without one. */
-const LOGO_TIMEOUT_MS = 2000;
+/**
+ * The longest the page waits for the operator's branding (the community,
+ * its invoice configuration and its logo) before it answers without it.
+ */
+const BRAND_TIMEOUT_MS = 2000;
 
 /** The parameter's value when it appears exactly once; "" when it is missing or repeated. */
 function single(params: URLSearchParams, name: string): string {
@@ -117,14 +124,38 @@ async function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined
 
 /**
  * The operator's brand for the attempt with this merchant reference, or
- * null. Never rejects: any error leaves the page unbranded.
+ * null. Never rejects and never takes longer than BRAND_TIMEOUT_MS: any
+ * error leaves the page unbranded, and a read still running at the
+ * deadline leaves it with the names read so far, without the logo.
+ */
+async function readBrand(supabase: SupabaseClient, reference: string): Promise<ReceiptBrand | null> {
+  const read: { names: ReceiptBrand | null } = { names: null };
+  const brand = await within(
+    lookUpBrand(supabase, reference, (names) => {
+      read.names = names;
+    }),
+    BRAND_TIMEOUT_MS,
+  );
+  return brand ?? read.names;
+}
+
+/**
+ * readBrand's reads, with no deadline of their own. `onNames` receives the
+ * brand without its logo as soon as it is known, before the logo is read.
  *
  * Every select names its columns. communities also holds the community's
  * payment provider settings, which this page must never read; naming the
  * columns keeps those, and any column added to the table later, off this
  * public page.
+ *
+ * The service role reads the logo, so this page decides which file it may
+ * embed: only one in the attempt's own community folder (logoInCommunity).
  */
-async function readBrand(supabase: SupabaseClient, reference: string): Promise<ReceiptBrand | null> {
+async function lookUpBrand(
+  supabase: SupabaseClient,
+  reference: string,
+  onNames: (brand: ReceiptBrand) => void,
+): Promise<ReceiptBrand | null> {
   try {
     const { data: attempt } = await supabase
       .from("payment_attempts")
@@ -151,8 +182,10 @@ async function readBrand(supabase: SupabaseClient, reference: string): Promise<R
       invoiceConfig: community.invoice_config,
     });
     if (!branding) return null;
-    if (!branding.logoPath) return branding.brand;
-    const logo = await within(readLogo(supabase, branding.logoPath), LOGO_TIMEOUT_MS);
+    onNames(branding.brand);
+    if (!branding.logoPath || !logoInCommunity(branding.logoPath, attempt.community_id)) return branding.brand;
+    // A logo read that fails drops the logo and keeps the names.
+    const logo = await readLogo(supabase, branding.logoPath).catch(() => undefined);
     return logo ? { ...branding.brand, logoDataUri: logo } : branding.brand;
   } catch {
     return null;
@@ -183,8 +216,21 @@ export async function GET(request: NextRequest): Promise<Response> {
       /* Never trust redirect parameters as proof of settlement. */
     }
   }
+  return receiptResponse(request, checked ? "checked" : "pending", brand);
+}
+
+/**
+ * The plain pending page, with no lookup and no check. The provider is
+ * expected to bring a household back with a GET; this keeps a POST from
+ * landing them on an error. The body is never read.
+ */
+export async function POST(request: NextRequest): Promise<Response> {
+  return receiptResponse(request, "pending", null);
+}
+
+function receiptResponse(request: NextRequest, outcome: ReceiptOutcome, brand: ReceiptBrand | null): Response {
   const lang = pickPublicLanguage(request.headers.get("accept-language"));
-  return publicHtmlResponse(200, renderReceipt({ lang, outcome: checked ? "checked" : "pending", brand }), {
+  return publicHtmlResponse(200, renderReceipt({ lang, outcome, brand }), {
     "Content-Language": lang,
     Vary: "Accept-Language",
   });

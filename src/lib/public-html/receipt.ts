@@ -74,6 +74,20 @@ export function receiptBranding(row: {
   return { brand, logoPath };
 }
 
+/**
+ * Whether a stored logo path names a file in the community's own folder:
+ * `{communityId}/{file}`, one file name with no folder of its own. The
+ * invoice logo upload (src/app/api/communities/[id]/invoice-logo/route.ts)
+ * stores every logo that way; if it ever stores them elsewhere, change
+ * this with it, or the page shows no logo.
+ */
+export function logoInCommunity(path: string, communityId: string): boolean {
+  const prefix = `${communityId}/`;
+  if (!communityId || !path.startsWith(prefix)) return false;
+  const file = path.slice(prefix.length);
+  return file !== "" && file !== "." && file !== ".." && !/[/\\]/.test(file);
+}
+
 function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
   return bytes.length >= signature.length && signature.every((byte, i) => bytes[i] === byte);
 }
