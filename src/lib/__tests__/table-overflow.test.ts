@@ -7,13 +7,27 @@
  * the status and the row actions, are cut off with no way to reach them; with
  * no such element at all it widens the whole page.
  *
+ * The box that scrolls must also be positioned: `relative`, or `absolute`,
+ * `fixed` or `sticky`. Tables can hold absolutely positioned elements, such
+ * as a column header or caption kept only for screen readers (`sr-only` is
+ * `position: absolute`). Such an element is placed against its nearest
+ * positioned ancestor. If the scroll box is not positioned, that ancestor is
+ * somewhere above the box, often the page itself, so the element escapes the
+ * box: the box neither scrolls to it nor hides it, and an element at the
+ * table's right edge widens the page again. A hidden "Actions" header once
+ * did that on the Edges & Devices page. The other side of the rule: a
+ * positioned scroll box keeps in everything a table cell positions
+ * absolutely, so a menu or tooltip that must show past the box's edges has
+ * to render in a portal (Radix `Portal`), or it is cut off at those edges.
+ *
  * This test reads every `.tsx` file under src/app and src/components (tests
  * excluded) and checks that each `<table>` has an ancestor element whose
- * className makes it scroll sideways. The nearest ancestor that sets an
- * overflow decides; responsive variants (`md:overflow-x-auto`) are ignored,
- * because the rule is about the narrowest screen. A table drawn by a
- * component declared in the same file (`function BatteryChart()` used as
- * `<BatteryChart />`) takes the state of those uses, the worst one deciding.
+ * className makes it scroll sideways and positions it. The nearest ancestor
+ * that sets an overflow decides; responsive variants (`md:overflow-x-auto`,
+ * `md:relative`) are ignored, because the rule is about the narrowest
+ * screen. A table drawn by a component declared in the same file
+ * (`function BatteryChart()` used as `<BatteryChart />`) takes the state of
+ * those uses, the worst one deciding.
  * A `<CopyTable>` counts as contained when the table inside
  * src/components/ui/copy-table.tsx scrolls.
  * A chart drawn with a fixed minimum width (an `<svg>` with a class such as
@@ -35,7 +49,10 @@
  * without `min-w-0` can still widen the page, because such an item is at
  * least as wide as its content. Nor does it evaluate conditions: every class
  * string in a className counts, so `cn(open && "overflow-x-auto")` reads as
- * scrolling. Open new tables at 360 px wide as well.
+ * scrolling. And it asks for the position on the scroll box itself, although a
+ * positioned element between the box and the table would also keep such
+ * elements inside; one rule on one element is easier to follow. Open new
+ * tables at 360 px wide as well.
  */
 import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -62,7 +79,13 @@ const EXEMPT: Record<string, Exemption> = {
   },
 };
 
-type State = "scrolls" | "clips" | "uncontained";
+/**
+ * `scrolls`: the nearest overflow ancestor scrolls sideways and is positioned.
+ * `unpositioned`: it scrolls sideways, but absolutely positioned elements in
+ * the table can escape it. `clips`: it hides what does not fit.
+ * `uncontained`: no ancestor sets an overflow.
+ */
+type State = "scrolls" | "unpositioned" | "clips" | "uncontained";
 
 type Found = { rel: string; line: number; tag: string; state: State };
 
@@ -116,6 +139,11 @@ function classify(tokens: Set<string>): State | null {
   return null;
 }
 
+/** Whether the element is the containing block of its absolutely positioned descendants. */
+function isPositioned(tokens: Set<string>): boolean {
+  return ["relative", "absolute", "fixed", "sticky"].some((name) => tokens.has(name));
+}
+
 /** The name of a function that is a component (capitalised), else null. */
 function componentName(n: ts.Node): string | null {
   let name: string | undefined;
@@ -137,7 +165,7 @@ function isFixedMinWidth(token: string): boolean {
   return token.startsWith("min-w-") && !NOT_FIXED_MIN_WIDTH.has(token);
 }
 
-const WORST: State[] = ["clips", "uncontained", "scrolls"];
+const WORST: State[] = ["clips", "uncontained", "unpositioned", "scrolls"];
 
 function stateOf(
   node: ts.Node,
@@ -148,7 +176,9 @@ function stateOf(
   for (let n = node.parent; n && !ts.isSourceFile(n); n = n.parent) {
     if (ts.isJsxElement(n)) {
       if (tagOf(n.openingElement, sf) in CONTAINED) return contained;
-      const state = classify(classTokens(n.openingElement));
+      const tokens = classTokens(n.openingElement);
+      const state = classify(tokens);
+      if (state === "scrolls" && !isPositioned(tokens)) return "unpositioned";
       if (state) return state;
       continue;
     }
@@ -244,7 +274,8 @@ function failingIn(rel: string): Found[] {
 }
 
 const FIX =
-  'Wrap it in <div className="overflow-x-auto">, or change the wrapper\'s overflow-hidden to overflow-x-auto.';
+  'Wrap it in <div className="relative overflow-x-auto">, or give the wrapper that already hides or ' +
+  "scrolls it both relative and overflow-x-auto (in place of overflow-hidden).";
 
 describe("wide tables scroll sideways inside their own box", () => {
   it("finds the tables it is meant to check", () => {
@@ -293,20 +324,31 @@ describe("the table scan", () => {
   };
 
   it.each([
-    ['<div className="overflow-x-auto"><table /></div>', "scrolls"],
+    ['<div className="relative overflow-x-auto"><table /></div>', "scrolls"],
     ['<div className="overflow-hidden rounded-lg"><table /></div>', "clips"],
     ['<div className="rounded-lg"><table /></div>', "uncontained"],
     ['<section>{rows.length > 0 && <table />}</section>', "uncontained"],
-    ['<div className="md:overflow-x-auto"><table /></div>', "uncontained"],
-    ['<div className="overflow-hidden overflow-x-auto"><table /></div>', "scrolls"],
-    ['<div className="overflow-auto overflow-x-hidden"><table /></div>', "clips"],
-    ['<div className="overflow-y-auto"><table /></div>', "scrolls"],
-    ['<div className="overflow-auto"><div className="overflow-hidden"><table /></div></div>', "clips"],
-    ['<div className={cn("rounded-lg", "overflow-x-auto")}><p /><table /></div>', "scrolls"],
-    ['<div className={`mt-2 ${x} overflow-x-auto`}><table /></div>', "scrolls"],
-    ['<div className="overflow-x-auto">{rows.map((r) => <div key={r}><table /></div>)}</div>', "scrolls"],
-    ['<div className="overflow-x-auto"><svg className="w-full min-w-[560px]" /></div>', "scrolls"],
+    ['<div className="relative md:overflow-x-auto"><table /></div>', "uncontained"],
+    ['<div className="relative overflow-hidden overflow-x-auto"><table /></div>', "scrolls"],
+    ['<div className="relative overflow-auto overflow-x-hidden"><table /></div>', "clips"],
+    ['<div className="relative overflow-y-auto"><table /></div>', "scrolls"],
+    ['<div className="relative overflow-auto"><div className="overflow-hidden"><table /></div></div>', "clips"],
+    ['<div className={cn("rounded-lg", "relative overflow-x-auto")}><p /><table /></div>', "scrolls"],
+    ['<div className={`mt-2 ${x} relative overflow-x-auto`}><table /></div>', "scrolls"],
+    ['<div className="relative overflow-x-auto">{rows.map((r) => <div key={r}><table /></div>)}</div>', "scrolls"],
+    ['<div className="relative overflow-x-auto"><svg className="w-full min-w-[560px]" /></div>', "scrolls"],
     ['<div><svg className="w-full min-w-[560px]" /></div>', "uncontained"],
+    // The scroll box must be the containing block of what the table positions absolutely.
+    ['<div className="overflow-x-auto"><table /></div>', "unpositioned"],
+    ['<div className="overflow-auto"><table /></div>', "unpositioned"],
+    ['<div className="overflow-y-auto"><table /></div>', "unpositioned"],
+    ['<div className="overflow-x-auto"><svg className="w-full min-w-[560px]" /></div>', "unpositioned"],
+    ['<div className="md:relative overflow-x-auto"><table /></div>', "unpositioned"],
+    ['<div className="relative"><div className="overflow-x-auto"><table /></div></div>', "unpositioned"],
+    ['<div className="absolute overflow-x-auto"><table /></div>', "scrolls"],
+    ['<div className="fixed overflow-auto"><table /></div>', "scrolls"],
+    ['<div className="sticky overflow-x-scroll"><table /></div>', "scrolls"],
+    ['<div className={cn("overflow-x-auto", "relative")}><table /></div>', "scrolls"],
   ])("%s → %s", (jsx, state) => {
     expect(stateIn(jsx)).toBe(state);
   });
@@ -314,8 +356,14 @@ describe("the table scan", () => {
   it.each([
     [
       "function Chart() { return <svg className='min-w-[560px]' />; }\n" +
-        "const x = (<div className='overflow-x-auto'><Chart /></div>);",
+        "const x = (<div className='relative overflow-x-auto'><Chart /></div>);",
       "scrolls",
+    ],
+    [
+      "function Chart() { return <svg className='min-w-[560px]' />; }\n" +
+        "const x = (<div className='relative overflow-x-auto'><Chart /></div>);\n" +
+        "const y = (<div className='overflow-x-auto'><Chart /></div>);",
+      "unpositioned",
     ],
     [
       "const Rows = () => (<table />);\nconst x = (<section><Rows /></section>);",
@@ -323,7 +371,7 @@ describe("the table scan", () => {
     ],
     [
       "function Rows() { return <table />; }\n" +
-        "const x = (<div className='overflow-x-auto'><Rows /></div>);\n" +
+        "const x = (<div className='relative overflow-x-auto'><Rows /></div>);\n" +
         "const y = (<div className='overflow-hidden'><Rows /></div>);",
       "clips",
     ],

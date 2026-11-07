@@ -276,7 +276,7 @@ export function HouseholdTable({
           className="border-0 shadow-none bg-transparent p-0"
         />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
               Households on this microgrid

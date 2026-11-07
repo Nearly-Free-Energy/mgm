@@ -302,7 +302,7 @@ export function TierEditor({
             />
           </div>
         ) : (
-          <div className="mb-6 overflow-x-auto">
+          <div className="relative mb-6 overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-border">
@@ -437,7 +437,7 @@ export function TierEditor({
             <Currency value={preview.totalAmount} className="font-semibold" />
           </p>
           {preview.tierBreakdown.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-left text-xs text-muted-foreground">
                 <tbody>
                   {preview.tierBreakdown.map((row, i) => (
