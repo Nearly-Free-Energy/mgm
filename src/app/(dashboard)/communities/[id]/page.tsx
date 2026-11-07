@@ -190,9 +190,10 @@ export default async function CommunityDetailPage({
           <div className="mt-4 border-t border-border pt-4">
             <Link
               href={`/communities/${community.id}/invoice`}
-              className="text-sm text-foreground hover:underline"
+              className="inline-flex min-h-11 items-center gap-1 text-sm text-foreground hover:underline"
             >
-              Invoice branding &rarr;
+              Invoice branding
+              <span aria-hidden="true">&rarr;</span>
             </Link>
           </div>
         )}
