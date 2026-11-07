@@ -211,7 +211,7 @@ export async function PATCH(
     );
   }
 
-  // Bust the layout cache so the sub-nav + child pages re-fetch.
+  // Bust the layout cache so the community's pages re-fetch.
   revalidatePath(`/communities/${communityId}`, "layout");
 
   return NextResponse.json({ status: "success" }, { status: 200 });
