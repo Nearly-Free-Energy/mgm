@@ -115,4 +115,15 @@ describe("SetupSubNav", () => {
     });
     expect(announced).toEqual([]);
   });
+
+  it("scrolls sideways inside its own width on a narrow screen", () => {
+    render(<SetupSubNav microgridId="mg-1" />);
+    const bar = screen.getByRole("tablist").className.split(/\s+/);
+    expect(bar).toEqual(expect.arrayContaining(["max-w-full", "overflow-x-auto"]));
+    for (const t of screen.getAllByRole("tab")) {
+      expect(t.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["shrink-0", "whitespace-nowrap"])
+      );
+    }
+  });
 });

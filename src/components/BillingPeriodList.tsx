@@ -291,7 +291,7 @@ export function BillingPeriodList({
       )}
 
       {periods.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border">

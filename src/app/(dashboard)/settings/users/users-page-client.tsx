@@ -224,7 +224,7 @@ export function UsersPageClient(props: UsersPageClientProps) {
           </button>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <div className="relative overflow-x-auto rounded-md border border-border bg-card">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-muted">
               <tr>
