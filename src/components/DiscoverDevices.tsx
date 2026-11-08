@@ -17,9 +17,6 @@
  *   3. POSTing selected rows to /api/devices (server-side transactional upsert)
  *      Selected rows with openemsChannelAddress: null are saved for observability
  *      (no billing channel) — previously these were silently excluded.
- *
- * DeviceManager.tsx is NOT modified — this is a separate component that renders
- * alongside the existing device list on the edge detail page.
  */
 
 import { useState, useCallback } from "react";

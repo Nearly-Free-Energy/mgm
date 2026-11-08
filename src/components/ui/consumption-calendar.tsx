@@ -107,7 +107,7 @@ function shapeClass(shape: "circle" | "square" | "triangle", color: string): str
     case "square":
       return `inline-block h-2 w-2 ${color}`;
     case "triangle":
-      // CSS triangle via borders — leave color inline to keep token reference.
-      return "inline-block h-0 w-0 border-x-[5px] border-x-transparent border-b-[8px] border-b-[color:var(--destructive)]";
+      // CSS triangle via borders; its colour comes from the destructive token.
+      return "inline-block h-0 w-0 border-x-[5px] border-x-transparent border-b-[8px] border-b-destructive";
   }
 }

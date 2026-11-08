@@ -14,6 +14,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
+import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
+import { renderPaymentLinkPage, type PaymentLinkNotice } from "@/lib/public-html/payment-link";
+
 const LINE_ITEM_ID = "550e8400-e29b-41d4-a716-446655440001";
 const GOOD_SLUG = "Kp9XrA";
 
@@ -203,5 +206,71 @@ describe("GET /p/[slug]", () => {
     expect(matching).toContain("203.0.113.0");
     expect(matching).not.toContain("203.0.113.42");
     infoSpy.mockRestore();
+  });
+});
+
+describe("GET /p/[slug] keeps its statuses and headers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectResult = { data: null, error: null };
+  });
+
+  it("(302) sends only Location and Cache-Control, with no body", async () => {
+    selectResult = { data: { id: LINE_ITEM_ID }, error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(GOOD_SLUG), { params: Promise.resolve({ slug: GOOD_SLUG }) });
+    expect(res.status).toBe(302);
+    expect([...res.headers.keys()].sort()).toEqual(["cache-control", "location"]);
+    expect(await res.text()).toBe("");
+  });
+
+  it.each([
+    ["a malformed slug", "abc-12", { data: null, error: null }, 400],
+    ["an unknown slug", GOOD_SLUG, { data: null, error: null }, 404],
+    ["a failed lookup", GOOD_SLUG, { data: null, error: { message: "kaboom" } }, 500],
+  ] as const)("answers %s with %i, an HTML page and no-store, and no Location", async (_case, slug, result, status) => {
+    selectResult = result;
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(slug), { params: Promise.resolve({ slug }) });
+    expect(res.status).toBe(status);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("location")).toBeNull();
+  });
+});
+
+describe("GET /p/[slug] pages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectResult = { data: null, error: null };
+  });
+
+  it.each([
+    ["a malformed slug", "abc-12", { data: null, error: null }, 400, "invalidLink"],
+    ["an unknown slug", GOOD_SLUG, { data: null, error: null }, 404, "billNotFound"],
+    ["a failed lookup", GOOD_SLUG, { data: null, error: { message: "kaboom" } }, 500, "lookupFailed"],
+  ] as const)(
+    "shows %s on the shared page, with its security headers and language",
+    async (_case, slug, result, status, notice: PaymentLinkNotice) => {
+      selectResult = result;
+      const { GET } = await import("../route");
+      const res = await GET(makeReq(slug), { params: Promise.resolve({ slug }) });
+      expect(res.status).toBe(status);
+      expect(await res.text()).toBe(renderPaymentLinkPage("en", { notice }));
+      for (const [name, value] of Object.entries(PUBLIC_PAGE_SECURITY_HEADERS)) {
+        expect(res.headers.get(name), name).toBe(value);
+      }
+      expect(res.headers.get("content-language")).toBe("en");
+      expect(res.headers.get("vary")).toBe("Accept-Language");
+    },
+  );
+
+  it("shows an unknown slug the same 'not available' sentence as the long link", async () => {
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(GOOD_SLUG), { params: Promise.resolve({ slug: GOOD_SLUG }) });
+    const body = await res.text();
+    expect(body).toContain("<h1>Bill not found</h1>");
+    expect(body).toContain("<p>This bill is not available. Please contact your operator.</p>");
+    expect(body).not.toContain(GOOD_SLUG);
   });
 });

@@ -165,4 +165,14 @@ describe("TabNav", () => {
     fireEvent.click(tab("Setup"), { button: 1 });
     expect(announced).toEqual([]);
   });
+
+  it("scrolls sideways on a narrow screen instead of widening the page", () => {
+    render(<TabNav microgridId="mg-1" />);
+    expect(screen.getByRole("tablist").className.split(/\s+/)).toContain("overflow-x-auto");
+    for (const t of screen.getAllByRole("tab")) {
+      expect(t.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["shrink-0", "whitespace-nowrap"])
+      );
+    }
+  });
 });

@@ -107,6 +107,8 @@ separately, from published release assets (`docs/releasing.md`).
 ## Pull request habits
 
 - One focused change per pull request; code, tests, and docs together.
+- Fill in the pull request template, including the 360 px check when
+  anything renders differently.
 - Describe what the change adds. Do not describe an unfixed security weakness
   in an issue, pull request, commit message, comment, or test name; report it
   privately instead (Security tab, private vulnerability reporting).

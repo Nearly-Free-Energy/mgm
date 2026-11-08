@@ -25,8 +25,7 @@ type Kind =
   | "householdDeviceRole"
   | "meter"
   | "meterType"
-  | "openemsBackendHealth"
-  | "paymentHealth";
+  | "openemsBackendHealth";
 
 type StatusMap = Record<string, { label: string; tone: ChipProps["tone"]; dot?: boolean }>;
 
@@ -160,19 +159,6 @@ const MAPS: Record<Kind, StatusMap> = {
   //   not_configured — ems_type IS NULL; no Discover has run. NO dot (chip
   //                   shouldn't imply any state, just absence).
   openemsBackendHealth: {
-    healthy:        { label: "Healthy",       tone: "success", dot: true  },
-    failing:        { label: "Failing",       tone: "alert",   dot: true  },
-    not_configured: { label: "Not connected", tone: "neutral" /* no dot */ },
-  },
-  // Community Payment-provider health (#119, #157, #215).
-  //   healthy        — fail-open: payment_provider set with no recent IPN
-  //                    failure (covers null timestamp, recent saves, and old
-  //                    saves alike).
-  //   failing        — Phase B (#157): a payment_events row with
-  //                    `to_status='failed'` AND `source='ipn'` was recorded
-  //                    within the last 24h.
-  //   not_configured — payment_provider IS NULL (no dot — just absence).
-  paymentHealth: {
     healthy:        { label: "Healthy",       tone: "success", dot: true  },
     failing:        { label: "Failing",       tone: "alert",   dot: true  },
     not_configured: { label: "Not connected", tone: "neutral" /* no dot */ },
