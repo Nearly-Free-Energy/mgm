@@ -19,6 +19,8 @@
 //                                      wrap.
 //     Esc                              leave the grid (blur the wrapper)
 //   Click anywhere on a cell           sets focus + copies (mouse path)
+//   Rows are 30px tall with a mouse and 44px on a touch screen
+//   (`pointer-coarse:h-11`), where each cell is a tap target.
 //
 // A11y commitments:
 //   • <caption> describes the table (row count, column count, copy hint).
@@ -35,8 +37,9 @@
 //   • Column-major Tab is a single setState in onKeyDown — no per-cell
 //     listeners.
 //   • TODO(virtualization): for >100 rows wire react-window. Recommended:
-//     `react-window` (FixedSizeList — uniform 30px row height) wrapped to
-//     keep the keyboard nav span the virtualized window. Sketch:
+//     `react-window` (FixedSizeList — uniform 30px row height, 44px on
+//     touch screens) wrapped to keep the keyboard nav span the
+//     virtualized window. Sketch:
 //       const listRef = useRef<FixedSizeList>(null);
 //       useEffect(() => listRef.current?.scrollToItem(focus.r, "smart"),
 //                [focus.r]);
@@ -359,7 +362,7 @@ export function CopyTable<Row>({
                       <td
                         key={c}
                         className={cn(
-                          "h-[30px] whitespace-nowrap px-2 text-center",
+                          "h-[30px] whitespace-nowrap px-2 text-center pointer-coarse:h-11",
                           col.className,
                         )}
                       >
@@ -375,7 +378,7 @@ export function CopyTable<Row>({
                         key={c}
                         scope="row"
                         className={cn(
-                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-[12px] font-medium text-foreground",
+                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-[12px] font-medium text-foreground pointer-coarse:h-11",
                           col.className,
                         )}
                       >
@@ -394,7 +397,7 @@ export function CopyTable<Row>({
                       }}
                       aria-label={`${col.header}, ${rowHeaderText(r)}, ${formatted}${isCopied ? ", copied" : ""}`}
                       className={cn(
-                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors",
+                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors pointer-coarse:h-11",
                         isFocus &&
                           "bg-accent outline outline-[3px] -outline-offset-[3px] outline-ring",
                         isCopied && "bg-success-muted",

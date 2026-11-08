@@ -36,10 +36,10 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
 import { Currency } from "@/components/format/currency";
 import { Banner } from "@/components/ui/banner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import type { RowBannerEntry } from "@/components/billing/row-banner-stack";
 import type {
   BillingLineItemPaymentStatus,
@@ -235,15 +235,8 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          role="dialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[420px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-lg outline-none",
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel role="dialog" className="w-[420px]">
           <div className="px-6 pb-5 pt-5">
             <Dialog.Title className="text-base font-semibold tracking-tight">
               Regenerating bill…
@@ -253,7 +246,7 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
             </Dialog.Description>
             <div className="mt-4 inline-block h-4 w-4 animate-spin rounded-full border-2 border-border border-t-transparent" />
           </div>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );
@@ -593,14 +586,10 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           role="dialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-lg outline-none",
-          )}
+          className="w-[480px]"
           onEscapeKeyDown={() => onOpenChange(false)}
         >
           <div className="h-[6px] bg-primary" aria-hidden="true" />
@@ -716,7 +705,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               </div>
             )}
 
-            <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+            <DialogFooter className="mt-4">
               <Dialog.Close asChild>
                 <button
                   type="button"
@@ -744,9 +733,9 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
                 )}
                 Save manual reading
               </button>
-            </div>
+            </DialogFooter>
           </form>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

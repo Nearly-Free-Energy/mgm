@@ -99,6 +99,8 @@ describe("isReleasedRoute", () => {
     "/settings",
     "/admin",
     "/microgrids/mg-1/operations/extra",
+    // The old tenants URL has no page and no released route; it stays a 404.
+    "/microgrids/abc/tenants",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });

@@ -403,7 +403,7 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
           </ul>
         </div>
         {/* On a phone the chart keeps a readable size and scrolls sideways. */}
-        <div className="mt-2 overflow-x-auto">
+        <div className="relative mt-2 overflow-x-auto">
           {day.sources.battery ? (
             <BatteryChart day={day} />
           ) : (

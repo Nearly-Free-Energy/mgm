@@ -4,7 +4,8 @@
  * Rule order is LOAD-BEARING. Earlier rules win. Do not reorder.
  *
  * Priority order:
- *  1. GridMeter       → 'grid_meter'
+ *  0. Srne.Backup-Meter (exact factory id) → 'inverter'
+ *  1. GridMeter | Grid-Meter | Grid_Meter | Grid.Meter → 'grid_meter'
  *  2. Pv* | Production → 'pv_meter'
  *  3. ConsumptionMeter → 'consumption_meter'
  *  4. Ess* | Battery*  → 'battery'
@@ -26,8 +27,19 @@ export function classifyDeviceType(
 ): DeviceType {
   const haystack = `${factoryId} ${nature ?? ""}`;
 
-  // Rule 1: GridMeter (must come before ConsumptionMeter/ProductionMeter)
-  if (/GridMeter/i.test(haystack)) return "grid_meter";
+  // Rule 0: the SRNE backup meter is the inverter's AC output — what the
+  // houses draw through the inverter — and the Operations tab reads the
+  // microgrid's `inverter` device as exactly that (`siteSources` in
+  // src/lib/metering/capability.ts). Matched on the exact factory id so no
+  // other backup or EPS meter is swept in. Revisit if the SRNE driver's
+  // backup meter stops measuring the inverter output, or if the Operations
+  // tab stops reading the `inverter` device as the inverter's output.
+  if (factoryId === "Srne.Backup-Meter") return "inverter";
+
+  // Rule 1: grid meter (must come before ConsumptionMeter/ProductionMeter).
+  // Accepts a separator between the words: the SRNE driver's factory id is
+  // `Srne.Grid-Meter`.
+  if (/Grid[-_.]?Meter/i.test(haystack)) return "grid_meter";
 
   // Rule 2: PV or Production meter
   if (/Pv|ProductionMeter|\.Production\./i.test(haystack)) return "pv_meter";

@@ -7,11 +7,14 @@
  *     navigation instead of a full document reload, and keep their tab
  *     semantics (aria-controls, roving tabindex).
  *   - Clicks and arrow keys announce the navigation to NavigationProgress.
+ *   - Every tab opens a released page, and the bar scrolls sideways inside
+ *     its own width on a narrow screen instead of widening the page.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MGM_NAVIGATION_START_EVENT } from "@/components/ui/navigation-progress";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 
 let mockPathname = "/settings/profile";
 const routerPushMock = vi.fn();
@@ -72,7 +75,6 @@ describe("SettingsSubNav", () => {
     expect(tabs.map((t) => t.getAttribute("href"))).toEqual([
       "/settings/profile",
       "/settings/users",
-      "/settings/api-tokens",
       "/settings/plugins",
     ]);
     for (const t of tabs) {
@@ -83,8 +85,29 @@ describe("SettingsSubNav", () => {
       "-1",
       "0",
       "-1",
-      "-1",
     ]);
+  });
+
+  it("links only to released settings pages", () => {
+    mockPathname = "/settings/profile";
+    render(<SettingsSubNav />);
+    const unreleased = screen
+      .getAllByRole("tab")
+      .map((t) => t.getAttribute("href") ?? "")
+      .filter((href) => !isReleasedRoute(href));
+    expect(unreleased).toEqual([]);
+  });
+
+  it("scrolls sideways inside its own width on a narrow screen", () => {
+    mockPathname = "/settings/profile";
+    render(<SettingsSubNav />);
+    const bar = screen.getByRole("tablist").className.split(/\s+/);
+    expect(bar).toEqual(expect.arrayContaining(["max-w-full", "overflow-x-auto"]));
+    for (const t of screen.getAllByRole("tab")) {
+      expect(t.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["shrink-0", "whitespace-nowrap"])
+      );
+    }
   });
 
   it("announces the navigation when a tab is clicked", () => {

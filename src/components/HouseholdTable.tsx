@@ -276,7 +276,7 @@ export function HouseholdTable({
           className="border-0 shadow-none bg-transparent p-0"
         />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-left text-sm">
             <caption className="sr-only">
               Households on this microgrid
@@ -353,7 +353,7 @@ export function HouseholdTable({
                       ) : (
                         <Link
                           href={`/microgrids/${microgridId}/setup/households/${household.id}`}
-                          className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent"
+                          className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                         >
                           View
                         </Link>
