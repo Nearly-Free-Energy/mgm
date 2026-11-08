@@ -167,10 +167,6 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "currentUserCanAccessCommunity calls notFound() before the service-role logo read.",
   },
-  "src/app/(dashboard)/microgrids/[id]/(overview)/page.tsx": {
-    kind: "session",
-    reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",
-  },
   "src/app/(dashboard)/microgrids/[id]/setup/edges/page.tsx": {
     kind: "session",
     reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",

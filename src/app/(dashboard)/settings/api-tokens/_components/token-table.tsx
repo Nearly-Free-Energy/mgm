@@ -43,7 +43,7 @@ export function TokenTable(props: TokenTableProps) {
   const showOrg = props.callerRole === "super_admin";
 
   return (
-    <div className="overflow-x-auto rounded-md border border-border bg-card shadow-elev-1">
+    <div className="relative overflow-x-auto rounded-md border border-border bg-card shadow-elev-1">
       <table className="w-full text-sm">
         <thead className="bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
           <tr>

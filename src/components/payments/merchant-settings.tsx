@@ -45,8 +45,8 @@ export function MerchantSettings({ orgId, communityId }: { orgId: string; commun
   return <section className="max-w-2xl space-y-4">
     <h1 className="text-2xl font-semibold">Payment accounts</h1>
     <p>New online payments require Payments and Pesapal to be enabled in Settings → Plugins. Manual payments and existing receipt reconciliation remain available.</p>
-    {errorMessage && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-4 text-red-900"><h2 className="font-semibold">Payment configuration failed</h2><p className="mt-1">{errorMessage}</p></div>}
-    {message && <p role="status" className="rounded-md border border-green-300 bg-green-50 p-4 text-green-900">{message}</p>}
+    {errorMessage && <div role="alert" className="rounded-md border border-destructive bg-destructive-muted p-4 text-destructive-fg"><h2 className="font-semibold">Payment configuration failed</h2><p className="mt-1">{errorMessage}</p></div>}
+    {message && <p role="status" className="rounded-md border border-success bg-success-muted p-4 text-success-fg">{message}</p>}
     {!ready && <p>Loading accounts…</p>}
     <ul>{accounts.map(account => <li key={account.id}>{account.display_name} · {account.is_default ? "Organization default" : "Optional override"} · {account.sandbox ? "Sandbox" : "Live"} · {account.disabled ? "Disabled" : account.last_test_status ?? "Not tested"}</li>)}</ul>
     {communityId && <div className="space-y-2"><label>Community account<select aria-label="Community account" value={selected} onChange={event => setSelected(event.target.value)} className="ml-2 rounded border p-2"><option value="">Inherit organization default</option>{accounts.map(account => <option key={account.id} value={account.id}>{account.display_name} ({account.sandbox ? "Sandbox" : "Live"})</option>)}</select></label><button disabled={busy || !ready} onClick={setOverride} className="rounded border p-2">Save community selection</button></div>}

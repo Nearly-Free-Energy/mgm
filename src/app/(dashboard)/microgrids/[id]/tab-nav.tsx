@@ -48,7 +48,7 @@ export function TabNav({ microgridId }: { microgridId: string }) {
 
   return (
     <nav
-      className="flex space-x-1 border-b border-border"
+      className="flex space-x-1 overflow-x-auto border-b border-border"
       role="tablist"
       aria-label="Microgrid sections"
     >
@@ -69,7 +69,7 @@ export function TabNav({ microgridId }: { microgridId: string }) {
                 announceNavigationStart(href);
               }
             }}
-            className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            className={`inline-flex shrink-0 items-center whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"

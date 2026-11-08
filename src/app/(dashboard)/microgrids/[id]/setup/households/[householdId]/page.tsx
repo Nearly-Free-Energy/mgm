@@ -301,7 +301,7 @@ export default async function HouseholdDetailPage({
             }
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="relative overflow-x-auto rounded-lg border border-border bg-card">
             <table className="w-full text-left text-sm">
               <thead className="bg-muted">
                 <tr>
@@ -398,7 +398,7 @@ export default async function HouseholdDetailPage({
             No billing history
           </p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="relative overflow-x-auto rounded-lg border border-border bg-card">
             <table className="w-full text-left text-sm">
               <thead className="bg-muted">
                 <tr>

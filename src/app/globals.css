@@ -276,3 +276,57 @@ body {
 @keyframes mgm-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
 @keyframes mgm-shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(100%) } }
 @keyframes mgm-nav-progress { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+
+/* Touch screens (a coarse pointer): every control is a target at least
+   44px tall. Base layer, so a utility on the element still wins: a
+   `min-h-*` class keeps a control smaller on purpose. min-height rather
+   than height, so an `h-8` button or an `h-9` field grows without a class
+   of its own. A link counts as a control when it is laid out as a box
+   (`flex` or `inline-flex`); min-height does nothing to an inline link,
+   so a link drawn as a button without those classes adds
+   `pointer-coarse:min-h-11` itself. A button drawn as a checkbox or
+   radio is left out: the label around it is the target. `role="switch"`
+   is not left out, because every switch in MGM is a text button; a switch
+   drawn as a track needs adding to both lists. Visually hidden controls
+   (`.sr-only`, or `aria-hidden="true"` such as the native select that
+   Radix Select renders beside its trigger) keep their 1px size. Fine
+   pointers (mouse, trackpad) get none of this.
+   src/lib/__tests__/touch-targets.test.ts checks this block. */
+@layer base {
+  @media (pointer: coarse) {
+    :where(
+      button:not([role="radio"], [role="checkbox"]),
+      [role="button"],
+      [role="tab"],
+      [role="menuitem"],
+      [role="menuitemcheckbox"],
+      [role="menuitemradio"],
+      [role="option"],
+      a[class~="flex"],
+      a[class~="inline-flex"],
+      summary,
+      select,
+      textarea,
+      input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="range"]),
+      label:has(input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"])
+    ):not(.sr-only, [aria-hidden="true"]) {
+      min-height: 2.75rem;
+    }
+    :where(button:not([role="radio"], [role="checkbox"]), [role="button"]):not(.sr-only, [aria-hidden="true"]) {
+      min-width: 2.75rem;
+    }
+  }
+}
+
+/* Touch screens: checkboxes and radios are drawn at 20px, and the label
+   around each one carries the 44px target (above). Not layered, so it
+   wins over a `size-4` or `h-4 w-4` utility on the box. */
+@media (pointer: coarse) {
+  input[type="checkbox"]:not(.sr-only),
+  input[type="radio"]:not(.sr-only),
+  button[role="checkbox"],
+  button[role="radio"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}

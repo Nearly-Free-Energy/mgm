@@ -34,6 +34,7 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -143,10 +144,9 @@ export function ConfirmDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55 data-[state=open]:animate-in data-[state=closed]:animate-out" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           role="alertdialog"
-          aria-modal
           aria-describedby={describedByIds || undefined}
           onOpenAutoFocus={(e) => {
             e.preventDefault();
@@ -160,10 +160,7 @@ export function ConfirmDialog({
               cancelRef.current?.focus();
             }
           }}
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[460px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3 outline-none",
-          )}
+          className="w-[460px]"
         >
           {/* top rail — tone color */}
           <div
@@ -248,7 +245,7 @@ export function ConfirmDialog({
             </div>
           )}
 
-          <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+          <DialogFooter className="mt-4">
             {/* Cancel renders first — a11y cancel-first focus order when
                 no type-to-confirm input is present (see onOpenAutoFocus). */}
             <Dialog.Close asChild>
@@ -295,8 +292,8 @@ export function ConfirmDialog({
                 {confirmLabel}
               </button>
             )}
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );
