@@ -18,16 +18,20 @@
  *   Same-origin redirect → no host-spoofing surface, no risk of leaking
  *   the request's host header into the response. Vercel preserves the
  *   incoming Host on relative redirects. This is a deliberate divergence
- *   from `pay/route.ts:128`, which 302s to a Pesapal-hosted absolute URL.
+ *   from `pay/route.ts`, which 302s to a Pesapal-hosted absolute URL.
  *
  * Rate limit: delegates entirely to `/pay`'s existing 10-req/min/IP sliding
  * window. The customer browser consumes our 302, then issues a new request
  * to `/pay` from the same IP — one customer click = one /pay hit. Adding a
  * second limiter here would double-count and add no defense in depth.
  *
- * Cache-Control: no-store on every response (302 / 404 / 400). Mirrors
+ * Cache-Control: no-store on every response (302 / 404 / 400 / 500), as on
  * `pay/route.ts` — defends against any intermediate proxy caching the slug
  * → /pay redirect.
+ *
+ * The HTML pages share src/lib/public-html/payment-link.ts with
+ * `pay/route.ts`: the same copy, in the language the request's
+ * Accept-Language picks, with the frame's security headers.
  *
  * Status-code map:
  *
@@ -47,6 +51,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createServiceClient } from "@/lib/supabase/service";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
+import { paymentLinkResponse } from "@/lib/public-html/payment-link";
 
 // Match the CHECK regex in 00038_billing_line_items_short_slug.sql.
 const SLUG_RE = /^[A-Za-z0-9]{6,8}$/;
@@ -60,6 +65,7 @@ export async function GET(
 
   const ipFull = readClientIp(request);
   const ipTruncated = truncateIp(ipFull);
+  const acceptLanguage = request.headers.get("accept-language");
 
   // 1. Defense-in-depth shape check before hitting the DB. The column CHECK
   //    enforces it too, but a malformed slug should 400 cheaply.
@@ -70,11 +76,7 @@ export async function GET(
       outcome: "bad_shape",
       durationMs: Date.now() - startedAt,
     });
-    return htmlResponse(
-      400,
-      "Invalid request",
-      "The link you used isn't valid. Please contact your operator.",
-    );
+    return paymentLinkResponse(400, acceptLanguage, { notice: "invalidLink" });
   }
 
   // 2. Service-role SELECT — slug IS the access token, mirroring how the
@@ -102,11 +104,7 @@ export async function GET(
       outcome: "error",
       durationMs: Date.now() - startedAt,
     });
-    return htmlResponse(
-      500,
-      "Unexpected error",
-      "We couldn't resolve this payment link. Please try again or contact your operator.",
-    );
+    return paymentLinkResponse(500, acceptLanguage, { notice: "lookupFailed" });
   }
 
   if (!data) {
@@ -116,11 +114,7 @@ export async function GET(
       outcome: "not_found",
       durationMs: Date.now() - startedAt,
     });
-    return htmlResponse(
-      404,
-      "Bill not found",
-      "This bill is not available — please contact your operator.",
-    );
+    return paymentLinkResponse(404, acceptLanguage, { notice: "billNotFound" });
   }
 
   // 3. Resolve to legacy /pay route via a RELATIVE 302 — preserves Host,
@@ -177,35 +171,6 @@ function truncateIp(ip: string): string {
     return `${head}::/48`;
   }
   return ip;
-}
-
-function htmlBody(title: string, message: string): string {
-  // Minimal, dependency-free HTML — mirrors pay/route.ts. Title/message are
-  // NEVER user-supplied; escaping omitted intentionally.
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    `<title>${title}</title>`,
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "</head>",
-    "<body>",
-    `<h1>${title}</h1>`,
-    `<p>${message}</p>`,
-    "</body>",
-    "</html>",
-  ].join("\n");
-}
-
-function htmlResponse(status: number, title: string, message: string): Response {
-  return new NextResponse(htmlBody(title, message), {
-    status,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function logShortSlugEvent(args: {

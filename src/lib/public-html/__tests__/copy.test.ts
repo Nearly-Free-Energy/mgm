@@ -26,6 +26,26 @@ describe("public page copy", () => {
     expect(PUBLIC_COPY.en.productName).toBe("Microgrid Manager");
   });
 
+  it("has one {seconds} in every form of the wait sentence, and an `other` form", () => {
+    for (const lang of PUBLIC_LANGUAGES) {
+      const forms: Record<string, string> = PUBLIC_COPY[lang].paymentLink.tooManyTries.body;
+      expect(Object.keys(forms), lang).toContain("other");
+      for (const [form, text] of Object.entries(forms)) {
+        expect(text.split("{seconds}").length - 1, `${lang}.${form}`).toBe(1);
+      }
+    }
+  });
+
+  it("has no {placeholder} outside the sentences that take one", () => {
+    for (const lang of PUBLIC_LANGUAGES) {
+      for (const [at, text] of strings(PUBLIC_COPY[lang], lang)) {
+        if (at.startsWith(`${lang}.paymentLink.tooManyTries.body.`)) continue;
+        if (at === `${lang}.receipt.whatsappPrompt` || at === `${lang}.receipt.whatsappButton`) continue;
+        expect(text, at).not.toMatch(/[{}]/);
+      }
+    }
+  });
+
   it("keeps each payment return placeholder exactly once, in every language", () => {
     for (const lang of PUBLIC_LANGUAGES) {
       const { whatsappPrompt, whatsappButton } = PUBLIC_COPY[lang].receipt;
