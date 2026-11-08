@@ -55,6 +55,20 @@ export interface PublicCopy {
       tryAgain: string;
     };
   };
+  /**
+   * The page a household returns to after a hosted checkout. "Checked"
+   * covers a failed payment too, so no string here may say the bill is
+   * paid. `{name}` is the operator's name and `{number}` their WhatsApp
+   * number as they stored it.
+   */
+  receipt: {
+    checkedHeading: string;
+    checked: string;
+    pendingHeading: string;
+    pending: string;
+    whatsappPrompt: string;
+    whatsappButton: string;
+  };
 }
 
 /** A heading and the one sentence under it. */
@@ -112,6 +126,15 @@ export const PUBLIC_COPY = {
         },
         tryAgain: "Try again",
       },
+    },
+    receipt: {
+      checkedHeading: "Payment checked",
+      checked:
+        "Your payment status has been checked. Your operator can confirm the receipt and any outstanding balance.",
+      pendingHeading: "Payment not confirmed yet",
+      pending: "Payment confirmation is pending. Please contact your operator before trying again.",
+      whatsappPrompt: "Questions about this payment? Message {name} on WhatsApp.",
+      whatsappButton: "WhatsApp {number}",
     },
   },
 } as const satisfies Record<PublicLanguage, PublicCopy>;

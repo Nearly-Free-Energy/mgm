@@ -139,7 +139,12 @@ function acceptedLogo(uri: string | undefined): string | undefined {
   return (data.length / 4) * 3 - padding <= MAX_LOGO_BYTES ? uri : undefined;
 }
 
-function clip(text: string): string {
+/**
+ * `text` cut to MAX_BRAND_CHARS whole characters, ending in "…" when cut.
+ * The brand header applies it itself; a caller that puts a brand name into
+ * a paragraph or a label applies it there, so the page keeps its size.
+ */
+export function clip(text: string): string {
   const chars = Array.from(text);
   return chars.length <= MAX_BRAND_CHARS ? text : `${chars.slice(0, MAX_BRAND_CHARS - 1).join("")}…`;
 }
