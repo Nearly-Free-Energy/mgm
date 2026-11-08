@@ -13,6 +13,8 @@
  *   (i) getEdgesStatus throws OPENEMS_AUTH_FAILED → 503 reason: "auth_failed"
  *   (j) getEdgesStatus throws OPENEMS_UNREACHABLE → 503 reason: "unreachable"
  *   (k) getEdgeConfig throws (edge offline) → 200 online: false, devices: []
+ *   (l) Hybrid inverter edge — ESS, grid meter, backup meter, battery
+ *       inverter, controller → battery, grid_meter, inverter; the rest unlisted
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -359,5 +361,89 @@ describe("GET /api/edges/[id]/discover-devices", () => {
     const json = await res.json();
     expect(json.devices).toHaveLength(1);
     expect(json.devices[0].alreadyAdded).toBe(true);
+  });
+
+  // (l) A hybrid-inverter edge, shaped like the SRNE driver's config: the ESS
+  // reports SymmetricEss/HybridEss (no plain `Ess` nature exists in OpenEMS),
+  // and the meters' factory ids separate words with a hyphen.
+  it("(l) lists an ESS as a battery and suggests the hybrid inverter's meters", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue(defaultEmsConfig);
+    registerEdgeLookup(true);
+    registerDedupQuery([]);
+
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: OPENEMS_EDGE_ID, online: true }]);
+    getEdgeConfigMock.mockResolvedValue({
+      components: {
+        ess0: { alias: "Battery", factoryId: "Srne.Ess", properties: {} },
+        meter0: { alias: "Grid", factoryId: "Srne.Grid-Meter", properties: {} },
+        meter2: { alias: "Backup", factoryId: "Srne.Backup-Meter", properties: {} },
+        batteryInverter0: {
+          alias: "Inverter",
+          factoryId: "Srne.BatteryInverter",
+          properties: {},
+        },
+        ctrlBalancing0: {
+          alias: "Balancing",
+          factoryId: "Controller.Ess.Balancing",
+          properties: {},
+        },
+      },
+      factories: {
+        "Srne.Ess": {
+          natureIds: [
+            "io.openems.edge.ess.srne.ess.SrneEss",
+            "io.openems.edge.ess.srne.common.Srne",
+            "io.openems.edge.ess.api.HybridEss",
+            "io.openems.edge.ess.api.SymmetricEss",
+            "io.openems.edge.bridge.modbus.api.ModbusComponent",
+            "io.openems.edge.common.component.OpenemsComponent",
+          ],
+        },
+        "Srne.Grid-Meter": {
+          natureIds: [
+            "io.openems.edge.ess.srne.gridmeter.SrneGridMeter",
+            "io.openems.edge.meter.api.ElectricityMeter",
+            "io.openems.edge.common.component.OpenemsComponent",
+          ],
+        },
+        "Srne.Backup-Meter": {
+          natureIds: [
+            "io.openems.edge.ess.srne.backupmeter.SrneBackupMeter",
+            "io.openems.edge.meter.api.ElectricityMeter",
+            "io.openems.edge.common.component.OpenemsComponent",
+          ],
+        },
+        "Srne.BatteryInverter": {
+          natureIds: [
+            "io.openems.edge.batteryinverter.api.ManagedSymmetricBatteryInverter",
+            "io.openems.edge.batteryinverter.api.SymmetricBatteryInverter",
+            "io.openems.edge.common.component.OpenemsComponent",
+          ],
+        },
+        "Controller.Ess.Balancing": {
+          natureIds: [
+            "io.openems.edge.controller.api.Controller",
+            "io.openems.edge.common.component.OpenemsComponent",
+          ],
+        },
+      },
+    });
+
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), {
+      params: Promise.resolve({ id: EDGE_DB_ID }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const byId = Object.fromEntries(
+      json.devices.map((d: { componentId: string }) => [d.componentId, d])
+    );
+    expect(Object.keys(byId).sort()).toEqual(["ess0", "meter0", "meter2"]);
+
+    expect(byId.ess0.nature).toBe("io.openems.edge.ess.api.SymmetricEss");
+    expect(byId.ess0.suggestedDeviceType).toBe("battery");
+    expect(byId.ess0.openemsChannelAddress).toBeNull();
+    expect(byId.meter0.suggestedDeviceType).toBe("grid_meter");
+    expect(byId.meter2.suggestedDeviceType).toBe("inverter");
   });
 });

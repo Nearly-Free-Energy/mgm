@@ -14,6 +14,8 @@
 //   3. Empty-microgrids community → "No microgrids yet" placeholder.
 //   4. Zero-stats community (0 hh, 0 devices) → stats strip renders zeros.
 //   5. User without access → Edit button not rendered.
+//   6. Invoice branding link shown with the Edit button, hidden without it;
+//      44 px tall, with its arrow hidden from screen readers.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -231,5 +233,47 @@ describe("CommunityDetailPage", () => {
     expect(html).toContain("Kisakye");
     // Edit button must NOT appear
     expect(html).not.toContain(">Edit<");
+  });
+
+  // 6. Invoice branding link follows the Edit button's condition.
+  it("links to Invoice branding when the user can edit the community", async () => {
+    communityData = {
+      ...BASE_COMMUNITY,
+      microgrids: [makeGrid("mg-1", "Block A", "Kampala", 2, 1)],
+    };
+    mockSingle.mockResolvedValue({ data: communityData, error: null });
+    canAccessResult = true;
+
+    const jsx = await CommunityDetailPage({
+      params: Promise.resolve({ id: "comm-1" }),
+    });
+    const html = renderToStaticMarkup(jsx as React.ReactElement);
+
+    const link = html.match(
+      /<a href="\/communities\/comm-1\/invoice" class="([^"]*)">(.*?)<\/a>/,
+    );
+    expect(link).not.toBeNull();
+    // min-h-11 (44 px) needs a box to apply to: an inline <a> ignores it.
+    expect(link![1].split(" ")).toEqual(
+      expect.arrayContaining(["inline-flex", "min-h-11", "items-center"]),
+    );
+    expect(link![2]).toBe('Invoice branding<span aria-hidden="true">→</span>');
+  });
+
+  it("does NOT link to Invoice branding when the user cannot edit the community", async () => {
+    communityData = {
+      ...BASE_COMMUNITY,
+      microgrids: [makeGrid("mg-1", "Block A", "Kampala", 2, 1)],
+    };
+    mockSingle.mockResolvedValue({ data: communityData, error: null });
+    canAccessResult = false;
+
+    const jsx = await CommunityDetailPage({
+      params: Promise.resolve({ id: "comm-1" }),
+    });
+    const html = renderToStaticMarkup(jsx as React.ReactElement);
+
+    expect(html).not.toContain("/communities/comm-1/invoice");
+    expect(html).not.toContain("Invoice branding");
   });
 });

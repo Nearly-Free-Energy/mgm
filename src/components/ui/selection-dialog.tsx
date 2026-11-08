@@ -13,6 +13,13 @@
 //     and composes body + footer slots.
 //   • Fixed body dimensions (min-h-[280px] max-h-[70vh] + 560px width) so
 //     the dialog does NOT resize across states. List content scrolls inside.
+//     Under 600px wide the body caps at 55% of the visible height instead,
+//     so the title, the list and the footer all fit on a phone's sheet.
+//   • The panel is a flex column, and only the body may shrink: on a short
+//     window, such as 1280 x 700, the body gives up the height the panel's
+//     cap leaves no room for, down to its 280px floor. The list is then the
+//     only thing that scrolls, instead of the list inside a panel that
+//     scrolls as well.
 //   • `locked` prop disables Esc + backdrop-click dismissal (used during
 //     the in-flight "adding" window to prevent mid-submit dismiss).
 //   • aria-describedby points at a body region with aria-live="polite" so
@@ -20,7 +27,7 @@
 
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { cn } from "@/lib/utils";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 
 export interface SelectionDialogProps {
   open: boolean;
@@ -70,10 +77,9 @@ export function SelectionDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55 data-[state=open]:animate-in data-[state=closed]:animate-out" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           role="dialog"
-          aria-modal
           aria-labelledby={TITLE_ID}
           aria-describedby={describedByIds || undefined}
           onOpenAutoFocus={onOpenAutoFocus}
@@ -86,12 +92,9 @@ export function SelectionDialog({
           onInteractOutside={(e) => {
             if (locked) e.preventDefault();
           }}
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3 outline-none",
-          )}
+          className="flex w-[560px] flex-col"
         >
-          <div className="px-6 pb-2 pt-5">
+          <div className="shrink-0 px-6 pb-2 pt-5">
             <Dialog.Title
               id={TITLE_ID}
               className="text-lg font-semibold tracking-tight text-foreground"
@@ -114,15 +117,13 @@ export function SelectionDialog({
           <div
             id={BODY_ID}
             aria-live="polite"
-            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-[13px] leading-relaxed text-foreground"
+            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-[13px] leading-relaxed text-foreground max-[600px]:max-h-[55vh] max-[600px]:supports-[height:100dvh]:max-h-[55dvh]"
           >
             {children}
           </div>
 
-          <div className="mt-2 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
-            {footer}
-          </div>
-        </Dialog.Content>
+          <DialogFooter className="mt-2 shrink-0">{footer}</DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

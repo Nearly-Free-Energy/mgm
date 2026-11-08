@@ -117,7 +117,7 @@ export function SetupSubNav({
     <nav
       role="tablist"
       aria-label="Setup sections"
-      className="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
+      className="inline-flex w-fit max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1"
     >
       {TABS.map((tab, i) => {
         const isActive = i === activeIndex;
@@ -140,7 +140,7 @@ export function SetupSubNav({
                 announceNavigationStart(href);
               }
             }}
-            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isActive
                 ? "bg-card text-foreground font-semibold shadow-elev-1"
                 : "text-muted-foreground hover:text-foreground"

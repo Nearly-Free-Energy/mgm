@@ -79,7 +79,7 @@ src/
 │   ├── (dashboard)/         ← authenticated pages (organizations, communities, microgrids, billing, settings)
 │   ├── login/, setup/, …    ← public auth and first-run pages
 │   └── api/                 ← route handlers; every write enters the Cordis runtime
-├── components/              ← React components (BillingTable, DeviceManager, HouseholdTable, etc.)
+├── components/              ← React components (BillingTable, DiscoverDevices, HouseholdTable, etc.)
 │   └── format/              ← format primitives (Currency, Kwh, LocalDate, locale-context)
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
@@ -213,7 +213,7 @@ Six rules every contributor must follow:
 
 2. **Format primitives:** Use `<Currency>`, `<Kwh>`, and `<LocalDate>` — never `Intl.NumberFormat` or `toLocaleDateString` directly. Locale comes from `Accept-Language` (detected at the app root); currency comes from microgrid context (wired in `microgrids/[id]/layout.tsx` via `<LocaleProvider currency={microgrid.currency}>`). In-table currency cells use `bareNumber` prop so Aaron's URA paste workflow gets `4,216,800` not `UGX 4,216,800`; show currency code only in column headers. Numbers render in Inter's tabular figures (`tabular-nums`, as these primitives do), so columns line up; `font-mono` is for identifiers such as component ids, URLs and token prefixes.
 
-3. **Token classes only:** No `bg-blue-*`, `text-gray-*`, or any hardcoded Tailwind color scale classes in `src/app/(dashboard)` or `src/components`. Use semantic tokens: `bg-card`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-primary-foreground`, `bg-destructive-muted`, `text-destructive-fg`, `bg-warning-muted`, `text-warning-fg`, `bg-success-muted`, `text-success-fg`, etc. Font sizes come from the type scale: `text-caption` (12px), `text-dense` (13px, 16px on touch screens), `text-body` (15px, 16px on touch screens), `text-title` (18px), `text-headline` (22px) and `text-kpi` (32px); new text uses one of these rather than an arbitrary size such as `text-[13px]`. On touch screens every text field is at least 16px, so iOS does not zoom into it. A new `--text-*` size in `globals.css` also goes into `TYPE_SCALE` in `src/lib/utils.ts`, or `cn()` reads it as a colour and drops it; `design-tokens.test.ts` fails until both agree.
+3. **Token classes only:** No Tailwind palette colours (`bg-blue-500`, `text-gray-600`, `text-white`, `bg-black/30`) and no arbitrary colour values (`bg-[#fff]`, `text-[rgb(…)]`, `accent-[color:var(--primary)]`) in `src/app`, `src/components` or `src/lib`. Use semantic tokens: `bg-card`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-primary-foreground`, `bg-destructive-muted`, `text-destructive-fg`, `bg-warning-muted`, `text-warning-fg`, `bg-success-muted`, `text-success-fg`, etc., and the token's own utility (`accent-primary`) rather than reaching the token through `var()` (`accent-[color:var(--primary)]`, `bg-[var(--primary)]`, `bg-(--primary)`). `src/lib/__tests__/no-palette-colors.test.ts` enforces this. Font sizes come from the type scale: `text-caption` (12px), `text-dense` (13px, 16px on touch screens), `text-body` (15px, 16px on touch screens), `text-title` (18px), `text-headline` (22px) and `text-kpi` (32px); new text uses one of these rather than an arbitrary size such as `text-[13px]`. On touch screens every text field is at least 16px, so iOS does not zoom into it. A new `--text-*` size in `globals.css` also goes into `TYPE_SCALE` in `src/lib/utils.ts`, or `cn()` reads it as a colour and drops it; `design-tokens.test.ts` fails until both agree.
 
 4. **Copy table:** Use `<CopyTable>` for billing data tables (built-in per-cell copy + keyboard nav). Grand-total footer rows go BELOW the CopyTable as a `<div>` — CopyTable doesn't support footer rows. Retain `<CopyButton>` only for footer cells.
 
@@ -256,7 +256,7 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
 - **Container image** (`Dockerfile`): still `node:20-alpine`. Moving it to Node 24 is a follow-up PR, linked from #33 and covered by the container work in #51; do not change it silently.
 - **`Test`**: Node 24 from `.nvmrc`. **`Build`**: Node 24 from `.nvmrc`, with a major-version check.
 
-**For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing.
+**For agents you delegate**: every implementer prompt MUST instruct the agent to `git commit -s` AND to commit with the user's existing signing config (no setup work — assume signing is already configured per the one-time setup above; the agent's commit inherits config from `~/.gitconfig`). If the agent's commit doesn't get a "Verified" badge, the user's signing setup needs attention — flag it before pushing. The prompt also tells the agent to write the pull request body from `.github/pull_request_template.md`: `gh pr create --body` does not apply the template.
 
 ## Local Dev Setup
 

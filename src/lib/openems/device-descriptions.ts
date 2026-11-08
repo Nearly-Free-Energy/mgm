@@ -80,10 +80,6 @@ export const DEVICE_TYPE_INFO: Record<
   },
 };
 
-// Legacy export alias to ease any lingering references during migration.
-/** @deprecated Use DEVICE_TYPE_INFO */
-export const METER_TYPE_INFO = DEVICE_TYPE_INFO;
-
 /**
  * humanReadable — return the human-readable label for a device-type enum value
  * (or any legacy uppercase classification key). Falls back to the raw key if
