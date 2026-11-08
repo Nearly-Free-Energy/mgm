@@ -9,6 +9,11 @@
  * active-match target can differ (e.g. Settings links to /settings/profile but
  * highlights on any /settings/* route).
  *
+ * Below md (768px) the links form one row that scrolls sideways, because the
+ * dashboard layout shows this nav as a band across the top there; from md up
+ * they stack as a sidebar. If the layout stops collapsing below md, the row
+ * classes (gap-1, overflow-x-auto, shrink-0, whitespace-nowrap) can go.
+ *
  * Active link: bg-accent text-accent-foreground + aria-current="page"
  * Idle link:   text-muted-foreground hover:bg-accent hover:text-accent-foreground
  * Pending link (navigation announced, route not yet settled): inline spinner +
@@ -49,7 +54,10 @@ export function SidebarNavLinks({ entries }: { entries: SidebarEntry[] }) {
   }, [pathname]);
 
   return (
-    <nav aria-label="Primary" className="flex-1 space-y-1 px-3 py-4">
+    <nav
+      aria-label="Primary"
+      className="flex min-w-0 flex-1 gap-1 overflow-x-auto px-2 py-1 md:block md:space-y-1 md:overflow-visible md:px-3 md:py-4"
+    >
       {entries.map((entry) => {
         const active = isActive(pathname, entry);
         const pending = pendingHref === entry.href && !active;
@@ -68,8 +76,8 @@ export function SidebarNavLinks({ entries }: { entries: SidebarEntry[] }) {
             }}
             className={
               active
-                ? "flex items-center rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-foreground"
-                : "flex items-center rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                ? "flex shrink-0 items-center whitespace-nowrap rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-foreground"
+                : "flex shrink-0 items-center whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             }
           >
             {entry.label}

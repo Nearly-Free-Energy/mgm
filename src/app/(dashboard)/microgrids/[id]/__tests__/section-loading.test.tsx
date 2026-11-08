@@ -16,12 +16,13 @@ describe("MicrogridSectionLoading", () => {
     expect(html).toContain("Loading microgrid…");
   });
 
-  it("stays generic — no overview-specific markers (pr-375)", () => {
+  it("stays a generic frame rather than one page's skeleton (pr-375)", () => {
     const html = renderToStaticMarkup(<MicrogridSectionLoading />);
-    expect(html).not.toContain("Loading microgrid overview");
-    // Only a handful of blocks: breadcrumb + two cards, not the ~40-block
-    // overview frame.
+    // Only a handful of blocks: breadcrumb + two cards. This fallback wraps
+    // every page under the microgrid, so a page-shaped skeleton here would
+    // flash the wrong frame on its siblings.
     const blocks = (html.match(/bg-muted/g) ?? []).length;
+    expect(blocks).toBeGreaterThan(0);
     expect(blocks).toBeLessThan(15);
   });
 
