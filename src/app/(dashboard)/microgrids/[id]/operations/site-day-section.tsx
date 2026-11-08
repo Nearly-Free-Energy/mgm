@@ -45,7 +45,7 @@ export async function SiteDaySection({
         cta={
           <Link
             href={`/microgrids/${microgridId}/setup/edges`}
-            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+            className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
           >
             Go to Edges
           </Link>

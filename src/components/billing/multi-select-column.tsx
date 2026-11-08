@@ -76,14 +76,18 @@ export function buildMultiSelectColumn<Row>(
       const id = getRowId(row);
       const name = getRowName(row);
       const checked = selectedIds.has(id);
+      // The label has no text of its own, so on a touch screen it is a 44px
+      // square (pointer-coarse:size-11) and all of it toggles the row.
       return (
-        <input
-          type="checkbox"
-          aria-label={`Select ${name}`}
-          checked={checked}
-          onChange={() => onToggleRow(id)}
-          className="size-4 rounded border-border accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
+        <label className="inline-flex items-center justify-center pointer-coarse:size-11">
+          <input
+            type="checkbox"
+            aria-label={`Select ${name}`}
+            checked={checked}
+            onChange={() => onToggleRow(id)}
+            className="size-4 rounded border-border accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
       );
     },
     // The header cell is rendered by CopyTable from `header`; we need a
