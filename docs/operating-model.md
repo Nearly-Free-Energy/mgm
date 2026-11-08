@@ -103,8 +103,9 @@ Merge control is a **maintainer social contract**, not an enforced ruleset.
 GitHub does not block a merge that breaks it. Enforcement (branch protection or
 a ruleset) is deferred; the decision is in launch tracker #30 § 2 and
 `docs/adr/ADR-002-ci-build-gate-and-merge-controls.md`. `CLAUDE.md` §
-"Required Merge Controls" has the per-check detail and `CONTRIBUTING.md` is the
-contributor-facing version. Keep the three in step.
+"Required Merge Controls" has the per-check detail, `CONTRIBUTING.md` is the
+contributor-facing version, and `.github/pull_request_template.md` repeats the
+checklist as boxes on each pull request. Keep the four in step.
 
 **Merger checklist.** The person who merges verifies each item and declines to
 merge until it holds:
