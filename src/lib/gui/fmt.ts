@@ -26,6 +26,21 @@ function meta(o: Meta | undefined): Meta {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * An amount in minor units, rounded the way the currency primitive rounds the
+ * text: half away from zero, on the decimal the amount is written as. Scaling
+ * in binary would not: 1.005 * 100 is 100.49999999999999, so v would be 100
+ * next to the text "$1.01". The exponent of the amount's shortest decimal form
+ * is shifted instead, so "1.005" becomes "1.005e2", exactly 100.5. A
+ * non-finite amount gives NaN, which the host's Value schema refuses.
+ */
+function toMinorUnits(amount: number, minor: number): number {
+  const [mantissa, exponent = "0"] = String(Math.abs(amount)).split("e");
+  const v = Math.round(Number(`${mantissa}e${Number(exponent) + minor}`));
+  // `|| 0` keeps a negative amount that rounds to zero from giving -0.
+  return amount < 0 ? -v || 0 : v;
+}
+
 export function createFmt({ locale }: { locale: string }): Fmt {
   const digits = (v: number, n: number) => formatRate(v, locale, { minDigits: n, maxDigits: n });
 
@@ -46,10 +61,7 @@ export function createFmt({ locale }: { locale: string }): Fmt {
       const minor = currencyFractionDigits(currency);
       // A bare figure keeps the currency's minor unit: "4,216,800" for UGX, "12.34" for USD.
       const text = o?.bare ? digits(amount, minor) : formatCurrency(amount, locale, currency);
-      // Half away from zero, as the text rounds, so -2000.5 UGX is v -2001 and reads "-2,001".
-      const scaled = amount * 10 ** minor;
-      const v = Math.sign(scaled) * Math.round(Math.abs(scaled)) || 0;
-      return { t: "money", v, currency, text };
+      return { t: "money", v: toMinorUnits(amount, minor), currency, text };
     },
 
     energy(wh, o) {

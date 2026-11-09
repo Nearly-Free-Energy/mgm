@@ -123,6 +123,22 @@ describe.each(LOCALES)("createFmt in %s", (locale) => {
     expect(fmt.money(-0.001, "USD")).toMatchObject({ v: 0 }); // not -0
   });
 
+  // Binary scaling gets these wrong: 1.005 * 100 is 100.49999999999999.
+  it.each([1.005, 8.345, 10.075, -1.005, -8.345])("keeps v equal to the text's digits for %s USD", (amount) => {
+    const money = fmt.money(amount, "USD");
+    const bare = fmt.money(amount, "USD", { bare: true });
+    if (money.t !== "money") throw new Error("fmt.money returned another kind of value");
+    expect(Math.abs(money.v)).toBe(Number(bare.text.replace(/\D/g, "")));
+    expect(Math.sign(money.v)).toBe(Math.sign(amount));
+    expect(money.text).toBe(formatCurrency(money.v / 100, locale, "USD"));
+  });
+
+  it("scales an amount written in exponent form", () => {
+    expect(fmt.money(1e21, "UGX")).toMatchObject({ v: 1e21 });
+    expect(fmt.money(1.5e-7, "USD")).toMatchObject({ v: 0 });
+    expect(fmt.money(5e-3, "USD")).toMatchObject({ v: 1 });
+  });
+
   it("formats energy in kWh from watt-hours", () => {
     expect(fmt.energy(12345)).toEqual({
       t: "energy",
