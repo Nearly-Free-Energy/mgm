@@ -83,7 +83,7 @@ breaks these rules, so the maintainer who merges checks each one by hand
 |---|---|
 | `Test` | type check, lint, database rehearsals, and the full test suite |
 | `CodeQL` (both entries) | static security analysis |
-| `Build` | the production build succeeds with no hosting provider and no secrets |
+| `Build` | the production build succeeds with no hosting provider and no secrets, and its first-load JavaScript, stylesheet and fonts stay within `scripts/budgets/limits.json` |
 | Verified signatures | every commit is cryptographically signed |
 | Sign-off | every commit carries `Signed-off-by:` (the merger reads the commits; no automated check reports it) |
 

@@ -129,7 +129,7 @@ merge until it holds:
 |---|---|---|
 | `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite against a local Supabase; Node.js 24 from `.nvmrc` |
 | `CodeQL` | `.github/workflows/codeql.yml` | static security analysis |
-| `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets |
+| `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets; then the first-load byte budgets in `scripts/budgets/limits.json` |
 
 Job names are the check names this checklist refers to; rename only together
 with these docs.
