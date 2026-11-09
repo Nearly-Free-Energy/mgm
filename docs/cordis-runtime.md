@@ -17,6 +17,7 @@ loads the platform plugins into it:
 | `<gui name>` | installs a compiled-in GUI's metadata (`src/gui/meta.ts`, `guiInstallPlugin`) | `mgmSurface` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
+| `fixture-metering` | registers the `synthetic` factory, only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |
 | `payment-providers` | `paymentProviders` — registry of payment provider factories | — |
 | `pesapal` | registers the `pesapal` factory | `paymentProviders` |
 | `community-management`, `metering`, `billing`, `billing-review`, `payments` | capability *plugins* (loaded per request, see below) | `mgmRequest` + the platform services they need |
@@ -28,10 +29,19 @@ source or payment provider is a new platform plugin that registers into the
 existing registry; nothing in billing or the routes changes. Metering plugins
 register a factory and an optional `supports(client, microgridId)` selector
 that reads their own configuration through the caller’s RLS-scoped client.
-Billing uses `forRequest(client)` and does not choose a vendor. Exactly one
+Billing uses `forRequest(client)` and does not choose a vendor; the Operations
+day asks `select(client, microgridId)` for the provider's name, the same
+choice `forRequest` makes. Exactly one
 matching provider is required; ambiguous selections fail closed. OpenEMS is
 the compatibility fallback for existing microgrids. A configured non-fallback
 provider takes precedence, and selection errors never fall back silently.
+
+The `synthetic` provider serves a microgrid whose edges all have ids starting
+`SYNTHETIC-EDGE-`. It refuses a microgrid that mixes them with real edges
+(409), generates site samples only for devices on such edges, and marks the
+day it produces as synthetic, which the Operations day shows in a banner.
+While the setting is off, nothing registers it and the edge registration
+route refuses those ids (400).
 
 **Request (one per API call).** Authenticated composers call
 `authorizeOrganization()` to authenticate and check organization access.

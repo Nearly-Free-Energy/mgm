@@ -63,6 +63,7 @@ function request(organizationId: string) {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await resetMgmRuntimeForTests();
 });
 
@@ -77,6 +78,7 @@ describe("MGM root runtime", () => {
       "gridtop",
       "metering-providers",
       "openems-metering",
+      "fixture-metering",
       "payment-providers",
       "pesapal",
     ]);
@@ -86,6 +88,16 @@ describe("MGM root runtime", () => {
     // Each contribution or compiled-in GUI added later shows up here.
     expect(runtime.mgmSurface.snapshot().views).toEqual([]);
     expect(runtime.mgmSurface.snapshot().guis).toEqual([GRIDTOP_META]);
+  });
+
+  it("registers the synthetic metering provider only while MGM_METERING_FIXTURES is on", async () => {
+    vi.stubEnv("MGM_METERING_FIXTURES", "");
+    expect((await getMgmRuntime()).meteringProviders.names()).toEqual(["openems"]);
+    vi.stubEnv("MGM_METERING_FIXTURES", "1");
+    // The setting is read when the root loads, so it takes a new root.
+    expect((await getMgmRuntime()).meteringProviders.names()).toEqual(["openems"]);
+    await resetMgmRuntimeForTests();
+    expect((await getMgmRuntime()).meteringProviders.names()).toEqual(["openems", "synthetic"]);
   });
 
   it("binds metering factories to the caller's client", async () => {

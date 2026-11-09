@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { composeMetering } from "../compose";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
+import { openOrganizationScope } from "@/lib/runtime/scope";
+import { composeMetering, MeteringPlugin } from "../compose";
+import { MeteringError } from "../errors";
+import type { MeteringRepository } from "../repository";
 
 let user: { id: string } | null = { id: "user-1" };
 let roles: unknown[] = [];
@@ -95,5 +99,36 @@ describe("composeMetering", () => {
       ok: false,
       code: "metering_composition_disposed",
     });
+  });
+});
+
+describe("MeteringPlugin", () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await resetMgmRuntimeForTests();
+  });
+
+  it("selects the site day's provider with the request's own client", async () => {
+    const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
+    const runtime = await getMgmRuntime();
+    const select = vi
+      .spyOn(runtime.meteringProviders, "select")
+      .mockRejectedValue(new MeteringError("mixed edges", "METERING_CONFIGURATION", 409));
+    const supabase = { caller: "a" } as never;
+    const repository = {
+      getMicrogridOrganization: async () => ({ microgridId: MG_ID, communityId: "c", orgId: ORG_ID }),
+      isPluginEnabled: async () => true,
+      getMicrogridTimezone: async () => "Africa/Kampala",
+    } as unknown as MeteringRepository;
+    const scope = await openOrganizationScope({ organizationId: ORG_ID, userId: "user-1", roles: [], supabase });
+    try {
+      await scope.load(MeteringPlugin, { repository });
+      const metering = scope.ctx.get("metering");
+      const result = await metering!.getSiteDay({ microgrid_id: MG_ID, date: "2026-01-01" });
+      expect(result).toMatchObject({ ok: false, status: 409, message: "mixed edges" });
+      expect(select).toHaveBeenCalledWith(supabase, MG_ID);
+    } finally {
+      await scope.dispose();
+    }
   });
 });

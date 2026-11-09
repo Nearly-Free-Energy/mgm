@@ -4,7 +4,7 @@
 // computeSiteDay) so each assertion pins one field to one piece of copy:
 //   - stat tiles: solar, houses' evening use (with the battery's share), cuts, lowest battery, 17:00
 //     battery, lights on; em dash and "needs …" copy when a value is null
-//   - the partial-day note for today
+//   - the partial-day note for today, and the Synthetic data banner
 //   - the battery chart's accessible description
 //   - the evening strip's segment widths
 //   - token classes only (no hard-coded Tailwind palette)
@@ -385,6 +385,20 @@ describe("DailyOperations", () => {
     const { html, root } = render(makeDay(NULL_DAY));
     expect(html).toContain("No battery is registered on this microgrid.");
     expect(root.querySelector("svg")).toBeNull();
+  });
+
+  it("labels a synthetic day with a Synthetic data banner", () => {
+    const { root } = render(makeDay({ synthetic: true }));
+    const banner = root.querySelector('[role="status"]');
+    expect(banner?.querySelector("h3")?.textContent).toBe("Synthetic data");
+    expect(banner?.textContent).toContain("No meter was read.");
+    // The warn tone, so the day is not read as an ordinary note.
+    expect(banner?.className).toContain("bg-warning-muted");
+  });
+
+  it("shows no Synthetic data banner for a day read from meters", () => {
+    const { html } = render(makeDay());
+    expect(html).not.toContain("Synthetic data");
   });
 
   it("shows no partial-day note for a complete day", () => {

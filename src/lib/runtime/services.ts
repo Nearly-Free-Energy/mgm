@@ -61,21 +61,30 @@ export class MeteringProviderFactories {
     return entry.factory(supabase);
   }
 
+  /**
+   * The one provider for this microgrid: a provider whose `supports` matches
+   * comes ahead of a fallback. None or several → MeteringError 503; an error
+   * a selector throws (a MeteringError such as the synthetic mixed-edge 409,
+   * or a failed lookup) passes through, so selection never falls back silently.
+   */
+  async select(supabase: SupabaseClient, microgridId: string): Promise<MeteringProviderName> {
+    const matches: MeteringProviderName[] = [];
+    const fallbacks: MeteringProviderName[] = [];
+    for (const [name, { selection }] of this.factories) {
+      if (selection.supports && !await selection.supports(supabase, microgridId)) continue;
+      (selection.fallback ? fallbacks : matches).push(name);
+    }
+    const selected = matches.length ? matches : fallbacks;
+    if (selected.length !== 1) {
+      throw new MeteringError(selected.length ? "Ambiguous metering provider configuration" : "No metering provider configured", "METERING_CONFIGURATION", 503, { microgridId });
+    }
+    return selected[0];
+  }
+
   /** Bind routing to the caller, resolving each microgrid through provider plugins. */
   forRequest(supabase: SupabaseClient): MeteringProvider {
-    return { getReadings: async (request) => {
-      const matches: MeteringProviderName[] = [];
-      const fallbacks: MeteringProviderName[] = [];
-      for (const [name, { selection }] of this.factories) {
-        if (selection.supports && !await selection.supports(supabase, request.microgridId)) continue;
-        (selection.fallback ? fallbacks : matches).push(name);
-      }
-      const selected = matches.length ? matches : fallbacks;
-      if (selected.length !== 1) {
-        throw new MeteringError(selected.length ? "Ambiguous metering provider configuration" : "No metering provider configured", "METERING_CONFIGURATION", 503, { microgridId: request.microgridId });
-      }
-      return this.create(selected[0], supabase).getReadings(request);
-    } };
+    return { getReadings: async (request) =>
+      this.create(await this.select(supabase, request.microgridId), supabase).getReadings(request) };
   }
 }
 

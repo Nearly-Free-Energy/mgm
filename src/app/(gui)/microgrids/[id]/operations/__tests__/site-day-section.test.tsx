@@ -190,6 +190,24 @@ describe("SiteDaySection", () => {
     expect(html).not.toContain("<a ");
   });
 
+  it("names mixed synthetic and real edges, not a disabled plugin, and points at Edges", async () => {
+    getSiteDayMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      code: "METERING_CONFIGURATION",
+      message: "This microgrid mixes synthetic and real edges; keep synthetic data in its own microgrid.",
+    });
+
+    const html = await renderSection();
+
+    expect(html).toContain("Synthetic and real edges are mixed");
+    expect(html).toContain("mixes synthetic and real edges");
+    expect(html).toContain("bg-warning-muted");
+    expect(html).toContain('href="/microgrids/mg-1/setup/edges"');
+    expect(html).not.toContain("Metering is disabled");
+    expect(html).not.toContain("setup/openems-backend");
+  });
+
   it("renders the setup EmptyState when the site has no battery or grid meter", async () => {
     getSiteDayMock.mockResolvedValue({
       ok: false,

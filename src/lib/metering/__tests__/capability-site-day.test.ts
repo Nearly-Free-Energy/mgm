@@ -102,6 +102,11 @@ function setup(
     /** `null` registers a provider without `getSiteSamples`; `"none"` registers nothing. */
     getSiteSamples?: SiteSamplesFn | null | "none";
     active?: boolean;
+    /** The name the provider registers under (default `openems`), and whether it is synthetic. */
+    providerName?: string;
+    synthetic?: boolean;
+    /** Omitted: the capability's default selector. */
+    selectProvider?: (microgridId: string) => Promise<string>;
   } = {}
 ) {
   const registry = new MeteringRegistry();
@@ -117,7 +122,10 @@ function setup(
               ? getSiteSamples.mockImplementation(options.getSiteSamples)
               : getSiteSamples,
           };
-    registry.register("openems", provider);
+    registry.register(
+      options.providerName ?? "openems",
+      options.synthetic ? { ...provider, synthetic: true } : provider
+    );
   }
   const repo = stubRepo(options.repo);
   const capability = new MeteringCapability(
@@ -125,7 +133,8 @@ function setup(
     scope,
     registry,
     stubConnection(),
-    () => options.active ?? true
+    () => options.active ?? true,
+    options.selectProvider
   );
   return { capability, registry, getSiteSamples, repo };
 }
@@ -587,6 +596,70 @@ describe("MeteringCapability.getSiteDay", () => {
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
       if (!result.ok) throw new Error(`expected a site day, got ${JSON.stringify(result)}`);
       expect(result.data.sources).toMatchObject({ houses: true, houseMetersUnreadable: 1 });
+    });
+
+    describe("provider selection", () => {
+      it("reads from the provider selected for the microgrid, by name", async () => {
+        const selectProvider = vi.fn(async () => "synthetic");
+        const { capability, getSiteSamples } = setup({ providerName: "synthetic", selectProvider });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result.ok).toBe(true);
+        expect(selectProvider).toHaveBeenCalledWith(MG_ID);
+        expect(getSiteSamples).toHaveBeenCalledTimes(1);
+      });
+
+      it("answers a selection MeteringError with its status and message", async () => {
+        const { capability, getSiteSamples } = setup({
+          selectProvider: async () => {
+            throw new MeteringError("mixed edges", "METERING_CONFIGURATION", 409);
+          },
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result).toEqual({ ok: false, status: 409, code: "METERING_CONFIGURATION", message: "mixed edges" });
+        expect(getSiteSamples).not.toHaveBeenCalled();
+      });
+
+      it("answers 503 when selection fails with another error, without its message", async () => {
+        const { capability } = setup({
+          selectProvider: async () => {
+            throw new Error("socket hang up");
+          },
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result).toEqual({
+          ok: false,
+          status: 503,
+          code: "METERING_CONFIGURATION",
+          message: "Metering provider is not available.",
+        });
+      });
+
+      it("answers 503 when the selected provider is not registered for the request", async () => {
+        const { capability } = setup({ selectProvider: async () => "synthetic" });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result).toMatchObject({ ok: false, status: 503, code: "METERING_CONFIGURATION" });
+      });
+
+      it("does not select a provider while the plugin is disabled", async () => {
+        const selectProvider = vi.fn(async () => "openems");
+        const { capability } = setup({ repo: { isPluginEnabled: async () => false }, selectProvider });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result).toMatchObject({ ok: false, status: 409, code: "metering_disabled" });
+        expect(selectProvider).not.toHaveBeenCalled();
+      });
+
+      it("marks the day synthetic only when the provider is", async () => {
+        const real = await setup().capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        if (!real.ok) throw new Error("expected a site day");
+        expect(real.data).not.toHaveProperty("synthetic");
+        const generated = await setup({
+          providerName: "synthetic",
+          synthetic: true,
+          selectProvider: async () => "synthetic",
+        }).capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        if (!generated.ok) throw new Error("expected a site day");
+        expect(generated.data.synthetic).toBe(true);
+      });
     });
 
     it("feeds the provider's samples into the day", async () => {

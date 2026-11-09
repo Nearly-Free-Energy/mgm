@@ -103,7 +103,14 @@ export class MeteringCapability implements MeteringCapabilityContract {
     private readonly scope: MeteringScope,
     private readonly registry: MeteringRegistry,
     private readonly connection: MeteringConnection,
-    private readonly isActive: () => boolean
+    private readonly isActive: () => boolean,
+    /**
+     * Picks the provider for a microgrid's site day; compose.ts binds it to
+     * `meteringProviders.select`. The default keeps OpenEMS.
+     */
+    private readonly selectProvider: (
+      microgridId: string
+    ) => Promise<MeteringProviderName> = async () => "openems"
   ) {}
 
   private ensureActive(): Extract<MeteringResult<never>, { ok: false }> | null {
@@ -563,9 +570,21 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
 
+    let providerName: MeteringProviderName;
+    try {
+      providerName = await this.selectProvider(microgridId);
+    } catch (error) {
+      if (error instanceof MeteringError) return this.fromMeteringError(error);
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "METERING_CONFIGURATION",
+        message: "Metering provider is not available.",
+      };
+    }
     let provider;
     try {
-      provider = this.registry.resolve("openems");
+      provider = this.registry.resolve(providerName);
     } catch {
       return {
         ok: false as const,
@@ -631,16 +650,17 @@ export class MeteringCapability implements MeteringCapabilityContract {
         timezone,
         resolutionMinutes: SITE_RESOLUTION_MINUTES,
       });
+      const day = computeSiteDay({
+        date,
+        timezone,
+        samples,
+        sources: availability,
+        resolutionMinutes: SITE_RESOLUTION_MINUTES,
+        nowMs,
+      });
       return {
         ok: true as const,
-        data: computeSiteDay({
-          date,
-          timezone,
-          samples,
-          sources: availability,
-          resolutionMinutes: SITE_RESOLUTION_MINUTES,
-          nowMs,
-        }),
+        data: provider.synthetic ? { ...day, synthetic: true as const } : day,
       };
     } catch (error) {
       if (error instanceof MeteringError) return this.fromMeteringError(error);

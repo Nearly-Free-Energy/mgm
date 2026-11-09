@@ -53,6 +53,28 @@ export async function SiteDaySection({
       />
     );
   }
+  // The synthetic provider refuses a microgrid with both synthetic and real
+  // edges with this 409 (src/lib/metering/fixture/plugin.ts), the only 409
+  // METERING_CONFIGURATION getSiteDay returns. If that code or status
+  // changes, or another source returns it, change this branch.
+  if (result.status === 409 && result.code === "METERING_CONFIGURATION") {
+    return (
+      <Banner
+        tone="warn"
+        title="Synthetic and real edges are mixed"
+        action={
+          <Link
+            href={`/microgrids/${microgridId}/setup/edges`}
+            className="text-sm font-medium text-primary hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+          >
+            Go to Edges →
+          </Link>
+        }
+      >
+        {result.message}
+      </Banner>
+    );
+  }
   if (result.status === 409) {
     return (
       <Banner tone="warn" title="Metering is disabled">
