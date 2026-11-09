@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { RETURN_PATH_PARAM, safeReturnPath } from "@/lib/auth/return-path";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -29,7 +30,13 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/");
+    // Back to the page the middleware sent the person here from (#126), when
+    // it is on this site. Read from the address bar at submit time rather
+    // than useSearchParams(), which would need a Suspense boundary to build.
+    const next = new URLSearchParams(window.location.search).get(
+      RETURN_PATH_PARAM,
+    );
+    router.replace(safeReturnPath(next));
     router.refresh();
   }
 

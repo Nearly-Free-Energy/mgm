@@ -4,7 +4,8 @@
  *
  * Coverage:
  *   - "Forgot password?" link is visible and points to /forgot-password.
- *   - A successful sign-in goes to the management dashboard.
+ *   - A successful sign-in goes to the management dashboard, or to the
+ *     same-site page in ?next= (#126), never to another site.
  *   - The sign-in button and the "Forgot password?" link are at least
  *     44 px tall, and the button's focus ring is offset on the card colour.
  *   - A sign-in error is announced to screen readers as an alert.
@@ -52,6 +53,25 @@ describe("LoginPage", () => {
     render(<LoginPage />);
     fireEvent.submit(screen.getByRole("button", { name: /sign in/i }).closest("form")!);
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/"));
+  });
+
+  it.each([
+    ["/microgrids/m1/operations?date=2026-11-08", "/microgrids/m1/operations?date=2026-11-08"],
+    ["https://evil.example/", "/"],
+    ["//evil.example/", "/"],
+    ["/\\evil.example", "/"],
+  ])("after sign-in with next=%s, goes to %s", async (next, expected) => {
+    replace.mockClear();
+    window.history.replaceState(null, "", `/login?next=${encodeURIComponent(next)}`);
+    signInWithPassword.mockResolvedValue({ error: null });
+    try {
+      const { default: LoginPage } = await import("../page");
+      render(<LoginPage />);
+      fireEvent.submit(screen.getByRole("button", { name: /sign in/i }).closest("form")!);
+      await waitFor(() => expect(replace).toHaveBeenCalledWith(expected));
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
   });
 
   // min-h-11 is 44 px on Tailwind's default 0.25rem spacing step; if

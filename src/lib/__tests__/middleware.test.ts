@@ -15,8 +15,8 @@
  *   - The web app manifest loads without a session.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
- * project (vitest.config.ts only globs src/lib, src/components, and
- * src/app).
+ * project (vitest.config.ts only globs src/lib, src/components, src/app
+ * and src/gui).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -239,7 +239,34 @@ describe("middleware PUBLIC_PATHS", () => {
     // NextResponse.redirect sets a 3xx and a Location header.
     expect(res.status).toBeGreaterThanOrEqual(300);
     expect(res.status).toBeLessThan(400);
-    expect(res.headers.get("location")).toMatch(/\/login$/);
+    expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  // #126: the login page returns to the page that was asked for.
+  it("passes the page asked for, with its query, to /login in one parameter", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(
+      makeRequest("/microgrids/m1/operations?date=2026-11-08"),
+    );
+
+    const location = new URL(res.headers.get("location")!);
+    expect(location.origin).toBe("http://localhost");
+    expect(location.pathname).toBe("/login");
+    expect([...location.searchParams.keys()]).toEqual(["next"]);
+    expect(location.searchParams.get("next")).toBe(
+      "/microgrids/m1/operations?date=2026-11-08",
+    );
+  });
+
+  it("sends a signed-out visit to the start page to a plain /login", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(makeRequest("/"));
+
+    expect(res.headers.get("location")).toBe("http://localhost/login");
   });
 
   // Release 4 (payments): /p/<slug> is the consumer-facing payment-link
@@ -396,7 +423,7 @@ describe("middleware session check", () => {
     });
     const middleware = await loadMiddleware();
     const page = await middleware(makeRequest("/communities"));
-    expect(page.headers.get("location")).toMatch(/\/login$/);
+    expect(new URL(page.headers.get("location")!).pathname).toBe("/login");
     expect((await middleware(makeRequest("/api/communities"))).status).toBe(401);
   });
 
@@ -408,7 +435,7 @@ describe("middleware session check", () => {
     getClaimsMock.mockRejectedValue(thrown);
     const middleware = await loadMiddleware();
     const page = await middleware(makeRequest("/communities"));
-    expect(page.headers.get("location")).toMatch(/\/login$/);
+    expect(new URL(page.headers.get("location")!).pathname).toBe("/login");
     expect((await middleware(makeRequest("/api/communities"))).status).toBe(401);
     // The login page and the public webhook still answer instead of failing.
     expect((await middleware(makeRequest("/login"))).status).toBe(200);
@@ -433,6 +460,31 @@ describe("middleware session check", () => {
     expect(res.headers.get("location")).toBe("http://localhost/");
     expect(getUserMock).toHaveBeenCalledTimes(1);
   });
+
+  it("sends a live session on /login to its same-site next page", async () => {
+    signedIn();
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest("/login?next=%2Fmicrogrids%2Fm1%2Foperations%3Fdate%3D2026-11-08"),
+    );
+    expect(res.headers.get("location")).toBe(
+      "http://localhost/microgrids/m1/operations?date=2026-11-08",
+    );
+  });
+
+  it.each(["https://evil.example/", "//evil.example/", "/\\evil.example"])(
+    "sends a live session on /login to / when next is %s",
+    async (next) => {
+      signedIn();
+      getUserMock.mockResolvedValue({ data: { user: { id: "u1" } }, error: null });
+      const middleware = await loadMiddleware();
+      const res = await middleware(
+        makeRequest(`/login?next=${encodeURIComponent(next)}`),
+      );
+      expect(res.headers.get("location")).toBe("http://localhost/");
+    },
+  );
 
   it("shows /login to a session Auth no longer knows, instead of redirecting back to /", async () => {
     // A session signed out on another device keeps a validly signed token

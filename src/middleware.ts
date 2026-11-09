@@ -4,6 +4,11 @@ import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
 import { cookieOptionsFor } from "@/lib/config/cookie-options";
 import { notReleasedResponse } from "@/lib/public-html/not-released";
+import {
+  RETURN_PATH_PARAM,
+  returnPathFor,
+  safeReturnPath,
+} from "@/lib/auth/return-path";
 
 // Only authentication pages are public in the first MGM release. Inherited
 // legacy payment links, customer APIs, and webhooks are blocked by the route
@@ -122,8 +127,12 @@ export async function middleware(request: NextRequest) {
         { status: 401 }
       );
     }
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
+    // The page asked for goes along in one parameter, and the login page
+    // returns there after sign-in (#126). The original query is not carried
+    // over on its own: it belongs to the page, not to /login.
+    const url = new URL("/login", request.nextUrl.origin);
+    const next = returnPathFor(request.nextUrl.pathname, request.nextUrl.search);
+    if (next) url.searchParams.set(RETURN_PATH_PARAM, next);
     return NextResponse.redirect(url);
   }
 
@@ -140,8 +149,12 @@ export async function middleware(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
     if (user) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/";
+      // Same destination the login page would choose, so a sign-in finished
+      // in another tab still lands on the page that was asked for.
+      const url = new URL(
+        safeReturnPath(request.nextUrl.searchParams.get(RETURN_PATH_PARAM)),
+        request.nextUrl.origin,
+      );
       return NextResponse.redirect(url);
     }
   }

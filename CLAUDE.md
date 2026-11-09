@@ -8,6 +8,7 @@ Tool-specific config for Claude Code. MGM is a microgrid operating system built 
 - `CONTRIBUTING.md` — contributor setup, sign-off, signed commits, and the required checks.
 - `docs/cordis-runtime.md` — how plugins, request scopes, and the plugin gate fit together.
 - `docs/entity-model.md` — the data model and the reasoning behind it.
+- `docs/adr/ADR-006-gui-contract-v0.md` — the GUI contract (v0, experimental): what capabilities contribute, what interfaces render, and the import boundaries between them.
 - Operational procedures: `docs/runbooks/dek.md` (credential encryption key), `docs/payments-rollout.md`, `docs/customerapp-activation.md`, `docs/pilot-import.md`, `docs/releasing.md` (publishing a versioned deployment asset; publishing deploys nothing).
 
 ## Build & Dev Commands
@@ -84,6 +85,7 @@ src/
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
 │   ├── plugins/             ← bundled plugin catalog (names, dependencies, owned routes)
+│   ├── gui/                 ← GUI contract v0: contract.ts (client-safe), surface.ts (server-only); host/{server,client,shared}/ layering enforced by gui-boundary.test.ts
 │   ├── community-management/, metering/, billing/, payments/  ← capability plugins
 │   ├── openems/             ← OpenEMS client, types, errors (adapter pattern)
 │   │   └── device-descriptions.ts  ← human-readable device-type labels
@@ -240,7 +242,7 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
    ```
    Then upload `~/.ssh/id_ed25519_signing.pub` at github.com → Settings → SSH and GPG keys → "New SSH key" with **Key type: Signing Key**. After setup, every `git commit` carries an "SSH" signature.
 4. **Every commit is signed off.** Each commit ends with `Signed-off-by: Your Name <email>` (`git commit -s`). No automated DCO check reports this today, so the merger reads the commits. Web-editor commits carry the sign-off only if the repository's web sign-off setting is on; check them too. The signature (item 3) and the sign-off are separate: the first is cryptographic, the second a text trailer. A merge commit that only brings in `main` needs no sign-off; `git show --remerge-diff <sha>` prints nothing for one. A merge that resolves conflicts needs `-s`.
-5. **Code-owner approval for owned paths.** Areas: database migrations, RLS helpers, roles, the Cordis runtime gate and plugin catalog, the GUI contract types and host, request middleware, and CI workflows; the exact paths are in `.github/CODEOWNERS`. The approval must be on the **final head commit**, re-requested after any push, and the approver must not be the person who pushed the owned-path change. Reviewers suggest changes rather than pushing to the author's branch. Other changes may be merged by their author once items 1 to 4 hold.
+5. **Code-owner approval for owned paths.** Areas: database migrations, RLS helpers, roles, the Cordis runtime gate and plugin catalog, the GUI contract and host (`src/lib/gui/`), request middleware, and CI workflows; the exact paths are in `.github/CODEOWNERS`. The approval must be on the **final head commit**, re-requested after any push, and the approver must not be the person who pushed the owned-path change. Reviewers suggest changes rather than pushing to the author's branch. Other changes may be merged by their author once items 1 to 4 hold.
 6. **No rebase merging.** GitHub cannot sign the commits a rebase merge creates. Outside contributions are squash-merged; maintainers may merge their own verified, signed-off commits with a merge commit. Squashing does not waive items 3 and 4: they apply to the commits on the PR, including PRs from forks.
 7. **Nobody force-pushes or deletes `main`.**
 
@@ -248,7 +250,7 @@ Merge control on `main` is a **maintainer social contract**. GitHub does not blo
 
 - **`CodeQL`** — `.github/workflows/codeql.yml` runs `github/codeql-action` on every PR + push to main. The job also gets `security-events: write` to upload results.
 - **`Test`** — `.github/workflows/test.yml` runs `npm ci` → `npx tsc --noEmit` → `npm run lint` → `supabase start` → `npm test` → the fresh-install key check on every PR + push to main, on Node.js 24 from `.nvmrc`. **Since #324 the database-backed suites run in the gate**: `SKIP_RLS_TESTS` is no longer set, the `rls` project executes against a local Supabase started on the runner, and the suites are self-fixturing (no generated seed, no repository secret — `supabase start` produces its own `JWT_SECRET` and `ANON_KEY`). Up to `npm test`, the job takes roughly three and a half to four minutes, of which `supabase start` is ~85s. **No test count is given here on purpose** — it moves with every PR that adds or removes one, and a count in this file would be stale within a day of being written. Read it off the latest `Test` run on `main`. `supabase start` runs with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`, the development opt-in that lets migration `00018` give the runner's throwaway database a generated credential encryption key; a fresh database without a key or the opt-in stops at `00018` (`docs/runbooks/dek.md`). The fresh-install key check then runs `dek-bootstrap.test.ts` with `RUN_DEK_BOOTSTRAP_TEST=1`: it resets the database without the opt-in, which must fail at `00018`, and then with it. It runs last because it wipes the database.
-- **`Build`** — `.github/workflows/build.yml` runs `npm ci` → `npm run build` on Node.js 24 (`.nvmrc`) on every PR + push to main, with no hosting provider, no secrets and no Supabase or application-URL settings, which are read at request time (ADR-003). Do not add a repository secret or a placeholder setting to make it pass; fix the build instead.
+- **`Build`** — `.github/workflows/build.yml` runs `npm ci` → `npm run build` → the first-load byte-budget check (`scripts/budgets/limits.json`) on Node.js 24 (`.nvmrc`) on every PR + push to main, with no hosting provider, no secrets and no Supabase or application-URL settings, which are read at request time (ADR-003). Do not add a repository secret or a placeholder setting to make it pass; fix the build instead.
 
 **No hosting preview or hosting check runs on a PR.** No hosting provider builds pull requests or posts a status check on them, and none is part of the checklist. The production-build proof is the `Build` job. A merge to `main` deploys nothing: production is deployed separately, by an operator, from a published and verified release asset (`docs/releasing.md`).
 

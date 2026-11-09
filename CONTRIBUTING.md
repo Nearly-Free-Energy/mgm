@@ -83,15 +83,15 @@ breaks these rules, so the maintainer who merges checks each one by hand
 |---|---|
 | `Test` | type check, lint, database rehearsals, and the full test suite |
 | `CodeQL` (both entries) | static security analysis |
-| `Build` | the production build succeeds with no hosting provider and no secrets |
+| `Build` | the production build succeeds with no hosting provider and no secrets, and its first-load JavaScript, stylesheet and fonts stay within `scripts/budgets/limits.json` |
 | Verified signatures | every commit is cryptographically signed |
 | Sign-off | every commit carries `Signed-off-by:` (the merger reads the commits; no automated check reports it) |
 
 Changes to the areas listed in `.github/CODEOWNERS` (migrations and RLS
-helpers, roles, the runtime gate and plugin catalog, the GUI contract types
-and host, request middleware, workflows, the release build script) also need
-approval from a code owner other than the person who pushed the change, on the
-final head commit. After you push again, ask for the approval again. Reviewers
+helpers, roles, the runtime gate and plugin catalog, the GUI contract and host (`src/lib/gui/`),
+request middleware, workflows, the release build script) also need approval
+from a code owner other than the person who pushed the change, on the final
+head commit. After you push again, ask for the approval again. Reviewers
 suggest changes rather than pushing to your branch. Other changes can be
 merged by their author once the checks pass. We do not use rebase merging,
 because GitHub cannot sign rebased commits.
