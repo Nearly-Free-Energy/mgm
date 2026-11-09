@@ -61,3 +61,10 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+
+      # First-load byte budgets (scripts/budgets/limits.json), measured from
+      # .next: no server, no network, no setting; if check.mjs ever needs one,
+      # revisit this job's header. Writes a table to the job summary and fails
+      # when a budget is exceeded.
+      - name: Check first-load byte budgets
+        run: node scripts/budgets/check.mjs

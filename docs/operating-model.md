@@ -129,16 +129,16 @@ merge until it holds:
 |---|---|---|
 | `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite against a local Supabase; Node.js 24 from `.nvmrc` |
 | `CodeQL` | `.github/workflows/codeql.yml` | static security analysis |
-| `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets |
+| `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets; then the first-load byte budgets in `scripts/budgets/limits.json` |
 
 Job names are the check names this checklist refers to; rename only together
 with these docs.
 
 **Code owners.** The owned areas are database migrations (including the RLS
 helpers), roles, the Cordis runtime gate and plugin catalog, the GUI contract,
-host and kit under `src/lib/gui/` with their type and import-boundary tests, request middleware, CI
-workflows, and the release build script. The paths live in
-`.github/CODEOWNERS`, which is the single list;
+host and kit under `src/lib/gui/` with their type and import-boundary tests,
+request middleware, CI workflows, and the release build script. The paths live
+in `.github/CODEOWNERS`, which is the single list;
 `src/lib/__tests__/codeowners.test.ts` checks that each pattern still matches
 a tracked file. Other changes may be merged by their author once the checks
 pass.
