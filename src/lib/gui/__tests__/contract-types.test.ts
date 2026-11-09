@@ -24,6 +24,7 @@ import type {
   ActionDef,
   Contribution,
   LoadedModel,
+  NavDef,
   Prepare,
   ProposableAction,
   ViewDef,
@@ -124,9 +125,32 @@ describe("GUI contract types", () => {
     });
   });
 
-  it("refuses an Href outside MGM", () => {
-    // @ts-expect-error an Href is a same-origin path
+  it("refuses an absolute URL as an Href", () => {
+    // @ts-expect-error an Href starts with "/"
     accept<Href>("https://example.com/x");
+  });
+
+  it("still compiles a protocol-relative or backslash Href, so the host must check at run time", () => {
+    // The type guarantees only a leading "/". Browsers send both of these
+    // off-site, and the host's Href schema refuses them (#124). If a later
+    // type refuses them too, these lines fail to compile: then update the
+    // Href comment in contract.ts.
+    accept<Href>("//evil.example/x");
+    accept<Href>("/\\evil.example");
+  });
+
+  it("refuses an absolute URL as a legacy nav entry's href", () => {
+    accept<NavDef>({
+      id: "billing.rates",
+      title: "Rates",
+      icon: "billing",
+      group: "configure",
+      order: 1,
+      // @ts-expect-error a legacy nav href is an Href
+      href: "https://example.com/rates",
+      needs: ["microgrid"],
+      legacy: true,
+    });
   });
 
   it("refuses a your-move signal that carries an action", () => {

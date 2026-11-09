@@ -26,6 +26,7 @@ import type {
   EntityKind,
   EntityRef,
   GuiMeta,
+  Href,
   Icon,
   Id,
   LinkRef,
@@ -171,7 +172,12 @@ export type NavDef = {
   order: number;
   /** Shown only to super admins. This hides the entry; it does not authorize anything. */
   audience?: "super-admin";
-} & ({ view: Id } | { href: string; needs: CoreEntityKind[]; legacy: true });
+} & (
+  | { view: Id }
+  // A legacy page's path. It becomes a NavEntry's Href, so it is one too: see
+  // Href for what the type does not check.
+  | { href: Href; needs: CoreEntityKind[]; legacy: true }
+);
 type SignalOut = SignalOf<ActionLink> extends infer S ? (S extends unknown ? Omit<S, "source"> : never) : never;
 
 export interface Contribution {
