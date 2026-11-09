@@ -88,7 +88,7 @@ breaks these rules, so the maintainer who merges checks each one by hand
 | Sign-off | every commit carries `Signed-off-by:` (the merger reads the commits; no automated check reports it) |
 
 Changes to the areas listed in `.github/CODEOWNERS` (migrations and RLS
-helpers, roles, the runtime gate and plugin catalog, the GUI contract types,
+helpers, roles, the runtime gate and plugin catalog, the GUI contract and host (`src/lib/gui/`),
 request middleware, workflows, the release build script) also need approval
 from a code owner other than the person who pushed the change, on the final
 head commit. After you push again, ask for the approval again. Reviewers

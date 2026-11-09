@@ -135,8 +135,8 @@ Job names are the check names this checklist refers to; rename only together
 with these docs.
 
 **Code owners.** The owned areas are database migrations (including the RLS
-helpers), roles, the Cordis runtime gate and plugin catalog, the GUI contract
-types with their type and import-boundary tests, request middleware, CI
+helpers), roles, the Cordis runtime gate and plugin catalog, the GUI contract,
+host and kit under `src/lib/gui/` with their type and import-boundary tests, request middleware, CI
 workflows, and the release build script. The paths live in
 `.github/CODEOWNERS`, which is the single list;
 `src/lib/__tests__/codeowners.test.ts` checks that each pattern still matches

@@ -88,10 +88,13 @@ read a stored credential, or to send data to another origin.
      so a kind newer than an interface's range can be shown by a generic
      fallback.
    - 1.0 is declared when two interfaces pass the same conformance checks.
-7. **Ownership.** The contract files, the host under `src/lib/gui/host/`,
-   the compiled-in interface list and the guard tests are code-owned
-   (`.github/CODEOWNERS`). Interface packages under `src/gui/<name>/` are
-   not: what they may import is fixed by the boundary test, which is.
+7. **Ownership.** Everything under `src/lib/gui/` is code-owned
+   (`.github/CODEOWNERS`): the contract files, the host, the kit and the
+   guard tests. Interface packages may import from there, so a file added
+   there reaches every interface at once. The compiled-in interface list
+   (`src/gui/meta.ts`) is owned from the pull request that creates it.
+   Interface packages under `src/gui/<name>/` are not owned: what they may
+   import is fixed by the boundary test, which is.
 
 ## Consequences
 

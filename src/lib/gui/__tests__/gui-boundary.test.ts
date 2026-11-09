@@ -529,9 +529,43 @@ describe("GUI import boundaries in this repository", () => {
       reviewedPackageProblems(REVIEWED_PACKAGES, guiPackageExists, Object.keys(manifest.dependencies ?? {})),
     ).toEqual([]);
   });
+  it("every @/ module GUI packages may import is code-owned", () => {
+    const codeowners = readFileSync(path.join(REPO_ROOT, ".github/CODEOWNERS"), "utf8");
+    expect(unownedAllowlistEntries(GUI_ALLOWED, codeowners)).toEqual([]);
+  });
 });
 
+/**
+ * The allowlist entries under `@/` that no CODEOWNERS pattern covers. An
+ * interface package may import them, so each must be code-owned: otherwise a
+ * file added there reaches every interface without a code owner's review.
+ * Patterns are read the way this repository writes them: a leading "/", and a
+ * trailing "/" for a directory.
+ */
+function unownedAllowlistEntries(allowed: readonly string[], codeowners: string): string[] {
+  const patterns = codeowners
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("/"))
+    .map((line) => line.split(/\s+/)[0].slice(1));
+  return allowed
+    .filter((entry) => entry.startsWith("@/"))
+    .filter((entry) => {
+      const target = `src/${entry.slice(2)}`;
+      return !patterns.some((pattern) =>
+        pattern.endsWith("/") ? `${target}/`.startsWith(pattern) : pattern === target || pattern.startsWith(`${target}.`),
+      );
+    });
+}
+
 describe("the boundary checker catches each violation (self-tests)", () => {
+  it("finds an allowlisted @/ module that CODEOWNERS does not cover", () => {
+    const owned = "/src/lib/gui/contract.ts @a @b\n/src/lib/gui/surface.ts @a @b\n";
+    expect(unownedAllowlistEntries(["@/lib/gui/contract", "@/lib/gui/kit", "react"], owned)).toEqual(["@/lib/gui/kit"]);
+    expect(unownedAllowlistEntries(["@/lib/gui/kit"], "/src/lib/gui/ @a @b\n")).toEqual([]);
+    expect(unownedAllowlistEntries(["@/lib/gui/kit"], "# /src/lib/gui/ @a\n")).toEqual(["@/lib/gui/kit"]);
+  });
+
   describe("contract", () => {
     it("accepts type-only imports from react and the plugin catalog", () => {
       expect(
