@@ -13,6 +13,8 @@
  *   - A page outside the installed release answers 404 with the
  *     not-released HTML page; an API path keeps its plain-text 404.
  *   - The web app manifest loads without a session.
+ *   - Page requests forward x-mgm-path and carry a report-only content
+ *     security policy with a fresh nonce; API requests get neither.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, src/app
@@ -20,6 +22,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { renderNotReleasedPage } from "@/lib/public-html/not-released";
 import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
 
@@ -520,9 +523,200 @@ describe("middleware session check", () => {
       return { data: { claims: { sub: "u1" } }, error: null };
     });
     const middleware = await loadMiddleware();
-    const res = await middleware(makeRequest("/settings/plugins"));
+    const res = await middleware(makeRequest("/settings/plugins?tab=all"));
     expect(res.status).toBe(200);
     expect(res.cookies.get("sb-test-auth-token")?.value).toBe("refreshed");
+    // The request forwarded to the page carries the refreshed cookie and
+    // the request path together.
+    expect(res.headers.get("x-middleware-request-cookie")).toContain(
+      "sb-test-auth-token=refreshed",
+    );
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe(
+      "/settings/plugins?tab=all",
+    );
+    expect(
+      res.headers.get("x-middleware-request-content-security-policy-report-only"),
+    ).toBe(res.headers.get("content-security-policy-report-only"));
+  });
+});
+
+const CSP = "content-security-policy-report-only";
+
+function nonceOf(policy: string | null): string | undefined {
+  return policy?.match(/'nonce-([^']+)'/)?.[1];
+}
+
+describe("middleware request path and content security policy", () => {
+  it("forwards the page's path and query as x-mgm-path", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/m1/operations?date=2026-11-08"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe(
+      "/microgrids/m1/operations?date=2026-11-08",
+    );
+    // A request header for the page, not a response header for the browser.
+    expect(res.headers.get("x-mgm-path")).toBeNull();
+  });
+
+  it("replaces an x-mgm-path the client sent", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest("/communities", { "x-mgm-path": "/organizations/other" }),
+    );
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe("/communities");
+  });
+
+  it("forwards no x-mgm-path and no policy for an API request", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest("/api/communities", { "x-mgm-path": "/organizations/other" }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
+    expect(res.headers.get("x-middleware-override-headers")).not.toContain("x-mgm-path");
+    expect(res.headers.get(CSP)).toBeNull();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("caps x-mgm-path at 2,048 characters", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(`/communities?q=${"a".repeat(3000)}`));
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toHaveLength(2048);
+  });
+
+  it.each([
+    { path: "/communities", session: signedIn },
+    { path: "/login", session: signedOut },
+  ])("gives $path a report-only policy with the Supabase origin and a nonce", async ({ path, session }) => {
+    session();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path));
+    const policy = res.headers.get(CSP);
+    expect(policy).toContain("connect-src 'self' http://localhost:54321");
+    expect(policy).toContain("img-src 'self' data: blob: http://localhost:54321");
+    expect(policy).toContain("object-src 'none'");
+    expect(nonceOf(policy)).toBeTruthy();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+    // The page's request carries the same policy, which is where Next.js
+    // reads the nonce from.
+    expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
+  });
+
+  it("takes the Supabase origin from the runtime settings", async () => {
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://db.example.test/base");
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/communities"));
+    expect(res.headers.get(CSP)).toContain("connect-src 'self' https://db.example.test;");
+  });
+
+  it("names the Supabase origin browsers use, not the server's internal one", async () => {
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://db.example.test");
+    vi.stubEnv("SUPABASE_INTERNAL_URL", "http://kong:8000");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "sb-mgm-auth-token");
+    signedIn();
+    const middleware = await loadMiddleware();
+    const policy = (await middleware(makeRequest("/communities"))).headers.get(CSP);
+    expect(policy).toContain("connect-src 'self' https://db.example.test;");
+    expect(policy).toContain("img-src 'self' data: blob: https://db.example.test;");
+    expect(policy).not.toContain("kong");
+  });
+
+  it.each([
+    { path: "/communities", header: "content-security-policy", value: "script-src 'nonce-chosen'" },
+    { path: "/communities", header: CSP, value: "script-src 'nonce-chosen'" },
+    { path: "/communities", header: "x-mgm-path", value: "/organizations/other" },
+    { path: "/api/communities", header: "x-mgm-path", value: "/organizations/other" },
+  ])("drops a client-sent $header on $path after a token refresh too", async ({ path, header, value }) => {
+    // setAll rebuilds the pass-through response; it must strip what the
+    // client sent just as the first one does.
+    getClaimsMock.mockImplementation(async () => {
+      const options = createServerClientMock.mock.calls.at(-1)?.[2] as {
+        cookies: {
+          setAll(cookies: { name: string; value: string; options: object }[]): void;
+        };
+      };
+      options.cookies.setAll([
+        { name: "sb-test-auth-token", value: "refreshed", options: { path: "/" } },
+      ]);
+      return { data: { claims: { sub: "u1" } }, error: null };
+    });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path, { [header]: value }));
+    expect(res.headers.get("x-middleware-request-cookie")).toContain(
+      "sb-test-auth-token=refreshed",
+    );
+    const forwarded = res.headers.get(`x-middleware-request-${header}`);
+    if (forwarded !== null) expect(forwarded).not.toBe(value);
+    expect(res.headers.get("x-middleware-request-content-security-policy")).toBeNull();
+    if (path.startsWith("/api/")) {
+      expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
+    }
+  });
+
+  it("uses a different nonce for each request", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const a = nonceOf((await middleware(makeRequest("/communities"))).headers.get(CSP));
+    const b = nonceOf((await middleware(makeRequest("/communities"))).headers.get(CSP));
+    expect(a).toBeTruthy();
+    expect(a).not.toBe(b);
+  });
+
+  it("drops a policy the client sent on the forwarded request", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest("/communities", { "content-security-policy": "script-src 'nonce-chosen'" }),
+    );
+    expect(res.headers.get("x-middleware-request-content-security-policy")).toBeNull();
+    expect(nonceOf(res.headers.get(`x-middleware-request-${CSP}`))).not.toBe("chosen");
+  });
+
+  it("adds eval and websockets in development", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    signedIn();
+    const middleware = await loadMiddleware();
+    const policy = (await middleware(makeRequest("/communities"))).headers.get(CSP);
+    expect(policy).toContain("'unsafe-eval'");
+    expect(policy).toContain("ws:");
+  });
+
+  it("still sends a signed-out page request to /login with next=", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest("/communities?tab=all", { "x-mgm-path": "/organizations/other" }),
+    );
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/communities?tab=all");
+  });
+});
+
+describe("middleware matcher", () => {
+  it.each([
+    ["/gui-styles/gridtop.3f9a1c2e4b5d.css", false],
+    ["/microgrids", true],
+    ["/gui-stylesheet", true],
+    ["/api/gui-styles/x", true],
+    ["/settings.css", true],
+    // Images in public/ skip middleware; a page path that happens to end in
+    // an image extension does not.
+    ["/icon.svg", false],
+    ["/apple-touch-icon.png", false],
+    ["/icons/icon-192.png", false],
+    ["/organizations/x.png", true],
+    ["/communities/a.svg", true],
+    ["/microgrids/1/setup/edges/e.png", true],
+  ])("matches %s: %s", async (url, expected) => {
+    vi.resetModules();
+    const { config } = await import("../../middleware");
+    expect(unstable_doesMiddlewareMatch({ config, url })).toBe(expected);
   });
 });
 

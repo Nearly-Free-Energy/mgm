@@ -44,6 +44,8 @@
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills
 /src/lib/mgm/released-routes.ts        @tushabe @arindahills
+# The content security policy middleware sets on every page.
+/src/lib/mgm/content-security-policy.ts @tushabe @arindahills
 
 # CI workflows, and this file.
 /.github/workflows/                    @tushabe @arindahills
