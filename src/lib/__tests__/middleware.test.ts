@@ -15,8 +15,8 @@
  *   - The web app manifest loads without a session.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
- * project (vitest.config.ts only globs src/lib, src/components, and
- * src/app).
+ * project (vitest.config.ts only globs src/lib, src/components, src/app
+ * and src/gui).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
