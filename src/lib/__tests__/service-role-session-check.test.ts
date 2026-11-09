@@ -116,6 +116,11 @@ const MODULES: Record<string, Module> = {
     privilegedExports: "all",
     reason: "Reads merchant account secrets on the service role.",
   },
+  "src/lib/gui/host/server/manifest.ts": {
+    privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
+    reason:
+      "Names mgmSurface and runs contributed status loaders through it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
+  },
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
     reason:

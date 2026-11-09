@@ -40,3 +40,34 @@ export function contextFor(
   if (!made.ok) throw new Error("fixture context refused");
   return made.ctx;
 }
+
+type TableResult = { data: unknown; error?: { message: string } | null };
+
+/**
+ * A client whose from(table) answers `results[table]` whatever the filters,
+ * awaited or through maybeSingle() (the first row). `calls` records each
+ * query's table and the methods called on it.
+ */
+export function tableClient(results: Record<string, TableResult>) {
+  const calls: { table: string; ops: [string, unknown[]][] }[] = [];
+  const client = {
+    from(table: string) {
+      const ops: [string, unknown[]][] = [];
+      calls.push({ table, ops });
+      const result = { data: results[table]?.data ?? null, error: results[table]?.error ?? null };
+      const chain: Record<string, unknown> = {
+        maybeSingle: async () => (ops.push(["maybeSingle", []]), { data: Array.isArray(result.data) ? (result.data[0] ?? null) : result.data, error: result.error }),
+        then: (resolve: (r: typeof result) => unknown, reject: (e: unknown) => unknown) =>
+          Promise.resolve(result).then(resolve, reject),
+      };
+      for (const op of ["select", "eq", "in", "order", "limit"]) {
+        chain[op] = (...args: unknown[]) => {
+          ops.push([op, args]);
+          return chain;
+        };
+      }
+      return chain;
+    },
+  };
+  return { client: client as unknown as SupabaseClient, calls };
+}
