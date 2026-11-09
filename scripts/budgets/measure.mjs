@@ -118,7 +118,7 @@ function fontFile(nextDir, cssFile, url) {
 
 /**
  * @param {string} nextDir
- * @param {{ shellLayout: string }} options  e.g. "src/app/(dashboard)/layout"
+ * @param {{ shellLayout: string }} options  e.g. "src/app/(gui)/layout"
  */
 export function measure(nextDir, { shellLayout }) {
   const build = readJson(join(nextDir, "build-manifest.json"), "build-manifest.json");

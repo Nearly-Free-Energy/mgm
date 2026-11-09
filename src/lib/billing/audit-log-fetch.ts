@@ -9,7 +9,7 @@
  *      delegates to `fetchAuditLogEntries`. Existing route tests at
  *      `route.test.ts` are the behavior contract — DO NOT diverge.
  *   2. The server-rendered history page (BC4) —
- *      `src/app/(dashboard)/microgrids/[id]/billing/[periodId]/history/page.tsx`
+ *      `src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx`
  *      calls this directly under the user-bound supabase client. No HTTP
  *      fetch from a server component (cookie + absolute-URL footgun).
  *

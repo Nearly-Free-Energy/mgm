@@ -13,7 +13,7 @@
  * Strategy: import the page module then call the default export directly
  * (it's an async server component). Render the returned JSX with
  * react-dom/server's renderToStaticMarkup. This mirrors the pattern in
- * src/app/(dashboard)/microgrids/[id]/__tests__/page.test.tsx.
+ * src/app/(gui)/microgrids/[id]/__tests__/page.test.tsx.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

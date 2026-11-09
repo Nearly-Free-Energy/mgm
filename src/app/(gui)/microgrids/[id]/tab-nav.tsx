@@ -19,7 +19,7 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 //   3. Setup      — configure-once (edges, households, rate schedule).
 //
 // Tabs are next/link <Link>s so a click is a client-side navigation: the
-// dashboard layout and this microgrid header stay mounted, and
+// (gui) layout and this microgrid header stay mounted, and
 // [id]/loading.tsx shows while the new tab renders.
 //
 // Each tab links to the page a click lands on, not to a URL that redirects:

@@ -77,7 +77,7 @@ See `docs/setup.md § "RLS Tests"` for full instructions.
 ```
 src/
 ├── app/
-│   ├── (dashboard)/         ← authenticated pages (organizations, communities, microgrids, billing, settings)
+│   ├── (gui)/               ← authenticated pages (organizations, communities, microgrids, billing, settings)
 │   ├── login/, setup/, …    ← public auth and first-run pages
 │   └── api/                 ← route handlers; every write enters the Cordis runtime
 ├── components/              ← React components (BillingTable, DiscoverDevices, HouseholdTable, etc.)

@@ -3,7 +3,7 @@ import { NoAccessLogout } from "./no-access-logout";
 /**
  * /no-access — account exists but has no user_roles rows.
  *
- * Outside the (dashboard) route group so no sidebar / top bar renders.
+ * Outside the (gui) route group so no sidebar / top bar renders.
  *
  * Triggered when:
  *   - An invited user has had their roles revoked (UX5 soft-delete).

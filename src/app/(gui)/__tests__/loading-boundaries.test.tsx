@@ -25,7 +25,7 @@ import EdgesLoading from "../microgrids/[id]/setup/edges/loading";
 import SettingsLoading from "../settings/loading";
 
 const BOUNDARIES: [string, React.ComponentType, string][] = [
-  ["(dashboard)", DashboardLoading, "page"],
+  ["(gui)", DashboardLoading, "page"],
   ["organizations", OrganizationsLoading, "organization"],
   ["organizations/[id]", OrganizationLoading, "organization"],
   ["communities", CommunitiesLoading, "community"],

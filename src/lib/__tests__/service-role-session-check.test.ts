@@ -155,7 +155,7 @@ type Entry =
 
 const ENTRIES: Record<string, Entry> = {
   // ── Pages and layouts ────────────────────────────────────────────────────
-  "src/app/(dashboard)/layout.tsx": {
+  "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
       "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside.",
@@ -164,20 +164,20 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason: "getUser() redirects to /login before organizationExists().",
   },
-  "src/app/(dashboard)/communities/[id]/invoice/page.tsx": {
+  "src/app/(gui)/communities/[id]/invoice/page.tsx": {
     kind: "session",
     reason:
       "currentUserCanAccessCommunity calls notFound() before the service-role logo read.",
   },
-  "src/app/(dashboard)/microgrids/[id]/setup/edges/page.tsx": {
+  "src/app/(gui)/microgrids/[id]/setup/edges/page.tsx": {
     kind: "session",
     reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",
   },
-  "src/app/(dashboard)/microgrids/[id]/setup/edges/[edgeId]/page.tsx": {
+  "src/app/(gui)/microgrids/[id]/setup/edges/[edgeId]/page.tsx": {
     kind: "session",
     reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",
   },
-  "src/app/(dashboard)/microgrids/[id]/setup/openems-backend/page.tsx": {
+  "src/app/(gui)/microgrids/[id]/setup/openems-backend/page.tsx": {
     kind: "session",
     reason:
       "currentUserCanAccessMicrogrid calls notFound() before getEmsSecretForMicrogrid.",

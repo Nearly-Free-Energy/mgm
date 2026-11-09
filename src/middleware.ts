@@ -139,7 +139,7 @@ export async function middleware(request: NextRequest) {
   if (signedIn && request.nextUrl.pathname.startsWith("/login")) {
     // Claims cannot tell a live session from one signed out elsewhere
     // (signOut() ends the user's sessions on every device), so ask Auth
-    // before sending the user away from /login. The (dashboard) layout and
+    // before sending the user away from /login. The (gui) layout and
     // /setup call getUser() and send a dead session here; redirecting on
     // claims alone would bounce between them until the token expired. For a
     // dead session the failed getUser() also clears its cookies through

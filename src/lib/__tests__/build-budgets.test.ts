@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { compare, gzipBytes, measure, readClientManifest } from "../../../scripts/budgets/measure.mjs";
 
-const SHELL = "src/app/(dashboard)/layout";
+const SHELL = "src/app/(gui)/layout";
 const LIMITS = {
   framework: { maxBytes: 1_000_000 },
   shell: { layout: SHELL, maxBytesAboveFramework: 1_000_000 },
@@ -18,7 +18,7 @@ const LIMITS = {
 const LATIN = "static/media/9f1c2e-s.p.woff2";
 const EXT = "static/media/a1b2c3-s.woff2";
 const OTHER = "static/media/d4e5f6-s.woff2";
-const MANIFEST = "server/app/(dashboard)/x/page_client-reference-manifest.js";
+const MANIFEST = "server/app/(gui)/x/page_client-reference-manifest.js";
 const face = (family: string, display: string | null, file: string, range: string) =>
   `@font-face{font-family:${family};font-style:normal;${display ? `font-display:${display};` : ""}src:url(../media/${file.split("/").pop()})format("woff2");unicode-range:${range}}`;
 const FALLBACK = "@font-face{font-family:Inter Fallback;src:local(Arial);size-adjust:107.12%}";
@@ -45,7 +45,7 @@ function clientManifest(omit?: string) {
   const js: Record<string, string[]> = {
     "[project]/src/app/layout": root,
     [`[project]/${SHELL}`]: shell,
-    "[project]/src/app/(dashboard)/x/page": [...shell, "static/chunks/page.js"],
+    "[project]/src/app/(gui)/x/page": [...shell, "static/chunks/page.js"],
   };
   const css: Record<string, string[]> = {
     "[project]/src/app/layout": ["static/chunks/app.css"],
@@ -56,7 +56,7 @@ function clientManifest(omit?: string) {
     Object.entries(css).map(([k, v]) => [k, v.map((p) => ({ path: p, inlined: false }))]),
   );
   const body = JSON.stringify({ moduleLoading: { prefix: "" }, clientModules: {}, entryCSSFiles, entryJSFiles: js });
-  put(MANIFEST, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\nglobalThis.__RSC_MANIFEST["/(dashboard)/x/page"] = ${body};\n`);
+  put(MANIFEST, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\nglobalThis.__RSC_MANIFEST["/(gui)/x/page"] = ${body};\n`);
 }
 
 function build({ faces = FACES, preloaded = [] as string[], pagesPreloaded = [] as string[] } = {}) {
@@ -72,7 +72,7 @@ function build({ faces = FACES, preloaded = [] as string[], pagesPreloaded = [] 
     "build-manifest.json",
     JSON.stringify({ polyfillFiles: ["static/chunks/polyfill.js"], rootMainFiles: ["static/chunks/root-a.js", "static/chunks/shared.js", "static/chunks/root-b.js"] }),
   );
-  put("server/next-font-manifest.json", JSON.stringify({ app: { "[project]/src/app/(dashboard)/x/page": preloaded }, pages: { "/_app": pagesPreloaded } }));
+  put("server/next-font-manifest.json", JSON.stringify({ app: { "[project]/src/app/(gui)/x/page": preloaded }, pages: { "/_app": pagesPreloaded } }));
   clientManifest();
 }
 
@@ -105,7 +105,7 @@ describe("first-load byte budgets", () => {
     );
     expect(m.shell.bytes).toBe(sum("app.js", "shell-a.js", "shell-b.js"));
     expect(m.css.bytes).toBe(sum("app.css", "shell.css"));
-    expect(m.routes).toEqual([{ route: "/(dashboard)/x", bytes: sum("page.js") }]);
+    expect(m.routes).toEqual([{ route: "/(gui)/x", bytes: sum("page.js") }]);
     expect(compare(m, LIMITS).ok).toBe(true);
   });
 
@@ -162,7 +162,7 @@ describe("first-load byte budgets", () => {
   it.each([
     ["no rootMainFiles", () => put("build-manifest.json", JSON.stringify({ rootMainFiles: [] })), /rootMainFiles/],
     ["a listed file is missing", () => unlinkSync(join(next, "static/chunks/shell-a.js")), /shell-a\.js is listed/],
-    ["the shell entry key is missing", () => clientManifest(`[project]/${SHELL}`), /has no entryJSFiles\["\[project\]\/src\/app\/\(dashboard\)\/layout"\]/],
+    ["the shell entry key is missing", () => clientManifest(`[project]/${SHELL}`), /has no entryJSFiles\["\[project\]\/src\/app\/\(gui\)\/layout"\]/],
     ["the layout folder has no client manifest", () => unlinkSync(join(next, MANIFEST)), /has no page_client-reference-manifest\.js/],
     ["the font manifest has no app map", () => put("server/next-font-manifest.json", "{}"), /has no app map/],
     ["a font manifest value is not a list", () => put("server/next-font-manifest.json", JSON.stringify({ app: { x: "a.woff2" } })), /app\["x"\] is not a list/],
@@ -175,7 +175,7 @@ describe("first-load byte budgets", () => {
 
   it("throws naming shell.layout when the layout folder is missing", () => {
     build();
-    expect(() => measure(next, { shellLayout: "src/app/(gui)/layout" })).toThrow(/shell\.layout "src\/app\/\(gui\)\/layout"/);
+    expect(() => measure(next, { shellLayout: "src/app/(missing)/layout" })).toThrow(/shell\.layout "src\/app\/\(missing\)\/layout"/);
   });
 
   it("parses the client manifest without evaluating it", () => {
@@ -218,7 +218,7 @@ describe("first-load byte budgets", () => {
     expect(breach.status).toBe(1);
     expect(breach.stderr).toMatch(/Over budget: Framework floor[\s\S]*static\/chunks\/root-a\.js/);
 
-    const missing = cli({ ...LIMITS, shell: { ...LIMITS.shell, layout: "src/app/(gui)/layout" } });
+    const missing = cli({ ...LIMITS, shell: { ...LIMITS.shell, layout: "src/app/(missing)/layout" } });
     expect(missing.status).toBe(1);
     expect(missing.stderr).toMatch(/shell\.layout/);
   });
