@@ -127,6 +127,17 @@ registry is privileged in `service-role-session-check.test.ts`: the functions
 it holds can compose capabilities, and a call made through it cannot be
 followed by import, so every file that names it is tracked.
 
+What a contribution names is checked in CI by
+`src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
+it boots: each action's route file, method, gate and release, and that the
+route parses its body with the action's own `input` from the plugin's
+`schemas.ts`; each view's examples, declared names and links. It also reads
+every module a contributing plugin's surface module loads, and refuses any
+capability method outside its `LOADER_READS`, so a new contributing plugin
+lists the module that exports its contribution in `SURFACE_MODULES` there,
+as an `@/` specifier. That module's exports must reach every function the
+plugin registered.
+
 ## The gate
 
 Every released API route enters the runtime. Routes that use a capability go
@@ -216,8 +227,9 @@ that reads a failure as `false` answers `409` instead.
 The payments composers do not count as gating. Their write routes (the
 stable link, refresh, reconcile, the IPN webhook and the notification worker)
 reach capability methods that only read or keep running while Payments is
-off. So route-surface lists each in `UNGATED_WRITES` as a `PaymentExemption`
-naming the one method it reaches. The test reads the whole route file, not
+off. So each is listed in `UNGATED_WRITES`
+(`src/lib/runtime/__tests__/route-rules.ts`) as a `PaymentExemption` naming
+the one method it reaches. route-surface reads the whole route file, not
 only the handler, since helpers, code that runs when the module loads and
 sibling handlers can all run for it. It checks that the file composes
 Payments and calls only that method on the capability. It checks that the
