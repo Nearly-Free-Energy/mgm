@@ -23,6 +23,7 @@ import {
 import type {
   ActionDef,
   Contribution,
+  Fmt,
   LoadedModel,
   NavDef,
   Prepare,
@@ -123,6 +124,13 @@ describe("GUI contract types", () => {
       // @ts-expect-error a View renders synchronously, so it also works in the browser and in jsdom
       View: async () => null,
     });
+  });
+
+  it("refuses a status map that STATUS_MAPS does not name", () => {
+    const unknownMap = (fmt: Fmt) =>
+      // @ts-expect-error fmt.status takes a map from STATUS_MAPS
+      fmt.status("nope", "x");
+    expect(unknownMap).toBeTypeOf("function");
   });
 
   it("refuses an absolute URL as an Href", () => {

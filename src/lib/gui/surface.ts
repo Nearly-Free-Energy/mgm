@@ -38,6 +38,7 @@ import type {
   Value,
   ViewKind,
 } from "./contract";
+import type { StatusKind } from "./status-maps";
 
 /** Builds Values on the server, so every GUI prints the same text. */
 export interface Fmt {
@@ -55,7 +56,8 @@ export interface Fmt {
   percent(v: number, o?: { at?: string; synthetic?: true }): Value;
   date(isoDate: string): Value;
   datetime(iso: string, tz: string): Value;
-  status(map: string, v: string): Value;
+  /** The label and tone from STATUS_MAPS; an unknown status shows as itself, neutral. */
+  status(map: StatusKind, v: string): Value;
   ref(r: EntityRef): Value;
 }
 
