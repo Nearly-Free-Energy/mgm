@@ -4,8 +4,8 @@
  *
  * The unit tests in gate.test.ts prove the gate asks the right questions
  * with a fake client. This suite proves real PostgREST + RLS answer them:
- *   - every target kind's embedded select resolves the owning organization
- *     for an org_manager of that organization and for a super_admin;
+ *   - every target kind's lookup resolves the owning organization for an
+ *     org_manager of that organization and for a super_admin;
  *   - an org_manager of another organization resolves nothing (RLS hides
  *     the row and the gate does not leak plugin state across orgs);
  *   - writes are refused with 409 `<plugin>_disabled` while the plugin is
@@ -22,7 +22,7 @@ import {
   shouldSkip,
   type TestUser,
 } from "@/lib/supabase/__tests__/rls.helpers";
-import { MGM_BUNDLED_PLUGINS, getBundledPlugin } from "@/lib/plugins/bundled";
+import { CORE_ENTITY_KINDS, MGM_BUNDLED_PLUGINS, getBundledPlugin } from "@/lib/plugins/bundled";
 import { MgmGate, resolveTargetOrganization, type GateTarget } from "../gate";
 import type { MgmCatalog } from "../services";
 
@@ -37,6 +37,8 @@ const F = {
   rateA: "e7000000-0000-4000-8006-000000000001",
   periodA: "e7000000-0000-4000-8007-000000000001",
   lineItemA: "e7000000-0000-4000-8008-000000000001",
+  merchantA: "e7000000-0000-4000-8009-000000000001",
+  attemptA: "e7000000-0000-4000-800a-000000000001",
 };
 
 const EMAILS = {
@@ -58,9 +60,11 @@ const TARGETS: GateTarget[] = [
   { kind: "microgrid", id: F.microgridA },
   { kind: "edge", id: F.edgeA },
   { kind: "device", id: F.deviceA },
+  { kind: "household", id: F.householdA },
   { kind: "billingPeriod", id: F.periodA },
   { kind: "lineItem", id: F.lineItemA },
   { kind: "rateSchedule", id: F.rateA },
+  { kind: "paymentAttempt", id: F.attemptA },
 ];
 
 let managerA: TestUser;
@@ -84,10 +88,29 @@ async function insert(table: string, rows: Record<string, unknown> | Record<stri
   if (error) throw new Error(`[fixture] ${table}: ${error.message}`);
 }
 
+// Removes the fixture organizations. payment_merchant_versions references
+// organizations without ON DELETE CASCADE, so its rows go first, as in
+// billing_period_delete_guard.test.ts; if that foreign key gains a cascade,
+// this delete becomes a no-op. Org A holds a payment attempt, which the
+// billing retention guards (20261103160000) keep, so cleanupTestData purges
+// Org A as the database owner.
+async function cleanup() {
+  const svc = await serviceClient();
+  const { error } = await svc
+    .from("payment_merchant_versions")
+    .delete()
+    .in("org_id", [F.orgA, F.orgB]);
+  if (error) throw new Error(`[cleanup] payment_merchant_versions: ${error.message}`);
+  await cleanupTestData({ orgIds: [F.orgA, F.orgB], userEmails: Object.values(EMAILS) });
+}
+
+// Both hooks may purge Org A as the database owner through the supabase CLI,
+// so they allow more than the default hook timeout, as
+// billing_period_delete_guard.test.ts does.
 beforeAll(async () => {
   if (shouldSkip()) return;
   await assertEnvironmentReady();
-  await cleanupTestData({ orgIds: [F.orgA, F.orgB], userEmails: Object.values(EMAILS) });
+  await cleanup();
 
   await insert("organizations", [
     { id: F.orgA, name: "Gate DB Org A" },
@@ -141,18 +164,39 @@ beforeAll(async () => {
     usage_kwh: 1,
     total_amount: 500,
   });
+  // Merchant account first: the payment_account_snapshot trigger writes the
+  // version row that payment_attempt_scope requires.
+  await insert("payment_merchant_accounts", {
+    id: F.merchantA,
+    org_id: F.orgA,
+    display_name: "Gate DB Merchant A",
+  });
+  await insert("payment_attempts", {
+    id: F.attemptA,
+    org_id: F.orgA,
+    line_item_id: F.lineItemA,
+    community_id: F.communityA,
+    merchant_account_id: F.merchantA,
+    merchant_account_version: 1,
+    amount: 500,
+    merchant_reference: `GATE-DB-${F.attemptA}`,
+  });
 
   managerA = await createTestUser({ email: EMAILS.managerA, role: "org_manager", scopeId: F.orgA });
   managerB = await createTestUser({ email: EMAILS.managerB, role: "org_manager", scopeId: F.orgB });
   superAdmin = await createTestUser({ email: EMAILS.superAdmin, role: "super_admin" });
-});
+}, 60_000);
 
 afterAll(async () => {
   if (shouldSkip()) return;
-  await cleanupTestData({ orgIds: [F.orgA, F.orgB], userEmails: Object.values(EMAILS) });
-});
+  await cleanup();
+}, 60_000);
 
 describe.skipIf(shouldSkip())("MGM runtime gate against the database", () => {
+  it("has a fixture for every core entity kind", () => {
+    expect(TARGETS.map((target) => target.kind).sort()).toEqual([...CORE_ENTITY_KINDS].sort());
+  });
+
   it.each(TARGETS.map((target) => [target.kind, target] as const))(
     "resolves a %s to its organization for that organization's manager",
     async (_kind, target) => {
