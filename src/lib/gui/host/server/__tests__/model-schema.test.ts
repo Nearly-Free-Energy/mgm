@@ -35,8 +35,10 @@ import type {
   ViewKind,
   ViewModel,
 } from "../../../contract";
+import type { ActionLink, LoadedModel } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import {
+  actionLinkSchema,
   actionRefSchema,
   actionResultSchema,
   actionSpecSchema,
@@ -51,6 +53,7 @@ import {
   inlineSchema,
   jsonSchema,
   linkRefSchema,
+  loadedModelSchemas,
   manifestSchema,
   modelSchema,
   modelSchemas,
@@ -107,6 +110,12 @@ describe("model schemas match the contract types", () => {
     expectTypeOf<Same<Out<typeof modelSchemas.flow>, ModelOf<"flow">>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<ReturnType<typeof modelSchema<"metrics">>>, ModelOf<"metrics">>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof viewModelSchema>, ViewModel>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof actionLinkSchema>, ActionLink>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof loadedModelSchemas.collection>, LoadedModel<"collection">>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof loadedModelSchemas.record>, LoadedModel<"record">>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof loadedModelSchemas.metrics>, LoadedModel<"metrics">>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof loadedModelSchemas.feed>, LoadedModel<"feed">>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof loadedModelSchemas.flow>, LoadedModel<"flow">>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof ceremonySchema>, Ceremony>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof signalSchema>, Signal>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof signalsSchema>, Signals>>().toEqualTypeOf<true>();
