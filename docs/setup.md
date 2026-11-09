@@ -361,6 +361,28 @@ The harness mints JWTs locally with `jose` and `SUPABASE_JWT_SECRET`. Each JWT c
 and `aud=authenticated`, which Supabase PostgREST uses to derive `auth.uid()` when evaluating RLS
 policies. No password round-trips to GoTrue — the impersonation is purely local and fast.
 
+## Browser smoke test (local Supabase only)
+
+`e2e/` holds a Playwright smoke test that `Test` runs after `npm test`. In
+Chromium at 360 × 800 with touch as the pointer, it signs in, opens the home
+page and a microgrid's households list, and checks that no page scrolls
+sideways, that tables scroll inside their own box and that controls are at
+least 44 px. It creates its own organization, microgrids, households and
+user in the local database and deletes them afterwards. Timings are printed,
+not enforced.
+
+```bash
+npx playwright install chromium        # once
+npm run build
+eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY|JWT_SECRET)=')"
+MGM_PUBLIC_SUPABASE_URL="$API_URL" MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
+  SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" SUPABASE_JWT_SECRET="$JWT_SECRET" \
+  npm run test:e2e
+```
+
+It starts the app on port 3100, or reuses one already listening there. It
+refuses to run unless `MGM_PUBLIC_SUPABASE_URL` is the local Supabase.
+
 ## Full-Stack Setup (with OpenEMS)
 
 To test meter readings and billing generation, you need the OpenEMS stack running alongside MGM.

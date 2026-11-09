@@ -12,6 +12,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "db:types": "npx supabase gen types typescript --local 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > src/lib/types/database.gen.ts",
     "db:types:linked": "npx supabase gen types typescript --linked 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > src/lib/types/database.gen.ts",
     "db:types:check": "npx supabase gen types typescript --local 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > /tmp/database.gen.check.ts; if [ ! -s /tmp/database.gen.check.ts ]; then echo 'db:types:check: supabase not running — skipping'; else diff /tmp/database.gen.check.ts src/lib/types/database.gen.ts || (echo 'database.gen.ts is out of date — run npm run db:types' && exit 1); fi",
@@ -40,6 +41,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/node": "^4.2.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/react": "^16.3.2",

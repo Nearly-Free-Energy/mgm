@@ -180,6 +180,51 @@ jobs:
           export MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
 
+      # The browser smoke (e2e/, playwright.config.ts): sign-in, home and a
+      # households list at 360 px against the production build and the local
+      # Supabase above, as a throwaway user it creates and deletes. Every
+      # value comes from `supabase status` on this runner; none is a
+      # repository secret. Timings go to the job summary and are not enforced.
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium for the browser smoke
+        run: npx playwright install --with-deps --only-shell chromium
+
+      - name: Build for the browser smoke
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Browser smoke at 360 px
+        id: smoke
+        run: |
+          eval "$(npx supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY|JWT_SECRET)=')"
+          export MGM_PUBLIC_SUPABASE_URL="$API_URL"
+          export MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          export SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export SUPABASE_JWT_SECRET="$JWT_SECRET"
+          export MGM_APP_URL="http://127.0.0.1:3100"
+          npm run test:e2e
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      # The report holds screenshots and traces of the failed pages. They
+      # record the smoke user's password as typed and its session, which
+      # are valid only in this runner's local database and go with the job.
+      - name: Browser smoke report
+        if: failure() && steps.smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
       # scripts/tests/test_export_restore_e2e.py exports the database above
       # and restores it into a second, empty Supabase project, started here.
       # pg_dump must be at least the server's major version, newer than the
