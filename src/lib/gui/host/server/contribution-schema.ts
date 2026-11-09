@@ -24,7 +24,7 @@ import { z } from "zod";
 import { CORE_ENTITY_KINDS, getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { MgmCatalog } from "@/lib/runtime/services";
 import type { Contribution } from "../../surface";
-import type { ViewKind, ViewModel } from "../../contract";
+import type { BodiesOf, ViewKind, ViewModel } from "../../contract";
 import {
   confirmSchema,
   entityKindSchema,
@@ -178,8 +178,11 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
 
 // ── Views ───────────────────────────────────────────────────────────────────
 
+/** A model's kind and body, whatever its action shape: a GUI's model or a loader's. */
+export type KindAndBody = { [K in ViewKind]: { kind: K; body: BodiesOf<unknown, unknown>[K] } }[ViewKind];
+
 /** Every key a model names that its view must declare: columns, cells, totals, fields, tiles and series. */
-function keysOf(model: ViewModel): [string, Path][] {
+export function keysOf(model: KindAndBody): [string, Path][] {
   const out: [string, Path][] = [];
   const each = (keys: string[], at: Path) => keys.forEach((k, i) => out.push([k, [...at, i]]));
   switch (model.kind) {

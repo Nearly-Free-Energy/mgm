@@ -11,15 +11,16 @@ import "server-only";
  * type in ../../contract.ts; __tests__/model-schema.test.ts fails to compile
  * while the two differ, so a contract edit lands together with its schema.
  *
- * These schemas check shape alone. They do not check whether a key was
- * declared by its view, whether an href is a released page or a released
- * download, or how large a model is: those depend on the view and the route
- * list, so the code that serves a view has to check them as well.
+ * These schemas check shape alone. Whether a key was declared by its view,
+ * whether an href is a released page or a released download, and how large a
+ * model is depend on the view and the route list: ./parse.ts checks those on
+ * top of these schemas.
  */
 import { z } from "zod";
 import { CORE_ENTITY_KINDS } from "@/lib/plugins/bundled";
 import type { Json, ViewKind, ViewModel } from "../../contract";
 import { CARET_RANGE_RE } from "../shared/contract-range";
+import { OUT_HREF_PATTERNS, isSameOriginPath } from "../shared/href";
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 
@@ -34,41 +35,15 @@ export const idSchema = z
   .templateLiteral([z.string(), ".", z.string()])
   .refine((s) => s.length <= 128 && ID_RE.test(s), "Expected an id such as billing.periods");
 
-const HREF_BASE = "https://host.invalid";
-
-/**
- * A same-origin path. Refused: anything not starting with one "/", a
- * backslash, a control character, an encoded "/" or "\", and any path the URL
- * parser would rewrite. That covers "." and ".." segments, encoded or not, and
- * characters a path must carry percent-encoded, such as a space or "é".
- */
-function isSameOriginPath(href: string): boolean {
-  if (href.length > 2048 || !href.startsWith("/") || href.startsWith("//")) return false;
-  if (/[\\\u0000-\u001f\u007f]/.test(href) || /%(?:2f|5c)/i.test(href)) return false;
-  let url: URL;
-  try {
-    url = new URL(href, HREF_BASE);
-  } catch {
-    return false;
-  }
-  const path = href.split(/[?#]/, 1)[0];
-  return url.origin === HREF_BASE && url.pathname === path;
-}
-
+/** A same-origin path, as ../shared/href.ts checks it. */
 export const hrefSchema = z
   .templateLiteral(["/", z.string()])
   .refine(isSameOriginPath, "Expected a same-origin path");
 
-/** Characters encodeURIComponent leaves, plus percent escapes. */
-const ENCODED = "[A-Za-z0-9%\\-_.!~*'()]*";
-const WHATSAPP_RE = new RegExp(`^https://wa\\.me/\\d{6,15}(?:\\?text=${ENCODED})?$`);
-const TEL_RE = /^tel:\+\d{6,15}$/;
-const SMS_RE = new RegExp(`^sms:\\+\\d{6,15}(?:\\?body=${ENCODED})?$`);
-
 export const outHrefSchema = z.union([
-  z.templateLiteral(["https://wa.me/", z.string()]).refine((s) => WHATSAPP_RE.test(s), "Expected a wa.me number"),
-  z.templateLiteral(["tel:", z.string()]).refine((s) => TEL_RE.test(s), "Expected tel:+<digits>"),
-  z.templateLiteral(["sms:", z.string()]).refine((s) => SMS_RE.test(s), "Expected sms:+<digits>"),
+  z.templateLiteral(["https://wa.me/", z.string()]).refine((s) => OUT_HREF_PATTERNS.whatsapp.test(s), "Expected a wa.me number"),
+  z.templateLiteral(["tel:", z.string()]).refine((s) => OUT_HREF_PATTERNS.tel.test(s), "Expected tel:+<digits>"),
+  z.templateLiteral(["sms:", z.string()]).refine((s) => OUT_HREF_PATTERNS.sms.test(s), "Expected sms:+<digits>"),
 ]);
 
 export const jsonSchema: z.ZodType<Json> = z.lazy(() =>
@@ -146,6 +121,12 @@ export const linkRefSchema = z.strictObject({
   share: z.strictObject({ title: z.string(), text: z.string() }).optional(),
 });
 
+const provenanceSchema = z.strictObject({
+  by: z.enum(["assistant", "watcher"]),
+  proposal: z.string().optional(),
+  at: isoDateTime,
+});
+
 export const actionRefSchema = z.strictObject({
   action: idSchema,
   params: z.record(z.string(), z.string()),
@@ -155,13 +136,16 @@ export const actionRefSchema = z.strictObject({
   tone: z.literal("danger").optional(),
   from: z.string().optional(),
   prefill: jsonSchema.optional(),
-  provenance: z
-    .strictObject({
-      by: z.enum(["assistant", "watcher"]),
-      proposal: z.string().optional(),
-      at: isoDateTime,
-    })
-    .optional(),
+  provenance: provenanceSchema.optional(),
+});
+
+/** What a loader puts where a GUI will see an ActionRef (ActionLink in ../../surface.ts). */
+export const actionLinkSchema = z.strictObject({
+  action: idSchema,
+  params: z.record(z.string(), z.string()),
+  label: z.string().optional(),
+  prefill: jsonSchema.optional(),
+  provenance: provenanceSchema.optional(),
 });
 
 export const actionSpecSchema = z.strictObject({
@@ -198,14 +182,20 @@ export const actionResultSchema = z.discriminatedUnion("ok", [
 /** Feed embeds carry a whole view model, so the union refers back to itself. */
 const embeddedViewModelSchema: z.ZodType<ViewModel> = z.lazy(() => viewModelSchema);
 
-const composeSchema = z.strictObject({
-  action: actionRefSchema,
-  textField: z.string().min(1),
-  contextField: z.string().min(1).optional(),
-  placeholder: z.string(),
-});
+const composeOf = <A extends z.ZodType>(actionSchema: A) =>
+  z.strictObject({
+    action: actionSchema,
+    textField: z.string().min(1),
+    contextField: z.string().min(1).optional(),
+    placeholder: z.string(),
+  });
+const composeSchema = composeOf(actionRefSchema);
 
-export const bodySchemas = {
+/**
+ * The five bodies over an action shape (ActionRef for a GUI, ActionLink for a
+ * loader) and what a feed's view embed carries besides its href.
+ */
+const bodiesOf = <A extends z.ZodType, E extends z.ZodRawShape>(actionSchema: A, viewEmbed: E) => ({
   collection: z.strictObject({
     columns: z.array(
       z.strictObject({
@@ -223,7 +213,7 @@ export const bodySchemas = {
         related: z.array(entityRefSchema).optional(),
         href: hrefSchema.optional(),
         cells: z.record(z.string(), valueSchema),
-        actions: z.array(actionRefSchema),
+        actions: z.array(actionSchema),
         links: z.array(linkRefSchema).optional(),
       }),
     ),
@@ -239,7 +229,7 @@ export const bodySchemas = {
       )
       .optional(),
     next: hrefSchema.optional(),
-    empty: z.strictObject({ title: z.string(), text: z.string().optional(), action: actionRefSchema.optional() }),
+    empty: z.strictObject({ title: z.string(), text: z.string().optional(), action: actionSchema.optional() }),
   }),
   record: z.strictObject({
     sections: z.array(
@@ -279,8 +269,8 @@ export const bodySchemas = {
         text: richSchema,
         embed: z
           .discriminatedUnion("type", [
-            z.strictObject({ type: z.literal("view"), href: hrefSchema, model: embeddedViewModelSchema }),
-            z.strictObject({ type: z.literal("action"), ref: actionRefSchema }),
+            z.strictObject({ type: z.literal("view"), href: hrefSchema, ...viewEmbed }),
+            z.strictObject({ type: z.literal("action"), ref: actionSchema }),
             z.strictObject({ type: z.literal("values"), values: z.array(valueSchema) }),
             z.strictObject({
               type: z.literal("steps"),
@@ -290,8 +280,8 @@ export const bodySchemas = {
           .optional(),
       }),
     ),
-    compose: composeSchema.optional(),
-    stop: actionRefSchema.optional(),
+    compose: composeOf(actionSchema).optional(),
+    stop: actionSchema.optional(),
     busy: z.boolean().optional(),
   }),
   flow: z.strictObject({
@@ -302,11 +292,15 @@ export const bodySchemas = {
         state: z.enum(["done", "current", "todo", "blocked"]),
         detail: z.string().optional(),
         href: hrefSchema.optional(),
-        action: actionRefSchema.optional(),
+        action: actionSchema.optional(),
       }),
     ),
   }),
-};
+});
+
+export const bodySchemas = bodiesOf(actionRefSchema, { model: embeddedViewModelSchema });
+/** What a loader returns: ActionLinks, and view embeds as an href the host loads. */
+export const loadedBodySchemas = bodiesOf(actionLinkSchema, {});
 
 export const extSchemaName = z
   .templateLiteral([z.string(), ".", z.string(), "@", z.number()])
@@ -314,6 +308,8 @@ export const extSchemaName = z
     const at = s.lastIndexOf("@");
     return ID_RE.test(s.slice(0, at)) && /^[1-9]\d*$/.test(s.slice(at + 1));
   }, "Expected <id>@<version>");
+
+const extSchema = z.strictObject({ schema: extSchemaName, data: jsonSchema });
 
 function modelOf<K extends ViewKind>(kind: K) {
   return z.strictObject({
@@ -340,7 +336,7 @@ function modelOf<K extends ViewKind>(kind: K) {
     live: z
       .strictObject({ refreshSeconds: z.number().positive(), staleAfterSeconds: z.number().positive() })
       .optional(),
-    ext: z.strictObject({ schema: extSchemaName, data: jsonSchema }).optional(),
+    ext: extSchema.optional(),
   });
 }
 
@@ -356,6 +352,31 @@ export const modelSchemas = {
 export function modelSchema<K extends ViewKind>(kind: K): (typeof modelSchemas)[K] {
   return modelSchemas[kind];
 }
+
+/**
+ * What a loader returns for each kind (LoadedModel in ../../surface.ts). The
+ * host fills type, view, kind, org, trail, attached, notice and live, so a
+ * loader that supplies any of them is refused.
+ */
+function loadedModelOf<K extends ViewKind>(kind: K) {
+  return z.strictObject({
+    body: loadedBodySchemas[kind],
+    title: z.string(),
+    subtitle: z.string().optional(),
+    entity: entityRefSchema.optional(),
+    actions: z.array(actionLinkSchema),
+    links: z.array(linkRefSchema).optional(),
+    ext: extSchema.optional(),
+  });
+}
+
+export const loadedModelSchemas = {
+  collection: loadedModelOf("collection"),
+  record: loadedModelOf("record"),
+  metrics: loadedModelOf("metrics"),
+  feed: loadedModelOf("feed"),
+  flow: loadedModelOf("flow"),
+};
 
 export const viewModelSchema = z.discriminatedUnion("kind", [
   modelSchemas.collection,
