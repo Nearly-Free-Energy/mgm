@@ -35,8 +35,10 @@ const CHIP_BG: Record<string, string> = {
 
 const ROWS = Object.entries(EXPECTED).flatMap(([kind, list]) =>
   list.split(" ").map((entry) => {
-    const [status, tone] = entry.replace("*", "").split("=");
-    return [kind as StatusKind, status, tone, entry.endsWith("*")] as const;
+    // A trailing "*" marks a status whose chip shows a dot.
+    const dot = entry.endsWith("*");
+    const [status, tone] = (dot ? entry.slice(0, -1) : entry).split("=");
+    return [kind as StatusKind, status, tone, dot] as const;
   }),
 );
 
