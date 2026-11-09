@@ -31,7 +31,14 @@ export const GUI_CONTRACT = "0.1.0";
 
 /** "<alias>.<name>", where the alias is the contributing plugin's catalog alias ("billing", "org"). */
 export type Id = `${string}.${string}`;
-/** A same-origin path: starts with "/", never "//", no scheme. */
+/**
+ * A path on this site. The type only guarantees a leading "/": "//host/x" and
+ * "/\\host" still compile, and browsers send both off-site. The host refuses
+ * them, and any other path that leaves the site, at run time before a model
+ * reaches a browser: the Href schema in src/lib/gui/host/server/model-schema.ts
+ * (added with the host schemas, #124). Never rely on the type alone; if that
+ * schema stops checking hrefs, revisit.
+ */
 export type Href = `/${string}`;
 /** The only targets outside MGM a view may carry: a WhatsApp chat, a call, an SMS. */
 export type OutHref = `https://wa.me/${string}` | `tel:${string}` | `sms:${string}`;
