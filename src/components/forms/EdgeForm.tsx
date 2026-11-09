@@ -28,6 +28,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Banner } from "@/components/ui/banner";
+import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import type { Edge } from "@/lib/types/domain";
 
 // ── Props ─────────────────────────────────────────────────────────────────
@@ -199,7 +200,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       <div>
         <label
           htmlFor="edge-name"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Name <span aria-hidden="true">*</span>
         </label>
@@ -221,7 +222,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
 
       {/* OpenEMS Edge ID — readonly display */}
       <div>
-        <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           OpenEMS Edge ID
         </label>
         <div className="rounded-md bg-muted px-3 py-2 font-mono text-sm text-foreground">
@@ -237,7 +238,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       <div>
         <label
           htmlFor="edge-role"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Role <span className="font-normal normal-case text-muted-foreground">(optional)</span>
         </label>
@@ -257,7 +258,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
           onClick={handleRediscover}
           disabled={rediscovering || saving}
           className={cn(
-            "rounded-md bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground hover:opacity-90",
+            "rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted",
             "disabled:cursor-not-allowed disabled:opacity-50"
           )}
         >
@@ -303,14 +304,8 @@ export function EdgeFormModal({ open, onOpenChange, edge }: EdgeFormModalProps) 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55 data-[state=open]:animate-in data-[state=closed]:animate-out" />
-        <Dialog.Content
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-y-auto max-h-[90vh] rounded-md border border-border bg-card shadow-elev-3 outline-none"
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel className="w-[560px]">
           {/* Top accent rail */}
           <div aria-hidden="true" className="h-[6px] bg-primary" />
 
@@ -330,7 +325,7 @@ export function EdgeFormModal({ open, onOpenChange, edge }: EdgeFormModalProps) 
               onCancel={() => onOpenChange(false)}
             />
           </div>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

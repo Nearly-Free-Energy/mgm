@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { Banner } from "@/components/ui/banner";
 import { Currency } from "@/components/format/currency";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { StatusChip } from "@/components/ui/status-chip";
 import {
   errorCodeCopy,
@@ -293,14 +294,14 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
         <div className="space-y-3">
           {edgeRows.length > 0 && (
             <section data-testid="regen-multi-edge-section">
-              <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Will be regenerated ({edgeRows.length})
               </h4>
               <ul className="space-y-1">
                 {edgeRows.map((r) => (
                   <li
                     key={r.householdId}
-                    className="flex items-center justify-between gap-2 text-[13px]"
+                    className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
@@ -326,10 +327,10 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
 
           {manualRows.length > 0 && (
             <section data-testid="regen-multi-skip-section">
-              <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Will be skipped ({manualRows.length})
               </h4>
-              <p className="mb-1 text-[12px] text-muted-foreground">
+              <p className="mb-1 text-caption text-muted-foreground">
                 Manual readings are per-row only — close this and use the row
                 menu to regenerate.
               </p>
@@ -337,7 +338,7 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
                 {manualRows.map((r) => (
                   <li
                     key={r.householdId}
-                    className="flex items-center justify-between gap-2 text-[13px]"
+                    className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
@@ -362,13 +363,13 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
           {allSelectedAreManual && (
             <p
               data-testid="regen-multi-all-manual-notice"
-              className="text-[12px] text-muted-foreground"
+              className="text-caption text-muted-foreground"
             >
               All selected rows are manual — nothing to regenerate.
             </p>
           )}
 
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Edge-only — to regenerate manual rows, use the row menu.
           </p>
         </div>
@@ -413,16 +414,12 @@ function ResultDialog(props: {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           role="alertdialog"
-          aria-modal
           data-testid="regen-multi-result-dialog"
           onEscapeKeyDown={() => onOpenChange(false)}
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[460px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3 outline-none",
-          )}
+          className="w-[460px]"
         >
           <div
             aria-hidden="true"
@@ -458,18 +455,18 @@ function ResultDialog(props: {
             </Banner>
           </div>
 
-          <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+          <DialogFooter className="mt-4">
             <Dialog.Close asChild>
               <button
                 type="button"
                 data-testid="regen-multi-result-close"
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Close
               </button>
             </Dialog.Close>
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

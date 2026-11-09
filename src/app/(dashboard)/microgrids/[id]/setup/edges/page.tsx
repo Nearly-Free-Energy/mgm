@@ -125,7 +125,7 @@ export default async function SetupEdgesPage({
       <HierarchyNav levels={levels} className="mb-2" />
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             Edges &amp; devices
           </p>
           <h3 className="text-lg font-semibold text-foreground">
@@ -190,23 +190,23 @@ export default async function SetupEdgesPage({
           emsType={emsType}
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="relative overflow-x-auto rounded-lg border border-border bg-card">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted">
               <tr>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Name
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Source
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   OpenEMS edge id
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Status
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   <span className="sr-only">Actions</span>
                 </th>
               </tr>

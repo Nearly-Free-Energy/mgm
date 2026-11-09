@@ -9,15 +9,25 @@ import { channelAddressFor } from "@/lib/openems/channel-address";
 import type { DiscoveredDevice, EdgeDiscoveryResponse } from "@/lib/openems/types";
 
 /**
- * Nature IDs for device types supported by Discover.
- * Expanded from ElectricityMeter-only to include Ess, Evcs, Inverter
- * so battery / EV charger / inverter device types are discoverable.
+ * OpenEMS nature IDs whose components Discover lists. These are the Java
+ * interface names OpenEMS reports in a factory's `natureIds`, so each must be
+ * a real interface in the OpenEMS release the edges run (NFE's fork,
+ * github.com/Nearly-Free-Energy/openems) — a name OpenEMS does not have
+ * matches nothing and hides that whole kind of device without an error.
+ *
+ *   - ElectricityMeter: every meter, and every PV inverter, since
+ *     `ManagedSymmetricPvInverter` extends it.
+ *   - SymmetricEss: every battery (ESS). `HybridEss`, `ManagedSymmetricEss`
+ *     and the asymmetric and single-phase ESS natures all extend it, so one
+ *     name covers them. There is no plain `io.openems.edge.ess.api.Ess`.
+ *   - Evcs: EV chargers.
+ *
+ * If OpenEMS renames or moves one of these interfaces, revisit this list.
  */
 const SUPPORTED_NATURE_IDS = [
   "io.openems.edge.meter.api.ElectricityMeter",
-  "io.openems.edge.ess.api.Ess",
+  "io.openems.edge.ess.api.SymmetricEss",
   "io.openems.edge.evcs.api.Evcs",
-  "io.openems.edge.inverter.api.Inverter",
 ];
 
 const UUID_RE =

@@ -19,8 +19,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const chipVariants = cva(
-  // base — 11px UPPERCASE, pill radius, max-width with truncation.
-  "inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide leading-tight max-w-[14rem] truncate align-middle",
+  // base — 12px (text-caption) UPPERCASE, pill radius, max-width with truncation.
+  "inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-caption font-semibold uppercase tracking-wide leading-tight max-w-[14rem] truncate align-middle",
   {
     variants: {
       tone: {
@@ -31,7 +31,7 @@ const chipVariants = cva(
         brand: "bg-accent text-accent-foreground",
       },
       size: {
-        sm: "px-1.5 py-px text-[11px]",
+        sm: "px-1.5 py-px text-caption",
         md: "",
       },
       state: {

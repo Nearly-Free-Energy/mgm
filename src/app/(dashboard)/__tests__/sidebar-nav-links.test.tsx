@@ -195,4 +195,20 @@ describe("SidebarNavLinks", () => {
     // bg-accent text-accent-foreground is not in a continuous sequence for idle links
     expect(link.getAttribute("aria-current")).toBeNull();
   });
+
+  // Below md the dashboard layout shows this nav as a band across the top:
+  // the links form one row that scrolls sideways, and stack again from md.
+  it("lays the links out in a row that scrolls sideways below md", () => {
+    mockPathname = "/microgrids";
+    renderNav();
+    const nav = screen.getByRole("navigation", { name: /primary/i });
+    expect(nav.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["flex", "min-w-0", "overflow-x-auto", "md:block"])
+    );
+    for (const link of within(nav).getAllByRole("link")) {
+      expect(link.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["shrink-0", "whitespace-nowrap"])
+      );
+    }
+  });
 });

@@ -744,7 +744,7 @@ export function BillingTable({
               }}
             />
             {showCaption && item.entered_at && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 Updated by {captionLabel} ·{" "}
                 <LocalDate value={item.entered_at} relative />
               </p>
@@ -1190,7 +1190,7 @@ export function BillingTable({
                       <button
                         type="button"
                         onClick={() => recordRowError(lineItemId, null)}
-                        className="rounded-sm border border-destructive bg-card px-2 py-0.5 text-[11px] font-medium text-destructive-fg hover:bg-muted"
+                        className="rounded-sm border border-destructive bg-card px-2 py-0.5 text-caption font-medium text-destructive-fg hover:bg-muted"
                       >
                         Dismiss
                       </button>

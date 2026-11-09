@@ -8,7 +8,8 @@ In Organization → Payment accounts, configure and test a Pesapal sandbox merch
 
 Before enabling live payments, have the operator perform a sandbox checkout and confirm all of the following:
 
-- The callback displays confirmation only after a server-side status lookup, and the bill, receipt, and audit event agree.
+- The return page (`/payment/callback`) says the status was checked only after a server-side lookup, never from the redirect parameters, and the bill, receipt, and audit event agree. The provider should bring the household back with a `GET`: a `POST` shows the plain "not confirmed yet" page and checks nothing.
+- The return page names the operator from the community's invoice branding: the trade name, else the organization's name, with the community beneath, and the WhatsApp contact the bill shows. A PNG or JPEG logo of 6 KB or less, uploaded for that community, appears too; a larger logo, or an SVG, leaves the name alone. The page waits at most 2 seconds for the branding: past that it answers without the logo, or without any branding if the names were not read in time.
 - Repeated IPNs, repeated clicks, and worker delivery do not duplicate accounting or create another outstanding checkout.
 - A draft total correction flags any old payment for reconciliation. Payment history shows the current total, received amount, and difference.
 - Plugin disablement blocks new checkout while keeping history and verification available. Manual payment recording remains independent.

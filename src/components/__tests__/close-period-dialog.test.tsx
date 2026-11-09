@@ -160,8 +160,8 @@ describe("ClosePeriodDialog — collapsed surface", () => {
 
     // Checkbox accent uses --primary, not --destructive.
     const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(checkbox.className).toContain("accent-[color:var(--primary)]");
-    expect(checkbox.className).not.toContain("accent-[color:var(--destructive)]");
+    expect(checkbox.className).toContain("accent-primary");
+    expect(checkbox.className).not.toContain("accent-destructive");
   });
 });
 

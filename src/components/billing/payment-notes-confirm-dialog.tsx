@@ -75,7 +75,7 @@ export function PaymentNotesConfirmDialog({
       body={
         <div className="mt-1 space-y-3">
           {/* Household + period + amount summary */}
-          <div className="text-[13px] leading-relaxed text-muted-foreground">
+          <div className="text-dense leading-relaxed text-muted-foreground">
             {householdName && (
               <span className="font-medium text-foreground">
                 {householdName}
@@ -97,7 +97,7 @@ export function PaymentNotesConfirmDialog({
           <div>
             <label
               htmlFor="payment-status-notes"
-              className="mb-1 block text-[12px] font-medium text-foreground"
+              className="mb-1 block text-caption font-medium text-foreground"
             >
               Reason or reference{" "}
               <span className="font-normal text-muted-foreground">
@@ -114,12 +114,12 @@ export function PaymentNotesConfirmDialog({
               placeholder="e.g. Cash 2026-04-24, M-Pesa receipt #123"
               className={cn(
                 "block w-full rounded-md border border-border bg-card px-3 py-1.5",
-                "text-[13px] text-foreground placeholder:text-muted-foreground",
+                "text-dense text-foreground placeholder:text-muted-foreground",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "resize-none",
               )}
             />
-            <p className="mt-0.5 text-right text-[11px] text-muted-foreground">
+            <p className="mt-0.5 text-right text-caption text-muted-foreground">
               {notes.length}/500
             </p>
           </div>

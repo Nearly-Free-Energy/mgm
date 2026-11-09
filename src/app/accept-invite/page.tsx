@@ -118,7 +118,7 @@ export default function AcceptInvitePage() {
 
         {phase.kind === "ready" && (
           <SetPasswordForm
-            title="Welcome to Micro Grid Manager"
+            title="Welcome to Microgrid Manager"
             subtitle="Set a password to finish setting up your account."
             onSubmit={handleSetPassword}
           />

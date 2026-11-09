@@ -25,26 +25,43 @@
  *     not cluster-wide; defends against accidental scraping but a coordinated
  *     attacker across instances bypasses it. A future ticket can swap in
  *     Upstash / Vercel KV when abuse signal appears (the call site only
- *     depends on `checkRateLimit(...)`'s contract).
+ *     depends on `checkRateLimit(...)`'s contract). Only allowed requests
+ *     count toward the window: `checkRateLimit` does not record a refused
+ *     one, so pressing Try again on the 429 page cannot lengthen the wait.
+ *     A replacement limiter must keep that, or the page's promise breaks;
+ *     `src/lib/rate-limit/__tests__/in-memory.test.ts` pins it.
  *
  * Status-code map (RFC 7231-aligned):
  *
- *   | Condition                                              | Status | Body                          |
- *   |--------------------------------------------------------|--------|-------------------------------|
- *   | Happy path                                             | 302    | Redirect to Pesapal URL       |
- *   | Line item not found (PESAPAL_LINE_ITEM_NOT_FOUND)      | 404    | HTML "not available"          |
- *   | Community has no payment provider (PAYMENT_NOT_CONFIG) | 409    | HTML "not configured"         |
- *   | Any other PaymentError (Pesapal upstream / auth / etc) | 502    | HTML "could not be retrieved" |
- *   | Rate-limit exceeded                                    | 429    | "Too many requests" + Retry-After |
+ *   | Condition                                              | Status      | Body                                 |
+ *   |--------------------------------------------------------|-------------|--------------------------------------|
+ *   | Happy path                                             | 302         | Redirect to Pesapal URL              |
+ *   | Malformed line-item id                                 | 400         | HTML "isn't valid"                   |
+ *   | Rate-limit exceeded                                    | 429         | HTML "Too many tries" + Retry-After  |
+ *   | Line item not found (or PESAPAL_LINE_ITEM_NOT_FOUND)   | 404         | HTML "not available"                 |
+ *   | Payments cannot be composed for the organization       | as returned | HTML "Please contact your operator"  |
+ *   | Online payment off or no account (ONLINE_PAYMENT_OFF)  | 409         | HTML "pay the usual way"             |
+ *   | Any other checkout refusal                             | as returned | HTML "cannot accept another checkout"|
+ *   | Community has no payment provider (PAYMENT_NOT_CONFIG) | 409         | HTML "not configured"                |
+ *   | Any other error (Pesapal upstream / auth / etc)        | 502         | HTML "could not be retrieved"        |
+ *
+ * The HTML pages come from src/lib/public-html/payment-link.ts, in the
+ * language the request's Accept-Language picks, with the frame's security
+ * headers, Content-Language and Vary. This file chooses each status and the
+ * Retry-After; every response is `Cache-Control: no-store`.
+ * `__tests__/responses.test.ts` pins all of it.
  *
  *   "Soft-deleted" is NOT a case — `billing_line_items` has no soft-delete
  *   column (verified at 00001_schema.sql:237-248). Hard-deletes cascade from
  *   `billing_periods.ON DELETE CASCADE` and surface here as 404.
  *
- * Audit logging: every hit writes a structured log line via
+ * Audit logging: the malformed id, the rate limit, the redirect and every
+ * thrown error write a structured log line via
  * `scrubSecretValues(payload, { extra: [redirectUrl].filter(Boolean) })` so
  * the persisted Pesapal URL never lands in stdout. The log includes the
- * truncated IP, line_item_id, and outcome (302 / 404 / 409 / 502 / 429).
+ * truncated IP, line_item_id, and outcome (400 / 429 / 302, or the thrown
+ * error's 404 / 409 / 502). An unknown bill, payments that cannot be
+ * composed and a checkout refusal write no line.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -55,6 +72,11 @@ import { resolveOrgForLineItem } from "@/lib/payments/resolve-org";
 import { createServiceClient } from "@/lib/supabase/service";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
+import {
+  paymentLinkResponse,
+  wholeSecondsToWait,
+  type PaymentLinkNotice,
+} from "@/lib/public-html/payment-link";
 
 /**
  * Seconds this function may run. Declared rather than left to the hosting
@@ -72,6 +94,22 @@ const UUID_RE =
 const RATE_LIMIT_PER_MIN = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+/**
+ * Checkout refusals that mean the household cannot pay this bill online at
+ * all, so the page tells them to pay their operator the usual way. The codes
+ * are the plugin gate's and the merchant-account resolution's in
+ * `ensureCheckout` (src/lib/payments/capability.ts); if a code there is
+ * renamed or a new "off" state is added, update this list and its copy in
+ * `__tests__/responses.test.ts`, which fails when one of these codes no
+ * longer appears in capability.ts.
+ */
+const ONLINE_PAYMENT_OFF: ReadonlySet<string> = new Set([
+  "payments_disabled",
+  "pesapal_disabled",
+  "payments_not_configured",
+  "payments_account_disabled",
+]);
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ lineItemId: string }> },
@@ -80,6 +118,7 @@ export async function GET(
   const { lineItemId } = await params;
 
   const ipFull = readClientIp(request);
+  const acceptLanguage = request.headers.get("accept-language");
 
   if (!UUID_RE.test(lineItemId)) {
     logPayEvent({
@@ -88,11 +127,7 @@ export async function GET(
       outcome: "400",
       durationMs: Date.now() - startedAt,
     });
-    return htmlResponse(
-      400,
-      "Invalid request",
-      "The link you used isn't valid. Please contact your operator.",
-    );
+    return paymentLinkResponse(400, acceptLanguage, { notice: "invalidLink" });
   }
 
   // ── Rate limit ──────────────────────────────────────────────────────────
@@ -104,19 +139,16 @@ export async function GET(
       outcome: "429",
       durationMs: Date.now() - startedAt,
     });
-    return new NextResponse(
-      htmlBody(
-        "Too many requests",
-        "You've made too many requests in a short window. Please try again in a moment.",
-      ),
-      {
-        status: 429,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Retry-After": String(rl.retryAfter ?? 60),
-          "Cache-Control": "no-store",
-        },
-      },
+    // Whole seconds and at least 1, so Retry-After is always a valid
+    // positive integer and the page's wait matches it.
+    const retryAfter = wholeSecondsToWait(rl.retryAfter, RATE_LIMIT_WINDOW_MS / 1000);
+    // The id passed the UUID check above, so this is a path on this site.
+    const tryAgainHref = `/api/billing-line-items/${lineItemId}/pay`;
+    return paymentLinkResponse(
+      429,
+      acceptLanguage,
+      { notice: "tooManyTries", retryAfterSeconds: retryAfter, tryAgainHref },
+      { "Retry-After": String(retryAfter) },
     );
   }
 
@@ -124,16 +156,19 @@ export async function GET(
   let result;
   try {
     const orgScope = await resolveOrgForLineItem(supabase, lineItemId);
-    if (!orgScope) return htmlResponse(404, "Bill not found", "This bill is not available. Please contact your operator.");
+    if (!orgScope) return paymentLinkResponse(404, acceptLanguage, { notice: "billNotFound" });
     const composed = await composePaymentsPublic({ supabase, organizationId: orgScope.orgId });
-    if (!composed.ok) return htmlResponse(composed.status, "Payment unavailable", "Please contact your operator.");
+    if (!composed.ok) return paymentLinkResponse(composed.status, acceptLanguage, { notice: "paymentUnavailable" });
     try {
       const checkout = await composed.data.payments.ensureCheckout(lineItemId);
-      if (!checkout.ok) return htmlResponse(checkout.status, "Payment unavailable", "This bill cannot accept another checkout right now. Please contact your operator.");
+      if (!checkout.ok) {
+        const notice = ONLINE_PAYMENT_OFF.has(checkout.code) ? "onlinePaymentOff" : "checkoutRefused";
+        return paymentLinkResponse(checkout.status, acceptLanguage, { notice });
+      }
       result = { redirectUrl: checkout.data.redirectUrl };
     } finally { await composed.data.dispose(); }
   } catch (err) {
-    return handleError(err, { lineItemId, ipTruncated: truncateIp(ipFull), startedAt });
+    return handleError(err, { lineItemId, ipTruncated: truncateIp(ipFull), startedAt, acceptLanguage });
   }
 
   logPayEvent({
@@ -160,25 +195,19 @@ export async function GET(
 
 function handleError(
   err: unknown,
-  ctx: { lineItemId: string; ipTruncated: string; startedAt: number },
+  ctx: { lineItemId: string; ipTruncated: string; startedAt: number; acceptLanguage: string | null },
 ): Response {
   const isPaymentErr = err instanceof PaymentError;
   let status = 502;
-  let title = "Payment link unavailable";
-  let body =
-    "Payment link could not be retrieved — please contact your operator.";
+  let notice: PaymentLinkNotice = "linkUnavailable";
 
   if (isPaymentErr) {
     if (err.code === "PESAPAL_LINE_ITEM_NOT_FOUND") {
       status = 404;
-      title = "Bill not found";
-      body =
-        "This bill is not available — please contact your operator.";
+      notice = "billNotFound";
     } else if (err.code === "PAYMENT_NOT_CONFIGURED") {
       status = 409;
-      title = "Online payment unavailable";
-      body =
-        "Online payment is not configured for this community. Please contact your operator.";
+      notice = "notConfigured";
     }
     // Every other PaymentError code falls through to the 502 default
     // ("upstream failed"). We deliberately do NOT surface 403 / 503 / 400
@@ -207,7 +236,7 @@ function handleError(
     durationMs: Date.now() - ctx.startedAt,
   });
 
-  return htmlResponse(status, title, body);
+  return paymentLinkResponse(status, ctx.acceptLanguage, { notice });
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -250,36 +279,6 @@ function truncateIp(ip: string): string {
     return `${head}::/48`;
   }
   return ip;
-}
-
-function htmlBody(title: string, message: string): string {
-  // Minimal, dependency-free HTML. No styles to keep payload small and
-  // avoid leaking design system into a public-facing error surface.
-  // Title/message are NEVER user-supplied — escaping omitted intentionally.
-  return [
-    "<!doctype html>",
-    '<html lang="en">',
-    "<head>",
-    '<meta charset="utf-8">',
-    `<title>${title}</title>`,
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "</head>",
-    "<body>",
-    `<h1>${title}</h1>`,
-    `<p>${message}</p>`,
-    "</body>",
-    "</html>",
-  ].join("\n");
-}
-
-function htmlResponse(status: number, title: string, message: string): Response {
-  return new NextResponse(htmlBody(title, message), {
-    status,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function logPayEvent(args: {

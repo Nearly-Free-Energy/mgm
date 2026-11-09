@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
 import { cookieOptionsFor } from "@/lib/config/cookie-options";
+import { notReleasedResponse } from "@/lib/public-html/not-released";
 
 // Only authentication pages are public in the first MGM release. Inherited
 // legacy payment links, customer APIs, and webhooks are blocked by the route
@@ -16,6 +17,9 @@ const PUBLIC_PATHS = [
   // Release 4 (payments): Pesapal IPN webhook is an unauthenticated
   // server-to-server callback with no MGM session.
   "/api/payments/ipn",
+  // The web app manifest (src/app/manifest.ts). Browsers fetch it without
+  // cookies, so a signed-in person's request arrives signed out too.
+  "/manifest.webmanifest",
 ];
 
 /**
@@ -40,7 +44,12 @@ export async function middleware(request: NextRequest) {
   // or direct API requests before their Cordis plugins are released —
   // see src/lib/mgm/released-routes.ts for the explicit allowlist.
   if (!isReleasedRoute(request.nextUrl.pathname)) {
-    return new NextResponse("Not available in this MGM release", { status: 404 });
+    // API callers keep the plain-text body they have always had. A person
+    // following a link gets a page with a way back to the start page.
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return new NextResponse("Not available in this MGM release", { status: 404 });
+    }
+    return notReleasedResponse(request.headers.get("accept-language"));
   }
   let supabaseResponse = NextResponse.next({
     request,
@@ -137,11 +146,17 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Existing management links target the old microgrid overview, which
-  // renders OpenEMS and billing widgets. Land on the household list instead.
+  // A microgrid's own URL opens its Operations day view, keeping the query
+  // (?date= picks the day). In-app links go there directly through
+  // microgridHref (src/lib/microgrid-links.ts); this keeps bookmarks and old
+  // links working, and microgrid-links.test.ts fails if the two disagree. If
+  // /microgrids/<id> should show a page of its own, delete this redirect and
+  // point microgridHref at that URL.
   if (/^\/microgrids\/[^/]+\/?$/.test(request.nextUrl.pathname)) {
-    const url = request.nextUrl.clone();
-    url.pathname = `${request.nextUrl.pathname.replace(/\/$/, "")}/setup/households`;
+    // A plain URL, not request.nextUrl.clone(): NextURL remembers a trailing
+    // slash on the original path and adds it back to the new one.
+    const url = new URL(request.nextUrl.href);
+    url.pathname = `${request.nextUrl.pathname.replace(/\/$/, "")}/operations`;
     return NextResponse.redirect(url);
   }
 

@@ -6,7 +6,7 @@
  *   - Tabs render through next/link, so a click is a client-side navigation
  *     instead of a full document reload.
  *   - Each tab links to the page a click lands on, not to a URL that
- *     redirects (/microgrids/<id> → household list, /setup → Edges).
+ *     redirects (/microgrids/<id> → Operations, /setup → Edges).
  *   - The highlighted tab for every sub-route, including Operations, whose
  *     ?date= query is not part of the pathname usePathname() returns.
  *   - A click announces the navigation to NavigationProgress, except on the
@@ -52,7 +52,7 @@ vi.mock("next/link", () => ({
 
 import { TabNav } from "../tab-nav";
 
-const TAB_NAMES = ["Dashboard", "Operations", "Billing", "Setup"];
+const TAB_NAMES = ["Operations", "Billing", "Setup"];
 
 let announced: string[];
 const onNavigationStart = (e: Event) =>
@@ -86,9 +86,6 @@ describe("TabNav", () => {
 
   it("links each tab to the page a click lands on, skipping redirects", () => {
     render(<TabNav microgridId="mg-1" />);
-    expect(tab("Dashboard").getAttribute("href")).toBe(
-      "/microgrids/mg-1/setup/households",
-    );
     expect(tab("Operations").getAttribute("href")).toBe(
       "/microgrids/mg-1/operations",
     );
@@ -97,8 +94,6 @@ describe("TabNav", () => {
   });
 
   it.each([
-    ["/microgrids/mg-1", "Dashboard"],
-    ["/microgrids/mg-1/", "Dashboard"],
     // usePathname() never includes the query, so /operations?date=… arrives
     // as the bare path and must still highlight Operations.
     ["/microgrids/mg-1/operations", "Operations"],
@@ -120,13 +115,18 @@ describe("TabNav", () => {
     }
   });
 
-  it("highlights nothing on a page outside the four tabs", () => {
-    mockPathname = "/microgrids/mg-1/tenants";
-    render(<TabNav microgridId="mg-1" />);
-    for (const name of TAB_NAMES) {
-      expect(tab(name).getAttribute("aria-selected")).toBe("false");
-    }
-  });
+  // The microgrid index never renders (middleware redirects it to
+  // Operations), and no tab claims it or a page outside the tabs.
+  it.each(["/microgrids/mg-1", "/microgrids/mg-1/", "/microgrids/mg-1/tenants"])(
+    "highlights nothing on %s",
+    (pathname) => {
+      mockPathname = pathname;
+      render(<TabNav microgridId="mg-1" />);
+      for (const name of TAB_NAMES) {
+        expect(tab(name).getAttribute("aria-selected")).toBe("false");
+      }
+    },
+  );
 
   it("announces the navigation to Operations from another tab", () => {
     mockPathname = "/microgrids/mg-1/billing";
@@ -164,5 +164,15 @@ describe("TabNav", () => {
     fireEvent.click(tab("Setup"), { shiftKey: true });
     fireEvent.click(tab("Setup"), { button: 1 });
     expect(announced).toEqual([]);
+  });
+
+  it("scrolls sideways on a narrow screen instead of widening the page", () => {
+    render(<TabNav microgridId="mg-1" />);
+    expect(screen.getByRole("tablist").className.split(/\s+/)).toContain("overflow-x-auto");
+    for (const t of screen.getAllByRole("tab")) {
+      expect(t.className.split(/\s+/)).toEqual(
+        expect.arrayContaining(["shrink-0", "whitespace-nowrap"])
+      );
+    }
   });
 });
