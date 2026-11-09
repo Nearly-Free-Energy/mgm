@@ -21,6 +21,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Input } from "@/components/ui/input";
 import { Banner } from "@/components/ui/banner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -31,7 +32,6 @@ import {
 import { SUPER_ADMIN, ORG_MANAGER } from "@/lib/roles";
 import type { UserRole } from "@/lib/types/domain";
 import type { OrgOption } from "./InviteUserDialog";
-import { cn } from "@/lib/utils";
 
 export interface EditUserDialogProps {
   open: boolean;
@@ -243,19 +243,13 @@ export function EditUserDialog(props: EditUserDialogProps) {
     <>
       <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-          <Dialog.Content
-            aria-modal
-            className={cn(
-              "fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-              "max-h-[90vh] overflow-y-auto rounded-md border border-border bg-card shadow-elev-3 outline-none"
-            )}
-          >
+          <DialogOverlay />
+          <DialogPanel className="w-[480px]">
             <div className="px-6 pt-5">
               <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
                 Edit user
               </Dialog.Title>
-              <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+              <Dialog.Description className="mt-1 text-dense text-muted-foreground">
                 Update profile and role. Contact admin to change email.
               </Dialog.Description>
             </div>
@@ -437,7 +431,7 @@ export function EditUserDialog(props: EditUserDialogProps) {
                     type="button"
                     onClick={handleResend}
                     disabled={resending}
-                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {resending ? "Sending…" : "Resend invitation"}
                   </button>
@@ -454,7 +448,7 @@ export function EditUserDialog(props: EditUserDialogProps) {
                   <button
                     type="button"
                     onClick={() => setConfirmOpen(true)}
-                    className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-[13px] font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-dense font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Revoke access
                   </button>
@@ -465,11 +459,11 @@ export function EditUserDialog(props: EditUserDialogProps) {
                 </div>
               )}
 
-              <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px] -mx-6 -mb-2">
+              <DialogFooter className="-mx-6 -mb-2 mt-4">
                 <Dialog.Close asChild>
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Cancel
                   </button>
@@ -477,13 +471,13 @@ export function EditUserDialog(props: EditUserDialogProps) {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {submitting ? "Saving..." : "Save"}
                 </button>
-              </div>
+              </DialogFooter>
             </form>
-          </Dialog.Content>
+          </DialogPanel>
         </Dialog.Portal>
       </Dialog.Root>
 

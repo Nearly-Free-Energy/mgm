@@ -15,7 +15,7 @@
 //     "way over" from "just over" — single-channel asymmetry the
 //     critique flagged.
 //   • Touch target ≥ 44px (was 38px in the artifact). Day label
-//     and kWh both render at 11px (was 9–10px). WCAG-AA-friendly.
+//     and kWh both render at 12px (text-caption). WCAG-AA-friendly.
 //   • Renders a button so the cell is focusable + clickable for
 //     drill-in (per-day detail). Supply `onSelect` to wire it.
 //   • Color-blind safe: tone is reinforced by the fill direction +
@@ -110,10 +110,10 @@ export function ConsumptionCell({
           }}
         />
       )}
-      <span className={cn("relative text-[11px] font-semibold", palette.fg)}>{day}</span>
+      <span className={cn("relative text-caption font-semibold", palette.fg)}>{day}</span>
       <span
         className={cn(
-          "relative font-mono text-[11px] font-medium tabular-nums",
+          "relative text-caption font-medium tabular-nums",
           palette.fg,
         )}
       >

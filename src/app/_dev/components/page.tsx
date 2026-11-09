@@ -89,7 +89,7 @@ export default function ComponentsDevPage() {
     <LocaleProvider locale="en-UG" currency="UGX">
       <div className="mx-auto max-w-4xl px-6 py-10 font-sans text-foreground">
         <h1 className="mb-2 text-2xl font-semibold tracking-tight">Design System — Components</h1>
-        <p className="mb-10 text-[13px] text-muted-foreground">
+        <p className="mb-10 text-dense text-muted-foreground">
           Visual spec for T2 primitives. Not linked from production nav.
         </p>
 
@@ -150,7 +150,7 @@ export default function ComponentsDevPage() {
             caption="April 2026 billing summary, 5 households"
             ariaLabel="Billing summary table"
           />
-          <p className="mt-2 text-[12px] text-muted-foreground">
+          <p className="mt-2 text-caption text-muted-foreground">
             Tab/Shift+Tab navigates column-major. C or Enter copies. Esc exits grid.
           </p>
         </Section>
@@ -159,7 +159,7 @@ export default function ComponentsDevPage() {
         <Section title="ClosePeriodDialog">
           <button
             onClick={() => setClosePeriodOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-primary bg-card px-3.5 text-[13px] font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 items-center rounded-md border border-primary bg-card px-3.5 text-dense font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Open Close Period Dialog
           </button>
@@ -182,7 +182,7 @@ export default function ComponentsDevPage() {
         <Section title="ConfirmDialog — destructive tone">
           <button
             onClick={() => setConfirmOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-destructive bg-card px-3.5 text-[13px] font-medium text-destructive hover:bg-destructive-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 items-center rounded-md border border-destructive bg-card px-3.5 text-dense font-medium text-destructive hover:bg-destructive-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Delete Period (opens dialog)
           </button>
@@ -201,7 +201,7 @@ export default function ComponentsDevPage() {
         <Section title="ConfirmDialog — destructive with type-to-confirm + blast-radius body">
           <button
             onClick={() => setConfirmTypedOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-[13px] font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-dense font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Delete Microgrid (opens dialog)
           </button>
@@ -234,7 +234,7 @@ export default function ComponentsDevPage() {
         <Section title="ConfirmDialog — neutral tone">
           <button
             onClick={() => setConfirmNeutralOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Confirm action (opens dialog)
           </button>
@@ -257,7 +257,7 @@ export default function ComponentsDevPage() {
             onSelect={(p) => setCurrentPeriodId(p.id)}
             onNewPeriod={() => alert("New period clicked")}
           />
-          <p className="mt-2 text-[12px] text-muted-foreground">
+          <p className="mt-2 text-caption text-muted-foreground">
             Selected: {SAMPLE_PERIODS.find((p) => p.id === currentPeriodId)?.startDate}
           </p>
         </Section>

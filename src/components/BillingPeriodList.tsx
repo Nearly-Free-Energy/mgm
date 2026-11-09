@@ -291,7 +291,7 @@ export function BillingPeriodList({
       )}
 
       {periods.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border">
@@ -338,7 +338,7 @@ export function BillingPeriodList({
                   <td className="py-3">
                     <Link
                       href={`/microgrids/${microgridId}/billing/${period.id}`}
-                      className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent"
+                      className="rounded-md px-2 py-1 text-sm text-primary hover:bg-accent pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                     >
                       View
                     </Link>

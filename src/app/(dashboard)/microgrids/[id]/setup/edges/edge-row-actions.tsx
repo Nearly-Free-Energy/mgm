@@ -82,7 +82,7 @@ export function EdgeRowActions({
             {/* Configure — always visible; opens EdgeFormModal in edit mode */}
             <DropdownMenu.Item
               onSelect={() => setConfigureOpen(true)}
-              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
             >
               Configure…
             </DropdownMenu.Item>
@@ -93,7 +93,7 @@ export function EdgeRowActions({
                 <DropdownMenu.Separator className="my-1 h-px bg-border" />
                 <DropdownMenu.Item
                   onSelect={triggerDelete}
-                  className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-destructive-fg outline-none data-[highlighted]:bg-destructive-muted"
+                  className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-destructive-fg outline-none data-[highlighted]:bg-destructive-muted"
                 >
                   Delete edge
                 </DropdownMenu.Item>
@@ -131,7 +131,7 @@ export function EdgeRowActions({
               <button
                 type="button"
                 onClick={() => setDeleteError(null)}
-                className="text-[13px] font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="text-dense font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Dismiss
               </button>

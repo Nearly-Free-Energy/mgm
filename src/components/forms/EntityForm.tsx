@@ -29,6 +29,7 @@ import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Input } from "@/components/ui/input";
 import { Banner } from "@/components/ui/banner";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -413,19 +414,13 @@ export function EntityForm(props: EntityFormProps) {
   return (
     <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[520px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "max-h-[90vh] overflow-y-auto rounded-md border border-border bg-card shadow-elev-3 outline-none"
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel className="w-[520px]">
           <div className="px-6 pt-5">
             <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
               {titleFor(props)}
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               {props.mode === "create"
                 ? "Fill in the fields below. City and country are required for organizations."
                 : "Only changed fields will be saved."}
@@ -700,12 +695,12 @@ export function EntityForm(props: EntityFormProps) {
             )}
           </form>
 
-          <div className="mt-4 flex items-center justify-end gap-2 border-t border-border bg-muted px-6 pb-[18px] pt-[14px]">
+          <DialogFooter className="mt-4 border-t border-border">
             <Dialog.Close asChild>
               <button
                 type="button"
                 disabled={submitting}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -714,7 +709,7 @@ export function EntityForm(props: EntityFormProps) {
               type="submit"
               onClick={handleSubmit}
               disabled={submitting}
-              className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             >
               {submitting
                 ? "Saving…"
@@ -722,8 +717,8 @@ export function EntityForm(props: EntityFormProps) {
                   ? "Create"
                   : "Save changes"}
             </button>
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

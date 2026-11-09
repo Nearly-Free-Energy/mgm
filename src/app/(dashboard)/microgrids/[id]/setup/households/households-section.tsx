@@ -57,7 +57,7 @@ export function HouseholdsSection({
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             Households
           </p>
           <h3 className="text-lg font-semibold text-foreground">

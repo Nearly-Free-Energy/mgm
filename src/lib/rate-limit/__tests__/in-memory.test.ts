@@ -70,21 +70,34 @@ describe("checkRateLimit", () => {
     expect(checkRateLimit("5.6.7.8", LIMIT, WINDOW_MS).ok).toBe(true);
   });
 
-  it("does NOT count rejected hits against the budget", () => {
+  it("does not lengthen the wait when refused requests keep arriving, as Try again sends them", () => {
     for (let i = 0; i < LIMIT; i++) {
       checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS);
     }
-    // Burn many rejections — none should add to the queue.
-    for (let i = 0; i < 5; i++) {
+    vi.advanceTimersByTime(30_000);
+    // As many refusals as the limit, so the next allowed request would be
+    // refused if any of them had been counted.
+    for (let i = 0; i < LIMIT; i++) {
+      expect(checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS)).toEqual({ ok: false, retryAfter: 30 });
+    }
+    vi.advanceTimersByTime(29_000);
+    expect(checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS)).toEqual({ ok: false, retryAfter: 1 });
+    // The wait the first refusal gave has passed, despite the refusals since.
+    vi.advanceTimersByTime(1_001);
+    expect(checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS)).toEqual({ ok: true });
+  });
+
+  it.each([
+    [500, 60],
+    [59_999, 1],
+    [WINDOW_MS, 1],
+  ])("gives a whole number of seconds, at least 1, when refusing %i ms after the first hit", (elapsedMs, seconds) => {
+    for (let i = 0; i < LIMIT; i++) {
       checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS);
     }
-    // Advance slightly past the window. Original 10 hits should age out;
-    // the budget resets to 10.
-    vi.advanceTimersByTime(WINDOW_MS + 1);
-    let allowed = 0;
-    for (let i = 0; i < LIMIT; i++) {
-      if (checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS).ok) allowed++;
-    }
-    expect(allowed).toBe(LIMIT);
+    vi.advanceTimersByTime(elapsedMs);
+    const r = checkRateLimit("1.2.3.4", LIMIT, WINDOW_MS);
+    expect(r).toEqual({ ok: false, retryAfter: seconds });
+    expect(Number.isInteger(r.retryAfter)).toBe(true);
   });
 });

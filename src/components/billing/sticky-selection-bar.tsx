@@ -45,7 +45,7 @@ export function StickySelectionBar(props: StickySelectionBarProps) {
         "flex items-center justify-between gap-3 rounded-md border border-border bg-card p-3 shadow-md",
       )}
     >
-      <span className="text-[13px] font-medium text-foreground">
+      <span className="text-dense font-medium text-foreground">
         {selectedCount} selected
       </span>
       <div className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export function StickySelectionBar(props: StickySelectionBarProps) {
           disabled={disabled}
           title={disabled ? disabledTooltip : undefined}
           className={cn(
-            "inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             "disabled:cursor-not-allowed disabled:opacity-60",
           )}
         >
@@ -64,7 +64,7 @@ export function StickySelectionBar(props: StickySelectionBarProps) {
         <button
           type="button"
           onClick={onClear}
-          className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Clear selection
         </button>

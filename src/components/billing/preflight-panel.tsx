@@ -524,7 +524,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
           onToggle={() => setReadyExpanded((e) => !e)}
         >
           {edgeReady.length === 0 ? (
-            <p className="px-2 py-1 text-[12px] text-muted-foreground">
+            <p className="px-2 py-1 text-caption text-muted-foreground">
               No edge-ready households.
             </p>
           ) : (
@@ -532,7 +532,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
               {edgeReady.map((h) => (
                 <li
                   key={h.id}
-                  className="flex items-center gap-2 text-[13px]"
+                  className="flex items-center gap-2 text-dense"
                 >
                   <span className="font-medium text-foreground">
                     {h.display_name}
@@ -547,7 +547,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
           )}
         </Disclosure>
         {allowUsageOnlyReadings && !retryHouseholdIds && (
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Bills use OpenEMS consumption for this period. If an absolute meter register is unavailable, the bill leaves its starting and ending readings blank. Manual readings are requested only when period data is missing.
           </p>
         )}
@@ -558,7 +558,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
             this from becoming another optional field. */}
         {needsSeed.length > 0 && (
           <section data-testid="preflight-needs-seed-section">
-            <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
               Needs a starting reading ({needsSeed.length})
             </h4>
             {/* One string, no branch. The CAUSE is a per-household fact and
@@ -567,7 +567,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                 billed before they were connected" is false for that row while
                 true for its neighbour. Stating an unestablished cause is
                 #335's defect, and this section would have reproduced it. */}
-            <p className="mb-2 text-[12px] text-muted-foreground">
+            <p className="mb-2 text-caption text-muted-foreground">
               MGM has no starting reading for these meters, so it cannot work
               out what to print as the previous reading on the invoice. Enter
               what each meter reads, and the day you read it.
@@ -585,12 +585,12 @@ export function PreflightPanel(props: PreflightPanelProps) {
                     data-testid={`preflight-seed-row-${h.id}`}
                     className="rounded-md border border-border p-2"
                   >
-                    <div className="text-[12px] font-medium text-foreground">
+                    <div className="text-caption font-medium text-foreground">
                       {h.display_name}
                     </div>
                     <label
                       htmlFor={`seed-dial-${h.id}`}
-                      className="mt-1 block text-[11px] text-muted-foreground"
+                      className="mt-1 block text-caption text-muted-foreground"
                     >
                       Reading on the meter (kWh)
                     </label>
@@ -599,7 +599,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                       data-testid={`preflight-seed-dial-${h.id}`}
                       type="number"
                       inputMode="decimal"
-                      className="w-40 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
+                      className="w-40 rounded-md border border-border bg-card px-2 py-1 text-xs tabular-nums"
                       value={f.dialReading}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -618,7 +618,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                         one tap rather than being silently wrong. */}
                     <label
                       htmlFor={`seed-read-date-${h.id}`}
-                      className="mt-2 block text-[11px] text-muted-foreground"
+                      className="mt-2 block text-caption text-muted-foreground"
                     >
                       Day this reading was taken
                     </label>
@@ -626,7 +626,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                       id={`seed-read-date-${h.id}`}
                       data-testid={`preflight-seed-read-date-${h.id}`}
                       type="date"
-                      className="w-40 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs"
+                      className="w-40 rounded-md border border-border bg-card px-2 py-1 text-xs tabular-nums"
                       value={readDate}
                       min={periodStartDate}
                       max={todayLocalDate()}
@@ -647,7 +647,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                     />
                     {dateProblem && (
                       <p
-                        className="mt-1 text-[11px] text-destructive-fg"
+                        className="mt-1 text-caption text-destructive-fg"
                         data-testid={`preflight-seed-date-problem-${h.id}`}
                       >
                         {dateProblem}
@@ -661,7 +661,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                         same situation from the operator's side and take the
                         same sentence. */}
                     <p
-                      className="mt-1 text-[11px] text-muted-foreground"
+                      className="mt-1 text-caption text-muted-foreground"
                       data-testid={`preflight-seed-cause-${h.id}`}
                     >
                       {hint != null
@@ -673,7 +673,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                         field: the operator types one number and a different
                         one is stored, so a wrong result has to be traceable to
                         which input was wrong. */}
-                    <div className="mt-2 text-[11px] text-muted-foreground">
+                    <div className="mt-2 text-caption text-muted-foreground">
                       {f.elapsedState === "loading" && <span>Fetching usage since period start…</span>}
                       {f.elapsedState === "error" && (
                         <span className="text-destructive-fg">
@@ -714,11 +714,11 @@ export function PreflightPanel(props: PreflightPanelProps) {
 
         {/* Section 2: Needs manual entry — expanded by default */}
         <section data-testid="preflight-needs-manual-section">
-          <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             Needs manual entry ({needsManual.length})
           </h4>
           {needsManual.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               All households have an edge configured.
             </p>
           ) : (
@@ -744,7 +744,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
             expanded={keptExpanded}
             onToggle={() => setKeptExpanded((e) => !e)}
           >
-            <p className="px-2 pt-1 text-[12px] text-muted-foreground">
+            <p className="px-2 pt-1 text-caption text-muted-foreground">
               These are not read from OpenEMS. To use edge data for one, choose
               “Switch back to edge data” on its row.
             </p>
@@ -753,7 +753,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                 <li
                   key={h.id}
                   data-testid={`preflight-kept-manual-row-${h.id}`}
-                  className="flex items-center gap-2 text-[13px]"
+                  className="flex items-center gap-2 text-dense"
                 >
                   <span className="font-medium text-foreground">
                     {h.display_name}
@@ -776,7 +776,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
           onToggle={() => setOverrideExpanded((e) => !e)}
         >
           {edgeReady.length === 0 ? (
-            <p className="px-2 py-1 text-[12px] text-muted-foreground">
+            <p className="px-2 py-1 text-caption text-muted-foreground">
               No edge-connected households to override.
             </p>
           ) : (
@@ -788,7 +788,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                     key={h.id}
                     className="rounded-md border border-border p-2"
                   >
-                    <label className="flex items-center gap-2 text-[13px]">
+                    <label className="flex items-center gap-2 text-dense">
                       <input
                         type="checkbox"
                         className="size-4 rounded border-border accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -829,7 +829,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Cancel
         </button>
@@ -840,7 +840,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
           disabled={!allValid || !allSeedsValid || submitting}
           title={!allValid ? "Fill in all required readings to enable Generate." : undefined}
           className={cn(
-            "inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             "disabled:cursor-not-allowed disabled:opacity-60",
           )}
         >
@@ -925,7 +925,7 @@ function ResultSection(props: {
             type="button"
             data-testid="preflight-manual-fallback"
             onClick={onManualFallback}
-            className="inline-flex h-8 items-center rounded-md border border-border px-3.5 text-[13px] font-medium text-foreground hover:bg-muted"
+            className="inline-flex h-8 items-center rounded-md border border-border px-3.5 text-dense font-medium text-foreground hover:bg-muted"
           >
             Enter manual readings for unresolved households
           </button>
@@ -934,7 +934,7 @@ function ResultSection(props: {
           type="button"
           data-testid="preflight-result-close"
           onClick={onClose}
-          className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Close
         </button>
@@ -960,7 +960,7 @@ function Disclosure(props: {
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-[13px] text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-dense text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span>{summary}</span>
         <span aria-hidden="true" className="text-muted-foreground">
@@ -1001,7 +1001,7 @@ function ManualRow(props: {
       className="space-y-2"
     >
       {showHeader && (
-        <p className="text-[13px] font-medium text-foreground">
+        <p className="text-dense font-medium text-foreground">
           {household.display_name}
         </p>
       )}
@@ -1009,7 +1009,7 @@ function ManualRow(props: {
         <div>
           <label
             htmlFor={startId}
-            className="mb-1 block text-[11px] font-medium text-muted-foreground"
+            className="mb-1 block text-caption font-medium text-muted-foreground"
           >
             Start (kWh)
           </label>
@@ -1022,13 +1022,13 @@ function ManualRow(props: {
             value={row.startKwh}
             onChange={(e) => onChange({ startKwh: e.target.value })}
             aria-label={`Start kWh for ${household.display_name}`}
-            className="block w-full rounded-md border border-border bg-card px-2 py-1 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block w-full rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
         <div>
           <label
             htmlFor={endId}
-            className="mb-1 block text-[11px] font-medium text-muted-foreground"
+            className="mb-1 block text-caption font-medium text-muted-foreground"
           >
             End (kWh)
           </label>
@@ -1042,17 +1042,17 @@ function ManualRow(props: {
             onChange={(e) => onChange({ endKwh: e.target.value })}
             aria-label={`End kWh for ${household.display_name}`}
             aria-invalid={orderError !== null}
-            className="block w-full rounded-md border border-border bg-card px-2 py-1 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="block w-full rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
       </div>
       {orderError && (
-        <p className="text-[11px] text-destructive-fg">{orderError}</p>
+        <p className="text-caption text-destructive-fg">{orderError}</p>
       )}
       <div>
         <label
           htmlFor={reasonId}
-          className="mb-1 block text-[11px] font-medium text-muted-foreground"
+          className="mb-1 block text-caption font-medium text-muted-foreground"
         >
           Reason{" "}
           <span className="font-normal text-muted-foreground">(optional)</span>
@@ -1064,7 +1064,7 @@ function ManualRow(props: {
           maxLength={500}
           rows={1}
           aria-label={`Manual entry reason for ${household.display_name} (optional, max 500 characters)`}
-          className="block w-full resize-none rounded-md border border-border bg-card px-2 py-1 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="block w-full resize-none rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
     </Wrapper>

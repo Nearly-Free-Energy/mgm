@@ -70,26 +70,26 @@ export default async function DashboardPage() {
         {isSuperAdmin ? (
           <Link
             href="/organizations"
-            className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted"
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
           >
             + Organization
           </Link>
         ) : null}
         <Link
           href="/communities"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
         >
           Communities
         </Link>
         <Link
           href="/microgrids"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
         >
           Microgrids
         </Link>
         <Link
           href="/settings/plugins"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
         >
           Plugin settings
         </Link>

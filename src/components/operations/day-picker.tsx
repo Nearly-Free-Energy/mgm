@@ -6,8 +6,11 @@ import { useLocale } from "@/components/format/locale-context";
 import { addDaysToDateKey } from "@/lib/timezone/day-key";
 import { cn } from "@/lib/utils";
 
+// On a touch screen each link and button here is at least 44px square, so
+// the arrow links are as wide as they are tall. inline-flex, because
+// min-height and min-width do nothing to an inline link.
 const linkClass =
-  "rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground hover:bg-muted";
+  "rounded-md border border-border bg-card px-2.5 py-1.5 text-sm text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:items-center pointer-coarse:justify-center";
 
 /**
  * Day switcher for the operations view. `date` and `today` are calendar days

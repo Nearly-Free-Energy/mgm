@@ -3,7 +3,7 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Banner } from "@/components/ui/banner";
-import { cn } from "@/lib/utils";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 
 export interface TokenRevealModalProps {
   open: boolean;
@@ -59,25 +59,18 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
   return (
     <Dialog.Root open={props.open} onOpenChange={props.onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          role="alertdialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-elev-3 outline-none"
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel role="alertdialog" className="w-[560px]">
           <div aria-hidden="true" className="h-[6px] bg-warning" />
 
           <div className="px-6 pt-5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-warning-fg">
+            <span className="text-caption font-semibold uppercase tracking-wide text-warning-fg">
               Shown once
             </span>
             <Dialog.Title className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
               Save this token now
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense leading-relaxed text-muted-foreground">
               MGM cannot show this plaintext again. Paste it into your
               customerapp configuration before closing this dialog.
             </Dialog.Description>
@@ -94,7 +87,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
             <div className="rounded-md border border-border bg-muted p-3">
               <code
                 aria-label="Token plaintext — copy now"
-                className="block break-all font-mono text-[13px] text-foreground"
+                className="block break-all font-mono text-dense text-foreground"
               >
                 {props.plaintext ?? ""}
               </code>
@@ -104,7 +97,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
               <button
                 type="button"
                 onClick={handleCopy}
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {copied ? "Copied!" : "Copy to clipboard"}
               </button>
@@ -114,17 +107,17 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+          <DialogFooter className="mt-4">
             <Dialog.Close asChild>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Done — token saved
               </button>
             </Dialog.Close>
-          </div>
-        </Dialog.Content>
+          </DialogFooter>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

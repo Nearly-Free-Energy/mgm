@@ -9,6 +9,8 @@
 //   (f) locked=true: Esc does NOT fire onOpenChange.
 //   (g) Body region carries aria-live="polite".
 //   (h) onOpenAutoFocus override honored.
+//   (i) Under 600px the list caps lower and the footer stays pinned.
+//   (j) On a short window the list shrinks inside the panel's height cap.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
@@ -165,5 +167,60 @@ describe("SelectionDialog", () => {
     await waitFor(() => {
       expect(handler).toHaveBeenCalled();
     });
+  });
+
+  it("(i) the list is shorter on a phone, so the title and the buttons fit the sheet", () => {
+    render(
+      <SelectionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        title="Add edges"
+        footer={<button>Cancel</button>}
+      >
+        <div data-testid="inner">Body</div>
+      </SelectionDialog>,
+    );
+
+    const body = screen.getByTestId("inner").closest("[aria-live]");
+    const classes = (body?.getAttribute("class") ?? "").split(/\s+/);
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        "overflow-y-auto",
+        "max-h-[70vh]",
+        // vh for browsers without dvh; dvh only where it is supported.
+        "max-[600px]:max-h-[55vh]",
+        "max-[600px]:supports-[height:100dvh]:max-h-[55dvh]",
+      ]),
+    );
+    expect(classes).not.toContain("max-[600px]:max-h-[55dvh]");
+    // The Cancel button sits in the frame's pinned footer row.
+    expect(screen.getByRole("button", { name: "Cancel" }).closest(".sticky")).not.toBeNull();
+  });
+
+  it("(j) on a short window only the list gives up height, so it is the one thing that scrolls", () => {
+    render(
+      <SelectionDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        title="Add edges"
+        footer={<button>Cancel</button>}
+      >
+        <div data-testid="inner">Body</div>
+      </SelectionDialog>,
+    );
+
+    const classesOf = (el: Element | null) => (el?.getAttribute("class") ?? "").split(/\s+/);
+    const panel = screen.getByRole("dialog");
+    const body = screen.getByTestId("inner").closest("[aria-live]");
+    const header = screen.getByText("Add edges").parentElement;
+    const footer = screen.getByRole("button", { name: "Cancel" }).closest(".sticky");
+
+    // A flex column inside the frame's height cap: the list shrinks to the
+    // room the title and the buttons leave, down to its 280px floor.
+    expect(classesOf(panel)).toEqual(expect.arrayContaining(["flex", "flex-col"]));
+    expect(classesOf(body)).toContain("min-h-[280px]");
+    expect(classesOf(body)).not.toContain("shrink-0");
+    expect(classesOf(header)).toContain("shrink-0");
+    expect(classesOf(footer)).toContain("shrink-0");
   });
 });

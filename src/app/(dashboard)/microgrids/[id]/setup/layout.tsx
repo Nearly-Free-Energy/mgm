@@ -39,7 +39,7 @@ export default async function SetupLayout({
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           Setup
         </p>
         <h2 className="text-xl font-semibold text-foreground">Configure this microgrid</h2>

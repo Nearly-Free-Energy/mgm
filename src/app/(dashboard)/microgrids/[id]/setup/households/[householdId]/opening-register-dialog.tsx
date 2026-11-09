@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Banner } from "@/components/ui/banner";
+import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { zonedDateTimeToUtcIso } from "@/lib/timezone/wall-clock";
 
 /**
@@ -93,15 +94,12 @@ export function OpeningRegisterDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          aria-modal
-          className="fixed left-1/2 top-1/2 z-50 w-[440px] max-w-[94%] -translate-x-1/2 -translate-y-1/2 rounded-md border border-border bg-card p-6 shadow-elev-3 outline-none"
-        >
+        <DialogOverlay />
+        <DialogPanel className="w-[440px] p-6">
           <Dialog.Title className="text-lg font-semibold text-foreground">
             Record opening register
           </Dialog.Title>
-          <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+          <Dialog.Description className="mt-1 text-dense text-muted-foreground">
             {deviceName} — the meter&apos;s register at the start of its first
             billable period. Times are interpreted in {timezone}, the
             microgrid&apos;s timezone. This becomes the baseline every later
@@ -168,7 +166,7 @@ export function OpeningRegisterDialog({
               </button>
             </div>
           </form>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );
