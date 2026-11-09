@@ -19,6 +19,7 @@ import "server-only";
 import { z } from "zod";
 import { CORE_ENTITY_KINDS } from "@/lib/plugins/bundled";
 import type { Json, ViewKind, ViewModel } from "../../contract";
+import { CARET_RANGE_RE } from "../shared/contract-range";
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 
@@ -76,9 +77,9 @@ export const jsonSchema: z.ZodType<Json> = z.lazy(() =>
 
 const isoDateTime = z.iso.datetime({ offset: true });
 const toneSchema = z.enum(["neutral", "info", "success", "warning", "danger", "accent"]);
-const confirmSchema = z.enum(["none", "confirm", "typed", "ceremony"]);
-const navGroupSchema = z.enum(["operate", "money", "configure", "system"]);
-const iconSchema = z.enum([
+export const confirmSchema = z.enum(["none", "confirm", "typed", "ceremony"]);
+export const navGroupSchema = z.enum(["operate", "money", "configure", "system"]);
+export const iconSchema = z.enum([
   "today", "live", "sites", "communities", "households", "devices", "readings",
   "billing", "payments", "tariff", "data-source", "branding", "accounts", "plugins",
   "users", "profile", "organizations", "assistant", "message", "alert", "download",
@@ -86,7 +87,7 @@ const iconSchema = z.enum([
 ]);
 const coreEntityKindSchema = z.enum(CORE_ENTITY_KINDS);
 /** A core kind, or a plugin's own kind written like an id ("sms-reminders.send"). */
-const entityKindSchema = z.union([coreEntityKindSchema, idSchema]);
+export const entityKindSchema = z.union([coreEntityKindSchema, idSchema]);
 
 export const entityRefSchema = z.strictObject({
   kind: entityKindSchema,
@@ -307,7 +308,7 @@ export const bodySchemas = {
   }),
 };
 
-const extSchemaName = z
+export const extSchemaName = z
   .templateLiteral([z.string(), ".", z.string(), "@", z.number()])
   .refine((s) => {
     const at = s.lastIndexOf("@");
@@ -463,7 +464,7 @@ export const guiMetaSchema = z.strictObject({
   title: z.string().min(1),
   version: z.string().regex(SEMVER_RE),
   /** A caret range over MAJOR.MINOR or MAJOR.MINOR.PATCH: "^0.1", "^0.1.2", "^1.2". */
-  contract: z.string().regex(/^\^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)){1,2}$/),
+  contract: z.string().regex(CARET_RANGE_RE),
   styles: z
     .string()
     .regex(/^\.\/[\w./-]+\.css$/)
