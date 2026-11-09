@@ -9,6 +9,7 @@
  * that registers a contribution must check the rules again at run time.
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { Context } from "cordis";
 import { z } from "zod";
 import {
   GUI_CONTRACT,
@@ -25,12 +26,14 @@ import type {
   Contribution,
   Fmt,
   LoadedModel,
+  MgmSurface,
   NavDef,
   Prepare,
   ProposableAction,
   ViewDef,
 } from "../surface";
 import type { GateTarget } from "@/lib/runtime/gate";
+import type {} from "@/lib/runtime/services";
 import { BILLING_SURFACE } from "./fixtures/billing-surface";
 
 /** Checks `value` against T where the call is written. */
@@ -197,6 +200,10 @@ describe("GUI contract types", () => {
 
   it("names the plugin gate's target kinds as its core entity kinds", () => {
     expectTypeOf<GateTarget["kind"]>().toEqualTypeOf<CoreEntityKind>();
+  });
+
+  it("gives plugins the surface's write side only", () => {
+    expectTypeOf<Context["mgmSurface"]>().toEqualTypeOf<MgmSurface>();
   });
 
   it("records a version for every view kind, none newer than the contract", () => {

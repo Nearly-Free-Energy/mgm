@@ -54,16 +54,18 @@ const PRIVILEGED_MODULES: Record<string, string> = {
 };
 
 /**
- * Root registries whose factories read stored credentials. Code reaches one
- * by name (ctx.meteringProviders, an inject list, getMgmRuntime()
- * .meteringProviders), so naming it is privileged. paymentProviderRegistry is
- * not here: its factories are handed a secret the payments repository has
- * already read, and read none themselves. If a payment factory starts reading
- * credentials, add it.
+ * Root registries through which code reaches something privileged by a call
+ * the import graph cannot follow. Code reaches one by name
+ * (ctx.meteringProviders, an inject list, getMgmRuntime().meteringProviders),
+ * so naming it is privileged. paymentProviderRegistry is not here: its
+ * factories are handed a secret the payments repository has already read, and
+ * read none themselves. If a payment factory starts reading credentials, add it.
  */
 const PRIVILEGED_REGISTRIES: Record<string, string> = {
   meteringProviders:
     "Builds metering providers; the OpenEMS provider calls getMicrogridEmsConfig when it reads.",
+  mgmSurface:
+    "Holds contributed loaders, signals, search and prepare functions, which compose capabilities that can build credentialed providers; a call made through it cannot be followed by import, so every caller settles the session first.",
 };
 
 type Module = {
@@ -117,12 +119,12 @@ const MODULES: Record<string, Module> = {
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
     reason:
-      "Creates the registry and hands it out on getMgmRuntime(); every reader names meteringProviders and is tracked.",
+      "Creates the registries and hands them out on getMgmRuntime(); every reader names meteringProviders or mgmSurface and is tracked.",
   },
   "src/lib/runtime/services.ts": {
     privilegedExports: [],
     reason:
-      "Declares the registry's class and the service types; an instance builds nothing until a provider plugin registers into it.",
+      "Declares the metering registry's class and the service types, including mgmSurface's; an instance builds nothing until a plugin registers into it.",
   },
 };
 

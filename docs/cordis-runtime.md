@@ -13,6 +13,8 @@ loads the platform plugins into it:
 |---|---|---|
 | `mgm-catalog` | `mgmCatalog` — the bundled plugin catalog (`src/lib/plugins/bundled.ts`) | — |
 | `mgm-gate` | `mgmGate` — organization resolution + per-org plugin enablement | `mgmCatalog` |
+| `mgm-surface` | `mgmSurface` — capability GUI contributions and installed GUI metadata, checked when they register (`src/lib/gui/host/server/surface-registry.ts`) | `mgmCatalog` |
+| `<gui name>` | installs a compiled-in GUI's metadata (`src/gui/meta.ts`, `guiInstallPlugin`) | `mgmSurface` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
 | `payment-providers` | `paymentProviders` — registry of payment provider factories | — |
@@ -90,6 +92,40 @@ trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
 id through `checkGate` on the caller's RLS-scoped client, so a period the
 caller cannot see yields no organization and a 404. A new caller must do the
 same.
+
+## GUI surface
+
+`mgmSurface` holds what capabilities contribute to GUIs (views, actions,
+navigation, signals, status, search, entity kinds) and the metadata of the
+GUIs compiled into the build. It is a root service, not a request one:
+
+- Contributions are code, identical for every organization and request, so
+  they are checked once per process, like the catalog. A platform plugin
+  registers each one with `ctx.effect(() => ctx.mgmSurface.contribute(…))`,
+  so unloading it removes the contribution.
+- It holds definitions and functions, never request data. Each loader call is
+  handed its own request (the caller's RLS client and checked user) as an
+  argument.
+- Whether a plugin is enabled for an organization is data. Code that serves
+  a request must filter contributions by the gate's plugin state for that
+  organization; it does not unload them.
+- A request scope isolates every `REQUEST_SERVICES` name, and a scope that
+  isolated `mgmSurface` would see no contributions. So it stays out of that
+  list, and `runtime.test.ts` checks that a request scope reads the root's
+  registry.
+
+`contribute()` and `install()` throw on any broken rule, naming the plugin or
+GUI and the path. The platform plugin then fails and the runtime does not
+start, payments included. That is acceptable only because both are
+deterministic: they read the contribution, the GUI metadata and the catalog,
+never the environment, network or database. `runtime.test.ts` builds the same
+root in the `Test` gate, so it refuses exactly what production would.
+
+Plugins see `ctx.mgmSurface` typed as `MgmSurface`, the write side. The host
+reads definitions through `getMgmRuntime().mgmSurface.snapshot()`. The
+registry is privileged in `service-role-session-check.test.ts`: the functions
+it holds can compose capabilities, and a call made through it cannot be
+followed by import, so every file that names it is tracked.
 
 ## The gate
 

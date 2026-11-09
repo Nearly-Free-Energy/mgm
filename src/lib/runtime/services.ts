@@ -11,6 +11,7 @@ import "server-only";
 import type { Context } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BundledPlugin, MgmPluginName } from "@/lib/plugins/bundled";
+import type { MgmSurface } from "@/lib/gui/surface";
 import type { MeteringProvider } from "@/lib/metering/types";
 import { MeteringError } from "@/lib/metering/errors";
 import type { MeteringProviderName } from "@/lib/metering/registry";
@@ -123,6 +124,8 @@ declare module "cordis" {
   interface Context {
     mgmCatalog: MgmCatalog;
     mgmGate: MgmGate;
+    /** The write side only; the host reads through MgmRuntime.mgmSurface. */
+    mgmSurface: MgmSurface;
     meteringProviders: MeteringProviderFactories;
     paymentProviderRegistry: PaymentProviderRegistry;
     mgmRequest: MgmRequest;

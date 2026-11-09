@@ -1,8 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as cordis from "cordis";
-import type { Context, Fiber, Plugin } from "cordis";
+import { Context, type Fiber, type Plugin } from "cordis";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
-import { FIBER_ACTIVE, getMgmRuntime, resetMgmRuntimeForTests } from "../root";
+import type { GuiMeta } from "@/lib/gui/contract";
+import type { Contribution } from "@/lib/gui/surface";
+import type { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
+import { BILLING_SURFACE } from "@/lib/gui/__tests__/fixtures/billing-surface";
+import {
+  CatalogPlugin,
+  FIBER_ACTIVE,
+  SurfacePlugin,
+  getMgmRuntime,
+  guiInstallPlugin,
+  loadPlatformPlugins,
+  resetMgmRuntimeForTests,
+} from "../root";
 import { openOrganizationScope, REQUEST_SERVICES } from "../scope";
 import { PaymentProviderRegistry, type MgmRequest } from "../services";
 import "../services";
@@ -60,6 +72,7 @@ describe("MGM root runtime", () => {
     expect(runtime.fibers.map((fiber) => fiber.name)).toEqual([
       "mgm-catalog",
       "mgm-gate",
+      "mgm-surface",
       "metering-providers",
       "openems-metering",
       "payment-providers",
@@ -68,6 +81,9 @@ describe("MGM root runtime", () => {
     expect(runtime.catalog.plugins).toBe(MGM_BUNDLED_PLUGINS);
     expect(runtime.meteringProviders.names()).toEqual(["openems"]);
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
+    // Each contribution or compiled-in GUI added later shows up here.
+    expect(runtime.mgmSurface.snapshot().views).toEqual([]);
+    expect(runtime.mgmSurface.snapshot().guis).toEqual([]);
   });
 
   it("binds metering factories to the caller's client", async () => {
@@ -92,6 +108,71 @@ describe("MGM root runtime", () => {
     const second = await getMgmRuntime();
     expect(second).not.toBe(first);
     expect(second.root).not.toBe(first.root);
+  });
+});
+
+const META: GuiMeta = {
+  name: "probe",
+  title: "Probe",
+  version: "0.1.0",
+  contract: "^0.1",
+  styles: "./styles.css",
+  dependencies: [],
+};
+
+describe("the GUI surface on the root", () => {
+  it("is the root's service in a request scope, never a request service", async () => {
+    const runtime = await getMgmRuntime();
+    const scope = await openOrganizationScope(request(ORG_A));
+    try {
+      expect(scope.ctx.get("mgmSurface")).toBe(runtime.root.get("mgmSurface"));
+      expect(scope.ctx.get("mgmSurface")).toBe(runtime.mgmSurface);
+      expect(REQUEST_SERVICES).not.toContain("mgmSurface");
+    } finally {
+      await scope.dispose();
+    }
+  });
+
+  it("stops a root whose contribution is refused, naming the plugin and the path", async () => {
+    const unprepared: Record<string, unknown> = { ...BILLING_SURFACE.actions?.[2] };
+    delete unprepared.prepare;
+    const BrokenSurface = {
+      name: "billing-surface",
+      inject: ["mgmSurface"],
+      apply(ctx: Context) {
+        ctx.effect(() => ctx.mgmSurface.contribute({ plugin: "billing", actions: [unprepared] } as Contribution));
+      },
+    } satisfies Plugin.Object<void>;
+    const root = new Context();
+    await expect(loadPlatformPlugins(root, [CatalogPlugin, SurfacePlugin, BrokenSurface])).rejects.toThrow(
+      /"billing"[\s\S]*actions\[0\]\.prepare/
+    );
+    // The plugins loaded before it were unloaded.
+    expect(root.get("mgmSurface")).toBeUndefined();
+    expect(root.get("mgmCatalog")).toBeUndefined();
+  });
+
+  it("installs a compiled-in GUI from its plugin and removes it on unload", async () => {
+    const root = new Context();
+    const [, surface, probe] = await loadPlatformPlugins(root, [
+      CatalogPlugin,
+      SurfacePlugin,
+      guiInstallPlugin("probe", META),
+    ]);
+    const registry = root.get("mgmSurface") as SurfaceRegistry;
+    expect(registry.gui("probe")).toEqual(META);
+    await probe.dispose();
+    expect(registry.gui("probe")).toBeUndefined();
+    await surface.dispose();
+  });
+
+  it("refuses a GUI whose range excludes the contract, or whose key differs from its name", async () => {
+    await expect(
+      loadPlatformPlugins(new Context(), [CatalogPlugin, SurfacePlugin, guiInstallPlugin("probe", { ...META, contract: "^0.2" })])
+    ).rejects.toThrow('GUI "probe" supports GUI contract ^0.2; this MGM provides 0.1.0');
+    await expect(
+      loadPlatformPlugins(new Context(), [CatalogPlugin, SurfacePlugin, guiInstallPlugin("other", META)])
+    ).rejects.toThrow('GUI "other" names itself "probe" in its metadata');
   });
 });
 
