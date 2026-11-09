@@ -6,37 +6,32 @@ import {
   announceNavigationStart,
   isSameTabClick,
 } from "@/components/ui/navigation-progress";
-import { microgridHref, microgridSetupHref } from "@/lib/microgrid-links";
+import { microgridSetupHref } from "@/lib/microgrid-links";
 
 // Microgrid tab nav (D2 / #53).
 //
-// Tab order (Dashboard | Operations | Billing | Setup) mirrors the operator
-// workflow:
-//   1. Dashboard  — landing / daily orientation.
-//   2. Operations — one day of the site: battery, power cuts, dark time.
-//   3. Billing    — the monthly close job (primary working surface).
-//   4. Setup      — configure-once (edges, households, rate schedule).
+// Tab order (Operations | Billing | Setup) mirrors the operator workflow:
+//   1. Operations — one day of the site: battery, power cuts, dark time.
+//      First because a microgrid opens here (microgridHref in
+//      src/lib/microgrid-links.ts); if microgridHref points elsewhere,
+//      revisit the order.
+//   2. Billing    — the monthly close job (primary working surface).
+//   3. Setup      — configure-once (edges, households, rate schedule).
 //
 // Tabs are next/link <Link>s so a click is a client-side navigation: the
 // dashboard layout and this microgrid header stay mounted, and
 // [id]/loading.tsx shows while the new tab renders.
 //
-// Each tab links to the page a click lands on (src/lib/microgrid-links.ts),
-// not to a URL that redirects:
-//   - Dashboard links to the household list, where middleware sends the
-//     microgrid index. It therefore never highlights while that redirect
-//     exists; if the index renders again, link Dashboard back to `base`.
-//   - Setup links to its first sub-tab rather than the /setup index.
+// Each tab links to the page a click lands on, not to a URL that redirects:
+// Setup links to its first sub-tab rather than the /setup index. Operations
+// keeps its own literal rather than microgridHref, so the tab named
+// Operations stays on that page if where a microgrid opens changes.
 //
-// Active-tab match:
-//   - Dashboard is the microgrid index (/microgrids/[id]) with no child segment.
-//     A raw `startsWith` on the index href would also match /billing and /setup.
-//     We detect "on the index" by requiring the URL to end at the microgrid id.
-//   - Operations, Billing and Setup use `startsWith` so their nested routes
-//     (and Operations' ?date= days) stay highlighted.
+// Active-tab match: every tab uses `startsWith` on its segment, so nested
+// routes (and Operations' ?date= days) stay highlighted. The microgrid index
+// highlights nothing; middleware redirects it to Operations.
 
 const tabs = [
-  { label: "Dashboard",  segment: "",           href: microgridHref },
   { label: "Operations", segment: "operations", href: (id: string) => `/microgrids/${id}/operations` },
   { label: "Billing",    segment: "billing",    href: (id: string) => `/microgrids/${id}/billing` },
   { label: "Setup",      segment: "setup",      href: microgridSetupHref },
@@ -54,9 +49,7 @@ export function TabNav({ microgridId }: { microgridId: string }) {
     >
       {tabs.map((tab) => {
         const href = tab.href(microgridId);
-        const isActive = tab.segment
-          ? pathname.startsWith(`${base}/${tab.segment}`)
-          : pathname === base || pathname === `${base}/`;
+        const isActive = pathname.startsWith(`${base}/${tab.segment}`);
 
         return (
           <Link
