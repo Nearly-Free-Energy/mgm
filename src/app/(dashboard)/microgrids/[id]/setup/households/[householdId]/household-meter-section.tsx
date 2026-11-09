@@ -45,7 +45,7 @@ export function HouseholdMeterSection({
     <section aria-labelledby="meter-history-heading">
       <h4
         id="meter-history-heading"
-        className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+        className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
       >
         Meter assignment history
       </h4>
@@ -58,16 +58,16 @@ export function HouseholdMeterSection({
           <table className="w-full text-left text-sm">
             <thead className="bg-muted">
               <tr>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Meter
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Effective from
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Effective to
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   State
                 </th>
               </tr>

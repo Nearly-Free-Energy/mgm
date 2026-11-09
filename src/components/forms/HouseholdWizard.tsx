@@ -469,7 +469,7 @@ export function HouseholdWizard({
               <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
                 Add household
               </Dialog.Title>
-              <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+              <Dialog.Description className="mt-1 text-dense text-muted-foreground">
                 Four quick steps. You&apos;ll assign a primary meter in step 3
                 so billing starts on the next period.
               </Dialog.Description>
@@ -555,7 +555,7 @@ export function HouseholdWizard({
                 type="button"
                 onClick={handleCancelClick}
                 disabled={submitting}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -566,7 +566,7 @@ export function HouseholdWizard({
                     type="button"
                     onClick={handleBack}
                     disabled={submitting}
-                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   >
                     Back
                   </button>
@@ -582,7 +582,7 @@ export function HouseholdWizard({
                       (step === 3 && blockedByNoMeters)
                     }
                     className={cn(
-                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       "disabled:cursor-not-allowed disabled:opacity-50"
                     )}
                   >
@@ -594,7 +594,7 @@ export function HouseholdWizard({
                     onClick={handleSubmit}
                     disabled={!canSave || submitting || blockedByNoMeters}
                     className={cn(
-                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       "disabled:cursor-not-allowed disabled:opacity-50"
                     )}
                   >
@@ -665,7 +665,7 @@ function StepIndicator({
               <span
                 aria-hidden="true"
                 className={cn(
-                  "inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold",
+                  "inline-flex h-5 w-5 items-center justify-center rounded-full text-caption font-semibold",
                   isActive && "bg-primary text-primary-foreground",
                   !isActive && isCompleted && "bg-success text-success-foreground",
                   !isActive && !isCompleted && "bg-border text-foreground"
@@ -716,7 +716,7 @@ function StepBasics({
       <div>
         <label
           htmlFor="hh-display-name"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Display name <span aria-hidden="true">*</span>
           <span className="sr-only"> (required)</span>
@@ -736,7 +736,7 @@ function StepBasics({
       <div>
         <label
           htmlFor="hh-account-number"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Account number
         </label>
@@ -753,7 +753,7 @@ function StepBasics({
         <div>
           <label
             htmlFor="hh-primary-phone"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Primary phone <span aria-hidden="true">*</span>
             <span className="sr-only"> (required)</span>
@@ -785,7 +785,7 @@ function StepBasics({
         <div>
           <label
             htmlFor="hh-primary-email"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Email
           </label>
@@ -802,7 +802,7 @@ function StepBasics({
       <div>
         <span
           id="hh-customer-type-label"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Customer type
         </span>
@@ -862,7 +862,7 @@ function StepAddress({
       <div>
         <label
           htmlFor="hh-address-line1"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Address line 1
         </label>
@@ -879,7 +879,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-line2"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Address line 2
           </label>
@@ -894,7 +894,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-unit-label"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Unit label
           </label>
@@ -911,7 +911,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-city"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             City
           </label>
@@ -926,7 +926,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-region"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Region / state
           </label>
@@ -943,7 +943,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-country"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Country
           </label>
@@ -958,7 +958,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-postal"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Postal code
           </label>
@@ -974,7 +974,7 @@ function StepAddress({
       <div>
         <label
           htmlFor="hh-geography-notes"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Geography notes
         </label>
@@ -1040,7 +1040,7 @@ function StepMeter({
         <div>
           <label
             htmlFor="hh-meter-serial"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Meter serial
           </label>
@@ -1056,7 +1056,7 @@ function StepMeter({
         <div>
           <label
             htmlFor="hh-meter-type"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Meter type
           </label>

@@ -233,7 +233,7 @@ export default async function HouseholdDetailPage({
       <section aria-labelledby="basics-heading">
         <h4
           id="basics-heading"
-          className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Household basics
         </h4>
@@ -253,7 +253,7 @@ export default async function HouseholdDetailPage({
       <section aria-labelledby="portal-users-heading">
         <h4
           id="portal-users-heading"
-          className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Portal users
         </h4>
@@ -266,7 +266,7 @@ export default async function HouseholdDetailPage({
       <section aria-labelledby="devices-heading">
         <h4
           id="devices-heading"
-          className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Linked devices
         </h4>
@@ -305,16 +305,16 @@ export default async function HouseholdDetailPage({
             <table className="w-full text-left text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Device
                   </th>
-                  <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Type
                   </th>
-                  <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Role
                   </th>
-                  <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Edge
                   </th>
                 </tr>
@@ -389,7 +389,7 @@ export default async function HouseholdDetailPage({
       <section aria-labelledby="billing-heading">
         <h4
           id="billing-heading"
-          className="mb-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Billing history (last 3 closed periods)
         </h4>
@@ -402,13 +402,13 @@ export default async function HouseholdDetailPage({
             <table className="w-full text-left text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Period
                   </th>
-                  <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Usage (kWh)
                   </th>
-                  <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Amount
                   </th>
                 </tr>
@@ -464,7 +464,7 @@ function BasicRow({
 }) {
   return (
     <div className="flex items-baseline gap-4 px-4 py-3">
-      <dt className="w-36 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <dt className="w-36 shrink-0 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
       <dd className="text-sm text-foreground">{value ?? "—"}</dd>

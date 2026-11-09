@@ -99,7 +99,7 @@ export function OpeningRegisterDialog({
           <Dialog.Title className="text-lg font-semibold text-foreground">
             Record opening register
           </Dialog.Title>
-          <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+          <Dialog.Description className="mt-1 text-dense text-muted-foreground">
             {deviceName} — the meter&apos;s register at the start of its first
             billable period. Times are interpreted in {timezone}, the
             microgrid&apos;s timezone. This becomes the baseline every later

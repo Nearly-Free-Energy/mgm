@@ -389,7 +389,7 @@ function BillingDeviceCell({
         <Chip tone="success" dot>
           {device.name}
           {device.edge_name ? (
-            <span className="ml-1 text-[11px] text-muted-foreground">
+            <span className="ml-1 text-caption text-muted-foreground">
               · {device.edge_name}
             </span>
           ) : null}
@@ -413,7 +413,7 @@ function BillingDeviceCell({
         <Chip tone="success" dot>
           {device.name}
           {device.edge_name ? (
-            <span className="ml-1 text-[11px] text-muted-foreground">
+            <span className="ml-1 text-caption text-muted-foreground">
               · {device.edge_name}
             </span>
           ) : null}
@@ -467,20 +467,20 @@ function HouseholdRowActions({
         >
           <DropdownMenu.Item
             onSelect={onEdit}
-            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
           >
             Edit household
           </DropdownMenu.Item>
           <DropdownMenu.Item
             onSelect={onEdit}
-            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
           >
             {hasDevice ? "Change billing device" : "Link device"}
           </DropdownMenu.Item>
           <DropdownMenu.Item asChild>
             <Link
               href={`/microgrids/${microgridId}/setup/households/${household.id}`}
-              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
             >
               View detail →
             </Link>
@@ -488,7 +488,7 @@ function HouseholdRowActions({
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item
             onSelect={onDelete}
-            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-destructive-fg outline-none data-[highlighted]:bg-destructive-muted"
+            className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-destructive-fg outline-none data-[highlighted]:bg-destructive-muted"
           >
             Delete household
           </DropdownMenu.Item>

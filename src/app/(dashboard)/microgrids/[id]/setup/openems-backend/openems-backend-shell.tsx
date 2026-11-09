@@ -613,7 +613,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
 
   const header = (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         OpenEMS Backend
       </p>
       <h3 className="text-lg font-semibold text-foreground">
@@ -652,7 +652,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       <div className="space-y-4">
         {header}
         <div className="mx-auto max-w-[560px] rounded-md border border-border bg-card p-6 shadow-elev-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             Connection
           </p>
           <h4 className="mt-1 text-lg font-semibold text-foreground">
@@ -701,7 +701,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           {/* Left column */}
           <div className="space-y-3">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Connection type
               </p>
               <p className="mt-1 text-sm font-medium text-foreground">
@@ -711,7 +711,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               </p>
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 {microgrid.ems_type === "cloud_aws"
                   ? "Lambda function URL"
                   : "Backend URL"}
@@ -723,7 +723,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
             {microgrid.ems_type === "cloud_aws" && (
               <>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Region
                   </p>
                   <p className="mt-1 font-mono text-xs text-foreground">
@@ -731,7 +731,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Access key ID
                   </p>
                   <p className="mt-1 break-all font-mono text-xs text-foreground">
@@ -739,7 +739,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Secret access key
                   </p>
                   <p className="mt-1 font-mono text-xs text-foreground">
@@ -749,7 +749,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               </>
             )}
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Edge IDs
               </p>
               <p className="mt-1 font-mono text-xs text-foreground">
@@ -760,7 +760,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
             </div>
             {microgrid.ems_type === "direct_url" && (
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Authentication
                 </p>
                 <p className="mt-1 font-mono text-xs text-foreground">
@@ -823,7 +823,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
   const form = isEditing && formType ? (
     <form onSubmit={handleSubmit} className="rounded-md border border-border bg-card p-5 shadow-elev-1 space-y-5">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           {initialMode === "empty" ? "New connection" : "Reconfigure connection"}
         </p>
         <h4 className="mt-1 text-lg font-semibold text-foreground">
@@ -834,7 +834,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
       {formType === "cloud_aws" ? (
         <>
           <fieldset className="space-y-3">
-            <legend className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <legend className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
               Endpoint
             </legend>
             <div>
@@ -871,7 +871,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           </fieldset>
 
           <fieldset className="space-y-3">
-            <legend className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <legend className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
               Credentials
             </legend>
             <div>
@@ -908,7 +908,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 className="font-mono text-xs"
               />
               {initialMode === "configured" && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   Leave blank to keep the current secret.
                 </p>
               )}
@@ -930,7 +930,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               required
               className="font-mono text-xs"
             />
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               The address of the OpenEMS Backend REST/JSON-RPC API — not the
               OpenEMS UI. `/jsonrpc` is appended automatically, so enter the
               base path without it.
@@ -946,7 +946,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
             <legend className="px-1 text-xs font-medium text-muted-foreground">
               Authentication (optional)
             </legend>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               Leave blank if your backend accepts unauthenticated requests. If
               the REST API is enabled with credentials, enter them here and
               they are stored encrypted.
@@ -984,7 +984,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 className="font-mono text-xs"
               />
               {hasStoredBasicAuthPassword && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   Leave blank to keep the current password.
                 </p>
               )}
@@ -1011,12 +1011,12 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 className="font-mono text-xs"
               />
               {hasStoredBearerToken ? (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   A token is on record — leave blank to keep it. Typing a
                   username above switches to Basic and clears it.
                 </p>
               ) : (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   For backends behind Keycloak: the dedicated account&apos;s
                   token. Leave blank for Basic or unauthenticated access.
                 </p>
@@ -1074,13 +1074,13 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
                 className="font-mono text-xs"
               />
               {hasStoredKeycloak ? (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   A Keycloak client is on record — leave blank to keep its
                   secret. Naming a bearer token or username above switches
                   away and clears it.
                 </p>
               ) : (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   Retype the URL and client ID with a blank secret to keep a
                   stored one; leave all three blank to clear Keycloak.
                 </p>
@@ -1105,7 +1105,7 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
           spellCheck={false}
           className="font-mono text-xs"
         />
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-caption text-muted-foreground">
           Automatic discovery lists edges when this connection has an OpenEMS UI username and password. Enter IDs here only for connections that cannot use UI discovery.
         </p>
       </div>

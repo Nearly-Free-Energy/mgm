@@ -242,7 +242,7 @@ export function DeviceEditDialog({
               </Dialog.Title>
               <Dialog.Description
                 id="dev-edit-desc"
-                className="mt-1 flex items-center gap-2 text-[13px] text-muted-foreground"
+                className="mt-1 flex items-center gap-2 text-dense text-muted-foreground"
               >
                 <span>Currently classified as</span>
                 <StatusChip kind="deviceType" status={device.device_type} />
@@ -264,7 +264,7 @@ export function DeviceEditDialog({
               <div>
                 <label
                   htmlFor="dev-edit-name"
-                  className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
                 >
                   Device name
                   <span aria-hidden="true" className="ml-0.5 text-destructive-fg">
@@ -290,7 +290,7 @@ export function DeviceEditDialog({
               <div>
                 <label
                   htmlFor="dev-edit-type"
-                  className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
                 >
                   Device type
                 </label>
@@ -318,7 +318,7 @@ export function DeviceEditDialog({
               <div>
                 <label
                   htmlFor="dev-edit-component-id"
-                  className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
                 >
                   OpenEMS component ID
                 </label>
@@ -340,7 +340,7 @@ export function DeviceEditDialog({
                 <button
                   type="button"
                   disabled={submitting}
-                  className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -349,7 +349,7 @@ export function DeviceEditDialog({
                 type="button"
                 onClick={() => handleSubmit()}
                 disabled={!canSave}
-                className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {submitting ? "Saving…" : "Save changes"}
               </button>

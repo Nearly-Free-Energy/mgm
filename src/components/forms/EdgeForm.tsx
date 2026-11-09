@@ -200,7 +200,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       <div>
         <label
           htmlFor="edge-name"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Name <span aria-hidden="true">*</span>
         </label>
@@ -222,7 +222,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
 
       {/* OpenEMS Edge ID — readonly display */}
       <div>
-        <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <label className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           OpenEMS Edge ID
         </label>
         <div className="rounded-md bg-muted px-3 py-2 font-mono text-sm text-foreground">
@@ -238,7 +238,7 @@ export function EdgeForm({ edge, onSuccess, onCancel }: EdgeFormProps) {
       <div>
         <label
           htmlFor="edge-role"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Role <span className="font-normal normal-case text-muted-foreground">(optional)</span>
         </label>

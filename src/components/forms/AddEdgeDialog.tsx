@@ -319,7 +319,7 @@ export function AddEdgeDialog({
               ref={retryRef}
               type="button"
               onClick={runDiscover}
-              className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Retry
             </button>
@@ -330,7 +330,7 @@ export function AddEdgeDialog({
       {(state.kind === "list" || state.kind === "adding") && (
         <div>
           <div className="flex items-center justify-between py-2">
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {edges.length} edge{edges.length === 1 ? "" : "s"} found
             </p>
             {newEdges.length > 0 && (
@@ -338,7 +338,7 @@ export function AddEdgeDialog({
                 type="button"
                 onClick={toggleAllNew}
                 disabled={adding}
-                className="text-[12px] font-medium text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+                className="text-caption font-medium text-primary hover:underline disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
               >
                 {allNewSelected ? "Deselect all new" : "Select all new"}
               </button>
@@ -436,7 +436,7 @@ export function AddEdgeDialog({
         ref={primaryRef}
         type="button"
         onClick={() => onOpenChange(false)}
-        className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         Close
       </button>
@@ -447,7 +447,7 @@ export function AddEdgeDialog({
         ref={cancelRef}
         type="button"
         onClick={() => onOpenChange(false)}
-        className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         Cancel
       </button>
@@ -463,7 +463,7 @@ export function AddEdgeDialog({
           type="button"
           onClick={() => onOpenChange(false)}
           disabled={adding}
-          className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+          className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
         >
           Cancel
         </button>
@@ -472,7 +472,7 @@ export function AddEdgeDialog({
           type="button"
           onClick={handleAdd}
           disabled={primaryDisabled}
-          className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+          className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {adding && <Spinner />}
           {adding ? "Adding…" : `Add selected (${newSelectedCount})`}

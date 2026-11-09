@@ -103,10 +103,10 @@ export function HierarchyNav({ levels, className }: HierarchyNavProps) {
                 : "border border-transparent hover:bg-muted",
             )}
           >
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
               {it.kind}
             </span>
-            <span className="flex items-center gap-1 text-[13px] font-semibold text-foreground">
+            <span className="flex items-center gap-1 text-dense font-semibold text-foreground">
               {it.active && (
                 <span aria-hidden="true" className="mr-0.5 h-3.5 w-1 rounded-sm bg-primary" />
               )}
@@ -116,7 +116,7 @@ export function HierarchyNav({ levels, className }: HierarchyNavProps) {
                 <>
                   <span
                     aria-label={`${it.count} ${it.kind.toLowerCase()}s`}
-                    className="rounded-pill bg-accent px-1.5 py-px text-[11px] font-semibold text-accent-foreground"
+                    className="rounded-pill bg-accent px-1.5 py-px text-caption font-semibold text-accent-foreground"
                   >
                     {it.count}
                   </span>
@@ -137,7 +137,7 @@ export function HierarchyNav({ levels, className }: HierarchyNavProps) {
                     sideOffset={4}
                     className="z-50 min-w-[200px] rounded-md border border-border bg-card p-1 shadow-elev-2"
                   >
-                    <DropdownMenu.Label className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <DropdownMenu.Label className="px-2 py-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                       Switch {it.kind.toLowerCase()}
                     </DropdownMenu.Label>
                     {it.siblings.map((s) => (
@@ -145,7 +145,7 @@ export function HierarchyNav({ levels, className }: HierarchyNavProps) {
                         <Link
                           href={s.href}
                           onClick={() => handleNavClick(s.href)}
-                          className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+                          className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
                         >
                           {s.label}
                         </Link>

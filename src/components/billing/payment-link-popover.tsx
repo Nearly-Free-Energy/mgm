@@ -88,7 +88,7 @@ export function PaymentLinkPopover({ url, onClose }: PaymentLinkPopoverProps) {
               "data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95",
             )}
           >
-            <div className="mb-2 text-[12px] font-semibold text-foreground">
+            <div className="mb-2 text-caption font-semibold text-foreground">
               Payment link
             </div>
 
@@ -100,7 +100,7 @@ export function PaymentLinkPopover({ url, onClose }: PaymentLinkPopoverProps) {
               onFocus={(e) => e.currentTarget.select()}
               className={cn(
                 "mb-3 w-full rounded-sm border border-border bg-muted px-2 py-1",
-                "font-mono text-[11px] text-foreground",
+                "font-mono text-caption text-foreground",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 "truncate",
               )}
@@ -123,7 +123,7 @@ export function PaymentLinkPopover({ url, onClose }: PaymentLinkPopoverProps) {
                 autoFocus
                 onClick={() => handleCopyLink(url)}
                 className={cn(
-                  "flex-1 rounded-md py-1 text-[12px] font-medium",
+                  "flex-1 rounded-md py-1 text-caption font-medium",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   copied
                     ? "bg-success-muted text-success-fg"
@@ -138,7 +138,7 @@ export function PaymentLinkPopover({ url, onClose }: PaymentLinkPopoverProps) {
                 type="button"
                 onClick={() => onClose()}
                 className={cn(
-                  "rounded-md border border-border bg-card px-3 py-1 text-[12px] font-medium text-foreground",
+                  "rounded-md border border-border bg-card px-3 py-1 text-caption font-medium text-foreground",
                   "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
               >

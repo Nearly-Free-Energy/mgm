@@ -126,7 +126,7 @@ export function GenerateTokenDialog(props: GenerateTokenDialogProps) {
             <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
               Generate API token
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               You will see the plaintext once. Save it immediately — it
               cannot be retrieved later.
             </Dialog.Description>
@@ -236,7 +236,7 @@ export function GenerateTokenDialog(props: GenerateTokenDialogProps) {
                 <button
                   type="button"
                   disabled={submitting}
-                  className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -244,7 +244,7 @@ export function GenerateTokenDialog(props: GenerateTokenDialogProps) {
               <button
                 type="submit"
                 disabled={submitting}
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 {submitting && (
                   <svg

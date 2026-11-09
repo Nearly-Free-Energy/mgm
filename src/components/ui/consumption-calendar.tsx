@@ -53,7 +53,7 @@ export function ConsumptionCalendar({
         {HEADERS[weekStart].map((d, i) => (
           <div
             key={`${d}-${i}`}
-            className="text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="text-center text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             {d}
           </div>
@@ -74,7 +74,7 @@ export function ConsumptionCalendar({
           />
         ))}
       </div>
-      <div className="mt-2 flex gap-3 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex gap-3 text-caption text-muted-foreground">
         <Legend shape="circle" colorClass="bg-success" label="within" />
         <Legend shape="square" colorClass="bg-warning" label="near" />
         <Legend shape="triangle" colorClass="bg-destructive" label="over" />

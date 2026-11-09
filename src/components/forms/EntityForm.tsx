@@ -420,7 +420,7 @@ export function EntityForm(props: EntityFormProps) {
             <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
               {titleFor(props)}
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               {props.mode === "create"
                 ? "Fill in the fields below. City and country are required for organizations."
                 : "Only changed fields will be saved."}
@@ -700,7 +700,7 @@ export function EntityForm(props: EntityFormProps) {
               <button
                 type="button"
                 disabled={submitting}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -709,7 +709,7 @@ export function EntityForm(props: EntityFormProps) {
               type="submit"
               onClick={handleSubmit}
               disabled={submitting}
-              className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             >
               {submitting
                 ? "Saving…"

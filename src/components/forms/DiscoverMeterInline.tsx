@@ -291,7 +291,7 @@ export function DiscoverMeterInline({
         <div>
           <label
             htmlFor="dmi-edge-select"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Edge
           </label>
@@ -432,7 +432,7 @@ export function DiscoverMeterInline({
               <div>
                 <label
                   htmlFor="dmi-name"
-                  className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                  className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
                 >
                   Device name
                 </label>

@@ -104,7 +104,7 @@ export function SelectionDialog({
             {description && (
               <Dialog.Description
                 id={DESC_ID}
-                className="mt-1 text-[13px] leading-relaxed text-muted-foreground"
+                className="mt-1 text-dense leading-relaxed text-muted-foreground"
               >
                 {description}
               </Dialog.Description>
@@ -117,7 +117,7 @@ export function SelectionDialog({
           <div
             id={BODY_ID}
             aria-live="polite"
-            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-[13px] leading-relaxed text-foreground max-[600px]:max-h-[55vh] max-[600px]:supports-[height:100dvh]:max-h-[55dvh]"
+            className="min-h-[280px] max-h-[70vh] overflow-y-auto px-6 pb-2 text-dense leading-relaxed text-foreground max-[600px]:max-h-[55vh] max-[600px]:supports-[height:100dvh]:max-h-[55dvh]"
           >
             {children}
           </div>
