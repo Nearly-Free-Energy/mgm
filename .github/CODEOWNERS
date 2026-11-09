@@ -27,12 +27,14 @@
 /src/lib/plugins/                      @tushabe @arindahills
 
 # GUI contract: the types GUIs and capability plugins build against, the
-# type test that pins the confirmation rules they express, and the host that
-# decides what contributed output may be sent to a browser.
+# type test that pins the confirmation rules they express, the host that
+# decides what contributed output may be sent to a browser, and the list of
+# compiled-in GUIs the runtime root installs at start-up.
 /src/lib/gui/contract.ts                      @tushabe @arindahills
 /src/lib/gui/surface.ts                       @tushabe @arindahills
 /src/lib/gui/__tests__/contract-types.test.ts @tushabe @arindahills
 /src/lib/gui/host/                            @tushabe @arindahills
+/src/gui/meta.ts                              @tushabe @arindahills
 
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills

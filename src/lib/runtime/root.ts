@@ -2,9 +2,10 @@
  * The long-lived MGM root context (docs/cordis-runtime.md).
  *
  * One root per module instance — one per warm server process. It loads the
- * platform plugins: the catalog, the plugin gate, and the provider
- * registries with the providers that register into them. Platform plugins
- * hold no request data; requests run in isolated children (`scope.ts`).
+ * platform plugins: the catalog, the plugin gate, the GUI surface with the
+ * compiled-in GUIs, and the provider registries with the providers that
+ * register into them. Platform plugins hold no request data; requests run in
+ * isolated children (`scope.ts`).
  */
 import "server-only";
 
@@ -15,6 +16,9 @@ import {
   type MgmPluginName,
 } from "@/lib/plugins/bundled";
 import { OpenEmsMeteringPlugin } from "@/lib/metering/providers-plugin";
+import { GUI_META } from "@/gui/meta";
+import type { GuiMeta } from "@/lib/gui/contract";
+import { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
 import { PesapalProviderPlugin } from "@/lib/payments/providers/pesapal/plugin";
 import { MgmGate } from "./gate";
 import {
@@ -43,6 +47,34 @@ export const GatePlugin = {
   },
 } satisfies Plugin.Object<void>;
 
+/**
+ * The GUI surface: capability contributions and installed GUIs, checked when
+ * they register. A root service, never a request one (docs/cordis-runtime.md
+ * § "GUI surface").
+ */
+export const SurfacePlugin = {
+  name: "mgm-surface",
+  inject: ["mgmCatalog"],
+  apply(ctx: Context) {
+    ctx.provide("mgmSurface", new SurfaceRegistry(ctx.mgmCatalog));
+  },
+} satisfies Plugin.Object<void>;
+
+/** Installs one compiled-in GUI's metadata. The Cordis plugin name is the GUI's name. */
+export function guiInstallPlugin(name: string, meta: GuiMeta) {
+  return {
+    name,
+    inject: ["mgmSurface"],
+    apply(ctx: Context) {
+      if (meta.name !== name) {
+        throw new Error(`GUI "${name}" names itself "${meta.name}" in its metadata`);
+      }
+      // Installation is undone when this fiber unloads.
+      ctx.effect(() => ctx.mgmSurface.install(meta));
+    },
+  } satisfies Plugin.Object<void>;
+}
+
 export const MeteringProvidersPlugin = {
   name: "metering-providers",
   apply(ctx: Context) {
@@ -61,6 +93,8 @@ export const PaymentProvidersPlugin = {
 export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   CatalogPlugin,
   GatePlugin,
+  SurfacePlugin,
+  ...Object.entries(GUI_META).map(([name, meta]) => guiInstallPlugin(name, meta)),
   MeteringProvidersPlugin,
   OpenEmsMeteringPlugin,
   PaymentProvidersPlugin,
@@ -71,6 +105,8 @@ export type MgmRuntime = {
   root: Context;
   catalog: MgmCatalog;
   gate: MgmGate;
+  /** The registry itself, for the host's reads; plugins see `ctx.mgmSurface`, typed MgmSurface. */
+  mgmSurface: SurfaceRegistry;
   meteringProviders: MeteringProviderFactories;
   paymentProviders: PaymentProviderRegistry;
   /** Platform plugin fibers, for diagnostics and tests. */
@@ -93,21 +129,35 @@ export async function requireActive(fiber: Fiber, label: string): Promise<Fiber>
   return fiber;
 }
 
-async function createRuntime(): Promise<MgmRuntime> {
-  const root = new Context();
+/**
+ * Loads `plugins` into `root` in order. If one fails, unloads those already
+ * loaded, newest first, and rethrows its error. getMgmRuntime loads
+ * PLATFORM_PLUGINS through it; tests pass their own lists.
+ */
+export async function loadPlatformPlugins(
+  root: Context,
+  plugins: readonly Plugin.Object<void>[]
+): Promise<Fiber[]> {
   const fibers: Fiber[] = [];
   try {
-    for (const plugin of PLATFORM_PLUGINS) {
+    for (const plugin of plugins) {
       fibers.push(await requireActive(root.plugin(plugin), plugin.name ?? "anonymous"));
     }
   } catch (error) {
     await Promise.allSettled([...fibers].reverse().map((fiber) => fiber.dispose()));
     throw error;
   }
+  return fibers;
+}
+
+async function createRuntime(): Promise<MgmRuntime> {
+  const root = new Context();
+  const fibers = await loadPlatformPlugins(root, PLATFORM_PLUGINS);
   return {
     root,
     catalog: root.get("mgmCatalog") as MgmCatalog,
     gate: root.get("mgmGate") as MgmGate,
+    mgmSurface: root.get("mgmSurface") as SurfaceRegistry,
     meteringProviders: root.get("meteringProviders") as MeteringProviderFactories,
     paymentProviders: root.get("paymentProviderRegistry") as PaymentProviderRegistry,
     fibers,
