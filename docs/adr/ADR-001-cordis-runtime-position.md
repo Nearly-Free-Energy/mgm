@@ -1,9 +1,9 @@
 # ADR-001: Cordis as MGM's in-process runtime, with conditions
 
-## Status: Proposed (draft for review by Aaron and Hillary)
+## Status: Accepted
 
 ## Context
-MGM is built as capabilities (community management, metering, billing, billing review, payments) that must be enabled per organization, run in isolation per request, and never leak between organizations. Aaron's PR #23 runs them on one Cordis runtime per process, with an isolated child scope per API call and a per-organization plugin gate that fails closed. An independent review of #23 found no cross-organization path and no scope-lifetime break (one P2 on a route the new test wrongly counted as gated, fixed in #29, and four P3). Release 2 (OpenEMS metering as a plugin, issue #4) is the first feature that depends on the plugin model, so we need a firm position before building on it.
+MGM is built as capabilities (community management, metering, billing, billing review, payments) that must be enabled per organization, run in isolation per request, and never leak between organizations. Aaron's PR #23 runs them on one Cordis runtime per process, with an isolated child scope per API call and a per-organization plugin gate that fails closed. An independent review of #23 found no cross-organization path and no scope-lifetime break (one P2 on a route the new test wrongly counted as gated, fixed in #29, and four P3). Release 2 (OpenEMS metering as a plugin, issue #4) is the first feature that depends on the plugin model, and its metering plugin is now on `main`; this records the position it was built on.
 
 Facts that shape the decision:
 - Cordis is a context-based plugin framework with dependency injection, scoped services and lifecycle cleanup. MGM pins `cordis` at exactly `4.0.0-rc.12` (since #81), a release candidate.
@@ -36,7 +36,7 @@ Still open: the `src/app/` import-boundary test (condition 1). Conditions 2 and 
 
 ## Consequences
 - Better: per-organization isolation by construction, adding a metering or payment provider is a new plugin, and disabling a plugin keeps data.
-- Worse: a pre-release dependency, extra concepts for new contributors, and per-request scope setup cost (measure p95 on Vercel before Release 2 goes live).
+- Worse: a pre-release dependency, extra concepts for new contributors, and per-request scope setup cost (p95 on Vercel is not yet measured; measure it before #4 is signed off).
 - Watch: leaks from undisposed scopes, upstream release cadence (the longest gap so far was 296 days, 4.0.0-beta.5 to beta.6; 62 days across the release candidates), and gate gaps on new routes.
 - Accepting this with rc.12 named also answers the "Cordis 0.1 decision" that #30 sends to #56.
 - Revisit this ADR at Release 2 sign-off, when Cordis 4.0.0 ships, or when a condition 2 trigger fires.
