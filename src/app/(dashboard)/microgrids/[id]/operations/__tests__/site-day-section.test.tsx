@@ -186,6 +186,8 @@ describe("SiteDaySection", () => {
 
     expect(html).toContain("Metering is disabled");
     expect(html).toContain("Metering is off.");
+    expect(html).not.toContain("Try again");
+    expect(html).not.toContain("<a ");
   });
 
   it("renders the setup EmptyState when the site has no battery or grid meter", async () => {
@@ -222,6 +224,27 @@ describe("SiteDaySection", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("bg-destructive-muted");
     expect(html).not.toContain("Metering is disabled");
+    // The way forward is another try at the same day, as a full page load.
+    expect(html).toContain(`href="/microgrids/mg-1/operations?date=${DATE}"`);
+    expect(html).toContain("Try again");
+    expect(html).not.toContain("setup/openems-backend");
+  });
+
+  it("points a configuration failure at the OpenEMS connection setup", async () => {
+    getSiteDayMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      code: "METERING_CONFIGURATION",
+      message: "Metering provider is not configured for this microgrid",
+    });
+
+    const html = await renderSection();
+
+    expect(html).toContain("Could not load this day&#x27;s operations");
+    expect(html).toContain("Metering provider is not configured for this microgrid");
+    expect(html).toContain('href="/microgrids/mg-1/setup/openems-backend"');
+    expect(html).toContain("Set up the OpenEMS connection");
+    expect(html).not.toContain("Try again");
   });
 
   it("renders the destructive banner when composition fails with something other than 409", async () => {

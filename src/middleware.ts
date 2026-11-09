@@ -153,7 +153,9 @@ export async function middleware(request: NextRequest) {
   // /microgrids/<id> should show a page of its own, delete this redirect and
   // point microgridHref at that URL.
   if (/^\/microgrids\/[^/]+\/?$/.test(request.nextUrl.pathname)) {
-    const url = request.nextUrl.clone();
+    // A plain URL, not request.nextUrl.clone(): NextURL remembers a trailing
+    // slash on the original path and adds it back to the new one.
+    const url = new URL(request.nextUrl.href);
     url.pathname = `${request.nextUrl.pathname.replace(/\/$/, "")}/operations`;
     return NextResponse.redirect(url);
   }

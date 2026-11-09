@@ -53,11 +53,39 @@ export async function SiteDaySection({
       />
     );
   }
+  if (result.status === 409) {
+    return (
+      <Banner tone="warn" title="Metering is disabled">
+        {result.message}
+      </Banner>
+    );
+  }
+  // Each failure ends with something to do. A configuration error means the
+  // microgrid has no usable OpenEMS connection, which anyone who can open
+  // this page may set up (#321); anything else is worth another try.
+  const configuration = result.code === "METERING_CONFIGURATION";
   return (
     <Banner
-      tone={result.status === 409 ? "warn" : "destructive"}
-      title={
-        result.status === 409 ? "Metering is disabled" : "Could not load this day's operations"
+      tone="destructive"
+      title="Could not load this day's operations"
+      action={
+        configuration ? (
+          <Link
+            href={`/microgrids/${microgridId}/setup/openems-backend`}
+            className="text-sm font-medium text-primary hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+          >
+            Set up the OpenEMS connection →
+          </Link>
+        ) : (
+          // A full page load, so the day is read again rather than served
+          // from the router's cache.
+          <a
+            href={`/microgrids/${microgridId}/operations?date=${encodeURIComponent(date)}`}
+            className="text-sm font-medium text-primary hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+          >
+            Try again
+          </a>
+        )
       }
     >
       {result.message}

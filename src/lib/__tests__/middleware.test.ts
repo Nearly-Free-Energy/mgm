@@ -134,10 +134,17 @@ describe("middleware PUBLIC_PATHS", () => {
     const res = await middleware(makeRequest("/microgrids/grid-1/"));
     expect(res.status).toBe(307);
     // Next.js answers a trailing-slash URL with a redirect to the bare path
-    // before middleware runs, so only a direct call sees one. NextURL keeps
-    // the slash on the new path, and the release check accepts either form.
-    expect(new URL(res.headers.get("location")!).pathname).toMatch(
-      /^\/microgrids\/grid-1\/operations\/?$/
+    // before middleware runs, so only a direct call sees one.
+    expect(res.headers.get("location")).toBe("http://localhost/microgrids/grid-1/operations");
+  });
+
+  it("drops the trailing slash and keeps the day asked for", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1/?date=2026-11-01"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(
+      "http://localhost/microgrids/grid-1/operations?date=2026-11-01"
     );
   });
 
@@ -331,6 +338,9 @@ describe("middleware for routes outside the installed release", () => {
     { path: "/settings/api-tokens", who: "signed out", session: signedOut },
     { path: "/microgrids/grid-1/tenants", who: "signed in", session: signedIn },
     { path: "/admin?next=%3Cscript%3E", who: "signed out", session: signedOut },
+    // Only paths under /api/ are API requests; these are page links.
+    { path: "/api", who: "signed in", session: signedIn },
+    { path: "/apiary", who: "signed out", session: signedOut },
   ])("answers a page link ($path, $who) with the not-released page and 404", async ({ path, session }) => {
     session();
     const middleware = await loadMiddleware();
@@ -355,6 +365,7 @@ describe("middleware for routes outside the installed release", () => {
     "/api/v1/billing/generate",
     "/api/openems/energy",
     "/api/payments/status",
+    "/api/",
   ])("answers an API request (%s) exactly as before", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
