@@ -53,6 +53,7 @@ export default defineConfig({
             "src/lib/billing/__tests__/seed-reading.test.ts",
             "src/lib/__tests__/invite-user-rpc.test.ts",
             "src/lib/runtime/__tests__/gate.db.test.ts",
+            "src/lib/gui/host/server/__tests__/entities.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
             // Component tests of the interface kit and host run in the
             // "gui" project below, in jsdom. Without this line each would
@@ -111,6 +112,7 @@ export default defineConfig({
             "src/lib/billing/__tests__/seed-reading.test.ts",
             "src/lib/__tests__/invite-user-rpc.test.ts",
             "src/lib/runtime/__tests__/gate.db.test.ts",
+            "src/lib/gui/host/server/__tests__/entities.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
           ],
