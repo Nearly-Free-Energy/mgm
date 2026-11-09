@@ -427,11 +427,14 @@ function boundaryViolations(
 function repositoryFiles(): Map<string, string> {
   const files = new Map<string, string>();
   const walk = (dir: string) => {
-    for (const name of readdirSync(dir)) {
+    // Directory entries carry their own type, so nothing is checked with a
+    // separate stat before it is read.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const name = entry.name;
       const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) {
+      if (entry.isDirectory()) {
         if (name !== "node_modules") walk(full);
-      } else if (/\.tsx?$/.test(name)) {
+      } else if (entry.isFile() && /\.tsx?$/.test(name)) {
         const relative = path.relative(REPO_ROOT, full).split(path.sep).join("/");
         files.set(relative, readFileSync(full, "utf8"));
       }
