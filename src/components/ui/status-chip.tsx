@@ -226,7 +226,7 @@ export function StatusChip({ kind, status, tooltip, ...props }: StatusChipProps)
           <Tooltip.Content
             sideOffset={6}
             className={cn(
-              "z-50 max-w-xs rounded-md bg-foreground px-3 py-2 text-[12px] leading-snug text-background shadow-elev-2",
+              "z-50 max-w-xs rounded-md bg-foreground px-3 py-2 text-caption leading-snug text-background shadow-elev-2",
               "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out"
             )}
           >

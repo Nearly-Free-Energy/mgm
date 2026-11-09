@@ -165,7 +165,7 @@ export function ClosePeriodDialog({
           >
             <span
               className={cn(
-                "text-[11px] font-semibold uppercase tracking-wide",
+                "text-caption font-semibold uppercase tracking-wide",
                 phase === 3 ? "text-success-fg" : "text-primary",
               )}
             >
@@ -176,7 +176,7 @@ export function ClosePeriodDialog({
             </Dialog.Title>
             <Dialog.Description
               id="close-period-desc"
-              className="mt-1 text-[13px] leading-relaxed text-muted-foreground"
+              className="mt-1 text-dense leading-relaxed text-muted-foreground"
             >
               {description}
             </Dialog.Description>
@@ -187,7 +187,7 @@ export function ClosePeriodDialog({
               <div
                 data-testid="close-period-unfilled-banner"
                 role="alert"
-                className="rounded-md bg-warning-muted px-3 py-2.5 text-[13px] text-warning-fg"
+                className="rounded-md bg-warning-muted px-3 py-2.5 text-dense text-warning-fg"
               >
                 <div className="font-semibold">
                   {unfilledCount} {unfilledHouseholdsWord} still un-billed
@@ -203,7 +203,7 @@ export function ClosePeriodDialog({
           <div className="grid grid-cols-2 gap-3 px-6 pt-3">
             {summaryRows.map((r, i) => (
               <div key={i} className="rounded-md bg-muted px-2.5 py-2">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   {r.label}
                 </div>
                 <div className="mt-0.5 text-sm font-semibold tabular-nums">
@@ -214,13 +214,13 @@ export function ClosePeriodDialog({
           </div>
 
           <div className="mt-2 flex items-center justify-between border-t border-dashed border-border px-6 pb-1 pt-2">
-            <div className="text-[12px] text-muted-foreground">Grand total</div>
-            <Currency value={grandTotal} className="text-[22px] font-semibold" />
+            <div className="text-caption text-muted-foreground">Grand total</div>
+            <Currency value={grandTotal} className="text-headline font-semibold" />
           </div>
 
           {phase === 2 && (
             <div className="px-6 pb-1 pt-3">
-              <label className="flex cursor-pointer items-start gap-2 text-[13px]">
+              <label className="flex cursor-pointer items-start gap-2 text-dense">
                 <input
                   type="checkbox"
                   checked={confirmed}
@@ -240,7 +240,7 @@ export function ClosePeriodDialog({
 
           {phase === "E" && (
             <div className="px-6 pt-3">
-              <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-[13px] text-destructive-fg">
+              <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
                 <b>Couldn&apos;t close period.</b> {error ?? "Network error"}. Your draft is
                 unchanged.
               </div>
@@ -250,7 +250,7 @@ export function ClosePeriodDialog({
           <DialogFooter className="mt-3">
             {/* Under 600px the status line takes its own row so Cancel and
                 the confirm button stay side by side beneath it. */}
-            <div className="mr-auto text-[11px] text-muted-foreground max-[600px]:basis-full">
+            <div className="mr-auto text-caption text-muted-foreground max-[600px]:basis-full">
               {phase === 3 ? (
                 <span className="inline-flex items-center gap-1 font-semibold text-success-fg">
                   ✓ Closed · read-only
@@ -265,7 +265,7 @@ export function ClosePeriodDialog({
             <Dialog.Close asChild>
               <button
                 ref={cancelRef}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Cancel
               </button>
@@ -274,7 +274,7 @@ export function ClosePeriodDialog({
               <button
                 onClick={handleClose}
                 disabled={!confirmed}
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {confirmButtonLabel}
               </button>
@@ -282,7 +282,7 @@ export function ClosePeriodDialog({
             {phase === 2.5 && (
               <button
                 disabled
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground opacity-60 cursor-not-allowed"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground opacity-60 cursor-not-allowed"
               >
                 Closing…
               </button>
@@ -290,7 +290,7 @@ export function ClosePeriodDialog({
             {phase === 3 && (
               <button
                 onClick={onExportCsv}
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Export CSV for URA
               </button>
@@ -298,7 +298,7 @@ export function ClosePeriodDialog({
             {phase === "E" && (
               <button
                 onClick={handleClose}
-                className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive px-3.5 text-[13px] font-medium text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive px-3.5 text-dense font-medium text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Retry close
               </button>

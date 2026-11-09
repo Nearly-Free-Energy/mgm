@@ -204,7 +204,7 @@ export function DeleteEntityButton({
 
   // Style mirrors #79's Revoke button (destructive tokenized).
   const btnCls =
-    "inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-[13px] font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed";
+    "inline-flex h-8 items-center rounded-md border border-destructive bg-destructive-muted px-3.5 text-dense font-medium text-destructive-fg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed";
 
   return (
     <>

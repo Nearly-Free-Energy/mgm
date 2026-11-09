@@ -126,7 +126,7 @@ export function ColorInput({
         />
       </div>
       {description && (
-        <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{description}</p>
       )}
     </div>
   );

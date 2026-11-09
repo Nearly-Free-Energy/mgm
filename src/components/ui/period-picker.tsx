@@ -98,7 +98,7 @@ export function PeriodPicker({
         <button
           disabled={disabled}
           className={cn(
-            "inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-[13px] font-medium text-foreground",
+            "inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3 text-dense font-medium text-foreground",
             "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             "disabled:cursor-not-allowed disabled:opacity-50",
             className,
@@ -124,14 +124,14 @@ export function PeriodPicker({
           className="z-50 w-80 rounded-md border border-border bg-card shadow-elev-3 outline-none"
         >
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <div className="text-[12px] font-semibold">Select billing period</div>
+            <div className="text-caption font-semibold">Select billing period</div>
             {onNewPeriod && (
               <button
                 onClick={() => {
                   setOpen(false);
                   onNewPeriod();
                 }}
-                className="inline-flex h-6 items-center rounded-md bg-primary px-2.5 text-[12px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-6 items-center rounded-md bg-primary px-2.5 text-caption font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 + New period
               </button>
@@ -151,7 +151,7 @@ export function PeriodPicker({
                 <Skeleton className="h-5 w-11/12" />
               </div>
             ) : error ? (
-              <div className="m-3 rounded-md bg-destructive-muted px-3 py-2.5 text-[13px] text-destructive-fg">
+              <div className="m-3 rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
                 Couldn&apos;t load periods. <button className="underline">Retry</button>
               </div>
             ) : (
@@ -175,12 +175,12 @@ export function PeriodPicker({
                   )}
                 >
                   <StatusChip kind="billingPeriod" status={p.status} size="sm" />
-                  <span className="text-[12px] tabular-nums text-foreground">
+                  <span className="text-caption tabular-nums text-foreground">
                     {formatRange(p.startDate, p.endDate)}
                   </span>
                   <Currency
                     value={p.totalAmount}
-                    className="ml-auto text-[12px] text-muted-foreground"
+                    className="ml-auto text-caption text-muted-foreground"
                   />
                 </button>
               ))

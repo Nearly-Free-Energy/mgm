@@ -10,6 +10,30 @@ describe("Chip", () => {
     expect(span?.className).toContain("text-success-fg");
   });
 
+  // cn() keeps both a type-scale size and a text colour only because
+  // TYPE_SCALE in src/lib/utils.ts lists the size. Without it tailwind-merge
+  // reads text-caption as a colour and keeps whichever comes last: md chips
+  // lose their size and sm chips lose their colour.
+  const TONE_FG = {
+    neutral: "text-muted-foreground",
+    success: "text-success-fg",
+    warn: "text-warning-fg",
+    alert: "text-destructive-fg",
+    brand: "text-accent-foreground",
+  } as const;
+
+  it.each(Object.keys(TONE_FG) as (keyof typeof TONE_FG)[])(
+    "keeps the caption size and the %s tone's text colour together",
+    (tone) => {
+      for (const size of ["sm", "md"] as const) {
+        const { container } = render(<Chip tone={tone} size={size}>Test</Chip>);
+        expect(container.querySelector("span")?.className.split(/\s+/)).toEqual(
+          expect.arrayContaining(["text-caption", TONE_FG[tone]]),
+        );
+      }
+    },
+  );
+
   it("dot span has aria-hidden='true'", () => {
     const { container } = render(<Chip tone="success" dot>Test</Chip>);
     const dotSpan = container.querySelector("span > span[aria-hidden='true']");

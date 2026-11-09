@@ -72,7 +72,7 @@ export function ListEditor<T>({
     return (
       <div className="space-y-2">
         {emptyCopy && (
-          <p className="text-[11px] text-muted-foreground">{emptyCopy}</p>
+          <p className="text-caption text-muted-foreground">{emptyCopy}</p>
         )}
         <button
           type="button"
@@ -146,7 +146,7 @@ export function ListEditor<T>({
         + {addLabel}
       </button>
       {rows.length >= maxRows && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           Maximum of {maxRows} rows reached.
         </p>
       )}

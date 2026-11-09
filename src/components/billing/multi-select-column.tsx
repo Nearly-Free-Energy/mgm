@@ -140,7 +140,7 @@ export function HeaderCheckbox({
     if (ref.current) ref.current.indeterminate = state === "indeterminate";
   }, [state]);
   return (
-    <label className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground">
+    <label className="inline-flex cursor-pointer items-center gap-1.5 text-caption text-muted-foreground">
       <input
         ref={ref}
         type="checkbox"

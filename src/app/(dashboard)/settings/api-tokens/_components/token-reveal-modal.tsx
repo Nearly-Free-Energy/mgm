@@ -64,13 +64,13 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
           <div aria-hidden="true" className="h-[6px] bg-warning" />
 
           <div className="px-6 pt-5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-warning-fg">
+            <span className="text-caption font-semibold uppercase tracking-wide text-warning-fg">
               Shown once
             </span>
             <Dialog.Title className="mt-1.5 text-xl font-semibold tracking-tight text-foreground">
               Save this token now
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense leading-relaxed text-muted-foreground">
               MGM cannot show this plaintext again. Paste it into your
               customerapp configuration before closing this dialog.
             </Dialog.Description>
@@ -87,7 +87,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
             <div className="rounded-md border border-border bg-muted p-3">
               <code
                 aria-label="Token plaintext — copy now"
-                className="block break-all font-mono text-[13px] text-foreground"
+                className="block break-all font-mono text-dense text-foreground"
               >
                 {props.plaintext ?? ""}
               </code>
@@ -97,7 +97,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
               <button
                 type="button"
                 onClick={handleCopy}
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {copied ? "Copied!" : "Copy to clipboard"}
               </button>
@@ -111,7 +111,7 @@ export function TokenRevealModal(props: TokenRevealModalProps) {
             <Dialog.Close asChild>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Done — token saved
               </button>

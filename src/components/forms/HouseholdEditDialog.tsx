@@ -322,7 +322,7 @@ export function HouseholdEditDialog({
               </Dialog.Title>
               <Dialog.Description
                 id="hh-edit-desc"
-                className="mt-1 text-[13px] text-muted-foreground"
+                className="mt-1 text-dense text-muted-foreground"
               >
                 Only changed fields are saved. Switch the billing meter at any
                 time — historical bills retain their original device link.
@@ -362,7 +362,7 @@ export function HouseholdEditDialog({
                 <div>
                   <span
                     id="hh-edit-customer-type-label"
-                    className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                    className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
                   >
                     Customer type
                   </span>
@@ -479,7 +479,7 @@ export function HouseholdEditDialog({
                 <button
                   type="button"
                   disabled={submitting}
-                  className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -488,7 +488,7 @@ export function HouseholdEditDialog({
                 type="button"
                 onClick={() => handleSubmit()}
                 disabled={!canSave}
-                className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {submitting ? "Saving…" : "Save changes"}
               </button>
@@ -530,7 +530,7 @@ function Section({
 }) {
   return (
     <section className="space-y-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </p>
       {children}
@@ -584,7 +584,7 @@ function Field({
     <div>
       <label
         htmlFor={id}
-        className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+        className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
       >
         {label}
         {required && (
@@ -641,7 +641,7 @@ function AddressSubsection({
       className="group rounded-md border border-border bg-card"
       open
     >
-      <summary className="flex cursor-pointer items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <summary className="flex cursor-pointer items-center justify-between px-3 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         <span>Address</span>
         <span
           aria-hidden
@@ -701,7 +701,7 @@ function AddressSubsection({
         <div>
           <label
             htmlFor="hh-edit-geography-notes"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Geography notes
           </label>

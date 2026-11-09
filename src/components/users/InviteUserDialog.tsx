@@ -173,7 +173,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
             <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
               Invite user
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               An invitation email with a magic-link sign-in will be sent.
             </Dialog.Description>
           </div>
@@ -325,7 +325,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
               <Dialog.Close asChild>
                 <button
                   type="button"
-                  className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Cancel
                 </button>
@@ -333,7 +333,7 @@ export function InviteUserDialog(props: InviteUserDialogProps) {
               <button
                 type="submit"
                 disabled={submitting}
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {submitting ? "Sending..." : "Send invitation"}
               </button>

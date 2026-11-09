@@ -294,14 +294,14 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
         <div className="space-y-3">
           {edgeRows.length > 0 && (
             <section data-testid="regen-multi-edge-section">
-              <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Will be regenerated ({edgeRows.length})
               </h4>
               <ul className="space-y-1">
                 {edgeRows.map((r) => (
                   <li
                     key={r.householdId}
-                    className="flex items-center justify-between gap-2 text-[13px]"
+                    className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
@@ -327,10 +327,10 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
 
           {manualRows.length > 0 && (
             <section data-testid="regen-multi-skip-section">
-              <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                 Will be skipped ({manualRows.length})
               </h4>
-              <p className="mb-1 text-[12px] text-muted-foreground">
+              <p className="mb-1 text-caption text-muted-foreground">
                 Manual readings are per-row only — close this and use the row
                 menu to regenerate.
               </p>
@@ -338,7 +338,7 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
                 {manualRows.map((r) => (
                   <li
                     key={r.householdId}
-                    className="flex items-center justify-between gap-2 text-[13px]"
+                    className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
@@ -363,13 +363,13 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
           {allSelectedAreManual && (
             <p
               data-testid="regen-multi-all-manual-notice"
-              className="text-[12px] text-muted-foreground"
+              className="text-caption text-muted-foreground"
             >
               All selected rows are manual — nothing to regenerate.
             </p>
           )}
 
-          <p className="text-[12px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             Edge-only — to regenerate manual rows, use the row menu.
           </p>
         </div>
@@ -460,7 +460,7 @@ function ResultDialog(props: {
               <button
                 type="button"
                 data-testid="regen-multi-result-close"
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Close
               </button>

@@ -213,7 +213,7 @@ export function LogoUploadControl({
           </p>
         )}
         {(draftPreviewUrl || persistedThumbnailSrc) && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {draftPreviewUrl
               ? `Selected: ${draftFile?.name ?? "file"} — click Upload to save`
               : currentLogoPath

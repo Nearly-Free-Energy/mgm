@@ -38,7 +38,7 @@ export function DeviceRowActions({ device }: { device: DeviceEditDialogDevice })
           >
             <DropdownMenu.Item
               onSelect={() => setEditing(true)}
-              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+              className="flex cursor-pointer items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
             >
               Edit device
             </DropdownMenu.Item>

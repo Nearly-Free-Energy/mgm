@@ -119,7 +119,7 @@ export function ManualUsageCell({
     return (
       <span
         className={cn(
-          "inline-block w-full text-right text-[12px] tabular-nums",
+          "inline-block w-full text-right text-dense tabular-nums",
           className
         )}
       >
@@ -215,7 +215,7 @@ export function ManualUsageCell({
         disabled={saving}
         aria-label={`${field === "end_kwh" ? "End kWh" : "Usage kWh"} for line item ${lineItemId}`}
         className={cn(
-          "w-full bg-transparent text-right text-[12px] tabular-nums",
+          "w-full bg-transparent text-right text-dense tabular-nums",
           "rounded-sm px-1 py-0.5 outline-none",
           "hover:ring-1 hover:ring-border focus:ring-2 focus:ring-ring",
           "disabled:opacity-60",

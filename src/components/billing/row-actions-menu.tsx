@@ -814,7 +814,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
                   <DropdownMenu.Item key={item.key} asChild>
                     <Link
                       href={item.href}
-                      className="flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none data-[highlighted]:bg-muted"
+                      className="flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-dense text-foreground outline-none data-[highlighted]:bg-muted"
                     >
                       {item.label}
                     </Link>
@@ -827,7 +827,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
                   <DropdownMenu.Item
                     key={item.key}
                     disabled
-                    className="flex cursor-not-allowed select-none items-center rounded-sm px-2 py-1.5 text-[13px] text-muted-foreground outline-none"
+                    className="flex cursor-not-allowed select-none items-center rounded-sm px-2 py-1.5 text-dense text-muted-foreground outline-none"
                   >
                     {item.label}
                   </DropdownMenu.Item>
@@ -838,7 +838,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
                   key={item.key}
                   onSelect={() => item.onSelect()}
                   className={cn(
-                    "flex cursor-pointer select-none flex-col items-start rounded-sm px-2 py-1.5 text-[13px] text-foreground outline-none",
+                    "flex cursor-pointer select-none flex-col items-start rounded-sm px-2 py-1.5 text-dense text-foreground outline-none",
                     "data-[highlighted]:bg-muted",
                   )}
                 >
@@ -849,7 +849,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
                     </span>
                   </span>
                   {item.subtext && (
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-caption text-muted-foreground">
                       {item.subtext}
                     </span>
                   )}

@@ -8,7 +8,7 @@
 //   p-6 · shadow-elev-1
 //
 // Typography mirrors that shell's empty state:
-//   - Eyebrow:  text-[10px] font-semibold uppercase tracking-wide text-muted-foreground
+//   - Eyebrow:  text-caption font-semibold uppercase tracking-wide text-muted-foreground
 //   - Title:    text-lg font-semibold text-foreground
 //   - Body:     text-sm text-muted-foreground  (mt-2)
 //   - CTA row:  mt-4
@@ -93,7 +93,7 @@ export function EmptyState({
       )}
     >
       {eyebrow && (
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           {eyebrow}
         </p>
       )}

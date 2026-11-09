@@ -179,7 +179,7 @@ export function ConfirmDialog({
             {eyebrow !== null && (
               <span
                 className={cn(
-                  "text-[11px] font-semibold uppercase tracking-wide",
+                  "text-caption font-semibold uppercase tracking-wide",
                   tone === "destructive" ? "text-destructive" : "text-primary",
                 )}
               >
@@ -196,7 +196,7 @@ export function ConfirmDialog({
             {description && (
               <Dialog.Description
                 id={DESC_ID}
-                className="mt-1 text-[13px] leading-relaxed text-muted-foreground"
+                className="mt-1 text-dense leading-relaxed text-muted-foreground"
               >
                 {description}
               </Dialog.Description>
@@ -206,7 +206,7 @@ export function ConfirmDialog({
           {body !== undefined && (
             <div
               id={BODY_ID}
-              className="px-6 pb-1 text-[13px] leading-relaxed text-foreground"
+              className="px-6 pb-1 text-dense leading-relaxed text-foreground"
             >
               {body}
             </div>
@@ -216,7 +216,7 @@ export function ConfirmDialog({
             <div className="mt-3 px-6 pb-1">
               <label
                 htmlFor="confirm-dialog-typed-input"
-                className="mb-1 block text-[12px] font-medium text-foreground"
+                className="mb-1 block text-caption font-medium text-foreground"
               >
                 {requireTypedConfirmation.label}
               </label>
@@ -231,7 +231,7 @@ export function ConfirmDialog({
                 autoCorrect="off"
                 spellCheck={false}
                 aria-label={requireTypedConfirmation.label}
-                className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-[13px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-dense text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder={requireTypedConfirmation.expected}
               />
             </div>
@@ -239,7 +239,7 @@ export function ConfirmDialog({
 
           {state === "error" && errorMsg && (
             <div className="px-6 pt-2">
-              <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-[13px] text-destructive-fg">
+              <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
                 {errorMsg}
               </div>
             </div>
@@ -251,7 +251,7 @@ export function ConfirmDialog({
             <Dialog.Close asChild>
               <button
                 ref={cancelRef}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 Cancel
               </button>
@@ -262,7 +262,7 @@ export function ConfirmDialog({
                 onClick={handleConfirm}
                 disabled={!typedMatches}
                 className={cn(
-                  "inline-flex h-8 items-center rounded-md border px-3.5 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed",
+                  "inline-flex h-8 items-center rounded-md border px-3.5 text-dense font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed",
                   confirmBtnCls,
                 )}
               >
@@ -273,7 +273,7 @@ export function ConfirmDialog({
                 onClick={handleConfirm}
                 disabled={state === "loading" || !typedMatches}
                 className={cn(
-                  "inline-flex h-8 items-center gap-2 rounded-md border px-3.5 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed",
+                  "inline-flex h-8 items-center gap-2 rounded-md border px-3.5 text-dense font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 disabled:cursor-not-allowed",
                   confirmBtnCls,
                 )}
               >

@@ -368,7 +368,7 @@ export function InvoiceShell({
   return (
     <form onSubmit={handleSave} className="space-y-6">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           Invoice
         </p>
         <h3 className="text-lg font-semibold text-foreground">
@@ -613,7 +613,7 @@ export function InvoiceShell({
             </span>
           </label>
           {state.tax_rate_pct === 0 && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               Tax section is hidden when the rate is 0%.
             </p>
           )}
@@ -800,7 +800,7 @@ function Field({
       </label>
       {children}
       {description && (
-        <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{description}</p>
       )}
     </div>
   );

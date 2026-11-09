@@ -330,7 +330,7 @@ export function CopyTable<Row>({
           "focus-visible:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_25%,transparent)]",
         )}
       >
-        <table className="w-full border-collapse text-[12px] tabular-nums">
+        <table className="w-full border-collapse text-dense tabular-nums">
           <caption className="sr-only">
             {caption}. Use arrow keys to move; press C or Enter to copy a cell.
           </caption>
@@ -342,7 +342,7 @@ export function CopyTable<Row>({
                   scope="col"
                   id={col.id ?? `mgm-col-${ci}`}
                   className={cn(
-                    "h-8 whitespace-nowrap border-b border-border px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
+                    "h-8 whitespace-nowrap border-b border-border px-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground",
                     col.kind === "row-header" ? "text-left" : col.kind === "action" ? "text-center" : "text-right",
                     col.className,
                   )}
@@ -378,7 +378,7 @@ export function CopyTable<Row>({
                         key={c}
                         scope="row"
                         className={cn(
-                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-[12px] font-medium text-foreground pointer-coarse:h-11",
+                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-dense font-medium text-foreground pointer-coarse:h-11",
                           col.className,
                         )}
                       >
@@ -406,7 +406,7 @@ export function CopyTable<Row>({
                     >
                       {formatted}
                       {isCopied && (
-                        <span aria-hidden="true" className="ml-1 text-[11px] font-semibold text-success-fg">
+                        <span aria-hidden="true" className="ml-1 text-caption font-semibold text-success-fg">
                           ✓
                         </span>
                       )}
