@@ -11,23 +11,16 @@ import {
   type SurfaceCatalog,
 } from "../contribution-schema";
 
-/** The real catalog, with the fixture's page routes given to billing and a second non-core plugin. */
+/** The real catalog, whose billing plugin owns the fixture's pages, plus a second non-core plugin. */
 const SMS = {
   ...MGM_BUNDLED_PLUGINS[0],
   name: "sms-reminders" as MgmPluginName,
   alias: "sms",
   core: false,
   routes: ["/api/sms"],
+  pages: [],
 } satisfies BundledPlugin;
-const CATALOG: SurfaceCatalog = {
-  plugins: [
-    ...MGM_BUNDLED_PLUGINS.map((p) =>
-      p.name === "billing" ? { ...p, routes: [...p.routes, "/microgrids/[id]/billing", "/microgrids/[id]/setup/rates"] } : p,
-    ),
-    SMS,
-  ],
-};
-const REAL_CATALOG: SurfaceCatalog = { plugins: MGM_BUNDLED_PLUGINS };
+const CATALOG: SurfaceCatalog = { plugins: [...MGM_BUNDLED_PLUGINS, SMS] };
 
 /** A contribution under test is edited freely, so it is typed loosely. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,7 +110,7 @@ describe("parseContribution", () => {
   });
 
   // [rule, change, path, message (exact; omitted where zod writes it), catalog]
-  const cases: [string, (c: Draft) => void, PropertyKey[], string?, SurfaceCatalog?][] = [
+  const cases: [string, (c: Draft) => void, PropertyKey[], string?][] = [
     // Strict shapes
     ["unknown top-level key", (c) => (c.extra = 1), [], 'Unrecognized key: "extra"'],
     ["unknown nested key", (c) => (c.views[0].declares.extra = 1), ["views", 0, "declares"], 'Unrecognized key: "extra"'],
@@ -192,8 +185,8 @@ describe("parseContribution", () => {
     ["assistant reading of a view on a configure legacy href", (c) => (c.nav[1].href = "/microgrids/[id]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     ["assistant reading of a view on a legacy href with renamed placeholders", (c) => (c.nav[1].href = "/microgrids/[microgridId]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
-    ["a view path another plugin owns", () => {}, ["views", 0, "path"], "the catalog gives /microgrids/[id]/billing to community-management", REAL_CATALOG],
-    ["a legacy href another plugin owns", () => {}, ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/rates to community-management", REAL_CATALOG],
+    ["a view path another plugin owns", (c) => (c.views[0].path = "/microgrids/[id]/operations"), ["views", 0, "path"], "the catalog gives /microgrids/[id]/operations to metering"],
+    ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/households"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/households to community-management"],
     ["an action path another plugin owns", (c) => (c.actions[0].path = "/api/devices"), ["actions", 0, "path"], "the catalog gives /api/devices to metering"],
     ["a path nobody owns", (c) => (c.actions[0].path = "/api/nowhere"), ["actions", 0, "path"], "no plugin in the catalog owns /api/nowhere"],
     ["two views on one path", (c) => (c.views[2].path = c.views[1].path), ["views", 2, "path"], "another view already serves /microgrids/[id]/billing/[periodId]"],
@@ -228,9 +221,9 @@ describe("parseContribution", () => {
     ["an ext schema with an async check", (c) => (c.views[1].ext.zod = c.views[1].ext.zod.refine(async () => true)), ["views", 1, "examples", 0, "ext", "data"], "the ext schema cannot be checked synchronously"],
   ];
 
-  it.each(cases)("refuses %s", (_rule, change, path, message, catalog) => {
+  it.each(cases)("refuses %s", (_rule, change, path, message) => {
     const isSms = path[0] === "entities";
-    const error = refusal(change, catalog ?? CATALOG, isSms ? SMS_SURFACE : BILLING_SURFACE);
+    const error = refusal(change, CATALOG, isSms ? SMS_SURFACE : BILLING_SURFACE);
     expect(error.issues).toContainEqual(expect.objectContaining(message === undefined ? { path } : { path, message }));
   });
 });
