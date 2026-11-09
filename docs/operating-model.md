@@ -56,7 +56,11 @@ upgrading from the old names, in `docs/setup.md`, "Runtime configuration").
   key and provider credentials are never serialized into props, HTML or
   bundles. `MGM_GUI` selects the compiled-in interface
   (`src/lib/config/gui.ts`); only the validated name of a compiled-in GUI
-  may reach the browser, never the raw value.
+  may reach the browser, never the raw value. `MGM_METERING_FIXTURES`
+  (`src/lib/config/metering-fixtures.ts`) is to allow synthetic site data
+  for reserved `SYNTHETIC-EDGE-` edges once the fixture provider is
+  registered; no metering path reads it yet. An invalid value is logged
+  and counts as off.
 - **One source per request.** Browser, server and middleware (Node.js
   runtime) Supabase clients use the same validated values and cookie name;
   an internal Supabase URL on another host requires an explicit cookie name. The configuration-

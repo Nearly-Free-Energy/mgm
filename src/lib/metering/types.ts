@@ -20,6 +20,11 @@ export type MeteringReadRequest = {
 
 /** A request-scoped metering dependency for the billing engine. */
 export interface MeteringProvider {
+  /**
+   * Set by a provider whose figures are generated, not measured, so a view
+   * can label them.
+   */
+  readonly synthetic?: true;
   getReadings(request: MeteringReadRequest): Promise<DeviceReading[]>;
   /**
    * Site power and battery samples for whole local days. Optional: a source

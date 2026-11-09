@@ -1,8 +1,8 @@
 /**
  * Server-start validation (#46): register() warns about names retired after
- * v0.0.2 (#79), validates MGM_APP_URL, MGM_GUI and the Supabase runtime
- * configuration on the Node.js runtime, and does nothing during `next build`
- * or on the Edge runtime.
+ * v0.0.2 (#79), validates MGM_APP_URL, MGM_GUI, MGM_METERING_FIXTURES and
+ * the Supabase runtime configuration on the Node.js runtime, and does nothing
+ * during `next build` or on the Edge runtime.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +25,7 @@ function stubValid() {
   vi.stubEnv("SUPABASE_INTERNAL_URL", "");
   vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
   vi.stubEnv("MGM_GUI", "");
+  vi.stubEnv("MGM_METERING_FIXTURES", "");
   for (const name of [
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -76,6 +77,28 @@ describe("instrumentation register()", () => {
     await expect((await loadRegister())()).resolves.toBeUndefined();
     expect(error).not.toHaveBeenCalled();
     error.mockRestore();
+  });
+
+  it("logs an invalid MGM_METERING_FIXTURES naming the variable and does not throw", async () => {
+    stubValid();
+    vi.stubEnv("MGM_METERING_FIXTURES", "sk_live_not_a_switch");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    const logged = String(error.mock.calls[0][0]);
+    expect(logged).toContain("MGM_METERING_FIXTURES must be on or off; synthetic site data stays off.");
+    expect(logged).not.toContain("sk_live_not_a_switch");
+    error.mockRestore();
+  });
+
+  it("warns once when MGM_METERING_FIXTURES is on", async () => {
+    stubValid();
+    vi.stubEnv("MGM_METERING_FIXTURES", "on");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/MGM_METERING_FIXTURES is on/);
+    warn.mockRestore();
   });
 
   it("rejects register() on missing Supabase settings", async () => {
