@@ -16,7 +16,8 @@
 import * as React from "react";
 import { LocalDate, type LocalDateProps } from "./local-date";
 
-const DT_OPTS: Intl.DateTimeFormatOptions = {
+/** Also used by the server-side Value formatter (src/lib/gui/fmt.ts). */
+export const LOCAL_DATE_TIME_OPTS: Readonly<Intl.DateTimeFormatOptions> = {
   year: "numeric",
   month: "short",
   day: "numeric",
@@ -27,5 +28,5 @@ const DT_OPTS: Intl.DateTimeFormatOptions = {
 export type LocalDateTimeProps = Omit<LocalDateProps, "opts" | "relative">;
 
 export function LocalDateTime(props: LocalDateTimeProps) {
-  return <LocalDate {...props} opts={DT_OPTS} />;
+  return <LocalDate {...props} opts={LOCAL_DATE_TIME_OPTS} />;
 }

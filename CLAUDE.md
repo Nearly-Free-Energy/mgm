@@ -211,7 +211,7 @@ Surfaces are `surface-1` (cards, panels), `surface-2` (muted areas) and `surface
 
 Six rules every contributor must follow:
 
-1. **Status chips:** Use `<Chip>` not raw `<span>` for status indicators. Use `<StatusChip kind="…" status="…">` to map domain enums (billingPeriod, meterType, edge, household) — this keeps tone-to-status mapping in one file (`src/components/ui/status-chip.tsx`). Add new domain enums by extending `MAPS` in that file, not inline.
+1. **Status chips:** Use `<Chip>` not raw `<span>` for status indicators. Use `<StatusChip kind="…" status="…">` to map domain enums (billingPeriod, meterType, edge, household) — this keeps tone-to-status mapping in one file (`src/lib/gui/status-maps.ts`), which `<StatusChip>` renders and `fmt.status` serves to GUIs. Add new domain enums by extending `STATUS_MAPS` there, not inline.
 
 2. **Format primitives:** Use `<Currency>`, `<Kwh>`, and `<LocalDate>` — never `Intl.NumberFormat` or `toLocaleDateString` directly. Locale comes from `Accept-Language` (detected at the app root); currency comes from microgrid context (wired in `microgrids/[id]/layout.tsx` via `<LocaleProvider currency={microgrid.currency}>`). In-table currency cells use `bareNumber` prop so Aaron's URA paste workflow gets `4,216,800` not `UGX 4,216,800`; show currency code only in column headers. Numbers render in Inter's tabular figures (`tabular-nums`, as these primitives do), so columns line up; `font-mono` is for identifiers such as component ids, URLs and token prefixes.
 

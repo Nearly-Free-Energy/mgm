@@ -21,6 +21,7 @@
 //     rates are unit-rate calculation factors decoupled from the currency's
 //     minor-unit convention. Defaults: minDigits=2, maxDigits=4. No currency
 //     parameter — the column header carries the unit. Returns "—" for null.
+//   - `currencyFractionDigits(currency)` — the currency's minor-unit digits.
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,14 @@ export function formatCurrency(
     if (opts.minFractionDigits !== undefined) nfOpts.minimumFractionDigits = opts.minFractionDigits;
   }
   return getNF(locale, nfOpts).format(value);
+}
+
+/**
+ * How many fraction digits a currency's minor unit has (ISO 4217, as Intl
+ * reports it): UGX 0, USD 2.
+ */
+export function currencyFractionDigits(currency: string): number {
+  return getNF("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 0;
 }
 
 /**
