@@ -171,6 +171,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_PUBLIC_SUPABASE_COOKIE_NAME` | when `SUPABASE_INTERNAL_URL` is on another host | yes | Fixed auth cookie name, so server, middleware and browser find the same session. Without it, Supabase derives the cookie name from the URL each side uses; MGM refuses to start a request when the internal and public hosts differ and this is unset |
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
 | `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
+| `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. No page reads it yet |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -182,15 +183,21 @@ Missing or invalid settings stop the request with an error that names the
 variable and never prints its value.
 
 At server start (`src/instrumentation.ts`, not during `next build`) MGM
-validates the Supabase settings and `MGM_APP_URL`. An invalid Supabase setting
-is logged at server start; every page and API request then fails with 500
-while the process keeps running (it does not exit, so a restart policy does
-not fire). Look for "Failed to prepare server" or "An error occurred while
-loading instrumentation hook" in the logs. An invalid `MGM_APP_URL` is logged
+validates the Supabase settings, `MGM_APP_URL` and `MGM_GUI`. An invalid
+Supabase setting is logged at server start; every page and API request then
+fails with 500 while the process keeps running (it does not exit, so a
+restart policy does not fire). Look for "Failed to prepare server" or "An
+error occurred while loading instrumentation hook" in the logs. An invalid `MGM_APP_URL` is logged
 as an error naming the variable and does not stop anything else; payment
 links and notification registration fail with the same message on first use.
 A missing `MGM_APP_URL` only logs a warning, because payments are the only
-feature that needs it.
+feature that needs it. An `MGM_GUI` that names no compiled-in GUI is also
+logged as an error naming the variable; its value is printed only when it
+looks like a GUI name. It does not stop payment pages or webhooks, which render no
+interface. A compiled-in GUI that does not support this build's GUI contract
+is different: the runtime refuses to install it at start, which stops every
+request, payments included. The `Test` gate
+(`src/gui/__tests__/installed-guis.test.ts`) refuses such a build first.
 
 Variables are read when a request is served. Set them in the hosting
 environment (Vercel project settings, the container's `environment:`, or

@@ -1,10 +1,10 @@
 /**
- * Browser code never reads the Supabase or application-URL settings from
- * `process.env` (#46, #79). The server reads them at request time
- * (src/lib/config/public-runtime-config.ts, src/lib/config/app-url.ts) and
- * the browser gets the three public values only from
- * PublicRuntimeConfigProvider. A browser read would take whatever value the
- * build had: the deployment that built it would work, and every other
+ * Browser code never reads the Supabase, application-URL or GUI settings
+ * from `process.env` (#46, #79). The server reads them at request time
+ * (src/lib/config/public-runtime-config.ts, src/lib/config/app-url.ts,
+ * src/lib/config/gui.ts) and the browser gets the three public values only
+ * from PublicRuntimeConfigProvider. A browser read would take whatever value
+ * the build had: the deployment that built it would work, and every other
  * installation running that build would log in to the wrong project, or to
  * none.
  *
@@ -17,8 +17,8 @@
  *      warning, names a retired setting anywhere in code (comments
  *      excepted), so a fallback cannot come back through destructuring, an
  *      alias, `process['env']` or `?.`;
- *   2. only the two config modules read the current settings from
- *      `process.env`;
+ *   2. only the config modules in ENV_READERS read the current settings
+ *      from `process.env`;
  *   3. browser files ("use client" modules and the browser-side helpers in
  *      BROWSER_MODULES) name none of the settings, and no NEXT_PUBLIC_ name,
  *      in code, and import only types from the server-only config modules;
@@ -47,6 +47,7 @@ const TEST = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const ENV_READERS: Record<string, string> = {
   "src/lib/config/public-runtime-config.ts": "reads and validates the Supabase settings per request",
   "src/lib/config/app-url.ts": "reads and validates MGM_APP_URL per call",
+  "src/lib/config/gui.ts": "reads and validates MGM_GUI per call",
 };
 
 /** The one module that may name the retired settings in code: it lists them. */
@@ -68,7 +69,7 @@ const BROWSER_MODULES: Record<string, string> = {
 
 const RETIRED =
   "NEXT_PUBLIC_(?:SUPABASE_URL|SUPABASE_ANON_KEY|SUPABASE_COOKIE_NAME|APP_URL|PAYMENT_CALLBACK_URL)";
-const CURRENT = "MGM_PUBLIC_SUPABASE_[A-Z_]+|MGM_APP_URL|SUPABASE_INTERNAL_URL";
+const CURRENT = "MGM_PUBLIC_SUPABASE_[A-Z_]+|MGM_APP_URL|MGM_GUI|SUPABASE_INTERNAL_URL";
 const ANY_NEXT_PUBLIC = "NEXT_PUBLIC_[A-Z0-9_]+";
 
 const PROCESS_ENV = `process\\s*(?:\\?\\.\\s*env|\\.\\s*env|\\[\\s*["'\`]env["'\`]\\s*\\])`;
@@ -174,11 +175,11 @@ describe("browser code does not read deployment settings from process.env", () =
     ).toEqual([]);
   });
 
-  it("reads the Supabase and application-URL settings only in the config modules", () => {
+  it("reads the Supabase, application-URL and GUI settings only in the config modules", () => {
     const found = files.filter((file) => !ENV_READERS[file] && CURRENT_READ.test(read(file)));
     expect(
       found,
-      "Read these settings through src/lib/config/public-runtime-config.ts or app-url.ts"
+      "Read these settings through src/lib/config/public-runtime-config.ts, app-url.ts or gui.ts"
     ).toEqual([]);
   });
 
@@ -213,6 +214,8 @@ describe("browser code does not read deployment settings from process.env", () =
     expect(NEXT_PUBLIC_READ.test("process.env.NEXT_PUBLIC_… or process.env.NEXT_PUBLIC_*")).toBe(false);
     expect(CURRENT_READ.test("process.env.MGM_PUBLIC_SUPABASE_ANON_KEY")).toBe(true);
     expect(CURRENT_READ.test("process.env['MGM_APP_URL']")).toBe(true);
+    expect(CURRENT_READ.test("process.env.MGM_GUI")).toBe(true);
+    expect(CURRENT_READ.test("process.env.MGM_GUI_EXTRA")).toBe(false);
     expect(CURRENT_READ.test("process.env.MGM_CREDENTIAL_KEY")).toBe(false);
     expect(NEXT_PUBLIC_READ.test("process['env'].NEXT_PUBLIC_APP_URL")).toBe(true);
     expect(NEXT_PUBLIC_READ.test("process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY")).toBe(true);
