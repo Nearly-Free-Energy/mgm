@@ -73,6 +73,11 @@ const routePattern = z
   .regex(/^\/$|^(?:\/(?:[a-z0-9_][a-z0-9_-]*|\[[A-Za-z][A-Za-z0-9_]*\]))+$/, "Expected a route such as /microgrids/[id]");
 const kindMap = z.record(z.string(), entityKindSchema);
 
+/** A route with its placeholder names dropped: /x/[id] and /x/[microgridId] are one route. */
+function routeKey(route: string): string {
+  return route.replace(/\[[^\]]+\]/g, "[]");
+}
+
 function segmentsOf(route: string): string[] {
   return [...route.matchAll(/\[([A-Za-z][A-Za-z0-9_]*)\]/g)].map((m) => m[1]);
 }
@@ -126,6 +131,14 @@ type Def = {
 const LEAVES = new Set(["string", "number", "boolean", "literal", "enum", "null", "date"]);
 const WRAPPERS = new Set(["optional", "nullable", "default", "readonly"]);
 
+/** Whether a record key schema allows only keys it names. */
+function closedKeys(schema: z.ZodType): boolean {
+  const def = schema._zod.def as unknown as Def;
+  if (def.type === "enum" || def.type === "literal") return true;
+  if (def.type === "union") return def.options!.every(closedKeys);
+  return false;
+}
+
 /** Where a schema could accept keys or values nobody declared: loose objects, any, unknown, custom, lazy, transforms. */
 export function strictProblems(schema: z.ZodType): { path: Path; message: string }[] {
   const problems: { path: Path; message: string }[] = [];
@@ -150,7 +163,10 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
       case "union":
         return def.options!.forEach((child) => walk(child, path));
       case "record":
-        walk(def.keyType!, path);
+        // A string key lets a loader send any key it likes, so a record must
+        // name its keys: an enum, a literal, or a union of those.
+        if (!closedKeys(def.keyType!))
+          problems.push({ path, message: "ext records must have enum or literal keys (z.record(z.enum([...]), ...))" });
         return walk(def.valueType!, path);
       default:
         problems.push({ path, message: `ext schemas may not use ${def.type}` });
@@ -339,11 +355,12 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
   ids(c.entities?.map((e) => e.kind), "entities", "kind");
 
   const views = c.views ?? [];
-  const paths = new Set<string>();
+  const paths = new Map<string, string>();
   views.forEach((v, i) => {
     owned(v.path, ["views", i, "path"]);
-    if (paths.has(v.path)) add(ctx, ["views", i, "path"], `another view already serves ${v.path}`);
-    paths.add(v.path);
+    const same = paths.get(routeKey(v.path));
+    if (same !== undefined) add(ctx, ["views", i, "path"], `another view already serves ${same}`);
+    else paths.set(routeKey(v.path), v.path);
     for (const [key, k] of Object.entries(v.params)) kind(k, ["views", i, "params", key]);
     if (typeof v.attach?.to === "string") kind(v.attach.to, ["views", i, "attach", "to"]);
     if (v.ext && !v.ext.schema.startsWith(`${entry.alias}.`))
@@ -353,7 +370,9 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
     if (n.href !== undefined) owned(n.href, ["nav", i, "href"]);
     // A legacy href reaches the view on its path once the catalog marks that page servedBy: "view";
     // if views stop being served at their own paths, revisit.
-    const j = views.findIndex((v) => (n.view === undefined ? v.path === n.href : v.id === n.view));
+    const j = views.findIndex((v) =>
+      n.view === undefined ? n.href !== undefined && routeKey(v.path) === routeKey(n.href) : v.id === n.view,
+    );
     if (j < 0) {
       if (n.view !== undefined) add(ctx, ["nav", i, "view"], `"${n.view}" is not a view in this contribution`);
       return;

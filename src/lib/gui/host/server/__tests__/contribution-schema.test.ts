@@ -190,12 +190,23 @@ describe("parseContribution", () => {
     ["assistant reading of a configure view", (c) => (c.nav[0].group = "configure"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     ["assistant reading of a system view", (c) => (c.nav[0].group = "system"), ["views", 0, "agent"], "a view reached from system navigation cannot be read by an assistant"],
     ["assistant reading of a view on a configure legacy href", (c) => (c.nav[1].href = "/microgrids/[id]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
+    ["assistant reading of a view on a legacy href with renamed placeholders", (c) => (c.nav[1].href = "/microgrids/[microgridId]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
     ["a view path another plugin owns", () => {}, ["views", 0, "path"], "the catalog gives /microgrids/[id]/billing to community-management", REAL_CATALOG],
     ["a legacy href another plugin owns", () => {}, ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/rates to community-management", REAL_CATALOG],
     ["an action path another plugin owns", (c) => (c.actions[0].path = "/api/devices"), ["actions", 0, "path"], "the catalog gives /api/devices to metering"],
     ["a path nobody owns", (c) => (c.actions[0].path = "/api/nowhere"), ["actions", 0, "path"], "no plugin in the catalog owns /api/nowhere"],
     ["two views on one path", (c) => (c.views[2].path = c.views[1].path), ["views", 2, "path"], "another view already serves /microgrids/[id]/billing/[periodId]"],
+    [
+      "two views on one path with renamed placeholders",
+      (c) => {
+        c.views[2].path = "/microgrids/[mg]/billing/[period]";
+        c.views[2].params = { mg: "microgrid", period: "billingPeriod" };
+        c.views[2].entity = "period";
+      },
+      ["views", 2, "path"],
+      "another view already serves /microgrids/[id]/billing/[periodId]",
+    ],
     // Schemas
     ["a loose ext schema", (c) => (c.views[1].ext.zod = z.object({ tariffVersion: z.number() })), ["views", 1, "ext", "zod"], "ext objects must be strict (z.strictObject)"],
     ["an input JSON Schema cannot describe", (c) => (c.actions[0].input = z.strictObject({ at: z.date() })), ["actions", 0, "input"], "the input cannot be described as JSON Schema: Date cannot be represented in JSON Schema"],
@@ -232,6 +243,9 @@ describe("strictProblems", () => {
     ["any", z.strictObject({ a: z.any() })],
     ["unknown", z.strictObject({ a: z.unknown() })],
     ["an open record", z.record(z.string(), z.unknown())],
+    ["a record with string keys", z.record(z.string(), z.string())],
+    ["a record keyed by a union with a string", z.record(z.union([z.literal("a"), z.string()]), z.number())],
+    ["an open record inside a strict object", z.strictObject({ meta: z.record(z.string(), z.string()) })],
     ["lazy", z.lazy(() => z.string())],
     ["a transform", z.string().transform(Number)],
     ["custom", z.custom<string>(() => true)],
@@ -257,6 +271,8 @@ describe("strictProblems", () => {
       pair: z.tuple([z.string(), z.number().nullable()]),
       either: z.discriminatedUnion("t", [z.strictObject({ t: z.literal("a") }), z.strictObject({ t: z.literal("b") })]),
       byKind: z.record(z.enum(["x", "y"]), z.number()),
+      byLiteral: z.record(z.literal("only"), z.string()),
+      byLiterals: z.record(z.union([z.literal("a"), z.literal("b")]), z.boolean()),
       level: z.enum(["low", "high"]).default("low"),
       nothing: z.null(),
     });
