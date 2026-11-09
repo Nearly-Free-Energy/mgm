@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as cordis from "cordis";
 import { Context, type Fiber, type Plugin } from "cordis";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
+import { GRIDTOP_META } from "@/gui/gridtop/meta";
 import type { GuiMeta } from "@/lib/gui/contract";
 import type { Contribution } from "@/lib/gui/surface";
 import type { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
@@ -73,6 +74,7 @@ describe("MGM root runtime", () => {
       "mgm-catalog",
       "mgm-gate",
       "mgm-surface",
+      "gridtop",
       "metering-providers",
       "openems-metering",
       "payment-providers",
@@ -83,7 +85,7 @@ describe("MGM root runtime", () => {
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
     // Each contribution or compiled-in GUI added later shows up here.
     expect(runtime.mgmSurface.snapshot().views).toEqual([]);
-    expect(runtime.mgmSurface.snapshot().guis).toEqual([]);
+    expect(runtime.mgmSurface.snapshot().guis).toEqual([GRIDTOP_META]);
   });
 
   it("binds metering factories to the caller's client", async () => {

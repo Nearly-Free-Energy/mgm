@@ -1,8 +1,8 @@
 /**
  * Server-start validation (#46): register() warns about names retired after
- * v0.0.2 (#79), validates MGM_APP_URL and the Supabase runtime configuration
- * on the Node.js runtime, and does nothing during `next build` or on the
- * Edge runtime.
+ * v0.0.2 (#79), validates MGM_APP_URL, MGM_GUI and the Supabase runtime
+ * configuration on the Node.js runtime, and does nothing during `next build`
+ * or on the Edge runtime.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +24,7 @@ function stubValid() {
   vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
   vi.stubEnv("SUPABASE_INTERNAL_URL", "");
   vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
+  vi.stubEnv("MGM_GUI", "");
   for (const name of [
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -53,6 +54,27 @@ describe("instrumentation register()", () => {
     const logged = String(error.mock.calls[0][0]);
     expect(logged).toMatch(/MGM_APP_URL must use https/);
     expect(logged).not.toContain("mgm.example.org");
+    error.mockRestore();
+  });
+
+  it("logs an error naming MGM_GUI and does not throw on a name no GUI has", async () => {
+    stubValid();
+    vi.stubEnv("MGM_GUI", "sk_live_not_a_gui");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(error).toHaveBeenCalledTimes(1);
+    const logged = String(error.mock.calls[0][0]);
+    expect(logged).toContain("MGM_GUI names no installed GUI. Installed: gridtop.");
+    expect(logged).not.toContain("sk_live_not_a_gui");
+    error.mockRestore();
+  });
+
+  it("accepts MGM_GUI naming an installed GUI", async () => {
+    stubValid();
+    vi.stubEnv("MGM_GUI", "gridtop");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect((await loadRegister())()).resolves.toBeUndefined();
+    expect(error).not.toHaveBeenCalled();
     error.mockRestore();
   });
 

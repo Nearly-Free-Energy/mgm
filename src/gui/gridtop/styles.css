@@ -1,0 +1,3 @@
+/* Gridtop's stylesheet source, named by GuiMeta.styles in ./meta.ts.
+   Nothing builds or links it yet: until then every page takes its styles from
+   src/app/globals.css. */

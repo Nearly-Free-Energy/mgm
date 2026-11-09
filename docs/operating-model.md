@@ -54,7 +54,9 @@ upgrading from the old names, in `docs/setup.md`, "Runtime configuration").
   and payment-notification registration, `src/lib/config/app-url.ts`),
   `SUPABASE_INTERNAL_URL`, the service-role key, the credential encryption
   key and provider credentials are never serialized into props, HTML or
-  bundles.
+  bundles. `MGM_GUI` selects the compiled-in interface
+  (`src/lib/config/gui.ts`); only the validated name of a compiled-in GUI
+  may reach the browser, never the raw value.
 - **One source per request.** Browser, server and middleware (Node.js
   runtime) Supabase clients use the same validated values and cookie name;
   an internal Supabase URL on another host requires an explicit cookie name. The configuration-
@@ -64,7 +66,10 @@ upgrading from the old names, in `docs/setup.md`, "Runtime configuration").
   server start, every request until fixed; `src/instrumentation.ts`) with an
   error naming the variable, never its value. The process keeps running, so
   look for "Failed to prepare server" in the logs. An invalid `MGM_APP_URL`
-  is only logged at start and fails payments on first use.
+  is only logged at start and fails payments on first use. An `MGM_GUI`
+  naming no compiled-in GUI is only logged at start; payment pages and
+  webhooks keep working. A compiled-in GUI that does not support this build's
+  GUI contract stops the runtime at start, so the `Test` gate refuses it.
 - **No `NEXT_PUBLIC_` for deployment settings.** Next.js inlines those at
   build time. The former `NEXT_PUBLIC_SUPABASE_*`, `NEXT_PUBLIC_APP_URL` and
   `NEXT_PUBLIC_PAYMENT_CALLBACK_URL` names were accepted by v0.0.1 and v0.0.2

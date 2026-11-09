@@ -157,6 +157,10 @@ Each operator decides when to deploy which version. On Vercel, in outline:
 Apply any database migrations the release notes list before deploying the
 application, as `docs/operating-model.md` describes.
 
+Before promoting, check that `MGM_GUI` is unset or names a GUI the release
+includes (`src/gui/meta.ts` lists them). A name the release does not include
+is logged at server start (`docs/setup.md`, "Runtime configuration").
+
 ## Build an asset locally
 
 Do this only to test the packaging or a deployment procedure. A local build
