@@ -274,6 +274,32 @@ the released-route allowlist (`src/lib/mgm/released-routes.ts`), so
 middleware answers 404 until a release opens them. They are on the runtime
 already, so opening them is an allowlist change only.
 
+## Catalog pages
+
+Each plugin in `src/lib/plugins/bundled.ts` lists the signed-in pages it owns
+in `pages`. A page is its path as spelled under `src/app`, with route-group
+folders left out, and the entity kind (one of `CORE_ENTITY_KINDS`) of each
+bracketed segment: `/microgrids/[id]/billing/[periodId]` is a microgrid and a
+billing period. A page carries `servedBy: "view"` once a contributed GUI view
+serves it instead of a `page.tsx`.
+
+`getRouteOwner` reads page paths as ownership prefixes beside `routes`, so
+`/microgrids/[id]/operations` belongs to metering and `…/setup/rates` to
+billing. No page path starts with `/api` (the test below checks this), so
+API ownership, and with it the gate checks above, is unchanged.
+`matchCatalogPage(pathname)` gives the page a URL is, its plugin and its
+segment values; a fixed segment beats a bracketed one, as in Next.js.
+
+`src/lib/plugins/__tests__/catalog-pages.test.ts` walks `src/app` and fails
+when a plugin page has no catalog entry or an entry has no `page.tsx`, when
+a page path starts with `/api`, when a bracketed segment's kind differs from
+the one its name gives in `SEGMENT_KINDS`, when a page's owner differs from
+`PAGE_OWNERS`, when a page's release state differs from
+`src/lib/mgm/released-routes.ts`, or when `getRouteOwner` gives a page to a
+plugin that does not list it. A page that is not released yet is listed in
+`UNRELEASED_PAGES` with a reason, and pages the host serves outside any
+plugin (sign-in, password reset, first-run setup) in `HOST_PAGES`.
+
 ## Database verification
 
 `src/lib/runtime/__tests__/gate.db.test.ts` runs in the `rls` project

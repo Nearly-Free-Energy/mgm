@@ -12,6 +12,7 @@ import {
   PESAPAL_PLUGIN_NAME,
   getPluginByAlias,
   getRouteOwner,
+  matchCatalogPage,
   resolvePluginStatuses,
   validatePluginToggle,
 } from "../bundled";
@@ -242,6 +243,22 @@ describe("getRouteOwner", () => {
     expect(getRouteOwner(route)?.name).toBe(plugin);
   });
 
+  it.each([
+    ["/microgrids/[id]/operations", METERING_PLUGIN_NAME],
+    ["/microgrids/[id]/billing/[periodId]/history", BILLING_PLUGIN_NAME],
+    ["/microgrids/[id]/setup/rates", BILLING_PLUGIN_NAME],
+    ["/microgrids/[id]/setup/edges/shared", METERING_PLUGIN_NAME],
+    ["/microgrids/[id]/setup/households", COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+    ["/microgrids/[id]/setup", COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+    ["/microgrids/[id]", COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+    ["/organizations/[id]/payments", PAYMENTS_PLUGIN_NAME],
+    ["/communities/[id]/payment", PAYMENTS_PLUGIN_NAME],
+    ["/communities/[id]/invoice", BILLING_PLUGIN_NAME],
+    ["/settings/plugins", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+  ])("page %s belongs to %s", (route, plugin) => {
+    expect(getRouteOwner(route)?.name).toBe(plugin);
+  });
+
   it("does not let the root page claim every route", async () => {
     const { getRouteOwner } = await import("../bundled");
     expect(getRouteOwner("/api/unclaimed")).toBeUndefined();
@@ -308,5 +325,63 @@ describe("plugin aliases", () => {
 describe("core entity kinds", () => {
   it("lists each kind once", () => {
     expect(new Set(CORE_ENTITY_KINDS).size).toBe(CORE_ENTITY_KINDS.length);
+  });
+});
+
+describe("matchCatalogPage", () => {
+  it("returns the page, its plugin and the segment values", () => {
+    const match = matchCatalogPage("/microgrids/abc/billing/p1/history");
+    expect(match?.plugin.name).toBe(BILLING_PLUGIN_NAME);
+    expect(match?.page.path).toBe("/microgrids/[id]/billing/[periodId]/history");
+    expect(match?.values).toEqual({ id: "abc", periodId: "p1" });
+  });
+
+  it("prefers a fixed segment to a bracketed one", () => {
+    const match = matchCatalogPage("/microgrids/abc/setup/edges/shared");
+    expect(match?.page.path).toBe("/microgrids/[id]/setup/edges/shared");
+    expect(match?.values).toEqual({ id: "abc" });
+  });
+
+  it.each([
+    ["listed first", [{ path: "/x/shared", params: {} }, { path: "/x/[id]", params: { id: "edge" } }]],
+    ["listed last", [{ path: "/x/[id]", params: { id: "edge" } }, { path: "/x/shared", params: {} }]],
+  ] as const)("prefers a fixed segment whether it is %s", (_order, pages) => {
+    const plugins = [{ ...METERING_PLUGIN, pages }];
+    expect(matchCatalogPage("/x/shared", plugins)?.page.path).toBe("/x/shared");
+    expect(matchCatalogPage("/x/e1", plugins)?.page.path).toBe("/x/[id]");
+  });
+
+  it("ignores a trailing slash, the query and the fragment", () => {
+    expect(matchCatalogPage("/microgrids/abc/setup/edges/e1/")?.values).toEqual({
+      id: "abc",
+      edgeId: "e1",
+    });
+    const operations = matchCatalogPage("/microgrids/abc/operations?date=2026-11-01#top");
+    expect(operations?.plugin.name).toBe(METERING_PLUGIN_NAME);
+    expect(operations?.values).toEqual({ id: "abc" });
+    expect(matchCatalogPage("/microgrids/abc/operations#top")?.values).toEqual({ id: "abc" });
+  });
+
+  it("returns segment values as they appear in the URL", () => {
+    expect(matchCatalogPage("/microgrids/a%2Fb/operations")?.values.id).toBe("a%2Fb");
+  });
+
+  it("matches the root page", () => {
+    const match = matchCatalogPage("/");
+    expect(match?.plugin.name).toBe(ORGANIZATION_DIRECTORY_PLUGIN_NAME);
+    expect(match?.values).toEqual({});
+  });
+
+  it.each([
+    "/api/microgrids/abc/edges",
+    "/microgrids/abc",
+    "/microgrids/abc/operations/extra",
+    "/login",
+  ])("finds no page for %s", (pathname) => {
+    expect(matchCatalogPage(pathname)).toBeUndefined();
+  });
+
+  it("reads pages from the list it is given", () => {
+    expect(matchCatalogPage("/communities/abc/payment", [COMMUNITY_MANAGEMENT_PLUGIN])).toBeUndefined();
   });
 });

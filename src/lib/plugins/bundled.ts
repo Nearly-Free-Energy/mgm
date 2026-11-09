@@ -53,6 +53,20 @@ export const CORE_ENTITY_KINDS = [
 
 export type CoreEntityKind = (typeof CORE_ENTITY_KINDS)[number];
 
+/** A signed-in page a plugin owns, with the entity kind of each segment. */
+export interface CatalogPage {
+  /** The route as spelled under src/app, with route-group folders left out. */
+  path: string;
+  /** The kind of every bracketed segment, keyed by its name, in path order. */
+  params: Readonly<Record<string, CoreEntityKind>>;
+  /**
+   * "view" when a contributed GUI view serves the path and no page.tsx
+   * exists; absent when a page.tsx serves it. catalog-pages.test.ts checks
+   * this against src/app.
+   */
+  servedBy?: "view";
+}
+
 export interface BundledPlugin {
   name: MgmPluginName;
   /**
@@ -70,6 +84,11 @@ export interface BundledPlugin {
   core: boolean;
   provides: string[];
   routes: string[];
+  /**
+   * The signed-in pages this plugin owns. getRouteOwner reads each path as
+   * an ownership prefix too; matchCatalogPage finds the page for a URL.
+   */
+  pages: readonly CatalogPage[];
   tables: string[];
 }
 
@@ -98,6 +117,15 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/api/users",
     "/api/org-api-tokens",
   ],
+  pages: [
+    { path: "/", params: {} },
+    { path: "/organizations", params: {} },
+    { path: "/organizations/[id]", params: { id: "organization" } },
+    { path: "/settings/profile", params: {} },
+    { path: "/settings/users", params: {} },
+    { path: "/settings/plugins", params: {} },
+    { path: "/settings/api-tokens", params: {} },
+  ],
   tables: ["organizations", "user_roles", "user_profiles", "mgm_plugins"],
 };
 
@@ -123,6 +151,19 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
     "/api/microgrids",
     "/api/households",
     "/api/v1/microgrids",
+  ],
+  pages: [
+    { path: "/communities", params: {} },
+    { path: "/communities/[id]", params: { id: "community" } },
+    { path: "/microgrids", params: {} },
+    // The setup index redirects to the first setup tab, whichever plugin owns
+    // that tab, so it stays with the plugin that owns the microgrid.
+    { path: "/microgrids/[id]/setup", params: { id: "microgrid" } },
+    { path: "/microgrids/[id]/setup/households", params: { id: "microgrid" } },
+    {
+      path: "/microgrids/[id]/setup/households/[householdId]",
+      params: { id: "microgrid", householdId: "household" },
+    },
   ],
   tables: ["communities", "microgrids", "households"],
 };
@@ -156,6 +197,19 @@ export const METERING_PLUGIN: BundledPlugin = {
     "/api/metering",
     "/api/meter-readings",
     "/api/openems",
+  ],
+  pages: [
+    { path: "/microgrids/[id]/operations", params: { id: "microgrid" } },
+    { path: "/microgrids/[id]/setup/edges", params: { id: "microgrid" } },
+    {
+      path: "/microgrids/[id]/setup/edges/[edgeId]",
+      params: { id: "microgrid", edgeId: "edge" },
+    },
+    { path: "/microgrids/[id]/setup/edges/shared", params: { id: "microgrid" } },
+    {
+      path: "/microgrids/[id]/setup/openems-backend",
+      params: { id: "microgrid" },
+    },
   ],
   tables: ["devices", "edges", "household_devices", "meter_readings"],
 };
@@ -191,6 +245,19 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/v1/billing-periods",
     "/api/v1/billing",
   ],
+  pages: [
+    { path: "/microgrids/[id]/billing", params: { id: "microgrid" } },
+    {
+      path: "/microgrids/[id]/billing/[periodId]",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+    },
+    {
+      path: "/microgrids/[id]/billing/[periodId]/history",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+    },
+    { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
+    { path: "/communities/[id]/invoice", params: { id: "community" } },
+  ],
   tables: [
     "rate_schedules",
     "billing_periods",
@@ -225,6 +292,10 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
     "/api/organizations/[id]/payment-accounts",
     "/api/communities/[id]/payment",
   ],
+  pages: [
+    { path: "/organizations/[id]/payments", params: { id: "organization" } },
+    { path: "/communities/[id]/payment", params: { id: "community" } },
+  ],
   tables: [
     "payment_merchant_accounts",
     "community_payment_overrides",
@@ -252,6 +323,7 @@ export const PESAPAL_PLUGIN: BundledPlugin = {
     "pesapal notifications",
   ],
   routes: ["/api/payments/ipn"],
+  pages: [],
   tables: [],
 };
 
@@ -401,10 +473,12 @@ function routeSegments(route: string): string[] {
 
 /**
  * The bundled plugin that owns an API or page route: the plugin whose
- * `routes` entry is the longest segment-prefix of the path. Bracketed
- * segments (`[id]`) match any one segment. Undefined when no plugin claims
- * the route. `plugins` defaults to the bundled catalog; a test passes its
- * own list to check ownership against a catalog with other routes.
+ * `routes` entry or page path is the longest segment-prefix of the path.
+ * No page path starts with /api (catalog-pages.test.ts checks this), so
+ * pages decide only pages. Bracketed segments (`[id]`) match any one
+ * segment. Undefined when no plugin claims the route. `plugins` defaults
+ * to the bundled catalog; a test passes its own list to check ownership
+ * against a catalog with other routes.
  */
 export function getRouteOwner(
   route: string,
@@ -413,7 +487,10 @@ export function getRouteOwner(
   const path = routeSegments(route);
   let best: { plugin: BundledPlugin; length: number } | undefined;
   for (const plugin of plugins) {
-    for (const pattern of plugin.routes) {
+    for (const pattern of [
+      ...plugin.routes,
+      ...plugin.pages.map((page) => page.path),
+    ]) {
       const segments = routeSegments(pattern);
       if (segments.length > path.length) continue;
       // The root page ("/") owns only itself, not every route.
@@ -427,4 +504,43 @@ export function getRouteOwner(
     }
   }
   return best?.plugin;
+}
+
+export type CatalogPageMatch = {
+  plugin: BundledPlugin;
+  page: CatalogPage;
+  /** Each bracketed segment's value by name, as it appears in the URL: not decoded or checked. */
+  values: Record<string, string>;
+};
+
+/**
+ * The catalog page a URL path is, with its segment values. Where two pages
+ * fit, a fixed segment beats a bracketed one at the first position they
+ * differ, as in Next.js, so ".../setup/edges/shared" is not an edge id.
+ * Undefined for API routes and for paths no plugin lists as a page.
+ */
+export function matchCatalogPage(
+  pathname: string,
+  plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS
+): CatalogPageMatch | undefined {
+  const path = pathname.split(/[?#]/)[0].split("/").filter(Boolean);
+  let best: { match: CatalogPageMatch; rank: string } | undefined;
+  for (const plugin of plugins) {
+    for (const page of plugin.pages) {
+      const segments = page.path.split("/").filter(Boolean);
+      if (segments.length !== path.length) continue;
+      const values: Record<string, string> = {};
+      let rank = "";
+      const matches = segments.every((segment, index) => {
+        const name = /^\[(.+)\]$/.exec(segment)?.[1];
+        rank += name ? "0" : "1";
+        if (name) values[name] = path[index];
+        return name !== undefined || segment === path[index];
+      });
+      if (matches && (!best || rank > best.rank)) {
+        best = { match: { plugin, page, values }, rank };
+      }
+    }
+  }
+  return best?.match;
 }
