@@ -488,7 +488,7 @@ describe("middleware session check", () => {
 
   it("shows /login to a session Auth no longer knows, instead of redirecting back to /", async () => {
     // A session signed out on another device keeps a validly signed token
-    // until it expires. The dashboard layout's getUser() sends it to /login;
+    // until it expires. The (gui) layout's getUser() sends it to /login;
     // redirecting it back to / would loop.
     signedIn();
     getUserMock.mockResolvedValue({ data: { user: null }, error: null });

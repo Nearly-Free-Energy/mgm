@@ -104,7 +104,7 @@ export default async function SetupEdgesPage({
   // Decrypting the stored credentials runs on the service role, so it waits
   // for canManage: currentUserCanAccessMicrogrid asks Supabase Auth through
   // getUser(), which refuses a session signed out elsewhere, while middleware
-  // only verifies the token's signature and the (dashboard) layout renders
+  // only verifies the token's signature and the (gui) layout renders
   // alongside this page rather than before it. If that helper stops calling
   // getUser(), revisit. With no OpenEMS edges there is nothing to look up.
   let emsConfig: OpenEmsClientConfig | null = null;

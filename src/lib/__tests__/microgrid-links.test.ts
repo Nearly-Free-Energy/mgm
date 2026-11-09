@@ -60,7 +60,7 @@ describe("microgridHref", () => {
 describe("microgridSetupHref", () => {
   it("is where the /setup index redirects", async () => {
     const { default: SetupIndexPage } = await import(
-      "@/app/(dashboard)/microgrids/[id]/setup/page"
+      "@/app/(gui)/microgrids/[id]/setup/page"
     );
     await SetupIndexPage({ params: Promise.resolve({ id: "grid-1" }) });
 

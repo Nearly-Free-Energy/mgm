@@ -27,7 +27,7 @@ import * as path from "node:path";
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 
 // Scope ONLY to the customerapp API boundary. The operator-side household
-// reads in src/app/(dashboard) / src/components / src/lib are not restricted.
+// reads in src/app/(gui) / src/components / src/lib are not restricted.
 const ROOTS = [path.join(REPO_ROOT, "src/app/api/v1")];
 
 // Character class on both sides covers single, double, AND backtick quotes.

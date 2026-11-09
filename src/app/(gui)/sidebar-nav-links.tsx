@@ -10,7 +10,7 @@
  * highlights on any /settings/* route).
  *
  * Below md (768px) the links form one row that scrolls sideways, because the
- * dashboard layout shows this nav as a band across the top there; from md up
+ * (gui) layout shows this nav as a band across the top there; from md up
  * they stack as a sidebar. If the layout stops collapsing below md, the row
  * classes (gap-1, overflow-x-auto, shrink-0, whitespace-nowrap) can go.
  *

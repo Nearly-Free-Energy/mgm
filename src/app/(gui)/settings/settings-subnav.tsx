@@ -3,7 +3,7 @@
 /**
  * settings-subnav.tsx — Settings sub-navigation (UX5 / #79).
  *
- * Mirrors `src/app/(dashboard)/microgrids/[id]/setup/setup-subnav.tsx`:
+ * Mirrors `src/app/(gui)/microgrids/[id]/setup/setup-subnav.tsx`:
  *   - Pill-style tablist sitting on a bg-muted container; active tab
  *     raises onto bg-card with shadow-elev-1.
  *   - role="tablist", per-tab role="tab", aria-selected, aria-controls.
@@ -24,7 +24,7 @@
  * every tab against isReleasedRoute).
  *
  * Tabs are next/link <Link>s, so clicks and arrow keys are client-side
- * navigations: the dashboard layout and this sub-nav stay mounted while
+ * navigations: the (gui) layout and this sub-nav stay mounted while
  * settings/loading.tsx stands in for the new tab.
  *
  * Copy-paste-adapted per ticket Dev Notes ("don't extract a shared

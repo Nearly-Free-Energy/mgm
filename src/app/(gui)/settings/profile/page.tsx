@@ -15,7 +15,7 @@ export default async function SettingsProfilePage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    // Dashboard layout already redirects to /login — belt-and-braces.
+    // The (gui) layout already redirects to /login — belt-and-braces.
     return null;
   }
 

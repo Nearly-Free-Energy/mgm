@@ -196,7 +196,7 @@ describe("SidebarNavLinks", () => {
     expect(link.getAttribute("aria-current")).toBeNull();
   });
 
-  // Below md the dashboard layout shows this nav as a band across the top:
+  // Below md the (gui) layout shows this nav as a band across the top:
   // the links form one row that scrolls sideways, and stack again from md.
   it("lays the links out in a row that scrolls sideways below md", () => {
     mockPathname = "/microgrids";

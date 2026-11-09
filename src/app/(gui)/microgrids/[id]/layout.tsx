@@ -29,7 +29,7 @@ export default async function MicrogridLayout({
     .single();
 
   // Missing, or hidden by RLS. On a full page load the not-found page comes
-  // with HTTP 200, not 404, because (dashboard)/loading.tsx and
+  // with HTTP 200, not 404, because (gui)/loading.tsx and
   // microgrids/loading.tsx wrap this layout; if both go, it is a 404 again.
   if (error || !data) {
     notFound();

@@ -1,7 +1,7 @@
 {
   "about": "First-load byte budgets, gzip -9 of the build output. Raise a limit only in a pull request that says why.",
   "framework": { "maxBytes": 139000 },
-  "shell": { "layout": "src/app/(dashboard)/layout", "maxBytesAboveFramework": 77000 },
+  "shell": { "layout": "src/app/(gui)/layout", "maxBytesAboveFramework": 77000 },
   "stylesheet": { "maxBytes": 15000 },
   "fonts": { "maxFamilies": 1, "display": "optional", "maxPreloaded": 0, "maxBasicLatinBytes": 51000 }
 }

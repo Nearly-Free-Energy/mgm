@@ -22,7 +22,7 @@ const readNavigationState = cache(async () => {
 });
 
 /**
- * Starts SidebarNav's reads ahead of its render. The dashboard layout calls
+ * Starts SidebarNav's reads ahead of its render. The (gui) layout calls
  * this before its own awaited checks, because SidebarNav, rendered inside the
  * layout's output, cannot start until the layout returns; if that stops being
  * true, the preload buys nothing. A failure surfaces when SidebarNav awaits
