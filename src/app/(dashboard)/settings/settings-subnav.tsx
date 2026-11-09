@@ -11,12 +11,17 @@
  *   - Longest-prefix active-tab match — future nested routes under
  *     /settings/<tab>/... keep the parent tab highlighted.
  *
- * Four tabs ship for Release 1: Profile (self), Users (admin-side),
- * API tokens (org-side), and Plugins (org-side). Profile, Users, and API
- * tokens are visible for both MVP roles (super_admin + org_manager can both
- * invite); plugin toggles are further gated per organization by the plugin
- * service. Future `microgrid_manager` may need per-role visibility —
- * not now.
+ * Three tabs ship: Profile (self), Users (admin-side) and Plugins
+ * (org-side). Profile and Users are visible for both MVP roles
+ * (super_admin + org_manager can both invite); plugin toggles are further
+ * gated per organization by the plugin service. Future `microgrid_manager`
+ * may need per-role visibility — not now.
+ *
+ * Every tab must link to a released page: the API tokens page exists under
+ * /settings/api-tokens but is not in src/lib/mgm/released-routes.ts, so
+ * middleware answers it with a 404 and a tab for it would lead nowhere. Add
+ * the tab back when that route is released (settings-subnav.test.tsx checks
+ * every tab against isReleasedRoute).
  *
  * Tabs are next/link <Link>s, so clicks and arrow keys are client-side
  * navigations: the dashboard layout and this sub-nav stay mounted while
@@ -38,7 +43,6 @@ type SubTab = { label: string; segment: string };
 const TABS: SubTab[] = [
   { label: "Profile", segment: "profile" },
   { label: "Users", segment: "users" },
-  { label: "API tokens", segment: "api-tokens" },
   { label: "Plugins", segment: "plugins" },
 ];
 
@@ -90,7 +94,7 @@ export function SettingsSubNav() {
     <nav
       role="tablist"
       aria-label="Settings sections"
-      className="inline-flex w-fit gap-1 rounded-lg bg-muted p-1"
+      className="inline-flex w-fit max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1"
     >
       {TABS.map((tab, i) => {
         const isActive = i === activeIndex;
@@ -112,7 +116,7 @@ export function SettingsSubNav() {
                 announceNavigationStart(href);
               }
             }}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               isActive
                 ? "bg-card text-foreground font-semibold shadow-elev-1"
                 : "text-muted-foreground hover:text-foreground"

@@ -1,83 +1,183 @@
 /* ─────────────────────────────────────────────────────────────────────────
    MGM Design System — Tokens (globals.css)
-   Drop this into src/app/globals.css (overwriting the file shadcn init writes).
+
+   Tailwind 4 reads its configuration from this file only: there is no
+   tailwind.config.* and no @config directive. A value a utility needs
+   (colour, font, type size, radius, elevation, motion) is a theme variable
+   here, or the utility generates no CSS and Tailwind reports no error.
+   src/lib/__tests__/design-tokens.test.ts compiles this file and fails
+   instead.
 
    ## Themability contract
 
    `--brand-hue` is the single fork-rebrand variable. It re-derives
-   `--primary`, `--accent`, `--accent-foreground`, and `--ring` only.
-   `--success`, `--warning`, `--destructive` are FIXED by hue (152 / 78 / 27)
-   so the irreversibility / status / safety affordances NEVER collapse into
-   the brand affordance.
+   `--primary`, `--primary-foreground` (dark theme), `--accent`,
+   `--accent-foreground` and `--ring` only. `--success`, `--warning` and
+   `--destructive` are FIXED by hue (152 / 78 / 27), and so are the energy
+   colours (solar 98, battery 195, grid 250, load 320), so the status,
+   safety and data colours never collapse into the brand affordance.
 
-   Safe ranges for `--brand-hue` (oklch hue degrees):
-     ✓ 200–280  (blues, indigos)            — default 262 (indigo)
-     ✓ 280–340  (purples, magentas)
-     ✓ 60–105   (yellow-greens, NOT pure yellow)
-   Avoid:
-     ✗ 0–55     (reds → collides with --destructive at hue 27)
-     ✗ 130–175  (greens → collides with --success at hue 152)
-     ✗ 50–95    (yellows → collides with --warning at hue 78)
+   Safe range for `--brand-hue` (oklch hue degrees): 200–340, default 262
+   (indigo). Below 200 the brand meets battery teal (195) and success
+   green (152); 0–60 meets destructive red (27); 60–130 meets warning
+   amber (78) and solar yellow (98). Energy colours mark data only, never
+   controls, so a brand near load magenta (320) stays distinguishable by
+   role. design-tokens.test.ts sweeps this range in both themes and fails
+   if a brand hue in it gives text on primary or accent, or the focus
+   ring, too little contrast.
 
-   If a fork must use a forbidden hue, override `--success`/`--warning`/
-   `--destructive` directly in the fork's :root — but be aware that
-   color-blind users rely on these being well-separated in hue + chroma.
+   If a fork needs a hue outside the range, it overrides `--success`,
+   `--warning`, `--destructive` and the energy colours directly in its own
+   :root, and keeps them well separated in hue and chroma: colour-blind
+   users rely on that separation.
+
+   ## Themes
+
+   :root is the light theme. `:root[data-theme="dark"]` holds the dark
+   palette, and the `dark:` variant follows the same attribute, not the
+   operating system's setting. Nothing in src sets the attribute, so the
+   dark palette is defined but inactive; design-tokens.test.ts fails if a
+   source file starts setting it. Before anything does, the dialog scrims
+   (`bg-foreground/55`), the skeleton shimmer and the overlays that rely
+   on a shadow alone need dark values: they are written for a light page.
+   Both palettes are held to WCAG contrast minimums by the same test.
 
    ## Token consumption
 
-   Spacing scale lives in tailwind.config.ts (`theme.extend.spacing`).
-   Elevation in `theme.extend.boxShadow` as `elev-1/2/3`. Components
-   should use `bg-success-muted`, `text-warning-fg`, `shadow-elev-2`,
-   `rounded-md` — never inline boxShadow or hex/oklch literals.
+   Components use the utilities these tokens generate (`bg-card`,
+   `text-warning-fg`, `shadow-elev-2`, `rounded-pill`, `text-caption`) —
+   never hex/oklch literals or an inline box-shadow. Tailwind's default
+   spacing scale (`--spacing: 0.25rem`) is the MGM 4px scale; it is not
+   redefined here.
 ───────────────────────────────────────────────────────────────────────── */
 
-:root {
-  /* Surfaces */
-  --background: oklch(99.0% 0.004 95);
-  --foreground: oklch(18.0% 0.010 250);
-  --card: oklch(100% 0 0);
-  --card-foreground: oklch(18.0% 0.010 250);
-  --muted: oklch(97.2% 0.005 95);
-  --muted-foreground: oklch(46.0% 0.012 250);
-  --border: oklch(91.0% 0.006 90);
-  --input: oklch(91.0% 0.006 90);
-  --ring: oklch(62.0% 0.15 var(--brand-hue, 262));
+@import "tailwindcss";
+@import "tw-animate-css";
 
-  /* Brand — fork rebrands by changing --brand-hue. */
+/* `dark:` follows the same attribute as the dark palette below, not
+   prefers-color-scheme, so the two cannot switch on separately. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
   --brand-hue: 262;
+
+  /* Surfaces. `surface-1` is a card or panel on the page background,
+     `surface-2` a recessed or muted area, `surface-3` a raised overlay.
+     `card`, `muted` and `input` are the older names for the same
+     surfaces and border, kept so existing classes keep working. */
+  --background: oklch(98.5% 0.004 95);
+  --surface-1: oklch(100% 0 0);
+  --surface-2: oklch(97.0% 0.005 95);
+  --surface-3: oklch(100% 0 0);
+  --card: var(--surface-1);
+  --muted: var(--surface-2);
+  --border: oklch(90.0% 0.006 90);
+  --input: var(--border);
+
+  /* Text. `subtle-foreground` is for captions and secondary labels: lighter
+     than `muted-foreground`, and still 4.5:1 on every surface of its theme
+     (design-tokens.test.ts checks both themes). */
+  --foreground: oklch(18.0% 0.010 250);
+  --card-foreground: var(--foreground);
+  --muted-foreground: oklch(46.0% 0.012 250);
+  --subtle-foreground: oklch(54.0% 0.010 250);
+
+  /* Brand — a fork rebrands by changing --brand-hue. */
   --primary: oklch(52.0% 0.16 var(--brand-hue));
   --primary-foreground: oklch(99.0% 0.004 95);
   --accent: oklch(94.0% 0.035 var(--brand-hue));
   --accent-foreground: oklch(30.0% 0.12 var(--brand-hue));
+  --ring: oklch(62.0% 0.15 var(--brand-hue));
 
-  /* Semantic anchor — FIXED hue. */
-  --success: oklch(58.0% 0.14 152);
+  /* Status — FIXED hue. */
+  --success: oklch(52.0% 0.14 152);
   --success-foreground: oklch(99.0% 0.004 95);
-  --success-muted: oklch(93.0% 0.05 152);
-  --success-fg: oklch(28.0% 0.10 152);
+  --success-muted: oklch(94.0% 0.05 152);
+  --success-fg: oklch(30.0% 0.09 152);
 
   --warning: oklch(62.0% 0.15 78);
   --warning-foreground: oklch(20.0% 0.04 78);
   --warning-muted: oklch(95.0% 0.05 78);
-  --warning-fg: oklch(34.0% 0.10 78);
+  --warning-fg: oklch(36.0% 0.09 78);
 
-  --destructive: oklch(57.0% 0.19 27);
+  --destructive: oklch(55.0% 0.19 27);
   --destructive-foreground: oklch(99.0% 0.004 95);
   --destructive-muted: oklch(94.0% 0.04 27);
-  --destructive-fg: oklch(34.0% 0.13 27);
+  --destructive-fg: oklch(36.0% 0.13 27);
+
+  /* Energy — FIXED hue. Data marks only (charts, legends, flow lines),
+     never status or controls. `energy-solar` is a light fill that sits
+     behind an icon or a darker mark; solar text and thin lines use
+     `energy-solar-ink`. `stale` marks readings that are no longer current. */
+  --energy-solar: oklch(80.0% 0.15 98);
+  --energy-solar-ink: oklch(50.0% 0.11 98);
+  --energy-battery: oklch(58.0% 0.11 195);
+  --energy-grid: oklch(50.0% 0.03 250);
+  --energy-load: oklch(55.0% 0.16 320);
+  --stale: oklch(62.0% 0.01 250);
 
   --radius: 0.5rem;
-  --font-sans: var(--font-inter-tight), ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SF Mono, Menlo, Consolas, monospace;
 }
 
+/* The dark palette. Inactive: see "Themes" in the header. It overrides only
+   what differs; `card`, `muted`, `input` and `card-foreground` follow
+   their surfaces through the aliases above. `color-scheme` makes native
+   selects, date pickers and checkboxes render dark as well. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: oklch(15.5% 0.012 250);
+  --surface-1: oklch(19.5% 0.013 250);
+  --surface-2: oklch(23.5% 0.014 250);
+  --surface-3: oklch(27.5% 0.015 250);
+  --border: oklch(32.0% 0.012 250);
+
+  --foreground: oklch(94.0% 0.006 95);
+  --muted-foreground: oklch(72.0% 0.012 250);
+  --subtle-foreground: oklch(65.0% 0.012 250);
+
+  --primary: oklch(70.0% 0.14 var(--brand-hue));
+  --primary-foreground: oklch(16.0% 0.02 var(--brand-hue));
+  --accent: oklch(30.0% 0.06 var(--brand-hue));
+  --accent-foreground: oklch(88.0% 0.06 var(--brand-hue));
+  --ring: oklch(72.0% 0.14 var(--brand-hue));
+
+  --success: oklch(70.0% 0.14 152);
+  --success-foreground: oklch(16.0% 0.02 152);
+  --success-muted: oklch(30.0% 0.06 152);
+  --success-fg: oklch(86.0% 0.10 152);
+
+  --warning: oklch(78.0% 0.14 78);
+  --warning-foreground: oklch(20.0% 0.04 78);
+  --warning-muted: oklch(32.0% 0.06 78);
+  --warning-fg: oklch(88.0% 0.10 78);
+
+  --destructive: oklch(68.0% 0.18 27);
+  --destructive-foreground: oklch(16.0% 0.02 27);
+  --destructive-muted: oklch(30.0% 0.07 27);
+  --destructive-fg: oklch(86.0% 0.08 27);
+
+  --energy-solar: oklch(85.0% 0.14 98);
+  --energy-solar-ink: oklch(85.0% 0.14 98);
+  --energy-battery: oklch(74.0% 0.11 195);
+  --energy-grid: oklch(72.0% 0.03 250);
+  --energy-load: oklch(72.0% 0.14 320);
+  --stale: oklch(55.0% 0.01 250);
+}
+
+/* Colours: `inline`, so each utility reads the token itself rather than a
+   copy taken on :root. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -97,31 +197,136 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive-muted: var(--destructive-muted);
   --color-destructive-fg: var(--destructive-fg);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  --color-energy-solar: var(--energy-solar);
+  --color-energy-solar-ink: var(--energy-solar-ink);
+  --color-energy-battery: var(--energy-battery);
+  --color-energy-grid: var(--energy-grid);
+  --color-energy-load: var(--energy-load);
+  --color-stale: var(--stale);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-@import "tailwindcss";
-@import "tw-animate-css";
+@theme {
+  /* Fonts. next/font sets `--font-inter` on <html> (src/app/layout.tsx).
+     It must be <html>: this value is resolved on :root, which cannot see a
+     variable set on <body>. Without the variable the system stack renders.
+     If the class moves, revisit; root-layout.test.tsx checks it. Numbers
+     use Inter's tabular figures (`tabular-nums`); `font-mono` is for
+     identifiers such as component ids, URLs and token prefixes. */
+  --font-sans: var(--font-inter, ui-sans-serif), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Type scale. Body and dense switch to 16px on coarse pointers below.
+     TYPE_SCALE in src/lib/utils.ts lists the same names so cn() keeps
+     them; if a size is added or renamed here, change it there too.
+     design-tokens.test.ts fails until both agree. */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.45;
+  --text-dense: 0.8125rem;
+  --text-dense--line-height: 1.45;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.45;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.25;
+  --text-headline: 1.375rem;
+  --text-headline--line-height: 1.25;
+  --text-kpi: 2rem;
+  --text-kpi--line-height: 1.1;
+
+  --radius-pill: 9999px;
+
+  --shadow-elev-1: 0 1px 2px rgb(24 24 27 / 0.04), 0 1px 1px rgb(24 24 27 / 0.03);
+  --shadow-elev-2: 0 2px 4px rgb(24 24 27 / 0.05), 0 4px 10px rgb(24 24 27 / 0.04);
+  --shadow-elev-3: 0 6px 14px rgb(24 24 27 / 0.08), 0 14px 32px rgb(24 24 27 / 0.06);
+
+  /* Motion: one duration for state changes and one easing. A
+     `transition-*` utility uses these unless it has its own `duration-*`
+     or `ease-*`. */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (pointer: coarse) {
+  :root {
+    --text-body: 1rem;
+    --text-dense: 1rem;
+  }
+  /* iOS zooms into a focused field whose text is under 16px. Unlayered,
+     so it wins over a `text-xs`/`text-sm` utility on the field. Controls
+     that hold no typed text keep their size. */
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]),
+  select,
+  textarea {
+    font-size: max(16px, 1rem);
+  }
+}
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
-}
-
-/* Use Tailwind's `font-mono tabular-nums` utility pair in components.
-   This back-compat class is kept only for any inline existing usage. */
-.tabular {
-  font-variant-numeric: tabular-nums;
-  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
 }
 
 /* Animations used by Chip (loading) + skeletons + navigation progress. */
 @keyframes mgm-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
 @keyframes mgm-shimmer { 0% { transform: translateX(-100%) } 100% { transform: translateX(100%) } }
 @keyframes mgm-nav-progress { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+
+/* Touch screens (a coarse pointer): every control is a target at least
+   44px tall. Base layer, so a utility on the element still wins: a
+   `min-h-*` class keeps a control smaller on purpose. min-height rather
+   than height, so an `h-8` button or an `h-9` field grows without a class
+   of its own. A link counts as a control when it is laid out as a box
+   (`flex` or `inline-flex`); min-height does nothing to an inline link,
+   so a link drawn as a button without those classes adds
+   `pointer-coarse:min-h-11` itself. A button drawn as a checkbox or
+   radio is left out: the label around it is the target. `role="switch"`
+   is not left out, because every switch in MGM is a text button; a switch
+   drawn as a track needs adding to both lists. Visually hidden controls
+   (`.sr-only`, or `aria-hidden="true"` such as the native select that
+   Radix Select renders beside its trigger) keep their 1px size. Fine
+   pointers (mouse, trackpad) get none of this.
+   src/lib/__tests__/touch-targets.test.ts checks this block. */
+@layer base {
+  @media (pointer: coarse) {
+    :where(
+      button:not([role="radio"], [role="checkbox"]),
+      [role="button"],
+      [role="tab"],
+      [role="menuitem"],
+      [role="menuitemcheckbox"],
+      [role="menuitemradio"],
+      [role="option"],
+      a[class~="flex"],
+      a[class~="inline-flex"],
+      summary,
+      select,
+      textarea,
+      input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="file"], [type="range"]),
+      label:has(input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="radio"])
+    ):not(.sr-only, [aria-hidden="true"]) {
+      min-height: 2.75rem;
+    }
+    :where(button:not([role="radio"], [role="checkbox"]), [role="button"]):not(.sr-only, [aria-hidden="true"]) {
+      min-width: 2.75rem;
+    }
+  }
+}
+
+/* Touch screens: checkboxes and radios are drawn at 20px, and the label
+   around each one carries the 44px target (above). Not layered, so it
+   wins over a `size-4` or `h-4 w-4` utility on the box. */
+@media (pointer: coarse) {
+  input[type="checkbox"]:not(.sr-only),
+  input[type="radio"]:not(.sr-only),
+  button[role="checkbox"],
+  button[role="radio"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+}

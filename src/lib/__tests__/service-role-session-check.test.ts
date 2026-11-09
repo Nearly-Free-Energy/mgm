@@ -167,10 +167,6 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "currentUserCanAccessCommunity calls notFound() before the service-role logo read.",
   },
-  "src/app/(dashboard)/microgrids/[id]/(overview)/page.tsx": {
-    kind: "session",
-    reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",
-  },
   "src/app/(dashboard)/microgrids/[id]/setup/edges/page.tsx": {
     kind: "session",
     reason: "getMicrogridEmsConfig waits for currentUserCanAccessMicrogrid.",
@@ -184,11 +180,11 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "currentUserCanAccessMicrogrid calls notFound() before getEmsSecretForMicrogrid.",
   },
-  "src/app/payment/callback/page.tsx": {
+  "src/app/payment/callback/route.ts": {
     kind: "public",
     path: "/payment/callback",
     reason:
-      "The provider's customer redirect; the order reference must match a stored attempt and the provider confirms the status server-side.",
+      "The provider's customer redirect; the order reference must match a stored attempt and the provider confirms the status server-side. For a matched attempt it also reads its community's name, its organization's name and the community's invoice branding (colour, WhatsApp number, a PNG or JPEG logo of at most 6 KB) to brand the page, with enumerated columns; an unmatched reference reads nothing more.",
   },
 
   // ── Released API routes ──────────────────────────────────────────────────

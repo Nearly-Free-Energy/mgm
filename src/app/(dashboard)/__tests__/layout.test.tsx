@@ -155,3 +155,40 @@ describe("DashboardLayout content column", () => {
     expect(classes).toContain("min-w-0");
   });
 });
+
+function findByType(node: Node, type: string): Node | null {
+  if (node.type === type) return node;
+  for (const k of childrenOf(node)) {
+    const found = findByType(k, type);
+    if (found) return found;
+  }
+  return null;
+}
+
+function classesOf(node: Node | null): string[] {
+  return (node?.props?.className ?? "").split(/\s+/);
+}
+
+describe("DashboardLayout on narrow screens", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Below md the sidebar becomes a band across the top, so the page gets
+  // the full width of a phone instead of what a 256px sidebar leaves.
+  it("stacks the navigation above the page below md and beside it from md", async () => {
+    wire({ user: { id: "user-1" }, orgCount: 1, roleCount: 1 });
+    const tree = (await DashboardLayout({ children: "child" })) as Node;
+    expect(classesOf(tree)).toEqual(expect.arrayContaining(["flex", "flex-col", "md:flex-row"]));
+    const aside = classesOf(findByType(tree, "aside"));
+    expect(aside).toEqual(expect.arrayContaining(["md:w-64", "md:flex-col", "border-b", "md:border-r"]));
+    expect(aside).not.toContain("w-64");
+  });
+
+  it("truncates a long email instead of pushing Logout off the screen", async () => {
+    wire({ user: { id: "user-1" }, orgCount: 1, roleCount: 1 });
+    const tree = (await DashboardLayout({ children: "child" })) as Node;
+    const email = classesOf(findByType(tree, "span"));
+    expect(email).toEqual(expect.arrayContaining(["min-w-0", "truncate"]));
+  });
+});

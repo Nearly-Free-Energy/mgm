@@ -352,7 +352,7 @@ export function BlastRadiusList({ counts, asOf }: BlastRadiusListProps) {
           closed bills keep their recorded start and end readings and totals.
         </Banner>
       )}
-      <p className="mt-2 text-[11px] text-muted-foreground">
+      <p className="mt-2 text-caption text-muted-foreground">
         Counts as of {asOfLabel}
       </p>
     </div>

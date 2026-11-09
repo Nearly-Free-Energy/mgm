@@ -22,7 +22,7 @@ export function formatDuration(minutes: number): string {
 }
 
 function Percent({ value, digits = 0 }: { value: number; digits?: number }) {
-  return <span className="font-mono tabular-nums">{value.toFixed(digits)}%</span>;
+  return <span className="tabular-nums">{value.toFixed(digits)}%</span>;
 }
 
 function useClock(timezone: string) {
@@ -52,7 +52,7 @@ function Stat({
 }) {
   return (
     <section className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
       <p
@@ -161,7 +161,7 @@ function BatteryChart({ day }: { day: SiteDayOperations }) {
             x={PAD.left - 6}
             y={y(pct) + 4}
             textAnchor="end"
-            className="fill-muted-foreground text-[11px]"
+            className="fill-muted-foreground text-caption"
           >
             {pct}
           </text>
@@ -173,7 +173,7 @@ function BatteryChart({ day }: { day: SiteDayOperations }) {
           x={x(atMs)}
           y={H - 6}
           textAnchor={hour === 0 ? "start" : hour === 24 ? "end" : "middle"}
-          className="fill-muted-foreground text-[11px]"
+          className="fill-muted-foreground text-caption"
         >
           {String(hour).padStart(2, "0")}
         </text>
@@ -209,7 +209,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
   const shown = order.filter((s) => s !== "no_data" || day.eveningHours.no_data > 0);
   return (
     <section className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         Who served the houses, {clock(day.eveningStartMs)}–24:00
       </p>
       {day.evening.length === 0 ? (
@@ -234,7 +234,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
               />
             ))}
           </div>
-          <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+          <div className="mt-1 flex justify-between text-caption text-muted-foreground">
             {[18, 19, 20, 21, 22, 23, 24].map((hour) => (
               <span key={hour}>{`${hour}:00`}</span>
             ))}
@@ -246,7 +246,7 @@ function EveningStrip({ day }: { day: SiteDayOperations }) {
           <li key={s} className="flex items-center gap-1.5">
             <span aria-hidden="true" className={cn("inline-block size-2.5 rounded-sm", SUPPLY[s].swatch)} />
             {SUPPLY[s].label}{" "}
-            <span className="font-mono tabular-nums text-foreground">
+            <span className="tabular-nums text-foreground">
               {day.eveningHours[s].toFixed(1)} h
             </span>
           </li>
@@ -347,7 +347,7 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
             cutCount === null ? (
               NOT_AVAILABLE
             ) : (
-              <span className="font-mono tabular-nums">
+              <span className="tabular-nums">
                 {cutCount} / {formatDuration(day.cutMinutes ?? 0)}
               </span>
             )
@@ -380,7 +380,7 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
 
       <section className="rounded-lg border border-border bg-card px-4 py-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
             Battery level (%)
           </p>
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -403,7 +403,7 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
           </ul>
         </div>
         {/* On a phone the chart keeps a readable size and scrolls sideways. */}
-        <div className="mt-2 overflow-x-auto">
+        <div className="relative mt-2 overflow-x-auto">
           {day.sources.battery ? (
             <BatteryChart day={day} />
           ) : (

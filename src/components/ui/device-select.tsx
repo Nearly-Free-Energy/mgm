@@ -156,7 +156,7 @@ export function DeviceSelect({
 
             {grouped.map((group) => (
               <SelectGroup key={group.edge_id}>
-                <SelectLabel className="bg-muted px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <SelectLabel className="bg-muted px-2 py-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Edge · {group.edge_name}
                 </SelectLabel>
                 {group.items.map((d) => {
@@ -189,7 +189,7 @@ export function DeviceSelect({
                 })}
               </SelectGroup>
             ))}
-            <div className="border-t border-border bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="border-t border-border bg-muted px-3 py-2 text-caption text-muted-foreground">
               Linked devices are managed from the household they&apos;re assigned to.
             </div>
           </>
@@ -208,7 +208,7 @@ function DropdownEmptyState({ edgesSetupHref }: { edgesSetupHref: string }) {
       aria-label="No devices available"
       className="px-4 py-5 text-center"
     >
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
         DEVICES
       </p>
       <h4 className="mt-1 text-sm font-semibold text-foreground">

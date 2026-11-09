@@ -16,6 +16,7 @@
  * Operations: the daily operations view of a microgrid (battery level, power
  * cuts, dark time and who served the houses), read through the metering
  * capability.
+ * Install metadata: the web app manifest.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -119,6 +120,14 @@ const OPERATIONS_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/operations$/,
 ];
 
+// Install metadata browsers fetch on their own: the web app manifest
+// (src/app/manifest.ts). The icons it and the root layout name are static
+// image files that the middleware matcher skips, so they need no entry; if
+// the matcher stops skipping them, list them here.
+const PUBLIC_METADATA_ROUTES = [
+  /^\/manifest\.webmanifest$/,
+];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -127,6 +136,7 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_3_PAGE_ROUTES,
     ...RELEASE_4_PAGE_ROUTES,
     ...OPERATIONS_PAGE_ROUTES,
+    ...PUBLIC_METADATA_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
     ...RELEASE_3_API_ROUTES,

@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * invoice-shell.tsx — Client shell for the community Invoice tab (#204 / PDF2).
+ * invoice-shell.tsx — Client shell for the community's Invoice branding page
+ * (#204 / PDF2).
  *
  * Owns:
- *   - Form state (controlled — useState; no react-hook-form, mirrors the
- *     Payment-shell precedent).
+ *   - Form state (controlled — useState; no react-hook-form).
  *   - Logo-staging state (drafted path + signed thumbnail URL until next save).
  *   - Submit handler (PATCH /api/communities/[id]/invoice-config).
  *   - Preview-button click flow (Pattern A — fetch + blob + popup window).
@@ -368,7 +368,7 @@ export function InvoiceShell({
   return (
     <form onSubmit={handleSave} className="space-y-6">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
           Invoice
         </p>
         <h3 className="text-lg font-semibold text-foreground">
@@ -613,7 +613,7 @@ export function InvoiceShell({
             </span>
           </label>
           {state.tax_rate_pct === 0 && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="mt-1 text-caption text-muted-foreground">
               Tax section is hidden when the rate is 0%.
             </p>
           )}
@@ -800,7 +800,7 @@ function Field({
       </label>
       {children}
       {description && (
-        <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
+        <p className="mt-1 text-caption text-muted-foreground">{description}</p>
       )}
     </div>
   );

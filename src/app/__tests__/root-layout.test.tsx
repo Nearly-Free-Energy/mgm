@@ -1,22 +1,30 @@
 /**
  * Root layout (#46): rendered per request, request-time boundary before the
  * configuration is read, and only the three public fields reach the client
- * configuration provider.
+ * configuration provider. It also loads the one web font and puts its
+ * variable on <html>, where globals.css resolves --font-sans.
  *
  * "passes only the three public fields" is the guard on what reaches the
  * page: the provider's props are what Next.js serializes into the page
  * payload, so they must already be the fresh three-field object that
  * parsePublicRuntimeConfig returns. The provider's own re-pick happens after
  * that serialization (see public-runtime-config-provider.test.tsx).
+ *
+ * It also names the app in the tab title and sets the browser's theme
+ * colour. The icon files the metadata points at are checked in
+ * src/lib/__tests__/app-icons.test.ts.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as React from "react";
 
 const order: string[] = [];
+const { fontCalls } = vi.hoisted(() => ({ fontCalls: [] as unknown[] }));
 
 vi.mock("next/font/google", () => ({
-  Inter_Tight: () => ({ variable: "font-inter-tight" }),
-  JetBrains_Mono: () => ({ variable: "font-jetbrains-mono" }),
+  Inter: (options: unknown) => {
+    fontCalls.push(options);
+    return { variable: "font-inter" };
+  },
 }));
 vi.mock("next/server", () => ({
   connection: vi.fn(async () => {
@@ -38,8 +46,9 @@ vi.mock("@/lib/config/public-runtime-config", async (importOriginal) => {
   };
 });
 
-import RootLayout, { dynamic } from "../layout";
+import RootLayout, { dynamic, metadata, viewport } from "../layout";
 import { PublicRuntimeConfigProvider } from "@/lib/config/public-runtime-config-provider";
+import { THEME_COLOR } from "@/lib/public-html/palette";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -59,9 +68,60 @@ function findProvider(node: React.ReactNode): React.ReactElement<{ config: unkno
   return null;
 }
 
+type ElementWithClass = React.ReactElement<{ className?: string; children?: React.ReactNode }>;
+
 describe("RootLayout", () => {
   it("is force-dynamic", () => {
     expect(dynamic).toBe("force-dynamic");
+  });
+
+  it("titles every tab Microgrid Manager, and a page's own title ends in MGM", () => {
+    expect(metadata.title).toEqual({ default: "Microgrid Manager", template: "%s · MGM" });
+    expect(metadata.applicationName).toBe("MGM");
+  });
+
+  it("describes what the app does", () => {
+    expect(metadata.description).toBe(
+      "Run community microgrids: households, meters, tariffs, bills and payments.",
+    );
+  });
+
+  it("labels the iOS home-screen icon MGM without switching it to standalone", () => {
+    expect(metadata.appleWebApp).toEqual({ title: "MGM", capable: false });
+  });
+
+  it("colours the browser bar with the light page background only", () => {
+    // Pages render only the light palette, so no dark entry yet.
+    expect(viewport.themeColor).toBe(THEME_COLOR.light);
+  });
+
+  it("loads one variable Inter, not preloaded, that never swaps in mid-page", () => {
+    // The loader runs once, when the module is imported.
+    expect(fontCalls).toEqual([
+      expect.objectContaining({
+        subsets: ["latin"],
+        variable: "--font-inter",
+        preload: false,
+        display: "optional",
+      }),
+    ]);
+    // No weight list: next/font then serves the variable font, one file for
+    // every weight, instead of one file per weight.
+    expect(fontCalls[0]).not.toHaveProperty("weight");
+  });
+
+  it("puts the font variable on <html>, not <body>", async () => {
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_URL", "https://alpha.example.test");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_ANON_KEY", "sb_publishable_alpha");
+    vi.stubEnv("MGM_PUBLIC_SUPABASE_COOKIE_NAME", "");
+    const html = (await RootLayout({ children: <main /> })) as ElementWithClass;
+    expect(html.type).toBe("html");
+    expect(html.props.className?.split(/\s+/)).toContain("font-inter");
+    const body = React.Children.toArray(html.props.children).find(
+      (child): child is ElementWithClass => React.isValidElement(child) && child.type === "body",
+    );
+    expect(body).toBeDefined();
+    expect(body!.props.className ?? "").not.toContain("font-inter");
   });
 
   it("enters the request-time boundary before reading configuration", async () => {

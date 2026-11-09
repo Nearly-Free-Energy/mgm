@@ -80,9 +80,12 @@ describe("isReleasedRoute", () => {
     "/api/payments/attempts",
     "/api/payments/reconcile-worker",
     "/p/abc123",
+    "/payment/callback",
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",
+    // Install metadata: the web app manifest.
+    "/manifest.webmanifest",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -99,6 +102,10 @@ describe("isReleasedRoute", () => {
     "/settings",
     "/admin",
     "/microgrids/mg-1/operations/extra",
+    "/manifest.json",
+    "/icons/manifest.webmanifest",
+    // The old tenants URL has no page and no released route; it stays a 404.
+    "/microgrids/abc/tenants",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });

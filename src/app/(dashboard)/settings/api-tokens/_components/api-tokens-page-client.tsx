@@ -118,7 +118,7 @@ export function ApiTokensPageClient(props: ApiTokensPageClientProps) {
           <button
             type="button"
             onClick={() => setGenerateOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             Generate token
           </button>

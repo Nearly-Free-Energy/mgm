@@ -19,6 +19,8 @@
 //                                      wrap.
 //     Esc                              leave the grid (blur the wrapper)
 //   Click anywhere on a cell           sets focus + copies (mouse path)
+//   Rows are 30px tall with a mouse and 44px on a touch screen
+//   (`pointer-coarse:h-11`), where each cell is a tap target.
 //
 // A11y commitments:
 //   • <caption> describes the table (row count, column count, copy hint).
@@ -35,8 +37,9 @@
 //   • Column-major Tab is a single setState in onKeyDown — no per-cell
 //     listeners.
 //   • TODO(virtualization): for >100 rows wire react-window. Recommended:
-//     `react-window` (FixedSizeList — uniform 30px row height) wrapped to
-//     keep the keyboard nav span the virtualized window. Sketch:
+//     `react-window` (FixedSizeList — uniform 30px row height, 44px on
+//     touch screens) wrapped to keep the keyboard nav span the
+//     virtualized window. Sketch:
 //       const listRef = useRef<FixedSizeList>(null);
 //       useEffect(() => listRef.current?.scrollToItem(focus.r, "smart"),
 //                [focus.r]);
@@ -327,7 +330,7 @@ export function CopyTable<Row>({
           "focus-visible:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring)_25%,transparent)]",
         )}
       >
-        <table className="w-full border-collapse font-mono text-[12px] tabular-nums">
+        <table className="w-full border-collapse text-dense tabular-nums">
           <caption className="sr-only">
             {caption}. Use arrow keys to move; press C or Enter to copy a cell.
           </caption>
@@ -339,7 +342,7 @@ export function CopyTable<Row>({
                   scope="col"
                   id={col.id ?? `mgm-col-${ci}`}
                   className={cn(
-                    "h-8 whitespace-nowrap border-b border-border px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground",
+                    "h-8 whitespace-nowrap border-b border-border px-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground",
                     col.kind === "row-header" ? "text-left" : col.kind === "action" ? "text-center" : "text-right",
                     col.className,
                   )}
@@ -359,7 +362,7 @@ export function CopyTable<Row>({
                       <td
                         key={c}
                         className={cn(
-                          "h-[30px] whitespace-nowrap px-2 text-center",
+                          "h-[30px] whitespace-nowrap px-2 text-center pointer-coarse:h-11",
                           col.className,
                         )}
                       >
@@ -375,7 +378,7 @@ export function CopyTable<Row>({
                         key={c}
                         scope="row"
                         className={cn(
-                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-[12px] font-medium text-foreground",
+                          "h-[30px] whitespace-nowrap px-3 text-left font-sans text-dense font-medium text-foreground pointer-coarse:h-11",
                           col.className,
                         )}
                       >
@@ -394,7 +397,7 @@ export function CopyTable<Row>({
                       }}
                       aria-label={`${col.header}, ${rowHeaderText(r)}, ${formatted}${isCopied ? ", copied" : ""}`}
                       className={cn(
-                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors duration-fast",
+                        "relative h-[30px] cursor-pointer whitespace-nowrap rounded-sm px-2 text-right transition-colors pointer-coarse:h-11",
                         isFocus &&
                           "bg-accent outline outline-[3px] -outline-offset-[3px] outline-ring",
                         isCopied && "bg-success-muted",
@@ -403,7 +406,7 @@ export function CopyTable<Row>({
                     >
                       {formatted}
                       {isCopied && (
-                        <span aria-hidden="true" className="ml-1 text-[11px] font-semibold text-success-fg">
+                        <span aria-hidden="true" className="ml-1 text-caption font-semibold text-success-fg">
                           ✓
                         </span>
                       )}

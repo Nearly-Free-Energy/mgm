@@ -36,10 +36,10 @@
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
 import { Currency } from "@/components/format/currency";
 import { Banner } from "@/components/ui/banner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import type { RowBannerEntry } from "@/components/billing/row-banner-stack";
 import type {
   BillingLineItemPaymentStatus,
@@ -235,25 +235,18 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
-          role="dialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[420px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-lg outline-none",
-          )}
-        >
+        <DialogOverlay />
+        <DialogPanel role="dialog" className="w-[420px]">
           <div className="px-6 pb-5 pt-5">
             <Dialog.Title className="text-base font-semibold tracking-tight">
               Regenerating bill…
             </Dialog.Title>
-            <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+            <Dialog.Description className="mt-1 text-dense text-muted-foreground">
               Recomputing readings for {household.display_name}.
             </Dialog.Description>
             <div className="mt-4 inline-block h-4 w-4 animate-spin rounded-full border-2 border-border border-t-transparent" />
           </div>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );
@@ -368,7 +361,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
       return (
         <div
           data-testid="regenerate-preview-loading"
-          className="flex items-center gap-2 py-2 text-[13px] text-muted-foreground"
+          className="flex items-center gap-2 py-2 text-dense text-muted-foreground"
         >
           <span
             aria-hidden="true"
@@ -385,7 +378,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
           className="space-y-3"
         >
           {period.status === "closed" && <ClosedPeriodBanner />}
-          <p className="text-[13px] text-destructive-fg">{state.message}</p>
+          <p className="text-dense text-destructive-fg">{state.message}</p>
         </div>
       );
     }
@@ -399,13 +392,13 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
     return (
       <div className="space-y-3">
         {period.status === "closed" && <ClosedPeriodBanner />}
-        <div className="text-[13px] leading-relaxed text-muted-foreground">
+        <div className="text-dense leading-relaxed text-muted-foreground">
           <span className="font-medium text-foreground">
             {household.display_name}
           </span>{" "}
           · {periodLabel}
         </div>
-        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[13px]">
+        <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-dense">
           <span className="text-muted-foreground">Current total:</span>
           <span className="font-medium text-foreground">
             <Currency value={p.previousTotalAmount ?? 0} />
@@ -429,7 +422,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
             )}
           </span>
         </div>
-        <p className="text-[12px] text-muted-foreground">
+        <p className="text-caption text-muted-foreground">
           The bill is currently marked {lineItem.payment_status}. Regenerating
           will recalculate the readings and totals; the payment record (paid_at,
           paid_by_user_id, payment_notes, pesapal_order_id, payment_events
@@ -593,14 +586,10 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
   return (
     <Dialog.Root open onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-        <Dialog.Content
+        <DialogOverlay />
+        <DialogPanel
           role="dialog"
-          aria-modal
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[480px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-            "overflow-hidden rounded-md border border-border bg-card shadow-lg outline-none",
-          )}
+          className="w-[480px]"
           onEscapeKeyDown={() => onOpenChange(false)}
         >
           <div className="h-[6px] bg-primary" aria-hidden="true" />
@@ -609,7 +598,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               <Dialog.Title className="text-xl font-semibold tracking-tight">
                 Manual readings
               </Dialog.Title>
-              <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+              <Dialog.Description className="mt-1 text-dense text-muted-foreground">
                 <span className="font-medium text-foreground">
                   {household.display_name}
                 </span>{" "}
@@ -627,7 +616,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               <div>
                 <label
                   htmlFor={startId}
-                  className="mb-1 block text-[12px] font-medium text-foreground"
+                  className="mb-1 block text-caption font-medium text-foreground"
                 >
                   Start (kWh)
                 </label>
@@ -642,12 +631,12 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
                   onChange={(e) => setStartKwh(e.target.value)}
                   aria-invalid={startError !== null}
                   aria-describedby={startError ? `${startId}-err` : undefined}
-                  className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
                 {startError && (
                   <p
                     id={`${startId}-err`}
-                    className="mt-1 text-[11px] text-destructive-fg"
+                    className="mt-1 text-caption text-destructive-fg"
                   >
                     {startError}
                   </p>
@@ -656,7 +645,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               <div>
                 <label
                   htmlFor={endId}
-                  className="mb-1 block text-[12px] font-medium text-foreground"
+                  className="mb-1 block text-caption font-medium text-foreground"
                 >
                   End (kWh)
                 </label>
@@ -672,12 +661,12 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
                   aria-describedby={
                     endError || orderError ? `${endId}-err` : undefined
                   }
-                  className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full rounded-md border border-border bg-card px-3 py-1.5 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
                 {(endError || orderError) && (
                   <p
                     id={`${endId}-err`}
-                    className="mt-1 text-[11px] text-destructive-fg"
+                    className="mt-1 text-caption text-destructive-fg"
                   >
                     {endError ?? orderError}
                   </p>
@@ -686,7 +675,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               <div>
                 <label
                   htmlFor={reasonId}
-                  className="mb-1 block text-[12px] font-medium text-foreground"
+                  className="mb-1 block text-caption font-medium text-foreground"
                 >
                   Reason for manual entry{" "}
                   <span className="font-normal text-muted-foreground">
@@ -700,9 +689,9 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
                   maxLength={500}
                   rows={2}
                   aria-label="Manual entry reason (optional, max 500 characters)"
-                  className="block w-full resize-none rounded-md border border-border bg-card px-3 py-1.5 text-[13px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block w-full resize-none rounded-md border border-border bg-card px-3 py-1.5 text-dense text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
-                <p className="mt-0.5 text-right text-[11px] text-muted-foreground">
+                <p className="mt-0.5 text-right text-caption text-muted-foreground">
                   {reason.length}/500
                 </p>
               </div>
@@ -710,17 +699,17 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
 
             {errorMsg && (
               <div className="px-6 pt-2">
-                <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-[13px] text-destructive-fg">
+                <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
                   {errorMsg}
                 </div>
               </div>
             )}
 
-            <div className="mt-4 flex items-center justify-end gap-2 bg-muted px-6 pb-[18px] pt-[14px]">
+            <DialogFooter className="mt-4">
               <Dialog.Close asChild>
                 <button
                   type="button"
-                  className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   Cancel
                 </button>
@@ -728,7 +717,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting && (
                   <svg
@@ -744,9 +733,9 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
                 )}
                 Save manual reading
               </button>
-            </div>
+            </DialogFooter>
           </form>
-        </Dialog.Content>
+        </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>
   );

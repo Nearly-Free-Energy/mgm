@@ -50,11 +50,13 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <NavigationProgress />
-      {/* Sidebar */}
-      <aside className="flex w-64 flex-col border-r border-border bg-muted">
-        <div className="border-b border-border px-6 py-4">
+      {/* Navigation: a sidebar from md (768px) up. Below that it is a band
+          across the top whose links scroll sideways, so pages get the full
+          width of a phone. */}
+      <aside className="flex items-center border-b border-border bg-muted md:w-64 md:flex-col md:items-stretch md:border-b-0 md:border-r">
+        <div className="shrink-0 px-4 py-2 md:border-b md:border-border md:px-6 md:py-4">
           <h2 className="text-lg font-semibold text-foreground">MGM</h2>
         </div>
         <SidebarNav />
@@ -63,16 +65,16 @@ export default async function DashboardLayout({
       {/* Main content */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
+        <header className="flex items-center justify-between gap-2 border-b border-border bg-card px-4 py-2 md:px-6 md:py-3">
           <div />
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{user.email}</span>
+          <div className="flex min-w-0 items-center gap-4">
+            <span className="min-w-0 truncate text-sm text-muted-foreground">{user.email}</span>
             <LogoutButton />
           </div>
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">{children}</main>
       </div>
     </div>
   );

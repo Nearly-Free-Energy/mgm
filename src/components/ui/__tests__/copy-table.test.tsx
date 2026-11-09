@@ -160,3 +160,30 @@ describe("CopyTable — ActionColumnDef", () => {
     expect(liveRegion?.textContent).toContain("End of table");
   });
 });
+
+describe("CopyTable — row height", () => {
+  // jsdom does not evaluate media queries, so these check the classes:
+  // h-[30px] is the height with a mouse, and pointer-coarse:h-11 (44px)
+  // applies only on a touch screen, where each cell is a tap target.
+  it("keeps 30px rows with a mouse and makes them 44px on a touch screen", () => {
+    const { container } = render(
+      <CopyTable rows={rows} columns={columnsWithAction} caption="Test table" />
+    );
+    const valueCell = container.querySelector("td[aria-label*='Amount']");
+    const rowHeader = container.querySelector("tbody th[scope='row']");
+    const actionCell = screen.getByTestId("pay-a").closest("td");
+    for (const cell of [valueCell, rowHeader, actionCell]) {
+      expect(cell).not.toBeNull();
+      expect(cell!.className).toContain("h-[30px]");
+      expect(cell!.className).toContain("pointer-coarse:h-11");
+    }
+  });
+
+  it("leaves the column headers at their height, since they are not tap targets", () => {
+    render(<CopyTable rows={rows} columns={columnsWithAction} caption="Test table" />);
+    for (const header of screen.getAllByRole("columnheader")) {
+      expect(header.className).toContain("h-8");
+      expect(header.className).not.toContain("pointer-coarse:");
+    }
+  });
+});

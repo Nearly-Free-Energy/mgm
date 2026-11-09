@@ -200,24 +200,24 @@ export default async function EdgeDetailPage({
           />
         )
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="relative overflow-x-auto rounded-lg border border-border bg-card">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted">
               <tr>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Device
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Type
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   OpenEMS component
                 </th>
-                <th className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                   Linked household
                 </th>
                 {canManage && (
-                  <th className="px-4 py-2 text-right text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
                     Actions
                   </th>
                 )}

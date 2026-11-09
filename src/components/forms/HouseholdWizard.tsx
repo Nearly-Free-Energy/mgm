@@ -33,6 +33,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { RadioCard } from "@/components/ui/radio-card";
 import { StatusChip } from "@/components/ui/status-chip";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { humanReadable } from "@/lib/openems/device-descriptions";
 import type { DeviceType } from "@/lib/types/domain";
 import {
@@ -459,14 +460,8 @@ export function HouseholdWizard({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-foreground/55" />
-          <Dialog.Content
-            aria-modal
-            className={cn(
-              "fixed left-1/2 top-1/2 z-50 w-[640px] max-w-[94%] -translate-x-1/2 -translate-y-1/2",
-              "max-h-[92vh] overflow-y-auto rounded-md border border-border bg-card shadow-elev-3 outline-none"
-            )}
-          >
+          <DialogOverlay />
+          <DialogPanel className="w-[640px]">
             {/* top rail */}
             <div aria-hidden="true" className="h-[6px] bg-primary" />
 
@@ -474,7 +469,7 @@ export function HouseholdWizard({
               <Dialog.Title className="text-xl font-semibold tracking-tight text-foreground">
                 Add household
               </Dialog.Title>
-              <Dialog.Description className="mt-1 text-[13px] text-muted-foreground">
+              <Dialog.Description className="mt-1 text-dense text-muted-foreground">
                 Four quick steps. You&apos;ll assign a primary meter in step 3
                 so billing starts on the next period.
               </Dialog.Description>
@@ -555,12 +550,12 @@ export function HouseholdWizard({
             </div>
 
             {/* Footer actions */}
-            <div className="mt-4 flex items-center justify-between gap-2 border-t border-border bg-muted px-6 pb-[18px] pt-[14px]">
+            <DialogFooter className="mt-4 justify-between border-t border-border">
               <button
                 type="button"
                 onClick={handleCancelClick}
                 disabled={submitting}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-[13px] font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -571,7 +566,7 @@ export function HouseholdWizard({
                     type="button"
                     onClick={handleBack}
                     disabled={submitting}
-                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-[13px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                    className="inline-flex h-8 items-center rounded-md border border-border bg-card px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   >
                     Back
                   </button>
@@ -587,7 +582,7 @@ export function HouseholdWizard({
                       (step === 3 && blockedByNoMeters)
                     }
                     className={cn(
-                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       "disabled:cursor-not-allowed disabled:opacity-50"
                     )}
                   >
@@ -599,7 +594,7 @@ export function HouseholdWizard({
                     onClick={handleSubmit}
                     disabled={!canSave || submitting || blockedByNoMeters}
                     className={cn(
-                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "inline-flex h-8 items-center rounded-md bg-primary px-3.5 text-dense font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       "disabled:cursor-not-allowed disabled:opacity-50"
                     )}
                   >
@@ -607,8 +602,8 @@ export function HouseholdWizard({
                   </button>
                 )}
               </div>
-            </div>
-          </Dialog.Content>
+            </DialogFooter>
+          </DialogPanel>
         </Dialog.Portal>
       </Dialog.Root>
 
@@ -670,7 +665,7 @@ function StepIndicator({
               <span
                 aria-hidden="true"
                 className={cn(
-                  "inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold",
+                  "inline-flex h-5 w-5 items-center justify-center rounded-full text-caption font-semibold",
                   isActive && "bg-primary text-primary-foreground",
                   !isActive && isCompleted && "bg-success text-success-foreground",
                   !isActive && !isCompleted && "bg-border text-foreground"
@@ -678,7 +673,11 @@ function StepIndicator({
               >
                 {isCompleted && !isActive ? "✓" : s}
               </span>
-              <span>{STEP_LABELS[s]}</span>
+              {/* Under 600px only the current step is named, so the bar
+                  fits a phone; screen readers still hear every step. */}
+              <span className={isActive ? undefined : "max-[600px]:sr-only"}>
+                {STEP_LABELS[s]}
+              </span>
             </button>
             {idx < steps.length - 1 && (
               <span aria-hidden="true" className="h-px flex-1 bg-border" />
@@ -717,7 +716,7 @@ function StepBasics({
       <div>
         <label
           htmlFor="hh-display-name"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Display name <span aria-hidden="true">*</span>
           <span className="sr-only"> (required)</span>
@@ -737,7 +736,7 @@ function StepBasics({
       <div>
         <label
           htmlFor="hh-account-number"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Account number
         </label>
@@ -754,7 +753,7 @@ function StepBasics({
         <div>
           <label
             htmlFor="hh-primary-phone"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Primary phone <span aria-hidden="true">*</span>
             <span className="sr-only"> (required)</span>
@@ -786,7 +785,7 @@ function StepBasics({
         <div>
           <label
             htmlFor="hh-primary-email"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Email
           </label>
@@ -803,7 +802,7 @@ function StepBasics({
       <div>
         <span
           id="hh-customer-type-label"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Customer type
         </span>
@@ -863,7 +862,7 @@ function StepAddress({
       <div>
         <label
           htmlFor="hh-address-line1"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Address line 1
         </label>
@@ -880,7 +879,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-line2"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Address line 2
           </label>
@@ -895,7 +894,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-unit-label"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Unit label
           </label>
@@ -912,7 +911,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-city"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             City
           </label>
@@ -927,7 +926,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-region"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Region / state
           </label>
@@ -944,7 +943,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-country"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Country
           </label>
@@ -959,7 +958,7 @@ function StepAddress({
         <div>
           <label
             htmlFor="hh-address-postal"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Postal code
           </label>
@@ -975,7 +974,7 @@ function StepAddress({
       <div>
         <label
           htmlFor="hh-geography-notes"
-          className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+          className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
         >
           Geography notes
         </label>
@@ -1041,7 +1040,7 @@ function StepMeter({
         <div>
           <label
             htmlFor="hh-meter-serial"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Meter serial
           </label>
@@ -1057,7 +1056,7 @@ function StepMeter({
         <div>
           <label
             htmlFor="hh-meter-type"
-            className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+            className="mb-1 block text-caption font-semibold uppercase tracking-wide text-muted-foreground"
           >
             Meter type
           </label>
