@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, closeSync, openSync, readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { TOUCH_TALL, TOUCH_WIDE } from "./touch-selectors";
 
@@ -111,6 +111,13 @@ export async function reportTiming(page: Page, label: string) {
   console.log(`[timing] ${label}: first byte ${t[0]} ms, DOM ready ${t[1]} ms, load ${t[2]} ms, document ${t[3]} B`);
   const summary = process.env.GITHUB_STEP_SUMMARY;
   if (!summary) return;
-  if (!existsSync(summary) || !readFileSync(summary, "utf8").includes(TIMINGS_HEADER)) appendFileSync(summary, TIMINGS_HEADER);
-  appendFileSync(summary, `| ${label} | ${t.join(" | ")} |\n`);
+  // One descriptor for the read and both appends ("a+" creates the file if
+  // needed), so nothing is checked by path before it is written.
+  const fd = openSync(summary, "a+");
+  try {
+    if (!readFileSync(fd, "utf8").includes(TIMINGS_HEADER)) appendFileSync(fd, TIMINGS_HEADER);
+    appendFileSync(fd, `| ${label} | ${t.join(" | ")} |\n`);
+  } finally {
+    closeSync(fd);
+  }
 }
