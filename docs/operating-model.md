@@ -127,7 +127,7 @@ merge until it holds:
 
 | Check | Workflow | Notes |
 |---|---|---|
-| `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite against a local Supabase; Node.js 24 from `.nvmrc` |
+| `Test` | `.github/workflows/test.yml` | types, lint, database rehearsals, full suite and a 360 px browser smoke against a local Supabase; Node.js 24 from `.nvmrc` |
 | `CodeQL` | `.github/workflows/codeql.yml` | static security analysis |
 | `Build` | `.github/workflows/build.yml` | production build on Node.js 24, no hosting provider, no secrets; then the first-load byte budgets in `scripts/budgets/limits.json` |
 
@@ -226,12 +226,14 @@ checks are run by hand:
   every job that `.github/workflows/` runs on pull requests to `main`,
   except CodeQL, in order and with the Node.js version and environment
   variables that job sets, plus any release build checks. That is more than
-  `npm test`: the `Test` job also runs database rehearsals and script tests
-  against its local Supabase. They use a disposable local environment with
-  synthetic data on a machine they control, and keep the recorded commits
-  and the results in the advisory's private record. This step defers to the
-  workflow files so that it changes when they do; if a pull-request check
-  ever runs outside `.github/workflows/`, add it here.
+  `npm test`: the `Test` job also runs database rehearsals, script tests and
+  the browser smoke against its local Supabase (the smoke needs
+  `npx playwright install chromium` on that machine). They use a disposable
+  local environment with synthetic data on a machine they control, and keep
+  the recorded commits and the results in the advisory's private record.
+  This step defers to the workflow files so that it changes when they do;
+  if a pull-request check ever runs outside `.github/workflows/`, add it
+  here.
 - Steps that only prepare an Actions runner are replaced by their local
   equivalent, not reproduced: the checkout is the combined result above,
   Node.js setup is the job's version installed locally, and the GHCR login,

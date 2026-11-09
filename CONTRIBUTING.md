@@ -81,7 +81,7 @@ breaks these rules, so the maintainer who merges checks each one by hand
 
 | Item | What it proves |
 |---|---|
-| `Test` | type check, lint, database rehearsals, and the full test suite |
+| `Test` | type check, lint, database rehearsals, the full test suite, and a browser smoke test at 360 px |
 | `CodeQL` (both entries) | static security analysis |
 | `Build` | the production build succeeds with no hosting provider and no secrets, and its first-load JavaScript, stylesheet and fonts stay within `scripts/budgets/limits.json` |
 | Verified signatures | every commit is cryptographically signed |

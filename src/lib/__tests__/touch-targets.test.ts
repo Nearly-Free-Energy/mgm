@@ -32,6 +32,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import { compile } from "@tailwindcss/node";
 import ts from "typescript";
+import { TOUCH_TALL, TOUCH_WIDE } from "../../../e2e/touch-selectors";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const CSS_PATH = path.join(REPO_ROOT, "src/app/globals.css");
@@ -241,6 +242,14 @@ describe("touch targets on a coarse pointer", () => {
     expect(matches(SAMPLES["visually hidden button"], minWidthRule.selector)).toBe(false);
     expect(matches(SAMPLES["flex link"], minWidthRule.selector)).toBe(false);
     expect(matches(SAMPLES["text field"], minWidthRule.selector)).toBe(false);
+  });
+
+  it("matches the selectors the browser smoke measures (e2e/touch-selectors.ts)", () => {
+    // The 360 px smoke checks rendered sizes of what these selectors reach;
+    // a list that drifts from the stylesheet would check the wrong controls.
+    const squash = (selector: string) => selector.replace(/\s+/g, "");
+    expect(squash(TOUCH_TALL)).toBe(squash(minHeightRule.selector));
+    expect(squash(TOUCH_WIDE)).toBe(squash(minWidthRule.selector));
   });
 
   it("draws checkboxes and radios at 20px outside every layer, so it wins over size-4", () => {
