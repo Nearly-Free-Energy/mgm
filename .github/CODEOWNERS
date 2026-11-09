@@ -27,12 +27,12 @@
 /src/lib/plugins/                      @tushabe @arindahills
 
 # GUI contract: the types GUIs and capability plugins build against, the
-# type test that pins the confirmation rules they express, and the host that
-# decides what contributed output may be sent to a browser.
-/src/lib/gui/contract.ts                      @tushabe @arindahills
-/src/lib/gui/surface.ts                       @tushabe @arindahills
-/src/lib/gui/__tests__/contract-types.test.ts @tushabe @arindahills
-/src/lib/gui/host/                            @tushabe @arindahills
+# host that serves them, the kit interface packages import, and the type and
+# import-boundary tests (docs/adr/ADR-006-gui-contract-v0.md). The whole
+# directory is owned because gui-boundary.test.ts lets every interface
+# package import from it: a file added here is reachable from src/gui/ at
+# once. If that allowlist stops naming anything under src/lib/gui, revisit.
+/src/lib/gui/                          @tushabe @arindahills
 
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills
