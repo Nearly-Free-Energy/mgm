@@ -15,6 +15,15 @@ import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
 
+// The four stored OpenEMS credentials, the same columns the guard trigger
+// names in its address rule (20261110142706).
+const EMS_CREDENTIAL_COLUMNS = [
+  "ems_aws_secret_access_key_encrypted",
+  "ems_basic_auth_password_encrypted",
+  "ems_bearer_token_encrypted",
+  "ems_keycloak_client_secret_encrypted",
+] as const;
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -949,6 +958,17 @@ export async function PUT(
   if (!preserveExistingKeycloakSecret) {
     updatePayload.ems_keycloak_client_secret_encrypted =
       wantsKeycloak && keycloakClientSecret ? encryptedKeycloakClientSecret : null;
+  }
+  // A new backend address takes no stored credential with it, including one
+  // left over from an earlier authentication mode: every credential column
+  // this save does not rewrite is cleared. The guard trigger refuses an
+  // address change that leaves stored ciphertext in place (20261110142706),
+  // and the check above has already refused a "keep" with a new address, so
+  // nothing a save preserves is cleared here.
+  if (backendUrlChanged) {
+    for (const column of EMS_CREDENTIAL_COLUMNS) {
+      if (!(column in updatePayload)) updatePayload[column] = null;
+    }
   }
 
   const { error: updErr } = await saveEmsConfigForMicrogrid(

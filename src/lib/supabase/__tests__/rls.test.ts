@@ -1945,6 +1945,32 @@ describe("Merchant credentials (#115)", () => {
         expectRefused(version.error);
       }
 
+      // The address a merchant secret is sent to is not the caller's to set:
+      // the save route takes it from the sandbox flag (one of two fixed
+      // Pesapal addresses) and writes on the service role through
+      // fn_payment_save_account. Signed-in clients can't write the table.
+      for (const user of [userA, userD]) {
+        const moved = await user.client
+          .from("payment_merchant_accounts")
+          .update({ base_url: "https://merchant-moved.example.com" })
+          .eq("id", MERCHANT_ID);
+        expectRefused(moved.error);
+        const inserted = await user.client.from("payment_merchant_accounts").insert({
+          org_id: FIXTURE.orgA,
+          display_name: "RLS merchant insert probe",
+          consumer_key: "ck_test_insert",
+          base_url: "https://merchant-moved.example.com",
+          secret_encrypted: encrypted,
+        });
+        expectRefused(inserted.error);
+      }
+      const { data: unmoved } = await svc
+        .from("payment_merchant_accounts")
+        .select("base_url")
+        .eq("id", MERCHANT_ID)
+        .single();
+      expect(unmoved?.base_url).toBe("https://cybqa.pesapal.com/pesapalv3");
+
       const secret = await svc.rpc("fn_get_payment_merchant_secret", { _account_id: MERCHANT_ID });
       expect(secret.error).toBeNull();
       expect(secret.data).toBe(MERCHANT_SECRET);

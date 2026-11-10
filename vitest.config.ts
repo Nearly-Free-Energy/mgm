@@ -56,6 +56,7 @@ export default defineConfig({
             "src/lib/gui/host/server/__tests__/entities.db.test.ts",
             "src/lib/gui/host/server/__tests__/manifest.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
+            "src/lib/supabase/__tests__/credential_key_reach.test.ts",
             // Component tests of the interface kit and host run in the
             // "gui" project below, in jsdom. Without this line each would
             // also run here, in node, and fail.
@@ -116,6 +117,7 @@ export default defineConfig({
             "src/lib/gui/host/server/__tests__/entities.db.test.ts",
             "src/lib/gui/host/server/__tests__/manifest.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
+            "src/lib/supabase/__tests__/credential_key_reach.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
           ],
           environment: "node",

@@ -1361,6 +1361,50 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
       expect(sink.payload?.ems_backend_url).toBe(NEW_URL);
       expect(sink.payload?.ems_basic_auth_password_encrypted).toBe("\\x01020304");
     });
+
+    it("clears credentials left from earlier modes when the backend URL changes", async () => {
+      // A Basic-auth row that still holds a bearer token, an AWS secret and a
+      // Keycloak secret from earlier configurations. The guard trigger
+      // refuses an address change that leaves any of them in place.
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_backend_url: STORED_URL,
+          ems_basic_auth_password_encrypted: "\\xDEADBEEF",
+          ems_bearer_token_encrypted: "\\xBEEF0001",
+          ems_aws_secret_access_key_encrypted: "\\xBEEF0002",
+          ems_keycloak_client_secret_encrypted: "\\xBEEF0003",
+        })
+      );
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: NEW_URL,
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+          basicAuthPassword: "typed-again",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      expect(sink.payload).toMatchObject({
+        ems_backend_url: NEW_URL,
+        ems_basic_auth_password_encrypted: "\\x01020304",
+        ems_bearer_token_encrypted: null,
+        ems_aws_secret_access_key_encrypted: null,
+        ems_keycloak_client_secret_encrypted: null,
+      });
+    });
   });
 });
 

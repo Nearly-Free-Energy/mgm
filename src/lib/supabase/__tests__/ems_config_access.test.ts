@@ -731,6 +731,45 @@ describe.skipIf(skip)("Saved OpenEMS credentials", () => {
     expect(row?.ems_bearer_token_encrypted).toBeNull();
   });
 
+  it("a backend URL change succeeds once credentials left from earlier modes are cleared", async () => {
+    // B uses Basic auth but still holds a bearer token from before. This is
+    // the save the settings route sends: the new password, and every other
+    // credential column cleared.
+    await resetB(await encrypt("synthetic-stale-bearer"));
+    const svc = await serviceClient();
+    const NEW_URL = "https://credentials-b-moved.example.com";
+    const password = await encrypt("synthetic-password-1");
+    const { error: setErr } = await svc
+      .from("microgrids")
+      .update({ ems_basic_auth_username: "openems", ems_basic_auth_password_encrypted: password })
+      .eq("id", B);
+    expect(setErr).toBeNull();
+
+    const typedAgain = await encrypt("synthetic-password-1");
+    const { error: keptErr } = await svc
+      .from("microgrids")
+      .update({ ems_backend_url: NEW_URL, ems_basic_auth_password_encrypted: typedAgain })
+      .eq("id", B);
+    expect(keptErr?.code).toBe("23514"); // the old bearer token would follow
+
+    const { error: clearedErr } = await svc
+      .from("microgrids")
+      .update({
+        ems_backend_url: NEW_URL,
+        ems_basic_auth_password_encrypted: typedAgain,
+        ems_bearer_token_encrypted: null,
+        ems_aws_secret_access_key_encrypted: null,
+        ems_keycloak_client_secret_encrypted: null,
+      })
+      .eq("id", B);
+    expect(clearedErr).toBeNull();
+    const row = await readB();
+    expect(row?.ems_backend_url).toBe(NEW_URL);
+    expect(row?.ems_bearer_token_encrypted).toBeNull();
+    expect(row?.ems_basic_auth_password_encrypted).not.toBeNull();
+    await resetB(null);
+  });
+
   it("a token URL change must clear or rewrite the Keycloak client secret", async () => {
     await resetB(null);
     const svc = await serviceClient();
