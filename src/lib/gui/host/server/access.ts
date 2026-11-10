@@ -20,9 +20,9 @@ import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt, InstallationRequest, SurfaceRequest } from "../../surface";
 
 /**
- * Returns a new row-level-security client for this request's session. Routes
- * pass createClient from @/lib/supabase/server; if a route passes any other
- * factory, revisit (gui/host-view's no-cache test is meant to guard this).
+ * Returns a new row-level-security client for this request's session. Every
+ * hostContext call in the host and its routes passes createClient from
+ * @/lib/supabase/server, which no-cache.test.ts checks.
  */
 export type ClientFactory = () => Promise<SupabaseClient>;
 

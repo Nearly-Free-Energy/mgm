@@ -41,6 +41,9 @@
 # The MGM_GUI setting: which compiled-in GUI serves the installation's pages.
 /src/lib/config/gui.ts                 @tushabe @arindahills
 
+# The GUI host's routes (decision 4 on #115).
+/src/app/api/gui/                      @tushabe @arindahills
+
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills
 /src/lib/mgm/released-routes.ts        @tushabe @arindahills

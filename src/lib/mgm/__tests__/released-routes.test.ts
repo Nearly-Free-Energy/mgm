@@ -86,6 +86,8 @@ describe("isReleasedRoute", () => {
     "/microgrids/mg-1/operations",
     // Install metadata: the web app manifest.
     "/manifest.webmanifest",
+    // The GUI host.
+    "/api/gui/view",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -106,6 +108,11 @@ describe("isReleasedRoute", () => {
     "/icons/manifest.webmanifest",
     // The old tenants URL has no page and no released route; it stays a 404.
     "/microgrids/abc/tenants",
+    // The GUI host releases one route at a time.
+    "/api/gui",
+    "/api/gui/manifest",
+    "/api/gui/view/extra",
+    "/api/gui/prepare",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -114,5 +121,6 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/microgrids/abc/setup/edges/")).toBe(true);
     expect(isReleasedRoute("/api/metering/readings/")).toBe(true);
     expect(isReleasedRoute("/microgrids/mg-1/operations/")).toBe(true);
+    expect(isReleasedRoute("/api/gui/view/")).toBe(true);
   });
 });

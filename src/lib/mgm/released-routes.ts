@@ -17,6 +17,7 @@
  * cuts, dark time and who served the houses), read through the metering
  * capability.
  * Install metadata: the web app manifest.
+ * GUI host: contributed views for the signed-in person's organization.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -120,6 +121,10 @@ const OPERATIONS_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/operations$/,
 ];
 
+// The GUI host (src/app/api/gui/). Each name here is a release decision in the
+// pull request that adds its route.
+const GUI_HOST_API_ROUTES = [/^\/api\/gui\/view$/];
+
 // Install metadata browsers fetch on their own: the web app manifest
 // (src/app/manifest.ts). The icons it and the root layout name are static
 // image files that the middleware matcher skips, so they need no entry; if
@@ -141,5 +146,6 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_2_API_ROUTES,
     ...RELEASE_3_API_ROUTES,
     ...RELEASE_4_API_ROUTES,
+    ...GUI_HOST_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

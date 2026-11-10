@@ -158,7 +158,7 @@ describe("strictParseModel", () => {
     m.body.rows[0].links = [
       { id: "billing.pdf", label: "PDF", href: `/api/billing-line-items/${MG}/pdf`, download: { mime: "application/pdf", filename: "bill.pdf" } },
       { id: "billing.call", label: "Call", href: "tel:+256700000000" },
-      { id: "billing.bad", label: "Bad", href: "/api/gui/view" },
+      { id: "billing.bad", label: "Bad", href: "/api/gui/manifest" },
       { id: "billing.gone", label: "Gone", href: `/microgrids/${MG}/nowhere` },
     ];
     // A model's own links follow the link rule too.
