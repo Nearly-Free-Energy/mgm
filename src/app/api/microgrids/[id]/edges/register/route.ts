@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
+import { meteringFixturesEnabled } from "@/lib/config/metering-fixtures";
+import {
+  SYNTHETIC_EDGE_ID_PREFIX,
+  isSyntheticEdgeId,
+} from "@/lib/metering/fixture-provider";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,6 +29,9 @@ type RegisterRequestBody = {
  *
  * Permission: RLS-enforced (the edges INSERT policy runs
  * user_can_access_microgrid(microgrid_id)).
+ *
+ * Ids starting with SYNTHETIC-EDGE- are refused (400) unless
+ * MGM_METERING_FIXTURES is on.
  *
  * Returns { inserted, updated, edges } where `inserted + updated` equals
  * the input edge count on success.
@@ -73,6 +81,19 @@ export async function POST(
         { status: 400 }
       );
     }
+  }
+
+  // Reserved synthetic ids are registered only where they are read:
+  // FixtureMeteringPlugin registers the synthetic provider only while
+  // MGM_METERING_FIXTURES is on. If it registers by another rule, revisit.
+  if (!meteringFixturesEnabled() && body.edges.some((e) => isSyntheticEdgeId(e.openems_edge_id.trim()))) {
+    return NextResponse.json(
+      {
+        error: `Edge ids starting with ${SYNTHETIC_EDGE_ID_PREFIX} are reserved for synthetic data, which this installation does not generate.`,
+        field: "openems_edge_id",
+      },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();

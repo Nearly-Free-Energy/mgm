@@ -75,7 +75,8 @@ export const MeteringPlugin = {
       scope,
       registry,
       createOpenEmsConnection(request.supabase, config.repository),
-      () => active
+      () => active,
+      (microgridId) => ctx.meteringProviders.select(request.supabase, microgridId)
     );
     ctx.provide("meteringScope", scope);
     ctx.provide("meteringRegistry", registry);

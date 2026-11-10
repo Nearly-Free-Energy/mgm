@@ -4,6 +4,7 @@ import * as React from "react";
 import { Kwh } from "@/components/format/kwh";
 import { formatLocalDate } from "@/components/format/local-date";
 import { useLocale } from "@/components/format/locale-context";
+import { Banner } from "@/components/ui/banner";
 import {
   GRID_PRESENT_MIN_V,
   LOW_BATTERY_PCT,
@@ -320,6 +321,11 @@ export function DailyOperations({ day }: { day: SiteDayOperations }) {
 
   return (
     <div className="space-y-4">
+      {day.synthetic && (
+        <Banner tone="warn" title="Synthetic data">
+          This day is generated for testing and demonstration. No meter was read.
+        </Banner>
+      )}
       {partial && (
         <p className="text-sm text-muted-foreground">
           Today so far, up to {clock(day.readUntilMs)}.

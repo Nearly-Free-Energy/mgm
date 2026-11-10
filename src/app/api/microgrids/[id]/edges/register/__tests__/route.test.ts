@@ -4,10 +4,11 @@
  * Covers:
  *   - 400 bad UUID / empty body / malformed entries
  *   - 403 on RLS violation
+ *   - 400 for a reserved SYNTHETIC-EDGE- id unless MGM_METERING_FIXTURES is on
  *   - Happy path: computes inserted vs updated from the prefetched existing set
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const MG_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -15,7 +16,8 @@ const MG_ID = "550e8400-e29b-41d4-a716-446655440000";
 const mockFrom = vi.fn();
 
 // The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
-vi.mock("@/lib/runtime/gate", () => ({ gateRoute: vi.fn(async () => null) }));
+const { gateRoute } = vi.hoisted(() => ({ gateRoute: vi.fn(async () => null) }));
+vi.mock("@/lib/runtime/gate", () => ({ gateRoute }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mockFrom }),
@@ -158,5 +160,75 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
     expect(json.inserted).toBe(1);
     expect(json.updated).toBe(1);
     expect(json.edges).toHaveLength(2);
+  });
+
+  describe("reserved synthetic edge ids", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    const synthetic = {
+      edges: [
+        { openems_edge_id: "edge0", name: "Edge 0" },
+        { openems_edge_id: " SYNTHETIC-EDGE-001 ", name: "Synthetic" },
+      ],
+    };
+
+    it.each([["unset", ""], ["off", "off"], ["invalid", "maybe"]])(
+      "refuses them with 400 before any read or write while MGM_METERING_FIXTURES is %s",
+      async (_label, value) => {
+        vi.stubEnv("MGM_METERING_FIXTURES", value);
+        const { POST } = await import("../route");
+        const res = await POST(makeReq(synthetic), { params: Promise.resolve({ id: MG_ID }) });
+        expect(res.status).toBe(400);
+        const json = await res.json();
+        expect(json.field).toBe("openems_edge_id");
+        expect(json.error).toContain("SYNTHETIC-EDGE-");
+        expect(gateRoute).not.toHaveBeenCalled();
+        expect(mockFrom).not.toHaveBeenCalled();
+      }
+    );
+
+    it("registers them while MGM_METERING_FIXTURES is on", async () => {
+      vi.stubEnv("MGM_METERING_FIXTURES", "on");
+      registerFrom(() => ({
+        select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      }));
+      const upsert = vi.fn(() => ({
+        select: () =>
+          Promise.resolve({
+            data: [{ id: "db-1", microgrid_id: MG_ID, openems_edge_id: "SYNTHETIC-EDGE-001", name: "Synthetic", role: null }],
+            error: null,
+          }),
+      }));
+      registerFrom(() => ({ upsert }));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: "SYNTHETIC-EDGE-001", name: "Synthetic" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(200);
+      expect(gateRoute).toHaveBeenCalledTimes(1);
+      expect(upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ openems_edge_id: "SYNTHETIC-EDGE-001" })],
+        { onConflict: "microgrid_id,openems_edge_id" }
+      );
+    });
+
+    it("leaves ids that only look similar to the normal path while off", async () => {
+      vi.stubEnv("MGM_METERING_FIXTURES", "");
+      registerFrom(() => ({
+        select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      }));
+      registerFrom(() => ({
+        upsert: () => ({ select: () => Promise.resolve({ data: [], error: null }) }),
+      }));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: "synthetic-edge-001", name: "Lower case" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(200);
+    });
   });
 });

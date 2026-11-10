@@ -172,7 +172,7 @@ browser bundle or the image. The decision is recorded in
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
 | `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. No page reads it yet |
-| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. No metering path reads it yet |
+| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -266,16 +266,29 @@ its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
 with a daylight-saving change has 23 or 25 hours of bins.
 
-Once the provider is registered, two keys guard it:
+Two keys guard it:
 
 - `MGM_METERING_FIXTURES` must be on ([Runtime configuration](#runtime-configuration)).
-- The provider generates samples only for devices whose edge id starts with
-  `SYNTHETIC-EDGE-`, and refuses any other device, so it never stands in for
-  a real meter.
+  Only then does the runtime register it, as the `synthetic` metering
+  provider (`src/lib/metering/fixture/plugin.ts`). While it is off, edge
+  registration refuses ids that start with `SYNTHETIC-EDGE-`.
+- Every edge of the microgrid must have an id starting with
+  `SYNTHETIC-EDGE-`. A microgrid with none keeps its usual provider, and one
+  that mixes synthetic and real edges is refused (409). The provider also
+  refuses any device whose edge id lacks the prefix, so it never stands in
+  for a real meter.
 
-The provider declares itself synthetic (`MeteringProvider.synthetic`), so a
-view can label its figures once it reads them. It is not yet registered for
-any microgrid, so the setting has no effect yet.
+The Operations day of such a microgrid shows a "Synthetic data" banner.
+It has no readings for billing, so generating a bill for such a microgrid
+fails rather than billing zero.
+
+To set one up with the setting on, create a microgrid and register its edge
+and devices through the API:
+
+1. `POST /api/microgrids/<id>/edges/register` with
+   `{"edges":[{"openems_edge_id":"SYNTHETIC-EDGE-001","name":"Synthetic"}]}`.
+2. `POST /api/devices` for a battery, a grid meter, an inverter and
+   consumption meters on that edge, then link the meters to households.
 
 ## Local Supabase Services
 

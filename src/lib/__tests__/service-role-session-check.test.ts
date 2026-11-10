@@ -93,6 +93,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Registers the OpenEMS factory into meteringProviders; the factory runs only through that registry, which is tracked by name.",
   },
+  "src/lib/metering/fixture/plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the synthetic factory into meteringProviders when MGM_METERING_FIXTURES is on; the factory reads no credentials and runs only through that registry, which is tracked by name.",
+  },
   "src/lib/metering/compose.ts": {
     privilegedExports: ["MeteringPlugin"],
     reason:

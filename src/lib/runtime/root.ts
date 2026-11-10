@@ -16,6 +16,7 @@ import {
   type MgmPluginName,
 } from "@/lib/plugins/bundled";
 import { OpenEmsMeteringPlugin } from "@/lib/metering/providers-plugin";
+import { FixtureMeteringPlugin } from "@/lib/metering/fixture/plugin";
 import { GUI_META } from "@/gui/meta";
 import type { GuiMeta } from "@/lib/gui/contract";
 import { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
@@ -97,6 +98,7 @@ export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   ...Object.entries(GUI_META).map(([name, meta]) => guiInstallPlugin(name, meta)),
   MeteringProvidersPlugin,
   OpenEmsMeteringPlugin,
+  FixtureMeteringPlugin,
   PaymentProvidersPlugin,
   PesapalProviderPlugin,
 ];
