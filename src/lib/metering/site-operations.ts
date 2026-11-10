@@ -165,6 +165,8 @@ export type SiteDayOperations = {
   soc: { atMs: number; pct: number | null }[];
   evening: EveningSegment[];
   eveningHours: Record<EveningSupply, number>;
+  /** Set when the samples came from a synthetic provider; computeSiteDay never sets it. */
+  synthetic?: true;
 };
 
 type Bin = {

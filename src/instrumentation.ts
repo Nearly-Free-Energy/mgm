@@ -17,6 +17,8 @@
  * If a payment page or webhook starts reading MGM_GUI, revisit. A compiled-in
  * GUI whose contract range excludes this build is different: the runtime root
  * refuses to install it, which stops every request that opens a scope.
+ * An invalid MGM_METERING_FIXTURES is logged and counts as off; an "on" value
+ * is logged as a warning. Neither throws.
  * Do not call process.exit() here; it would break Vercel.
  */
 export async function register() {
@@ -25,6 +27,9 @@ export async function register() {
   const { warnAboutRetiredNames } = await import("@/lib/config/retired-names");
   const { validateAppUrlAtStartup } = await import("@/lib/config/app-url");
   const { validateGuiAtStartup } = await import("@/lib/config/gui");
+  const { validateMeteringFixturesAtStartup } = await import(
+    "@/lib/config/metering-fixtures"
+  );
   const { validatePublicRuntimeConfigAtStartup } = await import(
     "@/lib/config/public-runtime-config"
   );
@@ -47,5 +52,6 @@ export async function register() {
       }`
     );
   }
+  validateMeteringFixturesAtStartup();
   validatePublicRuntimeConfigAtStartup();
 }

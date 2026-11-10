@@ -48,6 +48,7 @@ const ENV_READERS: Record<string, string> = {
   "src/lib/config/public-runtime-config.ts": "reads and validates the Supabase settings per request",
   "src/lib/config/app-url.ts": "reads and validates MGM_APP_URL per call",
   "src/lib/config/gui.ts": "reads and validates MGM_GUI per call",
+  "src/lib/config/metering-fixtures.ts": "reads and validates MGM_METERING_FIXTURES per call",
 };
 
 /** The one module that may name the retired settings in code: it lists them. */
@@ -69,7 +70,7 @@ const BROWSER_MODULES: Record<string, string> = {
 
 const RETIRED =
   "NEXT_PUBLIC_(?:SUPABASE_URL|SUPABASE_ANON_KEY|SUPABASE_COOKIE_NAME|APP_URL|PAYMENT_CALLBACK_URL)";
-const CURRENT = "MGM_PUBLIC_SUPABASE_[A-Z_]+|MGM_APP_URL|MGM_GUI|SUPABASE_INTERNAL_URL";
+const CURRENT = "MGM_PUBLIC_SUPABASE_[A-Z_]+|MGM_APP_URL|MGM_GUI|MGM_METERING_FIXTURES|SUPABASE_INTERNAL_URL";
 const ANY_NEXT_PUBLIC = "NEXT_PUBLIC_[A-Z0-9_]+";
 
 const PROCESS_ENV = `process\\s*(?:\\?\\.\\s*env|\\.\\s*env|\\[\\s*["'\`]env["'\`]\\s*\\])`;
@@ -175,11 +176,11 @@ describe("browser code does not read deployment settings from process.env", () =
     ).toEqual([]);
   });
 
-  it("reads the Supabase, application-URL and GUI settings only in the config modules", () => {
+  it("reads the Supabase, application-URL, GUI and metering-fixture settings only in the config modules", () => {
     const found = files.filter((file) => !ENV_READERS[file] && CURRENT_READ.test(read(file)));
     expect(
       found,
-      "Read these settings through src/lib/config/public-runtime-config.ts, app-url.ts or gui.ts"
+      "Read these settings through src/lib/config/public-runtime-config.ts, app-url.ts, gui.ts or metering-fixtures.ts"
     ).toEqual([]);
   });
 
@@ -216,6 +217,7 @@ describe("browser code does not read deployment settings from process.env", () =
     expect(CURRENT_READ.test("process.env['MGM_APP_URL']")).toBe(true);
     expect(CURRENT_READ.test("process.env.MGM_GUI")).toBe(true);
     expect(CURRENT_READ.test("process.env.MGM_GUI_EXTRA")).toBe(false);
+    expect(CURRENT_READ.test("process.env.MGM_METERING_FIXTURES")).toBe(true);
     expect(CURRENT_READ.test("process.env.MGM_CREDENTIAL_KEY")).toBe(false);
     expect(NEXT_PUBLIC_READ.test("process['env'].NEXT_PUBLIC_APP_URL")).toBe(true);
     expect(NEXT_PUBLIC_READ.test("process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY")).toBe(true);

@@ -172,6 +172,7 @@ browser bundle or the image. The decision is recorded in
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
 | `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. No page reads it yet |
+| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. No metering path reads it yet |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -194,8 +195,11 @@ A missing `MGM_APP_URL` only logs a warning, because payments are the only
 feature that needs it. An `MGM_GUI` that names no compiled-in GUI is also
 logged as an error naming the variable; its value is printed only when it
 looks like a GUI name. It does not stop payment pages or webhooks, which render no
-interface. A compiled-in GUI that does not support this build's GUI contract
-is different: the runtime refuses to install it at start, which stops every
+interface. An `MGM_METERING_FIXTURES` value other than on or off is logged
+as an error naming the variable, never the value, and counts as off; `on`
+is logged as a warning, so synthetic data is never on unnoticed. A
+compiled-in GUI that does not support this build's GUI contract is
+different: the runtime refuses to install it at start, which stops every
 request, payments included. The `Test` gate
 (`src/gui/__tests__/installed-guis.test.ts`) refuses such a build first.
 
@@ -249,6 +253,29 @@ After renaming, redeploy and confirm login and a payment link.
 Changing an installation's public URL also means updating the payment
 provider's notification registration, the payment worker URL in Vault, and
 Supabase Auth's site and redirect URLs (`docs/payments-rollout.md`).
+
+## Synthetic site data
+
+For demonstrations, reviews and browser tests without an OpenEMS backend,
+the fixture metering provider (`src/lib/metering/fixture-provider.ts`)
+generates a site's battery, grid, load and house-meter samples from a fixed
+seed (`src/lib/metering/fixture/site-samples.ts`). The same microgrid and
+day always give the same samples. Each day follows one of five scenarios:
+a clear day, an evening power cut, a long cut in which the battery reaches
+its floor and the houses go dark, a battery at its floor before dawn, and a
+45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
+with a daylight-saving change has 23 or 25 hours of bins.
+
+Once the provider is registered, two keys guard it:
+
+- `MGM_METERING_FIXTURES` must be on ([Runtime configuration](#runtime-configuration)).
+- The provider generates samples only for devices whose edge id starts with
+  `SYNTHETIC-EDGE-`, and refuses any other device, so it never stands in for
+  a real meter.
+
+The provider declares itself synthetic (`MeteringProvider.synthetic`), so a
+view can label its figures once it reads them. It is not yet registered for
+any microgrid, so the setting has no effect yet.
 
 ## Local Supabase Services
 
