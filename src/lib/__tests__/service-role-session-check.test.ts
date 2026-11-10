@@ -136,6 +136,16 @@ const MODULES: Record<string, Module> = {
     reason:
       "Runs a contributed action's available() and prepare from the snapshot. prepareAction takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
+  "src/lib/gui/host/server/signals.ts": {
+    privilegedExports: ["collectSignals"],
+    reason:
+      "Reads the snapshot and runs contributed watchers from it. collectSignals takes a HostContext, which hostContext issues only from a getUser()-backed access read. collectStatus runs only the status entries its caller passes.",
+  },
+  "src/lib/gui/host/server/search.ts": {
+    privilegedExports: ["runSearch"],
+    reason:
+      "Reads the snapshot and runs contributed searches from it. runSearch takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
+  },
   "src/lib/gui/host/server/manifest.ts": {
     privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
     reason:
@@ -294,6 +304,15 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getCurrentUserAccess (getUser) answers 401 or 403 before the body is read, the snapshot is read or any prepare runs.",
+  },
+  "src/app/api/gui/signals/route.ts": {
+    kind: "session",
+    reason: "getCurrentUserAccess (getUser) answers 401 or 403 before the snapshot is read or any watcher runs.",
+  },
+  "src/app/api/gui/search/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any search runs.",
   },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",

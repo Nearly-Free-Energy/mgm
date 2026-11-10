@@ -3,13 +3,14 @@
  *
  * Every encrypted credential column holds a canary, stored through
  * fn_ems_encrypt_secret. An org manager of that organization then gets every
- * view and prepares every action in the real root's snapshot, and no response
+ * view, prepares every action, and runs every watcher and search in the real
+ * root's snapshot, and no response
  * body or console line may carry any canary as plaintext, base64, hex or
  * stored ciphertext. Every view must be dispatched and its loader run, and
- * every action prepared and its own available() and prepare run, so a new
- * view or action is covered without editing this file. Self-tests prove the
- * scan and the loops catch a loader, prepare or available() that leaks any
- * decrypted canary.
+ * every action prepared and its own available() and prepare run, and every
+ * watcher and search run, so a new contribution is covered without editing
+ * this file. Self-tests prove the scan and the loops catch a loader,
+ * prepare, available(), watcher or search that leaks any decrypted canary.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
@@ -44,6 +45,7 @@ import { hostContext } from "../access";
 import {
   CREDENTIAL_COLUMNS,
   assertNoCanary,
+  collectEverySignalAndSearch,
   dispatchEveryView,
   encryptedColumnsInSchema,
   prepareEveryAction,
@@ -172,6 +174,63 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     const results = await prepareEveryAction(ctx(), snapshot, IDS, serve);
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.actions.size);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+  });
+
+  it("no watcher or search in the real snapshot returns or logs a stored credential", async () => {
+    const snapshot = (await getMgmRuntime()).mgmSurface.snapshot();
+    const results = await collectEverySignalAndSearch(ctx(), snapshot, IDS, serve);
+    expect(results.map((r) => r.id)).toEqual([
+      "signals",
+      ...(["@", "#"] as const).filter((p) => snapshot.search.some((s) => s.prefix === p)).map((p) => `search ${p}`),
+    ]);
+    for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+  });
+
+  describe("self-test: the scan catches a watcher or search that leaks a decrypted credential", () => {
+    const basic = "microgrids.ems_basic_auth_password_encrypted";
+    // A core plugin, so the gate passes and the watcher or search runs.
+    const plugin = "organization-directory" as const;
+    const signal = (title: string) => ({ id: "s1", kind: "info", severity: "info", title, href: "/microgrids", at: "2026-11-09T07:00:00Z" });
+    const hit = (label: string) => ({ kind: "microgrid", id: IDS.microgridIds.basic, label, href: `/microgrids/${IDS.microgridIds.basic}` });
+    const watching = (load: () => Promise<unknown>): SurfaceSnapshot => ({
+      ...surface([]),
+      signals: [{ plugin, id: "acme.canary", load } as unknown as SurfaceSnapshot["signals"][number]],
+    });
+    const searching = (find: () => Promise<unknown>): SurfaceSnapshot => ({
+      ...surface([]),
+      search: [{ plugin, prefix: "#", entity: "microgrid", find } as unknown as SurfaceSnapshot["search"][number]],
+    });
+
+    it("passes a clean watcher and search", async () => {
+      const results = await collectEverySignalAndSearch(ctx(), { ...watching(async () => [signal("Readings")]), search: searching(async () => [hit("Kiwumu")]).search }, IDS, serve);
+      expect(results.map((r) => [r.id, r.status])).toEqual([["signals", 200], ["search #", 200]]);
+      expect(results[0].output).toContain('"checked":["acme.canary"]');
+      expect(results[1].output).toContain("Kiwumu");
+      scanAll(results)();
+    });
+
+    const leaks: [string, (secret: string) => SurfaceSnapshot][] = [
+      ["a signal's title", (s) => watching(async () => [signal(s)])],
+      ["console.error in a watcher", (s) => watching(async () => (console.error(`openems said ${s}`), []))],
+      ["a hit's label, as base64", (s) => searching(async () => [hit(Buffer.from(s).toString("base64"))])],
+      ["console.warn in a search", (s) => searching(async () => (console.warn(`openems said ${s}`), []))],
+    ];
+    it.each(leaks)("%s", async (_name, leak) => {
+      const secret = await decrypted(canary(basic));
+      const results = await collectEverySignalAndSearch(ctx(), leak(secret), IDS, serve);
+      expect(scanAll(results)).toThrow(basic);
+    });
+
+    // The served snapshot drops them, as one whose gate refuses or whose copy the route never reaches would.
+    it("refuses a watcher that did not run", async () => {
+      const dropping = (s: SurfaceSnapshot | null) => serve(s && { ...s, signals: [] });
+      await expect(collectEverySignalAndSearch(ctx(), watching(async () => []), IDS, dropping)).rejects.toThrow("watcher acme.canary did not run");
+    });
+
+    it("refuses a search that did not run", async () => {
+      const dropping = (s: SurfaceSnapshot | null) => serve(s && { ...s, search: [] });
+      await expect(collectEverySignalAndSearch(ctx(), searching(async () => []), IDS, dropping)).rejects.toThrow("search organization-directory # did not run");
+    });
   });
 
   describe("self-test: the scan catches a prepare or available() that leaks a decrypted credential", () => {

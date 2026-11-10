@@ -2,9 +2,8 @@
  * The reusable part of the credential canary (credential-canary.db.test.ts):
  * stored credentials seeded with canary plaintexts through the database's own
  * encryption function, a scan of host output for any form of them, and a
- * loop that dispatches every view or prepares every action in a surface
- * snapshot. Signals and search add their own loops here and scan with the
- * same assertion.
+ * loop that dispatches every view, prepares every action, or runs every
+ * watcher and search in a surface snapshot.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -17,6 +16,8 @@ import { fillPath } from "../../shared/merge-actions";
 import type { HostContext } from "../access";
 import { hostOutcome } from "../http";
 import { prepareAction } from "../prepare";
+import { runSearch } from "../search";
+import { collectSignals } from "../signals";
 import type { SurfaceSnapshot } from "../surface-registry";
 import { dispatchView } from "../view";
 
@@ -281,5 +282,49 @@ export async function prepareEveryAction(
     serve(null);
     for (const spy of spies) spy.mockRestore();
   }
+  return out;
+}
+
+/**
+ * Collects the signals of every watcher in `snapshot` for the seeded
+ * organization, and runs every search of each prefix with `q`. Returns each
+ * response body as the route sends it, with whatever was logged meanwhile.
+ * `serve` works as for dispatchEveryView. A watcher or search that did not
+ * run throws rather than passing unscanned.
+ */
+export async function collectEverySignalAndSearch(
+  ctx: HostContext,
+  snapshot: SurfaceSnapshot,
+  ids: CanaryIds,
+  serve: (snapshot: SurfaceSnapshot | null) => void,
+  q = "ka",
+): Promise<Dispatched[]> {
+  const ran = new Set<string>();
+  const signals = snapshot.signals.map((s) => ({ ...s, load: ((req) => (ran.add(`signals ${s.id}`), s.load(req))) as typeof s.load }));
+  const search = snapshot.search.map((s, i) => ({ ...s, find: ((req, text) => (ran.add(`search ${i}`), s.find(req, text))) as typeof s.find }));
+  const out: Dispatched[] = [];
+  const spies = LOGS.map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+  const record = async (id: string, href: string, response: Response) => {
+    const logged = spies.flatMap((spy) => spy.mock.calls.flat().map(show));
+    out.push({ id, href, status: response.status, output: [await response.text(), ...logged].join("\n") });
+    for (const spy of spies) spy.mockClear();
+  };
+  serve({ ...snapshot, signals, search });
+  try {
+    await record("signals", `/api/gui/signals?org=${ids.orgId}`, hostOutcome(await collectSignals(ctx, { requested: ids.orgId })));
+    for (const prefix of ["@", "#"] as const) {
+      if (!search.some((s) => s.prefix === prefix)) continue;
+      const response = hostOutcome(await runSearch(ctx, { q, prefix, org: ids.orgId }));
+      await record(`search ${prefix}`, `/api/gui/search?q=${q}&prefix=${encodeURIComponent(prefix)}`, response);
+    }
+  } finally {
+    serve(null);
+    for (const spy of spies) spy.mockRestore();
+  }
+  const last = `${out.at(-1)?.status} ${out.at(-1)?.output}`;
+  for (const s of snapshot.signals) if (!ran.has(`signals ${s.id}`)) throw new Error(`[canary] watcher ${s.id} did not run: ${last}`);
+  snapshot.search.forEach((s, i) => {
+    if (!ran.has(`search ${i}`)) throw new Error(`[canary] search ${s.plugin} ${s.prefix} did not run: ${last}`);
+  });
   return out;
 }

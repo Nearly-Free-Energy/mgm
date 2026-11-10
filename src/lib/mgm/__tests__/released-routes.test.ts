@@ -89,6 +89,8 @@ describe("isReleasedRoute", () => {
     // The GUI host.
     "/api/gui/view",
     "/api/gui/prepare",
+    "/api/gui/signals",
+    "/api/gui/search",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -114,7 +116,9 @@ describe("isReleasedRoute", () => {
     "/api/gui/manifest",
     "/api/gui/view/extra",
     "/api/gui/prepare/x",
-    "/api/gui/search",
+    "/api/gui/signals/x",
+    "/api/gui/search/extra",
+    "/api/gui/searches",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -125,5 +129,7 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/microgrids/mg-1/operations/")).toBe(true);
     expect(isReleasedRoute("/api/gui/view/")).toBe(true);
     expect(isReleasedRoute("/api/gui/prepare/")).toBe(true);
+    expect(isReleasedRoute("/api/gui/signals/")).toBe(true);
+    expect(isReleasedRoute("/api/gui/search/")).toBe(true);
   });
 });
