@@ -10,5 +10,5 @@ export const GRIDTOP_META = {
   version: "0.1.0",
   contract: "^0.1",
   styles: "./styles.css",
-  dependencies: [],
+  dependencies: ["clsx", "lucide-react"],
 } as const satisfies GuiMeta;

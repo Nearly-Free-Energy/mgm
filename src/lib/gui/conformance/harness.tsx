@@ -71,6 +71,8 @@ export function ModelView({ gui, model }: { gui: GuiPlugin; model: ViewModel }) 
 export interface Rendered {
   log: Recorded;
   pathname: string;
+  /** Renders the same Shell as if the page had moved to `pathname`. */
+  goTo(pathname: string): Promise<void>;
   unmount(): void;
 }
 
@@ -105,8 +107,8 @@ export async function settle(): Promise<void> {
  */
 export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, child?: ReactNode): Promise<Rendered> {
   const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
-  const tree = (content: ReactNode) => (
-    <KitRuntimeProvider runtime={runtime}>
+  const tree = (content: ReactNode, at: KitRuntime = runtime) => (
+    <KitRuntimeProvider runtime={at}>
       <KitProvider manifest={fixture.manifest} initial={fixture.initial}>
         {content}
       </KitProvider>
@@ -123,5 +125,10 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
     rerender(tree(shell));
   });
   await settle();
-  return { log, pathname: fixture.pathname, unmount: cleanup };
+  const goTo = async (pathname: string) => {
+    await act(async () => {
+      rerender(tree(shell, { ...runtime, pathname }));
+    });
+  };
+  return { log, pathname: fixture.pathname, goTo, unmount: cleanup };
 }

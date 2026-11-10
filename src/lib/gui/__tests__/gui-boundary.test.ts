@@ -36,6 +36,13 @@
  *      and files of their own package, test helpers included.
  *   9. conformance-reach: only test code imports the conformance kit
  *      (src/lib/gui/conformance/). No other file imports it, even as types.
+ *  10. gui-entry: a GUI's src/gui/<name>/index.ts is read by the server
+ *      host, so it has no "use client"; each .tsx module of its package it
+ *      imports starts with "use client", so the components it hands over
+ *      are client references.
+ *
+ * Apart from the rules, the npm packages a GUI imports must equal both its
+ * REVIEWED_PACKAGES entry and its GuiMeta.dependencies (packageListProblems).
  *
  * Each rule is a function over a map of file paths to source text. The
  * self-tests feed it small inline sources and expect every violation to be
@@ -48,6 +55,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
+import { GUI_META } from "@/gui/meta";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
@@ -75,7 +83,10 @@ const GUI_TEST_ALLOWED = ["@/lib/gui/conformance", "vitest"];
  * also admits the package's subpaths ("pkg/sub"). Adding one is a review
  * decision: the package runs in every browser that loads the GUI.
  */
-const REVIEWED_PACKAGES: Readonly<Record<string, readonly string[]>> = {};
+const REVIEWED_PACKAGES: Readonly<Record<string, readonly string[]>> = {
+  // Class-name joining, and the dock's icons.
+  gridtop: ["clsx", "lucide-react"],
+};
 
 /** Imports a shared host module must not take as values, by package name. */
 const SHARED_FORBIDDEN_PACKAGES = [
@@ -99,7 +110,8 @@ type Rule =
   | "gui-imports"
   | "gui-meta"
   | "gui-tests"
-  | "conformance-reach";
+  | "conformance-reach"
+  | "gui-entry";
 
 type Violation = { rule: Rule; file: string; message: string };
 
@@ -423,6 +435,20 @@ function boundaryViolations(
         const problem = guiImportProblem(file, imported.specifier, packageDir, reviewed[name] ?? [], false);
         if (problem) report("gui-imports", file, problem);
       }
+
+      // 10. gui-entry
+      if (file === `${packageDir}index.ts` || file === `${packageDir}index.tsx`) {
+        if (directives(source).includes("use client")) {
+          report("gui-entry", file, 'has "use client"; the server host reads the GUI from it');
+        }
+        for (const imported of imports) {
+          if (imported.typeOnly || !imported.specifier.startsWith(".")) continue;
+          const target = resolveLocal(file, imported.specifier, files);
+          if (target?.exists && target.path.endsWith(".tsx") && !startsWithUseClient(sourceOf(target.path))) {
+            report("gui-entry", file, `imports ${imported.specifier}, which does not start with "use client"`);
+          }
+        }
+      }
     }
   }
 
@@ -511,6 +537,44 @@ function reviewedPackageProblems(
   return problems;
 }
 
+/** The npm package a bare specifier names: "pkg" or "@scope/pkg", without a subpath. */
+function packageName(specifier: string): string {
+  const parts = specifier.split("/");
+  return parts.slice(0, specifier.startsWith("@") ? 2 : 1).join("/");
+}
+
+/**
+ * Each GUI package's npm imports outside its tests, against its
+ * REVIEWED_PACKAGES entry and its GuiMeta.dependencies: all three must name
+ * the same packages.
+ */
+function packageListProblems(
+  input: Files,
+  reviewed: Readonly<Record<string, readonly string[]>>,
+  dependencies: Readonly<Record<string, readonly string[]>>,
+): string[] {
+  const imported = new Map<string, Set<string>>();
+  for (const [file, text] of input) {
+    const dir = guiPackageDir(file);
+    if (!dir || isTestFile(file)) continue;
+    const name = dir.slice(GUI_PACKAGES.length, -1);
+    const own = imported.get(name) ?? new Set<string>();
+    imported.set(name, own);
+    for (const { specifier } of importsOf(parse(file, text))) {
+      if (!specifier || specifier.startsWith(".") || specifier.startsWith("@/") || GUI_ALLOWED.includes(specifier)) continue;
+      own.add(packageName(specifier));
+    }
+  }
+  const problems: string[] = [];
+  const sorted = (list: Iterable<string>) => [...new Set(list)].sort().join(", ");
+  for (const [name, own] of imported) {
+    const uses = sorted(own);
+    if (sorted(reviewed[name] ?? []) !== uses) problems.push(`REVIEWED_PACKAGES["${name}"] is not [${uses}]`);
+    if (sorted(dependencies[name] ?? []) !== uses) problems.push(`the dependencies of ${name}'s meta are not [${uses}]`);
+  }
+  return problems;
+}
+
 function check(
   sources: Record<string, string>,
   reviewed: Readonly<Record<string, readonly string[]>> = {},
@@ -589,6 +653,16 @@ describe("GUI import boundaries in this repository", () => {
       reviewedPackageProblems(REVIEWED_PACKAGES, guiPackageExists, Object.keys(manifest.dependencies ?? {})),
     ).toEqual([]);
   });
+  it("each GUI's reviewed packages and declared dependencies are exactly what it imports", () => {
+    const dependencies = Object.fromEntries(Object.entries(GUI_META).map(([name, meta]) => [name, meta.dependencies]));
+    expect(Object.keys(dependencies).length).toBeGreaterThan(0);
+    expect(packageListProblems(files, REVIEWED_PACKAGES, dependencies)).toEqual([]);
+  });
+
+  it("a GUI's index has no \"use client\", and the components it imports do", () => {
+    expect(byRule("gui-entry")).toEqual([]);
+  });
+
   it("every @/ module GUI packages may import is code-owned", () => {
     const codeowners = readFileSync(path.join(REPO_ROOT, ".github/CODEOWNERS"), "utf8");
     expect(unownedAllowlistEntries([...GUI_ALLOWED, ...GUI_TEST_ALLOWED], codeowners)).toEqual([]);
@@ -832,7 +906,7 @@ describe("the boundary checker catches each violation (self-tests)", () => {
             'import { createPortal } from "react-dom";',
             'import { Shell } from "./shell/shell";',
           ].join("\n"),
-          "src/gui/probe/shell/shell.tsx": 'import { cx } from "../ui/cx";',
+          "src/gui/probe/shell/shell.tsx": '"use client";\nimport { cx } from "../ui/cx";',
           "src/gui/probe/ui/cx.ts": "export const cx = 1;",
         }),
       ).toEqual([]);
@@ -987,6 +1061,45 @@ describe("the boundary checker catches each violation (self-tests)", () => {
     it("refuses a package that is not a declared dependency", () => {
       expect(reviewedPackageProblems({ probe: ["lucide-react"] }, () => true, ["clsx"])).toEqual([
         "lucide-react (for probe) is not a dependency in package.json",
+      ]);
+    });
+  });
+
+  describe("gui-entry", () => {
+    const shell = '"use client";\nimport { useState } from "react";\nexport const Shell = () => null;';
+    const index = 'import { meta } from "./meta";\nimport { Shell } from "./shell";\nexport default { ...meta, Shell };';
+    const meta = 'import type { GuiMeta } from "@/lib/gui/contract";\nexport const meta = {} as GuiMeta;';
+
+    it("accepts a server-readable index that imports a client Shell", () => {
+      expect(check({ "src/gui/probe/index.ts": index, "src/gui/probe/shell.tsx": shell, "src/gui/probe/meta.ts": meta })).toEqual([]);
+    });
+
+    it('refuses an index with "use client"', () => {
+      const files = { "src/gui/probe/index.ts": `"use client";\n${index}`, "src/gui/probe/shell.tsx": shell, "src/gui/probe/meta.ts": meta };
+      expect(rulesOf(check(files))).toEqual(["gui-entry"]);
+    });
+
+    it('refuses an index that imports a component module without "use client"', () => {
+      const files = { "src/gui/probe/index.ts": index, "src/gui/probe/shell.tsx": shell.replace('"use client";\n', ""), "src/gui/probe/meta.ts": meta };
+      expect(rulesOf(check(files))).toEqual(["gui-entry"]);
+    });
+  });
+
+  describe("package lists", () => {
+    const files = new Map([
+      ["src/gui/probe/a.tsx", 'import { clsx } from "clsx";\nimport { X } from "@scope/icons/x";\nimport { useState } from "react";'],
+      ["src/gui/probe/__tests__/a.test.tsx", 'import { render } from "@testing-library/react";'],
+    ]);
+
+    it("accepts lists that name exactly the packages imported", () => {
+      const both = { probe: ["@scope/icons", "clsx"] };
+      expect(packageListProblems(files, both, both)).toEqual([]);
+    });
+
+    it("refuses a reviewed list or declared dependencies that miss or add one", () => {
+      expect(packageListProblems(files, { probe: ["@scope/icons"] }, { probe: ["@scope/icons", "clsx", "extra"] })).toEqual([
+        'REVIEWED_PACKAGES["probe"] is not [@scope/icons, clsx]',
+        "the dependencies of probe's meta are not [@scope/icons, clsx]",
       ]);
     });
   });
