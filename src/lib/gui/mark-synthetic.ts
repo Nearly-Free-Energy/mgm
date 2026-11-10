@@ -8,6 +8,10 @@
  * its rich text and those in a values embed. A series
  * point has no marker, so a view with a series says so in its own `ext`.
  * If a body kind gains a Value position, add it here.
+ *
+ * Every object on the way to a Value is copied with a spread, so whatever
+ * else a body, row, section, field, tile, entry, embed, text block or
+ * inline carries comes through unchanged.
  */
 import type { Inline, Rich, Value } from "./contract";
 import type { LoadedModel } from "./surface";
@@ -17,9 +21,11 @@ const markRecord = (values: Record<string, Value>) =>
   Object.fromEntries(Object.entries(values).map(([key, value]) => [key, mark(value)]));
 
 const markInline = (inline: Inline): Inline =>
-  typeof inline === "object" && "value" in inline ? { value: mark(inline.value) } : inline;
+  typeof inline === "object" && "value" in inline ? { ...inline, value: mark(inline.value) } : inline;
 const markRich = (rich: Rich): Rich =>
-  rich.map((block) => ("p" in block ? { p: block.p.map(markInline) } : { li: block.li.map(markInline) }));
+  rich.map((block) =>
+    "p" in block ? { ...block, p: block.p.map(markInline) } : { ...block, li: block.li.map(markInline) },
+  );
 
 type AnyBody = LoadedModel<"collection" | "record" | "metrics" | "feed" | "flow">["body"];
 
@@ -43,6 +49,7 @@ function markBody(body: AnyBody): AnyBody {
   }
   if ("sections" in body) {
     return {
+      ...body,
       sections: body.sections.map((section) => ({
         ...section,
         fields: section.fields.map((field) => ({ ...field, value: mark(field.value) })),

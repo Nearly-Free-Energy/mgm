@@ -5,13 +5,18 @@
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)
- * passes it. Every label is formatted on the server; a renderer formats
+ * passes it. The bands and the strip's segments are capped at one per bin
+ * at the finest resolution on the longest day (MAX_DAY_BINS and
+ * MAX_EVENING_BINS in ../site-operations.ts). computeSiteDay refuses a day
+ * with more bins than those bounds, so any day it returns fits; if it stops
+ * refusing them, these caps no longer hold. Every label is formatted on the server; a renderer formats
  * nothing. Times are ISO 8601 instants. A change to this shape is `@2`,
  * named by SITE_DAY_EXT_SCHEMA in ./site-day-model.ts (kept there so the
  * model, which a client component imports for formatDuration, needs no zod).
  */
 import { z } from "zod";
 import { isSameOriginPath } from "@/lib/gui/host/shared/href";
+import { isSiteResolution, MAX_DAY_BINS, MAX_EVENING_BINS } from "../site-operations";
 
 const iso = z.iso.datetime({ offset: true });
 const label = (max: number) => z.string().max(max);
@@ -39,15 +44,16 @@ export const SiteDayExt = z.discriminatedUnion("state", [
     dayEnd: iso,
     readUntil: iso,
     eveningStart: iso,
-    resolutionMinutes: z.number().int().positive().max(60),
+    resolutionMinutes: z.number().int().positive().max(60).refine(isSiteResolution),
     /** "00", "03" … "24", at local hours. */
     hourMarks: z.array(tick).max(9),
     /** "18:00" … "24:00". */
     eveningTicks: z.array(tick).max(8),
-    /** Null when the grid meter gave no reading. */
-    cuts: z.array(range).max(288).nullable(),
-    dark: z.array(range).max(288),
-    evening: z.array(z.strictObject({ start: iso, end: iso, supply, label: label(80) })).max(72),
+    /** Null when the grid meter gave no reading. Each band is at least one bin. */
+    cuts: z.array(range).max(MAX_DAY_BINS).nullable(),
+    dark: z.array(range).max(MAX_DAY_BINS),
+    /** One segment per change of supply, so at most one per evening bin. */
+    evening: z.array(z.strictObject({ start: iso, end: iso, supply, label: label(80) })).max(MAX_EVENING_BINS),
     /** Supplies shown in the strip's key, in order: "No data" only when there was some. */
     legend: z.array(z.strictObject({ supply, label: label(32), hours: label(16) })).max(5),
     eveningHours: z.strictObject({ battery: hours, battery_and_grid: hours, grid: hours, dark: hours, no_data: hours }),
