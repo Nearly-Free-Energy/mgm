@@ -192,3 +192,31 @@ describe("DashboardLayout on narrow screens", () => {
     expect(email).toEqual(expect.arrayContaining(["min-w-0", "truncate"]));
   });
 });
+
+describe("DashboardLayout stylesheet", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  function links(node: Node): Node[] {
+    return [...(node.type === "link" ? [node] : []), ...childrenOf(node).flatMap(links)];
+  }
+
+  it("links exactly one stylesheet, the selected GUI's", async () => {
+    wire({ user: { id: "user-1" }, orgCount: 1, roleCount: 1 });
+    const tree = (await DashboardLayout({ children: "child" })) as Node;
+    expect(links(tree).map((l) => l.props)).toEqual([
+      { rel: "stylesheet", href: "/gui-styles/gridtop.css", precedence: "gui" },
+    ]);
+  });
+
+  it("answers an MGM_GUI naming no compiled-in GUI with an error, after the sign-in redirect", async () => {
+    vi.stubEnv("MGM_GUI", "nextgrid");
+    wire({ user: null, orgCount: 1, roleCount: 0 });
+    await expect(DashboardLayout({ children: null })).rejects.toThrow("redirect:/login");
+    wire({ user: { id: "user-1" }, orgCount: 1, roleCount: 1 });
+    await expect(DashboardLayout({ children: null })).rejects.toThrow(/MGM_GUI "nextgrid" names no installed GUI/);
+    vi.unstubAllEnvs();
+  });
+});

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
+import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { LogoutButton } from "./logout-button";
 import { preloadSidebarNav, SidebarNav } from "./sidebar-nav";
@@ -49,8 +50,20 @@ export default async function DashboardLayout({
     redirect("/no-access");
   }
 
+  // After the redirects, so a signed-out visitor still reaches /login. An
+  // MGM_GUI naming no compiled-in GUI throws here: the interface pages
+  // answer 500 and the pages outside this layout keep working (decision 3
+  // on #115).
+  const gui = readGuiName();
+
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      {/* React moves the link into <head>. The GUI stylesheet restates
+          Tailwind's layer order, so the layers hold in either order against
+          globals.css. Within the utilities layer the later stylesheet still
+          wins, so the two must not emit the same utility;
+          gui-stylesheets.test.ts checks that. */}
+      <link rel="stylesheet" href={guiStylesheetHref(gui)} precedence="gui" />
       <NavigationProgress />
       {/* Navigation: a sidebar from md (768px) up. Below that it is a band
           across the top whose links scroll sideways, so pages get the full

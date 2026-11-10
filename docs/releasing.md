@@ -215,7 +215,10 @@ artifact holds that Linux build for a day, for inspection.
 - The placeholder project settings in the script match the hosting project's:
   the Next.js preset, the default install, build and output commands, and
   Node.js from `.nvmrc`. If the hosting project gains overrides, mirror them
-  in the script.
+  in the script. The default build command runs `npm run build`, which
+  builds the GUI stylesheets into `public/gui-styles/`
+  (`scripts/gui/build-stylesheets.mjs`) before `next build`; a build that
+  skips that step stops with an error naming it.
 - Every operator's verification names `.github/workflows/release.yml`
   (`--signer-workflow`). Do not move or rename it without telling them.
 - `scripts/release/third_party_notices.py` writes the notices. It finds a

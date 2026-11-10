@@ -1,5 +1,6 @@
 /**
- * The design tokens in src/app/globals.css reach the browser.
+ * The design tokens in src/styles/tokens.css reach the browser through
+ * src/app/globals.css, which imports them.
  *
  * Tailwind 4 generates a utility only when its value is a theme variable in
  * the stylesheet it compiles. A class whose value is missing (or that lives
@@ -28,10 +29,13 @@ import { cn, TYPE_SCALE } from "@/lib/utils";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const CSS_PATH = path.join(REPO_ROOT, "src/app/globals.css");
-const CSS = readFileSync(CSS_PATH, "utf8");
+const TOKENS_PATH = path.join(REPO_ROOT, "src/styles/tokens.css");
+// The tokens are declared in tokens.css, which globals.css imports. The
+// text checks below read both files; compile() resolves the import itself.
+const CSS = `${readFileSync(TOKENS_PATH, "utf8")}\n${readFileSync(CSS_PATH, "utf8")}`;
 const CSS_RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, "");
 
-const compiler = await compile(CSS, {
+const compiler = await compile(readFileSync(CSS_PATH, "utf8"), {
   base: path.dirname(CSS_PATH),
   from: CSS_PATH,
   onDependency() {},
@@ -213,7 +217,7 @@ const GRAPHIC_PAIRS: Record<Theme, [string, string][]> = {
 /** The brand-hue range the stylesheet's header calls safe. */
 function safeBrandHues(): [number, number] {
   const m = /Safe range for `--brand-hue`[^:]*:\s*(\d+)–(\d+)/.exec(CSS);
-  if (!m) throw new Error("globals.css header no longer states a safe range for --brand-hue");
+  if (!m) throw new Error("tokens.css header no longer states a safe range for --brand-hue");
   return [Number(m[1]), Number(m[2])];
 }
 
@@ -287,18 +291,19 @@ describe("design tokens", () => {
 
   it("raises body and dense text and every text field to 16px on coarse pointers", () => {
     const out = build([]);
-    const at = out.indexOf("@media (pointer: coarse) {");
-    expect(at).toBeGreaterThan(-1);
-    const coarse = /@media \(pointer: coarse\) \{([\s\S]*?)\n\}/.exec(out.slice(at))?.[1] ?? "";
+    // Outside every @layer, so it wins over a text-xs or text-sm utility on
+    // a field: only blocks with no brace still open where they start count.
+    // The sizes (tokens.css) and the field rule (globals.css) are two blocks.
+    const depth = (before: string) => (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
+    const blocks = [...out.matchAll(/@media \(pointer: coarse\) \{([\s\S]*?)\n\}/g)].filter(
+      (m) => depth(out.slice(0, m.index)) === 0,
+    );
+    expect(blocks.length).toBeGreaterThan(0);
+    const coarse = blocks.map((m) => m[1]).join("\n");
     expect(coarse).toMatch(/--text-body: 1rem;/);
     expect(coarse).toMatch(/--text-dense: 1rem;/);
     expect(coarse).toMatch(/\bselect,\s*textarea \{\s*font-size: max\(16px, 1rem\);/);
     expect(coarse).toMatch(/input:not\([^)]*\[type="checkbox"\]/);
-    // Outside every @layer, so it wins over a text-xs or text-sm utility on
-    // a field: count the braces still open where the block starts.
-    const before = out.slice(0, at);
-    const depth = (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
-    expect(depth).toBe(0);
   });
 
   it("has no theme variable that refers to itself", () => {
@@ -449,7 +454,7 @@ describe("design tokens", () => {
     it("keeps the dark palette inactive: nothing sets data-theme or follows the system setting", () => {
       // The dark palette is defined but not switched on. Dialog scrims, the
       // skeleton shimmer and shadow-only overlays still assume a light page
-      // (see "Themes" in globals.css). Give them dark values before
+      // (see "Themes" in tokens.css). Give them dark values before
       // switching it on, then remove this check. Comments are left out, so
       // a note about the attribute does not count as setting it.
       const setters: string[] = [];

@@ -1,5 +1,5 @@
 /**
- * PALETTE mirrors colour tokens in src/app/globals.css. This test reads the
+ * PALETTE mirrors colour tokens in src/styles/tokens.css. This test reads the
  * light theme from the top-level :root rule and the dark theme from the
  * top-level :root[data-theme="dark"] rule laid over it, resolves var(),
  * converts each oklch() value to sRGB the way the browser does for an
@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { PALETTE, THEME_COLOR, type PublicColour, type PublicTheme } from "../palette";
 
-const CSS_PATH = path.resolve(__dirname, "../../../app/globals.css");
+const CSS_PATH = path.resolve(__dirname, "../../../styles/tokens.css");
 const CSS = readFileSync(CSS_PATH, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const DARK_SELECTOR = ':root[data-theme="dark"]';
 
@@ -51,7 +51,7 @@ function tokens(theme: PublicTheme): Map<string, string> {
   const vars = declarations(rules.get(":root") ?? "");
   if (theme === "dark") {
     const dark = rules.get(DARK_SELECTOR);
-    if (dark === undefined) throw new Error(`globals.css has no top-level ${DARK_SELECTOR} rule`);
+    if (dark === undefined) throw new Error(`tokens.css has no top-level ${DARK_SELECTOR} rule`);
     for (const [name, value] of declarations(dark)) vars.set(name, value);
   }
   return vars;
@@ -59,7 +59,7 @@ function tokens(theme: PublicTheme): Map<string, string> {
 
 function resolve(vars: Map<string, string>, name: string, seen: string[] = []): string {
   const raw = vars.get(name);
-  if (raw === undefined) throw new Error(`${name} is not defined in globals.css`);
+  if (raw === undefined) throw new Error(`${name} is not defined in tokens.css`);
   if (seen.includes(name)) throw new Error(`${[...seen, name].join(" → ")} is a cycle`);
   return raw.replace(/var\((--[\w-]+)\)/g, (_, ref: string) => resolve(vars, ref, [...seen, name]));
 }
@@ -102,7 +102,7 @@ describe("public page palette", () => {
   });
 
   it.each(THEMES.flatMap((theme) => NAMES.map((name) => [theme, name] as const)))(
-    "%s %s matches its token in globals.css",
+    "%s %s matches its token in tokens.css",
     (theme, name) => {
       const expected = oklchToRgb(resolve(tokens(theme), `--${name}`));
       const actual = hexToRgb(PALETTE[theme][name]);

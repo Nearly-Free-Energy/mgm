@@ -1,3 +1,26 @@
-/* Gridtop's stylesheet source, named by GuiMeta.styles in ./meta.ts.
-   Nothing builds or links it yet: until then every page takes its styles from
-   src/app/globals.css. */
+/* Gridtop's stylesheet, named by GuiMeta.styles in ./meta.ts. Built by
+   scripts/gui/build-stylesheets.mjs into public/gui-styles/; the interface
+   layout links it while MGM_GUI selects Gridtop.
+
+   It generates the utilities used in this package only. No preflight and
+   no base rules: src/app/globals.css, which the root layout loads on every
+   page, provides them. If globals.css stops loading on the interface
+   pages, import tailwindcss/preflight.css here.
+
+   The layer order Tailwind declares in globals.css, stated again so it holds
+   whichever stylesheet the browser reads first. That fixes the order of the
+   layers only: inside the utilities layer the later stylesheet wins, so this
+   one must not emit a utility globals.css also emits.
+   src/lib/__tests__/gui-stylesheets.test.ts fails when they share one. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "../../styles/tokens.css";
+
+@source "./";
+
+/* Layout widths: 600px and 1280px. */
+@theme {
+  --breakpoint-medium: 37.5rem;
+  --breakpoint-expanded: 80rem;
+}

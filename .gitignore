@@ -20,6 +20,10 @@
 # production
 /build
 
+# GUI stylesheets and their manifest (scripts/gui/build-stylesheets.mjs)
+/public/gui-styles/
+/src/gui/.generated/
+
 # misc
 .DS_Store
 *.pem

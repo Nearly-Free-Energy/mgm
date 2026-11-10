@@ -1,15 +1,15 @@
 /**
- * Colour tokens from src/app/globals.css, written out in hex for HTML that
- * globals.css never reaches: the pages page.ts renders carry their own small
- * stylesheet. Hex rather than oklch() because those pages open on whatever
- * browser a phone has, and a browser that cannot parse oklch() drops the
- * declaration instead of falling back to something readable.
+ * Colour tokens from src/styles/tokens.css, written out in hex for HTML that
+ * the app's stylesheets never reach: the pages page.ts renders carry their
+ * own small stylesheet. Hex rather than oklch() because those pages open on
+ * whatever browser a phone has, and a browser that cannot parse oklch()
+ * drops the declaration instead of falling back to something readable.
  *
- * Each key is the token's name in globals.css; `card` is `--surface-1`
+ * Each key is the token's name in tokens.css; `card` is `--surface-1`
  * through its alias. `light` mirrors :root and `dark` the dark palette, at
  * the default --brand-hue. __tests__/palette.test.ts converts the tokens and
  * fails when a value here is off by more than one step in any channel, so
- * a change to globals.css (a rebrand included) fails until this file
+ * a change to tokens.css (a rebrand included) fails until this file
  * follows. If the tokens move to another stylesheet, point that test there.
  *
  * No success colour on purpose: nothing on these pages may look like a

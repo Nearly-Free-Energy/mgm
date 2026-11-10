@@ -11,9 +11,9 @@
  * MGM_APP_URL is logged here (variable named, never its value) and does not
  * throw, because only payments need it and they fail closed through
  * appUrl(). An MGM_GUI that names no compiled-in GUI is logged the same way
- * and does not throw: no page reads it yet, and the interface pages that will
- * (through readGuiName()) answer 500 for the same error, while payment pages
- * and webhooks, which render no interface, keep working (decision 3 on #115).
+ * and does not throw: the interface layout reads it through readGuiName() and
+ * answers 500 for the same error, while payment pages and webhooks, which
+ * render no interface, keep working (decision 3 on #115).
  * If a payment page or webhook starts reading MGM_GUI, revisit. A compiled-in
  * GUI whose contract range excludes this build is different: the runtime root
  * refuses to install it, which stops every request that opens a scope.
