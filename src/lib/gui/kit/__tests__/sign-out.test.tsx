@@ -39,7 +39,9 @@ function renderSignOut() {
 
 /** Waits for the failure to show, then checks that nothing was cleared and the button works again. */
 async function expectStillHere(button: HTMLButtonElement) {
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(SIGN_OUT_FAILED));
+  // A longer wait than waitFor's 1 s default: the case that loads a fresh
+  // copy of the module after vi.resetModules took just over 1 s on a CI runner.
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(SIGN_OUT_FAILED), { timeout: 5000 });
   // Shown in words on the page, not only to screen readers.
   expect(screen.getByRole("alert").className).toBe("text-caption text-destructive-fg");
   expect(assign).not.toHaveBeenCalled();
