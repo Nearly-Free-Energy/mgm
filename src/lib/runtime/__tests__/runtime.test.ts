@@ -76,6 +76,11 @@ describe("MGM root runtime", () => {
       "mgm-gate",
       "mgm-surface",
       "gridtop",
+      "organization-directory-surface",
+      "community-management-surface",
+      "metering-surface",
+      "billing-surface",
+      "payments-surface",
       "metering-providers",
       "openems-metering",
       "fixture-metering",
@@ -87,6 +92,13 @@ describe("MGM root runtime", () => {
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
     // Each contribution or compiled-in GUI added later shows up here.
     expect(runtime.mgmSurface.snapshot().views).toEqual([]);
+    expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([
+      "organization-directory",
+      "community-management",
+      "metering",
+      "billing",
+      "payments",
+    ]);
     expect(runtime.mgmSurface.snapshot().guis).toEqual([GRIDTOP_META]);
   });
 
@@ -114,6 +126,13 @@ describe("MGM root runtime", () => {
     const pesapal = runtime.fibers.find((fiber) => fiber.name === "pesapal");
     await pesapal?.dispose();
     expect(runtime.paymentProviders.names()).toEqual([]);
+  });
+
+  it("removes a capability's contribution when its surface plugin unloads", async () => {
+    const runtime = await getMgmRuntime();
+    const metering = runtime.fibers.find((fiber) => fiber.name === "metering-surface");
+    await metering?.dispose();
+    expect(runtime.mgmSurface.snapshot().nav.some((entry) => entry.plugin === "metering")).toBe(false);
   });
 
   it("builds a fresh root after reset", async () => {

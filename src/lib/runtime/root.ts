@@ -3,9 +3,9 @@
  *
  * One root per module instance — one per warm server process. It loads the
  * platform plugins: the catalog, the plugin gate, the GUI surface with the
- * compiled-in GUIs, and the provider registries with the providers that
- * register into them. Platform plugins hold no request data; requests run in
- * isolated children (`scope.ts`).
+ * compiled-in GUIs and each capability's contribution, and the provider
+ * registries with the providers that register into them. Platform plugins
+ * hold no request data; requests run in isolated children (`scope.ts`).
  */
 import "server-only";
 
@@ -21,6 +21,11 @@ import { GUI_META } from "@/gui/meta";
 import type { GuiMeta } from "@/lib/gui/contract";
 import { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
 import { PesapalProviderPlugin } from "@/lib/payments/providers/pesapal/plugin";
+import { OrganizationDirectorySurfacePlugin } from "@/lib/organization-directory/surface-plugin";
+import { CommunityManagementSurfacePlugin } from "@/lib/community-management/surface-plugin";
+import { MeteringSurfacePlugin } from "@/lib/metering/surface-plugin";
+import { BillingSurfacePlugin } from "@/lib/billing/surface-plugin";
+import { PaymentsSurfacePlugin } from "@/lib/payments/surface-plugin";
 import { MgmGate } from "./gate";
 import {
   MeteringProviderFactories,
@@ -96,6 +101,11 @@ export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   GatePlugin,
   SurfacePlugin,
   ...Object.entries(GUI_META).map(([name, meta]) => guiInstallPlugin(name, meta)),
+  OrganizationDirectorySurfacePlugin,
+  CommunityManagementSurfacePlugin,
+  MeteringSurfacePlugin,
+  BillingSurfacePlugin,
+  PaymentsSurfacePlugin,
   MeteringProvidersPlugin,
   OpenEmsMeteringPlugin,
   FixtureMeteringPlugin,

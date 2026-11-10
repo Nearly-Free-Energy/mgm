@@ -15,6 +15,7 @@ loads the platform plugins into it:
 | `mgm-gate` | `mgmGate` — organization resolution + per-org plugin enablement | `mgmCatalog` |
 | `mgm-surface` | `mgmSurface` — capability GUI contributions and installed GUI metadata, checked when they register (`src/lib/gui/host/server/surface-registry.ts`) | `mgmCatalog` |
 | `<gui name>` | installs a compiled-in GUI's metadata (`src/gui/meta.ts`, `guiInstallPlugin`) | `mgmSurface` |
+| `<capability>-surface` | contributes a capability's GUI navigation, and later its views and actions (`src/lib/<capability>/surface-plugin.ts`, contributing `src/lib/<capability>/surface.ts`), one plugin each for `organization-directory`, `community-management`, `metering`, `billing` and `payments` | `mgmSurface` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
 | `fixture-metering` | registers the `synthetic` factory, only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |

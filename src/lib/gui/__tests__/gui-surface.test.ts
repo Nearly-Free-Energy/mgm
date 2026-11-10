@@ -17,9 +17,9 @@
  * capability method outside LOADER_READS, so its loaders, signals, search and
  * prepare steps write nothing through a capability.
  *
- * No capability contributes yet, so each check is a function over its inputs
- * and the self-tests feed it violating fixtures: the guard is shown to fail
- * while the snapshot is empty.
+ * Capabilities contribute only navigation so far, so each check is a
+ * function over its inputs and the self-tests feed it violating fixtures: the
+ * guard is shown to fail while the snapshot holds no view or action.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -55,7 +55,13 @@ const PARSE_BODY = { module: "@/lib/validation/parse-body", name: "parseJsonBody
  * specifier like SCHEMA_MODULES'. Check 8 reads what it loads, and its exports
  * must reach every function the plugin's registered contribution holds.
  */
-const SURFACE_MODULES: Partial<Record<MgmPluginName, string>> = {};
+const SURFACE_MODULES: Partial<Record<MgmPluginName, string>> = {
+  "organization-directory": "@/lib/organization-directory/surface",
+  "community-management": "@/lib/community-management/surface",
+  metering: "@/lib/metering/surface",
+  billing: "@/lib/billing/surface",
+  payments: "@/lib/payments/surface",
+};
 
 /** Words that make a declared name look like a secret, alone or with an "s". */
 const SECRET_WORDS = new Set([
