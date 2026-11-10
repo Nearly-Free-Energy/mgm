@@ -35,6 +35,9 @@
 # Also the list of compiled-in GUIs the runtime root installs at start-up,
 # and the test that checks each entry in that list.
 /src/lib/gui/                          @tushabe @arindahills
+# The conformance kit every interface plugin runs in its tests. Listed on its
+# own so it stays owned if the line above is ever narrowed.
+/src/lib/gui/conformance/              @tushabe @arindahills
 /src/gui/meta.ts                       @tushabe @arindahills
 /src/gui/__tests__/installed-guis.test.ts @tushabe @arindahills
 
