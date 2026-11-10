@@ -174,6 +174,51 @@ describe("useUiParam", () => {
     expect(result.current[0]).toBe("r2");
   });
 
+  it("shows the written value until the URL catches up, then never brings it back after a navigation", () => {
+    next.searchParams = new URLSearchParams();
+    const { result, rerender } = renderHook(() => useUiParam("ui.row"));
+    expect(result.current[0]).toBeNull();
+    flush(() => result.current[1]("r1"));
+    // Between the write and the router's search params catching up.
+    expect(result.current[0]).toBe("r1");
+    next.searchParams = new URLSearchParams("ui.row=r1");
+    rerender();
+    expect(result.current[0]).toBe("r1");
+    // A navigation to a page without ui.row.
+    window.history.replaceState(null, "", "/elsewhere");
+    next.searchParams = new URLSearchParams();
+    rerender();
+    expect(result.current[0]).toBeNull();
+  });
+
+  it("drops the written value when a navigation lands before the URL caught up", () => {
+    next.searchParams = new URLSearchParams();
+    const { result, rerender } = renderHook(() => useUiParam("ui.row"));
+    flush(() => result.current[1]("r1"));
+    expect(result.current[0]).toBe("r1");
+    window.history.replaceState(null, "", "/elsewhere");
+    rerender();
+    expect(result.current[0]).toBeNull();
+    // Nor does it come back on a later render.
+    rerender();
+    expect(result.current[0]).toBeNull();
+  });
+
+  it("follows a later router navigation back to the value from before the write", () => {
+    window.history.replaceState(null, "", "/?ui.row=a");
+    next.searchParams = new URLSearchParams("ui.row=a");
+    const { result, rerender } = renderHook(() => useUiParam("ui.row"));
+    flush(() => result.current[1]("b"));
+    next.searchParams = new URLSearchParams("ui.row=b");
+    rerender();
+    expect(result.current[0]).toBe("b");
+    // The router navigates to ?ui.row=a and renders before it moves the
+    // address bar, which still says ui.row=b.
+    next.searchParams = new URLSearchParams("ui.row=a");
+    rerender();
+    expect(result.current[0]).toBe("a");
+  });
+
   it("writes with history.replaceState, not the router", () => {
     const replace = vi.spyOn(window.history, "replaceState");
     const { result } = renderHook(() => useUiParam("ui.row"));

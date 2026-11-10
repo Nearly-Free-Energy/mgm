@@ -22,7 +22,12 @@ export interface KitRuntime {
   fetch(url: string, init?: RequestInit): Promise<Response>;
   act(ref: ActionRef, options?: { initial?: Json }): Promise<ActionResult>;
   open(link: LinkRef): Promise<void>;
-  /** Replaces the kit's sign-out, which loads the Supabase client and leaves the page. */
+  /**
+   * Replaces the kit's sign-out, which loads the Supabase client and leaves
+   * the page. Rejects when the session was not removed: the button (SignOut
+   * in ../../kit/sign-out.tsx) is then enabled again and says that sign-out
+   * did not finish; if that component stops catching the rejection, revisit.
+   */
   signOut?(): Promise<void>;
   /** The pathname outside the Next.js router, as in jsdom. */
   pathname?: string;

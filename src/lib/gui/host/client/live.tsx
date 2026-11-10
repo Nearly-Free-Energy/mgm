@@ -4,6 +4,8 @@
  * Keeps a live view's model fresh, and ages its values against server time.
  * Polling is gentle: never faster than every 15 seconds, four times slower
  * on a data saver or a slow connection, and paused while the tab is hidden.
+ * Ages move with a clock of their own, so values turn stale even when every
+ * poll fails or never answers.
  */
 import { useEffect, useState } from "react";
 import type { ActionResult, FeedState, Href, LiveState, Value, ViewModel } from "../../contract";
@@ -13,6 +15,14 @@ import { usePathname } from "./navigation";
 
 export const MIN_REFRESH_SECONDS = 15;
 export const SLOW_FACTOR = 4;
+/**
+ * How often a live view re-renders so that ageSeconds and stale move on
+ * without a new model. Five seconds is a third of the fastest poll: a value
+ * turns stale at most five seconds late, without re-rendering the whole view
+ * every second on a low-end phone. Not slowed on a slow connection, since it
+ * sends nothing.
+ */
+export const CLOCK_SECONDS = 5;
 
 type Connection = { saveData?: boolean; effectiveType?: string };
 
@@ -29,13 +39,23 @@ export function useLive(model: ViewModel): LiveState {
   const [hidden, setHidden] = useState(() => typeof document !== "undefined" && document.hidden);
   const [slow] = useState(slowConnection);
   const live = model.live;
+  const isLive = !!live;
   const refreshSeconds = live?.refreshSeconds;
+  const [, setClock] = useState(0);
 
   useEffect(() => {
     const onChange = () => setHidden(document.hidden);
     document.addEventListener("visibilitychange", onChange);
     return () => document.removeEventListener("visibilitychange", onChange);
   }, []);
+
+  // Independent of polling, so a failed or pending poll does not freeze ages.
+  // Not while hidden: nobody sees it, and becoming visible re-renders anyway.
+  useEffect(() => {
+    if (!isLive || hidden) return;
+    const id = setInterval(() => setClock((tick) => tick + 1), CLOCK_SECONDS * 1000);
+    return () => clearInterval(id);
+  }, [isLive, hidden]);
 
   useEffect(() => {
     if (!refreshSeconds || hidden) return;

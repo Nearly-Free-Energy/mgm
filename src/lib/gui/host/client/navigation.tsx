@@ -68,9 +68,15 @@ export function useUiParam(name: `ui.${string}`): [string | null, (value: string
   }
   const params = useSearchParams();
   const fromUrl = params ? params.get(name) : fromLocation(name);
-  // What this hook last wrote, kept until the URL it read moves on.
+  // What this hook last wrote, shown only between the write and the URL it
+  // reads catching up: while that URL still says what it said before the
+  // write, and the address bar still carries the write. Dropped as soon as
+  // either moves on (the URL acknowledged the write, or a navigation replaced
+  // it), so a later navigation can never bring back a value the URL lacks.
   const [written, setWritten] = useState<{ base: string | null; value: string | null } | null>(null);
-  const value = written && written.base === fromUrl ? written.value : fromUrl;
+  const pending = written !== null && written.base === fromUrl && fromLocation(name) === written.value;
+  if (written && !pending) setWritten(null);
+  const value = pending ? written.value : fromUrl;
   const set = (next: string | null) => {
     const url = new URL(window.location.href);
     if (next === null) url.searchParams.delete(name);

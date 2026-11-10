@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Value } from "../../../contract";
 import { KitProvider } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
-import { useFeed, useLive } from "../live";
+import { CLOCK_SECONDS, useFeed, useLive } from "../live";
 import { initial, manifest, model, recordingRuntime } from "./kit-test-utils";
 
 vi.mock("next/navigation", () => ({ usePathname: () => null, useSearchParams: () => null }));
@@ -166,6 +166,66 @@ describe("useLive", () => {
     expect(result.current.stale(value("2026-11-10T11:58:59.000Z"))).toBe(true);
     const still = renderHook(() => useLive(model()), { wrapper });
     expect(still.result.current.stale(value("2026-11-09T12:00:00.000Z"))).toBe(false);
+  });
+
+  it.each([
+    ["fails", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["answers with an error", async () => new Response("null", { status: 503 })],
+    ["never answers", () => new Promise<Response>(() => {})],
+  ])("turns a value stale after staleAfterSeconds while every poll %s", async (_, fetch) => {
+    const { runtime, wrapper } = setup(undefined, fetch);
+    const value: Value = { t: "text", text: "x", at: "2026-11-10T11:59:30.000Z" };
+    // What a GUI shows: the age and staleness as of its last render, not as
+    // of a later call (stale() reads the clock whenever it is called).
+    const { result } = renderHook(
+      () => {
+        const state = useLive(live);
+        return { model: state.model, age: state.ageSeconds(value), stale: state.stale(value) };
+      },
+      { wrapper },
+    );
+    expect(result.current).toEqual({ model: live, age: 30, stale: false });
+    // 30 seconds on, the value is exactly staleAfterSeconds old: not yet stale.
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(runtime.fetch).toHaveBeenCalled();
+    expect(result.current).toEqual({ model: live, age: 60, stale: false });
+    // Five seconds later, with no new model: CLOCK_SECONDS promises a value
+    // turns stale at most five seconds late.
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    expect(result.current).toEqual({ model: live, age: 65, stale: true });
+  });
+
+  it("re-renders on the clock only while live and visible, and stops on unmount", async () => {
+    const { wrapper } = setup(undefined, () => new Promise<Response>(() => {}));
+    let renders = 0;
+    const { rerender, unmount } = renderHook(
+      ({ m }) => {
+        renders += 1;
+        return useLive(m);
+      },
+      { wrapper, initialProps: { m: model() } },
+    );
+    let before = renders;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(renders).toBe(before);
+
+    rerender({ m: live });
+    before = renders;
+    await act(() => vi.advanceTimersByTimeAsync(CLOCK_SECONDS * 1000));
+    expect(renders).toBeGreaterThan(before);
+
+    act(() => setHidden(true));
+    before = renders;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(renders).toBe(before);
+
+    act(() => setHidden(false));
+    before = renders;
+    await act(() => vi.advanceTimersByTimeAsync(CLOCK_SECONDS * 1000));
+    expect(renders).toBeGreaterThan(before);
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("ages a value from the server's future as 0", () => {
