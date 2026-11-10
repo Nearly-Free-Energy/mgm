@@ -121,7 +121,8 @@ export const linkRefSchema = z.strictObject({
   share: z.strictObject({ title: z.string(), text: z.string() }).optional(),
 });
 
-const provenanceSchema = z.strictObject({
+/** Who proposed an action the person did not start (ActionRef.provenance). */
+export const provenanceSchema = z.strictObject({
   by: z.enum(["assistant", "watcher"]),
   proposal: z.string().optional(),
   at: isoDateTime,

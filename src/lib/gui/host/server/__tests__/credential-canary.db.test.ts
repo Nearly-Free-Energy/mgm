@@ -3,16 +3,19 @@
  *
  * Every encrypted credential column holds a canary, stored through
  * fn_ems_encrypt_secret. An org manager of that organization then gets every
- * view in the real root's snapshot, and no response body or console line may
- * carry any canary as plaintext, base64, hex or stored ciphertext. Every view
- * in the snapshot must be dispatched and its loader run, so a new view is
- * covered without editing this file. Self-tests prove the scan and the loop
- * catch a loader that leaks any decrypted canary.
+ * view and prepares every action in the real root's snapshot, and no response
+ * body or console line may carry any canary as plaintext, base64, hex or
+ * stored ciphertext. Every view must be dispatched and its loader run, and
+ * every action prepared and its own available() and prepare run, so a new
+ * view or action is covered without editing this file. Self-tests prove the
+ * scan and the loops catch a loader, prepare or available() that leaks any
+ * decrypted canary.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
 import type { User } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   assertEnvironmentReady,
   cleanupTestData,
@@ -35,7 +38,7 @@ vi.mock("../snapshot", async (importOriginal) => {
 });
 
 import { getMgmRuntime } from "@/lib/runtime/root";
-import type { ViewDef } from "../../../surface";
+import type { ActionDef, ViewDef } from "../../../surface";
 import { createFmt } from "../../../fmt";
 import { hostContext } from "../access";
 import {
@@ -43,6 +46,7 @@ import {
   assertNoCanary,
   dispatchEveryView,
   encryptedColumnsInSchema,
+  prepareEveryAction,
   seedCanaries,
   type Canary,
   type CanaryIds,
@@ -161,6 +165,74 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     const results = await dispatchEveryView(ctx(), snapshot, IDS, serve);
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.views.length);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+  });
+
+  it("no action in the real snapshot returns or logs a stored credential when prepared", async () => {
+    const snapshot = (await getMgmRuntime()).mgmSurface.snapshot();
+    const results = await prepareEveryAction(ctx(), snapshot, IDS, serve);
+    expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.actions.size);
+    for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+  });
+
+  describe("self-test: the scan catches a prepare or available() that leaks a decrypted credential", () => {
+    // A core plugin, so the gate passes and the action's own functions run.
+    const action = (over: Record<string, unknown>) => ({
+      plugin: "organization-directory" as const,
+      def: {
+        id: "acme.canary",
+        title: "Canary",
+        target: "microgrid",
+        input: z.object({ note: z.string().optional() }),
+        inputVersion: 1,
+        path: "/api/microgrids/[id]",
+        method: "PATCH",
+        bind: { path: { id: "microgrid" } },
+        risk: "write",
+        confirm: "confirm",
+        humanOnly: false,
+        ...over,
+      } as unknown as ActionDef,
+    });
+    const actions = (a: ReturnType<typeof action>): SurfaceSnapshot => ({ ...surface([]), actions: new Map([[a.def.id, a]]) });
+    const ceremony = (statement: string) => ({ ok: true, model: { type: "ceremony", statement, facts: [], warnings: [], acknowledgements: [] } });
+    const basic = "microgrids.ems_basic_auth_password_encrypted";
+    const scanPrepared = (results: { output: string }[]) => () => results.forEach((r) => assertNoCanary(r.output, canaries, "self-test"));
+
+    it("passes a clean prepare at every seeded microgrid", async () => {
+      const results = await prepareEveryAction(ctx(), actions(action({ prepare: async () => ceremony("Change it") })), IDS, serve);
+      expect(results.map((r) => r.status)).toEqual(Object.values(IDS.microgridIds).map(() => 200));
+      scanPrepared(results)();
+    });
+
+    const leaks: [string, (secret: string) => Record<string, unknown>][] = [
+      ["a ceremony statement", (s) => ({ prepare: async () => ceremony(s) })],
+      ["a refusal message from prepare", (s) => ({ prepare: async () => ({ ok: false, status: 409, message: `sent ${Buffer.from(s).toString("base64")}` }) })],
+      ["available()'s reason", (s) => ({ available: async (_r: unknown, ids: string[]) => Object.fromEntries(ids.map((i) => [i, `hex ${Buffer.from(s).toString("hex")}`])) })],
+      ["console.error in prepare", (s) => ({ prepare: async () => (console.error(`openems said ${s}`), ceremony("Change it")) })],
+      [
+        "available()'s reason, for an action that binds a body field and has no prepare",
+        (s) => ({
+          bind: { path: { id: "microgrid" }, body: { microgrid_id: "microgrid" } },
+          input: z.object({ microgrid_id: z.uuid(), note: z.string().optional() }),
+          available: async (_r: unknown, ids: string[]) => Object.fromEntries(ids.map((i) => [i, `sent ${s}`])),
+        }),
+      ],
+    ];
+    it.each(leaks)("%s", async (_name, leak) => {
+      const secret = await decrypted(canary(basic));
+      const results = await prepareEveryAction(ctx(), actions(action(leak(secret))), IDS, serve);
+      expect(scanPrepared(results)).toThrow(basic);
+    });
+
+    it("refuses an action whose available() did not run", async () => {
+      const fixture = actions(action({ path: "/api/microgrids/[id]/unreleased", available: async () => ({}) }));
+      await expect(prepareEveryAction(ctx(), fixture, IDS, serve)).rejects.toThrow("available() did not run");
+    });
+
+    it("refuses an action whose prepare did not run", async () => {
+      const fixture = actions(action({ prepare: async () => ceremony("x"), available: async (_r: unknown, ids: string[]) => Object.fromEntries(ids.map((i) => [i, "No"])) }));
+      await expect(prepareEveryAction(ctx(), fixture, IDS, serve)).rejects.toThrow("prepare did not run");
+    });
   });
 
   describe("self-test: the scan catches a loader that leaks a decrypted credential", () => {

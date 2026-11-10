@@ -115,7 +115,7 @@ function writeOnlyKeys(input: z.ZodType): ReadonlySet<string> | null {
  * removed. Undefined when it does not parse or its writeOnly fields cannot be
  * found.
  */
-function cleanPrefill(def: ActionDef, prefill: Json): Json | undefined {
+export function cleanPrefill(def: ActionDef, prefill: Json): Json | undefined {
   if (!(def.input instanceof z.ZodObject) || prefill === null || typeof prefill !== "object" || Array.isArray(prefill))
     return undefined;
   const shape = def.input.shape as Record<string, z.ZodType>;

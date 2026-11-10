@@ -134,10 +134,13 @@ root in the `Test` gate, so it refuses exactly what production would.
 Plugins see `ctx.mgmSurface` typed as `MgmSurface`, the write side. The host
 reads definitions only through `surfaceSnapshot()`
 (`src/lib/gui/host/server/snapshot.ts`), and serves a contributed view with
-`GET /api/gui/view?href=<page>` after checking the caller's session. The
-registry is privileged in `service-role-session-check.test.ts`: the functions
-it holds can compose capabilities, and a call made through it cannot be
-followed by import, so every file that names it is tracked.
+`GET /api/gui/view?href=<page>` after checking the caller's session.
+`POST /api/gui/prepare` returns an action's form, confirmation, route and
+method for the same caller; it writes nothing, and the write goes to the
+action's own route. The registry is privileged in
+`service-role-session-check.test.ts`: the functions it holds can compose
+capabilities, and a call made through it cannot be followed by import, so
+every file that names it is tracked.
 
 What a contribution names is checked in CI by
 `src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
