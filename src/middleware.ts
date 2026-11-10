@@ -5,6 +5,11 @@ import { getServerSupabaseSettings } from "@/lib/config/public-runtime-config";
 import { cookieOptionsFor } from "@/lib/config/cookie-options";
 import { notReleasedResponse } from "@/lib/public-html/not-released";
 import {
+  buildContentSecurityPolicy,
+  cspHeaderName,
+  newNonce,
+} from "@/lib/mgm/content-security-policy";
+import {
   RETURN_PATH_PARAM,
   returnPathFor,
   safeReturnPath,
@@ -26,6 +31,19 @@ const PUBLIC_PATHS = [
   // cookies, so a signed-in person's request arrives signed out too.
   "/manifest.webmanifest",
 ];
+
+/**
+ * The request header that carries a page request's path and query to
+ * layouts, which Next.js does not otherwise give them. Middleware always
+ * replaces it, so a value sent by the client never arrives; that holds
+ * because the matcher below skips only static files, never a page path.
+ * If the matcher starts skipping page paths, revisit. It is a hint
+ * for display and for choosing among the caller's visible organizations,
+ * never an authorization; if a reader starts using it for anything else,
+ * revisit.
+ */
+const MGM_PATH_HEADER = "x-mgm-path";
+const MGM_PATH_MAX_LENGTH = 2048;
 
 /**
  * Release 4 public payment surfaces (no MGM session). The line-item id /
@@ -56,14 +74,45 @@ export async function middleware(request: NextRequest) {
     }
     return notReleasedResponse(request.headers.get("accept-language"));
   }
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
-
   // Same validated runtime configuration as the server and browser clients
   // (#46). Missing or invalid settings throw a RuntimeConfigError that names
   // the variable, never its value, and the request fails closed.
   const settings = getServerSupabaseSettings();
+
+  // Pages get the request path and a content security policy with a fresh
+  // nonce; API requests get neither.
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
+  const pathWithQuery = `${request.nextUrl.pathname}${request.nextUrl.search}`.slice(
+    0,
+    MGM_PATH_MAX_LENGTH,
+  );
+  const csp = isApi
+    ? null
+    : {
+        header: cspHeaderName(),
+        policy: buildContentSecurityPolicy({
+          nonce: newNonce(),
+          supabaseUrl: settings.publicConfig.supabaseUrl,
+          development: process.env.NODE_ENV === "development",
+        }),
+      };
+
+  // Rebuilt on every call: setAll writes refreshed session cookies into
+  // request.headers, and Server Components must see them alongside the
+  // forwarded headers. Next.js reads the nonce from the forwarded policy.
+  const forward = () => {
+    const headers = new Headers(request.headers);
+    headers.delete(MGM_PATH_HEADER);
+    headers.delete("content-security-policy");
+    headers.delete("content-security-policy-report-only");
+    if (!isApi) headers.set(MGM_PATH_HEADER, pathWithQuery);
+    if (csp) headers.set(csp.header, csp.policy);
+    const response = NextResponse.next({ request: { headers } });
+    if (csp) response.headers.set(csp.header, csp.policy);
+    return response;
+  };
+
+  let supabaseResponse = forward();
 
   const supabase = createServerClient(
     settings.url,
@@ -78,9 +127,7 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
+          supabaseResponse = forward();
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
@@ -193,9 +240,12 @@ export const config = {
      * Match all request paths except:
      * - _next/static (static files)
      * - _next/image (image optimization files)
+     * - gui-styles/ (compiled GUI stylesheets, static files in public/)
      * - favicon.ico (favicon file)
-     * - public folder assets
+     * - images in public/, which sit at the top level or in icons/. Deeper
+     *   paths ending in an image extension still match, because a dynamic
+     *   page segment such as /organizations/x.png must pass through here.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|gui-styles/|favicon.ico|(?:icons/)?[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
