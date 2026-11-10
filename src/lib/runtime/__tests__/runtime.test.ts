@@ -91,7 +91,7 @@ describe("MGM root runtime", () => {
     expect(runtime.meteringProviders.names()).toEqual(["openems"]);
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
     // Each contribution or compiled-in GUI added later shows up here.
-    expect(runtime.mgmSurface.snapshot().views).toEqual([]);
+    expect(runtime.mgmSurface.snapshot().views.map((v) => `${v.plugin} ${v.def.id}`)).toEqual(["metering metering.site-day"]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([
       "organization-directory",
       "community-management",

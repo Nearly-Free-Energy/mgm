@@ -5,12 +5,13 @@
  * loop that dispatches every view, prepares every action, or runs every
  * watcher and search in a surface snapshot.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { inspect } from "node:util";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { vi } from "vitest";
+import { SYNTHETIC_EDGE_ID_PREFIX } from "@/lib/metering/fixture-provider";
 import type { EntityKind } from "../../../contract";
 import { fillPath } from "../../shared/merge-actions";
 import type { HostContext } from "../access";
@@ -21,7 +22,10 @@ import { collectSignals } from "../signals";
 import type { SurfaceSnapshot } from "../surface-registry";
 import { dispatchView } from "../view";
 
-const NOWHERE = "http://127.0.0.1:9";
+// Port 9 answers nothing. The backend URL check (src/lib/openems/backend-url.ts)
+// accepts localhost over http://, so the OpenEMS client is built and contacted
+// with each decrypted credential; if that check changes, revisit.
+export const NOWHERE = "http://localhost:9";
 
 /**
  * One microgrid per way src/lib/openems/config.ts picks a credential, since a
@@ -72,13 +76,34 @@ export function encryptedColumnsInSchema(): string[] {
 
 /** A seeded credential: `column` is `table.field`, stored in row `rowId`. */
 export type Canary = { column: string; table: string; field: string; rowId: string; plaintext: string; ciphertext: string };
-export type CanaryIds = { orgId: string; communityId: string; merchantId: string; microgridIds: Record<OpenEmsPath, string> };
+export type CanaryIds = {
+  orgId: string;
+  communityId: string;
+  merchantId: string;
+  microgridIds: Record<OpenEmsPath, string>;
+  /** Served by the synthetic metering source while MGM_METERING_FIXTURES is on. */
+  syntheticMicrogridId: string;
+  /** One synthetic edge and one real one, which the synthetic source refuses. */
+  mixedMicrogridId: string;
+};
+
+/** Every seeded microgrid: one per OpenEMS credential path, then the synthetic and mixed ones. */
+export const canaryMicrogrids = (ids: CanaryIds): string[] => [
+  ...Object.values(ids.microgridIds),
+  ids.syntheticMicrogridId,
+  ids.mixedMicrogridId,
+];
 
 /**
  * Seeds an organization, a community, one microgrid per OpenEMS credential
- * path and a merchant account. Each credential column holds a new canary,
+ * path, a synthetic microgrid with the Basic path's configuration, a mixed
+ * one with the bearer path's, and a merchant account. Each credential column holds a new canary,
  * `CANARY-<field>-<32 random hex>`, encrypted by fn_ems_encrypt_secret as the
  * routes that store them do. Every backend is an address nothing answers on.
+ * Each microgrid has an edge with a battery and a grid meter, so a view that
+ * reads the site reaches its metering source: the edges of the synthetic
+ * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
+ * one, and the mixed microgrid has one edge of each.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -104,10 +129,24 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       },
     ],
   ];
-  for (const [path, [field, config]] of Object.entries(OPENEMS_PATHS)) {
-    const id = ids.microgridIds[path as OpenEmsPath];
-    const row = { id, community_id: ids.communityId, name: `GUI Canary Microgrid ${path}`, currency: "UGX", ems_backend_url: NOWHERE, ...config };
+  const REAL = "CANARY-EDGE-";
+  const microgrids: { id: string; name: string; edgePrefixes: string[]; path: OpenEmsPath }[] = [
+    ...(Object.keys(OPENEMS_PATHS) as OpenEmsPath[]).map((path) => ({ id: ids.microgridIds[path], name: path, edgePrefixes: [REAL], path })),
+    { id: ids.syntheticMicrogridId, name: "synthetic", edgePrefixes: [SYNTHETIC_EDGE_ID_PREFIX], path: "basic" },
+    { id: ids.mixedMicrogridId, name: "mixed", edgePrefixes: [SYNTHETIC_EDGE_ID_PREFIX, REAL], path: "bearer" },
+  ];
+  const site: [string, Record<string, unknown>][] = [];
+  for (const { id, name, edgePrefixes, path } of microgrids) {
+    const [field, config] = OPENEMS_PATHS[path];
+    const row = { id, community_id: ids.communityId, name: `GUI Canary Microgrid ${name}`, currency: "UGX", timezone: "Africa/Kampala", ems_backend_url: NOWHERE, ...config };
     rows.push(["microgrids", { ...row, ...(await secret("microgrids", field, id)) }]);
+    for (const edgePrefix of edgePrefixes) {
+      const edge = randomUUID();
+      site.push(["edges", { id: edge, microgrid_id: id, name: `Canary edge ${edgePrefix}`, openems_edge_id: `${edgePrefix}${id}` }]);
+      for (const [type, component] of [["battery", "ess0"], ["grid_meter", "meter0"]]) {
+        site.push(["devices", { edge_id: edge, name: `Canary ${type}`, device_type: type, openems_component_id: component }]);
+      }
+    }
   }
   rows.push([
     "payment_merchant_accounts",
@@ -119,7 +158,7 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       ...(await secret("payment_merchant_accounts", "secret_encrypted", ids.merchantId)),
     },
   ]);
-  for (const [table, row] of rows) {
+  for (const [table, row] of [...rows, ...site]) {
     const { error } = await svc.from(table).insert(row);
     if (error) throw new Error(`[canary] ${table}: ${error.message}`);
   }
@@ -176,7 +215,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
   const byKind: Partial<Record<EntityKind, string[]>> = {
     organization: [ids.orgId],
     community: [ids.communityId],
-    microgrid: Object.values(ids.microgridIds),
+    microgrid: canaryMicrogrids(ids),
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {

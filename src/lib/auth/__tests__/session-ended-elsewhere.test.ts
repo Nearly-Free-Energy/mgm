@@ -20,6 +20,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
+// The root before any composer: the metering surface's loader imports
+// composeMetering, and loaded first from inside the scope mock below it would
+// bind the uncounted opener. If the root stops importing surface modules, the
+// order no longer matters.
+import "@/lib/runtime/root";
 import {
   getCurrentUserRoles,
   currentUserIsSuperAdmin,
@@ -68,7 +73,8 @@ function rows(data: unknown) {
   return chain();
 }
 
-function sessionEndedElsewhere(): SupabaseClient {
+/** `live` gives the same client an Auth that still knows the session. */
+function sessionEndedElsewhere(live = false): SupabaseClient {
   return {
     auth: {
       // The token verifies locally...
@@ -78,10 +84,10 @@ function sessionEndedElsewhere(): SupabaseClient {
         error: null,
       }),
       // ...but Auth no longer knows the session.
-      getUser: async () => ({
-        data: { user: null },
-        error: { name: "AuthApiError", status: 403, code: "session_not_found" },
-      }),
+      getUser: async () =>
+        live
+          ? { data: { user: { id: "u1" } }, error: null }
+          : { data: { user: null }, error: { name: "AuthApiError", status: 403, code: "session_not_found" } },
     },
     from: (table: string) => {
       if (table === "user_roles") {
@@ -95,6 +101,8 @@ function sessionEndedElsewhere(): SupabaseClient {
       }
       return rows({ org_id: ORG_ID });
     },
+    // Every plugin is enabled.
+    rpc: async () => ({ data: true, error: null }),
   } as unknown as SupabaseClient;
 }
 
@@ -142,6 +150,16 @@ describe("the composers that check the session themselves", () => {
   ])("%s answers 401 without opening a request scope", async (_name, compose) => {
     expect(await compose()).toMatchObject({ ok: false, status: 401 });
     expect(opened.scopes).toBe(0);
+  });
+
+  // The counter itself: composeMetering is the composer the root's surface
+  // modules import, so a change in import order binds it first. Without this
+  // case, a composer holding the unwrapped opener would pass the ones above.
+  it("composeMetering opens a counted request scope for a live session", async () => {
+    const composed = await composeMetering({ supabase: sessionEndedElsewhere(true), organizationId: ORG_ID });
+    if (!composed.ok) throw new Error(composed.code);
+    await composed.data.dispose();
+    expect(opened.scopes).toBe(1);
   });
 
   it("composeBillingReview, which leaves the check to its caller, opens one", async () => {

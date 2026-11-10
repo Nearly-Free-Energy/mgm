@@ -119,6 +119,7 @@ export default defineConfig({
             "src/lib/gui/host/server/__tests__/credential-canary.db.test.ts",
             "src/lib/supabase/__tests__/credential_key.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
+            "src/app/api/gui/view/__tests__/site-day.db.test.ts",
           ],
           environment: "node",
           fileParallelism: false,
@@ -134,6 +135,7 @@ export default defineConfig({
           // run in the `rls` project (live local Supabase, sequential).
           exclude: [
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
+            "src/app/api/gui/view/__tests__/site-day.db.test.ts",
           ],
           environment: "node",
         },

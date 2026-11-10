@@ -14,11 +14,15 @@
  * organization id its scope reports.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+// The root before any composer: the metering surface's loader imports
+// composeMetering, and loaded first from inside the scope mock below it would
+// bind the unwrapped opener. If the root stops importing surface modules, the
+// order no longer matters.
+import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { composeBilling } from "@/lib/billing/compose";
 import type { RunGenerationParams } from "@/lib/billing/generate";
 import { composeMetering } from "@/lib/metering/compose";
 import type { MeteringReadRequest } from "@/lib/metering/types";
-import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { openOrganizationScope } from "../scope";
 
 const ORG_A = "550e8400-e29b-41d4-a716-44665544000a";

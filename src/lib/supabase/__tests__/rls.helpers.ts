@@ -128,9 +128,11 @@ export async function mintUserJwt(userId: string): Promise<string> {
 
 /**
  * Mints a service-role JWT from the local JWT secret.
- * Used for fixture setup — bypasses all RLS policies.
+ * Used for fixture setup — bypasses all RLS policies — and as the
+ * SUPABASE_SERVICE_ROLE_KEY a test stubs when the code under test builds
+ * its own service-role client.
  */
-async function mintServiceRoleJwt(): Promise<string> {
+export async function mintServiceRoleJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({
     role: "service_role",
