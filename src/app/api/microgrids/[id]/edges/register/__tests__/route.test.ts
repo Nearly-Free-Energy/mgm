@@ -4,6 +4,7 @@
  * Covers:
  *   - 400 bad UUID / empty body / malformed entries
  *   - 403 on RLS violation
+ *   - 401 without a signed-in user, before the synthetic-id refusal
  *   - 400 for a reserved SYNTHETIC-EDGE- id unless MGM_METERING_FIXTURES is on
  *   - Happy path: computes inserted vs updated from the prefetched existing set
  */
@@ -14,13 +15,14 @@ import { NextRequest } from "next/server";
 const MG_ID = "550e8400-e29b-41d4-a716-446655440000";
 
 const mockFrom = vi.fn();
+const mockGetUser = vi.fn();
 
 // The MGM runtime gate is covered by src/app/api/__tests__/runtime-gate-wiring.test.ts.
 const { gateRoute } = vi.hoisted(() => ({ gateRoute: vi.fn(async () => null) }));
 vi.mock("@/lib/runtime/gate", () => ({ gateRoute }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mockFrom }),
+  createClient: async () => ({ from: mockFrom, auth: { getUser: mockGetUser } }),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -47,6 +49,7 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
     vi.clearAllMocks();
     handlers = [];
     index = 0;
+    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
     mockFrom.mockImplementation(() => {
       const h = handlers[index++];
       if (!h) throw new Error(`unexpected from() #${index}`);
@@ -174,8 +177,22 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
       ],
     };
 
+    it.each([["off", ""], ["on", "on"]])(
+      "answers 401 without a signed-in user, whether the setting is %s, so the setting cannot be probed",
+      async (_label, value) => {
+        vi.stubEnv("MGM_METERING_FIXTURES", value);
+        mockGetUser.mockResolvedValue({ data: { user: null }, error: { message: "Auth session missing!" } });
+        const { POST } = await import("../route");
+        const res = await POST(makeReq(synthetic), { params: Promise.resolve({ id: MG_ID }) });
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({ error: "unauthorized" });
+        expect(gateRoute).not.toHaveBeenCalled();
+        expect(mockFrom).not.toHaveBeenCalled();
+      }
+    );
+
     it.each([["unset", ""], ["off", "off"], ["invalid", "maybe"]])(
-      "refuses them with 400 before any read or write while MGM_METERING_FIXTURES is %s",
+      "refuses them with 400 after authentication and before any other read or write while MGM_METERING_FIXTURES is %s",
       async (_label, value) => {
         vi.stubEnv("MGM_METERING_FIXTURES", value);
         const { POST } = await import("../route");
@@ -184,6 +201,7 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
         const json = await res.json();
         expect(json.field).toBe("openems_edge_id");
         expect(json.error).toContain("SYNTHETIC-EDGE-");
+        expect(mockGetUser).toHaveBeenCalledTimes(1);
         expect(gateRoute).not.toHaveBeenCalled();
         expect(mockFrom).not.toHaveBeenCalled();
       }
