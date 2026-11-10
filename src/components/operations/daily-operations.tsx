@@ -12,15 +12,11 @@ import {
   type SiteDayOperations,
   type TimeRange,
 } from "@/lib/metering/site-operations";
+import { formatDuration } from "@/lib/metering/surface/site-day-model";
 import { cn } from "@/lib/utils";
 
-/** "4h 10m", "45m", "0m". */
-export function formatDuration(minutes: number): string {
-  const total = Math.round(minutes);
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
+// The Operations view's model formats durations the same way.
+export { formatDuration };
 
 function Percent({ value, digits = 0 }: { value: number; digits?: number }) {
   return <span className="tabular-nums">{value.toFixed(digits)}%</span>;

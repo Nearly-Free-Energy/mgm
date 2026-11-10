@@ -143,6 +143,13 @@ export const STATUS_MAPS = {
     failing:        { label: "Failing",       tone: "danger",  dot: true  },
     not_configured: { label: "Not connected", tone: "neutral" /* no dot */ },
   },
+  // Operations day tile statuses: a grid cut, the battery at its discharge
+  // floor, houses without power.
+  siteDay: {
+    cut:   { label: "Grid cuts",    tone: "warning" },
+    floor: { label: "At the floor", tone: "warning" },
+    dark:  { label: "Houses dark",  tone: "danger"  },
+  },
 } as const satisfies Record<string, Record<string, StatusEntry>>;
 
 export type StatusKind = keyof typeof STATUS_MAPS;
