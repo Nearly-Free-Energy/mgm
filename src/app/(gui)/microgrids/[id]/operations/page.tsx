@@ -4,8 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { DayPicker } from "@/components/operations/day-picker";
-import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
-import { isSupportedTimezone } from "@/lib/validation/timezone";
+import { resolveRequestedDay } from "@/lib/timezone/requested-day";
 import { SiteDayLoading, SiteDaySection } from "./site-day-section";
 
 /**
@@ -38,12 +37,11 @@ export default async function OperationsPage({
   ]);
   if (!microgrid) notFound();
 
-  const timezone = isSupportedTimezone(microgrid.timezone) ? microgrid.timezone : "UTC";
-  const today = dayKeyInZone(new Date(), timezone);
-  const date =
-    typeof requested === "string" && isCalendarDateKey(requested) && requested <= today
-      ? requested
-      : addDaysToDateKey(today, -1);
+  const { today, date } = resolveRequestedDay({
+    requested,
+    stored: microgrid.timezone,
+    now: new Date(),
+  });
 
   return (
     <>
