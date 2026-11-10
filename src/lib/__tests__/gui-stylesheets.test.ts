@@ -5,7 +5,8 @@
  * import the host's tokens, so the two stylesheets agree on every value.
  */
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { gzipSync } from "node:zlib";
 import { compile } from "@tailwindcss/node";
@@ -26,8 +27,8 @@ const REPO_ROOT = path.resolve(__dirname, "../../..");
 const GLOBALS = path.join(REPO_ROOT, "src/app/globals.css");
 const TOKENS = path.join(REPO_ROOT, "src/styles/tokens.css");
 
-// Fixture packages live under node_modules/.cache so that their stylesheets
-// resolve `tailwindcss` from the project's own node_modules.
+// Fixture packages live under node_modules/.cache, inside the repository
+// and ignored by git.
 const fixtures: string[] = [];
 function fixtureRoot(packages: Record<string, Record<string, string>>): string {
   const cache = path.join(REPO_ROOT, "node_modules/.cache");
@@ -178,6 +179,206 @@ describe("the GUI stylesheet build", () => {
     expect(manifest).toEqual({ gridtop: "/gui-styles/gridtop.3f9a1c2e4b5d.css" });
     expect(JSON.parse(readFileSync(path.join(root, MANIFEST), "utf8"))).toEqual(manifest);
     expect(readdirSync(path.join(root, OUT_DIR))).toEqual(["gridtop.3f9a1c2e4b5d.css"]);
+  });
+});
+
+// Each of these fixtures puts files outside the package, at the fixture's
+// root, holding a candidate-shaped token that names where it came from. A
+// stylesheet that reached them would publish that token in its CSS.
+const OUTSIDE = {
+  ".env.local": "SECRET=content-['leak-env']\n",
+  "secret/notes.txt": "<p className=\"content-['leak-notes']\" />\n",
+  "outside.css": ".leak{content:'leak-css'}\n",
+};
+
+/** A fixture with Gridtop's stylesheet plus `extra` in a package named demo, and files outside it. */
+function escapingFixture(extra: string, files: Record<string, string> = {}): { root: string; pkg: string } {
+  const demo = demoPackage('export const View = () => <div className="bg-card" />;\n');
+  const root = fixtureRoot({ demo: { ...demo, "styles.css": `${demo["styles.css"]}\n${extra}\n`, ...files } });
+  for (const [name, text] of Object.entries(OUTSIDE)) {
+    mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+    writeFileSync(path.join(root, name), text);
+  }
+  return { root, pkg: path.join(root, "src/gui/demo") };
+}
+
+/** The refusal, checked to name the stylesheet and the directive and to quote no outside file. */
+async function refusal(root: string, directive: string): Promise<string> {
+  const error: Error = await buildStylesheets(root).then(
+    () => {
+      throw new Error("the build did not refuse");
+    },
+    (e: Error) => e,
+  );
+  expect(error.message).toContain("src/gui/demo/styles.css: ");
+  expect(error.message).toContain(directive);
+  expect(error.message).not.toMatch(/leak-|SECRET/);
+  return error.message;
+}
+
+describe("what a GUI stylesheet may read", () => {
+  it("would publish an outside file's tokens if the scanner were given it", () => {
+    // Without this, the refusals below could pass on a fixture nothing reads.
+    const { pkg } = escapingFixture("");
+    const scan = (pattern: string) => new Scanner({ sources: [{ base: pkg, pattern, negated: false }] }).scan();
+    expect(scan("../../../")).toContain("content-['leak-notes']");
+    expect(scan("../../../.env.local").some((candidate) => candidate.includes("leak-env"))).toBe(true);
+  });
+
+  it.each([
+    ['@source "../../../";'],
+    ['@source "../../../.env.local";'],
+    ['@source "../../../secret/notes.txt";'],
+    ['@source not "../../../";'],
+    ['@source "../**/*";'],
+    ['@source "../../../secret/*.txt";'],
+    ['@source "**/../../../../secret/*";'],
+    ['@source "{..,x}/{..,x}/{..,x}/secret/*";'],
+    // Expanded, "{.,x}{.,x}" includes "..", and "{.,}." includes "..".
+    ['@source "{.,x}{.,x}/{.,x}{.,x}/{.,x}{.,x}/secret/*";'],
+    ['@source not "{.,x}{.,x}/{.,x}{.,x}/{.,x}{.,x}/secret/*";'],
+    ['@source "{.,}./{.,}./{.,}./secret/*";'],
+    ['@source "./*.{tsx,}";'],
+    ['@source "./{a,{b,c}}/*";'],
+    // A sibling package whose name starts with this one's.
+    ['@source "../demo2";'],
+  ])("refuses %s", async (directive) => {
+    const { root } = escapingFixture(directive);
+    expect(await refusal(root, directive.slice(0, -1))).toMatch(/scans files inside its own package only/);
+  });
+
+  it("refuses an @source of a sibling package whose name starts with the package's", async () => {
+    const { root } = escapingFixture('@source "../demo2/";');
+    mkdirSync(path.join(root, "src/gui/demo2"), { recursive: true });
+    writeFileSync(path.join(root, "src/gui/demo2/x.txt"), "content-['leak-sibling']\n");
+    await refusal(root, '@source "../demo2/"');
+  });
+
+  it("accepts an @source whose braces list plain names", async () => {
+    const { root } = escapingFixture('@source "./*.{tsx,ts}";');
+    const [built] = await buildStylesheets(root);
+    expect(built.css).toContain(".bg-card{");
+  });
+
+  it("refuses an absolute @source outside the package", async () => {
+    const { root } = escapingFixture("");
+    const directive = `@source "${path.join(root, "secret")}"`;
+    writeFileSync(
+      path.join(root, "src/gui/demo/styles.css"),
+      `${readFileSync(path.join(root, "src/gui/demo/styles.css"), "utf8")}\n${directive};\n`,
+    );
+    await refusal(root, directive);
+  });
+
+  it("refuses an @source through a link inside the package to a directory outside it", async () => {
+    const { root, pkg } = escapingFixture('@source "./link";');
+    symlinkSync(path.join(root, "secret"), path.join(pkg, "link"));
+    await refusal(root, '@source "./link"');
+  });
+
+  it("refuses an @source through a link inside the package to a file outside it", async () => {
+    const { root, pkg } = escapingFixture('@source "./notes.txt";');
+    symlinkSync(path.join(root, "secret/notes.txt"), path.join(pkg, "notes.txt"));
+    await refusal(root, '@source "./notes.txt"');
+  });
+
+  it("refuses an @source of a path that does not exist yet, under a link inside the package", async () => {
+    // The link resolves outside although "later" does not exist there.
+    const { root, pkg } = escapingFixture('@source "./link/later";');
+    symlinkSync(path.join(root, "secret"), path.join(pkg, "link"));
+    await refusal(root, '@source "./link/later"');
+  });
+
+  it("refuses the package's own @source when a link inside it leads outside", async () => {
+    // @source "./" passes the pattern check; the scanner then follows the link.
+    const { root, pkg } = escapingFixture("");
+    symlinkSync(path.join(root, "secret"), path.join(pkg, "link"));
+    const message = await refusal(root, "@source reaches ");
+    expect(message).toContain("src/gui/demo/link/notes.txt, outside the package");
+  });
+
+  it("refuses a stylesheet that is a link to a file outside the package", () => {
+    const { root, pkg } = escapingFixture("");
+    rmSync(path.join(pkg, "styles.css"));
+    symlinkSync(path.join(root, "outside.css"), path.join(pkg, "styles.css"));
+    expect(() => findGuis(root)).toThrow(/styles must name a \.css file inside the package/);
+  });
+
+  it.each([
+    ['@import "../../../outside.css";', '@import or @reference "../../../outside.css"'],
+    ['@reference "../../../outside.css";', '@import or @reference "../../../outside.css"'],
+    ['@import "./parts.css";', '@import or @reference "./parts.css"'],
+    // Only the host's tokens.css, not another file of that name.
+    ['@import "./tokens.css";', '@import or @reference "./tokens.css"'],
+    ['@import "tw-animate-css";', '@import or @reference "tw-animate-css"'],
+    ['@import "tailwindcss/package.json";', '@import or @reference "tailwindcss/package.json"'],
+    ['@import "tailwindcss/../../outside.css";', '@import or @reference "tailwindcss/../../outside.css"'],
+  ])("refuses %s", async (line, directive) => {
+    const { root } = escapingFixture(line, { "parts.css": ".part{color:red}\n", "tokens.css": ".tok{color:red}\n" });
+    expect(await refusal(root, directive)).toMatch(/imports only tailwindcss's stylesheets and src\/styles\/tokens\.css/);
+  });
+
+  // tailwindcss passes these through unread; the browser would fetch them.
+  it.each([
+    ['@import "https://example.com/x.css";', '@import "https://example.com/x.css"'],
+    ["@import url(https://example.com/y.css);", '@import "https://example.com/y.css"'],
+    ['@import "data:text/css,.x%7Bcolor:red%7D";', '@import "data:text/css,.x%7Bcolor:red%7D"'],
+    ['@media screen { @import "https://example.com/z.css"; }', "@import inside another rule"],
+  ])("refuses %s left in the compiled CSS", async (line, directive) => {
+    // First in the stylesheet, where an @import is valid CSS.
+    const { root, pkg } = escapingFixture("");
+    const styles = path.join(pkg, "styles.css");
+    writeFileSync(styles, `${line}\n${readFileSync(styles, "utf8")}`);
+    expect(await refusal(root, directive)).toMatch(/imports only tailwindcss's stylesheets and src\/styles\/tokens\.css/);
+  });
+
+  it("refuses an @import left after other rules", async () => {
+    const { root } = escapingFixture('@import "https://example.com/x.css";');
+    expect(await refusal(root, "compiled CSS that cannot be checked for @import")).toMatch(/must precede/);
+  });
+
+  it("refuses an @import through a link inside the package to a stylesheet outside it", async () => {
+    const { root, pkg } = escapingFixture('@import "./linked.css";');
+    symlinkSync(path.join(root, "outside.css"), path.join(pkg, "linked.css"));
+    await refusal(root, '@import or @reference "./linked.css"');
+  });
+
+  it.each([
+    ["plugin", '@plugin "./run.mjs";'],
+    ["config", '@config "./run.mjs";'],
+  ])("refuses @%s without running it", async (kind, line) => {
+    const { root, pkg } = escapingFixture(line, {
+      "run.mjs": `import { writeFileSync } from "node:fs";\nwriteFileSync(new URL("./ran", import.meta.url), "");\nexport default {};\n`,
+    });
+    expect(await refusal(root, `@${kind} "./run.mjs"`)).toMatch(/loads no JavaScript/);
+    expect(existsSync(path.join(pkg, "ran"))).toBe(false);
+  });
+
+  it("keeps the package as the boundary when the stylesheet sits in a subdirectory", async () => {
+    const demo = demoPackage('export const View = () => <div className="bg-card" />;\n');
+    const css = `${demo["styles.css"]}\n@source "../";\n`;
+    const files = { ...demo, "meta.ts": meta('name: "demo", styles: "./css/styles.css"'), "css/styles.css": css };
+    delete (files as Record<string, string>)["styles.css"];
+    const root = fixtureRoot({ demo: files });
+    const [built] = await buildStylesheets(root);
+    expect(built.css).toContain(".bg-card{");
+    writeFileSync(path.join(root, "src/gui/demo/css/styles.css"), `${css}@source "../../";\n`);
+    await expect(buildStylesheets(root)).rejects.toThrow('src/gui/demo/css/styles.css: @source "../../" is refused');
+  });
+
+  it("checks the tailwindcss version the loaders were written for", () => {
+    // loaders() in the build script lists the ways tailwindcss's compile()
+    // reads a file, as of 4.2. On an upgrade, check that list, then this.
+    const version = createRequire(__filename)("tailwindcss/package.json").version;
+    expect(version).toMatch(/^4\.2\./);
+  });
+
+  it("accepts Gridtop's stylesheet, tailwindcss's stylesheets and an inline source", async () => {
+    const { root } = escapingFixture('@import "tailwindcss/preflight.css" layer(base);\n@source inline("underline");');
+    const [built] = await buildStylesheets(root);
+    expect(built.css).toContain(".bg-card{");
+    expect(built.css).toContain(".underline{");
+    expect(built.css).not.toMatch(/leak-/);
   });
 });
 
