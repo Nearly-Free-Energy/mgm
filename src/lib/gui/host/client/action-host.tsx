@@ -16,8 +16,15 @@
  * the Overlay is handed or can reach through React (props, children, what
  * HostSlot reads when called) carries the step or a function that confirms
  * or sends; onDismiss, which cancels, is the one thing it can call. The
- * host's own frame (./action-frame.tsx) is given the step directly. A form's
- * `submit` only hands a copy of its values to the host.
+ * kit's frame (kit/overlay.tsx), used when the GUI brings none, gets the same
+ * slot. A form's `submit` only hands a copy of its values to the host.
+ *
+ * Without a bespoke form that reads the action's input version, the kit's
+ * form (kit/action-form.tsx) is used. At level confirm with the kit's form,
+ * the confirmation is that form's footer, one step (spec 9.2): the host
+ * renders the footer, and its Confirm reaches `send` with the same checks as
+ * the separate step's. A bespoke form, or a ceremony with facts, warnings or
+ * acknowledgements, gets the separate step.
  *
  * `send` is the one call that writes, and it makes its checks itself, when
  * it is called. After a confirmation step: this flow's step is on screen and
@@ -35,6 +42,7 @@ import {
   Suspense,
   useCallback,
   useContext,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -67,16 +75,16 @@ import {
   TYPING_EVENTS,
 } from "./trusted";
 
+// Loaded on first use, so pages that never write do not carry them.
 const ConfirmStep = lazy(() => import("./confirm-step").then((m) => ({ default: m.ConfirmStep })));
-const HostOverlay = lazy(() => import("./action-frame").then((m) => ({ default: m.HostOverlay })));
-const NoForm = lazy(() => import("./action-frame").then((m) => ({ default: m.NoForm })));
+const ConfirmFooter = lazy(() => import("./confirm-step").then((m) => ({ default: m.ConfirmFooter })));
+const KitOverlay = lazy(() => import("../../kit/overlay").then((m) => ({ default: m.Overlay })));
+const KitForm = lazy(() => import("../../kit/action-form").then((m) => ({ default: m.ActionForm })));
 
-/** What the active GUI may bring: its frame, its bespoke forms, and the kit's form. */
+/** What the active GUI may bring: its frame and its bespoke forms. */
 export interface ActionHostSlots {
   Overlay?: SyncComponent<OverlayProps>;
   forms?: GuiPlugin["forms"];
-  /** The kit's form for any supported input; without one, an action with fields offers Cancel only. */
-  Form?: SyncComponent<FormProps>;
 }
 
 type Failure = ActionResult & { ok: false };
@@ -90,6 +98,10 @@ type Flow = Readonly<{
   prepared: PreparedAction;
   level: Confirm;
   hasForm: boolean;
+  /** The GUI's bespoke form, when one applies; otherwise the kit's. */
+  Form: SyncComponent<FormProps> | null;
+  /** The kit's form with the confirmation as its footer. */
+  oneStep: boolean;
   /** Keys never handed back to a form. */
   writeOnly: readonly string[];
   /** `shown` is set once the form or the confirmation step is on screen. */
@@ -109,7 +121,7 @@ type Shown = {
 type Progress = { round: number; acknowledged: Set<string>; typed: string };
 /** What lets `send` write: the person's click on Confirm, or a gesture for a none-level action. */
 type Proof =
-  | { kind: "click"; event: MouseEvent<HTMLButtonElement> }
+  | { kind: "click"; event: MouseEvent<HTMLButtonElement>; values?: Json }
   | { kind: "gesture"; values: Json | null; activated: boolean };
 
 const isObject = (v: unknown): v is Record<string, Json> => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -240,7 +252,7 @@ async function prepare(runtime: KitRuntime, ref: ActionRef, initial: Json | unde
   return failureOf(response.ok ? 500 : response.status, json);
 }
 
-export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlots & { model?: ViewModel | null }) {
+export function ActionHost({ Overlay, forms, model = null }: ActionHostSlots & { model?: ViewModel | null }) {
   const runtime = useKitRuntime();
   const flow = useRef<Flow | null>(null);
   /** Taken before prepare is sent, so a second act() waits for nothing. */
@@ -252,15 +264,20 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
   const rounds = useRef(0);
   const progress = useRef<Progress | null>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
+  /** Reads the kit form's values for a one-step confirm; set by the form. */
+  const reader = useRef<(() => Json | null) | null>(null);
+  const bind = useCallback((read: (() => Json | null) | null) => void (reader.current = read), []);
+  const statementId = useId();
   /** Where a GUI-framed step is rendered; created in the browser only. */
   const [slot] = useState(() =>
     typeof document === "undefined" ? null : Object.assign(document.createElement("div"), { className: "contents" }),
   );
-  const show = useCallback((next: Omit<Shown, "round"> | null) => {
+  /** `fresh` shows the same step again as a new round, which remounts it. */
+  const show = useCallback((next: Omit<Shown, "round"> | null, fresh = false) => {
     const prev = step.current;
-    const same = next !== null && prev !== null && prev.flow === next.flow && prev.step === next.step;
+    const same = !fresh && next !== null && prev !== null && prev.flow === next.flow && prev.step === next.step;
     const round = same ? prev.round : (rounds.current += 1);
-    if (!same && next?.step === "confirm") progress.current = { round, acknowledged: new Set(), typed: "" };
+    if (!same && (next?.step === "confirm" || next?.flow.oneStep)) progress.current = { round, acknowledged: new Set(), typed: "" };
     step.current = next && { ...next, round };
     setShown(step.current);
   }, []);
@@ -286,11 +303,13 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
       if (proof.kind === "click") {
         const open = step.current;
         const record = progress.current;
-        if (!open || open.flow !== current || open.step !== "confirm" || open.busy) return;
+        if (!open || open.flow !== current || open.busy) return;
+        // On the form step only as the one-step footer, with the form's values.
+        if (open.step === "form" && (!current.oneStep || proof.values === undefined)) return;
         if (!isTrusted(proof.event) || !isClickOn(proof.event, confirmButton.current)) return;
         const made = record?.round === open.round ? required(current.prepared, current.level, record) : null;
         if (!made) return;
-        values = open.values;
+        values = open.step === "form" ? proof.values! : open.values;
         confirmation = made;
       } else {
         if (current.level !== "none" || !proof.activated) return;
@@ -320,7 +339,8 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
       } else if (flow.current === current) {
         const error = { message: result.message, ...(result.field ? { field: result.field } : {}) };
         const again = withoutKeys(values, current.writeOnly);
-        show({ flow: current, step: current.hasForm ? "form" : "confirm", busy: false, error, values: again });
+        // A one-step form starts again from what was sent, without its secrets.
+        show({ flow: current, step: current.hasForm ? "form" : "confirm", busy: false, error, values: again }, current.oneStep);
       }
     },
     [runtime, finish, show],
@@ -342,12 +362,22 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
       }
       const { any, writeOnly } = fieldsOf(prepared.spec.input);
       const values = isObject(prepared.prefill) ? withoutKeys(prepared.prefill, writeOnly) : null;
+      const level = prepared.confirm;
+      const bespoke = forms?.[prepared.spec.id];
+      const Form =
+        bespoke && bespoke.reads.includes(prepared.spec.inputVersion) && (level === "none" || level === "confirm")
+          ? bespoke.Component
+          : null;
+      const { ceremony } = prepared;
+      const plain = !ceremony || ceremony.facts.length + ceremony.warnings.length + ceremony.acknowledgements.length === 0;
       return new Promise<ActionResult>((resolve) => {
         const current: Flow = Object.freeze({
           ref,
           prepared,
-          level: prepared.confirm,
+          level,
           hasForm: any,
+          Form,
+          oneStep: any && !Form && level === "confirm" && plain,
           writeOnly: Object.freeze(writeOnly),
           state: { shown: false, sending: false },
           resolve,
@@ -358,7 +388,7 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
         show({ flow: current, step: any ? "form" : "confirm", busy: false, error: null, values });
       });
     },
-    [runtime, send, show],
+    [runtime, send, show, forms],
   );
 
   const latest = useRef(act);
@@ -405,6 +435,13 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
     }
   };
   const confirmed = (event: MouseEvent<HTMLButtonElement>) => void send(current, { kind: "click", event });
+  /** The one-step footer's Confirm: reads the kit form's values, then sends with the click as proof. */
+  const confirmedWithForm = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!isTrusted(event) || !onScreen("form")) return;
+    const read = reader.current?.() ?? null;
+    const copy = read === null ? undefined : copyOf(read);
+    if (copy !== undefined) void send(current, { kind: "click", event, values: copy });
+  };
   /** The host's record for this round, when `event` is real input the browser is dispatching at `input`. */
   const recordFor = (event: ChangeEvent<HTMLInputElement>, input: HTMLInputElement, types: readonly string[]) => {
     const record = progress.current;
@@ -423,27 +460,46 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
     const record = recordFor(event, input, TYPING_EVENTS);
     if (record) record.typed = readInput(input).value;
   };
-  const bespoke = forms?.[spec.id];
-  const FormView =
-    bespoke && bespoke.reads.includes(spec.inputVersion) && (level === "none" || level === "confirm")
-      ? bespoke.Component
-      : (Form ?? NoForm);
   const tone = current.ref.tone === "danger" || level === "typed" || level === "ceremony" ? "danger" : "neutral";
+  const formProps: FormProps = {
+    spec,
+    actionRef: current.ref,
+    model,
+    initial: shown.values,
+    busy: shown.busy,
+    error: shown.error,
+    submit,
+    cancel,
+  };
+  const Bespoke = current.Form;
+  const statement = current.prepared.ceremony?.statement;
+  const footer = current.oneStep ? (
+    <>
+      {statement && (
+        <p id={statementId} className="px-6">
+          {statement}
+        </p>
+      )}
+      <ConfirmFooter
+        title={spec.title}
+        tone={tone}
+        ready={!shown.busy}
+        describedBy={statement ? statementId : undefined}
+        onConfirm={confirmedWithForm}
+        onCancel={cancel}
+        confirmRef={confirmButton}
+      />
+    </>
+  ) : undefined;
 
   const content = (
     <Suspense fallback={null}>
       {shown.step === "form" ? (
-        <FormView
-          key={shown.round}
-          spec={spec}
-          actionRef={current.ref}
-          model={model}
-          initial={shown.values}
-          busy={shown.busy}
-          error={shown.error}
-          submit={submit}
-          cancel={cancel}
-        />
+        Bespoke ? (
+          <Bespoke key={shown.round} {...formProps} />
+        ) : (
+          <KitForm key={shown.round} {...formProps} footer={footer} bind={bind} />
+        )
       ) : (
         <ConfirmStep
           key={shown.round}
@@ -466,18 +522,18 @@ export function ActionHost({ Overlay, forms, Form, model = null }: ActionHostSlo
 
   return (
     <Suspense fallback={null}>
-      {Overlay ? (
-        <>
-          <SlotContext.Provider value={slot}>
-            <Overlay {...frame}>
-              <HostSlot />
-            </Overlay>
-          </SlotContext.Provider>
-          {slot && createPortal(content, slot)}
-        </>
-      ) : (
-        <HostOverlay {...frame}>{content}</HostOverlay>
-      )}
+      <SlotContext.Provider value={slot}>
+        {Overlay ? (
+          <Overlay {...frame}>
+            <HostSlot />
+          </Overlay>
+        ) : (
+          <KitOverlay {...frame}>
+            <HostSlot />
+          </KitOverlay>
+        )}
+      </SlotContext.Provider>
+      {slot && createPortal(content, slot)}
     </Suspense>
   );
 }

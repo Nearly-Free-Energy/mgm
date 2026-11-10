@@ -11,6 +11,11 @@
  * component's state only decides what is shown and when Confirm is enabled.
  * Confirm is the only thing that calls onConfirm: nothing submits on mount,
  * on Enter or on a tick.
+ *
+ * ConfirmFooter is the Cancel and Confirm row on its own. action-host.tsx
+ * also renders it as the kit form's footer for a one-step confirm, with the
+ * same Confirm button and the same click check; a change here changes both,
+ * as long as the host keeps using it there.
  */
 import {
   useEffect,
@@ -22,6 +27,8 @@ import {
   type MouseEvent,
   type Ref,
 } from "react";
+import { DialogFooter } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import type { Ceremony } from "../../contract";
 import { isLiveEventOn, isTrusted, readInput, TICK_EVENTS, TYPING_EVENTS } from "./trusted";
 
@@ -44,7 +51,44 @@ export interface ConfirmStepProps {
 }
 
 const BUTTON =
-  "inline-flex min-h-8 items-center rounded-md border px-3.5 text-dense font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex min-h-8 items-center rounded-md border px-3.5 text-dense font-medium pointer-coarse:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+
+export interface ConfirmFooterProps {
+  title: string;
+  tone: "neutral" | "danger";
+  /** Whether Confirm may be pressed. */
+  ready: boolean;
+  /** The id of the text Confirm is described by. */
+  describedBy?: string;
+  onConfirm(event: MouseEvent<HTMLButtonElement>): void;
+  onCancel(): void;
+  confirmRef?: Ref<HTMLButtonElement>;
+  cancelRef?: Ref<HTMLButtonElement>;
+  className?: string;
+}
+
+/** Cancel, and Confirm labelled with the action's title; Confirm calls onConfirm only on a real click while ready. */
+export function ConfirmFooter({ title, tone, ready, describedBy, onConfirm, onCancel, confirmRef, cancelRef, className }: ConfirmFooterProps) {
+  return (
+    <DialogFooter className={className}>
+      <button ref={cancelRef} type="button" className={`${BUTTON} border-transparent`} onClick={onCancel}>
+        Cancel
+      </button>
+      <button
+        ref={confirmRef}
+        type="button"
+        disabled={!ready}
+        aria-describedby={describedBy}
+        className={cn(BUTTON, tone === "danger" ? "border-destructive bg-destructive text-destructive-foreground" : "border-primary bg-primary text-primary-foreground")}
+        onClick={(event) => {
+          if (ready && isTrusted(event)) onConfirm(event);
+        }}
+      >
+        {title}
+      </button>
+    </DialogFooter>
+  );
+}
 
 export function ConfirmStep({
   level,
@@ -156,23 +200,17 @@ export function ConfirmStep({
           {error}
         </p>
       )}
-      <div className="sticky bottom-0 -mx-6 flex flex-wrap justify-end gap-2 bg-muted px-6 py-3">
-        <button ref={cancel} type="button" className={`${BUTTON} border-transparent`} onClick={onCancel}>
-          Cancel
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          disabled={!ready}
-          aria-describedby={`${id}-statement`}
-          className={`${BUTTON} ${tone === "danger" ? "border-destructive bg-destructive text-destructive-foreground" : "border-primary bg-primary text-primary-foreground"}`}
-          onClick={(event) => {
-            if (ready && isTrusted(event)) onConfirm(event);
-          }}
-        >
-          {title}
-        </button>
-      </div>
+      <ConfirmFooter
+        className="-mx-6"
+        title={title}
+        tone={tone}
+        ready={ready}
+        describedBy={`${id}-statement`}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+        confirmRef={confirmRef}
+        cancelRef={cancel}
+      />
     </div>
   );
 }

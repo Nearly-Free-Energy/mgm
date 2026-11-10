@@ -44,7 +44,7 @@ export function KitProvider(props: {
   manifest: Manifest | null;
   initial: InitialView;
   resolve?: ResolveView;
-  /** The active GUI's Overlay and forms, and the kit's form, for the page's ActionHost. */
+  /** The active GUI's Overlay and forms for the page's ActionHost; the kit's are used otherwise. */
   actions?: ActionHostSlots;
   children: ReactNode;
 }) {

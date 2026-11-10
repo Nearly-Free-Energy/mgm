@@ -1,4 +1,4 @@
-import { act as flush, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act as flush, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Children, cloneElement, isValidElement, useEffect, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionRef, ActionResult, FormProps, Json, OverlayProps } from "../../../contract";
@@ -189,10 +189,11 @@ describe("ActionHost", () => {
     expect(sent()).toEqual({ microgrid_id: MG, confirmation: { digest: "d9", acknowledged: ["a"], typed: "Kasenge" } });
   });
 
-  it("uses the host's form, not a bespoke one, for a ceremony action", async () => {
+  it("uses the kit's form, not a bespoke one, for a ceremony action", async () => {
     mount({ body: prepared({ confirm: "ceremony", ceremony: { type: "ceremony", statement: "x", facts: [], warnings: [], acknowledgements: [] } }) }, undefined, { forms });
     const done = act(ref());
-    expect(await screen.findByText(NO_FORM)).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Name" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Submit form" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await expect(done).resolves.toMatchObject({ ok: false, code: "cancelled" });
@@ -299,7 +300,7 @@ describe("ActionHost", () => {
   it("does not use a bespoke form for an input version it does not read, or for a typed action", async () => {
     const first = mount({ body: prepared({ confirm: "confirm", inputVersion: 2 }) }, undefined, { forms });
     const done = act(ref());
-    expect(await screen.findByText(NO_FORM)).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Name" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Submit form" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await expect(done).resolves.toMatchObject({ code: "cancelled" });
@@ -308,7 +309,7 @@ describe("ActionHost", () => {
     const ceremony = { type: "ceremony" as const, statement: "x", facts: [], warnings: [], acknowledgements: [], typed: "Kasenge" };
     mount({ body: prepared({ confirm: "typed", ceremony }) }, undefined, { forms });
     void act(ref());
-    expect(await screen.findByText(NO_FORM)).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Name" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Submit form" })).toBeNull();
   });
 
@@ -320,20 +321,23 @@ describe("ActionHost", () => {
     expect(writes()).toHaveLength(0);
   });
 
-  it("frames the steps in the GUI's Overlay and renders the kit's Form slot", async () => {
+  it("frames a bespoke form and then the separate confirm step in the GUI's Overlay", async () => {
     const roles: string[] = [];
     function TestOverlay({ role, children }: OverlayProps) {
       roles.push(role);
       return <section data-testid="overlay">{children}</section>;
     }
-    const { sent } = mount({ body: prepared() }, undefined, { Overlay: TestOverlay, Form: formSubmitting({ name: "Kit" }) });
+    const { sent, writes } = mount({ body: prepared() }, undefined, { Overlay: TestOverlay, forms });
     const done = act(ref());
     fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
-    fireEvent.click(await confirmButton());
+    const confirm = await confirmButton();
+    expect(writes()).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Submit form" })).toBeNull();
+    fireEvent.click(confirm);
     await expect(done).resolves.toMatchObject({ ok: true });
     expect(roles).toContain("form");
     expect(roles).toContain("confirm");
-    expect(sent()).toEqual({ name: "Kit", microgrid_id: MG });
+    expect(sent()).toEqual({ name: "Kasenge", microgrid_id: MG });
   });
 
   it("shows a confirm step when a none-level form submits without a gesture", async () => {
@@ -894,5 +898,200 @@ describe("ActionHost with a GUI's own Overlay and forms", () => {
     await expect(done).resolves.toMatchObject({ code: "cancelled" });
     expect(confirm.isConnected).toBe(false);
     expect(writes()).toHaveLength(0);
+  });
+});
+
+describe("ActionHost with the kit's form", () => {
+  type Handlers = { onClick?: (event: unknown) => void };
+  const domProps = (node: Element): Handlers => {
+    const key = Object.keys(node).find((k) => k.startsWith("__reactProps$"));
+    return key ? (node as unknown as Record<string, Handlers>)[key] : {};
+  };
+  const name = () => screen.findByRole("textbox", { name: "Name" });
+
+  it("confirms a confirm-level action in one step: the host's footer under the kit's form", async () => {
+    const roles: string[] = [];
+    function TestOverlay({ role, children }: OverlayProps) {
+      roles.push(role);
+      return <section>{children}</section>;
+    }
+    const { writes, sent } = mount({ body: prepared({ prefill: { name: "Old" } }) }, undefined, { Overlay: TestOverlay });
+    const done = act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    fireEvent.change(screen.getByLabelText(/Pin/), { target: { value: "1234" } });
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    fireEvent.click(await confirmButton());
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ name: "Kasenge", pin: "1234", microgrid_id: MG });
+    expect(new Set(roles)).toEqual(new Set(["form"]));
+  });
+
+  it("never sends from an untrusted click, a synthetic one, or a click on anything but the host's Confirm", async () => {
+    function Elsewhere({ children }: OverlayProps) {
+      const forward = (event: unknown) => {
+        const confirm = screen.queryByRole("button", { name: "Rename site" });
+        if (confirm) domProps(confirm).onClick?.(event);
+      };
+      return (
+        <section>
+          {children}
+          <button type="button" onClick={forward}>
+            Elsewhere
+          </button>
+        </section>
+      );
+    }
+    const { writes } = mount({ body: prepared({ prefill: { name: "Kasenge" } }) }, undefined, { Overlay: Elsewhere });
+    const done = act(ref());
+    await name();
+    const confirm = await confirmButton();
+    // Script's click on Confirm.
+    input.trusted = false;
+    fireEvent.click(confirm);
+    input.trusted = true;
+    await flush(async () => {
+      // Objects shaped like a click on Confirm, and a real event not being dispatched.
+      domProps(confirm).onClick!({ type: "click", target: confirm, currentTarget: confirm, nativeEvent: { isTrusted: true, type: "click", eventPhase: 2, target: confirm } });
+      domProps(confirm).onClick!({ type: "click", nativeEvent: new MouseEvent("click") });
+    });
+    // The person's click on another button, handed to Confirm's handler.
+    fireEvent.click(screen.getByRole("button", { name: "Elsewhere" }));
+    // Enter in a field submits nothing.
+    fireEvent.submit((await name()).closest("form")!);
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("sends nothing while a required field is empty, and says where", async () => {
+    const { writes } = mount({ body: prepared() });
+    void act(ref());
+    await name();
+    fireEvent.click(await confirmButton());
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+    expect(screen.getByText("Enter a value.")).toBeTruthy();
+    expect((await name()).getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("shows the route's field error at the field, keeping the name and dropping the secret", async () => {
+    const { writes } = mount({ body: prepared() }, { status: 422, body: { error: "That name is taken.", field: "name" } });
+    void act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    fireEvent.change(screen.getByLabelText(/Pin/), { target: { value: "1234" } });
+    fireEvent.click(await confirmButton());
+    expect(await screen.findByText("That name is taken.")).toBeTruthy();
+    expect(writes()).toHaveLength(1);
+    expect(((await name()) as HTMLInputElement).value).toBe("Kasenge");
+    expect((screen.getByLabelText(/Pin/) as HTMLInputElement).value).toBe("");
+    expect((await confirmButton()).isConnected).toBe(true);
+  });
+
+  it("keeps the separate step for a typed action under the kit's form", async () => {
+    const ceremony = { type: "ceremony" as const, statement: "Rename?", facts: [], warnings: [], acknowledgements: [], typed: "Kasenge" };
+    const { writes, sent } = mount({ body: prepared({ confirm: "typed", ceremony }) });
+    const done = act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    expect(writes()).toHaveLength(0);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Kasenge" } });
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(sent()).toEqual({ name: "Kasenge", microgrid_id: MG, confirmation: { acknowledged: [], typed: "Kasenge" } });
+  });
+
+  it("keeps the separate step when a confirm-level ceremony asks for acknowledgements", async () => {
+    const ceremony = { type: "ceremony" as const, statement: "Rename?", facts: [], warnings: [], acknowledgements: [{ id: "a", label: "Sure" }] };
+    const { writes } = mount({ body: prepared({ ceremony }) });
+    void act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("checkbox", { name: "Sure" })).toBeTruthy();
+    expect(writes()).toHaveLength(0);
+  });
+
+  it.each([
+    ["warnings", { warnings: ["Households will see the new name."] }, "Households will see the new name."],
+    ["facts", { facts: [{ label: "Site", value: { t: "text" as const, text: "Old" } }] }, "Old"],
+  ])("keeps the separate step when a confirm-level ceremony has %s", async (_, over, shownText) => {
+    const ceremony = { type: "ceremony" as const, statement: "Rename?", facts: [], warnings: [], acknowledgements: [], ...over };
+    const { writes } = mount({ body: prepared({ ceremony }) });
+    void act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await confirmButton();
+    expect(screen.getByText(shownText)).toBeTruthy();
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("shows the ceremony's statement above the one-step footer, describes Confirm by it, and keeps the tone", async () => {
+    const ceremony = { type: "ceremony" as const, statement: "Rename this site?", facts: [], warnings: [], acknowledgements: [] };
+    mount({ body: prepared({ ceremony }) });
+    void act(ref({ tone: "danger" }));
+    await name();
+    const statement = screen.getByText("Rename this site?");
+    const confirm = await confirmButton();
+    expect(statement.id).toBeTruthy();
+    expect(confirm.getAttribute("aria-describedby")).toBe(statement.id);
+    expect(confirm.className).toContain("bg-destructive");
+  });
+
+  it("gives the host's Cancel and Confirm 44 px targets on coarse pointers, in one step and in the separate step", async () => {
+    const coarse = () => {
+      for (const label of ["Cancel", "Rename site"]) {
+        expect(screen.getByRole("button", { name: label }).className).toContain("pointer-coarse:min-h-11");
+      }
+    };
+    mount({ body: prepared() });
+    void act(ref());
+    await confirmButton();
+    coarse();
+    cleanup();
+    mount({ body: prepared({ fields: false }) });
+    void act(ref());
+    await confirmButton();
+    coarse();
+  });
+
+  it("disables the one-step Confirm while the write is in flight", async () => {
+    const hold = gate();
+    const { writes } = mount({ body: prepared({ prefill: { name: "Kasenge" } }) }, { body: {}, wait: hold.wait });
+    const done = act(ref());
+    await name();
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirm.disabled).toBe(true));
+    expect(writes()).toHaveLength(1);
+    hold.open();
+    await expect(done).resolves.toMatchObject({ ok: true });
+  });
+
+  it("focuses the field the route names after a failed one-step write", async () => {
+    mount({ body: prepared() }, { status: 422, body: { error: "That PIN is wrong.", field: "pin" } });
+    void act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    fireEvent.change(screen.getByLabelText(/Pin/), { target: { value: "1234" } });
+    fireEvent.click(await confirmButton());
+    expect(await screen.findByText("That PIN is wrong.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/Pin/)));
+  });
+
+  it("sends a none-level kit form at once on the person's submit", async () => {
+    const { writes, sent } = mount({ body: prepared({ confirm: "none", specConfirm: "none" }) });
+    const done = act(ref());
+    fireEvent.change(await name(), { target: { value: "Kasenge" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename site" }));
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ name: "Kasenge", microgrid_id: MG });
   });
 });
