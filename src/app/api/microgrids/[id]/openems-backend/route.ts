@@ -9,10 +9,20 @@ import {
   getEmsBasicAuthPasswordForMicrogrid,
   getEmsBearerTokenForMicrogrid,
   getEmsKeycloakClientSecretForMicrogrid,
+  saveEmsConfigForMicrogrid,
 } from "@/lib/openems/config";
 import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
+
+// The four stored OpenEMS credentials, the same columns the guard trigger
+// names in its address rule (20261110142706).
+const EMS_CREDENTIAL_COLUMNS = [
+  "ems_aws_secret_access_key_encrypted",
+  "ems_basic_auth_password_encrypted",
+  "ems_bearer_token_encrypted",
+  "ems_keycloak_client_secret_encrypted",
+] as const;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,6 +68,9 @@ const UUID_RE =
  *      existing ciphertext is on record, preserve it. Otherwise 400.
  *      Same gate for the direct_url Basic password (#327), plus a 400 when
  *      exactly one of username/password is supplied.
+ *      A blank field keeps a stored credential only while the backend URL
+ *      (and, for the Keycloak secret, the token URL) is unchanged; otherwise
+ *      400 asking for it again.
  *   4. Mid-period lock — 3-branch decision tree:
  *        (a) draft exists            → hard 409
  *        (b) closed exists (no draft) → 409 with requires_typed_confirmation
@@ -68,7 +81,8 @@ const UUID_RE =
  *      in step 3) and call getEdgesStatus(known_edge_ids). Any ID absent
  *      from the response → 400 with invalid_edges. No DB write on failure.
  *   6. Persist the config (first transaction). fn_ems_encrypt_secret encrypts
- *      the AWS secret key if supplied. Saves ems_known_edge_ids.
+ *      each credential supplied; saveEmsConfigForMicrogrid writes the row on
+ *      the service client after its own access check. Saves ems_known_edge_ids.
  *   7. Run Discover against the saved config (second transaction; status
  *      fields updated regardless of success). UI credentials enumerate edges;
  *      explicit IDs reuse statuses from step 5.
@@ -253,13 +267,14 @@ export async function PUT(
   const { data: mgRow, error: mgErr } = await supabase
     .from("microgrids")
     .select(
-      "id, name, ems_type, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted, ems_bearer_token_encrypted, ems_keycloak_token_url, ems_keycloak_client_id, ems_keycloak_client_secret_encrypted"
+      "id, name, ems_type, ems_backend_url, ems_aws_secret_access_key_encrypted, ems_basic_auth_password_encrypted, ems_bearer_token_encrypted, ems_keycloak_token_url, ems_keycloak_client_id, ems_keycloak_client_secret_encrypted"
     )
     .eq("id", microgridId)
     .maybeSingle<{
       id: string;
       name: string;
       ems_type: "cloud_aws" | "direct_url" | null;
+      ems_backend_url: string | null;
       ems_aws_secret_access_key_encrypted: string | null;
       ems_basic_auth_password_encrypted: string | null;
       ems_bearer_token_encrypted: string | null;
@@ -334,6 +349,38 @@ export async function PUT(
     !!keycloakClientId &&
     !keycloakClientSecret &&
     storedKeycloakComplete;
+
+  // A saved credential stays with the address it was entered for. A blank
+  // field keeps the stored credential only while the backend URL (and, for
+  // the Keycloak client secret, the token URL) stays the same; otherwise the
+  // operator enters it again. This runs before anything is decrypted or
+  // contacted. The guard trigger on `microgrids` enforces the same rule on
+  // the write (migration 20261110142706); if either rule changes, change both.
+  const backendUrlChanged =
+    (mgRow.ems_backend_url ?? null) !== backendUrl.trim();
+  const keycloakTokenUrlChanged =
+    (mgRow.ems_keycloak_token_url ?? null) !== (keycloakTokenUrl ?? null);
+  const keptCredential = preserveExistingSecret
+    ? "secret access key"
+    : preserveExistingBasicAuthPassword
+      ? "password"
+      : preserveExistingBearerToken
+        ? "bearer token"
+        : preserveExistingKeycloakSecret
+          ? "client secret"
+          : null;
+  if (
+    keptCredential &&
+    (backendUrlChanged ||
+      (preserveExistingKeycloakSecret && keycloakTokenUrlChanged))
+  ) {
+    return NextResponse.json(
+      {
+        error: `Enter the ${keptCredential} again. A saved credential is not kept when the address it is sent to changes.`,
+      },
+      { status: 400 }
+    );
+  }
 
   // Reject the half-filled form. Checked after the row read so that "username
   // present, password blank, ciphertext on record" is a preserve rather than
@@ -464,13 +511,12 @@ export async function PUT(
   }
   // Configuration gate. Since #321 this is the same permission as reaching
   // the microgrid at all: an org manager configures any microgrid in their own
-  // org and nothing else. It is a preview of what the BEFORE UPDATE trigger on
-  // `microgrids` will decide at step 6 (migration 00053, which chains through
-  // `user_can_access_microgrid`) — it exists to produce an actionable 403 here
-  // rather than a bare Postgres 42501 after the outbound connection test has
-  // already run. The trigger is the enforcement; if this check were removed the
-  // write would still be rejected. If that trigger is ever repointed at a
-  // narrower predicate, this stops being an accurate preview.
+  // org and nothing else. It answers 403 here, before the outbound connection
+  // test runs. Step 6 saves through `saveEmsConfigForMicrogrid`, which asks
+  // the same question again before it writes on the service client: only the
+  // service role writes saved credentials (migration 20261110142706), and the
+  // guard trigger's own access check does not run for it. If the guard's
+  // predicate ever narrows, both checks must narrow with it.
   if (!(await currentUserCanAccessMicrogrid(supabase, microgridId))) {
     return NextResponse.json(
       { error: "You do not have permission to configure this microgrid." },
@@ -913,11 +959,23 @@ export async function PUT(
     updatePayload.ems_keycloak_client_secret_encrypted =
       wantsKeycloak && keycloakClientSecret ? encryptedKeycloakClientSecret : null;
   }
+  // A new backend address takes no stored credential with it, including one
+  // left over from an earlier authentication mode: every credential column
+  // this save does not rewrite is cleared. The guard trigger refuses an
+  // address change that leaves stored ciphertext in place (20261110142706),
+  // and the check above has already refused a "keep" with a new address, so
+  // nothing a save preserves is cleared here.
+  if (backendUrlChanged) {
+    for (const column of EMS_CREDENTIAL_COLUMNS) {
+      if (!(column in updatePayload)) updatePayload[column] = null;
+    }
+  }
 
-  const { error: updErr } = await supabase
-    .from("microgrids")
-    .update(updatePayload)
-    .eq("id", microgridId);
+  const { error: updErr } = await saveEmsConfigForMicrogrid(
+    supabase,
+    microgridId,
+    updatePayload
+  );
 
   if (updErr) {
     if (

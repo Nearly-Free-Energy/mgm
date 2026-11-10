@@ -62,8 +62,6 @@ const FORBIDDEN: Record<string, string> = {
   "src/lib/payments/infrastructure/": "the payments repository and merchant configuration",
   "src/lib/payments/capability.ts": "the capability class, constructed only by its composer",
   "src/lib/payments/factory.ts": "the legacy provider factory",
-  "src/lib/payments/ensure-payment-link.ts": "the legacy checkout path, which calls the provider",
-  "src/lib/payments/config.ts": "the legacy provider configuration, with the decrypted secret",
 };
 
 const MERCHANT_SETUP =

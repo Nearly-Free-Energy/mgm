@@ -83,8 +83,11 @@ vi.mock("@/lib/auth/access", () => ({
 // first, so the preserve-secret path now issues an EXTRA from('microgrids')
 // before this RPC — see the handler ordering in that test.
 const mockServiceRpc = vi.fn();
+// The config save (step 6) also runs on the service client
+// (saveEmsConfigForMicrogrid), so it shares the sequenced from() handlers:
+// the update handler a test registers serves whichever client issues it.
 vi.mock("@/lib/supabase/service", () => ({
-  createServiceClient: () => ({ rpc: mockServiceRpc }),
+  createServiceClient: () => ({ rpc: mockServiceRpc, from: mockFrom }),
 }));
 
 // Sequenced from() handlers — each test sets up the order of calls.
@@ -110,9 +113,13 @@ function mgSelectHandler(
     id: string;
     name: string;
     ems_type?: "cloud_aws" | "direct_url" | null;
+    ems_backend_url?: string | null;
     ems_aws_secret_access_key_encrypted?: string | null;
     ems_basic_auth_password_encrypted?: string | null;
     ems_bearer_token_encrypted?: string | null;
+    ems_keycloak_token_url?: string | null;
+    ems_keycloak_client_id?: string | null;
+    ems_keycloak_client_secret_encrypted?: string | null;
   } | null
 ) {
   return () => ({
@@ -597,6 +604,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
         id: MG_ID,
         name: MG_NAME,
         ems_type: "cloud_aws",
+        ems_backend_url: "https://lambda.example.com/",
         // sentinel non-null bytea hex representation
         ems_aws_secret_access_key_encrypted: "\\x01020304",
       })
@@ -858,6 +866,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
           id: MG_ID,
           name: MG_NAME,
           ems_type: "direct_url",
+          ems_backend_url: "https://ems.example/rest",
           ems_basic_auth_password_encrypted: "\\xDEADBEEF",
         })
       );
@@ -978,6 +987,7 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
           id: MG_ID,
           name: MG_NAME,
           ems_type: "direct_url",
+          ems_backend_url: "https://ems.example/rest",
           ems_bearer_token_encrypted: "\\xDEADBEEF",
         })
       );
@@ -1196,6 +1206,204 @@ describe("PUT /api/microgrids/[id]/openems-backend", () => {
       // No persist occurred — from() was consumed only by row read + periods.
       expect(fromCallIndex).toBe(2);
       vi.unstubAllGlobals();
+    });
+  });
+
+  // ── A saved credential stays with its address ─────────────────────────
+  //
+  // A blank credential field keeps the stored credential only while the
+  // address it is sent to is unchanged. Each refusal must come from the row
+  // read alone: nothing decrypted, nothing contacted, nothing written.
+  describe("a saved credential stays with its address", () => {
+    const STORED_URL = "https://ems.example/rest";
+    const NEW_URL = "https://ems-new.example/rest";
+    const TOKEN_URL =
+      "https://keycloak.example/realms/energy/protocol/openid-connect/token";
+
+    async function expectAskedAgain(body: Record<string, unknown>, label: RegExp) {
+      const { PUT } = await import("../route");
+      const res = await PUT(makePutRequest(body), {
+        params: Promise.resolve({ id: MG_ID }),
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(label);
+      expect(fromCallIndex).toBe(1); // the row read, nothing after it
+      expect(mockServiceRpc).not.toHaveBeenCalled();
+      expect(getEdgesStatusMock).not.toHaveBeenCalled();
+    }
+
+    it("asks for the secret access key again when the backend URL changes", async () => {
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "cloud_aws",
+          ems_backend_url: "https://lambda.example.com/",
+          ems_aws_secret_access_key_encrypted: "\\x01020304",
+        })
+      );
+      await expectAskedAgain(
+        {
+          type: "cloud_aws",
+          backendUrl: "https://lambda-new.example.com/",
+          region: "us-east-1",
+          accessKeyId: "AKIAEXAMPLEKEYID12345",
+          known_edge_ids: ["edge0"],
+        },
+        /Enter the secret access key again/
+      );
+    });
+
+    it("asks for the password again when the backend URL changes", async () => {
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_backend_url: STORED_URL,
+          ems_basic_auth_password_encrypted: "\\xDEADBEEF",
+        })
+      );
+      await expectAskedAgain(
+        {
+          type: "direct_url",
+          backendUrl: NEW_URL,
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+        },
+        /Enter the password again/
+      );
+    });
+
+    it("asks for the bearer token again when the backend URL changes", async () => {
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_backend_url: STORED_URL,
+          ems_bearer_token_encrypted: "\\xDEADBEEF",
+        })
+      );
+      await expectAskedAgain(
+        { type: "direct_url", backendUrl: NEW_URL, known_edge_ids: [] },
+        /Enter the bearer token again/
+      );
+    });
+
+    it.each([
+      ["the backend URL", NEW_URL, TOKEN_URL],
+      [
+        "the token URL",
+        STORED_URL,
+        "https://keycloak.example/realms/other/protocol/openid-connect/token",
+      ],
+    ])(
+      "asks for the Keycloak client secret again when %s changes",
+      async (_label, backendUrl, keycloakTokenUrl) => {
+        registerFrom(
+          mgSelectHandler({
+            id: MG_ID,
+            name: MG_NAME,
+            ems_type: "direct_url",
+            ems_backend_url: STORED_URL,
+            ems_keycloak_token_url: TOKEN_URL,
+            ems_keycloak_client_id: "mgm-client",
+            ems_keycloak_client_secret_encrypted: "\\xDEADBEEF",
+          })
+        );
+        await expectAskedAgain(
+          {
+            type: "direct_url",
+            backendUrl,
+            known_edge_ids: [],
+            keycloakTokenUrl,
+            keycloakClientId: "mgm-client",
+          },
+          /Enter the client secret again/
+        );
+      }
+    );
+
+    it("saves a new URL with the password typed again, encrypting what was typed", async () => {
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_backend_url: STORED_URL,
+          ems_basic_auth_password_encrypted: "\\xDEADBEEF",
+        })
+      );
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: NEW_URL,
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+          basicAuthPassword: "typed-again",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockServiceRpc).not.toHaveBeenCalled(); // nothing stored was decrypted
+      expect(mockRpc).toHaveBeenCalledWith("fn_ems_encrypt_secret", {
+        p_plaintext: "typed-again",
+      });
+      expect(sink.payload?.ems_backend_url).toBe(NEW_URL);
+      expect(sink.payload?.ems_basic_auth_password_encrypted).toBe("\\x01020304");
+    });
+
+    it("clears credentials left from earlier modes when the backend URL changes", async () => {
+      // A Basic-auth row that still holds a bearer token, an AWS secret and a
+      // Keycloak secret from earlier configurations. The guard trigger
+      // refuses an address change that leaves any of them in place.
+      const sink: { payload?: Record<string, unknown> } = {};
+      registerFrom(
+        mgSelectHandler({
+          id: MG_ID,
+          name: MG_NAME,
+          ems_type: "direct_url",
+          ems_backend_url: STORED_URL,
+          ems_basic_auth_password_encrypted: "\\xDEADBEEF",
+          ems_bearer_token_encrypted: "\\xBEEF0001",
+          ems_aws_secret_access_key_encrypted: "\\xBEEF0002",
+          ems_keycloak_client_secret_encrypted: "\\xBEEF0003",
+        })
+      );
+      registerFrom(billingPeriodsHandler([]));
+      registerFrom(capturingUpdateHandler(sink)); // persist config
+      registerFrom(mgUpdateHandler(null)); // health update
+      getEdgesStatusMock.mockResolvedValue([]);
+
+      const { PUT } = await import("../route");
+      const res = await PUT(
+        makePutRequest({
+          type: "direct_url",
+          backendUrl: NEW_URL,
+          known_edge_ids: [],
+          basicAuthUsername: "openems",
+          basicAuthPassword: "typed-again",
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+
+      expect(res.status).toBe(200);
+      expect(sink.payload).toMatchObject({
+        ems_backend_url: NEW_URL,
+        ems_basic_auth_password_encrypted: "\\x01020304",
+        ems_bearer_token_encrypted: null,
+        ems_aws_secret_access_key_encrypted: null,
+        ems_keycloak_client_secret_encrypted: null,
+      });
     });
   });
 });

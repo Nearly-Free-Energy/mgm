@@ -909,7 +909,8 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               />
               {initialMode === "configured" && (
                 <p className="mt-1 text-caption text-muted-foreground">
-                  Leave blank to keep the current secret.
+                  Leave blank to keep the current secret. If you change the
+                  backend URL, enter it again.
                 </p>
               )}
             </div>
@@ -985,7 +986,8 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               />
               {hasStoredBasicAuthPassword && (
                 <p className="mt-1 text-caption text-muted-foreground">
-                  Leave blank to keep the current password.
+                  Leave blank to keep the current password. If you change
+                  the backend URL, enter it again.
                 </p>
               )}
             </div>
@@ -1012,8 +1014,9 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               />
               {hasStoredBearerToken ? (
                 <p className="mt-1 text-caption text-muted-foreground">
-                  A token is on record — leave blank to keep it. Typing a
-                  username above switches to Basic and clears it.
+                  A token is on record — leave blank to keep it, unless you
+                  change the backend URL. Typing a username above switches to
+                  Basic and clears it.
                 </p>
               ) : (
                 <p className="mt-1 text-caption text-muted-foreground">
@@ -1076,8 +1079,9 @@ export function OpenemsBackendShell(props: OpenemsBackendShellProps) {
               {hasStoredKeycloak ? (
                 <p className="mt-1 text-caption text-muted-foreground">
                   A Keycloak client is on record — leave blank to keep its
-                  secret. Naming a bearer token or username above switches
-                  away and clears it.
+                  secret, unless you change the backend URL or the token URL.
+                  Naming a bearer token or username above switches away and
+                  clears it.
                 </p>
               ) : (
                 <p className="mt-1 text-caption text-muted-foreground">
