@@ -133,19 +133,22 @@ export type MenuItem =
  * `__tests__/row-actions-menu.test.tsx`.
  *
  * Generate vs Regenerate signal (#221): driven by
- * `lineItem.pesapal_redirect_url` (the truth-of-cache — what the helper's
- * mint path will cache-hit on), NOT `payment_status` (the truth-of-intent
+ * `lineItem.pesapal_redirect_url` (whether a link was stored on the row;
+ * checkout reuse itself follows the Payments capability's active attempt,
+ * see `ensureCheckout` in src/lib/payments/capability.ts), NOT
+ * `payment_status` (the truth-of-intent
  * — what the system thinks the customer is doing). The two can drift in
  * legitimate scenarios:
  *   - Operator clicked "Mark as unpaid" on a `link_generated` row —
  *     `fn_apply_payment_event` resets payment_status but does NOT clear
  *     pesapal_redirect_url (00028:331-373).
  *   - Pre-#157 history.
- *   - Helper warn-and-return paths that wrote a fresh URL before the
- *     audit RPC rejected the status transition (ensure-payment-link.ts
- *     :305-374).
+ *   - Rows written by the retired community-level checkout helper, which
+ *     could store a fresh URL before the audit RPC rejected the status
+ *     transition.
  * In all those cases the menu's question is "is there a link to
- * regenerate?" — that's a cache question, not an intent question.
+ * regenerate?" — that's a question about the row's stored link, not about
+ * intent.
  *
  * Paid rows are excluded from the payment-link group entirely (see the
  * explicit `!isPaid` gate). Operator workflow on paid is "Mark as
@@ -280,7 +283,7 @@ export function computeMenuItems(input: {
         kind: "action",
         key: "generate-link",
         label: "Generate payment link",
-        // First-mint path — cache is empty by definition; no force needed.
+        // First link for the row — nothing is stored yet; no force needed.
         // Wrapper preserved (NOT a bare `handlers.onGenerateLink` reference)
         // — Radix `onSelect` passes an `Event` argument; the wrapper drops
         // it so TypeScript matches the `(opts?: { force?: boolean }) => void`

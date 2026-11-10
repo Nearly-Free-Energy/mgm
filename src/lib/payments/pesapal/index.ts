@@ -13,7 +13,7 @@ import type { PesapalConfig } from "./types";
  * `generatePaymentLink` performs the composite three-step flow:
  *   1. getAccessToken → Bearer token (Step 1 of Pesapal 3.0 flow)
  *   2. submitOrder with the configured IPN id (Step 3 — IPN is pre-registered
- *      at configure-time and stored on `communities.payment_provider_config`;
+ *      at configure-time and stored with the provider config;
  *      Step 2 `GetIpnList` is skipped since the IPN is known)
  *
  * Each call performs two HTTP requests against Pesapal; caching the token is

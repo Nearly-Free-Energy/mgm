@@ -28,8 +28,8 @@ export class PesapalError extends PaymentError {
 // "PESAPAL_AUTH_FAILED"           (401) — auth token request failed
 // "PESAPAL_HTTP_ERROR"            (502) — non-2xx from Pesapal
 // "PESAPAL_NO_IPN"                (400) — no IPN registrations on the account
-//                                          (legacy; post-#121 parsePesapalConfig
-//                                          rejects upstream with PAYMENT_INVALID_CONFIG)
+//                                          (legacy; a config without ipn_id is
+//                                          refused before a provider is built)
 // "PESAPAL_REGISTER_IPN_FAILED"   (502) — RegisterIPN endpoint failed or returned no ipn_id
 // "PESAPAL_UNREACHABLE"           (503) — network/fetch failure or request timeout
 // "PESAPAL_MISSING_CONTACT"       (400) — household has neither email nor phone

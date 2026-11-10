@@ -15,10 +15,11 @@
  *     load.
  *     Production: RLS hides the row → 404 fires first; unit tests: row
  *     visible, role rows toggled to assert 403.
- *   - Proactively `ensurePaymentLinkForLineItem()` when community has a
- *     payment provider AND the line item has no cached redirect URL. Pesapal
- *     failure → 422 with the upstream reason in the body. No-provider →
- *     proceed with `paymentRedirectUrl = null` (renderer omits the card).
+ *   - Embed the stable MGM `/pay` link when the Payments capability reports
+ *     the community ready (or sandbox). Rendering never creates a checkout:
+ *     the provider order is submitted when the customer follows the link.
+ *     Otherwise proceed with `paymentRedirectUrl = null` (renderer omits the
+ *     card).
  *   - Generate `invoice_number` on first render via `fn_next_invoice_number`
  *     + `formatInvoiceNumber`; persist to `billing_line_items.invoice_number`.
  *     Concurrent first-render race: catch 23505 (UNIQUE violation) → reload

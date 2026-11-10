@@ -130,14 +130,13 @@ export interface RegisterIpnResponse {
 
 /**
  * Non-secret Pesapal config stored as JSONB in
- * `communities.payment_provider_config`. `consumer_secret` is stored separately
- * in `payment_provider_secret_encrypted` (envelope-encrypted BYTEA) and
- * surfaced via `fn_get_community_payment_secret`.
+ * `communities.payment_provider_config` by the retired community-level
+ * configuration. `consumer_secret` was stored separately in
+ * `payment_provider_secret_encrypted` (envelope-encrypted BYTEA). Payments now
+ * read merchant credentials from `payment_merchant_accounts`.
  *
- * `ipn_id` is **required** post-#121: Save & test now registers an IPN with
- * Pesapal as part of the success path and writes the returned GUID here. A
- * persisted Pesapal config without `ipn_id` is treated as malformed by
- * `parsePesapalConfig` (throws `PAYMENT_INVALID_CONFIG`).
+ * `ipn_id` is **required** post-#121: Save & test registered an IPN with
+ * Pesapal as part of the success path and wrote the returned GUID here.
  */
 export interface PesapalConfig {
   consumer_key: string;

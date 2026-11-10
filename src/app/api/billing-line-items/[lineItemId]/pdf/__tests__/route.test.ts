@@ -7,16 +7,15 @@
  *   - Not-found (line item missing / RLS-hidden) → 404.
  *   - Unauthorized (no session) → 401.
  *   - Bad UUID → 400.
- *   - Ensure-link succeeds branch → 200, helper invoked exactly once.
- *   - Ensure-link fails branch → 422 with reason.
- *   - No-payment-provider branch → 200 PDF, paymentRedirectUrl=null,
- *     ensurePaymentLinkForLineItem NOT called.
+ *   - Payments ready → 200 PDF embedding the stable MGM pay link, with no
+ *     checkout and no slug mutation.
+ *   - Payments not ready → 200 PDF, paymentRedirectUrl=null.
  *   - Invoice number first-render branch → fn_next_invoice_number called +
  *     persisted via UPDATE.
  *   - Invoice number stability → second call uses persisted value, RPC
  *     NOT called again.
- *   - Idempotency: two consecutive calls invoke ensurePaymentLinkForLineItem
- *     at most once across both (cache hit on second).
+ *   - Idempotency: two consecutive calls submit no provider order and embed
+ *     the same link.
  *
  * The renderer is mocked because route tests assert routing/auth behavior,
  * not visual layout — the renderer's own tests cover PDF correctness.
@@ -40,7 +39,6 @@ const SCHEDULE_ID = "550e8400-e29b-41d4-a716-446655440005";
 
 const releasedRouteMock = vi.fn();
 vi.mock("@/lib/mgm/released-routes", () => ({ isReleasedRoute: releasedRouteMock }));
-const ensurePaymentLinkMock = vi.fn();
 const readinessMock = vi.fn();
 const stableLinkMock = vi.fn();
 const checkoutMock = vi.fn();
@@ -54,10 +52,6 @@ const ORG_MANAGER_ROWS: RoleRow[] = [
 ];
 let callerRoles: RoleRow[] = ORG_MANAGER_ROWS;
 const getCurrentUserRolesMock = vi.fn(async () => callerRoles);
-
-vi.mock("@/lib/payments/ensure-payment-link", () => ({
-  ensurePaymentLinkForLineItem: ensurePaymentLinkMock,
-}));
 
 vi.mock("@/lib/payments/short-slug", () => ({
   mintUniqueShortSlug: mintShortSlugMock,
@@ -332,12 +326,6 @@ beforeEach(() => {
   fromState.household_devices = { data: [], error: null };
   fromState.rate_schedules = { data: RATE_SCHEDULE_ROW, error: null };
   fromState.fnListVisibleUsers = { data: [], error: null };
-  ensurePaymentLinkMock.mockResolvedValue({
-    redirectUrl: "https://pay.pesapal.com/x",
-    orderTrackingId: "OT-1",
-    merchantReference: "M-1",
-    wasMinted: true,
-  });
   mintShortSlugMock.mockReset().mockResolvedValue("Kp9XrA");
   renderInvoicePdfMock.mockResolvedValue(
     Buffer.from("%PDF-1.4 stub for tests", "utf8"),
@@ -445,7 +433,6 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     const { GET } = await import("../route");
     const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
     expect(res.status).toBe(200);
-    expect(ensurePaymentLinkMock).not.toHaveBeenCalled();
     expect(mintShortSlugMock).not.toHaveBeenCalled();
     expect(renderInvoicePdfMock.mock.calls[0][0].paymentRedirectUrl).toBeNull();
   });
@@ -456,7 +443,6 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     expect(response.status).toBe(200);
     expect(renderInvoicePdfMock.mock.calls[0][0].paymentRedirectUrl).toBe(`https://mgm.test/api/billing-line-items/${LINE_ITEM_ID}/pay`);
     expect(checkoutMock).not.toHaveBeenCalled();
-    expect(ensurePaymentLinkMock).not.toHaveBeenCalled();
     expect(mintShortSlugMock).not.toHaveBeenCalled();
   });
   it.each(["disabled", "unconfigured", "connection_error"])("still renders the invoice with no link when payment readiness is %s", async state => {
@@ -507,7 +493,6 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
     await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
     expect(checkoutMock).not.toHaveBeenCalled();
-    expect(ensurePaymentLinkMock).not.toHaveBeenCalled();
     expect(renderInvoicePdfMock.mock.calls[0][0].paymentRedirectUrl).toBe(renderInvoicePdfMock.mock.calls[1][0].paymentRedirectUrl);
   });
 

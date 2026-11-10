@@ -9,8 +9,8 @@
  * **Legacy / backward-compat note (#223):** As of #223 (2026-05) new PDF
  * bills embed the shorter `/p/<6-8 char slug>` indirection instead of this
  * long URL. The `/p/` route resolves the slug to a line_item_id and 302s
- * here — both paths converge on the same `ensurePaymentLinkForLineItem`
- * pipeline. This route is kept FOREVER for backward compatibility with
+ * here — both paths converge on the Payments capability's `ensureCheckout`
+ * (`composePaymentsPublic`). This route is kept FOREVER for backward compatibility with
  * bills already shipped to customers before the slug change: those PDFs
  * embed the long URL in WhatsApp threads, and we cannot rewrite already-
  * delivered messages. Behavior, status codes, and response shapes here

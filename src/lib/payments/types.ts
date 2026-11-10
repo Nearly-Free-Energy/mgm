@@ -11,7 +11,6 @@
  *      to `communities.payment_provider_config` for that provider.
  *   3. Implement a class that satisfies `PaymentProviderClient`.
  *   4. Extend the factory switch in `factory.ts`.
- *   5. Extend the config loader in `config.ts` if the shape differs.
  *
  * No schema migration or route refactor is needed for additional providers.
  */
@@ -23,8 +22,8 @@ import type { BillingAddress } from "./pesapal/types";
 export type PaymentProvider = "pesapal";
 
 /**
- * Resolved payment config: the non-secret provider_config joined with the
- * decrypted secret (retrieved via `fn_get_community_payment_secret`).
+ * Resolved payment config: the non-secret provider config joined with the
+ * decrypted secret.
  */
 export type PaymentProviderConfig = {
   provider: "pesapal";
