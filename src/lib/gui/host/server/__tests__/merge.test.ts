@@ -176,6 +176,26 @@ describe("resolveActions: the view's own links", () => {
     expect(out.actions[0].prefill).toEqual({ note: "n" });
   });
 
+  it("drops keys the input does not declare at every depth, not only at the top", async () => {
+    const move = action("billing", "billing.move", {
+      target: "billingPeriod",
+      path: "/api/billing-periods/[id]",
+      bind: { path: { id: "billingPeriod" } },
+      input: z.object({
+        address: z.object({ street: z.string() }),
+        stops: z.array(z.object({ name: z.string() })),
+      }),
+    } as Partial<ActionDef>);
+    const { m } = context([move]);
+    const prefill = {
+      address: { street: "x", nationalId: "CM123", internalNote: "n" },
+      stops: [{ name: "a", hidden: true }],
+    };
+    const link: ActionLink = { action: "billing.move", params: { id: P1 }, prefill };
+    const out = await resolveActions(loaded([], [link]), m);
+    expect(out.actions[0].prefill).toEqual({ address: { street: "x" }, stops: [{ name: "a" }] });
+  });
+
   it("removes a field with writeOnly anywhere in it, and copes with fields JSON Schema cannot express", async () => {
     const secret = z.string().meta({ id: "mergeTestSecret", writeOnly: true });
     const onPeriod = {

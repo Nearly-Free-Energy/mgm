@@ -120,19 +120,23 @@ function cleanPrefill(def: ActionDef, prefill: Json): Json | undefined {
     return undefined;
   const shape = def.input.shape as Record<string, z.ZodType>;
   const omitted = new Set([...Object.keys(def.bind.body ?? {}), "confirmation"].filter((k) => Object.hasOwn(shape, k)));
-  let parsed: boolean;
+  let parsed: Record<string, unknown> | undefined;
   try {
     type Mask = Parameters<typeof def.input.omit>[0];
     const mask = Object.fromEntries([...omitted].map((k) => [k, true as const])) as Mask;
-    parsed = def.input.omit(mask).partial().safeParse(prefill).success;
+    const r = def.input.omit(mask).partial().safeParse(prefill);
+    if (r.success) parsed = r.data as Record<string, unknown>;
   } catch {
-    parsed = false; // .omit() refuses an object schema with refinements
+    parsed = undefined; // .omit() refuses an object schema with refinements
   }
   const writeOnly = parsed ? writeOnlyKeys(def.input) : null;
-  if (!writeOnly) return undefined;
+  if (!parsed || !writeOnly) return undefined;
+  // Built from the parsed value, not the loader's object: parsing strips keys
+  // the input does not declare at every depth, so a nested undeclared key
+  // never reaches the browser.
   return Object.fromEntries(
-    Object.entries(prefill).filter(([k]) => Object.hasOwn(shape, k) && !omitted.has(k) && !writeOnly.has(k)),
-  );
+    Object.entries(parsed).filter(([k]) => Object.hasOwn(shape, k) && !omitted.has(k) && !writeOnly.has(k)),
+  ) as Json;
 }
 
 /** The view's own ActionLinks as ActionRefs, then other plugins' targeted actions appended. */
