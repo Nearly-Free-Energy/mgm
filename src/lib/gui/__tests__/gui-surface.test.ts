@@ -17,9 +17,9 @@
  * capability method outside LOADER_READS, so its loaders, signals, search and
  * prepare steps write nothing through a capability.
  *
- * Capabilities contribute only navigation so far, so each check is a
- * function over its inputs and the self-tests feed it violating fixtures: the
- * guard is shown to fail while the snapshot holds no view or action.
+ * Each check is a function over its inputs and the self-tests feed it
+ * violating fixtures, so the guard is shown to fail on kinds of entry the
+ * snapshot does not hold yet, such as actions.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";

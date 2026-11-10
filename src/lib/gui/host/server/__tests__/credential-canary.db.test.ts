@@ -12,6 +12,11 @@
  * this file. Self-tests prove the scan and the loops catch a loader,
  * prepare, available(), watcher or search that leaks any decrypted canary.
  *
+ * MGM_METERING_FIXTURES is on for the whole file, so one seeded microgrid
+ * is served by the synthetic metering source, one mixing synthetic and real
+ * edges is refused by it, and the others, with canary credentials, are
+ * served by OpenEMS at an address nothing answers on.
+ *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
 import type { User } from "@supabase/supabase-js";
@@ -38,6 +43,7 @@ vi.mock("../snapshot", async (importOriginal) => {
   return { surfaceSnapshot: async () => served ?? actual.surfaceSnapshot() };
 });
 
+import { SITE_DAY_REFUSALS } from "@/lib/metering/surface/site-day";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import type { ActionDef, ViewDef } from "../../../surface";
 import { createFmt } from "../../../fmt";
@@ -45,6 +51,7 @@ import { hostContext } from "../access";
 import {
   CREDENTIAL_COLUMNS,
   assertNoCanary,
+  canaryMicrogrids,
   collectEverySignalAndSearch,
   dispatchEveryView,
   encryptedColumnsInSchema,
@@ -64,7 +71,10 @@ const IDS: CanaryIds = {
     basic: "e7400000-0000-4000-8002-000000000003",
     aws: "e7400000-0000-4000-8002-000000000004",
   },
+  syntheticMicrogridId: "e7400000-0000-4000-8002-000000000005",
+  mixedMicrogridId: "e7400000-0000-4000-8002-000000000006",
 };
+const MICROGRIDS = canaryMicrogrids(IDS);
 const EMAIL = "gui-canary-manager@test.local";
 const COLUMNS = Object.entries(CREDENTIAL_COLUMNS).flatMap(([t, cs]) => cs.map((c) => `${t}.${c}`));
 
@@ -94,6 +104,8 @@ async function cleanup() {
 beforeAll(async () => {
   if (shouldSkip()) return;
   await assertEnvironmentReady();
+  // Read when the root loads its platform plugins, which happens on the first getMgmRuntime() below.
+  vi.stubEnv("MGM_METERING_FIXTURES", "1");
   await cleanup();
   const svc = await serviceClient();
   canaries = await seedCanaries(svc, IDS);
@@ -106,6 +118,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (shouldSkip()) return;
   served = null;
+  vi.unstubAllEnvs();
   await cleanup();
   // cleanupTestData ignores a failed organization delete; live ciphertexts must not stay behind.
   const svc = await serviceClient();
@@ -159,7 +172,8 @@ async function decrypted(c: Canary): Promise<string> {
 describe.skipIf(shouldSkip())("credential canary", () => {
   it("seeds every encrypted credential column the schema has", () => {
     expect(encryptedColumnsInSchema()).toEqual([...COLUMNS].sort());
-    expect(canaries.map((c) => c.column).sort()).toEqual([...COLUMNS].sort());
+    // The synthetic and mixed microgrids hold a second Basic password and a second bearer token.
+    expect([...new Set(canaries.map((c) => c.column))].sort()).toEqual([...COLUMNS].sort());
   });
 
   it("no view in the real snapshot returns or logs a stored credential", async () => {
@@ -167,6 +181,26 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     const results = await dispatchEveryView(ctx(), snapshot, IDS, serve);
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.views.length);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+
+    // The Operations day: generated on the synthetic microgrid, refused with
+    // fixed copy elsewhere. A bearer, Basic or AWS microgrid answering
+    // "unavailable" rather than "noConnection" shows its decrypted credential
+    // reached an OpenEMS client; Keycloak's token address is refused first.
+    const site = results.filter((r) => r.id === "metering.site-day");
+    const refused: Record<string, (typeof SITE_DAY_REFUSALS)[keyof typeof SITE_DAY_REFUSALS]> = {
+      [IDS.microgridIds.keycloak]: SITE_DAY_REFUSALS.noConnection,
+      [IDS.microgridIds.bearer]: SITE_DAY_REFUSALS.unavailable,
+      [IDS.microgridIds.basic]: SITE_DAY_REFUSALS.unavailable,
+      [IDS.microgridIds.aws]: SITE_DAY_REFUSALS.unavailable,
+      [IDS.mixedMicrogridId]: SITE_DAY_REFUSALS.mixed,
+    };
+    expect(site.map((r) => r.href)).toEqual(MICROGRIDS.map((id) => `/microgrids/${id}/operations`));
+    for (const [i, r] of site.entries()) {
+      const body = JSON.parse(r.output.split("\n")[0]);
+      const expected = refused[MICROGRIDS[i]];
+      if (expected) expect([r.status, body.message], r.href).toEqual([expected.status, expected.message]);
+      else expect([r.status, body], r.href).toMatchObject([200, { view: "metering.site-day", notice: { tone: "warning" }, ext: { data: { synthetic: true } } }]);
+    }
   });
 
   it("no action in the real snapshot returns or logs a stored credential when prepared", async () => {
@@ -259,7 +293,7 @@ describe.skipIf(shouldSkip())("credential canary", () => {
 
     it("passes a clean prepare at every seeded microgrid", async () => {
       const results = await prepareEveryAction(ctx(), actions(action({ prepare: async () => ceremony("Change it") })), IDS, serve);
-      expect(results.map((r) => r.status)).toEqual(Object.values(IDS.microgridIds).map(() => 200));
+      expect(results.map((r) => r.status)).toEqual(MICROGRIDS.map(() => 200));
       scanPrepared(results)();
     });
 
@@ -297,7 +331,7 @@ describe.skipIf(shouldSkip())("credential canary", () => {
   describe("self-test: the scan catches a loader that leaks a decrypted credential", () => {
     it("passes a clean view at every seeded microgrid", async () => {
       const results = await dispatchEveryView(ctx(), atMicrogrid(() => ok("Battery")), IDS, serve);
-      expect(results.map((r) => [r.href, r.status])).toEqual(Object.values(IDS.microgridIds).map((id) => [`/microgrids/${id}`, 200]));
+      expect(results.map((r) => [r.href, r.status])).toEqual(MICROGRIDS.map((id) => [`/microgrids/${id}`, 200]));
       scanAll(results)();
     });
 

@@ -28,13 +28,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
+// The root before any composer: the metering surface's loader imports
+// composeMetering, and loaded first from inside the scope mock below it would
+// bind the unwrapped opener. If the root stops importing surface modules, the
+// order no longer matters.
+import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { composeBilling } from "@/lib/billing/compose";
 import { composeCommunityManagement } from "@/lib/community-management/compose";
 import { composeBillingReview } from "@/lib/cordis/billing-review";
 import { composeMetering } from "@/lib/metering/compose";
 import { composePayments, composePaymentsPublic } from "@/lib/payments/compose";
 import { openOrganizationScope } from "@/lib/runtime/scope";
-import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 
 const ORG = "550e8400-e29b-41d4-a716-446655440000";
 const COMMUNITY = "550e8400-e29b-41d4-a716-446655440001";
