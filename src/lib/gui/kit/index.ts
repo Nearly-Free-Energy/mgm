@@ -2,7 +2,9 @@
  * The kit: the only I/O a GUI has (GuiKit in ../contract.ts). Each part lives
  * in a "use client" module; this file only gathers them.
  *
- * `act` refuses until the action host is mounted, and `useFeed` is inert.
+ * `act` reaches the ActionHost that KitProvider mounts, and `useFeed` is
+ * inert. The write itself (host/client/invoke.ts) is not exported
+ * (write-path.test.ts).
  */
 import type { GuiKit } from "../contract";
 import { useManifest, useSignals, useView } from "../host/client/kit-provider";

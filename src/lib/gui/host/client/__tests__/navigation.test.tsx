@@ -144,7 +144,7 @@ describe("act", () => {
   it("refuses without an action host and sends nothing", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const result = await kit.act({ action: "billing.close", params: {}, label: "Close", enabled: true });
-    expect(result).toMatchObject({ ok: false, code: "unsupported" });
+    expect(result).toMatchObject({ ok: false, code: "no_action_host" });
     expect(fetch).not.toHaveBeenCalled();
   });
 });

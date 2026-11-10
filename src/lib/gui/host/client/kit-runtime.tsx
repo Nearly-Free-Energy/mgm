@@ -39,14 +39,32 @@ let injected: KitRuntime | null = null;
 /** The organization the mounted manifest shows, so search asks the host for it. */
 let organization: string | null = null;
 
-/** No write path is mounted yet, so act refuses without sending anything. */
+type Act = KitRuntime["act"];
+/** The mounted ActionHost's act (./action-host.tsx); null while none is mounted. */
+let actionHost: Act | null = null;
+
+/** Without a mounted ActionHost, act refuses without sending anything. */
 const NO_ACTION_HOST: ActionResult = {
   type: "result",
   ok: false,
   status: 0,
-  code: "unsupported",
-  message: "Actions are not available yet.",
+  code: "no_action_host",
+  message: "Actions are not available on this page.",
 };
+
+/** Called by ActionHost when it mounts; returns the unmount. A page has one host. */
+export function mountActionHost(act: Act): () => void {
+  if (actionHost && process.env.NODE_ENV !== "production") {
+    console.warn("[gui] A second ActionHost was mounted; the latest one runs actions.");
+  }
+  actionHost = act;
+  return () => {
+    if (actionHost === act) actionHost = null;
+  };
+}
+
+/** The default runtime's act: the mounted host's, which is the only write path. */
+export const hostAct: Act = (ref, options) => (actionHost ? actionHost(ref, options) : Promise.resolve(NO_ACTION_HOST));
 
 export const defaultRuntime: KitRuntime = {
   navigate(href) {
@@ -59,7 +77,7 @@ export const defaultRuntime: KitRuntime = {
     router?.refresh();
   },
   fetch: (url, init) => globalThis.fetch(url, init),
-  act: async () => NO_ACTION_HOST,
+  act: hostAct,
   open: (link) => openLink(link, (href) => defaultRuntime.navigate(href)),
 };
 
