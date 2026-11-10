@@ -41,7 +41,8 @@ The `synthetic` provider serves a microgrid whose edges all have ids starting
 (409), generates site samples only for devices on such edges, and marks the
 day it produces as synthetic, which the Operations day shows in a banner.
 While the setting is off, nothing registers it and the edge registration
-route refuses those ids (400).
+route refuses those ids (400). Only that route refuses them, not the
+database (`docs/setup.md` § "Synthetic site data").
 
 **Request (one per API call).** Authenticated composers call
 `authorizeOrganization()` to authenticate and check organization access.

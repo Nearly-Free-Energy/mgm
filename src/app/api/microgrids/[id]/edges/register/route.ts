@@ -31,7 +31,9 @@ type RegisterRequestBody = {
  * user_can_access_microgrid(microgrid_id)).
  *
  * Ids starting with SYNTHETIC-EDGE- are refused (400) unless
- * MGM_METERING_FIXTURES is on.
+ * MGM_METERING_FIXTURES is on. That refusal comes after the route checks the
+ * session with Supabase Auth (401 otherwise), so only a caller with a live
+ * session can see it.
  *
  * Returns { inserted, updated, edges } where `inserted + updated` equals
  * the input edge count on success.
@@ -83,9 +85,22 @@ export async function POST(
     }
   }
 
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   // Reserved synthetic ids are registered only where they are read:
   // FixtureMeteringPlugin registers the synthetic provider only while
   // MGM_METERING_FIXTURES is on. If it registers by another rule, revisit.
+  // This route is the only place the prefix is refused. MGM_METERING_FIXTURES
+  // is an environment variable the database never sees, so a direct insert or
+  // update under RLS still accepts the prefix (docs/setup.md § "Synthetic site
+  // data"). If a migration adds a rule on edges.openems_edge_id, or another
+  // route starts writing it, revisit.
   if (!meteringFixturesEnabled() && body.edges.some((e) => isSyntheticEdgeId(e.openems_edge_id.trim()))) {
     return NextResponse.json(
       {
@@ -96,7 +111,6 @@ export async function POST(
     );
   }
 
-  const supabase = await createClient();
   // MGM runtime gate: metering writes fail closed while the plugin is disabled.
   const pluginGate = await gateRoute(supabase, {
     plugin: "metering",

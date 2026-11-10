@@ -271,7 +271,16 @@ Two keys guard it:
 - `MGM_METERING_FIXTURES` must be on ([Runtime configuration](#runtime-configuration)).
   Only then does the runtime register it, as the `synthetic` metering
   provider (`src/lib/metering/fixture/plugin.ts`). While it is off, edge
-  registration refuses ids that start with `SYNTHETIC-EDGE-`.
+  registration refuses ids that start with `SYNTHETIC-EDGE-` (400). It
+  checks the session with Supabase Auth first, so only a caller with a live
+  session sees that refusal; others get 401. Only that route refuses the
+  prefix. The setting is an environment variable the database never sees,
+  so a direct insert or update through the Supabase API, which row-level
+  security limits to people who can already edit the microgrid, still
+  accepts it. Such an edge does nothing while the setting is off. If the
+  setting is turned on later, a microgrid that mixes it with real edges is
+  refused (409): its Operations day shows a banner saying so, and generating
+  a bill for it fails. Synthetic data is never shown or billed as real.
 - Every edge of the microgrid must have an id starting with
   `SYNTHETIC-EDGE-`. A microgrid with none keeps its usual provider, and one
   that mixes synthetic and real edges is refused (409). The provider also
