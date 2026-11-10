@@ -77,6 +77,42 @@ export const HOUSE_READING_TOLERANCE_MS = 30 * 60_000;
 /** The hour whose battery level is reported before the evening window. */
 export const SOC_CHECK_HOUR = 17;
 
+/**
+ * The finest bin a day can be read at, in minutes. A bin is a whole number
+ * of minutes that divides an hour (isSiteResolution, which computeSiteDay
+ * and the fixture generator enforce), so one minute is the finest any
+ * provider can be asked for. Every bound on how many bins, bands or
+ * segments a day holds derives from it.
+ */
+export const FINEST_RESOLUTION_MINUTES = 1;
+/**
+ * The clock change, in hours, a day's bounds allow for. Two hours covers
+ * every zone whose clocks change each year: Antarctica/Troll goes from
+ * +02:00 to +00:00 each October, a 26-hour day, and Asia/Beirut's change at
+ * local midnight puts its extra hour inside the evening (18:00–24:00 lasts
+ * seven hours). Some zones have had larger changes (Antarctica/Casey went
+ * back three hours in several years up to 2023; Pacific/Kwajalein's
+ * 30 September 1969 lasted 47 hours). So this is an allowance, not the
+ * largest change in the tz database: computeSiteDay refuses a day with more
+ * bins than these bounds hold at the resolution it is asked for, and any
+ * day it returns fits the caps that derive from them. If a zone in use
+ * starts changing by more, raise this.
+ */
+export const CLOCK_CHANGE_ALLOWANCE_HOURS = 2;
+/** Minutes in the longest local day computeSiteDay reads. */
+export const MAX_DAY_MINUTES = (24 + CLOCK_CHANGE_ALLOWANCE_HOURS) * 60;
+/** Minutes in the longest evening window computeSiteDay reads: 18:00–24:00 plus the allowance. */
+export const MAX_EVENING_MINUTES = (24 - EVENING_START_HOUR + CLOCK_CHANGE_ALLOWANCE_HOURS) * 60;
+/** The most bins one day holds, at the finest resolution on the longest day. */
+export const MAX_DAY_BINS = MAX_DAY_MINUTES / FINEST_RESOLUTION_MINUTES;
+/** The most bins the evening window holds, at the finest resolution. */
+export const MAX_EVENING_BINS = MAX_EVENING_MINUTES / FINEST_RESOLUTION_MINUTES;
+
+/** Whether `minutes` is a bin length a day can be read at: whole, at least the finest, dividing an hour. */
+export function isSiteResolution(minutes: number): boolean {
+  return Number.isInteger(minutes) && minutes >= FINEST_RESOLUTION_MINUTES && 60 % minutes === 0;
+}
+
 export type SiteSourceAvailability = {
   battery: boolean;
   gridMeter: boolean;
@@ -251,9 +287,22 @@ export function computeSiteDay(input: {
   nowMs: number;
 }): SiteDayOperations {
   const { date, timezone, samples, sources, resolutionMinutes, nowMs } = input;
+  if (!isSiteResolution(resolutionMinutes)) {
+    throw new RangeError("resolutionMinutes must be a whole number of minutes that divides an hour");
+  }
   const binMs = resolutionMinutes * MINUTE;
   const dayStartMs = startOfDayInZone(date, timezone).getTime();
   const dayEndMs = localInstant(date, 24, timezone);
+  const eveningStartMs = localInstant(date, EVENING_START_HOUR, timezone);
+  // The ext's caps (site-day-ext.ts) allow one band or segment per bin of
+  // these bounds; a day with more bins than they hold is refused here, so
+  // every day returned parses.
+  if (
+    Math.ceil((dayEndMs - dayStartMs) / binMs) > MAX_DAY_BINS ||
+    Math.ceil((dayEndMs - eveningStartMs) / binMs) > MAX_EVENING_BINS
+  ) {
+    throw new RangeError(`${date} in ${timezone} has more ${resolutionMinutes}-minute bins than a day's bounds allow`);
+  }
   // Only whole bins that closed at least the ingestion lag ago; a finished
   // day reads to its end.
   const readUntilMs = Math.max(
@@ -342,7 +391,6 @@ export function computeSiteDay(input: {
       : null;
   }
 
-  const eveningStartMs = localInstant(date, EVENING_START_HOUR, timezone);
   const eveningBins = bins.filter((b) => b.startMs >= eveningStartMs);
   // Null before the window (no evening bins) and when no evening bin had a
   // battery power reading.

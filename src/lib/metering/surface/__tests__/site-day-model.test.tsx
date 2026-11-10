@@ -19,13 +19,19 @@ vi.mock("@/components/format/locale-context", () => ({
 
 import { DailyOperations } from "@/components/operations/daily-operations";
 import { createFmt } from "@/lib/gui/fmt";
-import { strictParseModel } from "@/lib/gui/host/server/parse";
+import { MODEL_CAPS, strictParseModel } from "@/lib/gui/host/server/parse";
 import { strictProblems } from "@/lib/gui/host/server/contribution-schema";
 import type { ViewDef } from "@/lib/gui/surface";
 import { addDaysToDateKey } from "@/lib/timezone/day-key";
 import { generateSiteSamples, siteScenario, SITE_FIXTURE_SEED, type SiteScenario } from "../../fixture/site-samples";
-import { computeSiteDay, type SiteDayOperations } from "../../site-operations";
-import type { SiteSources } from "../../types";
+import {
+  computeSiteDay,
+  FINEST_RESOLUTION_MINUTES,
+  MAX_DAY_BINS,
+  MAX_EVENING_BINS,
+  type SiteDayOperations,
+} from "../../site-operations";
+import type { SiteSamples, SiteSources } from "../../types";
 import { SiteDayExt } from "../site-day-ext";
 import { buildNoSiteDevicesModel, buildSiteDayModel, SITE_DAY_EXT_SCHEMA, SITE_DAY_KEYS } from "../site-day-model";
 
@@ -494,6 +500,13 @@ describe("parity with the Operations page", () => {
     makeDay({ ...BEFORE_EVENING, readUntilMs: at(18), eveningDischargeKwh: 0, housesEveningKwh: null }), ...generatedDays(),
   ];
 
+  it("covers days with and without a battery, and with and without an evening strip", () => {
+    expect(DAYS.some((d) => d.sources.battery)).toBe(true);
+    expect(DAYS.some((d) => !d.sources.battery)).toBe(true);
+    expect(DAYS.some((d) => d.evening.length > 0)).toBe(true);
+    expect(DAYS.some((d) => d.evening.length === 0)).toBe(true);
+  });
+
   it.each(DAYS.map((day, i) => [i, day] as const))("day %i: the tiles read as the page's", (_i, day) => {
     const model = build(day);
     const t = Object.fromEntries(model.body.tiles.map((x) => [x.key, x]));
@@ -514,14 +527,26 @@ describe("parity with the Operations page", () => {
     const html = renderToStaticMarkup(<DailyOperations day={day} />);
     const root = document.createElement("div");
     root.innerHTML = html;
-    const data = build(day).ext!.data as { chartLabel: string; eveningLabel: string; notes: string[]; evening: { label: string }[] };
+    const data = build(day).ext!.data as {
+      chartLabel: string; eveningLabel: string; eveningEmpty: string | null; notes: string[]; evening: { label: string }[];
+    };
     const page = root.textContent ?? "";
     for (const note of data.notes) expect(page).toContain(note);
-    if (day.sources.battery) expect(root.querySelector("svg")!.getAttribute("aria-label")).toBe(data.chartLabel);
-    const strip = Array.from(root.querySelectorAll('div[role="img"]'))[0];
-    if (strip) {
-      expect(strip.getAttribute("aria-label")).toBe(data.eveningLabel);
-      expect(Array.from(strip.children).map((c) => c.getAttribute("title"))).toEqual(data.evening.map((e) => e.label));
+    // Presence and count first, so a chart or strip the page stops drawing
+    // fails here rather than skipping the comparison.
+    const chart = root.querySelectorAll('svg[role="img"]');
+    expect(chart, "battery chart").toHaveLength(day.sources.battery ? 1 : 0);
+    if (day.sources.battery) expect(chart[0].getAttribute("aria-label")).toBe(data.chartLabel);
+    const strips = root.querySelectorAll('div[role="img"]');
+    expect(strips, "evening strip").toHaveLength(data.evening.length > 0 ? 1 : 0);
+    if (data.evening.length > 0) {
+      expect(data.eveningEmpty).toBeNull();
+      expect(strips[0].getAttribute("aria-label")).toBe(data.eveningLabel);
+      expect(strips[0].children, "strip segments").toHaveLength(data.evening.length);
+      expect(Array.from(strips[0].children).map((c) => c.getAttribute("title"))).toEqual(data.evening.map((e) => e.label));
+    } else {
+      expect(data.eveningEmpty).not.toBeNull();
+      expect(page).toContain(data.eveningEmpty);
     }
     if (day.readUntilMs < day.dayEndMs) expect(page).toContain(`${build(day).subtitle!.split(" · ")[0]}.`);
   });
@@ -571,11 +596,145 @@ describe("the metering.site-day@1 ext", () => {
     const data = build(makeDay()).ext!.data as Record<string, unknown> & { cuts: unknown[]; eveningHours: object };
     const refuses = (d: unknown) => expect(SiteDayExt.safeParse(d).success).toBe(false);
     refuses({ ...data, dayStart: "yesterday" });
-    refuses({ ...data, cuts: Array(289).fill(data.cuts[0]) });
-    expect(SiteDayExt.safeParse({ ...data, cuts: Array(288).fill(data.cuts[0]) }).success).toBe(true);
+    refuses({ ...data, resolutionMinutes: 0 });
+    refuses({ ...data, resolutionMinutes: 7 });
     refuses({ ...data, notes: Array(5).fill("x") });
     refuses({ ...data, notes: ["x".repeat(801)] });
     refuses({ ...data, eveningHours: { ...data.eveningHours, battery: -1 } });
     refuses({ ...data, eveningHours: { ...data.eveningHours, battery: 26 } });
+  });
+
+  it("caps the bands at one per bin of the longest one-minute day, and the strip at one segment per evening bin", () => {
+    const data = build(makeDay()).ext!.data as Record<string, unknown> & { cuts: unknown[]; dark: unknown[]; evening: unknown[] };
+    const parses = (d: unknown) => SiteDayExt.safeParse(d).success;
+    for (const [key, cap] of [["cuts", MAX_DAY_BINS], ["dark", MAX_DAY_BINS], ["evening", MAX_EVENING_BINS]] as const) {
+      expect(parses({ ...data, [key]: Array(cap).fill(data[key][0]) }), `${key} at the cap`).toBe(true);
+      expect(parses({ ...data, [key]: Array(cap + 1).fill(data[key][0]) }), `${key} over the cap`).toBe(false);
+    }
+    expect(parses({ ...data, resolutionMinutes: FINEST_RESOLUTION_MINUTES })).toBe(true);
+  });
+});
+
+// ── One-minute bins ─────────────────────────────────────────────────────────
+
+describe("a day read at one-minute bins", () => {
+  const NOW = Date.parse("2030-01-01T00:00:00Z");
+  const edge = "SYNTHETIC-EDGE-001";
+  const device = (id: string) => ({ id, edgeOpenemsId: edge, componentId: `meter-${id}` });
+  const sources: SiteSources = {
+    battery: device("battery"), gridMeter: device("grid"), load: device("load"), pv: null,
+    houseMeters: [device("house-a")], houseMetersUnreadable: 0,
+  };
+  const available = { battery: true, gridMeter: true, load: true, pv: false, houses: true, houseMetersUnreadable: 0 };
+  const compute = (date: string, timezone: string, samples: Parameters<typeof computeSiteDay>[0]["samples"]) =>
+    computeSiteDay({ date, timezone, samples, sources: available, resolutionMinutes: FINEST_RESOLUTION_MINUTES, nowMs: NOW });
+
+  it("keeps the battery series under the host's point cap", () => {
+    expect(MAX_DAY_BINS).toBeLessThanOrEqual(MODEL_CAPS.points);
+  });
+
+  it.each([
+    ["Africa/Kampala", "2026-06-10", 24],
+    ["Europe/London", "2026-10-25", 25],
+    ["Antarctica/Troll", "2026-10-25", 26],
+    ["Asia/Beirut", "2026-10-24", 25],
+  ] as const)("parses a whole %s day, %s, of %i hours", (timezone, date, hours) => {
+    const samples = generateSiteSamples({
+      microgridId: MG.id, sources, startDate: addDaysToDateKey(date, -1), endDate: date, timezone,
+      resolutionMinutes: FINEST_RESOLUTION_MINUTES,
+    });
+    const day = compute(date, timezone, samples);
+    expect(day.soc).toHaveLength(hours * 60);
+    expect(strictParseModel(VIEW, build(day))).toMatchObject({ ok: true });
+  });
+
+  /** Every bin of the longest day, from local midnight, with `at(i)` giving each series' value. */
+  function everyMinute(date: string, timezone: string, at: (i: number) => Partial<Record<keyof SiteSamples, number | null>>) {
+    const start = computeSiteDay({
+      date, timezone, samples: emptySamples(), sources: available, resolutionMinutes: FINEST_RESOLUTION_MINUTES, nowMs: NOW,
+    }).dayStartMs;
+    const samples = emptySamples();
+    for (let i = 0; i < MAX_DAY_BINS; i++) {
+      const v = at(i);
+      samples.timestamps.push(start + i * MIN);
+      samples.batterySocPct.push(v.batterySocPct ?? null);
+      samples.batteryPowerW.push(v.batteryPowerW ?? null);
+      samples.gridPowerW.push(v.gridPowerW ?? null);
+      samples.gridVoltageV.push(v.gridVoltageV ?? null);
+      samples.loadPowerW.push(null);
+      samples.pvPowerW.push(null);
+    }
+    return compute(date, timezone, samples);
+  }
+  function emptySamples(): SiteSamples {
+    return {
+      timestamps: [], batterySocPct: [], batteryPowerW: [], gridPowerW: [], gridVoltageV: [], loadPowerW: [], pvPowerW: [],
+      houseEnergyWh: {},
+    };
+  }
+
+  it("parses the most bands and segments a computed day holds: the grid and the supply changing every minute of a 26-hour day", () => {
+    // Grid on and off every other minute; the houses on the grid when it is on and on the battery when it is off.
+    const flapping = everyMinute("2026-10-25", "Antarctica/Troll", (i) => ({
+      batterySocPct: 50, batteryPowerW: 0, gridPowerW: 500, gridVoltageV: i % 2 === 0 ? 230 : 100,
+    }));
+    expect(flapping.soc).toHaveLength(MAX_DAY_BINS);
+    expect(flapping.cuts).toHaveLength(MAX_DAY_BINS / 2);
+    expect(flapping.evening).toHaveLength((flapping.dayEndMs - flapping.eveningStartMs) / MIN);
+    expect(strictParseModel(VIEW, build(flapping))).toMatchObject({ ok: true });
+
+    // In a cut throughout, the gateway silent every other minute: a dark band each time.
+    const blinking = everyMinute("2026-10-25", "Antarctica/Troll", (i) =>
+      i % 2 === 0 ? { batterySocPct: 50, batteryPowerW: 300, gridPowerW: 0, gridVoltageV: 100 } : {},
+    );
+    expect(blinking.dark).toHaveLength(MAX_DAY_BINS / 2);
+    expect(strictParseModel(VIEW, build(blinking))).toMatchObject({ ok: true });
+  });
+
+  it("parses an evening lengthened by a clock change: Beirut's supply changing every minute of a seven-hour evening", () => {
+    // Asia/Beirut goes back an hour at local midnight, so 24 October 2026's 18:00–24:00 lasts seven hours.
+    const beirut = everyMinute("2026-10-24", "Asia/Beirut", (i) => ({
+      batterySocPct: 50, batteryPowerW: 0, gridPowerW: 500, gridVoltageV: i % 2 === 0 ? 230 : 100,
+    }));
+    expect((beirut.dayEndMs - beirut.eveningStartMs) / MIN).toBe(7 * 60);
+    expect(beirut.evening).toHaveLength(7 * 60);
+    expect(strictParseModel(VIEW, build(beirut))).toMatchObject({ ok: true });
+  });
+
+  it("refuses a day with more bins than the bounds hold, and reads the same day at five-minute bins", () => {
+    // Antarctica/Casey went back three hours at local midnight on 13 March 2022: a 27-hour day with a nine-hour evening.
+    const date = "2022-03-12";
+    const timezone = "Antarctica/Casey";
+    expect(() => compute(date, timezone, emptySamples())).toThrow(RangeError);
+    const samples = generateSiteSamples({
+      microgridId: MG.id, sources, startDate: addDaysToDateKey(date, -1), endDate: date, timezone, resolutionMinutes: 5,
+    });
+    const day = computeSiteDay({ date, timezone, samples, sources: available, resolutionMinutes: 5, nowMs: NOW });
+    expect((day.dayEndMs - day.dayStartMs) / MIN).toBe(27 * 60);
+    expect((day.dayEndMs - day.eveningStartMs) / MIN).toBe(9 * 60);
+    expect(strictParseModel(VIEW, build(day))).toMatchObject({ ok: true });
+  });
+
+  it("parses a day at every cap and refuses one band or segment over", () => {
+    const ranges = (n: number) => Array.from({ length: n }, (_, i) => ({ startMs: DAY_START + i * MIN, endMs: DAY_START + (i + 1) * MIN }));
+    const segments = (n: number) => ranges(n).map((r, i) => ({ ...r, supply: i % 2 ? ("grid" as const) : ("battery" as const) }));
+    const full = { resolutionMinutes: FINEST_RESOLUTION_MINUTES, cuts: ranges(MAX_DAY_BINS), dark: ranges(MAX_DAY_BINS), evening: segments(MAX_EVENING_BINS) };
+    expect(strictParseModel(VIEW, build(makeDay(full)))).toMatchObject({ ok: true });
+    for (const over of [
+      { cuts: ranges(MAX_DAY_BINS + 1) },
+      { dark: ranges(MAX_DAY_BINS + 1) },
+      { evening: segments(MAX_EVENING_BINS + 1) },
+    ]) {
+      expect(strictParseModel(VIEW, build(makeDay({ ...full, ...over }))), Object.keys(over)[0]).toMatchObject({ ok: false });
+    }
+  });
+
+  it("refuses a bin that does not divide an hour", () => {
+    expect(() => compute("2026-06-10", "Africa/Kampala", emptySamples())).not.toThrow();
+    for (const resolutionMinutes of [0, 7, 1.5, 90]) {
+      expect(() =>
+        computeSiteDay({ date: "2026-06-10", timezone: "Africa/Kampala", samples: emptySamples(), sources: available, resolutionMinutes, nowMs: NOW }),
+      ).toThrow(RangeError);
+    }
   });
 });

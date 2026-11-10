@@ -9,7 +9,7 @@
  * day with a DST change has more or fewer bins.
  */
 import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
-import { LOW_BATTERY_PCT } from "../site-operations";
+import { isSiteResolution, LOW_BATTERY_PCT } from "../site-operations";
 import type { SiteSamples, SiteSamplesRequest } from "../types";
 
 export const SITE_FIXTURE_SEED = "mgm-fixture-site-v1";
@@ -163,7 +163,7 @@ export function generateSiteSamples(
   seed: string = SITE_FIXTURE_SEED,
 ): SiteSamples {
   const { microgridId, sources, timezone, resolutionMinutes } = request;
-  if (!Number.isInteger(resolutionMinutes) || resolutionMinutes <= 0 || 60 % resolutionMinutes !== 0) {
+  if (!isSiteResolution(resolutionMinutes)) {
     throw new RangeError("resolutionMinutes must be a whole number of minutes that divides an hour");
   }
   const binMs = resolutionMinutes * 60_000;
