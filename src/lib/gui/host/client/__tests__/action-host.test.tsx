@@ -1,4 +1,5 @@
 import { act as flush, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Children, cloneElement, isValidElement, useEffect, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionRef, ActionResult, FormProps, Json, OverlayProps } from "../../../contract";
 import type { PreparedAction } from "../../server/prepare";
@@ -7,9 +8,14 @@ import { act, hostAct, KitRuntimeProvider } from "../kit-runtime";
 import { initial, manifest, MG, recordingRuntime } from "./kit-test-utils";
 
 vi.mock("next/navigation", () => ({ usePathname: () => null, useSearchParams: () => null }));
-// jsdom creates only untrusted events and has no userActivation: both stand in here.
+// jsdom creates only untrusted events and has no userActivation: both stand in
+// here. isClickOn stays real, so the host's check of the click itself runs.
 const input = vi.hoisted(() => ({ trusted: true, active: true }));
-vi.mock("../trusted", () => ({ isTrusted: () => input.trusted, hasUserActivation: () => input.active }));
+vi.mock("../trusted", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../trusted")>()),
+  isTrusted: () => input.trusted,
+  hasUserActivation: () => input.active,
+}));
 
 const PATH = `/api/microgrids/${MG}/name`;
 const PROPOSAL = "00000000-0000-4000-8000-0000000000f1";
@@ -473,5 +479,420 @@ describe("ActionHost", () => {
     mount({ body: prepared({ confirm: "none", fields: false }) }, { status: 422, body: { error: "x".repeat(400) } });
     const result = await act(ref());
     expect(result.ok === false && result.message).toHaveLength(300);
+  });
+});
+
+describe("ActionHost with a GUI's own Overlay and forms", () => {
+  const ceremony = {
+    type: "ceremony" as const,
+    statement: "Rename?",
+    facts: [],
+    warnings: [],
+    acknowledgements: [{ id: "a", label: "Sure" }],
+    typed: "Kasenge",
+    digest: "d9",
+  };
+  const typedAction = () => prepared({ confirm: "typed", fields: false, ceremony });
+  const forged = { digest: "d9", acknowledged: ["a"], typed: "Kasenge" };
+  const forgedEvent = { type: "click", nativeEvent: { isTrusted: true, type: "click", eventPhase: 2 } };
+
+  /** What the person does to confirm the typed action: tick, type the name, click Confirm. */
+  async function personConfirms() {
+    fireEvent.click(await screen.findByRole("checkbox"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Kasenge" } });
+    fireEvent.click(await confirmButton());
+  }
+
+  /** Every function an element's props reach, nested children included, by path. */
+  function functionsIn(node: unknown, at = "", found: [string, (...args: unknown[]) => unknown][] = []) {
+    if (isValidElement(node)) return functionsIn(node.props, at, found);
+    if (node === null || typeof node !== "object" || node instanceof Node) return found;
+    for (const [key, value] of Object.entries(node)) {
+      const path = at ? `${at}.${key}` : key;
+      if (typeof value === "function") found.push([path, value as (...args: unknown[]) => unknown]);
+      else functionsIn(value, path, found);
+    }
+    return found;
+  }
+
+  type Handlers = { onClick?: (event: unknown) => void; onChange?: (event: unknown) => void };
+  /** The props React keeps on a rendered DOM node, as script on the page could read them. */
+  function domProps(node: Element): Handlers {
+    const key = Object.keys(node).find((k) => k.startsWith("__reactProps$"));
+    return key ? (node as unknown as Record<string, Handlers>)[key] : {};
+  }
+
+  /**
+   * A callback the host hands ConfirmStep, reached through React's internals
+   * from a node inside it: a probe for the checks the host makes itself,
+   * which no GUI-reachable prop leads to.
+   */
+  function stepProp(node: Element, name: "onConfirm" | "onTick" | "onType"): (...args: unknown[]) => void {
+    const key = Object.keys(node).find((k) => k.startsWith("__reactFiber$"))!;
+    type Fiber = { memoizedProps?: Record<string, unknown>; return: Fiber | null };
+    let fiber: Fiber | null = (node as unknown as Record<string, Fiber>)[key];
+    while (fiber && typeof fiber.memoizedProps?.[name] !== "function") fiber = fiber.return;
+    return fiber!.memoizedProps![name] as (...args: unknown[]) => void;
+  }
+
+  /** Enables Confirm in the DOM and has a click on it reach ConfirmStep's onConfirm directly, bypassing its own check. */
+  function forwardClicks(confirm: HTMLButtonElement) {
+    const onConfirm = stepProp(confirm, "onConfirm");
+    const forward = (event: Event) => onConfirm({ nativeEvent: event, target: confirm, currentTarget: confirm });
+    confirm.disabled = false;
+    confirm.addEventListener("click", forward);
+    return () => confirm.removeEventListener("click", forward);
+  }
+
+  it("writes nothing when an Overlay calls children.props.onConfirm, walking nested children", async () => {
+    const found: string[] = [];
+    function Forging({ children }: OverlayProps) {
+      useEffect(() => {
+        const visit = (node: ReactNode) => {
+          if (!isValidElement(node)) return;
+          const props = node.props as { onConfirm?: unknown; children?: ReactNode };
+          if (typeof props.onConfirm === "function") {
+            found.push("onConfirm");
+            props.onConfirm(forged, forgedEvent);
+          }
+          Children.forEach(props.children, visit);
+        };
+        visit(children);
+      });
+      return <section>{children}</section>;
+    }
+    const { writes, sent } = mount({ body: typedAction() }, undefined, { Overlay: Forging });
+    const done = act(ref());
+    await confirmButton();
+    await flush(async () => {});
+    expect(found).toEqual([]);
+    expect(writes()).toHaveLength(0);
+
+    await personConfirms();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ microgrid_id: MG, confirmation: forged });
+  });
+
+  it("keeps the action's level when an Overlay clones its children with a weaker one", async () => {
+    /** Clones every element it reaches, setting a weaker level on each. */
+    const weaken = (node: ReactNode): ReactNode =>
+      isValidElement(node)
+        ? cloneElement(node as ReactElement<{ children?: ReactNode }>, {
+            level: "confirm",
+            ceremony: null,
+            busy: false,
+            children: Children.map((node.props as { children?: ReactNode }).children, weaken),
+          } as Record<string, unknown>)
+        : node;
+    function Weakening({ children }: OverlayProps) {
+      return <section>{weaken(children)}</section>;
+    }
+    const { writes } = mount({ body: typedAction() }, undefined, { Overlay: Weakening });
+    const done = act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    expect(screen.getByRole("checkbox")).toBeTruthy();
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+
+    await personConfirms();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("writes nothing when an Overlay calls every function its props reach", async () => {
+    let paths: string[] = [];
+    function CallsEverything(props: OverlayProps) {
+      useEffect(() => {
+        const found = functionsIn(props);
+        paths = found.map(([path]) => path);
+        for (const [, fn] of found) fn(forged, forgedEvent);
+      });
+      return <section>{props.children}</section>;
+    }
+    const { writes } = mount({ body: typedAction() }, undefined, { Overlay: CallsEverything });
+    const done = act(ref());
+    // Dismissing is the only thing an Overlay is handed to call.
+    await expect(done).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    expect(paths).toEqual(["onDismiss"]);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("hands an Overlay that calls its child's component nothing of the step", async () => {
+    const reached: string[] = [];
+    const keys = new Set<string>();
+    function Peeks({ children }: OverlayProps) {
+      // Calls HostSlot itself, inside the host's providers, as script could.
+      const made = isValidElement(children) && typeof children.type === "function" ? (children.type as (p: object) => ReactNode)({}) : null;
+      reached.push(...functionsIn(made).map(([path]) => path));
+      if (isValidElement(made)) for (const key of Object.keys(made.props as object)) keys.add(key);
+      useEffect(() => {
+        for (const [, fn] of functionsIn(made)) fn(forged, forgedEvent);
+      });
+      return (
+        <section data-testid="overlay">
+          {made}
+          {children}
+        </section>
+      );
+    }
+    const { writes, sent } = mount({ body: typedAction() }, undefined, { Overlay: Peeks });
+    const done = act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    await flush(async () => {});
+    expect(reached).toEqual([]);
+    expect([...keys].sort()).toEqual(["className", "ref"]);
+    // The step is the host's, at its own level, inside the Overlay's frame.
+    expect(screen.getByTestId("overlay").contains(confirm)).toBe(true);
+    expect(screen.getByRole("checkbox")).toBeTruthy();
+    expect(screen.getByRole("textbox")).toBeTruthy();
+    expect(confirm.disabled).toBe(true);
+    expect(writes()).toHaveLength(0);
+
+    await personConfirms();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(sent()).toEqual({ microgrid_id: MG, confirmation: forged });
+  });
+
+  it("counts no tick or typing that an Overlay hands to the step's controls from another event", async () => {
+    function Ticks({ children }: OverlayProps) {
+      useEffect(() => {
+        const forward = (event: Event) => {
+          const box = document.querySelector('input[type="checkbox"]');
+          const text = document.querySelector('input[type="text"]');
+          if (box) domProps(box).onChange?.({ nativeEvent: event, target: { checked: true }, currentTarget: box });
+          if (text) domProps(text).onChange?.({ nativeEvent: event, target: { value: "Kasenge" }, currentTarget: text });
+        };
+        window.addEventListener("keydown", forward, true);
+        window.addEventListener("click", forward, true);
+        return () => {
+          window.removeEventListener("keydown", forward, true);
+          window.removeEventListener("click", forward, true);
+        };
+      }, []);
+      return (
+        <section>
+          {children}
+          <button type="button">Elsewhere</button>
+        </section>
+      );
+    }
+    const { writes } = mount({ body: typedAction() }, undefined, { Overlay: Ticks });
+    const done = act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    // The person presses a key and clicks elsewhere: live, trusted events, at other controls.
+    fireEvent.keyDown(document.body, { key: "Shift" });
+    fireEvent.click(screen.getByRole("button", { name: "Elsewhere" }));
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("");
+    expect(confirm.disabled).toBe(true);
+    // The same events handed straight to the host's own callbacks, past ConfirmStep's check.
+    const box = screen.getByRole("checkbox") as HTMLInputElement;
+    const text = screen.getByRole("textbox") as HTMLInputElement;
+    const direct = (event: Event) => {
+      stepProp(box, "onTick")("a", { nativeEvent: event }, box);
+      stepProp(text, "onType")({ nativeEvent: event }, text);
+    };
+    window.addEventListener("keydown", direct, true);
+    box.checked = true;
+    text.value = "Kasenge";
+    fireEvent.keyDown(document.body, { key: "Shift" });
+    window.removeEventListener("keydown", direct, true);
+    box.checked = false;
+    text.value = "";
+    // Nor has the host recorded either: a click reaching onConfirm directly sends nothing.
+    const stop = forwardClicks(confirm);
+    fireEvent.click(confirm);
+    stop();
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+    confirm.disabled = true;
+
+    await personConfirms();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("builds the confirmation from the host's own record of ticks and typing, at the send", async () => {
+    const { writes, sent } = mount({ body: typedAction() });
+    const done = act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    const box = screen.getByRole("checkbox");
+    const text = screen.getByRole("textbox");
+    const stop = forwardClicks(confirm);
+    // Nothing ticked or typed.
+    fireEvent.click(confirm);
+    // The name typed, the acknowledgement not ticked.
+    fireEvent.change(text, { target: { value: "Kasenge" } });
+    confirm.disabled = false;
+    fireEvent.click(confirm);
+    // Ticked, with the wrong name.
+    fireEvent.click(box);
+    fireEvent.change(text, { target: { value: "Kasenga" } });
+    confirm.disabled = false;
+    fireEvent.click(confirm);
+    // Ticked, typed, then unticked again.
+    fireEvent.change(text, { target: { value: "Kasenge" } });
+    fireEvent.click(box);
+    confirm.disabled = false;
+    fireEvent.click(confirm);
+    stop();
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+
+    fireEvent.click(box);
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ microgrid_id: MG, confirmation: forged });
+  });
+
+  it("records no tick or typing that is not the person's, even when it reaches the host directly", async () => {
+    const { writes } = mount({ body: typedAction() });
+    void act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    const box = screen.getByRole("checkbox") as HTMLInputElement;
+    const text = screen.getByRole("textbox") as HTMLInputElement;
+    const onTick = (event: Event) => stepProp(box, "onTick")("a", { nativeEvent: event }, box);
+    const onType = (event: Event) => stepProp(text, "onType")({ nativeEvent: event }, text);
+    box.addEventListener("click", onTick);
+    text.addEventListener("change", onType);
+    input.trusted = false;
+    fireEvent.click(box);
+    fireEvent.change(text, { target: { value: "Kasenge" } });
+    box.removeEventListener("click", onTick);
+    text.removeEventListener("change", onType);
+    input.trusted = true;
+    const stop = forwardClicks(confirm);
+    fireEvent.click(confirm);
+    stop();
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("checks at the send that the click on Confirm is the person's own", async () => {
+    const { writes } = mount({ body: prepared({ fields: false }) });
+    const done = act(ref());
+    const confirm = (await confirmButton()) as HTMLButtonElement;
+    input.trusted = false;
+    const stop = forwardClicks(confirm);
+    fireEvent.click(confirm);
+    stop();
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+
+    input.trusted = true;
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("checks the click itself at the send, even when script reaches Confirm's handler", async () => {
+    function Elsewhere({ children }: OverlayProps) {
+      const forward = (event: unknown) => {
+        const confirm = document.querySelector("[aria-describedby]");
+        if (confirm) domProps(confirm).onClick?.(event);
+      };
+      return (
+        <section>
+          {children}
+          <button type="button" onClick={forward}>
+            Elsewhere
+          </button>
+        </section>
+      );
+    }
+    const { writes } = mount({ body: prepared({ fields: false }) }, undefined, { Overlay: Elsewhere });
+    const done = act(ref());
+    const confirm = await confirmButton();
+    const handler = domProps(confirm).onClick;
+    expect(handler).toBeTypeOf("function");
+
+    await flush(async () => {
+      // An object shaped like a click on Confirm.
+      handler!({ ...forgedEvent, target: confirm, currentTarget: confirm, nativeEvent: { ...forgedEvent.nativeEvent, target: confirm } });
+      // A real click event that is not being dispatched.
+      handler!({ type: "click", nativeEvent: new MouseEvent("click") });
+    });
+    // The person's live click on another button, handed to Confirm's handler.
+    fireEvent.click(screen.getByRole("button", { name: "Elsewhere" }));
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("confirms on the host's own Overlay with the person's click", async () => {
+    const { writes, sent } = mount({ body: typedAction() });
+    const done = act(ref());
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    await personConfirms();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ microgrid_id: MG, confirmation: forged });
+  });
+
+  it("lets a form only hand values over: later submits and changes to its object send nothing new", async () => {
+    const kept: { submit?: FormProps["submit"] } = {};
+    const values = { name: "First" };
+    function Keeping({ submit }: FormProps) {
+      useEffect(() => {
+        kept.submit = submit;
+      });
+      return (
+        <button type="button" onClick={() => submit(values)}>
+          Submit form
+        </button>
+      );
+    }
+    const { writes, sent } = mount({ body: prepared() }, undefined, { forms: { "metering.rename": { reads: [1], Component: Keeping } } });
+    const done = act(ref());
+    fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
+    const confirm = await confirmButton();
+    values.name = "Changed";
+    await flush(async () => {
+      kept.submit!({ name: "Later" });
+      kept.submit!({ name: "Later" });
+    });
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(confirm);
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ name: "First", microgrid_id: MG });
+  });
+
+  it("sends nothing, and says so, when a form's values cannot be copied", async () => {
+    const circular: Record<string, unknown> = { name: "Loop" };
+    circular.self = circular;
+    const { writes } = mount({ body: prepared({ confirm: "none" }) }, undefined, {
+      forms: { "metering.rename": { reads: [1], Component: formSubmitting(circular as Json) } },
+    });
+    void act(ref());
+    fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
+    expect((await screen.findByTestId("error")).textContent).toContain("The form's values could not be read.");
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("shows the confirm step, writing nothing, whenever a form submits a confirm-level action", async () => {
+    function SubmitsAtOnce({ submit }: FormProps) {
+      useEffect(() => submit({ name: "Unasked" }), [submit]);
+      return null;
+    }
+    const { writes } = mount({ body: prepared() }, undefined, { forms: { "metering.rename": { reads: [1], Component: SubmitsAtOnce } } });
+    const done = act(ref());
+    const confirm = await confirmButton();
+    await flush(async () => {});
+    expect(writes()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await expect(done).resolves.toMatchObject({ code: "cancelled" });
+    expect(confirm.isConnected).toBe(false);
+    expect(writes()).toHaveLength(0);
   });
 });

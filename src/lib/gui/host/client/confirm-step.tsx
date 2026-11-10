@@ -2,14 +2,28 @@
 
 /**
  * The confirmation step before a write, owned by the host (decision 5 on
- * #115): a GUI frames it in its Overlay but never supplies or alters it.
- * Ticks, typing and Confirm count only from real input (./trusted.ts), so a
- * script cannot confirm on the person's behalf. Confirm is the only thing
- * that calls onConfirm: nothing submits on mount, on Enter or on a tick.
+ * #115): a GUI frames it in its Overlay but never supplies, sees or alters
+ * it. A tick, a keystroke in the typed name or a click on Confirm counts
+ * only when it is real input the browser is dispatching at that very control
+ * (./trusted.ts); checked state and text are read from the control itself.
+ * Each one is handed to the host with its event and control, and the host
+ * checks it again and keeps its own record, which is what it sends: this
+ * component's state only decides what is shown and when Confirm is enabled.
+ * Confirm is the only thing that calls onConfirm: nothing submits on mount,
+ * on Enter or on a tick.
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import type { Ceremony, Confirmation } from "../../contract";
-import { isTrusted } from "./trusted";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  type Ref,
+} from "react";
+import type { Ceremony } from "../../contract";
+import { isLiveEventOn, isTrusted, readInput, TICK_EVENTS, TYPING_EVENTS } from "./trusted";
 
 export interface ConfirmStepProps {
   level: "confirm" | "typed" | "ceremony";
@@ -18,17 +32,39 @@ export interface ConfirmStepProps {
   ceremony: Ceremony | null;
   busy: boolean;
   error: string | null;
-  onConfirm(confirmation: Confirmation): void;
+  /** Called on a real click of Confirm, with that click; the host builds the confirmation itself. */
+  onConfirm(event: MouseEvent<HTMLButtonElement>): void;
+  /** Called on a real change of an acknowledgement's checkbox, with that change and the checkbox. */
+  onTick(id: string, event: ChangeEvent<HTMLInputElement>, input: HTMLInputElement): void;
+  /** Called on real typing in the typed name, with that change and the text input. */
+  onType(event: ChangeEvent<HTMLInputElement>, input: HTMLInputElement): void;
   onCancel(): void;
+  /** The Confirm button, for the host's own check of the click. */
+  confirmRef?: Ref<HTMLButtonElement>;
 }
 
 const BUTTON =
   "inline-flex min-h-8 items-center rounded-md border px-3.5 text-dense font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
-export function ConfirmStep({ level, title, tone, ceremony, busy, error, onConfirm, onCancel }: ConfirmStepProps) {
+export function ConfirmStep({
+  level,
+  title,
+  tone,
+  ceremony,
+  busy,
+  error,
+  onConfirm,
+  onTick,
+  onType,
+  onCancel,
+  confirmRef,
+}: ConfirmStepProps) {
   const [ticked, setTicked] = useState<ReadonlySet<string>>(() => new Set());
   const [typed, setTyped] = useState("");
   const cancel = useRef<HTMLButtonElement>(null);
+  /** Each acknowledgement's checkbox, by id, and the typed-name input. */
+  const boxes = useRef(new Map<string, HTMLInputElement>());
+  const text = useRef<HTMLInputElement>(null);
   const id = useId();
   useEffect(() => cancel.current?.focus(), []);
 
@@ -69,14 +105,20 @@ export function ConfirmStep({ level, title, tone, ceremony, busy, error, onConfi
           <input
             type="checkbox"
             className="mt-1"
+            ref={(box) => {
+              if (box) boxes.current.set(a.id, box);
+              else boxes.current.delete(a.id);
+            }}
             checked={ticked.has(a.id)}
             disabled={busy}
             onChange={(event) => {
-              if (!isTrusted(event)) return;
+              const box = boxes.current.get(a.id) ?? null;
+              if (!box || !isTrusted(event) || !isLiveEventOn(event, box, TICK_EVENTS)) return;
               const next = new Set(ticked);
-              if (event.target.checked) next.add(a.id);
+              if (readInput(box).checked) next.add(a.id);
               else next.delete(a.id);
               setTicked(next);
+              onTick(a.id, event, box);
             }}
           />
           <span>{a.label}</span>
@@ -88,6 +130,7 @@ export function ConfirmStep({ level, title, tone, ceremony, busy, error, onConfi
             Type <strong>{expected}</strong> to confirm
           </span>
           <input
+            ref={text}
             type="text"
             value={typed}
             disabled={busy}
@@ -97,7 +140,10 @@ export function ConfirmStep({ level, title, tone, ceremony, busy, error, onConfi
             spellCheck={false}
             className="rounded-md border border-border bg-card px-3 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onChange={(event) => {
-              if (isTrusted(event)) setTyped(event.target.value);
+              const input = text.current;
+              if (!input || !isTrusted(event) || !isLiveEventOn(event, input, TYPING_EVENTS)) return;
+              setTyped(readInput(input).value);
+              onType(event, input);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") event.preventDefault();
@@ -115,17 +161,13 @@ export function ConfirmStep({ level, title, tone, ceremony, busy, error, onConfi
           Cancel
         </button>
         <button
+          ref={confirmRef}
           type="button"
           disabled={!ready}
           aria-describedby={`${id}-statement`}
           className={`${BUTTON} ${tone === "danger" ? "border-destructive bg-destructive text-destructive-foreground" : "border-primary bg-primary text-primary-foreground"}`}
           onClick={(event) => {
-            if (!ready || !isTrusted(event)) return;
-            onConfirm({
-              ...(ceremony?.digest === undefined ? {} : { digest: ceremony.digest }),
-              acknowledged: acknowledgements.filter((a) => ticked.has(a.id)).map((a) => a.id),
-              ...(expected === undefined ? {} : { typed: typed.trim() }),
-            });
+            if (ready && isTrusted(event)) onConfirm(event);
           }}
         >
           {title}

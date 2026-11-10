@@ -57,13 +57,18 @@ function specifiers(file: string, text: string): string[] {
 
 /**
  * The repo path a local specifier names, without extension or /index; null
- * for a package. Every extension bundler resolution maps to a .ts source is
+ * for a package. "@/" is tsconfig's alias for src/ (its `paths`; if that
+ * mapping changes, change this). A resource query or fragment ("?raw", "#x")
+ * is dropped first, as the bundler resolves the file without it. Both kinds
+ * are posix-normalised, so "." and ".." segments and repeated slashes cannot
+ * hide a path. Every extension bundler resolution maps to a .ts source is
  * dropped, so "./invoke.js" names invoke.ts.
  */
 function target(from: string, specifier: string): string | null {
+  const file = specifier.replace(/[?#].*$/, "");
   let base: string;
-  if (specifier.startsWith("@/")) base = `src/${specifier.slice(2)}`;
-  else if (specifier.startsWith(".")) base = path.posix.join(path.posix.dirname(from), specifier);
+  if (file.startsWith("@/")) base = path.posix.normalize(`src/${file.slice(2)}`);
+  else if (file.startsWith(".")) base = path.posix.join(path.posix.dirname(from), file);
   else return null;
   return base.replace(/\.(?:[cm]?[jt]sx?)$/, "").replace(/\/index$/, "");
 }
@@ -104,8 +109,18 @@ describe("write path", () => {
       ["src/lib/gui/host/client/e.ts", "const m = require(name);"],
       ["src/lib/gui/host/client/g.ts", 'import { invoke } from "./invoke.js";'],
       ["src/gui/probe/h.ts", 'import { invoke } from "@/lib/gui/host/client/invoke.js";'],
+      ["src/gui/probe/i.ts", 'import { invoke } from "@/lib/gui/host/client/./invoke";'],
+      ["src/gui/probe/j.ts", 'import { invoke } from "@/lib/gui/host/client/../client/invoke";'],
+      ["src/gui/probe/k.ts", 'export { invoke } from "@/lib/gui/kit/.//../host/./client/invoke.js";'],
+      ["src/gui/probe/l.ts", 'const m = import("@/../src/lib/gui/host/client/invoke");'],
+      ["src/gui/probe/n.ts", 'const m = require("@/lib/gui/host/client/invoke?x");'],
+      ["src/lib/gui/host/client/o.ts", 'import { invoke } from "./invoke.ts#y";'],
     ];
-    const missed = [["src/lib/gui/host/client/f.ts", 'import { invoke } from "./invoked";']];
+    const missed = [
+      ["src/lib/gui/host/client/f.ts", 'import { invoke } from "./invoked";'],
+      // Names src/lib/gui/host/host/client/invoke, which is not invoke.ts.
+      ["src/gui/probe/m.ts", 'import { invoke } from "@/lib/gui/host/client/../host/client/invoke";'],
+    ];
     const planted = new Map([...caught, ...missed] as [string, string][]);
     expect(invokeImporters(planted)).toEqual(caught.map(([file]) => file));
   });
