@@ -98,6 +98,31 @@ const MODULES: Record<string, Module> = {
     reason:
       "Registers the synthetic factory into meteringProviders when MGM_METERING_FIXTURES is on; the factory reads no credentials and runs only through that registry, which is tracked by name.",
   },
+  "src/lib/organization-directory/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
+  "src/lib/community-management/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
+  "src/lib/metering/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
+  "src/lib/billing/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
+  "src/lib/payments/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
   "src/lib/metering/compose.ts": {
     privilegedExports: ["MeteringPlugin"],
     reason:
