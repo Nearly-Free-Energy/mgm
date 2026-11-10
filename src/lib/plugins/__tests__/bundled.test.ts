@@ -240,6 +240,8 @@ describe("getRouteOwner", () => {
     ["/", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
     ["/api/gui/view", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
     ["/api/gui/prepare", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+    ["/api/gui/signals", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+    ["/api/gui/search", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   ])("%s belongs to %s", async (route, plugin) => {
     const { getRouteOwner } = await import("../bundled");
     expect(getRouteOwner(route)?.name).toBe(plugin);

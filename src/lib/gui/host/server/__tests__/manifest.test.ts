@@ -257,6 +257,8 @@ describe("buildManifest", () => {
           throw new Error("canary-text");
         }),
         status("metering", "metering.bad", async () => ({ label: "Bad", state: "unknown", open: "/microgrids" }) as never),
+        status("metering", "metering.unreleased", async () => ({ label: "Elsewhere", state: "idle", open: "/microgrids/x/unreleased" })),
+        status("metering", "metering.undefined", async () => undefined as never),
       ],
     });
     const newClient = vi.fn(async () => client);

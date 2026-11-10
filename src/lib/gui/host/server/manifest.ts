@@ -10,7 +10,7 @@ import "server-only";
  * security), after the getUser()-backed check in hostContext. Status loaders
  * run through the GUI surface registry (decision 8 on #115), read with
  * surfaceSnapshot (./snapshot.ts), each on its own request and within
- * STATUS_BUDGET_MS.
+ * STATUS_BUDGET_MS (./signals.ts).
  */
 import { cache } from "react";
 import { headers } from "next/headers";
@@ -18,26 +18,26 @@ import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import { createClient } from "@/lib/supabase/server";
-import type { Manifest, StatusItem } from "../../contract";
+import type { Manifest } from "../../contract";
 import { createFmt } from "../../fmt";
 import { buildManifestModel, livePlugins, MAX_PLACES_PER_KIND } from "../shared/manifest-model";
-import { hostContext, requireIssued, surfaceRequest, type HostContext, type HostRefusal } from "./access";
+import { hostContext, requireIssued, type HostContext, type HostRefusal } from "./access";
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate } from "./gate-state";
-import { manifestSchema, statusItemSchema } from "./model-schema";
+import { manifestSchema } from "./model-schema";
 import { pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
 import { parseOrFail } from "./parse";
+import { collectStatus } from "./signals";
 import { surfaceSnapshot } from "./snapshot";
-import type { RegisteredStatus, SurfaceSnapshot } from "./surface-registry";
+import type { SurfaceSnapshot } from "./surface-registry";
+
+export { STATUS_BUDGET_MS } from "./signals";
 
 /**
  * No build stamps a release yet, so the manifest says null (decision 17 on
  * #115). When the release build (scripts/release) stamps a version, read it here.
  */
 const RELEASE: string | null = null;
-
-/** How long one status loader may take before its item is left out. */
-export const STATUS_BUDGET_MS = 800;
 
 export type ManifestOutcome = { ok: true; manifest: Manifest } | HostRefusal;
 
@@ -113,29 +113,6 @@ async function pathScope(ctx: HostContext, scope: Scope, rows: PlaceRows): Promi
   };
 }
 
-/** One status item, or null when its loader returns none, fails, is late or breaks the schema. */
-async function loadStatus(ctx: HostContext, organizationId: string, entry: RegisteredStatus): Promise<StatusItem | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const req = await surfaceRequest(ctx, organizationId, {}, new URLSearchParams());
-    const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), STATUS_BUDGET_MS)));
-    const loaded = await Promise.race([entry.load(req), late]);
-    if (!loaded) return null;
-    // `ask` needs its action resolved for this person, which the action merge adds; until then it is left out.
-    const parsed = parseOrFail(
-      statusItemSchema,
-      { id: entry.id, label: loaded.label, state: loaded.state, open: loaded.open },
-      entry.id,
-    );
-    return parsed.ok ? parsed.value : null;
-  } catch {
-    console.error(`[gui] ${entry.id}: status loader failed`);
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * The manifest for `ctx`'s person, in the organization the hints select
  * (organization.ts), with the interface `gui`. Refuses with gui_no_access
@@ -166,7 +143,7 @@ export async function buildManifest(
   const statuses = snapshot.status.filter((s) => live.has(s.plugin));
   // The path's places count only when the path is in the chosen organization.
   const [items, scope] = await Promise.all([
-    Promise.all(statuses.map((s) => loadStatus(ctx, org.id, s))),
+    collectStatus(ctx, org.id, statuses),
     path?.organizationId === org.id ? pathScope(ctx, path.scope, places) : undefined,
   ]);
 

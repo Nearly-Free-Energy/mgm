@@ -138,7 +138,11 @@ reads definitions only through `surfaceSnapshot()`
 `GET /api/gui/view?href=<page>` after checking the caller's session.
 `POST /api/gui/prepare` returns an action's form, confirmation, route and
 method for the same caller; it writes nothing, and the write goes to the
-action's own route. The registry is privileged in
+action's own route. `GET /api/gui/signals?org=<id>` and
+`GET /api/gui/search?q=<text>&prefix=@|#&org=<id>` run contributed watchers
+and searches for the caller's organization, each only while its plugin is
+enabled and each within its own time budget, so one slow plugin cannot hold
+the others. The registry is privileged in
 `service-role-session-check.test.ts`: the functions it holds can compose
 capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
