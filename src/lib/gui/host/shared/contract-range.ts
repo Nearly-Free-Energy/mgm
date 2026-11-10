@@ -30,10 +30,19 @@ export function parseCaretRange(range: string): { min: Triple; below: Triple } {
   return { min, below: [0, 0, patch + 1] };
 }
 
-export function satisfiesContract(version: string, range: string): boolean {
+function parseVersion(version: string): Triple {
   const v = VERSION_RE.exec(version);
   if (!v) throw new Error(`Not a contract version: "${version}"`);
-  const triple: Triple = [Number(v[1]), Number(v[2]), Number(v[3])];
+  return [Number(v[1]), Number(v[2]), Number(v[3])];
+}
+
+/** Negative, zero or positive as `a` is below, equal to or above `b`. */
+export function compareVersions(a: string, b: string): number {
+  return compare(parseVersion(a), parseVersion(b));
+}
+
+export function satisfiesContract(version: string, range: string): boolean {
+  const triple = parseVersion(version);
   const { min, below } = parseCaretRange(range);
   return compare(triple, min) >= 0 && compare(triple, below) < 0;
 }
