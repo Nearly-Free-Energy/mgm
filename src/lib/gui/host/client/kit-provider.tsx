@@ -10,6 +10,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
 import type { EntityRef, Href, InitialView, Manifest, NavEntry, Signals, ViewModel, ViewState } from "../../contract";
 import { isHref } from "../shared/href";
+import { ActionHost, type ActionHostSlots } from "./action-host";
 import { defaultRuntime, RouterBridge, useKitRuntime, useSearchOrganization } from "./kit-runtime";
 import { usePathname } from "./navigation";
 
@@ -43,9 +44,11 @@ export function KitProvider(props: {
   manifest: Manifest | null;
   initial: InitialView;
   resolve?: ResolveView;
+  /** The active GUI's Overlay and forms, and the kit's form, for the page's ActionHost. */
+  actions?: ActionHostSlots;
   children: ReactNode;
 }) {
-  const { manifest, initial, resolve, children } = props;
+  const { manifest, initial, resolve, actions, children } = props;
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
@@ -74,6 +77,7 @@ export function KitProvider(props: {
     <KitContext.Provider value={state}>
       {runtime === defaultRuntime && <RouterBridge />}
       {children}
+      <ActionHost {...actions} model={boundary?.pathname === pathname ? boundary.model : null} />
     </KitContext.Provider>
   );
 }

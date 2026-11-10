@@ -3,8 +3,9 @@
  * in a "use client" module; this file only gathers them.
  *
  * KitView and RawView are not built yet, so the check below leaves out those
- * two names; when they land, it becomes `satisfies GuiKit`. `act` refuses
- * until the action host is mounted, and `useFeed` is inert.
+ * two names; when they land, it becomes `satisfies GuiKit`. `act` reaches the
+ * ActionHost that KitProvider mounts, and `useFeed` is inert. The write
+ * itself (host/client/invoke.ts) is not exported (write-path.test.ts).
  */
 import type { GuiKit } from "../contract";
 import { useManifest, useSignals, useView } from "../host/client/kit-provider";

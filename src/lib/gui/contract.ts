@@ -434,7 +434,12 @@ export interface FormProps {
   initial: Json | null;
   busy: boolean;
   error: { message: string; field?: string } | null;
-  /** The kit then runs the confirmation step and the request. */
+  /**
+   * Hands the values to the kit, which copies them, then runs the
+   * confirmation step and the request; only a none-level action submitted
+   * during the person's gesture is sent without the step. A call once the
+   * form is off screen or busy does nothing.
+   */
   submit(body: Json): void;
   cancel(): void;
 }
@@ -443,7 +448,15 @@ export interface OverlayProps {
   tone: "neutral" | "danger";
   role: "form" | "confirm";
   onDismiss(): void;
-  /** Rendered by the kit; the GUI frames it (dialog, sheet, page) and never alters it. */
+  /**
+   * Where the kit's step goes; the GUI frames it (dialog, sheet, page) and
+   * never alters it. It is an empty slot with no props: the host renders the
+   * step into it through a portal, so the step's React events and context do
+   * not pass through the Overlay, and an Overlay that closes on an outside
+   * click judges "outside" by DOM containment. Holds while ActionHost
+   * (host/client/action-host.tsx) portals the step; if the Overlay is ever
+   * handed the step itself, revisit.
+   */
   children: ReactNode;
 }
 export type PublicPage =

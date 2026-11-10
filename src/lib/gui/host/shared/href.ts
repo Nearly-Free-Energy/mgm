@@ -32,6 +32,15 @@ export function isHref(href: unknown): href is Href {
   return typeof href === "string" && isSameOriginPath(href);
 }
 
+/**
+ * An action's route: a same-origin path under /api/ with no "." or ".."
+ * segment. Prepare (../server/prepare.ts) refuses any other path, and the
+ * action host's invoke (../client/invoke.ts) checks it again before writing.
+ */
+export function isApiPath(path: unknown): path is Href {
+  return typeof path === "string" && /^\/api\/[A-Za-z0-9/_.%-]+$/.test(path) && isSameOriginPath(path);
+}
+
 /** Characters encodeURIComponent leaves, plus percent escapes. */
 const ENCODED = "[A-Za-z0-9%\\-_.!~*'()]*";
 
