@@ -313,12 +313,18 @@ function contractOf(decl: ts.Declaration): string | null {
   return owner && ts.isClassDeclaration(owner) ? classContract(owner) : null;
 }
 
+/** A class implementing a capability contract: its body is the capability's own code. */
+function isCapabilityClass(node: ts.Node): boolean {
+  return ts.isClassDeclaration(node) && classContract(node) !== null;
+}
+
 /**
  * The files `roots` load at run time: value imports, re-exports, and import()
- * or require of a literal. A file implementing a capability is not entered:
- * other code reaches what it runs only through its members, which are checked
- * where they are used. A module named at run time cannot be followed and is
- * refused.
+ * or require of a literal. The body of a class implementing a capability is
+ * not entered: other code reaches what it runs only through its members, which
+ * are checked where they are used. The rest of its file is, so a helper
+ * exported beside the class is checked like any other code. A module named at
+ * run time cannot be followed and is refused.
  */
 function loadedFiles(program: ts.Program, host: ts.ModuleResolutionHost, roots: readonly string[]) {
   const files: ts.SourceFile[] = [];
@@ -331,7 +337,6 @@ function loadedFiles(program: ts.Program, host: ts.ModuleResolutionHost, roots: 
   while (queue.length) {
     const file = program.getSourceFile(queue.shift() as string);
     if (!file || files.includes(file) || file.isDeclarationFile) continue;
-    if (file.statements.some((s) => ts.isClassDeclaration(s) && classContract(s))) continue;
     files.push(file);
     const follow = (spec: string) => {
       const resolved = ts.resolveModuleName(spec, file.fileName, program.getCompilerOptions(), host).resolvedModule;
@@ -346,7 +351,7 @@ function loadedFiles(program: ts.Program, host: ts.ModuleResolutionHost, roots: 
         if (arg && ts.isStringLiteralLike(arg)) follow(arg.text);
         else problems.push(`${path.relative(REPO, file.fileName)}: loads a module named at run time`);
       }
-      ts.forEachChild(node, visit);
+      if (!isCapabilityClass(node)) ts.forEachChild(node, visit);
     };
     visit(file);
   }
@@ -391,7 +396,7 @@ function capabilityWrites(program: ts.Program, host: ts.ModuleResolutionHost, ro
       const key = node.propertyName ?? node.name;
       check(node, node.parent, node.dotDotDotToken ? null : ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : null);
     }
-    ts.forEachChild(node, visit);
+    if (!isCapabilityClass(node)) ts.forEachChild(node, visit);
   };
   files.forEach(visit);
   return problems;
@@ -680,6 +685,25 @@ describe("the GUI surface guard", () => {
     for (const name of ["indirect", "reexport", "star", "required"]) expect(writes(name), name).toEqual(["helper.ts:2: uses ShopCapabilityContract.buy"]);
     expect(writes("missing")).toEqual(["missing.ts: no source file to check"]);
     expect(writes("dynamic")).toEqual(["dynamic.ts: loads a module named at run time"]);
+  }, 30_000);
+
+  it("checks a helper exported beside a capability class, but not the class's own body", () => {
+    const { program, host } = memoryProgram({
+      "contract.ts": "export interface ShopCapabilityContract { list(): number[]; buy(id: string): void; }",
+      "capability.ts": [
+        'import type { ShopCapabilityContract } from "./contract";',
+        'export class ShopCapability implements ShopCapabilityContract { list() { return []; } buy(id: string) { void id; this.buy("again"); } }',
+        'export function writeHelper() { new ShopCapability().buy("1"); }',
+      ].join("\n"),
+      "viaHelper.ts": 'import { writeHelper } from "./capability";\nexport const load = () => writeHelper();',
+      "viaClass.ts": 'import { ShopCapability } from "./capability";\nexport const load = () => new ShopCapability().list();',
+    });
+    const writes = (surface: string) =>
+      capabilityWrites(program, host, [`/guard/${surface}.ts`], { ShopCapabilityContract: ["list"] }).map((p) => p.replace(/^.*guard\//, ""));
+
+    // Both load capability.ts, so both see writeHelper; neither sees the class's own this.buy().
+    expect(writes("viaHelper")).toEqual(["capability.ts:3: uses ShopCapabilityContract.buy"]);
+    expect(writes("viaClass")).toEqual(["capability.ts:3: uses ShopCapabilityContract.buy"]);
   }, 30_000);
 
   it("resolves SURFACE_MODULES entries as \"@/\" specifiers, and reports one that names no file", () => {
