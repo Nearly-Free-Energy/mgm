@@ -217,7 +217,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/microgrids/[id]/openems-backend/route.ts": {
     kind: "session",
     reason:
-      "currentUserCanAccessMicrogrid answers 404 before any stored secret is decrypted.",
+      "currentUserCanAccessMicrogrid answers 403 before any stored secret is decrypted, and saveEmsConfigForMicrogrid asks it again before the service-role save.",
   },
   "src/app/api/microgrids/[id]/openems-backend/discover/route.ts": {
     kind: "session",

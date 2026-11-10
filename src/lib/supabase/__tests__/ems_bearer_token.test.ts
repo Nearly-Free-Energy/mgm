@@ -5,8 +5,8 @@
  * token column:
  *
  * 1. The column behaves like the other credential columns: encrypted at
- *    rest, writable only through the configuration guard, readable only
- *    through a service_role function.
+ *    rest, written only by the service role (the configuration guard since
+ *    20261110142706), readable only through a service_role function.
  * 2. The guard coverage itself is asserted statically (no database) in
  *    `src/lib/__tests__/ems-guard-enumeration.test.ts`, which reads the
  *    newest guard migration — 00061 re-issues it with the new column in
@@ -90,17 +90,24 @@ describe.skipIf(skip)("#4 — Keycloak bearer token (migration 00061)", () => {
 
   // ── Behaviour: the bearer column is inside the guard ────────────────────
 
-  it("an org manager can write the bearer column on their own microgrid", async () => {
+  it("only the service role writes the bearer column, even on the manager's own microgrid", async () => {
     const svc = await serviceClient();
     const { data: ct } = await svc.rpc("fn_ems_encrypt_secret", {
       p_plaintext: "keycloak-test-token",
     });
 
-    const { error } = await MGR.client
+    const { error: mgrErr } = await MGR.client
       .from("microgrids")
       .update({ ems_bearer_token_encrypted: ct as string })
       .eq("id", FIXTURE.microgrid);
+    expect(mgrErr?.code).toBe("42501");
 
+    // The settings route saves on the service client after its own access
+    // check (saveEmsConfigForMicrogrid); the tests below read this value.
+    const { error } = await svc
+      .from("microgrids")
+      .update({ ems_bearer_token_encrypted: ct as string })
+      .eq("id", FIXTURE.microgrid);
     expect(error).toBeNull();
   });
 

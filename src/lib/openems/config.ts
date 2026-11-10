@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { OpenEmsClientConfig } from "./index";
 import { OpenEmsError } from "./errors";
+import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 
 /**
  * Server-only helper that resolves a microgrid's saved OpenEMS backend
@@ -386,4 +387,42 @@ async function authorizeThenDecrypt(
   }
 
   return typeof secret === "string" && secret.length > 0 ? secret : null;
+}
+
+/**
+ * Save a microgrid's OpenEMS connection settings, saved credentials included.
+ *
+ * Only the service role writes the encrypted credential columns (migration
+ * 20261110142706), so the UPDATE runs on the service client. The service
+ * client bypasses RLS and the guard trigger's access check, which makes the
+ * `currentUserCanAccessMicrogrid` call below, on the caller's own session,
+ * the only authorization for the write. It must stay ahead of the write, for
+ * the same reason the RLS read stays ahead of the decrypt in
+ * `authorizeThenDecrypt`.
+ *
+ * A caller who fails the check gets a `42501` error and nothing is written,
+ * matching what the guard trigger answered when this write ran on the
+ * caller's client.
+ */
+export async function saveEmsConfigForMicrogrid(
+  authorizedClient: SupabaseClient,
+  microgridId: string,
+  payload: Record<string, unknown>
+): Promise<{ error: { code?: string; message: string } | null }> {
+  if (!(await currentUserCanAccessMicrogrid(authorizedClient, microgridId))) {
+    return {
+      error: {
+        code: "42501",
+        message:
+          "You do not have permission to configure the OpenEMS connection for this microgrid.",
+      },
+    };
+  }
+
+  const { createServiceClient } = await import("@/lib/supabase/service");
+  const { error } = await createServiceClient()
+    .from("microgrids")
+    .update(payload)
+    .eq("id", microgridId);
+  return { error: error ? { code: error.code, message: error.message } : null };
 }
