@@ -77,6 +77,10 @@ Open [http://localhost:3000](http://localhost:3000) and log in:
 - **Email:** `admin@eiot.energy`
 - **Password:** `admin123`
 
+`npm run dev` builds the interface's stylesheet once before it starts. While
+you change classes under `src/gui/` or the tokens in `src/styles/tokens.css`,
+run `npm run gui:styles:watch` beside it to rebuild the stylesheet.
+
 ### Quick Start — Cloud Supabase
 
 Connects to an existing hosted Supabase project. No Docker required.
@@ -171,7 +175,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_PUBLIC_SUPABASE_COOKIE_NAME` | when `SUPABASE_INTERNAL_URL` is on another host | yes | Fixed auth cookie name, so server, middleware and browser find the same session. Without it, Supabase derives the cookie name from the URL each side uses; MGM refuses to start a request when the internal and public hosts differ and this is unset |
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
 | `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
-| `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. No page reads it yet |
+| `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
 | `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 

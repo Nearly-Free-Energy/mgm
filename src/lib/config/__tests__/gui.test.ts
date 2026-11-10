@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GUI_CONTRACT, type GuiMeta } from "@/lib/gui/contract";
-import { DEFAULT_GUI, GuiSettingError, readGuiName, validateGuiAtStartup } from "../gui";
+import { DEFAULT_GUI, guiStylesheetHref, GuiSettingError, readGuiName, validateGuiAtStartup } from "../gui";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -82,5 +82,35 @@ describe("validateGuiAtStartup", () => {
     expect(() => validateGuiAtStartup({})).not.toThrow();
     expect(() => validateGuiAtStartup({ MGM_GUI: "gridtop" })).not.toThrow();
     expect(() => validateGuiAtStartup({ MGM_GUI: "nextgrid" })).toThrow(GuiSettingError);
+  });
+});
+
+describe("guiStylesheetHref", () => {
+  // next.config.ts compiles the constant in; a global stands in for it here.
+  const constant = globalThis as { __MGM_GUI_STYLESHEETS__?: string };
+  afterEach(() => {
+    delete constant.__MGM_GUI_STYLESHEETS__;
+  });
+
+  it("falls back to the unhashed name when no build constant is compiled in", () => {
+    expect(guiStylesheetHref("gridtop")).toBe("/gui-styles/gridtop.css");
+  });
+
+  it("uses the URL the stylesheet build published", () => {
+    constant.__MGM_GUI_STYLESHEETS__ = JSON.stringify({ gridtop: "/gui-styles/gridtop.3f9a1c2e4b5d.css" });
+    expect(guiStylesheetHref("gridtop")).toBe("/gui-styles/gridtop.3f9a1c2e4b5d.css");
+  });
+
+  it("ignores a manifest it cannot use", () => {
+    for (const value of [
+      "not json",
+      "null",
+      JSON.stringify({ gridtop: "https://elsewhere.example/x.css" }),
+      JSON.stringify({ gridtop: "//elsewhere.example/x.css" }),
+      JSON.stringify({ gridtop: "/other/x.css" }),
+    ]) {
+      constant.__MGM_GUI_STYLESHEETS__ = value;
+      expect(guiStylesheetHref("gridtop"), value).toBe("/gui-styles/gridtop.css");
+    }
   });
 });

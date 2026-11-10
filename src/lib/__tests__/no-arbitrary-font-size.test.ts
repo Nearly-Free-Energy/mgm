@@ -1,13 +1,13 @@
 /**
  * Font sizes come from the type scale declared as `--text-<name>` in
- * src/app/globals.css (CLAUDE.md design rule 3): text-caption, text-dense,
+ * src/styles/tokens.css (CLAUDE.md design rule 3): text-caption, text-dense,
  * text-body, text-title, text-headline and text-kpi. An arbitrary size such
  * as `text-[13px]` has no touch-screen step and no line height, and the next
  * change to the scale misses it.
  *
  * Scans class syntax in every .ts/.tsx file under ROOTS, line by line. Test
  * files are skipped because they name classes to assert their absence. CSS is
- * not scanned: globals.css is where the sizes are declared. Inline CSS in an
+ * not scanned: tokens.css is where the sizes are declared. Inline CSS in an
  * HTML string (src/lib/public-html) is not class syntax and is not matched.
  * `style={{ fontSize }}` is flagged in src/app and src/components only:
  * src/lib/invoices draws a PDF with @react-pdf, whose sizes are print points

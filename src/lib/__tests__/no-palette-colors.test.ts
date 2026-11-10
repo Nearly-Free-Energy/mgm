@@ -1,12 +1,12 @@
 /**
- * Colours come from the semantic tokens declared in src/app/globals.css
+ * Colours come from the semantic tokens declared in src/styles/tokens.css
  * (CLAUDE.md design rule 3), never from Tailwind's palette or a literal value.
  * A palette class ignores --brand-hue and any later change to the tokens, so
  * a rebrand silently misses that element.
  *
  * Scans class syntax in every .ts/.tsx file under ROOTS, line by line. Test
  * files are skipped because they name classes to assert their absence. CSS is
- * not scanned: globals.css is where colour literals belong. Style objects,
+ * not scanned: tokens.css is where colour literals belong. Style objects,
  * @react-pdf StyleSheets (src/lib/invoices) and inline CSS in HTML strings are
  * not class syntax and are not matched; a printed invoice keeps print colours.
  * Not caught: class names assembled at run time, `bg-[red]`-style named
@@ -17,7 +17,7 @@
  * A token reached through `var()` is flagged too, in each spelling Tailwind
  * compiles to a colour: `accent-[color:var(--primary)]`, `bg-[var(--primary)]`,
  * `bg-(--primary)` and `bg-(color:--primary)`. Every colour token that
- * globals.css declares under `@theme` has its own utility (`accent-primary`,
+ * tokens.css declares under `@theme` has its own utility (`accent-primary`,
  * `border-b-destructive`), and the `var()` form hides the token from search
  * and from a rename. If a token is ever declared outside `@theme`, it has no
  * utility; add it to `@theme` rather than loosening this.
@@ -185,7 +185,7 @@ describe("colour classes come from tokens", () => {
   it("uses no arbitrary colour value", () => {
     expect(
       offenders(ARBITRARY_COLOUR),
-      "Use the token's utility (accent-primary, not accent-[color:var(--primary)]), or add the token to globals.css",
+      "Use the token's utility (accent-primary, not accent-[color:var(--primary)]), or add the token to src/styles/tokens.css",
     ).toEqual([]);
   });
 

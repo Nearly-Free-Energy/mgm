@@ -68,3 +68,28 @@ export function readGuiName(env: RuntimeEnv = process.env): GuiName {
 export function validateGuiAtStartup(env: RuntimeEnv = process.env): void {
   readGuiName(env);
 }
+
+// Compiled in by next.config.ts from src/gui/.generated/stylesheets.json.
+declare const __MGM_GUI_STYLESHEETS__: string | undefined;
+
+function builtStylesheets(): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(__MGM_GUI_STYLESHEETS__ ?? "{}");
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    // Not compiled in (tests, or a development server started before the
+    // stylesheet build), or not JSON.
+    return {};
+  }
+}
+
+/**
+ * The URL of a GUI's built stylesheet: the content-hashed name the
+ * stylesheet build published (scripts/gui/build-stylesheets.mjs), or
+ * `/gui-styles/<name>.css`, the name a development build writes.
+ */
+export function guiStylesheetHref(name: GuiName): string {
+  const stylesheets = builtStylesheets();
+  const href = Object.hasOwn(stylesheets, name) ? stylesheets[name] : undefined;
+  return typeof href === "string" && href.startsWith("/gui-styles/") ? href : `/gui-styles/${name}.css`;
+}
