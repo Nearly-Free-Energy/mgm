@@ -19,6 +19,7 @@ import { CORE_ENTITY_KINDS } from "@/lib/plugins/bundled";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import type { ActionRef, Ceremony, EntityKind, Json } from "../../contract";
 import type { ActionDef, Loaded } from "../../surface";
+import { isApiPath } from "../shared/href";
 import { fillPath, idFits } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
 import { resolveSegments, type Segment } from "./entities";
@@ -33,9 +34,6 @@ import type { HostFailure, HostOutcome } from "./view";
 export const MAX_PREPARE_BYTES = 16 * 1024;
 const MAX_MESSAGE = 300;
 const REFUSAL_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
-/** The same rule the kit's invoke applies to a prepared path: an API route with no ".." segment. */
-const API_PATH = /^\/api\/[A-Za-z0-9/_.%-]+$/;
-const isApiPath = (path: string) => API_PATH.test(path) && !path.split("/").includes("..");
 
 const fail = (status: number, code: string, message: string): HostFailure => ({ ok: false, status, code, message });
 const BAD_REQUEST = fail(400, "gui_bad_request", "The request is not valid.");
@@ -64,7 +62,7 @@ export const preparedActionSchema = z.strictObject({
   /** The level the host runs: the action's own, and at least "confirm" for a proposal. */
   confirm: confirmSchema,
   method: z.enum(["POST", "PUT", "PATCH", "DELETE"]),
-  path: z.string().refine(isApiPath, "Expected an API route with no .. segment"),
+  path: z.string().refine(isApiPath, "Expected an API route with no . or .. segment"),
   /** Body fields filled from the entity; the kit sends them over the form's values. */
   bound: z.record(z.string(), z.string()),
   ceremony: ceremonySchema.nullable(),
