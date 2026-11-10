@@ -131,6 +131,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Runs a contributed view's loader from the snapshot. dispatchView takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
+  "src/lib/gui/host/server/prepare.ts": {
+    privilegedExports: ["prepareAction"],
+    reason:
+      "Runs a contributed action's available() and prepare from the snapshot. prepareAction takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
+  },
   "src/lib/gui/host/server/manifest.ts": {
     privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
     reason:
@@ -284,6 +289,11 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getCurrentUserAccess (getUser) answers 401 or 403 before the snapshot is read or any loader runs.",
+  },
+  "src/app/api/gui/prepare/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the body is read, the snapshot is read or any prepare runs.",
   },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",

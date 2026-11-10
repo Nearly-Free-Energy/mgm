@@ -51,6 +51,7 @@ const EXTERNAL_GETS = new Set([
  */
 const HOST_READ_ROUTES: Record<string, string> = {
   "GET /api/gui/view": "Loads one contributed view for the caller's organization.",
+  "POST /api/gui/prepare": "Builds an action's form and confirmation; writes nothing. If prepare ever writes, it leaves this list.",
 };
 /** What a GUI host route may import: the session, its client, and the host's server modules. */
 const HOST_ROUTE_IMPORT = /^(?:next\/server|@\/lib\/supabase\/server|@\/lib\/auth\/access|@\/lib\/gui\/host\/server\/[a-z-]+)$/;

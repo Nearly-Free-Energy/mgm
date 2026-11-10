@@ -2,8 +2,9 @@
  * The reusable part of the credential canary (credential-canary.db.test.ts):
  * stored credentials seeded with canary plaintexts through the database's own
  * encryption function, a scan of host output for any form of them, and a
- * loop that dispatches every view in a surface snapshot. Prepare, signals and
- * search add their own loops here and scan with the same assertion.
+ * loop that dispatches every view or prepares every action in a surface
+ * snapshot. Signals and search add their own loops here and scan with the
+ * same assertion.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -15,6 +16,7 @@ import type { EntityKind } from "../../../contract";
 import { fillPath } from "../../shared/merge-actions";
 import type { HostContext } from "../access";
 import { hostOutcome } from "../http";
+import { prepareAction } from "../prepare";
 import type { SurfaceSnapshot } from "../surface-registry";
 import { dispatchView } from "../view";
 
@@ -168,6 +170,22 @@ const LOGS = ["error", "warn", "log", "info"] as const;
 const show = (arg: unknown) =>
   typeof arg === "string" ? arg : inspect(arg, { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity });
 
+/** Every assignment of seeded rows to `kinds` (name → entity kind), or a throw naming a kind with no seeded row. */
+function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: string): Record<string, string>[] {
+  const byKind: Partial<Record<EntityKind, string[]>> = {
+    organization: [ids.orgId],
+    community: [ids.communityId],
+    microgrid: Object.values(ids.microgridIds),
+  };
+  let combos: Record<string, string>[] = [{}];
+  for (const [name, kind] of Object.entries(kinds)) {
+    const rows = byKind[kind];
+    if (rows === undefined) throw new Error(`[canary] ${what}: no canary row for entity kind "${kind}"; seed one`);
+    combos = combos.flatMap((c) => rows.map((id) => ({ ...c, [name]: id })));
+  }
+  return combos;
+}
+
 /**
  * Dispatches every view in `snapshot` once for each seeded row of the entity
  * kinds its path names (a view with no segments gets `?org=`), and returns
@@ -183,11 +201,6 @@ export async function dispatchEveryView(
   ids: CanaryIds,
   serve: (snapshot: SurfaceSnapshot | null) => void,
 ): Promise<Dispatched[]> {
-  const byKind: Partial<Record<EntityKind, string[]>> = {
-    organization: [ids.orgId],
-    community: [ids.communityId],
-    microgrid: Object.values(ids.microgridIds),
-  };
   const runs = new Map<string, number>();
   const views = snapshot.views.map(({ plugin, def }) => {
     const load = (async (req: unknown) => {
@@ -201,13 +214,7 @@ export async function dispatchEveryView(
   serve({ ...snapshot, views });
   try {
     for (const { def } of snapshot.views) {
-      let combos: Record<string, string>[] = [{}];
-      for (const [name, kind] of Object.entries(def.params)) {
-        const rows = byKind[kind];
-        if (rows === undefined) throw new Error(`[canary] view ${def.id}: no canary row for entity kind "${kind}"; seed one`);
-        combos = combos.flatMap((c) => rows.map((id) => ({ ...c, [name]: id })));
-      }
-      for (const params of combos) {
+      for (const params of seededParams(ids, def.params, `view ${def.id}`)) {
         const path = fillPath(def.path, params);
         if (path === null) throw new Error(`[canary] view ${def.id}: path ${def.path} could not be filled`);
         const href = Object.keys(def.params).length === 0 ? `${path}?org=${ids.orgId}` : path;
@@ -218,6 +225,56 @@ export async function dispatchEveryView(
         if ((runs.get(def.id) ?? 0) === before) throw new Error(`[canary] view ${def.id} (${href}): loader did not run: ${response.status} ${body}`);
         const logged = spies.flatMap((spy) => spy.mock.calls.flat().map(show));
         out.push({ id: def.id, href, status: response.status, output: [body, ...logged].join("\n") });
+      }
+    }
+  } finally {
+    serve(null);
+    for (const spy of spies) spy.mockRestore();
+  }
+  return out;
+}
+
+/**
+ * Prepares every action in `snapshot` once for each seeded row of the entity
+ * kinds it binds, with no starting values, and returns each response body as
+ * the route sends it, with whatever was logged meanwhile. `serve` works as
+ * for dispatchEveryView. An action must get past its request check for at
+ * least one row, and reach its own available() and prepare, where it has
+ * them, for at least one row; otherwise the loop throws rather than passing
+ * it unscanned.
+ */
+export async function prepareEveryAction(
+  ctx: HostContext,
+  snapshot: SurfaceSnapshot,
+  ids: CanaryIds,
+  serve: (snapshot: SurfaceSnapshot | null) => void,
+): Promise<Dispatched[]> {
+  const runs = new Map<string, number>();
+  const count = <F extends (...args: never[]) => unknown>(key: string, fn: F | undefined): F | undefined =>
+    fn && (((...args: Parameters<F>) => (runs.set(key, (runs.get(key) ?? 0) + 1), fn(...args))) as F);
+  const actions = new Map(
+    [...snapshot.actions].map(([id, { plugin, def }]) => {
+      const counted = { ...def, prepare: count(`${id} prepare`, def.prepare), available: count(`${id} available()`, def.available) };
+      return [id, { plugin, def: counted as typeof def }];
+    }),
+  );
+  const out: Dispatched[] = [];
+  const spies = LOGS.map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+  serve({ ...snapshot, actions });
+  try {
+    for (const [id, { def }] of snapshot.actions) {
+      const kinds = { ...def.bind.path, ...def.bind.body };
+      const first = out.length;
+      for (const params of seededParams(ids, kinds, `action ${id}`)) {
+        for (const spy of spies) spy.mockClear();
+        const response = hostOutcome(await prepareAction(ctx, { action: id, params }));
+        const logged = spies.flatMap((spy) => spy.mock.calls.flat().map(show));
+        out.push({ id, href: `${def.method} ${fillPath(def.path, params)}`, status: response.status, output: [await response.text(), ...logged].join("\n") });
+      }
+      const last = `${out.at(-1)?.status} ${out.at(-1)?.output}`;
+      if (out.slice(first).every((r) => r.status === 400)) throw new Error(`[canary] action ${id}: every request was refused: ${last}`);
+      for (const [fn, has] of [["available()", def.available], ["prepare", def.prepare]] as const) {
+        if (has && !runs.get(`${id} ${fn}`)) throw new Error(`[canary] action ${id}: ${fn} did not run: ${last}`);
       }
     }
   } finally {

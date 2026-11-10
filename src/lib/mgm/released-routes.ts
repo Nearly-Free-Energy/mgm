@@ -17,7 +17,9 @@
  * cuts, dark time and who served the houses), read through the metering
  * capability.
  * Install metadata: the web app manifest.
- * GUI host: contributed views for the signed-in person's organization.
+ * GUI host: contributed views for the signed-in person's organization, and
+ * the step that prepares an action's form and confirmation. That step writes
+ * nothing; the write goes to the action's own route, which keeps its own gate.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -123,7 +125,7 @@ const OPERATIONS_PAGE_ROUTES = [
 
 // The GUI host (src/app/api/gui/). Each name here is a release decision in the
 // pull request that adds its route.
-const GUI_HOST_API_ROUTES = [/^\/api\/gui\/view$/];
+const GUI_HOST_API_ROUTES = [/^\/api\/gui\/(?:view|prepare)$/];
 
 // Install metadata browsers fetch on their own: the web app manifest
 // (src/app/manifest.ts). The icons it and the root layout name are static
