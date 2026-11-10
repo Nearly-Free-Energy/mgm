@@ -32,4 +32,16 @@ describe("CODEOWNERS", () => {
       : tracked.includes(rel);
     expect(matches).toBe(true);
   });
+
+  // Decision 4 on #115: the GUI host's routes are code-owned.
+  it("owns every file of the GUI host's routes", () => {
+    const owned = (file: string) =>
+      patterns().some((pattern) => {
+        const rel = pattern.replace(/^\//, "");
+        return pattern.endsWith("/") ? file.startsWith(rel) : file === rel;
+      });
+    const files = tracked.filter((f) => f.startsWith("src/app/api/gui/"));
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((f) => !owned(f))).toEqual([]);
+  });
 });

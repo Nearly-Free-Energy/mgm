@@ -43,6 +43,35 @@ const EXTERNAL_GETS = new Set([
   "/api/edges/[id]/discover-devices",
 ]);
 
+/**
+ * The GUI host's handlers (src/app/api/gui/), all reads. The write rule below
+ * skips them, because organization-directory, a core plugin, owns them, so
+ * this list is what holds them to reading: a handler that writes leaves it.
+ * The writes a GUI sends go to each action's own route, which that rule covers.
+ */
+const HOST_READ_ROUTES: Record<string, string> = {
+  "GET /api/gui/view": "Loads one contributed view for the caller's organization.",
+};
+/** What a GUI host route may import: the session, its client, and the host's server modules. */
+const HOST_ROUTE_IMPORT = /^(?:next\/server|@\/lib\/supabase\/server|@\/lib\/auth\/access|@\/lib\/gui\/host\/server\/[a-z-]+)$/;
+
+/** Why a GUI host route file reaches past the host: imports outside HOST_ROUTE_IMPORT, a composer or the gate. */
+function hostRouteProblems(text: string): string[] {
+  const problems: string[] = [];
+  const visit = (node: ts.Node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (!HOST_ROUTE_IMPORT.test(node.moduleSpecifier.text)) problems.push(`imports ${node.moduleSpecifier.text}`);
+    } else if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+      problems.push("loads a module at run time");
+    } else if (ts.isIdentifier(node) && (/^compose[A-Z]/.test(node.text) || node.text === "gateRoute" || node.text === "checkGate")) {
+      problems.push(`names ${node.text}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile("route.ts", text, ts.ScriptTarget.Latest, true));
+  return problems;
+}
+
 // The gate exemptions (UNGATED_WRITES) and handlerSources are in
 // ./route-rules.ts, which gui-surface.test.ts reads too.
 
@@ -606,6 +635,32 @@ describe("MGM runtime route surface", () => {
       .filter(({ route }) => !UNOWNED.has(route) && !getRouteOwner(route))
       .map(({ route }) => route);
     expect(unowned, "Add the route to a plugin's `routes` in src/lib/plugins/bundled.ts").toEqual([]);
+  });
+
+  it("keeps the GUI host's routes to the reads it lists", () => {
+    const handlers: string[] = [];
+    const problems: string[] = [];
+    for (const { file, route } of routes.filter(({ route }) => route === "/api/gui" || route.startsWith("/api/gui/"))) {
+      const text = readFileSync(file, "utf8");
+      for (const method of handlerSources(text).keys()) handlers.push(`${method} ${route}`);
+      if (getRouteOwner(route)?.name !== "organization-directory") problems.push(`${route}: not organization-directory's`);
+      problems.push(...hostRouteProblems(text).map((problem) => `${route}: ${problem}`));
+    }
+    expect(problems).toEqual([]);
+    expect(handlers.sort()).toEqual(Object.keys(HOST_READ_ROUTES).sort());
+  });
+
+  it("refuses a GUI host route that reaches past the host", () => {
+    expect(hostRouteProblems('import { dispatchView } from "@/lib/gui/host/server/view";')).toEqual([]);
+    expect(hostRouteProblems('import { composeMetering } from "@/lib/metering/compose";')).toEqual([
+      "imports @/lib/metering/compose",
+      "names composeMetering",
+    ]);
+    expect(hostRouteProblems('import { x } from "@/lib/gui/host/server/../../surface";')).toHaveLength(1);
+    expect(hostRouteProblems("export async function GET() { await gateRoute(s, r); }")).toEqual(["names gateRoute"]);
+    expect(hostRouteProblems('export async function GET() { await import("@/lib/gui/host/server/view"); }')).toEqual([
+      "loads a module at run time",
+    ]);
   });
 
   it("enters the runtime from every write handler of a non-core plugin", () => {

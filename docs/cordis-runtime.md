@@ -132,7 +132,9 @@ never the environment, network or database. `runtime.test.ts` builds the same
 root in the `Test` gate, so it refuses exactly what production would.
 
 Plugins see `ctx.mgmSurface` typed as `MgmSurface`, the write side. The host
-reads definitions through `getMgmRuntime().mgmSurface.snapshot()`. The
+reads definitions only through `surfaceSnapshot()`
+(`src/lib/gui/host/server/snapshot.ts`), and serves a contributed view with
+`GET /api/gui/view?href=<page>` after checking the caller's session. The
 registry is privileged in `service-role-session-check.test.ts`: the functions
 it holds can compose capabilities, and a call made through it cannot be
 followed by import, so every file that names it is tracked.

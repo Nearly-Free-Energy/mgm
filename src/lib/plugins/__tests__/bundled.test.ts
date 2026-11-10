@@ -238,6 +238,7 @@ describe("getRouteOwner", () => {
     ["/api/billing-line-items/[lineItemId]/pay", PAYMENTS_PLUGIN_NAME],
     ["/api/payments/ipn", PESAPAL_PLUGIN_NAME],
     ["/", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+    ["/api/gui/view", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   ])("%s belongs to %s", async (route, plugin) => {
     const { getRouteOwner } = await import("../bundled");
     expect(getRouteOwner(route)?.name).toBe(plugin);

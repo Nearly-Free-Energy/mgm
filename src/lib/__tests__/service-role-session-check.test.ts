@@ -121,10 +121,20 @@ const MODULES: Record<string, Module> = {
     privilegedExports: "all",
     reason: "Reads merchant account secrets on the service role.",
   },
+  "src/lib/gui/host/server/snapshot.ts": {
+    privilegedExports: ["surfaceSnapshot"],
+    reason:
+      "Names mgmSurface: the host's one read of the registry. Its importers settle the session before they call what the snapshot holds.",
+  },
+  "src/lib/gui/host/server/view.ts": {
+    privilegedExports: ["dispatchView"],
+    reason:
+      "Runs a contributed view's loader from the snapshot. dispatchView takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
+  },
   "src/lib/gui/host/server/manifest.ts": {
     privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
     reason:
-      "Names mgmSurface and runs contributed status loaders through it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
+      "Reads the snapshot and runs contributed status loaders from it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
   },
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
@@ -150,6 +160,8 @@ const SESSION_CHECKS = new Set([
   "composeCommunityManagement",
   "composeMetering",
   "composePayments",
+  // src/lib/auth/access.ts: getUser() and the caller's role rows.
+  "getCurrentUserAccess",
   // The request-scoped helpers in src/lib/auth/request-access.ts, added by
   // mgm#89, which read getUser() once per render. Drop these if that file
   // does not land.
@@ -267,6 +279,11 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/payments/attempts/[id]/reconcile/route.ts": {
     kind: "session",
     reason: "getUser() answers 401 before the service-role attempt lookup.",
+  },
+  "src/app/api/gui/view/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the snapshot is read or any loader runs.",
   },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",

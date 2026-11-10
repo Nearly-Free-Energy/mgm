@@ -112,7 +112,7 @@ describe("isLinkHref", () => {
     // /api/mgm/health is released but no catalog plugin owns it.
     for (const h of [
       "/api/mgm/health",
-      "/api/gui/view",
+      "/api/gui/manifest",
       "/api/nowhere",
       `/microgrids/${MG}/nowhere`,
       "https://evil.example/x.pdf",

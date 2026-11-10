@@ -8,15 +8,15 @@ import "server-only";
  *
  * Every read runs on a client of the caller's own session (row-level
  * security), after the getUser()-backed check in hostContext. Status loaders
- * run through the GUI surface registry (decision 8 on #115), each on its own
- * request and within STATUS_BUDGET_MS.
+ * run through the GUI surface registry (decision 8 on #115), read with
+ * surfaceSnapshot (./snapshot.ts), each on its own request and within
+ * STATUS_BUDGET_MS.
  */
 import { cache } from "react";
 import { headers } from "next/headers";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
-import { getMgmRuntime } from "@/lib/runtime/root";
 import { createClient } from "@/lib/supabase/server";
 import type { Manifest, StatusItem } from "../../contract";
 import { createFmt } from "../../fmt";
@@ -27,6 +27,7 @@ import { pluginGate } from "./gate-state";
 import { manifestSchema, statusItemSchema } from "./model-schema";
 import { pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
 import { parseOrFail } from "./parse";
+import { surfaceSnapshot } from "./snapshot";
 import type { RegisteredStatus, SurfaceSnapshot } from "./surface-registry";
 
 /**
@@ -145,7 +146,7 @@ export async function buildManifest(
   o: { gui: string; path?: string | null } & Omit<OrganizationHints, "fromPath">,
 ): Promise<ManifestOutcome> {
   requireIssued(ctx);
-  const snapshot = (await getMgmRuntime()).mgmSurface.snapshot();
+  const snapshot = await surfaceSnapshot();
   const [path, organizations, name] = await Promise.all([
     resolvePath(ctx, snapshot, o.path),
     visibleOrganizations(ctx),
