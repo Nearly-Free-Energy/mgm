@@ -25,7 +25,7 @@ import { dispatchView } from "../view";
 // Port 9 answers nothing. The backend URL check (src/lib/openems/backend-url.ts)
 // accepts localhost over http://, so the OpenEMS client is built and contacted
 // with each decrypted credential; if that check changes, revisit.
-const NOWHERE = "http://localhost:9";
+export const NOWHERE = "http://localhost:9";
 
 /**
  * One microgrid per way src/lib/openems/config.ts picks a credential, since a
