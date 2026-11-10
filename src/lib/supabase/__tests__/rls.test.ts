@@ -1848,67 +1848,16 @@ describe("RLS: OpenEMS Backend (#101)", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// RLS: Community payment provider (#115, #196)
-// Exercises the fn_get_community_payment_secret truth table + encryption
-// round-trip via fn_ems_encrypt_secret (shared DEK).
-//
-// Post-#196: org_managers scoped to the community's parent org now receive
-// the plaintext secret (previously redacted to NULL). Cross-org callers
-// continue to receive NULL via the user_can_access_org gate.
+// RLS: Community payment provider (#115) and merchant credentials
+// The communities.payment_provider* columns remain with their CHECK
+// constraint. Payments read merchant credentials from
+// payment_merchant_accounts through fn_get_payment_merchant_secret and
+// fn_payment_account_version, which serve the service role only (00065,
+// 20261010202643); the community-level accessor was dropped in
+// 20261110114033.
 // ══════════════════════════════════════════════════════════════════════════
 
 describe("RLS: Community payment provider (#115)", () => {
-  const PAYMENT_SECRET_PLAINTEXT = "cs_live_abcdefghijklmnopqrstuvwxyz";
-
-  async function setupPaymentConfig() {
-    const svc = await serviceClient();
-    const { data: encrypted } = await svc.rpc("fn_ems_encrypt_secret", {
-      p_plaintext: PAYMENT_SECRET_PLAINTEXT,
-    });
-    await svc
-      .from("communities")
-      .update({
-        payment_provider: "pesapal",
-        payment_provider_config: {
-          consumer_key: "ck_live_xyz",
-          base_url: "https://pay.pesapal.com/v3",
-          ipn_id: "ipn-abc",
-        },
-        payment_provider_secret_encrypted: encrypted,
-        payment_last_configured_at: new Date().toISOString(),
-      })
-      .eq("id", FIXTURE.communityA);
-  }
-
-  async function clearPaymentConfig() {
-    const svc = await serviceClient();
-    // CHECK constraint requires the four fields to be NULLed together.
-    await svc
-      .from("communities")
-      .update({
-        payment_provider: null,
-        payment_provider_config: null,
-        payment_provider_secret_encrypted: null,
-        payment_last_configured_at: null,
-      })
-      .eq("id", FIXTURE.communityA);
-  }
-
-  it("AC: encryption round-trip — setup + fn_get_community_payment_secret as super_admin returns plaintext", async () => {
-    if (skipIfRequested()) return;
-    await setupPaymentConfig();
-    try {
-      const { data, error } = await userD.client.rpc(
-        "fn_get_community_payment_secret",
-        { _community_id: FIXTURE.communityA }
-      );
-      expect(error).toBeNull();
-      expect(data).toBe(PAYMENT_SECRET_PLAINTEXT);
-    } finally {
-      await clearPaymentConfig();
-    }
-  });
-
   it("AC: CHECK constraint rejects payment_provider set with NULL last_configured_at", async () => {
     if (skipIfRequested()) return;
     const svc = await serviceClient();
@@ -1927,129 +1876,84 @@ describe("RLS: Community payment provider (#115)", () => {
     );
   });
 
-  describe("fn_get_community_payment_secret truth table", () => {
-    it("super_admin gets NULL when secret is not set", async () => {
-      if (skipIfRequested()) return;
-      await clearPaymentConfig();
-      const { data, error } = await userD.client.rpc(
-        "fn_get_community_payment_secret",
-        { _community_id: FIXTURE.communityA }
+  it("has no community-level payment accessor", async () => {
+    if (skipIfRequested()) return;
+    const svc = await serviceClient();
+    for (const client of [userA.client, svc]) {
+      const { data, error } = await client.rpc(
+        "fn_get_community_payment_secret" as never,
+        { _community_id: FIXTURE.communityA } as never
       );
-      expect(error).toBeNull();
       expect(data).toBeNull();
-    });
+      expect(error?.code, JSON.stringify(error)).toBe("PGRST202");
+    }
+  });
+});
 
-    it("org_manager (owner org) gets plaintext (#196 — widened)", async () => {
-      if (skipIfRequested()) return;
-      await setupPaymentConfig();
-      try {
-        const { data, error } = await userA.client.rpc(
-          "fn_get_community_payment_secret",
-          { _community_id: FIXTURE.communityA }
-        );
-        expect(error).toBeNull();
-        expect(data).toBe(PAYMENT_SECRET_PLAINTEXT);
-      } finally {
-        await clearPaymentConfig();
-      }
-    });
+describe("Merchant credentials (#115)", () => {
+  const MERCHANT_ID = "aaaaaaaa-aaaa-4000-8000-0000000000c1";
+  const MERCHANT_SECRET = "cs_test_merchant_probe_value";
 
-    it("org_manager (owner org) gets NULL when secret is not set (#196)", async () => {
-      if (skipIfRequested()) return;
-      // Setup with provider null (no secret) — org_manager can read the
-      // community row via RLS but the function returns NULL because there
-      // is no ciphertext to decrypt. Distinct from "no permission".
-      await clearPaymentConfig();
-      const { data, error } = await userA.client.rpc(
-        "fn_get_community_payment_secret",
-        { _community_id: FIXTURE.communityA }
-      );
-      expect(error).toBeNull();
-      expect(data).toBeNull();
-    });
+  // A grant-layer refusal surfaces as 42501 / "permission denied", or as
+  // PGRST202 once PostgREST's schema cache filters the function out for the
+  // role (CLAUDE.md, "PostgREST surface varies by REVOKE pattern").
+  function expectRefused(error: { code?: string; message?: string } | null): void {
+    expect(
+      error?.code === "42501" ||
+        (error?.message?.toLowerCase().includes("permission denied") ?? false) ||
+        error?.code === "PGRST202",
+      `Expected a grant-layer refusal; got ${JSON.stringify(error)}`
+    ).toBe(true);
+  }
 
-    it("org_manager (different org) gets NULL — blocked by user_can_access_org gate", async () => {
-      if (skipIfRequested()) return;
-      await setupPaymentConfig();
-      try {
-        const { data, error } = await userB.client.rpc(
-          "fn_get_community_payment_secret",
-          { _community_id: FIXTURE.communityA }
-        );
-        expect(error).toBeNull();
-        expect(data).toBeNull();
-      } finally {
-        await clearPaymentConfig();
-      }
-    });
+  async function removeMerchant(): Promise<void> {
+    const svc = await serviceClient();
+    // payment_merchant_versions references the account ON DELETE RESTRICT.
+    const versions = await svc.from("payment_merchant_versions").delete().eq("account_id", MERCHANT_ID);
+    if (versions.error) throw new Error(versions.error.message);
+    const account = await svc.from("payment_merchant_accounts").delete().eq("id", MERCHANT_ID);
+    if (account.error) throw new Error(account.error.message);
+  }
 
-    it("service_role gets plaintext (server-side path)", async () => {
-      if (skipIfRequested()) return;
-      await setupPaymentConfig();
-      try {
-        const svc = await serviceClient();
-        const { data, error } = await svc.rpc(
-          "fn_get_community_payment_secret",
-          { _community_id: FIXTURE.communityA }
-        );
-        expect(error).toBeNull();
-        expect(data).toBe(PAYMENT_SECRET_PLAINTEXT);
-      } finally {
-        await clearPaymentConfig();
-      }
+  it("serves merchant credentials only to the service role", async () => {
+    if (skipIfRequested()) return;
+    const svc = await serviceClient();
+    const { data: encrypted, error: encErr } = await svc.rpc("fn_ems_encrypt_secret", {
+      p_plaintext: MERCHANT_SECRET,
     });
-
-    it("userC (no role) gets NULL", async () => {
-      if (skipIfRequested()) return;
-      await setupPaymentConfig();
-      try {
-        const { data, error } = await userC.client.rpc(
-          "fn_get_community_payment_secret",
-          { _community_id: FIXTURE.communityA }
-        );
-        expect(error).toBeNull();
-        expect(data).toBeNull();
-      } finally {
-        await clearPaymentConfig();
-      }
+    expect(encErr).toBeNull();
+    // The payment_account_snapshot trigger writes version 1.
+    const { error: insErr } = await svc.from("payment_merchant_accounts").insert({
+      id: MERCHANT_ID,
+      org_id: FIXTURE.orgA,
+      display_name: "RLS merchant probe",
+      consumer_key: "ck_test_probe",
+      base_url: "https://cybqa.pesapal.com/pesapalv3",
+      secret_encrypted: encrypted,
     });
-
-    it("anon (no Authorization header) is denied at the grant layer (#196 + #270)", async () => {
-      if (skipIfRequested()) return;
-      await setupPaymentConfig();
-      try {
-        // Anon client: anon key only, no user JWT. As of migration 00047
-        // (#270 B2), anon has EXECUTE revoked on fn_get_community_payment_secret
-        // — the call fails at the GRANT layer with SQLSTATE 42501 BEFORE
-        // the function body runs. This is a stronger guarantee than the
-        // body-side NULL-return defense-in-depth (#196) that the function
-        // also retains. Either outcome (NULL with no error, OR 42501 error)
-        // means anon got nothing back, which is the load-bearing property.
-        // src/middleware.ts:57-64 also 401s anon /api/* requests upstream.
-        const anonKey = testAnonKey();
-        if (!anonKey) throw new Error("MGM_PUBLIC_SUPABASE_ANON_KEY not set");
-        const anonClient = createClient(LOCAL_SUPABASE_URL, anonKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
+    expect(insErr).toBeNull();
+    try {
+      const versionArgs = { _account_id: MERCHANT_ID, _version: 1, _org_id: FIXTURE.orgA };
+      for (const user of [userA, userD]) {
+        const secret = await user.client.rpc("fn_get_payment_merchant_secret", {
+          _account_id: MERCHANT_ID,
         });
-        const { data, error } = await anonClient.rpc(
-          "fn_get_community_payment_secret",
-          { _community_id: FIXTURE.communityA }
-        );
-        // Post-#270: grant-layer denial (42501). Pre-#270 contract (NULL
-        // with no error) is preserved as an accepted alternative for any
-        // future revert / partial rollback scenario.
-        const deniedAtGrant =
-          error?.code === "42501" ||
-          (error?.message?.toLowerCase().includes("permission denied") ?? false);
-        const deniedAtBody = error === null && data === null;
-        expect(
-          deniedAtGrant || deniedAtBody,
-          `Expected anon to be denied (grant-layer 42501 or body-layer NULL). Got error=${JSON.stringify(error)} data=${JSON.stringify(data)}`
-        ).toBe(true);
-      } finally {
-        await clearPaymentConfig();
+        expect(secret.data).toBeNull();
+        expectRefused(secret.error);
+        const version = await user.client.rpc("fn_payment_account_version", versionArgs);
+        expect(version.data).toBeNull();
+        expectRefused(version.error);
       }
-    });
+
+      const secret = await svc.rpc("fn_get_payment_merchant_secret", { _account_id: MERCHANT_ID });
+      expect(secret.error).toBeNull();
+      expect(secret.data).toBe(MERCHANT_SECRET);
+      const version = await svc.rpc("fn_payment_account_version", versionArgs);
+      expect(version.error).toBeNull();
+      expect((version.data as { secret?: string } | null)?.secret).toBe(MERCHANT_SECRET);
+    } finally {
+      await removeMerchant();
+    }
   });
 });
 
@@ -2061,8 +1965,8 @@ describe("RLS: Community payment provider (#115)", () => {
 // functions and re-GRANTs to authenticated + service_role. The tests below
 // assert the REVOKE fires at the grant layer (PostgreSQL returns SQLSTATE
 // 42501) BEFORE the function body runs. This is structurally different from
-// the body-side defense pattern used by `fn_get_community_payment_secret`
-// (which returns NULL with no error) — these REVOKEs surface as an error.
+// a body-side defense that returns NULL with no error — these REVOKEs
+// surface as an error.
 //
 // Authenticated happy-paths are exercised by existing tests
 // (payment_state_machine.test.ts for fn_apply_payment_event;
@@ -2140,6 +2044,7 @@ describe("B1 #268 — anon REVOKE on SECURITY DEFINER mutators", () => {
 //
 //   Secret-handling (4):  fn_ems_encrypt_secret, fn_ems_decrypt_secret,
 //                         fn_get_ems_secret, fn_get_community_payment_secret
+//                         (the last dropped in 20261110114033)
 //   RLS helpers (5):      is_super_admin, user_can_access_{org,community,
 //                         microgrid}, user_can_see_user_profile
 //   Customerapp flag (1): customerapp_enabled_for_org
@@ -2200,15 +2105,6 @@ describe("B2 #270 — SECURITY DEFINER anon REVOKE", () => {
     const anonClient = buildAnonClient();
     const { error } = await anonClient.rpc("fn_get_ems_secret", {
       _microgrid_id: "00000000-0000-4000-8000-000000000010",
-    });
-    expectAnonDenied(error);
-  });
-
-  it("anon RPC to fn_get_community_payment_secret is denied (42501)", async () => {
-    if (skipIfRequested()) return;
-    const anonClient = buildAnonClient();
-    const { error } = await anonClient.rpc("fn_get_community_payment_secret", {
-      _community_id: "00000000-0000-4000-8000-000000000011",
     });
     expectAnonDenied(error);
   });

@@ -1650,10 +1650,6 @@ export type Database = {
         }
         Returns: undefined
       }
-      fn_get_community_payment_secret: {
-        Args: { _community_id: string }
-        Returns: string
-      }
       fn_get_ems_basic_auth_password: {
         Args: { _microgrid_id: string }
         Returns: string
