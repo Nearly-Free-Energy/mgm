@@ -20,7 +20,7 @@
  * absolutely, so a menu or tooltip that must show past the box's edges has
  * to render in a portal (Radix `Portal`), or it is cut off at those edges.
  *
- * This test reads every `.tsx` file under src/app and src/components (tests
+ * This test reads every `.tsx` file under src/app, src/components and src/lib/gui (tests
  * excluded) and checks that each `<table>` has an ancestor element whose
  * className makes it scroll sideways and positions it. The nearest ancestor
  * that sets an overflow decides; responsive variants (`md:overflow-x-auto`,
@@ -60,7 +60,7 @@ import * as path from "node:path";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const ROOTS = ["src/app", "src/components"];
+const ROOTS = ["src/app", "src/components", "src/lib/gui"];
 
 /** Components whose own markup puts their table in a scroll container. */
 const CONTAINED: Record<string, string> = {

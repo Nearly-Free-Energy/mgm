@@ -387,10 +387,10 @@ describe("KitProvider", () => {
 });
 
 describe("kit", () => {
-  it("exports every GuiKit name except the views still to come", () => {
+  it("exports every GuiKit name", () => {
     const names: (keyof GuiKit)[] = [
       "useManifest", "useView", "useSignals", "useLive", "useFeed", "loadView", "search", "Link",
-      "navigate", "refresh", "usePathname", "useUiParam", "act", "open", "SignOut",
+      "navigate", "refresh", "usePathname", "useUiParam", "act", "open", "KitView", "RawView", "SignOut",
     ];
     expect(Object.keys(kit).sort()).toEqual([...names].sort());
   });

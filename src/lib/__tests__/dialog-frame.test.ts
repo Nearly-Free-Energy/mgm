@@ -6,7 +6,7 @@
  * Confirm row pinned on screen. A dialog that bypasses it is cut off or
  * unreachable on a phone.
  *
- * This test reads every .ts/.tsx file under src/app and src/components
+ * This test reads every .ts/.tsx file under src/app, src/components and src/lib/gui
  * (skipping __tests__/ and *.test.* files) with the TypeScript parser and
  * fails when:
  *
@@ -41,7 +41,7 @@ import * as path from "node:path";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const ROOTS = ["src/app", "src/components"];
+const ROOTS = ["src/app", "src/components", "src/lib/gui"];
 const FRAME_FILE = "src/components/ui/dialog.tsx";
 const FRAME_MODULE = "src/components/ui/dialog";
 

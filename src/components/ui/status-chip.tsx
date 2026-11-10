@@ -17,7 +17,7 @@ import { statusEntry, type StatusKind } from "@/lib/gui/status-maps";
 
 // The labels and tones live in src/lib/gui/status-maps.ts, which the server
 // also serves to GUIs. Chip names its tones differently; CHIP_TONE maps them.
-const CHIP_TONE: Record<Tone, NonNullable<ChipProps["tone"]>> = {
+export const CHIP_TONE: Record<Tone, NonNullable<ChipProps["tone"]>> = {
   neutral: "neutral",
   info: "neutral", // Chip has no info tone; if it gains one, map info to it
   success: "success",
