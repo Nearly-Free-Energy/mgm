@@ -56,15 +56,18 @@ function onMount(model: ViewModel, log: Recorded, report: Report): void {
   for (const ref of log.act) report("writes", `called kit.act(${ref.action}) without a person asking`);
   for (const message of controlIssues()) report("a11y", message);
   const text = pageText();
-  for (const value of valuesOf(model)) {
+  const values = valuesOf(model);
+  for (const value of values) {
     if (!value.text) continue;
     const found = holding(value.text);
     if (found.length === 0) {
       report("kinds", `does not show "${value.text}"`);
       continue;
     }
-    if (value.synthetic && !found.some((el) => markedNear(el, /synthetic/i))) report("kinds", `does not mark "${value.text}" as synthetic`);
-    if (value.derived && !found.some((el) => markedNear(el, /≈|derived|estimated/i))) report("kinds", `does not mark "${value.text}" as derived`);
+    // A mark beside another value is that value's, not this one's.
+    const others = values.map((v) => v.text).filter((t) => t && !value.text.includes(t));
+    if (value.synthetic && !found.some((el) => markedNear(el, /synthetic/i, others))) report("kinds", `does not mark "${value.text}" as synthetic`);
+    if (value.derived && !found.some((el) => markedNear(el, /≈|derived|estimated/i, others))) report("kinds", `does not mark "${value.text}" as derived`);
   }
   if (model.notice && !text.includes(model.notice.text)) report("kinds", `does not show the notice "${model.notice.text}"`);
   if (model.kind === "collection") {

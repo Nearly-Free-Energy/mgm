@@ -2,7 +2,7 @@
  * Each check fails a GUI broken in the way it guards, and no other check
  * does, so a check that cannot fail is caught here.
  */
-import { useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import type { ActionRef, GuiMeta, GuiPlugin, OverlayProps, ViewModel, ViewProps } from "../../contract";
 import { kit, Overlay } from "../../kit";
@@ -90,6 +90,32 @@ function addingTo(kind: ViewModel["kind"], Extra: (props: { model: ViewModel }) 
 const atZeroRows = (change: (body: Extract<ViewModel, { kind: "collection" }>["body"]) => object) =>
   drawing((m) => (m.kind === "collection" && m.body.rows.length === 0 ? ({ ...m, body: { ...m.body, ...change(m.body) } } as ViewModel) : m));
 const stripKey = (key: string) => drawing((m) => JSON.parse(JSON.stringify(m, (k, v) => (k === key ? undefined : v))));
+
+/**
+ * A View that draws a record's `flag` values as one plain list whose cells
+ * hold their text directly, marking the first of them only; the kit draws
+ * the rest of the model.
+ */
+function marksFirstOnly(flag: "derived" | "synthetic", mark: (text: string) => string) {
+  return function MarksFirst({ model }: ViewProps) {
+    if (model.kind !== "record") return <kit.KitView model={model} />;
+    const flagged = model.body.sections.flatMap((s) => s.fields.filter((f) => f.value[flag]));
+    const rest = { ...model, body: { sections: model.body.sections.map((s) => ({ ...s, fields: s.fields.filter((f) => !f.value[flag]) })) } };
+    return (
+      <>
+        <kit.KitView model={rest} />
+        <dl>
+          {flagged.map((f, i) => (
+            <Fragment key={f.key}>
+              <dt>{f.label}</dt>
+              <dd>{i === 0 ? mark(f.value.text) : f.value.text}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      </>
+    );
+  };
+}
 
 const DropsLowPriority = drawing((m) =>
   m.kind === "collection" ? { ...m, body: { ...m.body, columns: m.body.columns.filter((c) => c.priority !== 3) } } : m,
@@ -214,8 +240,10 @@ const BROKEN: Case[] = [
   ["a11y", "gives a tab an href", referenceGui({ tabWithHref: true }), /role="tab"/],
   ["a11y", "does not mark the current page", referenceGui({ noCurrent: true }), /without aria-current/],
   ["kinds", "drops the priority-3 column", withView(DropsLowPriority), /does not show "Meter [ABC]\d\d"/],
-  ["kinds", "leaves out the synthetic marks", withView(stripKey("synthetic")), [/^does not mark "1\.4 kW" as synthetic$/, /^does not mark "12\.3 kWh" as synthetic$/]],
+  ["kinds", "leaves out the synthetic marks", withView(stripKey("synthetic")), [/^does not mark "1\.4 kW" as synthetic$/, /^does not mark "2\.6 kWh" as synthetic$/, /^does not mark "12\.3 kWh" as synthetic$/]],
   ["kinds", "leaves out the derived marks", withView(stripKey("derived")), [/^does not mark "12\.5 %" as derived$/, /^does not mark "41\.2 kWh" as derived$/]],
+  ["kinds", "marks one synthetic value and not its neighbour", withView(marksFirstOnly("synthetic", (t) => `${t} Synthetic`)), /^does not mark "2\.6 kWh" as synthetic$/, /^record of every value/],
+  ["kinds", "marks one derived value and not its neighbour", withView(marksFirstOnly("derived", (t) => `≈ ${t}`)), /^does not mark "41\.2 kWh" as derived$/, /^record of every value/],
   ["kinds", "leaves out the empty state's title", withView(EmptyWithoutTitle), /^does not show the empty state "No households yet"$/, /^collection with no rows/],
   ["kinds", "leaves out the empty state's action", withView(EmptyWithoutAction), /^does not offer the empty state's action "Add household"$/, /^collection with no rows/],
   ["kinds", "shows the filters with no rows", withView(FiltersAtZeroRows), [/^shows the filter "Every household" with no rows$/, /^shows the filter "Owing only" with no rows$/], /^collection with no rows/],

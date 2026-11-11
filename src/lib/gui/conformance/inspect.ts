@@ -74,11 +74,21 @@ export function holding(text: string, root: Element = document.body): Element[] 
   );
 }
 
-/** Whether `el` or an ancestor within two levels has text, an aria-label or a title matching `re`. */
-export function markedNear(el: Element, re: RegExp): boolean {
+/**
+ * Whether `el` or an ancestor within two levels has text, an aria-label or a
+ * title matching `re`. The climb stops below the first ancestor whose text
+ * holds any of `others` (the other values' texts), so a mark can only be
+ * found in the part of the page that holds this value alone, whether the GUI
+ * lays values out as cells, fields, cards or tiles. Telling values apart by
+ * text rests on each value's text being found in no other value of its model
+ * (__tests__/fixtures.test.ts); if a fixture breaks that, revisit this.
+ */
+export function markedNear(el: Element, re: RegExp, others: readonly string[]): boolean {
   let at: Element | null = el;
   for (let level = 0; at && level <= 2; level++, at = at.parentElement) {
-    if ([at.textContent, at.getAttribute("aria-label"), at.getAttribute("title")].some((s) => s && re.test(s))) return true;
+    const text = at.textContent ?? "";
+    if (level > 0 && others.some((other) => text.includes(other))) return false;
+    if ([text, at.getAttribute("aria-label"), at.getAttribute("title")].some((s) => s && re.test(s))) return true;
   }
   return false;
 }

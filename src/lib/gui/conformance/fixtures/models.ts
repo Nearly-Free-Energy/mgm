@@ -111,7 +111,11 @@ const EMPTY_COLLECTION = model("collection", "community.households", "Households
   // Only the empty state offers Add household, so a GUI that leaves out its call to action is caught.
 }, { entity: SITE_REF });
 
-/** One field of each value type; derived, at and synthetic are set on some. */
+/**
+ * One field of each value type; derived, at and synthetic are set on some.
+ * Two are derived and two synthetic, so a View that marks one and leaves its
+ * neighbour unmarked is caught.
+ */
 const GALLERY = model("record", "community.household", "A household", {
   sections: [{
     title: "Every value",
@@ -123,6 +127,7 @@ const GALLERY = model("record", "community.household", "A household", {
       { key: "balance", label: "Balance", value: ugx(72500, "UGX 72,500") },
       { key: "used", label: "Used this month", value: kwh(41.2, { derived: true }) },
       { key: "load", label: "Load now", value: { t: "power", v: 1.4, unit: "kW", text: "1.4 kW", at: AT, synthetic: true } },
+      { key: "solar", label: "Solar today", value: kwh(2.6, { synthetic: true }) },
       { key: "since", label: "Connected", value: { t: "date", v: "2026-03-02", text: "2 Mar 2026" } },
       { key: "read", label: "Last reading", value: { t: "datetime", v: AT, tz: "Africa/Kampala", text: "10 Nov 2026, 14:55", at: AT } },
       { key: "account", label: "Account", value: { t: "status", v: "active", tone: "success", text: "Active" } },
