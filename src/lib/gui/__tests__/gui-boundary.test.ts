@@ -31,13 +31,19 @@
  *      src/gui/meta.ts imports only those files and contract types. Any other
  *      file directly under src/gui/ is refused until a rule for it is added
  *      here.
+ *   8. gui-tests: a GUI package's test files import only what its other
+ *      files may, plus the conformance kit, vitest and @testing-library/*,
+ *      and files of their own package, test helpers included.
+ *   9. conformance-reach: only test code imports the conformance kit
+ *      (src/lib/gui/conformance/). No other file imports it, even as types.
  *
  * Each rule is a function over a map of file paths to source text. The
  * self-tests feed it small inline sources and expect every violation to be
  * caught, so the guard is shown to fail even while the directories it guards
- * are empty. Test files are not checked themselves, because a bundle reaches
- * one only when other code imports it: the client-reach walk follows such an
- * import into the test file, and a GUI package may not import one at all.
+ * are empty. Apart from rule 8, test files are not checked themselves, because
+ * a bundle reaches one only when other code imports it: the client-reach walk
+ * follows such an import into the test file, and a GUI package may not import
+ * one at all.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
@@ -53,12 +59,16 @@ const HOST_SERVER = `${HOST}server/`;
 const HOST_CLIENT = `${HOST}client/`;
 const HOST_SHARED = `${HOST}shared/`;
 const GUI_PACKAGES = "src/gui/";
+const CONFORMANCE = "src/lib/gui/conformance/";
 
 /** What contract.ts may import types from. */
 const CONTRACT_TYPE_SOURCES = ["react", "@/lib/plugins/bundled"];
 
 /** What any GUI package may import, besides its own files and its reviewed packages. */
 const GUI_ALLOWED = ["@/lib/gui/contract", "@/lib/gui/kit", "react", "react/jsx-runtime", "react-dom"];
+
+/** What a GUI package's test files may import besides GUI_ALLOWED; also any @testing-library/ package. */
+const GUI_TEST_ALLOWED = ["@/lib/gui/conformance", "vitest"];
 
 /**
  * npm packages a GUI package may import, by package directory name. An entry
@@ -87,7 +97,9 @@ type Rule =
   | "host-layout"
   | "client-reach"
   | "gui-imports"
-  | "gui-meta";
+  | "gui-meta"
+  | "gui-tests"
+  | "conformance-reach";
 
 type Violation = { rule: Rule; file: string; message: string };
 
@@ -232,7 +244,7 @@ function resolveLocal(
   files: Files,
 ): { path: string; exists: boolean } | null {
   let base: string;
-  if (specifier.startsWith("@/")) base = `src/${specifier.slice(2)}`;
+  if (specifier.startsWith("@/")) base = path.posix.normalize(`src/${specifier.slice(2)}`);
   else if (specifier.startsWith(".")) base = path.posix.join(path.posix.dirname(from), specifier);
   else return null;
   const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`];
@@ -263,6 +275,35 @@ function isBrowserEntry(file: string, source: ts.SourceFile): boolean {
 
 function isStylesheet(specifier: string): boolean {
   return /\.(css|scss|sass|less)(\?.*)?$/.test(specifier);
+}
+
+/** Why a file of the GUI package in `packageDir` may not import `specifier`, or null. */
+function guiImportProblem(
+  file: string,
+  specifier: string,
+  packageDir: string,
+  reviewedForPackage: readonly string[],
+  test: boolean,
+): string | null {
+  if (!specifier) return "imports a computed module";
+  if (isStylesheet(specifier)) return `imports the stylesheet ${specifier}; GuiMeta.styles names it`;
+  if (GUI_ALLOWED.includes(specifier)) return null;
+  if (test && (GUI_TEST_ALLOWED.includes(specifier) || specifier.startsWith("@testing-library/"))) return null;
+  if (specifier.startsWith(".")) {
+    const target = path.posix.join(path.posix.dirname(file), specifier);
+    if (!`${target}/`.startsWith(packageDir)) return `imports ${specifier}, outside its package`;
+    if (!test && isTestPath(target)) return `imports ${specifier}, which is test code`;
+    return null;
+  }
+  if (reviewedForPackage.some((entry) => specifier === entry || specifier.startsWith(`${entry}/`))) return null;
+  const name = packageDir.slice(GUI_PACKAGES.length, -1);
+  return `imports ${specifier}, which is not on the allowlist or in REVIEWED_PACKAGES["${name}"]`;
+}
+
+/** The GUI package directory ("src/gui/<name>/") a file belongs to, or null. */
+function guiPackageDir(file: string): string | null {
+  const match = /^src\/gui\/([^/]+)\//.exec(file);
+  return match && match[1] !== "__tests__" ? `${GUI_PACKAGES}${match[1]}/` : null;
 }
 
 /** Every boundary violation in `files`. */
@@ -332,6 +373,16 @@ function boundaryViolations(
       }
     }
 
+    // 9. conformance-reach
+    if (!file.startsWith(CONFORMANCE)) {
+      for (const imported of imports) {
+        const local = resolveLocal(file, imported.specifier, input);
+        if (local && `${local.path}/`.startsWith(CONFORMANCE)) {
+          report("conformance-reach", file, `imports ${imported.specifier}; only test code imports the conformance kit`);
+        }
+      }
+    }
+
     // 6 and 7. GUI packages and their metadata
     if (file.startsWith(GUI_PACKAGES)) {
       const rest = file.slice(GUI_PACKAGES.length);
@@ -368,24 +419,21 @@ function boundaryViolations(
         }
         continue;
       }
-      const reviewedForPackage = reviewed[name] ?? [];
       for (const imported of imports) {
-        const specifier = imported.specifier;
-        let problem: string | null = null;
-        if (!specifier) problem = "imports a computed module";
-        else if (isStylesheet(specifier)) problem = `imports the stylesheet ${specifier}; GuiMeta.styles names it`;
-        else if (GUI_ALLOWED.includes(specifier)) problem = null;
-        else if (specifier.startsWith(".")) {
-          const target = path.posix.join(path.posix.dirname(file), specifier);
-          if (!`${target}/`.startsWith(packageDir)) problem = `imports ${specifier}, outside its package`;
-          else if (isTestPath(target)) problem = `imports ${specifier}, which is test code`;
-        } else if (
-          !reviewedForPackage.some((entry) => specifier === entry || specifier.startsWith(`${entry}/`))
-        ) {
-          problem = `imports ${specifier}, which is not on the allowlist or in REVIEWED_PACKAGES["${name}"]`;
-        }
+        const problem = guiImportProblem(file, imported.specifier, packageDir, reviewed[name] ?? [], false);
         if (problem) report("gui-imports", file, problem);
       }
+    }
+  }
+
+  // 8. gui-tests: test files of a GUI package.
+  for (const file of input.keys()) {
+    const packageDir = guiPackageDir(file);
+    if (!packageDir || !isTestFile(file) || file.endsWith(".d.ts")) continue;
+    const name = packageDir.slice(GUI_PACKAGES.length, -1);
+    for (const imported of importsOf(sourceOf(file))) {
+      const problem = guiImportProblem(file, imported.specifier, packageDir, reviewed[name] ?? [], true);
+      if (problem) report("gui-tests", file, problem);
     }
   }
 
@@ -520,6 +568,15 @@ describe("GUI import boundaries in this repository", () => {
     expect(byRule("gui-meta")).toEqual([]);
   });
 
+  it("GUI test files import only the allowlist, the conformance kit, vitest and testing-library", () => {
+    expect(byRule("gui-tests")).toEqual([]);
+  });
+
+  it("only test code imports the conformance kit", () => {
+    expect(files.has(`${CONFORMANCE}index.ts`)).toBe(true);
+    expect(byRule("conformance-reach")).toEqual([]);
+  });
+
   it("REVIEWED_PACKAGES names existing GUI packages and declared dependencies", () => {
     const manifest = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as {
       dependencies?: Record<string, string>;
@@ -534,7 +591,7 @@ describe("GUI import boundaries in this repository", () => {
   });
   it("every @/ module GUI packages may import is code-owned", () => {
     const codeowners = readFileSync(path.join(REPO_ROOT, ".github/CODEOWNERS"), "utf8");
-    expect(unownedAllowlistEntries(GUI_ALLOWED, codeowners)).toEqual([]);
+    expect(unownedAllowlistEntries([...GUI_ALLOWED, ...GUI_TEST_ALLOWED], codeowners)).toEqual([]);
   });
 });
 
@@ -841,6 +898,79 @@ describe("the boundary checker catches each violation (self-tests)", () => {
     it("skips test files", () => {
       expect(
         check({ "src/gui/probe/__tests__/a.test.tsx": 'import { render } from "@testing-library/react";' }),
+      ).toEqual([]);
+    });
+  });
+
+  describe("gui-tests", () => {
+    it("accepts the kit, the conformance kit, vitest, testing-library and the package's own files", () => {
+      expect(
+        check({
+          "src/gui/probe/__tests__/conformance.test.tsx": [
+            'import { describe, it, vi } from "vitest";',
+            'import { render } from "@testing-library/react";',
+            'import userEvent from "@testing-library/user-event";',
+            'import { describeGuiConformance } from "@/lib/gui/conformance";',
+            'import { kit } from "@/lib/gui/kit";',
+            'import probe from "..";',
+            'import { helper } from "./helper";',
+          ].join("\n"),
+          "src/gui/probe/index.tsx": "export default {};",
+          "src/gui/probe/__tests__/helper.ts": 'import { vi } from "vitest";\nexport const helper = vi.fn();',
+        }),
+      ).toEqual([]);
+    });
+
+    it("refuses host, app and unreviewed modules, and files outside the package", () => {
+      for (const source of [
+        'import { createClient } from "@/lib/supabase/client";',
+        'import { getMgmRuntime } from "@/lib/runtime/root";',
+        'import { crawl } from "@/lib/gui/conformance/crawl";',
+        'import Link from "next/link";',
+        'import { x } from "../../other/x";',
+        'import "../styles.css";',
+      ]) {
+        expect(rulesOf(check({ "src/gui/probe/__tests__/a.test.tsx": source })), source).toContain("gui-tests");
+      }
+    });
+
+    it("applies to test files next to the code as well", () => {
+      expect(rulesOf(check({ "src/gui/probe/a.test.tsx": 'import { createClient } from "@/lib/supabase/client";' }))).toContain(
+        "gui-tests",
+      );
+      expect(check({ "src/gui/probe/a.test.tsx": 'import { describeGuiConformance } from "@/lib/gui/conformance";' })).toEqual([]);
+    });
+
+    it("leaves tests outside GUI packages to the other rules", () => {
+      expect(check({ "src/gui/__tests__/installed.test.ts": 'import { readFileSync } from "node:fs";' })).toEqual([]);
+    });
+  });
+
+  describe("conformance-reach", () => {
+    it("refuses the conformance kit in a GUI package's non-test files", () => {
+      const rules = rulesOf(check({ "src/gui/probe/a.tsx": 'import { crawl } from "@/lib/gui/conformance";' }));
+      expect(rules).toContain("gui-imports");
+      expect(rules).toContain("conformance-reach");
+    });
+
+    it("refuses it in app and library code, by any path and even as types", () => {
+      for (const [file, source] of [
+        ["src/app/page.tsx", 'import { renderShell } from "@/lib/gui/conformance/harness";'],
+        ["src/lib/gui/kit/x.tsx", 'import type { Finding } from "../conformance";'],
+        ["src/components/x.tsx", 'export { CHECKS } from "@/lib/gui/conformance/checks";'],
+        ["src/app/page.tsx", 'import { crawl } from "@/lib/gui/kit/../conformance";'],
+      ]) {
+        expect(rulesOf(check({ [file]: source })), file).toContain("conformance-reach");
+      }
+    });
+
+    it("allows the conformance kit's own files and test files anywhere", () => {
+      expect(
+        check({
+          [`${CONFORMANCE}index.ts`]: 'export { crawl } from "./crawl";',
+          [`${CONFORMANCE}crawl.ts`]: "export const crawl = 1;",
+          "src/lib/gui/kit/__tests__/a.test.tsx": 'import { crawl } from "@/lib/gui/conformance";',
+        }),
       ).toEqual([]);
     });
   });

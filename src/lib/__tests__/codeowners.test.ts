@@ -33,6 +33,12 @@ describe("CODEOWNERS", () => {
     expect(matches).toBe(true);
   });
 
+  // The conformance kit every interface plugin runs is code-owned, on its own line.
+  it("owns the conformance kit by its own pattern", () => {
+    expect(patterns()).toContain("/src/lib/gui/conformance/");
+    expect(tracked.some((f) => f.startsWith("src/lib/gui/conformance/"))).toBe(true);
+  });
+
   // Decision 4 on #115: the GUI host's routes are code-owned.
   it("owns every file of the GUI host's routes", () => {
     const owned = (file: string) =>
