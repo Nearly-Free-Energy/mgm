@@ -74,6 +74,7 @@ function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations 
     darkInferredMinutes: 0,
     noDataMinutes: 0,
     lightsOnPct: (100 * (1440 - 60)) / 1440,
+    knownMinutes: 1440,
     soc: [
       { atMs: at(0), pct: 80 },
       { atMs: at(0, 15), pct: 78 },
@@ -88,6 +89,7 @@ function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations 
       { startMs: at(23), endMs: at(24), supply: "dark" },
     ],
     eveningHours: { battery: 3, battery_and_grid: 1, grid: 1, dark: 1, no_data: 0 },
+    flows: [],
     ...overrides,
   };
 }
