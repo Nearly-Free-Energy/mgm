@@ -135,17 +135,26 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
   return { log, pathname: fixture.pathname, unmount: cleanup };
 }
 
-/** Renders `child` inside the kit, on the first manifest fixture's page, with no Shell. */
+/**
+ * Renders `child` inside the kit, on the first manifest fixture's page, with
+ * no Shell. Like renderShell, it mounts the providers empty first, so a kit
+ * call the child makes while it renders reaches this render's log.
+ */
 export async function renderInKit(child: ReactNode, fixture: ManifestFixture = MANIFEST_FIXTURES[0]): Promise<Rendered> {
   const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
+  const tree = (content: ReactNode) => (
+    <KitRuntimeProvider runtime={runtime}>
+      <KitProvider manifest={fixture.manifest} initial={fixture.initial}>
+        {content}
+      </KitProvider>
+    </KitRuntimeProvider>
+  );
+  let rerender: (ui: ReactNode) => void = () => {};
   await act(async () => {
-    render(
-      <KitRuntimeProvider runtime={runtime}>
-        <KitProvider manifest={fixture.manifest} initial={fixture.initial}>
-          {child}
-        </KitProvider>
-      </KitRuntimeProvider>,
-    );
+    rerender = render(tree(null)).rerender;
+  });
+  await act(async () => {
+    rerender(tree(child));
   });
   await settle();
   return { log, pathname: fixture.pathname, unmount: cleanup };

@@ -15,7 +15,7 @@ export interface Acted {
 }
 
 export interface Reachable {
-  /** Every anchor's href seen, plus every navigate() the runtime recorded. */
+  /** Every anchor's href seen, plus every navigate() and open() the runtime recorded. */
   hrefs: Set<string>;
   /** The accessible name, text and aria-label of every control seen. */
   names: Set<string>;
@@ -152,5 +152,6 @@ export async function crawl(log: Recorded, opts: { depth?: number; max?: number 
     document.removeEventListener("submit", stay, true);
   }
   for (const href of log.navigate) hrefs.add(href);
+  for (const link of log.open) hrefs.add(link.href);
   return { hrefs, names, acted };
 }

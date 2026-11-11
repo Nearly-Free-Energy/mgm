@@ -42,6 +42,8 @@ export interface Broken {
   unmarkedProposal?: boolean;
   /** Adds a control that navigates to a path the host never handed out. */
   hardCodedHref?: boolean;
+  /** Adds a control that opens a link the host never handed out. */
+  openedHref?: boolean;
   /** An Overlay that leaves out the host's step. */
   overlayDropsStep?: boolean;
   /** A PublicFrame with no main landmark. */
@@ -160,6 +162,11 @@ export function referenceGui(broken: Broken = {}): GuiPlugin {
         <Main tabIndex={broken.positiveTabIndex ? 1 : undefined}>{children}</Main>
         {broken.hardCodedHref && (
           <button type="button" className={TOUCH} onClick={() => kit.navigate("/reports")}>
+            Reports
+          </button>
+        )}
+        {broken.openedHref && (
+          <button type="button" className={TOUCH} onClick={() => void kit.open({ id: "acme.reports", label: "Reports", href: "/reports" })}>
             Reports
           </button>
         )}

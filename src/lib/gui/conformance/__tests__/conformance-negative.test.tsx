@@ -145,6 +145,14 @@ function ActsOnFeed({ model }: ViewProps) {
   useEffect(() => void (model.kind === "feed" && kit.act(model.actions[0])), [model]);
   return <kit.KitView model={model} />;
 }
+function ActsOnFeedInLayoutEffect({ model }: ViewProps) {
+  useLayoutEffect(() => void (model.kind === "feed" && kit.act(model.actions[0])), [model]);
+  return <kit.KitView model={model} />;
+}
+function ActsOnFeedInRender({ model }: ViewProps) {
+  if (model.kind === "feed") void kit.act(model.actions[0]);
+  return <kit.KitView model={model} />;
+}
 const DropsTargeted = drawing((m) => mapActions(m, (refs) => refs.filter((r) => !r.from)));
 const PrintsCurrencyInBareCells = drawing((m) =>
   m.kind === "collection"
@@ -233,8 +241,11 @@ const BROKEN: Case[] = [
   ["writes", "draws a disabled action as an enabled button", withView(EnablesDisabled), [/^offers "Close period" as an enabled control while it is disabled$/, /^called kit\.act\(billing\.close-period\) on a disabled action$/]],
   ["writes", "leaves out a disabled action's reason", withView(DropsReason), /^does not show why "Close period" is unavailable$/],
   ["writes", "navigates to a path the host never handed out", referenceGui({ hardCodedHref: true }), /navigates to \/reports,/],
+  ["writes", "opens a link the host never handed out", referenceGui({ openedHref: true }), /navigates to \/reports,/],
   ["writes", "links a view to a path the host never handed out", withView(LinksOut), /^links or navigates to \/reports,/, /^feed at/],
   ["writes", "acts on mount in one view only", withView(ActsOnFeed), /^called kit\.act\(acme\.poke\) without a person asking$/, /^feed at/],
+  ["writes", "acts in a layout effect in one view only", withView(ActsOnFeedInLayoutEffect), /^called kit\.act\(acme\.poke\) without a person asking$/, /^feed at/],
+  ["writes", "acts while it renders in one view only", withView(ActsOnFeedInRender), /^called kit\.act\(acme\.poke\) without a person asking$/, /^feed at/],
   ["a11y", "has an unnamed button in a view", withView(UnnamedRowButton), /^has 1 button element\(s\) without an accessible name$/, /^collection/],
   ["unknowns", "prints nothing for a value of unknown type", withView(DropsUnknown), /Gauge at 42 of 100/],
   ["frames", "has an Overlay that leaves out the host's step", referenceGui({ overlayDropsStep: true }), /host's/],
