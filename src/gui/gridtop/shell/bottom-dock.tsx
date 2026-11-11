@@ -2,11 +2,13 @@
  * The phone dock, below 600 px: three pinned apps and More. More opens every
  * group above the dock; the sheet that replaces this panel comes with
  * Gridtop's sheets. The panel follows More in the page's order, so Tab
- * moves from More into it; Escape closes it and puts focus back on More, and
- * it closes when the page changes.
+ * moves from More into it; Escape closes it and puts focus back on More. It
+ * is open for one pathname only, so it closes when the page changes and
+ * stays closed on coming back, and following any link in the dock in the
+ * same tab closes it.
  */
 import { Ellipsis } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type MouseEvent } from "react";
 import type { Id, NavEntry } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { AppGroups, ROW_ITEM } from "./dock";
@@ -20,10 +22,15 @@ const TAB =
 
 const PINNED_ITEM: NavItemStyle = { item: TAB, icon: "gt:size-5 gt:shrink-0", label: "gt:max-w-full gt:truncate" };
 
+/** A plain left click, which follows a link in this tab; a modified one opens a new tab or window. */
+const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+
 export function BottomDock({ nav, current }: { nav: readonly NavEntry[]; current: Id | null }) {
   const pathname = kit.usePathname();
   // Open for one pathname only, so a navigation closes it.
   const [openOn, setOpenOn] = useState<string | null>(null);
+  // Forgotten once the page changes, so coming back does not reopen it.
+  if (openOn !== null && openOn !== pathname) setOpenOn(null);
   const open = openOn === pathname;
   const panel = useId();
   const more = useRef<HTMLButtonElement>(null);
@@ -31,6 +38,9 @@ export function BottomDock({ nav, current }: { nav: readonly NavEntry[]; current
     <nav
       aria-label="Apps"
       className="gt:relative gt:border-t gt:border-border gt:bg-card gt:pb-[env(safe-area-inset-bottom)] gt:medium:hidden"
+      // A link to the page already shown changes no pathname, so following any
+      // link in the dock, in the panel or a pinned tab, closes the panel too.
+      onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href]") && setOpenOn(null)}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || !open) return;
         setOpenOn(null);

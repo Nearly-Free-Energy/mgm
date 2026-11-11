@@ -222,6 +222,43 @@ describe("Gridtop's shell", () => {
     expect(within(bottom).queryByRole("link", { name: "Invoice branding" })).toBeNull();
   });
 
+  it("keeps the More panel closed when Back returns to the page it was opened on", async () => {
+    const { bottom, goTo } = await shell(fixture({ sites: 1 }));
+    const more = within(bottom).getByRole("button", { name: "More" });
+    fireEvent.click(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    await goTo("/communities/c1/invoice");
+    await goTo("/");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(within(bottom).queryByRole("link", { name: "Invoice branding" })).toBeNull();
+  });
+
+  it("closes the More panel when a link to the page already shown is followed inside it", async () => {
+    const { bottom } = await shell(fixture({ sites: 1 }));
+    const more = within(bottom).getByRole("button", { name: "More" });
+    fireEvent.click(more);
+    const panel = document.getElementById(more.getAttribute("aria-controls") ?? "");
+    expect(panel).not.toBeNull();
+    const here = within(panel!).getByRole("link", { current: "page" });
+    expect(here.getAttribute("href")).toBe("/");
+    fireEvent.click(here);
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(within(bottom).queryByRole("link", { name: "Invoice branding" })).toBeNull();
+  });
+
+  it("closes the More panel when the pinned tab for the page already shown is followed", async () => {
+    const { bottom } = await shell(fixture({ sites: 1 }));
+    const more = within(bottom).getByRole("button", { name: "More" });
+    fireEvent.click(more);
+    const panel = document.getElementById(more.getAttribute("aria-controls") ?? "");
+    const pinnedHere = within(bottom)
+      .getAllByRole("link", { current: "page" })
+      .find((link) => !panel?.contains(link));
+    expect(pinnedHere?.getAttribute("href")).toBe("/");
+    fireEvent.click(pinnedHere!);
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("gives every link and button a 44 px target on touch screens", async () => {
     const trail = [
       { label: "Org One", href: "/organizations/o1" as const },
