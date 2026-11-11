@@ -29,7 +29,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const ROOTS = ["src/app", "src/components", "src/lib"];
+const ROOTS = ["src/app", "src/components", "src/lib", "src/gui"];
 const STYLE_ROOTS = ["src/app/", "src/components/"];
 
 /** Type hints Tailwind compiles to font-size: `text-[size:…]`, `text-(length:--x)`. */
