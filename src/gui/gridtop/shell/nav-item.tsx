@@ -1,13 +1,14 @@
 /**
  * One app in the dock. It opens the entry's page when the view can fill the
  * pattern: from the place in scope, or the only place of the kind it needs.
- * Otherwise it opens the place picker (./place-picker.tsx).
+ * Otherwise it opens the place picker (./place-picker.tsx), or shows muted
+ * when no pick would fill it.
  */
 import type { NavEntry } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { cx } from "../ui/cx";
 import { hasIcon, Icon } from "../ui/icon";
-import { PlacePicker } from "./place-picker";
+import { pickStep, PlacePicker } from "./place-picker";
 
 export interface NavItemStyle {
   item: string;
@@ -21,7 +22,10 @@ export function NavItem({ entry, current, style }: { entry: NavEntry; current: b
   const label = <span className={cx("gt:min-w-0", hasIcon(entry.icon) && style.label)}>{entry.title}</span>;
   const icon = <Icon name={entry.icon} className={style.icon} />;
 
-  const href = view.href(entry);
+  // Ask first whether a place still has to be picked: href alone would fill
+  // a lone place even where it does not belong (pickStep says when).
+  const step = pickStep(view, entry);
+  const href = step ? null : view.href(entry);
   if (href) {
     return (
       <kit.Link href={href} current={current} className={style.item}>
@@ -30,10 +34,7 @@ export function NavItem({ entry, current, style }: { entry: NavEntry; current: b
       </kit.Link>
     );
   }
-  // ViewState.href fills the organization from the manifest (fillNavHref in
-  // host/client/kit-provider.tsx), so it is never the place missing; if that changes, revisit.
-  const kind = entry.needs.find((k) => !view.scope[k] && k !== "organization");
-  if (!kind) {
+  if (!step) {
     return (
       <span className={cx(style.item, "gt:text-muted-foreground")}>
         {icon}
@@ -42,7 +43,7 @@ export function NavItem({ entry, current, style }: { entry: NavEntry; current: b
     );
   }
   return (
-    <PlacePicker entry={entry} kind={kind} className={cx(style.item, "gt:w-full")}>
+    <PlacePicker entry={entry} kind={step.kind} className={cx(style.item, "gt:w-full")}>
       {icon}
       {label}
     </PlacePicker>

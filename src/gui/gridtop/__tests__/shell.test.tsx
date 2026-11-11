@@ -193,6 +193,85 @@ describe("Gridtop's shell", () => {
     ]);
   });
 
+  describe("an app that needs a community and a microgrid", () => {
+    const xsite = nav("acme.site", "Site page", "operate", 90, "/communities/[community]/microgrids/[microgrid]/x");
+    const OTHER: EntityRef = { kind: "community", id: "c2", label: "Other", href: "/communities/c2" };
+    const M3 = { ...site("m3", "North"), parent: "c2" };
+    function twoCommunities() {
+      const f = fixture({ nav: [...NAV, xsite] });
+      f.manifest.org.places = [COMMUNITY, OTHER, M1, M2, M3];
+      return f;
+    }
+
+    it("asks for the community first, then the microgrid in it", async () => {
+      expect(xsite.needs).toEqual(["community", "microgrid"]);
+      const { dock } = await shell(twoCommunities());
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a community" }), "Site page: choose a community");
+      expect(within(sheet).queryByText("No communities yet.")).toBeNull();
+      expect(within(sheet).queryAllByRole("link")).toEqual([]);
+      await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Kasana, then choose a microgrid" })));
+      const next = screen.getByRole("dialog", { name: "Site page: choose a microgrid in Kasana" });
+      expect(hrefs(next)).toEqual([
+        ["East", "/communities/c1/microgrids/m1/x"],
+        ["West", "/communities/c1/microgrids/m2/x"],
+      ]);
+    });
+
+    it("says when the community it was given has no microgrid", async () => {
+      const f = twoCommunities();
+      f.manifest.org.places = [COMMUNITY, OTHER, M1, M2];
+      const { dock } = await shell(f);
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a community" }), /Site page/);
+      await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Other, then choose a microgrid" })));
+      const next = screen.getByRole("dialog", { name: "Site page: choose a microgrid in Other" });
+      expect(within(next).getByText("No microgrids in Other yet.")).toBeTruthy();
+      expect(hrefs(next)).toEqual([["Microgrids", "/microgrids"]]);
+    });
+
+    it("skips the community when there is only one, as the link would", async () => {
+      const { dock } = await shell(fixture({ nav: [...NAV, xsite] }));
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a microgrid" }), "Site page: choose a microgrid in Kasana");
+      expect(hrefs(sheet)).toEqual([
+        ["East", "/communities/c1/microgrids/m1/x"],
+        ["West", "/communities/c1/microgrids/m2/x"],
+      ]);
+    });
+
+    it("pairs no community with another community's only microgrid", async () => {
+      const f = twoCommunities();
+      f.manifest.org.places = [COMMUNITY, OTHER, M1];
+      const { dock } = await shell(f);
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a community" }), "Site page: choose a community");
+      expect(hrefs(sheet)).toEqual([["Kasana", "/communities/c1/microgrids/m1/x"]]);
+      await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Other, then choose a microgrid" })));
+      const next = screen.getByRole("dialog", { name: "Site page: choose a microgrid in Other" });
+      expect(within(next).getByText("No microgrids in Other yet.")).toBeTruthy();
+      expect(hrefs(next)).toEqual([["Microgrids", "/microgrids"]]);
+    });
+
+    it("does not link the community in scope to another community's only microgrid", async () => {
+      const f = twoCommunities();
+      f.initial.scope = { organization: ORG, community: OTHER };
+      f.manifest.org.places = [COMMUNITY, OTHER, M1];
+      const { dock } = await shell(f);
+      expect(within(dock).queryByRole("link", { name: "Site page" })).toBeNull();
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a microgrid" }), "Site page: choose a microgrid in Other");
+      expect(within(sheet).getByText("No microgrids in Other yet.")).toBeTruthy();
+    });
+
+    it("lists only the microgrids of the community in scope", async () => {
+      const f = twoCommunities();
+      f.initial.scope = { organization: ORG, community: OTHER };
+      f.manifest.org.places = [COMMUNITY, OTHER, M1, M2, M3, { ...site("m4", "South"), parent: "c2" }];
+      const { dock } = await shell(f);
+      const sheet = await openSheet(within(dock).getByRole("button", { name: "Site page, choose a microgrid" }), "Site page: choose a microgrid in Other");
+      expect(hrefs(sheet)).toEqual([
+        ["North", "/communities/c2/microgrids/m3/x"],
+        ["South", "/communities/c2/microgrids/m4/x"],
+      ]);
+    });
+  });
+
   it("keeps an app that needs a microgrid when there is none, and says so", async () => {
     const { dock } = await shell(fixture({ sites: 0 }));
     const sheet = await openSheet(within(dock).getByRole("button", { name: "Billing, choose a microgrid" }), "Billing: choose a microgrid");
