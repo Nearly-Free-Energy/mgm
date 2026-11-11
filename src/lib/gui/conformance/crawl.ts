@@ -4,22 +4,39 @@
  * follow. Searches document.body, so portalled menus and sheets count.
  */
 import { act, fireEvent, queryAllByRole } from "@testing-library/react";
+import type { ActionRef } from "../contract";
 import type { Recorded } from "./harness";
+
+/** A kit.act call the crawl caused, with the name and description of the control it pressed. */
+export interface Acted {
+  ref: ActionRef;
+  name: string;
+  description: string;
+}
 
 export interface Reachable {
   /** Every anchor's href seen, plus every navigate() the runtime recorded. */
   hrefs: Set<string>;
   /** The accessible name, text and aria-label of every control seen. */
   names: Set<string>;
+  /** Every kit.act call a pressed control made. */
+  acted: Acted[];
 }
 
 const ROLES = ["button", "link", "menuitem", "tab", "option", "combobox"] as const;
-const CONTROLS = ["button", "a[href]", "summary", "select", "select option"].concat(ROLES.map((role) => `[role="${role}"]`)).join(",");
+export const CONTROLS = ["button", "a[href]", "summary", "select", "select option"].concat(ROLES.map((role) => `[role="${role}"]`)).join(",");
 
-const nameOf = (el: Element) => (el.getAttribute("aria-label") ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
+const squash = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
+const nameOf = (el: Element) => squash(el.getAttribute("aria-label") ?? el.textContent);
+const textOf = (ids: string | null) =>
+  squash((ids ?? "").split(/\s+/).map((id) => (id ? document.getElementById(id)?.textContent : "")).join(" "));
+/** A control's name: what aria-labelledby points at, else aria-label, else its text. */
+export const controlName = (el: Element) => textOf(el.getAttribute("aria-labelledby")) || nameOf(el);
+/** A control's description: what aria-describedby points at, and its title. */
+export const controlDescription = (el: Element) => squash(`${textOf(el.getAttribute("aria-describedby"))} ${el.getAttribute("title") ?? ""}`);
 const keyOf = (el: Element) =>
   [el.tagName, el.getAttribute("role") ?? "", nameOf(el), el.getAttribute("href") ?? ""].join("|");
-const enabled = (el: Element) =>
+export const enabled = (el: Element) =>
   !el.matches(":disabled") &&
   el.getAttribute("aria-disabled") !== "true" &&
   !(el instanceof HTMLOptionElement && el.closest("select:disabled, optgroup[disabled]"));
@@ -55,6 +72,7 @@ export async function crawl(log: Recorded, opts: { depth?: number; max?: number 
   const seen = new Set<string>();
   const queue: { key: string; path: string[] }[] = [];
   const named = new Set<string>();
+  const acted: Acted[] = [];
   const record = (name: string) => {
     names.add(name);
     return false;
@@ -79,7 +97,9 @@ export async function crawl(log: Recorded, opts: { depth?: number; max?: number 
   const limit = max * (maxDepth + 1);
   const press = async (el: Element, parent: string) => {
     activations++;
+    const before = log.act.length;
     await activate(el);
+    for (const ref of log.act.slice(before)) acted.push({ ref, name: controlName(el), description: controlDescription(el) });
     identify(parent);
   };
   const collect = (path: string[]) => {
@@ -132,5 +152,5 @@ export async function crawl(log: Recorded, opts: { depth?: number; max?: number 
     document.removeEventListener("submit", stay, true);
   }
   for (const href of log.navigate) hrefs.add(href);
-  return { hrefs, names };
+  return { hrefs, names, acted };
 }

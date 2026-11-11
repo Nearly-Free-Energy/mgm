@@ -46,9 +46,11 @@ export function KitProvider(props: {
   resolve?: ResolveView;
   /** The active GUI's Overlay and forms for the page's ActionHost; the kit's are used otherwise. */
   actions?: ActionHostSlots;
+  /** What useSignals() returns; null when left out. */
+  signals?: Signals | null;
   children: ReactNode;
 }) {
-  const { manifest, initial, resolve, actions, children } = props;
+  const { manifest, initial, resolve, actions, signals = null, children } = props;
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
@@ -70,8 +72,8 @@ export function KitProvider(props: {
   }, [unplaced, pathname, runtime]);
 
   const state = useMemo<KitState>(
-    () => ({ manifest, view: resolved, boundary, setBoundary, skew, signals: null }),
-    [manifest, resolved, boundary, skew],
+    () => ({ manifest, view: resolved, boundary, setBoundary, skew, signals }),
+    [manifest, resolved, boundary, skew, signals],
   );
   return (
     <KitContext.Provider value={state}>
