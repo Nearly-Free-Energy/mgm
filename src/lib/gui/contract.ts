@@ -453,7 +453,10 @@ export interface OverlayProps {
    * never alters it. It is an empty slot with no props: the host renders the
    * step into it through a portal, so the step's React events and context do
    * not pass through the Overlay, and an Overlay that closes on an outside
-   * click judges "outside" by DOM containment. Holds while ActionHost
+   * click judges "outside" by DOM containment. Put it inside the dialog's
+   * content element itself (for Radix, inside Dialog.Content), not in a
+   * portal of its own: a modal dialog hides everything outside its content
+   * from assistive tech and counts presses there as outside. Holds while ActionHost
    * (host/client/action-host.tsx) portals the step; if the Overlay is ever
    * handed the step itself, revisit.
    */
