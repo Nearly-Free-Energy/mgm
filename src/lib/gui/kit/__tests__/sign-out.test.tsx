@@ -55,6 +55,8 @@ afterEach(() => {
   vi.clearAllMocks();
   supabase.signOut.mockReset();
   supabase.signOut.mockImplementation(async () => ({ error: null }));
+  // Queued, not applied: it takes effect at the next import, which also
+  // re-runs the factory, so each test's first click loads the client afresh.
   vi.doMock("@/lib/supabase/client", supabase.client);
   document.cookie = "mgm-org=; Max-Age=0; Path=/";
   Object.defineProperty(window, "location", { configurable: true, value: realLocation });
@@ -136,6 +138,11 @@ describe("SignOut", () => {
   });
 
   it("stays on the page when the Supabase client fails to load", async () => {
+    // Apply the mock the last afterEach queued before queueing the failing
+    // one. Vitest resolves the mocks queued for one import in parallel and
+    // keeps whichever finishes last (vitest 4.1, BareModuleMocker.resolveMocks;
+    // recheck on an upgrade), so with both queued the working client could win.
+    await import("@/lib/supabase/client");
     vi.resetModules();
     vi.doMock("@/lib/supabase/client", () => {
       throw new Error("Failed to fetch dynamically imported module");
