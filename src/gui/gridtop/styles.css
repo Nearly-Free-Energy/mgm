@@ -24,3 +24,21 @@
   --breakpoint-medium: 37.5rem;
   --breakpoint-expanded: 80rem;
 }
+
+/* Every class in this package starts with gt:, a variant that changes
+   nothing, so this stylesheet never emits a utility that globals.css also
+   emits: globals.css has no gt variant and generates nothing for gt:flex.
+   The variant adds no condition, but it does change the class names, and
+   the 44px touch rule in globals.css finds links by their class name. So it
+   misses every link here, and each sets its own height on touch screens
+   (__tests__/shell.test.tsx checks the frame's). If that rule stops matching
+   links by class, revisit. */
+@custom-variant gt {
+  @slot;
+}
+
+/* The element's role=alert child, while that child has text: the kit's
+   Sign out message (src/lib/gui/kit/sign-out.tsx), which stays mounted and
+   empty until sign-out fails. If the kit stops rendering it as a direct,
+   empty child, revisit title-bar.tsx. */
+@custom-variant alert (& > [role="alert"]:not(:empty));

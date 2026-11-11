@@ -71,6 +71,8 @@ export function ModelView({ gui, model, kindsSince }: { gui: GuiPlugin; model: V
 export interface Rendered {
   log: Recorded;
   pathname: string;
+  /** Renders the same Shell as if the page had moved to `pathname`. */
+  goTo(pathname: string): Promise<void>;
   unmount(): void;
 }
 
@@ -115,8 +117,8 @@ export async function settle(): Promise<void> {
  */
 export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, child?: ReactNode): Promise<Rendered> {
   const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
-  const tree = (content: ReactNode) => (
-    <KitRuntimeProvider runtime={runtime}>
+  const tree = (content: ReactNode, at: KitRuntime = runtime) => (
+    <KitRuntimeProvider runtime={at}>
       <KitProvider manifest={fixture.manifest} initial={fixture.initial} signals={fixture.signals ?? null}>
         {content}
       </KitProvider>
@@ -132,7 +134,12 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
     rerender(tree(shell));
   });
   await settle();
-  return { log, pathname: fixture.pathname, unmount: cleanup };
+  const goTo = async (pathname: string) => {
+    await act(async () => {
+      rerender(tree(shell, { ...runtime, pathname }));
+    });
+  };
+  return { log, pathname: fixture.pathname, goTo, unmount: cleanup };
 }
 
 /**
@@ -140,7 +147,7 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
  * no Shell. Like renderShell, it mounts the providers empty first, so a kit
  * call the child makes while it renders reaches this render's log.
  */
-export async function renderInKit(child: ReactNode, fixture: ManifestFixture = MANIFEST_FIXTURES[0]): Promise<Rendered> {
+export async function renderInKit(child: ReactNode, fixture: ManifestFixture = MANIFEST_FIXTURES[0]): Promise<Omit<Rendered, "goTo">> {
   const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
   const tree = (content: ReactNode) => (
     <KitRuntimeProvider runtime={runtime}>
@@ -161,6 +168,6 @@ export async function renderInKit(child: ReactNode, fixture: ManifestFixture = M
 }
 
 /** Renders a model the way production picks its renderer, inside the kit and with no Shell. */
-export function renderModel(gui: GuiPlugin, model: ViewModel, kindsSince?: KindsSince): Promise<Rendered> {
+export function renderModel(gui: GuiPlugin, model: ViewModel, kindsSince?: KindsSince): Promise<Omit<Rendered, "goTo">> {
   return renderInKit(<ModelView gui={gui} model={model} kindsSince={kindsSince} />);
 }
