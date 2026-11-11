@@ -1,20 +1,13 @@
 /**
  * One app in the dock. It opens the entry's page when the view can fill the
  * pattern: from the place in scope, or the only place of the kind it needs.
- * Otherwise it opens the list to choose a place from. The place picker that
- * replaces this list link comes with Gridtop's sheets.
+ * Otherwise it opens the place picker (./place-picker.tsx).
  */
-import type { CoreEntityKind, Href, NavEntry } from "@/lib/gui/contract";
+import type { NavEntry } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { cx } from "../ui/cx";
 import { hasIcon, Icon } from "../ui/icon";
-
-/**
- * The pages that list each kind of place. Community management serves both,
- * and every plugin whose pages need a place depends on it (bundled.ts), so
- * the list is on whenever such an entry is. If that dependency goes, revisit.
- */
-const PLACE_LISTS: Partial<Record<CoreEntityKind, Href>> = { microgrid: "/microgrids", community: "/communities" };
+import { PlacePicker } from "./place-picker";
 
 export interface NavItemStyle {
   item: string;
@@ -37,9 +30,10 @@ export function NavItem({ entry, current, style }: { entry: NavEntry; current: b
       </kit.Link>
     );
   }
-  const kind = entry.needs.find((k) => !view.scope[k]);
-  const list = kind && PLACE_LISTS[kind];
-  if (!list) {
+  // ViewState.href fills the organization from the manifest (fillNavHref in
+  // host/client/kit-provider.tsx), so it is never the place missing; if that changes, revisit.
+  const kind = entry.needs.find((k) => !view.scope[k] && k !== "organization");
+  if (!kind) {
     return (
       <span className={cx(style.item, "gt:text-muted-foreground")}>
         {icon}
@@ -48,10 +42,9 @@ export function NavItem({ entry, current, style }: { entry: NavEntry; current: b
     );
   }
   return (
-    <kit.Link href={list} current={current} className={style.item}>
+    <PlacePicker entry={entry} kind={kind} className={cx(style.item, "gt:w-full")}>
       {icon}
       {label}
-      <span className="gt:sr-only">, choose a {kind}</span>
-    </kit.Link>
+    </PlacePicker>
   );
 }

@@ -1,35 +1,44 @@
 /**
- * The 48 px band above the page: the mark, which opens the dashboard, the
- * trail as plain links (only its last crumb below 600 px), and the person's
- * name with Sign out. When sign-out fails, the kit's message opens below the
- * band rather than beside the button, so it can wrap on a narrow screen.
+ * The 48 px band above the page: the mark, which opens the dashboard when
+ * the manifest's nav has one, the organization switcher, the trail as plain links (only its last crumb
+ * below 600 px), and the tray.
  */
 import { kit } from "@/lib/gui/kit";
 import { cx } from "../ui/cx";
-
-// The `alert` variant (../styles.css) reaches the kit's message only while it has text.
-const SIGN_OUT_MESSAGE =
-  "gt:alert:absolute gt:alert:top-full gt:alert:right-0 gt:alert:z-20 gt:alert:mt-1 gt:alert:w-64 " +
-  "gt:alert:rounded-md gt:alert:border gt:alert:border-border gt:alert:bg-card gt:alert:p-2";
+import { OrgSwitcher } from "./org-switcher";
+import { Tray } from "./tray";
 
 const CRUMB =
   "gt:block gt:truncate gt:rounded-sm gt:px-1 gt:leading-8 gt:text-muted-foreground gt:hover:text-foreground " +
   "gt:pointer-coarse:leading-11 gt:aria-[current=page]:font-medium gt:aria-[current=page]:text-foreground " +
   "gt:focus-visible:outline-2 gt:focus-visible:outline-ring";
 
+const MARK = "gt:inline-flex gt:size-9 gt:shrink-0 gt:items-center gt:justify-center gt:rounded-md gt:text-title gt:text-primary gt:pointer-coarse:size-11";
+
+/** The dashboard's nav id (src/lib/organization-directory/surface.ts, which keeps it if the page moves to a view); if it changes, revisit. */
+const DASHBOARD = "org.today";
+
 export function TitleBar() {
-  const { user } = kit.useManifest();
-  const { trail, title } = kit.useView();
+  const view = kit.useView();
+  const { org } = kit.useManifest();
+  const { trail, title } = view;
   const last = trail.length - 1;
+  // A GUI links only where the host points (conformance check 6), so the mark follows the dashboard's nav entry.
+  const today = org.nav.find((entry) => entry.id === DASHBOARD);
+  const home = today && view.href(today);
   return (
     <header className="gt:col-span-full gt:flex gt:h-12 gt:min-w-0 gt:items-center gt:gap-2 gt:border-b gt:border-border gt:bg-card gt:px-2 gt:medium:px-3">
-      <kit.Link
-        href="/"
-        className="gt:inline-flex gt:size-9 gt:shrink-0 gt:items-center gt:justify-center gt:rounded-md gt:text-title gt:text-primary gt:hover:bg-muted gt:pointer-coarse:size-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring"
-      >
-        <span aria-hidden="true">◆</span>
-        <span className="gt:sr-only">Dashboard</span>
-      </kit.Link>
+      {home ? (
+        <kit.Link href={home} className={cx(MARK, "gt:hover:bg-muted gt:focus-visible:outline-2 gt:focus-visible:outline-ring")}>
+          <span aria-hidden="true">◆</span>
+          <span className="gt:sr-only">{today.title}</span>
+        </kit.Link>
+      ) : (
+        <span aria-hidden="true" className={MARK}>
+          ◆
+        </span>
+      )}
+      <OrgSwitcher />
       <nav aria-label="You are here" className="gt:min-w-0 gt:flex-1">
         {trail.length === 0 ? (
           <p className="gt:truncate gt:px-1 gt:text-dense gt:font-medium gt:text-foreground">{title}</p>
@@ -53,12 +62,7 @@ export function TitleBar() {
           </ol>
         )}
       </nav>
-      <div className={cx("gt:relative gt:flex gt:shrink-0 gt:items-center gt:gap-2", SIGN_OUT_MESSAGE)}>
-        <span className="gt:hidden gt:max-w-48 gt:truncate gt:text-caption gt:text-muted-foreground gt:expanded:inline">
-          {user.name ?? user.email}
-        </span>
-        <kit.SignOut className="gt:h-9 gt:pointer-coarse:h-11 gt:rounded-md gt:border gt:border-border gt:px-3 gt:text-dense gt:text-foreground gt:hover:bg-muted gt:focus-visible:outline-2 gt:focus-visible:outline-ring" />
-      </div>
+      <Tray />
     </header>
   );
 }

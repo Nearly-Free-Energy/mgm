@@ -36,9 +36,3 @@
 @custom-variant gt {
   @slot;
 }
-
-/* The element's role=alert child, while that child has text: the kit's
-   Sign out message (src/lib/gui/kit/sign-out.tsx), which stays mounted and
-   empty until sign-out fails. If the kit stops rendering it as a direct,
-   empty child, revisit title-bar.tsx. */
-@custom-variant alert (& > [role="alert"]:not(:empty));

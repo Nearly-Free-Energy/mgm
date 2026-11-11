@@ -84,8 +84,8 @@ const GUI_TEST_ALLOWED = ["@/lib/gui/conformance", "vitest"];
  * decision: the package runs in every browser that loads the GUI.
  */
 const REVIEWED_PACKAGES: Readonly<Record<string, readonly string[]>> = {
-  // Class-name joining, and the dock's icons.
-  gridtop: ["clsx", "lucide-react"],
+  // Sheets (focus trap, Escape, focus return), class-name joining, and the dock's icons.
+  gridtop: ["@radix-ui/react-dialog", "clsx", "lucide-react"],
 };
 
 /** Imports a shared host module must not take as values, by package name. */
