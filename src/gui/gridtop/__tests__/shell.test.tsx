@@ -499,6 +499,28 @@ describe("Gridtop's shell", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("keeps the More sheet closed when Back returns to the page it was opened on", async () => {
+    const { bottom, goTo } = await shell(fixture({ sites: 1 }));
+    const more = within(bottom).getByRole("button", { name: "More" });
+    await openSheet(more, "All apps");
+    await goTo("/communities/c1/invoice");
+    await goTo("/");
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes the More sheet when a link to the page already shown is followed inside it", async () => {
+    const { bottom } = await shell(fixture({ sites: 1 }));
+    const more = within(bottom).getByRole("button", { name: "More" });
+    const sheet = await openSheet(more, "All apps");
+    const here = within(sheet).getByRole("link", { current: "page" });
+    expect(here.getAttribute("href")).toBe("/");
+    await act(async () => fireEvent.click(here));
+    await settle();
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("gives every link and button a 44 px target on touch screens", async () => {
     const trail = [
       { label: "Org One", href: "/organizations/o1" as const },
