@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
-import { validateGridTariffBands } from "@/lib/billing/site-savings";
-import { isCalendarDateKey } from "@/lib/timezone/day-key";
+import { AddGridTariffBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 import type { GridTariff } from "@/lib/types/domain";
 
 const UUID_RE =
@@ -20,9 +20,12 @@ const UUID_RE =
  *   bands: { from_hour: number; to_hour: number; rate: number }[];
  * }
  *
- * The database checks only that `bands` is an array of 1 to 24 entries; the
- * full 0–24 coverage is validated here by `validateGridTariffBands`, so every
- * write path must call it.
+ * Parsed with `AddGridTariffBody` (`@/lib/billing/schemas`); unknown keys,
+ * at the top level or in a band, are refused.
+ *
+ * The database checks only that `bands` has 1 to 24 entries;
+ * `AddGridTariffBody` checks 0-24 coverage, so anything else that writes
+ * `grid_tariffs` must parse with it too.
  *
  * Access: the user's own RLS client only. The `grid_tariffs` FOR ALL policy
  * chains through `user_can_access_microgrid`, so the insert succeeds only for
@@ -48,27 +51,11 @@ export async function POST(
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-  }
-  const { effective_from, bands } = body as Record<string, unknown>;
-
-  if (typeof effective_from !== "string" || !isCalendarDateKey(effective_from)) {
-    return NextResponse.json(
-      { error: "effective_from must be a date (YYYY-MM-DD)", field: "effective_from" },
-      { status: 400 }
-    );
-  }
-  const validated = validateGridTariffBands(bands);
-  if (!validated.ok) {
-    return NextResponse.json({ error: validated.message, field: "bands" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, AddGridTariffBody);
+  if (!parsed.ok) return parsed.response;
+  const { effective_from } = parsed.data;
+  // AddGridTariffBody has checked 0-24 coverage; store the bands in hour order.
+  const bands = [...parsed.data.bands].sort((a, b) => a.from_hour - b.from_hour);
 
   const gate = await gateRoute(supabase, {
     plugin: "billing",
@@ -95,7 +82,7 @@ export async function POST(
     .insert({
       microgrid_id: microgridId,
       effective_from,
-      bands: validated.bands,
+      bands,
     })
     .select("*")
     .single<GridTariff>();
