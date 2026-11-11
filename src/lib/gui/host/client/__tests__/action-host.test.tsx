@@ -1,6 +1,6 @@
 import { act as flush, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Children, cloneElement, isValidElement, useEffect, type ReactElement, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionRef, ActionResult, FormProps, Json, OverlayProps } from "../../../contract";
 import type { PreparedAction } from "../../server/prepare";
 import { KitProvider } from "../kit-provider";
@@ -21,6 +21,13 @@ const PATH = `/api/microgrids/${MG}/name`;
 const PROPOSAL = "00000000-0000-4000-8000-0000000000f1";
 const realLocation = window.location;
 const assign = vi.fn();
+
+// The host loads its steps and frame lazily. Importing them once here keeps
+// the first cold import out of a test's 1 s wait for the step to appear; the
+// list matches the lazy() calls in action-host.tsx, so a new one goes here too.
+beforeAll(async () => {
+  await Promise.all([import("../confirm-step"), import("../../../kit/overlay"), import("../../../kit/action-form")]);
+});
 
 beforeEach(() => {
   input.trusted = true;
@@ -1083,6 +1090,42 @@ describe("ActionHost with the kit's form", () => {
     fireEvent.click(await confirmButton());
     expect(await screen.findByText("That PIN is wrong.")).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/Pin/)));
+  });
+
+  /** A whole press, in the order a browser sends it: pointer and mouse down, focus, pointer and mouse up, click. */
+  const press = (element: Element) => {
+    fireEvent.pointerDown(element, { button: 0, pointerType: "mouse" });
+    fireEvent.mouseDown(element, { button: 0 });
+    if (element instanceof HTMLElement) flush(() => element.focus());
+    fireEvent.pointerUp(element, { button: 0, pointerType: "mouse" });
+    fireEvent.mouseUp(element, { button: 0 });
+    fireEvent.click(element, { button: 0 });
+  };
+  /** The dialog listens for presses outside it only from the tick after it opens. */
+  const settled = () => flush(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  it("keeps the default Overlay open through whole presses on the step's field and Confirm, and closes on its backdrop", async () => {
+    const { writes, sent } = mount({ body: prepared() });
+    const done = act(ref());
+    const field = await name();
+    await settled();
+    press(field);
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "Kasenge" } });
+    fireEvent.change(screen.getByLabelText(/Pin/), { target: { value: "1234" } });
+    press(await confirmButton());
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(1);
+    expect(sent()).toEqual({ name: "Kasenge", pin: "1234", microgrid_id: MG });
+
+    const again = act(ref());
+    const panel = await screen.findByRole("dialog");
+    await settled();
+    const backdrop = panel.previousElementSibling!;
+    expect(panel.contains(backdrop)).toBe(false);
+    press(backdrop);
+    await expect(again).resolves.toMatchObject({ code: "cancelled" });
+    expect(writes()).toHaveLength(1);
   });
 
   it("sends a none-level kit form at once on the person's submit", async () => {

@@ -230,6 +230,29 @@ describe("ActionForm", () => {
     expect(fieldsOf(input)).toMatchObject([{ kind: "rows", minItems: 0, maxItems: 100 }]);
   });
 
+  const MANY: Json = { type: "object", properties: { a: { type: "array", maxItems: 1000, items: { type: "object", properties: { b: { type: "string" } } } } } };
+  const rowsOf = (n: number) => Array.from({ length: n }, (_, i) => ({ b: `row ${i}` }));
+
+  it.each<[string, Json, Json]>([
+    ["more initial rows than the form renders", MANY, { a: rowsOf(101) }],
+    ["more initial rows than the array's maxItems", BANDS, { bands: rowsOf(4).map((_, i) => ({ from_hour: i, rate: 1 })) }],
+  ])("offers Cancel only, sending nothing, for %s", (_, input, initial) => {
+    const bound: { read: (() => Json | null) | null } = { read: null };
+    const { submit } = mount(input, { initial, footer: <div data-testid="host-footer" />, bind: (r) => void (bound.read = r) });
+    expect(screen.getByText(NO_FORM)).toBeTruthy();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel"]);
+    expect(screen.queryByTestId("host-footer")).toBeNull();
+    expect(bound.read?.() ?? null).toBeNull();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("renders and submits every initial row when they fill the form exactly", () => {
+    const { submit } = mount(MANY, { initial: { a: rowsOf(100) } });
+    expect(screen.getAllByRole("group", { name: /^A, row/ })).toHaveLength(100);
+    save();
+    expect(submit).toHaveBeenCalledWith({ a: rowsOf(100) });
+  });
+
   it("shows the route's error at its field, a row's cell, or above the buttons", () => {
     const { rerender } = mount(BANDS, { initial: { bands: [{ from_hour: 0, rate: 1 }, { from_hour: 6, rate: 2 }] }, error: { message: "Rates overlap.", field: "bands.1.rate" } });
     const second = within(screen.getByRole("group", { name: "Bands, row 2" }));

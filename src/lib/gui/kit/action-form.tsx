@@ -4,8 +4,9 @@
  * The kit's form for a prepared action's input, which the action host uses
  * whenever the GUI brings no form of its own. It renders the JSON Schema in
  * ActionSpec.input: flat fields (text, secret, date, number, whole number,
- * yes/no, a choice) and arrays of flat objects as rows. Any other shape gets
- * a notice and Cancel only, never a partial form.
+ * yes/no, a choice) and arrays of flat objects as rows. Any other shape, or
+ * an array that starts with more rows than its maxItems (at most 100), gets a
+ * notice and Cancel only, never a partial form.
  *
  * It never fetches or writes. Its own button hands a copy of the values to
  * the host through `submit`. For a one-step confirm the host passes its own
@@ -157,13 +158,24 @@ function rowOf(fields: Flat[], item: Json | undefined): Row {
   return { id: nextRow(), cells: Object.fromEntries(fields.map((f) => [f.key, rawOf(f, isObject(item) ? item[f.key] : undefined)])) };
 }
 
+/** The rows an array starts with: its initial value, else its default. */
+function listOf(field: Rows, given: Record<string, Json>): Json[] {
+  const list = Array.isArray(given[field.key]) ? given[field.key] : Array.isArray(field.fallback) ? field.fallback : [];
+  return list as Json[];
+}
+
+/** Whether every array starts within its maxItems; more rows than the form shows could only be sent cut short. */
+function fits(fields: Field[], initial: Json | null): boolean {
+  const given = isObject(initial) ? initial : {};
+  return fields.every((field) => field.kind !== "rows" || listOf(field, given).length <= field.maxItems);
+}
+
 function startOf(fields: Field[], initial: Json | null): Values {
   const given = isObject(initial) ? initial : {};
   return Object.fromEntries(
     fields.map((field) => {
       if (field.kind !== "rows") return [field.key, rawOf(field, given[field.key])];
-      const list = Array.isArray(given[field.key]) ? given[field.key] : Array.isArray(field.fallback) ? field.fallback : [];
-      const rows = (list as Json[]).slice(0, field.maxItems).map((item) => rowOf(field.fields, item));
+      const rows = listOf(field, given).map((item) => rowOf(field.fields, item));
       while (rows.length < field.minItems) rows.push(rowOf(field.fields, undefined));
       return [field.key, rows];
     }),
@@ -226,7 +238,10 @@ export interface ActionFormProps extends FormProps {
 }
 
 export function ActionForm({ spec, initial, busy, error, submit, cancel, footer, bind }: ActionFormProps) {
-  const [fields] = useState(() => fieldsOf(spec.input));
+  const [fields] = useState(() => {
+    const all = fieldsOf(spec.input);
+    return all && fits(all, initial) ? all : null;
+  });
   const [values, setValues] = useState<Values>(() => (fields ? startOf(fields, initial) : {}));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const form = useRef<HTMLFormElement>(null);

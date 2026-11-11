@@ -142,6 +142,13 @@ const SlotContext = createContext<HTMLElement | null>(null);
  * The one child a GUI's Overlay receives. It has no props, and rendering or
  * calling it yields an empty element with a ref object: it only places the
  * host's node where the Overlay puts it.
+ *
+ * The node goes inside this element's own DOM node. React hands an event
+ * from the step's portal to the nearest element it drew above the node in
+ * the DOM, so a Radix dialog around HostSlot counts presses in the step as
+ * inside. If the node moves anywhere else, the kit's Overlay closes on the
+ * first press in the step (test: "keeps the default Overlay open through
+ * whole presses").
  */
 function HostSlot() {
   const slot = useContext(SlotContext);
