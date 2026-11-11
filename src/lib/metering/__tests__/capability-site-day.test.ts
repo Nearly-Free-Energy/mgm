@@ -1094,6 +1094,40 @@ describe("MeteringCapability.getSiteDays", () => {
       expect(result).toMatchObject({ ok: false, status: 404, code: "metering_no_site_devices" });
       expect(getSiteSamples).not.toHaveBeenCalled();
     });
+
+    it("reads the selected provider, marks every day synthetic when it is, and reads no house meters", async () => {
+      const selectProvider = vi.fn(async () => "synthetic");
+      const getHouseMeterIds = vi.fn(async () => [METER_ID]);
+      const { capability, getSiteSamples } = setup({
+        providerName: "synthetic",
+        synthetic: true,
+        selectProvider,
+        repo: { getHouseMeterIds },
+      });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-03"));
+      if (!result.ok) throw new Error(`expected site days, got ${JSON.stringify(result)}`);
+      expect(selectProvider).toHaveBeenCalledWith(MG_ID);
+      expect(result.data).toHaveLength(3);
+      expect(result.data.every((d) => d.synthetic === true)).toBe(true);
+      // Which meters are house meters changes from day to day, and the
+      // savings figures do not use them.
+      expect(getHouseMeterIds).not.toHaveBeenCalled();
+      expect(getSiteSamples.mock.calls.every(([q]) => q.sources.houseMeters.length === 0)).toBe(true);
+      expect(result.data.every((d) => !d.sources.houses && d.housesEveningKwh === null)).toBe(true);
+    });
+
+    it("answers 503 metering_site_devices_unavailable when the devices cannot be read", async () => {
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getManagedDevices: async () => {
+            throw new Error("db down");
+          },
+        },
+      });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 503, code: "metering_site_devices_unavailable" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+    });
   });
 
   describe("chunked reads", () => {

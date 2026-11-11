@@ -134,9 +134,11 @@ export async function SavingsSection({
   const result = await readSiteDays(supabase, organizationId, microgridId, start, date);
 
   if (!result.ok) {
-    // SiteDaySection, above this one on the page, already explains both of
-    // these (the setup EmptyState and the "Metering is disabled" banner);
-    // saying it twice is noise. If that section stops showing them, revisit.
+    // SiteDaySection, above this one on the page, already explains these:
+    // the setup EmptyState, and for a 409 the "Metering is disabled" banner
+    // or, for METERING_CONFIGURATION, the "Synthetic and real edges are
+    // mixed" one. Saying it twice is noise. If that section stops showing
+    // them, or getSiteDays gains another 409, revisit.
     if (result.code === "metering_no_site_devices" || result.status === 409) return null;
     return (
       <Banner tone="destructive" title="Could not work out the savings">

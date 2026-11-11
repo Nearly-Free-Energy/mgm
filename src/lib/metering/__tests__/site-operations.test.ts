@@ -490,6 +490,21 @@ describe("computeSiteDay — carry-in from the previous day", () => {
     expect(day.dark).toEqual(rangesAt([0, 30]));
   });
 
+  it("ignores samples from before the previous day, as a single-day read would", () => {
+    // Two days back the grid was off; the previous day has no samples at all.
+    const old = makeSamples(() => ({ ...NORMAL, volts: 0, gridW: 0, soc: 15 }), {
+      startMs: DAY_START - 48 * HOUR,
+      endMs: DAY_START - 24 * HOUR,
+    });
+    const today = makeSamples((m) => (m < 30 ? null : NORMAL));
+    const inRangeRead = run(concat(old, today));
+    const alone = run(today);
+    expect(inRangeRead.dark).toEqual(alone.dark);
+    expect(inRangeRead.dark).toEqual([]);
+    expect(inRangeRead.noDataMinutes).toBe(30);
+    expect(inRangeRead.lightsOnPct).toBe(alone.lightsOnPct);
+  });
+
   it("does not start dark when the previous day ended with the grid present", () => {
     const tail = makeSamples(
       (m) => (m < -30 ? { ...NORMAL, volts: 0 } : NORMAL),

@@ -363,12 +363,15 @@ export function computeSiteDay(input: {
     )
   );
 
-  // Carry-in: the grid state and battery level at the last sample before
-  // the day.
+  // Carry-in: the grid state and battery level at the last sample of the
+  // previous day. Earlier samples are ignored, so a day works out the same
+  // whether it is read alone (from the day before) or inside a longer range.
+  const carryStartMs = startOfDayInZone(addDaysToDateKey(date, -1), timezone).getTime();
   let carried: boolean | null = null;
   let lastSoc: number | null = null;
   const byBin = new Map<number, number>();
   samples.timestamps.forEach((t, i) => {
+    if (t < carryStartMs) return;
     if (t < dayStartMs) {
       const v = samples.gridVoltageV[i];
       if (v !== null) carried = v >= GRID_PRESENT_MIN_V;
