@@ -82,6 +82,10 @@ export function holding(text: string, root: Element = document.body): Element[] 
  * lays values out as cells, fields, cards or tiles. Telling values apart by
  * text rests on each value's text being found in no other value of its model
  * (__tests__/fixtures.test.ts); if a fixture breaks that, revisit this.
+ * Two limits: `el` itself is checked without the bound, so one text node
+ * holding two values is read as one; and a mark only in a flat <dl>'s <dt>
+ * is not found, since the <dt> is not an ancestor of its value (a wrapper
+ * per field is).
  */
 export function markedNear(el: Element, re: RegExp, others: readonly string[]): boolean {
   let at: Element | null = el;
