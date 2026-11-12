@@ -110,6 +110,8 @@ describe("the GUI stylesheet build", () => {
     expect(css).toContain(".gt\\:overflow-y-auto{");
     expect(css).toMatch(/@media \(min-width:37\.5rem\)\{[^@]*\.gt\\:medium\\:p-6\{/);
     expect(css).toContain(".gt\\:pb-\\[env\\(safe-area-inset-bottom\\)\\]{padding-bottom:env(safe-area-inset-bottom)}");
+    // The status bar: expanded (1280 px wide) and tall (800 px high).
+    expect(css).toContain("@media (min-width:80rem){@media (min-height:50rem){.gt\\:expanded\\:tall\\:flex{display:flex}}}");
     expect(gzipSync(css, { level: 9 }).length).toBeLessThan(20 * 1024);
   });
 
