@@ -12,10 +12,22 @@ import { describe, it } from "vitest";
 import type { GuiPlugin } from "../contract";
 import { registerConformance } from "./describe";
 
-export { WIDTHS, type CheckId, type Finding } from "./checks";
-export { crawl, type Reachable } from "./crawl";
+export { CHECKS, WIDTHS, type CheckId, type Finding } from "./checks";
+export { crawl, type Acted, type Reachable } from "./crawl";
+export { POKE_ACTION, POKE_LABEL, withPoke } from "./fixtures/acme";
 export { MANIFEST_FIXTURES, PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
-export { ModelView, recordingRuntime, renderShell, settle, type Recorded, type Rendered } from "./harness";
+export { MODEL_FIXTURES, SIGNALS, type ModelFixture } from "./fixtures/models";
+export {
+  ModelView,
+  recordingRuntime,
+  renderInKit,
+  renderModel,
+  renderShell,
+  settle,
+  type Recorded,
+  type Rendered,
+} from "./harness";
+export { checkModel } from "./views";
 
 /** One `describe` per GUI and one `it` per check; the GUI must match its entry in GUI_META. */
 export function describeGuiConformance(gui: GuiPlugin): void {

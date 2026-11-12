@@ -3,7 +3,7 @@
  * one shows. Nav hrefs are kind-named, as the host's manifest builder writes
  * them (kindNamedHref in ../../host/shared/manifest-model.ts).
  */
-import type { Icon, InitialView, Manifest, NavEntry, OrgManifest, ViewModel } from "../../contract";
+import type { Icon, InitialView, Manifest, NavEntry, OrgManifest, Signals, ViewModel } from "../../contract";
 
 export interface ManifestFixture {
   name: string;
@@ -13,6 +13,8 @@ export interface ManifestFixture {
   pathname: string;
   /** Text the Shell must show, such as the title of an entry whose icon is unknown. */
   text?: string[];
+  /** What kit.useSignals() returns; null when left out. */
+  signals?: Signals;
 }
 
 const ORG = "00000000-0000-4000-8000-0000000000c1";
@@ -20,6 +22,9 @@ const OTHER_ORG = "00000000-0000-4000-8000-0000000000c2";
 const COMMUNITY = "00000000-0000-4000-8000-0000000000d1";
 const SITE = "00000000-0000-4000-8000-0000000000e1";
 const SECOND_SITE = "00000000-0000-4000-8000-0000000000e2";
+
+/** The ids the manifests use, for fixtures that point at the same places. */
+export const FIXTURE_IDS = { org: ORG, community: COMMUNITY, site: SITE } as const;
 
 const entry = (id: NavEntry["id"], title: string, href: NavEntry["href"], over: Partial<NavEntry> = {}): NavEntry => ({
   id,
@@ -32,6 +37,8 @@ const entry = (id: NavEntry["id"], title: string, href: NavEntry["href"], over: 
   ...over,
 });
 
+/** The dashboard's legacy entry, as src/lib/organization-directory/surface.ts declares it, so a GUI's link to it is checked. */
+const DASHBOARD = entry("org.today", "Dashboard", "/", { icon: "today", order: 5, legacy: true });
 const COMMUNITIES = entry("community.communities", "Communities", "/communities", { icon: "communities", legacy: true });
 const OPERATIONS = entry("metering.operations", "Operations", "/microgrids/[microgrid]/operations", { icon: "live", order: 20 });
 const BILLING = entry("billing.periods", "Billing", "/microgrids/[microgrid]/billing", { icon: "billing", group: "money", order: 30 });
@@ -55,7 +62,7 @@ function org(over: Partial<OrgManifest> = {}): OrgManifest {
     name: "First organization",
     href: `/organizations/${ORG}`,
     timezone: "Africa/Kampala",
-    nav: [COMMUNITIES, OPERATIONS, BILLING],
+    nav: [DASHBOARD, COMMUNITIES, OPERATIONS, BILLING],
     status: [{ id: "community.setup", label: "Setup", state: "needs-you", open: `/communities/${COMMUNITY}` }],
     places: [{ kind: "community", id: COMMUNITY, label: "Community" }, place(SITE, "First site")],
     ...over,
