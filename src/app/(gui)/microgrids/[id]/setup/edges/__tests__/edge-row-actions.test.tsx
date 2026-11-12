@@ -3,7 +3,7 @@
  * EdgeRowActions component tests (#100).
  *
  * Strategy:
- *   - Mock next/navigation (useRouter) and next/link per sidebar-nav-links pattern.
+ *   - Mock next/navigation (useRouter) and next/link.
  *   - Mock DeleteEntityButton to a sentinel div — avoids firing the real
  *     delete-preview network request.
  *   - Mock EdgeFormModal so tests don't pull in the full form tree.

@@ -40,6 +40,11 @@
  *      host, so it has no "use client"; each .tsx module of its package it
  *      imports starts with "use client", so the components it hands over
  *      are client references.
+ *  11. gui-installed: src/gui/installed.ts, the GUIs' entry points by name,
+ *      imports only ./<name> package entries and types from ./meta and the
+ *      contract. Only host pages import it: server files under src/app/,
+ *      and test code. So a GUI's components reach the pages that render it
+ *      and no other module.
  *
  * Apart from the rules, the npm packages a GUI imports must equal both its
  * REVIEWED_PACKAGES entry and its GuiMeta.dependencies (packageListProblems).
@@ -68,6 +73,9 @@ const HOST_CLIENT = `${HOST}client/`;
 const HOST_SHARED = `${HOST}shared/`;
 const GUI_PACKAGES = "src/gui/";
 const CONFORMANCE = "src/lib/gui/conformance/";
+const INSTALLED = "src/gui/installed.ts";
+/** Where the files that may import INSTALLED live (server files only). */
+const HOST_PAGES = "src/app/";
 
 /** What contract.ts may import types from. */
 const CONTRACT_TYPE_SOURCES = ["react", "@/lib/plugins/bundled"];
@@ -111,7 +119,8 @@ type Rule =
   | "gui-meta"
   | "gui-tests"
   | "conformance-reach"
-  | "gui-entry";
+  | "gui-entry"
+  | "gui-installed";
 
 type Violation = { rule: Rule; file: string; message: string };
 
@@ -395,10 +404,34 @@ function boundaryViolations(
       }
     }
 
+    // 11. gui-installed: who imports the installed GUIs
+    if (file !== INSTALLED && !(file.startsWith(HOST_PAGES) && !directives(source).includes("use client"))) {
+      for (const imported of imports) {
+        if (resolveLocal(file, imported.specifier, input)?.path === INSTALLED) {
+          report("gui-installed", file, `imports ${imported.specifier}; only host pages under ${HOST_PAGES} render a GUI`);
+        }
+      }
+    }
+
     // 6 and 7. GUI packages and their metadata
     if (file.startsWith(GUI_PACKAGES)) {
       const rest = file.slice(GUI_PACKAGES.length);
       const slash = rest.indexOf("/");
+      if (file === INSTALLED) {
+        for (const imported of imports) {
+          const typeFrom = (specifier: string) => imported.declaredTypeOnly && imported.specifier === specifier;
+          // ./meta is a file, not a package, so its values stay out.
+          const entry = /^\.\/[a-z0-9][a-z0-9-]*$/.test(imported.specifier) && imported.specifier !== "./meta";
+          if (!typeFrom("@/lib/gui/contract") && !typeFrom("./meta") && !entry) {
+            report(
+              "gui-installed",
+              file,
+              `imports ${imported.specifier || "a computed module"}; it may import only ./<name> package entries and types from ./meta and @/lib/gui/contract`,
+            );
+          }
+        }
+        continue;
+      }
       if (slash === -1) {
         if (rest !== "meta.ts") {
           report("gui-meta", file, "has no import rule; add one to gui-boundary.test.ts before adding the file");
@@ -661,6 +694,11 @@ describe("GUI import boundaries in this repository", () => {
 
   it("a GUI's index has no \"use client\", and the components it imports do", () => {
     expect(byRule("gui-entry")).toEqual([]);
+  });
+
+  it("only host pages import the installed GUIs, which import only package entries", () => {
+    expect(files.has(INSTALLED)).toBe(true);
+    expect(byRule("gui-installed")).toEqual([]);
   });
 
   it("every @/ module GUI packages may import is code-owned", () => {
@@ -1136,7 +1174,52 @@ describe("the boundary checker catches each violation (self-tests)", () => {
     });
 
     it("refuses any other file directly under src/gui", () => {
-      expect(rulesOf(check({ "src/gui/installed.ts": "export const INSTALLED = {};" }))).toContain("gui-meta");
+      expect(rulesOf(check({ "src/gui/registry.ts": "export const REGISTRY = {};" }))).toContain("gui-meta");
+    });
+  });
+
+  describe("gui-installed", () => {
+    const installed = [
+      'import type { GuiPlugin } from "@/lib/gui/contract";',
+      'import type { GuiName } from "./meta";',
+      'import { ProbeGui } from "./probe";',
+      "export const INSTALLED_GUIS: Record<GuiName, GuiPlugin> = { probe: ProbeGui };",
+    ].join("\n");
+    const layout = 'import { INSTALLED_GUIS } from "@/gui/installed";\nexport default INSTALLED_GUIS;';
+
+    it("accepts package entries and types, imported by a server page and a test", () => {
+      expect(
+        check({
+          [INSTALLED]: installed,
+          "src/app/(gui)/layout.tsx": layout,
+          "src/app/(gui)/__tests__/layout.test.tsx": layout,
+          "src/gui/__tests__/installed.test.ts": 'import { INSTALLED_GUIS } from "../installed";',
+        }),
+      ).toEqual([]);
+    });
+
+    it("refuses anything but package entries and types in installed.ts", () => {
+      for (const source of [
+        'import { GUI_META } from "./meta";',
+        'import { GUI_CONTRACT } from "@/lib/gui/contract";',
+        'import { Shell } from "./probe/shell";',
+        'import { kit } from "@/lib/gui/kit";',
+        "const probe = await import(name);",
+      ]) {
+        expect(rulesOf(check({ [INSTALLED]: source })), source).toContain("gui-installed");
+      }
+    });
+
+    it("refuses an import from outside the host pages, or from a client file among them", () => {
+      for (const [file, source] of [
+        ["src/lib/gui/host/server/render.ts", 'import "server-only";\nimport { INSTALLED_GUIS } from "@/gui/installed";'],
+        ["src/components/shell.tsx", 'import { INSTALLED_GUIS } from "@/gui/installed";'],
+        ["src/gui/probe/index.ts", 'import { INSTALLED_GUIS } from "../installed";'],
+        ["src/app/(gui)/picker.tsx", '"use client";\nimport { INSTALLED_GUIS } from "@/gui/installed";'],
+        ["src/lib/x.ts", 'import type { INSTALLED_GUIS } from "@/gui/installed";'],
+      ]) {
+        expect(rulesOf(check({ [INSTALLED]: installed, [file]: source })), file).toContain("gui-installed");
+      }
     });
   });
 });

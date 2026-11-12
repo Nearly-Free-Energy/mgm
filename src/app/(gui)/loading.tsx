@@ -1,7 +1,7 @@
 // Dashboard loading fallback.
 //
-// Sits inside (gui)/layout.tsx, so the sidebar and top bar stay on
-// screen and only the main area shows this frame while a different section
+// Sits inside (gui)/layout.tsx, so the interface shell stays on screen
+// and only the main area shows this frame while a different section
 // loads (/, /organizations, /communities, /microgrids, /settings). It also
 // lets a full page load paint the chrome before the page's own queries
 // finish.

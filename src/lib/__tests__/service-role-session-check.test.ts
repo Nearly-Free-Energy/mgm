@@ -220,7 +220,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
-      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside.",
+      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads.",
   },
   "src/app/setup/page.tsx": {
     kind: "session",

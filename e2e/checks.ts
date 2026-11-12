@@ -54,9 +54,34 @@ export async function checkTouchTargets(page: Page, root = "body") {
 }
 
 /**
- * The page never scrolls sideways, every table sits in a box of its own
- * that scrolls sideways within the screen, and every control is a 44 px
- * target. Signed-in pages also have a visible main and navigation landmark.
+ * Every link in the shell's own header and navigation, outside main, is at
+ * least 44 px tall. The shell's links carry the GUI's prefixed classes, which
+ * TOUCH_TALL (the 44 px rule in globals.css) does not select, so they are
+ * measured here instead.
+ */
+export async function checkShellLinks(page: Page) {
+  const small = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLAnchorElement>("header a, nav a, [role=banner] a, [role=navigation] a"))
+      .filter((a) => !a.closest("main, [role=main], [aria-hidden=true]"))
+      .filter((a) => {
+        const box = a.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && getComputedStyle(a).visibility !== "hidden" && box.height < 43.5;
+      })
+      .map((a) => {
+        const box = a.getBoundingClientRect();
+        const name = (a.getAttribute("aria-label") ?? a.textContent ?? "").trim().slice(0, 40);
+        return `a "${name}" ${Math.round(box.width)}x${Math.round(box.height)}`;
+      })
+  );
+  expect(small, "shell links under 44 px on a touch screen").toEqual([]);
+}
+
+/**
+ * The page never scrolls sideways, nor does its main landmark (the shell's
+ * main is what scrolls), every table sits in a box of its own that scrolls
+ * sideways within the screen, and every control is a 44 px target.
+ * Signed-in pages also have a visible main and navigation landmark, and the
+ * shell's links are 44 px targets.
  */
 export async function checkNarrowPage(page: Page, { landmarks = true } = {}) {
   // Measured after load, and only once two samples half a second apart
@@ -66,7 +91,12 @@ export async function checkNarrowPage(page: Page, { landmarks = true } = {}) {
     .poll(
       () =>
         page.evaluate(async () => {
-          const overflow = () => document.scrollingElement!.scrollWidth - document.scrollingElement!.clientWidth;
+          // The document, and main: Gridtop's main scrolls (overflow-y: auto
+          // makes overflow-x auto too), so a wide page no longer widens the
+          // document. A page without a main has only the document.
+          const sideways = (box: Element | null) => (box ? box.scrollWidth - box.clientWidth : 0);
+          const overflow = () =>
+            Math.max(sideways(document.scrollingElement), sideways(document.querySelector("main, [role=main]")));
           const first = overflow();
           await new Promise((resolve) => setTimeout(resolve, 500));
           return Math.max(first, overflow());
@@ -76,17 +106,23 @@ export async function checkNarrowPage(page: Page, { landmarks = true } = {}) {
     .toBeLessThanOrEqual(0);
   if (landmarks) {
     await expect(page.getByRole("main")).toBeVisible();
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    // The default GUI's app navigation: the rail or dock, or on a phone the
+    // bottom dock. A different MGM_GUI names its own.
+    await expect(page.getByRole("navigation", { name: "Apps" })).toBeVisible();
+    await checkShellLinks(page);
   }
   const looseTables = await page.evaluate(() =>
     Array.from(document.querySelectorAll("table"))
       .filter((table) => table.getBoundingClientRect().width > 0)
       .filter((table) => {
+        // main scrolls the whole page, so it does not count as the table's
+        // own box: a table that reaches it is loose, as one reaching body is.
+        const pageBox = (el: Element) => el === document.body || el.matches("main, [role=main]");
         let box = table.parentElement;
-        while (box && box !== document.body && !/^(auto|scroll)$/.test(getComputedStyle(box).overflowX)) {
+        while (box && !pageBox(box) && !/^(auto|scroll)$/.test(getComputedStyle(box).overflowX)) {
           box = box.parentElement;
         }
-        return !box || box === document.body || box.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5;
+        return !box || pageBox(box) || box.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5;
       })
       .map((table) => table.caption?.textContent?.trim() || "a table without a caption")
   );

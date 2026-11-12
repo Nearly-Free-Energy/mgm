@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import Link from "next/link";
 import type React from "react";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 // ── Import component under test (after mocks) ─────────────────────────────────
 
-import { OrgCard } from "../page";
+import DashboardPage, { OrgCard } from "../page";
 
 // ── Query builder helpers ─────────────────────────────────────────────────────
 //
@@ -96,5 +97,35 @@ describe("DashboardPage org-panel microgrid cards", () => {
 
     expect(html).toContain("3 households");
     expect(html).toContain("UGX");
+  });
+});
+
+type Node = { type?: unknown; props?: Record<string, unknown> };
+
+/** Every element in a returned tree, without rendering the async OrgCards. */
+function elements(node: unknown): Node[] {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (typeof node !== "object" || node === null) return [];
+  const el = node as Node;
+  return [el, ...elements(el.props?.children)];
+}
+
+describe("DashboardPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFrom.mockImplementation((table: string) =>
+      table === "organizations" ? buildQuery([ORG]) : buildQuery([])
+    );
+  });
+
+  // The shell's navigation carries the links the quick-link row held.
+  it("renders no quick-link navigation and reads no roles", async () => {
+    const tree = await DashboardPage();
+    const all = elements(tree);
+    expect(all.some((el) => el.type === OrgCard)).toBe(true);
+    expect(all.filter((el) => el.type === "nav" || el.props?.role === "navigation")).toEqual([]);
+    // The page's own links live in the OrgCards, which this tree does not expand.
+    expect(all.filter((el) => el.type === Link || el.type === "a")).toEqual([]);
+    expect(mockFrom.mock.calls.map(([table]) => table).sort()).toEqual(["mgm_plugins", "organizations"]);
   });
 });

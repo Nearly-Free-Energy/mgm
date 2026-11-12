@@ -39,15 +39,23 @@ describe("CODEOWNERS", () => {
     expect(tracked.some((f) => f.startsWith("src/lib/gui/conformance/"))).toBe(true);
   });
 
+  const owned = (file: string) =>
+    patterns().some((pattern) => {
+      const rel = pattern.replace(/^\//, "");
+      return pattern.endsWith("/") ? file.startsWith(rel) : file === rel;
+    });
+
   // Decision 4 on #115: the GUI host's routes are code-owned.
   it("owns every file of the GUI host's routes", () => {
-    const owned = (file: string) =>
-      patterns().some((pattern) => {
-        const rel = pattern.replace(/^\//, "");
-        return pattern.endsWith("/") ? file.startsWith(rel) : file === rel;
-      });
     const files = tracked.filter((f) => f.startsWith("src/app/api/gui/"));
     expect(files.length).toBeGreaterThan(0);
     expect(files.filter((f) => !owned(f))).toEqual([]);
+  });
+
+  // Decision 4 on #115: the layout that checks the session and renders the
+  // selected GUI's shell, and the list of GUIs it renders from.
+  it.each(["src/app/(gui)/layout.tsx", "src/gui/installed.ts"])("owns %s", (file) => {
+    expect(tracked).toContain(file);
+    expect(owned(file)).toBe(true);
   });
 });

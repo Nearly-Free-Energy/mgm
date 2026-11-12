@@ -1,15 +1,19 @@
 import { NoAccessLogout } from "./no-access-logout";
 
 /**
- * /no-access — account exists but has no user_roles rows.
+ * /no-access — account exists but reaches no organization.
  *
- * Outside the (gui) route group so no sidebar / top bar renders.
+ * Outside the (gui) route group so no interface shell renders.
  *
  * Triggered when:
  *   - An invited user has had their roles revoked (UX5 soft-delete).
  *   - An auth.users row exists but was never granted a role (unusual;
  *     possible if the invite RPC failed after the auth row was created
  *     and cleanup also failed).
+ *   - The user has role rows, but none reaches an organization they can
+ *     see, for example after their organization was deleted. The (gui)
+ *     layout sends them here when getManifest refuses; if that redirect
+ *     changes, revisit.
  */
 export default async function NoAccessPage() {
   return (

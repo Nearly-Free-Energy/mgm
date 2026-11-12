@@ -1,42 +1,21 @@
 /**
  * The navigation capabilities contribute for pages served outside the GUI
- * contract (`legacy: true`, src/lib/<capability>/surface.ts). Nothing renders
- * it yet; the interface shell will, in place of the sidebar and the home
- * page's quick links. Until then these checks keep it complete and stable:
- * every link the current chrome offers has an entry with today's label, every
- * released page is reached from an entry or a page link that exists, each
- * entry's `needs` matches its page's segments, and ids and groups do not
- * change, since /go/<id> links will name them. The sidebar and quick-link
- * cases read those components; when the shell deletes them, replace those
- * cases with a fixed list of their hrefs.
+ * contract (`legacy: true`, src/lib/<capability>/surface.ts), which the
+ * interface shell shows in place of the old sidebar and the home page's quick
+ * links. These checks keep it complete and stable: every link the old chrome
+ * offered has an entry with its label, every released page is reached from
+ * an entry or a page link that exists, each entry's `needs` matches its
+ * page's segments, and ids and groups do not change, since /go/<id> links
+ * will name them.
  */
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import type { Icon, NavGroup } from "@/lib/gui/contract";
 import type { NavDef } from "@/lib/gui/surface";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
-
-const mocks = vi.hoisted(() => ({ roles: [] as { role: string; scope_type: string; scope_id: string | null }[] }));
-
-vi.mock("@/lib/auth/request-access", () => ({
-  getRequestUserAccess: async () => ({ user: { id: "u1" }, roles: mocks.roles }),
-}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    from: (table: string) =>
-      table === "organizations"
-        ? { select: async () => ({ data: [{ id: "org-1" }], error: null }) }
-        : { select: () => ({ eq: async () => ({ data: [], error: null }) }) },
-  }),
-}));
-vi.mock("@/app/(gui)/sidebar-nav-links", () => ({
-  SidebarNavLinks: (props: { entries: { label: string; href: string }[] }) => props,
-}));
-
-import { SidebarNav } from "@/app/(gui)/sidebar-nav";
 
 type Legacy = Extract<NavDef, { legacy: true }>;
 type Entry = { plugin: MgmPluginName; def: Legacy };
@@ -67,8 +46,23 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
   "org.organizations": ["Organizations", "system", "organizations", 40],
 };
 
+/**
+ * The sidebar the shell replaced, as it was: its links, with Organizations
+ * shown to super admins only.
+ */
+const OLD_SIDEBAR: { label: string; href: string; superAdminOnly?: true }[] = [
+  { label: "Dashboard", href: "/" },
+  { label: "Organizations", href: "/organizations", superAdminOnly: true },
+  { label: "Communities", href: "/communities" },
+  { label: "Microgrids", href: "/microgrids" },
+  { label: "Settings", href: "/settings/profile" },
+];
+
 /** Sidebar labels the dock replaces with its own entries: Settings opened Profile, beside Users and Plugins. */
 const SIDEBAR_RENAMED: Record<string, string> = { Settings: "org.profile" };
+
+/** The hrefs of the home page's quick-link row the shell replaced. */
+const OLD_QUICK_LINKS = ["/organizations", "/communities", "/microgrids", "/settings/plugins"];
 
 const GUI = "src/app/(gui)";
 const pageFile = (pattern: string) => `${GUI}${pattern === "/" ? "" : pattern}/page.tsx`;
@@ -157,26 +151,14 @@ async function legacyNav(): Promise<Entry[]> {
   });
 }
 
-async function sidebarLinks(role: "super_admin" | "org_manager") {
-  mocks.roles = [{ role, scope_type: "org", scope_id: role === "super_admin" ? null : "org-1" }];
-  const element = (await SidebarNav()) as unknown as { props: { entries: { label: string; href: string }[] } };
-  return element.props.entries;
-}
-
-/** The hrefs in the home page's quick-link row (`<nav aria-label="Setup">`). */
-function homeQuickLinks(): string[] {
-  const row = /<nav\s+aria-label="Setup"[\s\S]*?<\/nav>/.exec(source(pageFile("/")))?.[0] ?? "";
-  return [...row.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
-}
-
 const fill = (pattern: string) => pattern.replace(/\[[^\]]+\]/g, "x");
 
 afterAll(() => resetMgmRuntimeForTests());
 
 describe("legacy navigation", () => {
-  it("keeps every link the sidebar offers, with its label", async () => {
+  it("keeps every link the old sidebar offered, with its label", async () => {
     const nav = await legacyNav();
-    for (const link of await sidebarLinks("super_admin")) {
+    for (const link of OLD_SIDEBAR) {
       const entry = nav.find((e) => e.def.href === link.href);
       expect(entry, `no nav entry for the sidebar's ${link.label}`).toBeDefined();
       const renamed = SIDEBAR_RENAMED[link.label];
@@ -185,20 +167,15 @@ describe("legacy navigation", () => {
     }
   });
 
-  it("shows super admins only what the sidebar showed only to them", async () => {
-    const all = (await sidebarLinks("super_admin")).map((l) => l.href);
-    const managers = new Set((await sidebarLinks("org_manager")).map((l) => l.href));
-    const onlyAdmins = all.filter((href) => !managers.has(href));
-    expect(onlyAdmins).toEqual(["/organizations"]);
+  it("shows super admins only what the old sidebar showed only to them", async () => {
+    const onlyAdmins = OLD_SIDEBAR.filter((link) => link.superAdminOnly).map((link) => link.href);
     const nav = await legacyNav();
     expect(nav.filter((e) => e.def.audience === "super-admin").map((e) => e.def.href)).toEqual(onlyAdmins);
   });
 
-  it("keeps every link the home page's quick-link row offers", async () => {
-    const hrefs = new Set((await legacyNav()).map((e) => e.def.href));
-    const links = homeQuickLinks();
-    expect(links.length).toBeGreaterThan(0);
-    expect(links.filter((href) => !hrefs.has(href as Legacy["href"]))).toEqual([]);
+  it("keeps every link the home page's old quick-link row offered", async () => {
+    const hrefs = new Set<string>((await legacyNav()).map((e) => e.def.href));
+    expect(OLD_QUICK_LINKS.filter((href) => !hrefs.has(href))).toEqual([]);
   });
 
   it("reaches every released catalog page from a nav entry or a page link", async () => {
