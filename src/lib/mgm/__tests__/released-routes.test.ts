@@ -91,6 +91,8 @@ describe("isReleasedRoute", () => {
     "/api/gui/prepare",
     "/api/gui/signals",
     "/api/gui/search",
+    "/go/billing.periods",
+    "/go/metering.operations",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -119,6 +121,9 @@ describe("isReleasedRoute", () => {
     "/api/gui/signals/x",
     "/api/gui/search/extra",
     "/api/gui/searches",
+    // /go takes one nav id and nothing else.
+    "/go",
+    "/go/billing.periods/extra",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -131,5 +136,6 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/api/gui/prepare/")).toBe(true);
     expect(isReleasedRoute("/api/gui/signals/")).toBe(true);
     expect(isReleasedRoute("/api/gui/search/")).toBe(true);
+    expect(isReleasedRoute("/go/billing.periods/")).toBe(true);
   });
 });

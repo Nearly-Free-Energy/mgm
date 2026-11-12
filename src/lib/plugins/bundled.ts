@@ -118,6 +118,8 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/api/org-api-tokens",
     // The GUI host's routes, which serve every plugin's contributions to the signed-in person.
     "/api/gui",
+    // The GUI host's page that opens any plugin's navigation entry by its id.
+    "/go",
   ],
   pages: [
     { path: "/", params: {} },

@@ -11,6 +11,11 @@ import { THEME_COLOR } from "@/lib/public-html/palette";
  * background, as in the root layout's viewport while pages render only the
  * light palette. If pages start following the device's dark setting,
  * revisit both.
+ *
+ * The shortcuts open navigation entries by id through /go/<nav>
+ * (src/lib/gui/host/server/go.ts), which picks the microgrid when there is
+ * only one and lists them otherwise. A page that moves keeps its nav id;
+ * manifest.test.ts checks each id is still contributed.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -32,6 +37,10 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/png",
         purpose: "maskable",
       },
+    ],
+    shortcuts: [
+      { name: "Billing", url: "/go/billing.periods" },
+      { name: "Operations", url: "/go/metering.operations" },
     ],
   };
 }
