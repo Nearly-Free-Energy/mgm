@@ -18,9 +18,9 @@ export type IpnNotificationType = "POST" | "GET";
  * Adapted from PR #58's `src/lib/pesapal/client.ts`. The major change vs. PR
  * #58: the client no longer reads `process.env.PESAPAL_*`. All credentials
  * (consumer_key, consumer_secret) and the base URL are injected via the
- * constructor. Every call site resolves config from the
- * `communities.payment_provider_config` + `fn_get_community_payment_secret`
- * path — there is no global fallback.
+ * constructor. Callers resolve config from the organization's merchant
+ * account (`payment_merchant_accounts`, secret via the service-role-only
+ * `fn_get_payment_merchant_secret`) — there is no global fallback.
  */
 export interface PesapalClientConfig {
   consumerKey: string;

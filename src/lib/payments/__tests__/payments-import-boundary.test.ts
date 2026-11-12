@@ -46,11 +46,11 @@ function isAllowedImporter(file: string): boolean {
     rel.startsWith("src/lib/payments/providers/") ||
     rel.startsWith("src/lib/payments/pesapal/") ||
     // Legacy shims under payments/ root that predate the capability
-    // (ensure-payment-link, config, factory) are grandfathered until the
+    // (factory) are grandfathered until the
     // compat routes migrate fully — but billing/ and app/ may not use them
     // to reach the provider.
     rel.startsWith("src/lib/payments/__tests__/") ||
-    ["src/lib/payments/resolve-org.ts", "src/lib/payments/config.ts", "src/lib/payments/factory.ts", "src/lib/payments/index.ts", "src/lib/payments/ensure-payment-link.ts"].includes(rel)
+    ["src/lib/payments/resolve-org.ts", "src/lib/payments/factory.ts", "src/lib/payments/index.ts"].includes(rel)
   );
 }
 

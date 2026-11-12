@@ -12,15 +12,15 @@
  *
  * Stability invariant: once minted, the slug is the row's permanent
  * indirection key. Regenerating a bill does NOT re-mint the slug
- * (contrast `buildOrderId(lineItemId)` in ensure-payment-link.ts:279, which
- * DOES mint fresh per call because Pesapal rejects merchant-reference reuse).
+ * (contrast a Pesapal merchant reference, which is minted fresh per checkout
+ * because Pesapal rejects merchant-reference reuse).
  * `fn_record_line_item_with_audit`'s DO UPDATE SET clause does NOT mention
  * `short_slug`, so re-generating a line item via runGenerationFor preserves
  * the slug.
  *
  * Concurrency: two concurrent /pdf renders against the same line item race
- * to mint. We use the UPDATE-NULL-guard + loser-path re-SELECT pattern,
- * mirroring `ensure-payment-link.ts:376-405` (#202). The UPDATE-NULL guard
+ * to mint. We use the UPDATE-NULL-guard + loser-path re-SELECT pattern
+ * (first used for the cached Pesapal URL, #202). The UPDATE-NULL guard
  * resolves the slot race; the partial UNIQUE index on `short_slug` resolves
  * cross-row collisions (the rare case where two rows generate the same
  * candidate — at 6 chars base62 = 56.8B combos, p ≈ 1-in-billion, but we
@@ -88,8 +88,7 @@ export function generateShortSlug(): string {
  * Atomically claim a short slug for the given line item, or return the slug
  * a concurrent caller already claimed for the SAME row.
  *
- * Concurrency contract (mirrors `ensure-payment-link.ts:376-405`, the #202
- * cached-pesapal-URL pattern):
+ * Concurrency contract (the #202 cached-pesapal-URL pattern):
  *
  *   1. Generate a candidate via `generateShortSlug()`.
  *   2. `UPDATE billing_line_items SET short_slug = $cand WHERE id = $lineItemId

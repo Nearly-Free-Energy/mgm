@@ -28,5 +28,13 @@ describe("merchant configuration versioned save", () => {
  });
  it("returns a conflict on a concurrent account edit", async () => { mocks.rpc.mockResolvedValue({ data: null, error: { message: "changed" } }); expect((await invoke({ consumerKey: "key", consumerSecret: "candidate", sandbox: true })).status).toBe(409); });
  it("denies other organizations before any provider probe", async () => { mocks.access.mockResolvedValue(false); expect((await invoke({ consumerKey: "key", consumerSecret: "candidate", sandbox: true })).status).toBe(403); expect(mocks.test).not.toHaveBeenCalled(); });
+ it("sends a kept secret only to the provider address the server picks", async () => {
+  mocks.rpc.mockImplementation(async (name: string) => name === "fn_get_payment_merchant_secret" ? { data: "stored-secret", error: null } : { data: account, error: null });
+  const response = await invoke({ consumerKey: "key", sandbox: false, baseUrl: "https://merchant-moved.example.com", base_url: "https://merchant-moved.example.com" });
+  expect(response.status).toBe(200);
+  expect(mocks.test).toHaveBeenCalledWith({ consumerKey: "key", consumerSecret: "stored-secret", sandbox: false });
+  expect(mocks.rpc).toHaveBeenCalledWith("fn_payment_save_account", expect.objectContaining({ _payload: expect.objectContaining({ base_url: "https://provider.test" }) }));
+  expect(JSON.stringify(mocks.rpc.mock.calls)).not.toContain("merchant-moved");
+ });
  it("requires an explicit environment", async () => { expect((await invoke({ consumerKey: "key", consumerSecret: "candidate" })).status).toBe(400); expect(mocks.test).not.toHaveBeenCalled(); });
 });

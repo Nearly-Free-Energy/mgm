@@ -5,8 +5,8 @@
  * column:
  *
  * 1. The column behaves like the other credential columns: encrypted at
- *    rest, writable only through the configuration guard, readable only
- *    through a service_role function.
+ *    rest, written only by the service role (the configuration guard since
+ *    20261110142706), readable only through a service_role function.
  * 2. The guard coverage itself is asserted statically (no database) in
  *    `src/lib/__tests__/ems-guard-enumeration.test.ts`, which reads the
  *    newest guard migration — 00062 re-issues it with the new columns in
@@ -90,21 +90,33 @@ describe.skipIf(skip)("#4 — Keycloak client secret (migration 00062)", () => {
 
   // ── Behaviour: the Keycloak columns are inside the guard ─────────────────
 
-  it("an org manager can write the Keycloak columns on their own microgrid", async () => {
+  it("an org manager writes the Keycloak identifiers; only the service role writes the secret", async () => {
     const svc = await serviceClient();
     const { data: ct } = await svc.rpc("fn_ems_encrypt_secret", {
       p_plaintext: "keycloak-client-secret",
     });
 
-    const { error } = await MGR.client
+    const { error: secretErr } = await MGR.client
+      .from("microgrids")
+      .update({ ems_keycloak_client_secret_encrypted: ct as string })
+      .eq("id", FIXTURE.microgrid);
+    expect(secretErr?.code).toBe("42501");
+
+    const { error: idErr } = await MGR.client
       .from("microgrids")
       .update({
         ems_keycloak_token_url: "https://kc.example/token",
         ems_keycloak_client_id: "mgm-client",
-        ems_keycloak_client_secret_encrypted: ct as string,
       })
       .eq("id", FIXTURE.microgrid);
+    expect(idErr).toBeNull();
 
+    // The settings route saves the secret on the service client after its
+    // own access check (saveEmsConfigForMicrogrid); the tests below read it.
+    const { error } = await svc
+      .from("microgrids")
+      .update({ ems_keycloak_client_secret_encrypted: ct as string })
+      .eq("id", FIXTURE.microgrid);
     expect(error).toBeNull();
   });
 

@@ -205,33 +205,28 @@ describe.skipIf(skip)("#321 — an org manager configures their own org", () => 
     }
   });
 
-  it("configures the whole guarded column set, not just the URL", async () => {
-    // All six columns the trigger enumerates, in one statement — a partial
-    // repoint of the trigger would show up here rather than in the URL-only
-    // case above. The ciphertext goes through the same encrypt RPC the route
-    // uses, because `microgrids_ems_aws_fields_required` rejects a cloud_aws
-    // row with a NULL secret.
-    const { data: ciphertext, error: encErr } = await MGR.client.rpc(
-      "fn_ems_encrypt_secret",
-      { p_plaintext: "test-secret-value" }
-    );
-    expect(encErr).toBeNull();
-
+  it("configures every guarded column except the saved credentials", async () => {
+    // Every guarded column an org manager's own client writes, in one
+    // statement: a partial repoint of the trigger would show up here rather
+    // than in the URL-only case above. The four saved-credential columns are
+    // left out because only the service role writes them (20261110142706);
+    // "Saved OpenEMS credentials" below covers them.
     const { error } = await MGR.client
       .from("microgrids")
       .update({
-        ems_type: "cloud_aws",
+        ems_type: "direct_url",
         ems_backend_url: "https://mgr-full-config.example.com",
         ems_aws_region: "eu-central-1",
         ems_aws_access_key_id: "AKIAEXAMPLEEXAMPLE00",
-        ems_aws_secret_access_key_encrypted: ciphertext,
+        ems_basic_auth_username: "mgm",
+        ems_keycloak_token_url: "https://keycloak.example.com/token",
+        ems_keycloak_client_id: "mgm-client",
         ems_known_edge_ids: ["edge-1", "edge-2"],
       })
       .eq("id", FIXTURE.microgridA);
     expect(error).toBeNull();
 
-    // Reset so later tests (and the direct_url fixtures) are not left in a
-    // half-configured cloud_aws state.
+    // Reset so later tests are not left with half-named identities.
     const svc = await serviceClient();
     await svc
       .from("microgrids")
@@ -239,7 +234,9 @@ describe.skipIf(skip)("#321 — an org manager configures their own org", () => 
         ems_type: "direct_url",
         ems_aws_region: null,
         ems_aws_access_key_id: null,
-        ems_aws_secret_access_key_encrypted: null,
+        ems_basic_auth_username: null,
+        ems_keycloak_token_url: null,
+        ems_keycloak_client_id: null,
       })
       .eq("id", FIXTURE.microgridA);
   });
@@ -550,5 +547,259 @@ describe.skipIf(skip)("#321 — the trigger's other behaviours are untouched", (
       .eq("user_id", MGR2.userId)
       .eq("scope_type", "org");
     expect(rows?.length).toBe(1);
+  });
+});
+
+// ── 7. Saved OpenEMS credentials (20261110142706) ─────────────────────────
+//
+// Only the service role writes the four encrypted credential columns, and a
+// saved credential stays with the address it was entered for. Uses
+// MICROGRID_B, and leaves it with no saved credentials afterwards.
+
+describe.skipIf(skip)("Saved OpenEMS credentials", () => {
+  const B = FIXTURE.microgridB;
+  const B_URL = "https://credentials-b.example.com";
+
+  async function encrypt(plaintext: string): Promise<string> {
+    const svc = await serviceClient();
+    const { data, error } = await svc.rpc("fn_ems_encrypt_secret", {
+      p_plaintext: plaintext,
+    });
+    if (error || !data) throw new Error(`[fixture] encrypt: ${error?.message}`);
+    return data as string;
+  }
+
+  async function readB() {
+    const svc = await serviceClient();
+    const { data } = await svc
+      .from("microgrids")
+      .select(
+        "ems_backend_url, ems_bearer_token_encrypted, ems_basic_auth_password_encrypted, ems_keycloak_token_url, ems_keycloak_client_secret_encrypted"
+      )
+      .eq("id", B)
+      .single();
+    return data;
+  }
+
+  /** B as direct_url at B_URL with a saved bearer token and nothing else. */
+  async function resetB(bearer: string | null) {
+    const svc = await serviceClient();
+    const { error } = await svc
+      .from("microgrids")
+      .update({
+        ems_type: "direct_url",
+        ems_backend_url: B_URL,
+        ems_basic_auth_username: null,
+        ems_basic_auth_password_encrypted: null,
+        ems_bearer_token_encrypted: bearer,
+        ems_keycloak_token_url: null,
+        ems_keycloak_client_id: null,
+        ems_keycloak_client_secret_encrypted: null,
+      })
+      .eq("id", B);
+    if (error) throw new Error(`[fixture] reset B: ${error.message}`);
+  }
+
+  afterAll(async () => {
+    if (skip) return;
+    await resetB(null);
+  });
+
+  it("an org manager's client cannot write a saved-credential column", async () => {
+    const stored = await encrypt("synthetic-bearer-1");
+    await resetB(stored);
+
+    // A value the manager encrypted themselves, and a value read back from
+    // the row: neither may be written from their own client.
+    const { data: own } = await MGR.client.rpc("fn_ems_encrypt_secret", {
+      p_plaintext: "synthetic-password-1",
+    });
+    const { data: visible } = await MGR.client
+      .from("microgrids")
+      .select("ems_bearer_token_encrypted")
+      .eq("id", B)
+      .single();
+    expect(visible?.ems_bearer_token_encrypted).toBeTruthy();
+
+    for (const value of [own, visible?.ems_bearer_token_encrypted]) {
+      const { error } = await MGR.client
+        .from("microgrids")
+        .update({
+          ems_basic_auth_username: "mgm",
+          ems_basic_auth_password_encrypted: value,
+        })
+        .eq("id", B);
+      expect(error?.code).toBe("42501");
+    }
+
+    const { error: clearErr } = await MGR.client
+      .from("microgrids")
+      .update({ ems_bearer_token_encrypted: null })
+      .eq("id", B);
+    expect(clearErr?.code).toBe("42501");
+
+    const row = await readB();
+    expect(row?.ems_basic_auth_password_encrypted).toBeNull();
+    expect(row?.ems_bearer_token_encrypted).toBe(stored);
+  });
+
+  it("a super admin's client cannot write one either", async () => {
+    const { error } = await SA.client
+      .from("microgrids")
+      .update({ ems_bearer_token_encrypted: await encrypt("synthetic-bearer-sa") })
+      .eq("id", B);
+    expect(error?.code).toBe("42501");
+  });
+
+  it("an org manager cannot insert a microgrid with a saved credential", async () => {
+    const id = "eeee2222-dddd-4000-8000-000000000001";
+    const { error } = await MGR.client.from("microgrids").insert({
+      id,
+      community_id: FIXTURE.communityMain,
+      name: "EMSCFG D",
+      ems_type: "direct_url",
+      ems_backend_url: "https://insert-d.example.com",
+      ems_bearer_token_encrypted: await encrypt("synthetic-bearer-2"),
+    });
+    expect(error?.code).toBe("42501");
+
+    const svc = await serviceClient();
+    const { data } = await svc.from("microgrids").select("id").eq("id", id);
+    expect(data).toEqual([]);
+  });
+
+  it("an org manager still inserts a microgrid with no saved credentials", async () => {
+    const id = "eeee2222-eeee-4000-8000-000000000001";
+    const { error } = await MGR.client.from("microgrids").insert({
+      id,
+      community_id: FIXTURE.communityMain,
+      name: "EMSCFG E",
+      ems_type: "direct_url",
+      ems_backend_url: "https://insert-e.example.com",
+    });
+    expect(error).toBeNull();
+    const svc = await serviceClient();
+    await svc.from("microgrids").delete().eq("id", id);
+  });
+
+  it("an org manager still saves other settings on a row with saved credentials", async () => {
+    const stored = await encrypt("synthetic-bearer-3");
+    await resetB(stored);
+    const { error } = await MGR.client
+      .from("microgrids")
+      .update({ ems_known_edge_ids: ["edge-7"], ems_backend_url: B_URL })
+      .eq("id", B);
+    expect(error).toBeNull();
+    expect((await readB())?.ems_bearer_token_encrypted).toBe(stored);
+  });
+
+  it("a backend URL change must clear or rewrite every saved credential", async () => {
+    const stored = await encrypt("synthetic-bearer-4");
+    await resetB(stored);
+    const svc = await serviceClient();
+    const NEW_URL = "https://credentials-b-new.example.com";
+
+    // The address alone, from either client.
+    const { error: mgrErr } = await MGR.client
+      .from("microgrids")
+      .update({ ems_backend_url: NEW_URL })
+      .eq("id", B);
+    expect(mgrErr).not.toBeNull();
+    const { error: svcErr } = await svc
+      .from("microgrids")
+      .update({ ems_backend_url: NEW_URL })
+      .eq("id", B);
+    expect(svcErr?.code).toBe("23514");
+    expect((await readB())?.ems_backend_url).toBe(B_URL);
+
+    // With the credential entered again.
+    const fresh = await encrypt("synthetic-bearer-4");
+    const { error: rewriteErr } = await svc
+      .from("microgrids")
+      .update({ ems_backend_url: NEW_URL, ems_bearer_token_encrypted: fresh })
+      .eq("id", B);
+    expect(rewriteErr).toBeNull();
+
+    // With the credential cleared.
+    const { error: clearErr } = await svc
+      .from("microgrids")
+      .update({ ems_backend_url: B_URL, ems_bearer_token_encrypted: null })
+      .eq("id", B);
+    expect(clearErr).toBeNull();
+    const row = await readB();
+    expect(row?.ems_backend_url).toBe(B_URL);
+    expect(row?.ems_bearer_token_encrypted).toBeNull();
+  });
+
+  it("a backend URL change succeeds once credentials left from earlier modes are cleared", async () => {
+    // B uses Basic auth but still holds a bearer token from before. This is
+    // the save the settings route sends: the new password, and every other
+    // credential column cleared.
+    await resetB(await encrypt("synthetic-stale-bearer"));
+    const svc = await serviceClient();
+    const NEW_URL = "https://credentials-b-moved.example.com";
+    const password = await encrypt("synthetic-password-1");
+    const { error: setErr } = await svc
+      .from("microgrids")
+      .update({ ems_basic_auth_username: "openems", ems_basic_auth_password_encrypted: password })
+      .eq("id", B);
+    expect(setErr).toBeNull();
+
+    const typedAgain = await encrypt("synthetic-password-1");
+    const { error: keptErr } = await svc
+      .from("microgrids")
+      .update({ ems_backend_url: NEW_URL, ems_basic_auth_password_encrypted: typedAgain })
+      .eq("id", B);
+    expect(keptErr?.code).toBe("23514"); // the old bearer token would follow
+
+    const { error: clearedErr } = await svc
+      .from("microgrids")
+      .update({
+        ems_backend_url: NEW_URL,
+        ems_basic_auth_password_encrypted: typedAgain,
+        ems_bearer_token_encrypted: null,
+        ems_aws_secret_access_key_encrypted: null,
+        ems_keycloak_client_secret_encrypted: null,
+      })
+      .eq("id", B);
+    expect(clearedErr).toBeNull();
+    const row = await readB();
+    expect(row?.ems_backend_url).toBe(NEW_URL);
+    expect(row?.ems_bearer_token_encrypted).toBeNull();
+    expect(row?.ems_basic_auth_password_encrypted).not.toBeNull();
+    await resetB(null);
+  });
+
+  it("a token URL change must clear or rewrite the Keycloak client secret", async () => {
+    await resetB(null);
+    const svc = await serviceClient();
+    const TOKEN_URL = "https://keycloak.example.com/realms/a/token";
+    const stored = await encrypt("synthetic-client-secret");
+    const { error: setErr } = await svc
+      .from("microgrids")
+      .update({
+        ems_keycloak_token_url: TOKEN_URL,
+        ems_keycloak_client_id: "mgm-client",
+        ems_keycloak_client_secret_encrypted: stored,
+      })
+      .eq("id", B);
+    expect(setErr).toBeNull();
+
+    const OTHER = "https://keycloak.example.com/realms/b/token";
+    const { error: keepErr } = await svc
+      .from("microgrids")
+      .update({ ems_keycloak_token_url: OTHER })
+      .eq("id", B);
+    expect(keepErr?.code).toBe("23514");
+
+    const { error: rewriteErr } = await svc
+      .from("microgrids")
+      .update({
+        ems_keycloak_token_url: OTHER,
+        ems_keycloak_client_secret_encrypted: await encrypt("synthetic-client-secret"),
+      })
+      .eq("id", B);
+    expect(rewriteErr).toBeNull();
+    expect((await readB())?.ems_keycloak_token_url).toBe(OTHER);
   });
 });

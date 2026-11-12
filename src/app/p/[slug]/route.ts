@@ -5,7 +5,8 @@
  * `${origin}/p/<6-8 char base62>`; the customer clicks from WhatsApp (no
  * session); we resolve the slug to a line_item_id via service-role SELECT
  * and 302 to `/api/billing-line-items/<id>/pay`, where the existing flow
- * (rate-limit, ensure-payment-link, Pesapal session redirect) takes over.
+ * (rate-limit, Payments capability checkout, Pesapal session redirect)
+ * takes over.
  *
  * Why a separate route (vs. embedding the slug-resolve inside /pay)?
  *   - Keeps the legacy `/api/billing-line-items/<uuid>/pay` route 100%
