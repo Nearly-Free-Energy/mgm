@@ -105,11 +105,11 @@ describe("the GUI stylesheet build", () => {
     // No preflight, and nothing the (gui) layout under src/app uses.
     expect(css).not.toContain("box-sizing:border-box");
     expect(css).not.toContain("md\\:w-64");
-    // The shell's own classes, behind its gt and alert variants and medium breakpoint (styles.css).
+    // The shell's own classes, behind its gt variant and medium breakpoint (styles.css).
     expect(css).toContain(".gt\\:min-w-0{");
     expect(css).toContain(".gt\\:overflow-y-auto{");
     expect(css).toMatch(/@media \(min-width:37\.5rem\)\{[^@]*\.gt\\:medium\\:p-6\{/);
-    expect(css).toContain(".gt\\:alert\\:absolute>[role=alert]:not(:empty){position:absolute}");
+    expect(css).toContain(".gt\\:pb-\\[env\\(safe-area-inset-bottom\\)\\]{padding-bottom:env(safe-area-inset-bottom)}");
     expect(gzipSync(css, { level: 9 }).length).toBeLessThan(20 * 1024);
   });
 
