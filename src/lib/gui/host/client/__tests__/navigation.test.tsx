@@ -372,6 +372,28 @@ describe("KitProvider", () => {
     expect(runtime.refresh).toHaveBeenCalledTimes(2);
   });
 
+  it("refreshes a pathname again once the manifest shows another organization", () => {
+    const runtime = recordingRuntime();
+    const resolve = () => ({ ...initial, unplaced: true });
+    const showing = (id: string): Manifest => {
+      const m = manifest();
+      m.org = { ...m.org, id };
+      return m;
+    };
+    const tree = (m: Manifest) => (
+      <KitRuntimeProvider runtime={{ ...runtime, pathname: "/organizations/b" }}>
+        <KitProvider manifest={m} initial={initial} resolve={resolve}>{null}</KitProvider>
+      </KitRuntimeProvider>
+    );
+    const { rerender } = render(tree(showing("a")));
+    rerender(tree(showing("a")));
+    expect(runtime.refresh).toHaveBeenCalledTimes(1);
+    rerender(tree(showing("b")));
+    expect(runtime.refresh).toHaveBeenCalledTimes(2);
+    rerender(tree(showing("a")));
+    expect(runtime.refresh).toHaveBeenCalledTimes(3);
+  });
+
   it("does not refresh for a place the manifest shows", () => {
     const runtime = recordingRuntime();
     const resolve = () => initial;
