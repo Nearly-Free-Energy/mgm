@@ -1,9 +1,10 @@
 /**
  * The 48 px band above the page: the mark, which opens the dashboard when
  * the manifest's nav has one, the organization switcher, the trail as plain links (only its last crumb
- * below 600 px), and the tray.
+ * below 600 px), the command palette's button, and the tray.
  */
 import { kit } from "@/lib/gui/kit";
+import { PaletteLauncher } from "../palette/launcher";
 import { cx } from "../ui/cx";
 import { OrgSwitcher } from "./org-switcher";
 import { Tray } from "./tray";
@@ -62,6 +63,7 @@ export function TitleBar() {
           </ol>
         )}
       </nav>
+      <PaletteLauncher />
       <Tray />
     </header>
   );
