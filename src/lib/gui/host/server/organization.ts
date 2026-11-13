@@ -35,6 +35,16 @@ export async function visibleOrganizations(ctx: HostContext): Promise<VisibleOrg
 }
 
 /**
+ * An organization hint as an id: trimmed and lowercased, or null when it is
+ * not a UUID. pickOrganization and /go (go.ts) both read hints through it, so
+ * they agree on which hint named the organization picked.
+ */
+export function organizationHint(hint: string | null | undefined): string | null {
+  const id = hint?.trim().toLowerCase();
+  return id && UUID_RE.test(id) ? id : null;
+}
+
+/**
  * The first hint that names one of `organizations`, in the order path,
  * `?org=`, last used; otherwise the first organization. A hint that is not a
  * UUID or names an organization the person cannot see is ignored.
@@ -42,8 +52,8 @@ export async function visibleOrganizations(ctx: HostContext): Promise<VisibleOrg
 export function pickOrganization(organizations: readonly VisibleOrganization[], hints: OrganizationHints): string | null {
   const ids = new Set(organizations.map((org) => org.id));
   for (const hint of [hints.fromPath, hints.requested, hints.preferred]) {
-    const id = hint?.trim().toLowerCase();
-    if (id && UUID_RE.test(id) && ids.has(id)) return id;
+    const id = organizationHint(hint);
+    if (id && ids.has(id)) return id;
   }
   return organizations[0]?.id ?? null;
 }

@@ -99,6 +99,20 @@ describe("goTarget", () => {
     expect(goTarget(manifest(), "org.today")).toEqual({ kind: "redirect", href: "/" });
   });
 
+  it("keeps an uppercase or padded ?org= the manifest picked, as its lowercase id", () => {
+    // pickOrganization accepts these, so the manifest is for ORG; the
+    // redirect must keep it or the cookie's organization takes over.
+    for (const requested of [ORG.toUpperCase(), `  ${ORG} `, ` ${ORG.toUpperCase()}\t`]) {
+      expect(goTarget(manifest(), "org.today", requested)).toEqual({ kind: "redirect", href: `/?org=${ORG}` });
+      expect(goTarget(manifest(), "org.plugins", requested)).toEqual({
+        kind: "redirect",
+        href: `/settings/plugins?org=${ORG}`,
+      });
+    }
+    // Another organization's id in any case is still not kept.
+    expect(goTarget(manifest(), "org.today", ` ${OTHER_ORG.toUpperCase()} `)).toEqual({ kind: "redirect", href: "/" });
+  });
+
   it("keeps the organization ?org= chose for an entry with no organization in its path", () => {
     expect(goTarget(manifest(), "org.plugins", ORG)).toEqual({
       kind: "redirect",
@@ -107,6 +121,7 @@ describe("goTarget", () => {
     expect(goTarget(manifest(), "org.today", ORG)).toEqual({ kind: "redirect", href: `/?org=${ORG}` });
     // ?org= named an organization the manifest did not pick: nothing to keep.
     expect(goTarget(manifest(), "org.plugins", OTHER_ORG)).toEqual({ kind: "redirect", href: "/settings/plugins" });
+    expect(goTarget(manifest(), "org.today", "not-an-organization")).toEqual({ kind: "redirect", href: "/" });
     // The path names the organization or a place in it already.
     expect(goTarget(manifest(), "payments.org-accounts", ORG)).toEqual({
       kind: "redirect",

@@ -19,6 +19,7 @@ import type { EntityRef, Href, Manifest, NavEntry } from "../../contract";
 import { isSameOriginPath } from "../shared/href";
 import { manifestHints } from "../shared/manifest-hints";
 import { getManifest } from "./manifest";
+import { organizationHint } from "./organization";
 
 export type GoLink = { label: string; href: Href };
 
@@ -108,8 +109,9 @@ export function goTarget(manifest: Manifest, navId: string, requested: string | 
     // A page with no organization in its path opens in the one the (gui)
     // layout picks: `?org=` before the cookie (manifest-hints.ts). Keep the
     // one `?org=` chose here, as view.ts does for attached views; if that
-    // order changes, revisit.
-    const keep = !entry.needs.includes("organization") && requested === manifest.org.id;
+    // order changes, revisit. The hint is read as pickOrganization reads it,
+    // and only the manifest's own id goes into the link.
+    const keep = !entry.needs.includes("organization") && organizationHint(requested) === manifest.org.id;
     const href = keep ? (`${choices[0].href}?org=${encodeURIComponent(manifest.org.id)}` as Href) : choices[0].href;
     return { kind: "redirect", href };
   }
