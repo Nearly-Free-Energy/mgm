@@ -103,6 +103,25 @@ describe("Gridtop's window bar", () => {
     expect(log.open).toEqual([EXPORT]);
   });
 
+  it("leaves a modified click on a link to the browser, which opens a new tab or window", async () => {
+    withModel(MODEL);
+    const { log } = await shell();
+    for (const key of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+      let followed = false;
+      await act(async () => {
+        followed = fireEvent.click(within(bar()!).getByRole("link", { name: "Export CSV" }), { [key]: true });
+      });
+      expect(followed, key).toBe(true);
+    }
+    // A middle click raises auxclick, not click; a click with another button is left alone too.
+    let followed = false;
+    await act(async () => {
+      followed = fireEvent.click(within(bar()!).getByRole("link", { name: "Export CSV" }), { button: 1 });
+    });
+    expect(followed).toBe(true);
+    expect(log.open).toEqual([]);
+  });
+
   it("draws a link as an anchor only for an href kit.open would open", async () => {
     const opened = ["/microgrids/m1/x", "/microgrids/m1/x?format=csv#top", "tel:+256700000000", "sms:+256700000000?body=Hi%20there", "https://wa.me/256700000000"];
     const refused = [

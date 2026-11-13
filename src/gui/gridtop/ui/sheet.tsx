@@ -37,7 +37,7 @@ export const SHEET_ROW =
   "gt:focus-visible:outline-2 gt:focus-visible:outline-offset-2 gt:focus-visible:outline-ring";
 
 /** A plain left click, which follows a link in this tab; a modified one opens a new tab or window. */
-const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+export const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 export function Sheet({ title, trigger, children }: { title: string; trigger: ReactElement; children: ReactNode }) {
   const pathname = kit.usePathname();

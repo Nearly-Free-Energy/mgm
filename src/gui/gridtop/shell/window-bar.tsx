@@ -6,7 +6,8 @@
  *
  * Every write goes through kit.act, which runs the form, the confirmation
  * and the request; a disabled action shows why instead. Links open through
- * kit.open. Below 600 px it is one 44 px bar: the title opens the tabs, ⋯
+ * kit.open on a plain click; a modified click is left to the browser, which
+ * opens the href in a new tab or window. Below 600 px it is one 44 px bar: the title opens the tabs, ⋯
  * opens the actions and links, and it slides away while `main` scrolls down.
  */
 import { ChevronDown, Ellipsis } from "lucide-react";
@@ -15,7 +16,7 @@ import type { ActionRef, Href, LinkRef, ViewModel, ViewState } from "@/lib/gui/c
 import { kit } from "@/lib/gui/kit";
 import { cx } from "../ui/cx";
 import { openable } from "../ui/href";
-import { SHEET_ROW, Sheet } from "../ui/sheet";
+import { SHEET_ROW, Sheet, sameTab } from "../ui/sheet";
 
 type Tab = { title: string; href: Href; current: boolean };
 
@@ -117,6 +118,7 @@ function LinkControl({ link, className }: { link: LinkRef; className: string }) 
       href={link.href}
       className={className}
       onClick={(event) => {
+        if (!sameTab(event)) return;
         event.preventDefault();
         void kit.open(link);
       }}
