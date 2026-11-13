@@ -9,6 +9,9 @@ import { existsSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import manifest from "../manifest";
 import { THEME_COLOR } from "@/lib/public-html/palette";
+import { BILLING_SURFACE } from "@/lib/billing/surface";
+import { METERING_SURFACE } from "@/lib/metering/surface";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 
 vi.mock("next/font/google", () => ({
   Inter: () => ({ variable: "font-inter" }),
@@ -52,7 +55,19 @@ describe("web app manifest", () => {
   it("has no fields that need app support it does not have yet", () => {
     const m = manifest() as Record<string, unknown>;
     expect(m).not.toHaveProperty("display_override");
-    expect(m).not.toHaveProperty("shortcuts");
+  });
+
+  it("opens each shortcut through /go/<nav> with a nav id a plugin contributes", () => {
+    const ids = new Set(
+      [BILLING_SURFACE, METERING_SURFACE].flatMap((surface) => (surface.nav ?? []).map((entry) => entry.id)),
+    );
+    const shortcuts = manifest().shortcuts ?? [];
+    expect(shortcuts.map((s) => s.name)).toEqual(["Billing", "Operations"]);
+    for (const { url } of shortcuts) {
+      const id = /^\/go\/([^/]+)$/.exec(url)?.[1];
+      expect(id && ids.has(id as never), url).toBe(true);
+      expect(isReleasedRoute(url), url).toBe(true);
+    }
   });
 
   it("points at PNG icons in public/ of the sizes it declares, one of them maskable", () => {

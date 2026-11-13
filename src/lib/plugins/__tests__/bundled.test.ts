@@ -259,6 +259,7 @@ describe("getRouteOwner", () => {
     ["/communities/[id]/payment", PAYMENTS_PLUGIN_NAME],
     ["/communities/[id]/invoice", BILLING_PLUGIN_NAME],
     ["/settings/plugins", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+    ["/go/[nav]", ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   ])("page %s belongs to %s", (route, plugin) => {
     expect(getRouteOwner(route)?.name).toBe(plugin);
   });
