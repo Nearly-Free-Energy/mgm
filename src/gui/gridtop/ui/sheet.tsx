@@ -9,11 +9,14 @@
  *
  * Radix traps focus inside, closes on Escape or a press outside, and puts
  * focus back on the trigger. The sheet is open for one pathname only, and
- * following a link inside it in the same tab closes it.
+ * following a link inside it in the same tab closes it. Without a trigger,
+ * the caller holds the open state (`open`, `onOpenChange`) and the pathname
+ * rule, as the command palette does, and names in `returnFocus` where focus
+ * goes back to.
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import { useState, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import { kit } from "@/lib/gui/kit";
 import { cx } from "./cx";
 
@@ -38,17 +41,35 @@ export const SHEET_ROW =
 /** A plain left click, which follows a link in this tab; a modified one opens a new tab or window. */
 const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
-export function Sheet({ title, trigger, children }: { title: string; trigger: ReactElement; children: ReactNode }) {
+type SheetProps = { title: string; children: ReactNode } & (
+  | { trigger: ReactElement; open?: never; onOpenChange?: never; returnFocus?: never }
+  | { trigger?: never; open: boolean; onOpenChange(open: boolean): void; returnFocus: RefObject<HTMLElement | null> }
+);
+
+export function Sheet(props: SheetProps) {
+  const { title, trigger, children } = props;
   const pathname = kit.usePathname();
   const [openOn, setOpenOn] = useState<string | null>(null);
   // Forgotten once the page changes, so coming back does not reopen it.
   if (openOn !== null && openOn !== pathname) setOpenOn(null);
+  const controlled = props.onOpenChange !== undefined;
+  const open = controlled ? props.open : openOn === pathname;
+  const setOpen = (next: boolean) => (controlled ? props.onOpenChange(next) : setOpenOn(next ? pathname : null));
+  // With no trigger, Radix has nowhere to put focus back. Left alone if
+  // something else, such as a dialog the choice opened, has taken it.
+  const onCloseAutoFocus = (event: Event) => {
+    if (!props.returnFocus) return;
+    event.preventDefault();
+    const target = props.returnFocus.current;
+    const active = document.activeElement;
+    if (target?.isConnected && (active === null || active === document.body)) target.focus();
+  };
   return (
-    <Dialog.Root open={openOn === pathname} onOpenChange={(open) => setOpenOn(open ? pathname : null)}>
-      <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      {trigger && <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>}
       <Dialog.Portal>
         <Dialog.Overlay className={OVERLAY} />
-        <Dialog.Content aria-modal aria-describedby={undefined} className={PANEL}>
+        <Dialog.Content aria-modal aria-describedby={undefined} className={PANEL} onCloseAutoFocus={onCloseAutoFocus}>
           <div className="gt:sticky gt:top-0 gt:z-10 gt:flex gt:items-center gt:gap-2 gt:border-b gt:border-border gt:bg-card gt:py-1 gt:pr-1 gt:pl-4">
             <Dialog.Title className="gt:min-w-0 gt:flex-1 gt:truncate gt:text-title gt:font-medium">{title}</Dialog.Title>
             <Dialog.Close className="gt:inline-flex gt:size-9 gt:shrink-0 gt:items-center gt:justify-center gt:rounded-md gt:text-muted-foreground gt:hover:bg-muted gt:hover:text-foreground gt:pointer-coarse:size-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring">
@@ -57,7 +78,7 @@ export function Sheet({ title, trigger, children }: { title: string; trigger: Re
             </Dialog.Close>
           </div>
           {/* A link to the page already shown changes no pathname, so following any link closes the sheet too. */}
-          <div className="gt:p-3" onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href]") && setOpenOn(null)}>
+          <div className="gt:p-3" onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href]") && setOpen(false)}>
             {children}
           </div>
         </Dialog.Content>
