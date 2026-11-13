@@ -1,12 +1,14 @@
 /**
  * The compiled-in GUIs' metadata (src/gui/meta.ts). The runtime root installs
  * each entry at start-up and refuses one it cannot install, so these checks
- * catch a bad entry here first, with a message that names it.
+ * catch a bad entry here first, with a message that names it. The host
+ * renders each GUI from its entry point in src/gui/installed.ts.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { GUI_META } from "@/gui/meta";
+import { INSTALLED_GUIS } from "@/gui/installed";
+import { GUI_META, type GuiName } from "@/gui/meta";
 import { GUI_CONTRACT } from "@/lib/gui/contract";
 import { guiMetaSchema } from "@/lib/gui/host/server/model-schema";
 import { satisfiesContract } from "@/lib/gui/host/shared/contract-range";
@@ -22,6 +24,11 @@ const packageDependencies = (): string[] =>
 describe("compiled-in GUIs", () => {
   it("installs Gridtop", () => {
     expect(Object.keys(GUI_META)).toContain("gridtop");
+  });
+
+  it("has an entry point for each, carrying that GUI's own metadata", () => {
+    expect(Object.keys(INSTALLED_GUIS).sort()).toEqual(Object.keys(GUI_META).sort());
+    for (const [name, meta] of entries) expect(INSTALLED_GUIS[name as GuiName], name).toMatchObject(meta);
   });
 
   it("lists every GUI package that has metadata", () => {

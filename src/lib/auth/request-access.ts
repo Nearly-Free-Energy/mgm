@@ -4,9 +4,10 @@ import "server-only";
  * request-access.ts — the signed-in user and their role rows, read once per
  * Server Component render.
  *
- * React `cache()` scopes the memo to one render of one request: the dashboard
- * layout, SidebarNav and the page in the same render share a single
- * `auth.getUser()` + user_roles read, and the next request starts empty.
+ * React `cache()` scopes the memo to one render of one request: the (gui)
+ * layout, the interface manifest and the page in the same render share a
+ * single `auth.getUser()` + user_roles read, and the next request starts
+ * empty.
  * Outside a render (route handlers, tests) `cache()` memoizes nothing and
  * every call reads again, so route handlers use `@/lib/auth/access` and pass
  * on what they have already read.

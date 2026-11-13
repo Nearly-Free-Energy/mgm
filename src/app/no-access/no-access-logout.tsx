@@ -3,10 +3,9 @@
 /**
  * no-access-logout.tsx — minimal logout button for /no-access.
  *
- * We inline a dedicated client component here rather than importing the
- * dashboard's LogoutButton so the /no-access route tree is fully
- * standalone — no accidental coupling to dashboard-only context
- * providers in the future.
+ * A dedicated client component rather than the kit's SignOut, so the
+ * /no-access route tree is fully standalone: it renders outside the (gui)
+ * layout and its KitProvider.
  */
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
