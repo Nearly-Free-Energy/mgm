@@ -41,6 +41,14 @@ const PAGES_OUTSIDE_GUI = [
 ];
 
 /**
+ * The one catch-all page: the host's, which serves contributed views on
+ * their own paths behind the `(gui)` layout's redirects. Next.js prefers
+ * every other page over it, so a second catch-all would decide which paths
+ * reach it.
+ */
+const CATCH_ALL_PAGES = ["(gui)/[...path]/page.tsx"];
+
+/**
  * The former group name must not appear in any tracked text file. Applied
  * migrations are history and are not edited, and binary files are not text.
  */
@@ -90,6 +98,11 @@ describe("route groups", () => {
     expect(outside, "A page outside (gui) renders without its layout's redirects").toEqual(
       [...PAGES_OUTSIDE_GUI].sort(),
     );
+  });
+
+  it("has only the host's catch-all page, inside (gui)", () => {
+    const catchAll = pages(APP).filter((page) => /\[\[?\.\.\./.test(page));
+    expect(catchAll.sort()).toEqual(CATCH_ALL_PAGES);
   });
 
   it("scans configuration and root documents as well as src and docs", () => {

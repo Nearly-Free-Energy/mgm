@@ -358,6 +358,71 @@ describe("KitView: what every view shares", () => {
     expect(screen.getByRole("link", { name: "Savings" }).getAttribute("href")).toBe("/microgrids/m/savings");
   });
 
+  it("leaves the title, subtitle, actions and links to a shell that draws them, keeping the heading and the notice", () => {
+    const link = { id: "billing.csv" as const, label: "Export", href: "/api/billing/export.csv" as const };
+    render(
+      <KitRuntimeProvider runtime={runtime}>
+        <KitView
+          headerInShell
+          model={model({
+            subtitle: "Today",
+            actions: [ref("billing.close", "Close period")],
+            links: [link],
+            notice: { tone: "warning", text: "Readings are late" },
+          })}
+        />
+      </KitRuntimeProvider>,
+    );
+    const heading = screen.getByRole("heading", { level: 1, name: "Operations" });
+    expect(heading.className).toContain("sr-only");
+    expect(screen.queryByText("Today")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close period" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Export" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Readings are late");
+  });
+
+  it("hides only the page view's header in the shell: an embedded view keeps its title and actions", () => {
+    const inner = model({ title: "Inner", actions: [ref("billing.remind", "Remind all")] });
+    render(
+      <KitRuntimeProvider runtime={runtime}>
+        <KitView
+          headerInShell
+          model={model({
+            kind: "feed",
+            actions: [ref("billing.close", "Close period")],
+            body: { entries: [{ id: "e", at: "2026-11-10T11:00:00Z", author: { kind: "system", name: "MGM" }, text: [], embed: { type: "view", href: "/inner", model: inner } }] },
+          } as Partial<ViewModel>)}
+        />
+      </KitRuntimeProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Close period" })).toBeNull();
+    const heading = screen.getByRole("heading", { level: 2, name: "Inner" });
+    expect(heading.className).not.toContain("sr-only");
+    expect(screen.getByRole("button", { name: "Remind all" })).toBeTruthy();
+  });
+
+  it("leaves views attached as tabs to a shell that draws them, and lists the others", () => {
+    const attached: ViewModel["attached"] = [
+      { view: "billing.savings", title: "Savings", href: "/microgrids/m/savings", hint: "tab" },
+      { view: "metering.devices", title: "Devices", href: "/microgrids/m/devices", hint: "section" },
+    ];
+    const { rerender } = render(
+      <KitRuntimeProvider runtime={runtime}>
+        <KitView headerInShell model={model({ attached })} />
+      </KitRuntimeProvider>,
+    );
+    const related = screen.getByRole("navigation", { name: "Related views" });
+    expect(within(related).queryByRole("link", { name: "Savings" })).toBeNull();
+    expect(within(related).getByRole("link", { name: "Devices" })).toBeTruthy();
+
+    rerender(
+      <KitRuntimeProvider runtime={runtime}>
+        <KitView model={model({ attached })} />
+      </KitRuntimeProvider>,
+    );
+    expect(within(screen.getByRole("navigation", { name: "Related views" })).getByRole("link", { name: "Savings" })).toBeTruthy();
+  });
+
   it("shows a warning notice in the warning tone", () => {
     show({ notice: { tone: "warning", text: "Readings are late" } });
     expect(screen.getByRole("status").className).toContain("bg-warning-muted");

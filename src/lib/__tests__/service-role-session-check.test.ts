@@ -176,6 +176,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Reads the snapshot and runs contributed status loaders from it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
   },
+  "src/lib/gui/host/server/render-view.tsx": {
+    privilegedExports: ["renderView", "resolveInitialView"],
+    reason:
+      "Loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load.",
+  },
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
     reason:
@@ -220,7 +225,12 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
-      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads.",
+      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects, with that same read.",
+  },
+  "src/app/(gui)/[...path]/page.tsx": {
+    kind: "session",
+    reason:
+      "getRequestUserAccess (getUser) redirects to /login before renderView, which loads the view for that read's user. An /api path or an unreleased one answers 404 before either.",
   },
   "src/app/setup/page.tsx": {
     kind: "session",

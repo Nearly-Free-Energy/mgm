@@ -35,12 +35,14 @@ const PUBLIC_PATHS = [
 /**
  * The request header that carries a page request's path and query to
  * layouts, which Next.js does not otherwise give them. Middleware always
- * replaces it, so a value sent by the client never arrives; that holds
- * because the matcher below skips only static files, never a page path.
- * If the matcher starts skipping page paths, revisit. It is a hint
- * for display and for choosing among the caller's visible organizations,
- * never an authorization; if a reader starts using it for anything else,
- * revisit.
+ * replaces it on the paths the matcher below matches. The matcher skips
+ * static-file paths, and one with no file in public/ reaches the (gui)
+ * catch-all page (src/app/(gui)/[...path]/page.tsx) without this
+ * middleware, so there the (gui) layout can receive a value the client
+ * sent; that page answers 404 for such a path, because none is released.
+ * It is a hint for display and for choosing among the caller's visible
+ * organizations, never an authorization; if a reader starts using it for
+ * anything else, revisit.
  */
 const MGM_PATH_HEADER = "x-mgm-path";
 const MGM_PATH_MAX_LENGTH = 2048;
