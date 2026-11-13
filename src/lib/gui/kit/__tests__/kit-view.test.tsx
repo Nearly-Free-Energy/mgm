@@ -140,6 +140,19 @@ describe("KitView: collection", () => {
     expect(runtime.open).toHaveBeenCalledWith(link);
   });
 
+  it("leaves a modified or middle click on a row link to the browser, which opens a new tab or window", () => {
+    const link = { id: "billing.statement" as const, label: "Statement", href: "/households/h1/statement" as const };
+    show(collection({ rows: [{ id: "h1", cells: { name: text("Aisha") }, actions: [], links: [link] }] }));
+    const anchor = screen.getByRole("link", { name: "Statement" });
+    for (const init of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      // fireEvent returns false when a handler called preventDefault.
+      expect(fireEvent.click(anchor, init), JSON.stringify(init)).toBe(true);
+    }
+    expect(runtime.open).not.toHaveBeenCalled();
+    expect(fireEvent.click(anchor)).toBe(false);
+    expect(runtime.open).toHaveBeenCalledWith(link);
+  });
+
   it("at zero rows, lets the empty state own the create action, with no table and no filters", async () => {
     const add = ref("org.add-household", "Add household");
     const view = show(
@@ -356,6 +369,16 @@ describe("KitView: what every view shares", () => {
     fireEvent.click(screen.getByRole("link", { name: "Export" }));
     expect(runtime.open).toHaveBeenCalledWith(link);
     expect(screen.getByRole("link", { name: "Savings" }).getAttribute("href")).toBe("/microgrids/m/savings");
+  });
+
+  it("leaves a modified click on a view's link to the browser", () => {
+    const link = { id: "billing.csv" as const, label: "Export", href: "/api/billing/export.csv" as const, download: { mime: "text/csv", filename: "b.csv" } };
+    show({ links: [link] });
+    const anchor = screen.getByRole("link", { name: "Export" });
+    for (const init of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { button: 1 }]) {
+      expect(fireEvent.click(anchor, init), JSON.stringify(init)).toBe(true);
+    }
+    expect(runtime.open).not.toHaveBeenCalled();
   });
 
   it("shows a warning notice in the warning tone", () => {

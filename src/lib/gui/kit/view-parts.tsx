@@ -3,6 +3,7 @@
 /** The parts KitView and RawView share: the header with its actions and links, and the notice. */
 import { useId, useState } from "react";
 import { Banner, type BannerTone } from "@/components/ui/banner";
+import { isSameTabClick } from "@/components/ui/navigation-progress";
 import { cn } from "@/lib/utils";
 import type { ActionRef, LinkRef, Tone, ViewModel } from "../contract";
 import { isHref, isOutHref } from "../host/shared/href";
@@ -67,7 +68,11 @@ export function ActionButton({ actionRef }: { actionRef: ActionRef }) {
   );
 }
 
-/** A GET the person opens: a real anchor, so its href is in the DOM, opened through kit.open. */
+/**
+ * A GET the person opens: a real anchor, so its href is in the DOM. A plain
+ * left click opens it through kit.open; a modified or middle click is left to
+ * the browser, which opens it in a new tab or window.
+ */
 export function LinkItem({ link }: { link: LinkRef }) {
   if (!isHref(link.href) && !isOutHref(link.href)) return <span>{link.label}</span>;
   return (
@@ -75,6 +80,7 @@ export function LinkItem({ link }: { link: LinkRef }) {
       href={link.href}
       className="text-dense font-medium text-primary underline-offset-2 hover:underline"
       onClick={(event) => {
+        if (!isSameTabClick(event)) return;
         event.preventDefault();
         void open(link);
       }}
