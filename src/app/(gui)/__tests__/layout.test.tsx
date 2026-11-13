@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   organizationExists: vi.fn(),
   getManifest: vi.fn(),
   preloadManifest: vi.fn(),
+  resolveInitialView: vi.fn(),
   headers: new Headers(),
   cookies: new Map<string, string>(),
 }));
@@ -42,6 +43,9 @@ vi.mock("@/lib/mgm/organization-exists", () => ({
 vi.mock("@/lib/gui/host/server/manifest", () => ({
   getManifest: mocks.getManifest,
   preloadManifest: mocks.preloadManifest,
+}));
+vi.mock("@/lib/gui/host/server/render-view", () => ({
+  resolveInitialView: mocks.resolveInitialView,
 }));
 vi.mock("@/components/ui/navigation-progress", () => ({
   NavigationProgress: () => null,
@@ -117,6 +121,7 @@ beforeEach(() => {
   mocks.headers = new Headers();
   mocks.cookies.clear();
   mocks.getManifest.mockResolvedValue({ ok: true, manifest: MANIFEST });
+  mocks.resolveInitialView.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -241,6 +246,24 @@ describe("GuiLayout shell", () => {
     expect(shell.props).toMatchObject({ manifest: MANIFEST, initial });
     expect(initial).toMatchObject({ nav: "billing.periods", unplaced: false });
     expect(initial.scope.microgrid?.id).toBe(MICROGRID);
+  });
+
+  it("takes a contributed view's initial view from resolveInitialView, with the render's access read", async () => {
+    wire(SIGNED_IN);
+    const path = `/microgrids/${MICROGRID}/operations?date=2026-11-10`;
+    mocks.headers = new Headers({ "x-mgm-path": path });
+    const initial = { view: "metering.site-day", title: "Tuesday", trail: [], tabs: [], scope: {} };
+    mocks.resolveInitialView.mockResolvedValue(initial);
+    const tree = await GuiLayout({ children: "page" });
+
+    const access = await mocks.getRequestUserAccess.mock.results[0].value;
+    expect(mocks.resolveInitialView).toHaveBeenCalledWith(access, path, MANIFEST);
+    // The same object, not a copy: the page's renderView shares the load only through React cache(), which keys on identity.
+    expect(mocks.resolveInitialView.mock.calls[0][0]).toBe(access);
+    const [provider] = byType(tree, HostKitProvider);
+    const [shell] = byType(provider?.props?.children, INSTALLED_GUIS.gridtop.Shell);
+    expect(provider.props?.initial).toBe(initial);
+    expect(shell.props?.initial).toBe(initial);
   });
 
   it("hands the GUI's own overlay and forms to the action host", async () => {

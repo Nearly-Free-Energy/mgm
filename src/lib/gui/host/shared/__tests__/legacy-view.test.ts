@@ -7,7 +7,7 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { Id, Manifest } from "../../../contract";
 import { buildManifestModel, type ManifestInput } from "../manifest-model";
-import { entityFromPath, legacyView, resolveLegacyView } from "../legacy-view";
+import { contributedView, entityFromPath, legacyView, resolveLegacyView } from "../legacy-view";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e7300000-0000-4000-8000-000000000002";
@@ -273,5 +273,40 @@ describe("resolveLegacyView", () => {
         unplaced: false,
       });
     }
+  });
+});
+
+describe("contributedView", () => {
+  const model = { view: "metering.site-day" as const, title: "Tuesday", trail: [] };
+
+  it("takes the view's id and title, and the scope, trail and current app from the path", () => {
+    const path = `/microgrids/${MICROGRID}/operations?date=2026-11-10`;
+    const legacy = legacyView(path, MANIFEST)!;
+    expect(contributedView(path, model, MANIFEST)).toEqual({ ...legacy, view: "metering.site-day", title: "Tuesday" });
+  });
+
+  it("derives the same answer for a page the catalog marks as served by a view", () => {
+    const forged: BundledPlugin = { ...MGM_BUNDLED_PLUGINS[0], pages: [{ path: "/forged/[id]", params: { id: "microgrid" }, servedBy: "view" }] };
+    const view = contributedView(`/forged/${MICROGRID}`, model, MANIFEST, [forged]);
+    expect(view).toMatchObject({ view: "metering.site-day", title: "Tuesday", unplaced: false });
+    expect(view.scope.microgrid?.id).toBe(MICROGRID);
+    expect(view.trail.map((crumb) => crumb.label)).toEqual(["Org One", "Kasana", "Kasana East"]);
+  });
+
+  it("marks a place the manifest does not list", () => {
+    expect(contributedView(`/microgrids/${STRANGER}/operations`, model, MANIFEST).unplaced).toBe(true);
+  });
+
+  it("off the catalog, shows the organization and then the model's trail", () => {
+    const trail = [{ label: "Somewhere", href: "/somewhere" as const }];
+    expect(contributedView("/no-such-page", { ...model, trail }, MANIFEST)).toEqual({
+      view: "metering.site-day",
+      title: "Tuesday",
+      trail: [{ label: "Org One", href: `/organizations/${ORG}` }, ...trail],
+      tabs: [],
+      scope: { organization: { kind: "organization", id: ORG, label: "Org One", href: `/organizations/${ORG}` } },
+      nav: null,
+      unplaced: false,
+    });
   });
 });

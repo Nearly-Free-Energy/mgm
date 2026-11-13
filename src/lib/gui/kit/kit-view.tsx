@@ -32,11 +32,17 @@ const NUMERIC = new Set(["number", "percent", "money", "energy", "power"]);
 const LOW_PRIORITY = "hidden min-[600px]:table-cell";
 const CELL = "px-2 py-1.5 align-top";
 
-export function KitView({ model }: ViewProps) {
-  return <KitViewAt model={model} depth={0} />;
+/**
+ * `headerInShell`: the GUI's shell draws this page view's title, subtitle,
+ * actions, links and the views attached as tabs (a window bar), so the
+ * header keeps only a visually hidden heading and the notice. A GUI passes
+ * it from its own View.
+ */
+export function KitView({ model, headerInShell }: ViewProps & { headerInShell?: boolean }) {
+  return <KitViewAt model={model} depth={0} headerInShell={headerInShell} />;
 }
 
-function KitViewAt({ model, depth }: { model: ViewModel; depth: number }) {
+function KitViewAt({ model, depth, headerInShell }: { model: ViewModel; depth: number; headerInShell?: boolean }) {
   // An embedded view is drawn from its own model and does not poll the page's path.
   const own = useMemo(() => (depth === 0 ? model : { ...model, live: undefined }), [model, depth]);
   const live = useLive(own);
@@ -44,14 +50,17 @@ function KitViewAt({ model, depth }: { model: ViewModel; depth: number }) {
   const body = renderBody(m, live, depth);
   if (body === null) return <RawViewAt model={m} depth={depth} />;
   const hide = m.kind === "collection" && m.body.rows.length === 0 ? m.body.empty.action?.action : undefined;
+  const inShell = depth === 0 && headerInShell === true;
+  // The shell draws views attached as tabs among its own tabs.
+  const attached = inShell ? m.attached.filter((a) => a.hint !== "tab") : m.attached;
   return (
     <article className="flex flex-col gap-4" data-gui-view={m.view} data-gui-kind={m.kind}>
-      <ViewHeader model={m} depth={depth} hide={hide} />
+      <ViewHeader model={m} depth={depth} hide={hide} inShell={inShell} />
       {body}
-      {m.attached.length > 0 && (
+      {attached.length > 0 && (
         <nav aria-label="Related views">
           <ul className="flex flex-wrap gap-3 text-dense">
-            {m.attached.map((a) => (
+            {attached.map((a) => (
               <li key={a.view}>
                 <Link href={a.href}>{a.title}</Link>
               </li>

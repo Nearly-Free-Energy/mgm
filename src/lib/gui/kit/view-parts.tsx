@@ -92,10 +92,22 @@ export function Notice({ notice }: { notice: NonNullable<ViewModel["notice"]> })
   );
 }
 
-/** Title, subtitle, actions, links and notice. `hide` leaves out actions another part already shows. */
-export function ViewHeader({ model, depth, hide }: { model: ViewModel; depth: number; hide?: string }) {
+/**
+ * Title, subtitle, actions, links and notice. `hide` leaves out actions another part already shows;
+ * `inShell` leaves the title (visually hidden), subtitle, actions and links to the GUI's shell.
+ */
+export function ViewHeader(props: { model: ViewModel; depth: number; hide?: string; inShell?: boolean }) {
+  const { model, depth, hide, inShell } = props;
   const Heading = depth === 0 ? "h1" : "h2";
   const actions = model.actions.filter((ref) => ref.action !== hide);
+  if (inShell) {
+    return (
+      <header className="flex flex-col gap-2">
+        <Heading className="sr-only">{model.title}</Heading>
+        {model.notice && <Notice notice={model.notice} />}
+      </header>
+    );
+  }
   return (
     <header className="flex flex-col gap-2">
       <Heading className="text-title font-semibold text-foreground">{model.title}</Heading>

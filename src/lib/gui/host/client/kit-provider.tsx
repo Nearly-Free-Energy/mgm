@@ -4,7 +4,8 @@
  * Holds what the kit's hooks read: the manifest, the view the server resolved
  * for the first paint, the model a ViewBoundary published, and the server's
  * clock. The layout that mounts it persists across soft navigations, so after
- * the first paint the view comes from `resolve(pathname)` or the boundary.
+ * the first paint the view comes from `resolve(pathname)` or the boundary;
+ * on a contributed view's page, the layout's `initial` covers the first paint.
  */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
@@ -85,16 +86,27 @@ export function KitProvider(props: {
   useSearchOrganization(manifest?.org.id ?? null);
   const [boundary, setBoundary] = useState<Boundary | null>(null);
   const [skew] = useState(() => (manifest ? Date.parse(manifest.now) - Date.now() : 0) || 0);
+  // A contributed view's `initial` holds for the pathname the layout rendered
+  // it for, so the first paint is right before its ViewBoundary publishes;
+  // `resolve` knows only pages served outside the contract. A new `initial`
+  // (the layout rendered again) belongs to the pathname current at the time.
+  const [initialAt, setInitialAt] = useState({ initial, pathname });
+  if (initialAt.initial !== initial) setInitialAt({ initial, pathname });
+  const initialPathname = initialAt.initial === initial ? initialAt.pathname : pathname;
   const resolved = useMemo(
-    () => (manifest && resolve ? resolve(pathname, manifest) : initial),
-    [manifest, resolve, pathname, initial],
+    () =>
+      manifest && resolve && !(initial.view !== null && pathname === initialPathname)
+        ? resolve(pathname, manifest)
+        : initial,
+    [manifest, resolve, pathname, initial, initialPathname],
   );
 
   // A place the manifest cannot show means it was built for another
   // organization or past the places cap: rebuild it once per pathname for
   // each organization the manifest shows.
   const refreshOnce = useRefreshOnce(manifest?.org.id ?? null);
-  const unplaced = "unplaced" in resolved && resolved.unplaced === true;
+  const shown: InitialView & { unplaced?: boolean } = boundary?.pathname === pathname ? boundary.initial : resolved;
+  const unplaced = shown.unplaced === true;
   useEffect(() => {
     if (unplaced) refreshOnce(`path:${pathname}`);
   }, [unplaced, pathname, refreshOnce]);
