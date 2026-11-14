@@ -59,6 +59,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # migration-hashes.test.ts compares supabase/migrations.sha256 with the
+      # copy on main, so that an edit to a merged migration fails even when its
+      # hash line was edited too. The checkout above has only the PR's merge
+      # commit; this adds main's tip as origin/main. The test fails in CI
+      # without it.
+      - name: Fetch main for the migration hash check
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'

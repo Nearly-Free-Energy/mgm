@@ -6,8 +6,24 @@
 -- (supabase/pilot/) and selected later migrations. Its grants are narrower
 -- than the chain's. A later migration converges production on the chain,
 -- so that `supabase db push` can manage it; for that, the chain has to end
--- where production is, not the other way round. Every statement here is a
--- no-op on that production database, except where noted.
+-- where production is, not the other way round.
+--
+-- How production gets it: the operator applies this file with
+-- `supabase db query --remote=<ref> -f <file>` (mgm-operations,
+-- runbooks/apply-migrations.md), then records it with `supabase migration
+-- repair`. Rehearsed on a schema-only copy of production on 2026-11-14: the
+-- only changes there are item 6's (below). Every object this file names
+-- without a guard exists on production (read 2026-11-14):
+-- fn_edge_ids_all_nonempty(text[]), fn_device_openems_component_valid(),
+-- fn_set_updated_at(), fn_user_roles_before_delete_guard(),
+-- user_can_access_microgrid(uuid), household_users, user_profiles,
+-- user_roles, billing_periods, microgrid_recent_activity,
+-- microgrid_shared_devices, pilot_import_batches and auth.users.
+--
+-- MAINTAIN (items 2 and 6) exists from PostgreSQL 17. Production runs 17.6
+-- (`server_version`, read 2026-11-14) and supabase/config.toml pins 17 for
+-- local and CI databases. On an earlier major version this file fails rather
+-- than half-applying. If production's major version ever changes, revisit.
 --
 -- 1. anon holds no table or view privilege. Signed-out routes read through the
 --    service role (src/app/p/[slug], /api/payments/ipn), never anon, so
@@ -29,8 +45,14 @@
 -- 6. Default privileges: tables created later by postgres in public no longer
 --    grant anon anything, or authenticated TRUNCATE, REFERENCES, TRIGGER or
 --    MAINTAIN. Without this, every new table reopens items 1 and 2.
---    On production this also removes those grants from the ten tables
---    created after the base (billing_audit_log ... payment_receipts).
+--    This affects only tables created after it. On production, the ten
+--    tables created after the base (billing_audit_log,
+--    community_payment_overrides, invoice_counters, mgm_plugin_audit_log,
+--    mgm_plugins, payment_attempts, payment_events,
+--    payment_merchant_accounts, payment_notifications, payment_receipts)
+--    lose anon's privileges through item 1 and authenticated's TRUNCATE,
+--    REFERENCES, TRIGGER and MAINTAIN through item 2; the base tables
+--    already have neither. The pull request lists every privilege removed.
 -- 7. pilot_import_batches, the pilot import ledger the billing review reads
 --    (src/app/api/billing-review/preview/route.ts), joins the chain with the
 --    definition and grants production has.
