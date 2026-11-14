@@ -9,7 +9,8 @@
  *
  * Radix traps focus inside, closes on Escape or a press outside, and puts
  * focus back on the trigger. The sheet is open for one pathname only, and
- * following a link inside it in the same tab closes it.
+ * following a link inside it in the same tab closes it, as does pressing a
+ * control marked data-closes-sheet.
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -36,7 +37,7 @@ export const SHEET_ROW =
   "gt:focus-visible:outline-2 gt:focus-visible:outline-offset-2 gt:focus-visible:outline-ring";
 
 /** A plain left click, which follows a link in this tab; a modified one opens a new tab or window. */
-const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+export const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 export function Sheet({ title, trigger, children }: { title: string; trigger: ReactElement; children: ReactNode }) {
   const pathname = kit.usePathname();
@@ -56,8 +57,12 @@ export function Sheet({ title, trigger, children }: { title: string; trigger: Re
               <span className="gt:sr-only">Close</span>
             </Dialog.Close>
           </div>
-          {/* A link to the page already shown changes no pathname, so following any link closes the sheet too. */}
-          <div className="gt:p-3" onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href]") && setOpenOn(null)}>
+          {/* A link to the page already shown changes no pathname, so following any link closes the sheet too,
+              as does a control marked data-closes-sheet, such as one that opens the action host's own dialog. */}
+          <div
+            className="gt:p-3"
+            onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href], [data-closes-sheet]") && setOpenOn(null)}
+          >
             {children}
           </div>
         </Dialog.Content>

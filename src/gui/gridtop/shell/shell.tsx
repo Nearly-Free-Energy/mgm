@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Gridtop's frame: skip link, title bar, the apps, and the page. `main` is
+ * Gridtop's frame: skip link, title bar, the apps, the page with the window
+ * bar of a contributed view above it, and the status bar. `main` is
  * what scrolls, at every size (decision 14 on #115), so a bar a page pins to
  * its bottom stays above the phone dock. Its padding is the old layout's,
  * except that it widens at 600 px rather than 768 px, and its zero minimum
@@ -10,18 +11,22 @@
  * viewportFit "cover" leaves to the page (src/app/layout.tsx); the bottom
  * dock pads the bottom one.
  */
+import { useRef } from "react";
 import type { ShellProps } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { BottomDock } from "./bottom-dock";
 import { Dock } from "./dock";
 import { currentApp } from "./groups";
+import { StatusBar } from "./status-bar";
 import { TitleBar } from "./title-bar";
+import { WindowBar } from "./window-bar";
 
 export function GridtopShell({ children }: ShellProps) {
   const view = kit.useView();
   const pathname = kit.usePathname();
   const nav = view.org.nav;
   const current = currentApp(nav, (entry) => view.href(entry), pathname);
+  const main = useRef<HTMLElement>(null);
   return (
     <div className="gt:grid gt:h-screen gt:supports-[height:100dvh]:h-dvh gt:grid-rows-[auto_minmax(0,1fr)_auto] gt:bg-background gt:text-foreground gt:medium:grid-cols-[auto_minmax(0,1fr)] gt:medium:grid-rows-[auto_minmax(0,1fr)] gt:pl-[env(safe-area-inset-left)] gt:pr-[env(safe-area-inset-right)]">
       <a
@@ -30,12 +35,14 @@ export function GridtopShell({ children }: ShellProps) {
       >
         Skip to content
       </a>
-      <TitleBar />
+      <TitleBar app={current} />
       <Dock nav={nav} current={current} />
-      <main id="main" tabIndex={-1} className="gt:min-w-0 gt:overflow-y-auto gt:p-4 gt:outline-none gt:medium:p-6">
+      <main ref={main} id="main" tabIndex={-1} className="gt:min-w-0 gt:overflow-y-auto gt:p-4 gt:outline-none gt:medium:p-6">
+        <WindowBar main={main} />
         {children}
       </main>
       <BottomDock nav={nav} current={current} />
+      <StatusBar />
     </div>
   );
 }

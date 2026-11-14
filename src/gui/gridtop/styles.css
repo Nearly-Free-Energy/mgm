@@ -25,6 +25,10 @@
   --breakpoint-expanded: 80rem;
 }
 
+/* Tall windows, from 800px of height: the status bar shows only in a window
+   that is expanded and tall. */
+@custom-variant tall (@media (min-height: 50rem));
+
 /* Every class in this package starts with gt:, a variant that changes
    nothing, so this stylesheet never emits a utility that globals.css also
    emits: globals.css has no gt variant and generates nothing for gt:flex.

@@ -181,6 +181,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load.",
   },
+  "src/lib/gui/host/server/go.ts": {
+    privilegedExports: ["resolveGoTarget"],
+    reason:
+      "Reads the manifest with getManifest, which reads the session with getRequestUserAccess first. goTarget only reads a manifest it is handed.",
+  },
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
     reason:
@@ -231,6 +236,11 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getRequestUserAccess (getUser) redirects to /login before renderView, which loads the view for that read's user. An /api path or an unreleased one answers 404 before either.",
+  },
+  "src/app/(gui)/go/[nav]/page.tsx": {
+    kind: "session",
+    reason:
+      "getRequestUserAccess (getUser) redirects to /login before resolveGoTarget, whose getManifest reads the session again before the manifest's reads.",
   },
   "src/app/setup/page.tsx": {
     kind: "session",

@@ -2,9 +2,7 @@ import "server-only";
 
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-
-/** The request header src/middleware.ts forwards a page request's path and query in. */
-export const MGM_PATH_HEADER = "x-mgm-path";
+import { MGM_PATH_HEADER } from "../shared/manifest-hints";
 
 /**
  * The request's path and query as src/middleware.ts forwarded them, or a

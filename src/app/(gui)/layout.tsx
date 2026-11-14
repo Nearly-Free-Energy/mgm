@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import type { GuiName } from "@/gui/meta";
@@ -9,15 +9,9 @@ import { getManifest, preloadManifest } from "@/lib/gui/host/server/manifest";
 import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
 import { resolveInitialView } from "@/lib/gui/host/server/render-view";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
-import { ORG_COOKIE } from "@/lib/gui/host/shared/org-cookie";
+import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
-
-/** The `?org=` of a path with its query, or null. */
-function requestedOrganization(path: string | null): string | null {
-  const query = path?.split("#", 1)[0].split("?")[1];
-  return query ? new URLSearchParams(query).get("org") : null;
-}
 
 /**
  * Every signed-in page, inside the shell of the GUI MGM_GUI selects. The
@@ -44,8 +38,9 @@ export default async function GuiLayout({
   const hasOrganization = organizationExists();
   hasOrganization.catch(() => {});
 
-  const requested = requestedOrganization(path);
-  const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
+  // Read as /go/<nav> reads them (manifest-hints.ts), so the two share one
+  // cached manifest.
+  const { requested, preferred } = manifestHints(await headers(), requestCookies);
 
   // An MGM_GUI naming no compiled-in GUI is reported only after the
   // redirects, so a signed-out visitor still reaches /login: the interface

@@ -313,16 +313,19 @@ describe("Gridtop's shell", () => {
 
   it("hides the organization switcher with one organization", async () => {
     await shell(fixture());
-    expect(screen.queryByRole("button", { name: /^Organization/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Switch organization" })).toBeNull();
   });
 
-  it("switches organization from the title bar, marking the current one", async () => {
+  it("switches organization from the trail's first crumb, marking the current one", async () => {
     const orgs = [
       { id: "o1", name: "Org One", href: "/organizations/o1" as const },
       { id: "o2", name: "Org Two", href: "/organizations/o2" as const },
     ];
     await shell(fixture({ orgs }));
-    const button = within(screen.getByRole("banner")).getByRole("button", { name: "Organization: Org One" });
+    const here = screen.getByRole("navigation", { name: "You are here" });
+    // With no trail, the organization still comes first, so its switcher is there.
+    expect(titles(within(here).getAllByRole("link"))).toEqual(["Org One"]);
+    const button = within(here).getByRole("button", { name: "Switch organization" });
     const sheet = await openSheet(button, "Organizations");
     expect(hrefs(sheet)).toEqual([
       ["Org One", "/organizations/o1"],
@@ -340,7 +343,7 @@ describe("Gridtop's shell", () => {
       { id: "o2", name: "Org Two", href: "/organizations/o2" as const },
     ];
     await shell(fixture({ orgs, pathname: "/organizations/o1" }));
-    const sheet = await openSheet(screen.getByRole("button", { name: "Organization: Org One" }), "Organizations");
+    const sheet = await openSheet(screen.getByRole("button", { name: "Switch organization" }), "Organizations");
     expect(current(sheet)).toEqual(["Org One"]);
   });
 
@@ -560,7 +563,7 @@ describe("Gridtop's shell", () => {
     ];
     await shell(fixture({ status, orgs }));
     const banner = screen.getByRole("banner");
-    const buttons = [/^Organization/, /^Needs you/, /^Account/].map((name) => within(banner).getByRole("button", { name }));
+    const buttons = [/^Switch organization/, /^Needs you/, /^Account/].map((name) => within(banner).getByRole("button", { name }));
     // Icon buttons: as wide as they are tall.
     expect(buttons.filter((el) => !tall(el) || !wide(el)).map((el) => el.getAttribute("aria-label"))).toEqual([]);
     for (const [button, title, rows] of [
