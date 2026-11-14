@@ -403,6 +403,127 @@ describe("valueSiteDays — arbitrage", () => {
   });
 });
 
+describe("valueSiteDays — export to the grid (gridW < 0)", () => {
+  /** Charge 2.4 kWh at night (400) so the day's charging rate is 400. */
+  const nightCharge = (hour: number): FlowValues | null => (hour < 2 ? { batteryW: -1200 } : null);
+
+  it("does not value solar exported to the grid", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      // load 500, solar 2000, grid −1500: the site used 500 W of it.
+      if (hour >= 10 && hour < 12) return { solarW: 2000, gridW: -1500 };
+      return {};
+    });
+    // 0.5 kW × 2 h = 1 kWh at 550, not 4 kWh.
+    expect(valueOne(day).columns.day.solarSavings).toBeCloseTo(1 * 550, 6);
+  });
+
+  it("still values solar that charged the battery while the rest was exported", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      // load 600, battery charging 1200, solar 3000, grid −1200.
+      if (hour === 12) return { solarW: 3000, batteryW: -1200, gridW: -1200 };
+      return {};
+    });
+    // 1.8 kWh used (0.6 load + 1.2 into the battery) at 550.
+    expect(valueOne(day).columns.day.solarSavings).toBeCloseTo(1.8 * 550, 6);
+  });
+
+  it("values solar in full when the site imports or neither imports nor exports", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      if (hour === 9) return { solarW: 1200, gridW: 300 };
+      if (hour === 10) return { solarW: 1200, gridW: 0 };
+      return {};
+    });
+    expect(valueOne(day).columns.day.solarSavings).toBeCloseTo(2 * 1.2 * 550, 6);
+  });
+
+  it("does not count battery discharge exported to the grid as arbitrage", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      // load 800, battery discharging 2000, no solar, grid −1200.
+      if (hour >= 18 && hour < 20) return { batteryW: 2000, gridW: -1200 };
+      return nightCharge(hour) ?? {};
+    });
+    // 0.8 kW × 2 h = 1.6 kWh served the site: 1.6 × 650 − 1.6 × 400 / 0.8.
+    expect(valueOne(day).columns.day.arbitrageGain).toBeCloseTo(1040 - 800, 6);
+  });
+
+  it("takes export from solar first, then from the battery's discharge", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      // Export below solar: load 1700, solar 1000, battery 1500, grid −800.
+      // Solar used 200 W; all 1500 W of discharge served the site.
+      if (hour === 18) return { solarW: 1000, batteryW: 1500, gridW: -800 };
+      // Export above solar: load 1500, solar 1000, battery 2000, grid −1500.
+      // All 1000 W of solar left; the other 500 W of export came from the
+      // discharge, so 1500 W of it served the site.
+      if (hour === 19) return { solarW: 1000, batteryW: 2000, gridW: -1500 };
+      return nightCharge(hour) ?? {};
+    });
+    const { columns } = valueOne(day);
+    expect(columns.day.solarSavings).toBeCloseTo(0.2 * 650, 6);
+    // (1.5 + 1.5) kWh at 650, less 3 kWh × 400 / 0.8.
+    expect(columns.day.arbitrageGain).toBeCloseTo(3 * 650 - (3 * 400) / 0.8, 6);
+  });
+
+  it("takes all the export from the discharge when the bin's solar is unknown", () => {
+    const day = makeDay(
+      "2026-10-05",
+      (hour) => {
+        if (hour >= 18 && hour < 20) return { solarW: null, batteryW: 2000, gridW: -1200 };
+        return { solarW: null, ...nightCharge(hour) };
+      },
+      { solarKwh: null }
+    );
+    expect(valueOne(day).columns.day.arbitrageGain).toBeCloseTo(1040 - 800, 6);
+  });
+
+  it("leaves out discharge whose export is unknown (no grid power reading)", () => {
+    const day = makeDay("2026-10-05", (hour) => {
+      if (hour === 21) return { batteryW: 3000, gridW: null };
+      if (hour >= 18 && hour < 20) return { batteryW: 1200 };
+      return nightCharge(hour) ?? {};
+    });
+    // Only the 2.4 kWh cycle counts: 2.4 × 650 − 2.4 × 400 / 0.8.
+    expect(valueOne(day).columns.day.arbitrageGain).toBeCloseTo(360, 6);
+  });
+
+  describe("with a solar meter", () => {
+    const meterDay = (gen: (hour: number) => FlowValues, overrides: Partial<SiteDayOperations> = {}) =>
+      makeDay("2026-10-05", gen, {
+        sources: { battery: true, gridMeter: true, load: true, pv: true, houses: false, houseMetersUnreadable: 0 },
+        solarEstimated: false,
+        ...overrides,
+      });
+
+    it("values only the metered solar the site used, not what it exported", () => {
+      const day = meterDay((hour) => {
+        // meter 2500, battery charging 500, load 1000, grid −1000.
+        if (hour >= 11 && hour < 13) return { solarW: 2500, batteryW: -500, gridW: -1000 };
+        return {};
+      });
+      // 1.5 kW × 2 h = 3 kWh at 550, not 5 kWh.
+      expect(valueOne(day).columns.day.solarSavings).toBeCloseTo(3 * 550, 6);
+    });
+
+    it("leaves out solar it cannot split from export (no grid power reading)", () => {
+      const day = meterDay((hour) => {
+        if (hour === 11) return { solarW: 2500, gridW: null };
+        if (hour === 12) return { solarW: 1200 };
+        return {};
+      });
+      expect(valueOne(day).columns.day.solarSavings).toBeCloseTo(1.2 * 550, 6);
+    });
+
+    it("is unknown, not zero, when no bin had a grid power reading", () => {
+      const day = meterDay(() => ({ solarW: 1000, gridW: null }), {
+        sources: { battery: true, gridMeter: false, load: true, pv: true, houses: false, houseMetersUnreadable: 0 },
+        cuts: null,
+        cutMinutes: null,
+        solarKwh: 24,
+      });
+      expect(valueOne(day).columns.day.solarSavings).toBeNull();
+    });
+  });
+});
+
 describe("valueSiteDays — tariffs", () => {
   it("values each day at the tariff in force on it", () => {
     const tariffs: TariffInput[] = [

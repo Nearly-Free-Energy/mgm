@@ -7,24 +7,32 @@
  * tariffs and its savings settings.
  *
  * Definitions:
- * - Solar savings: every solar kWh valued at the grid rate of its local hour
- *   (what that energy would have cost from the grid), from
- *   `solar_savings_from` on. Solar that charged the battery is counted here
- *   too, and again below as a charge cost, so the total is the reliable
- *   figure rather than either part alone.
- * - Arbitrage: battery discharge while the grid was present, valued at the
- *   rate of its hour, less what that energy cost to put in: the day's
- *   average charging rate (the tariff's lowest rate when the day charged
- *   almost nothing) divided by the round-trip efficiency. Discharge during
- *   a cut is backup, not arbitrage, and is left out; a day with no grid
- *   reading at all has no arbitrage figure. From
- *   `arbitrage_from` on, and only on a day with at least
- *   `ARBITRAGE_MIN_BATTERY_MINUTES` of battery power readings.
+ * - Only energy the site used itself saves anything. Energy exported to the
+ *   grid (a bin's `gridW` below 0) displaced no purchase, so it is valued at
+ *   nothing; see `selfConsumed` for how a bin's export is split between its
+ *   solar and its battery discharge.
+ * - Solar savings: every solar kWh the site used (by its load or to charge
+ *   the battery) valued at the grid rate of its local hour (what that
+ *   energy would have cost from the grid), from `solar_savings_from` on.
+ *   Solar that charged the battery is counted here too, and again below as
+ *   a charge cost, so the total is the reliable figure rather than either
+ *   part alone. A bin with no grid power reading is left out, since its
+ *   export is unknown; a day where no bin's export is known has no solar
+ *   figure.
+ * - Arbitrage: battery discharge that served the site while the grid was
+ *   present, valued at the rate of its hour, less what that energy cost to
+ *   put in: the day's average charging rate (the tariff's lowest rate when
+ *   the day charged almost nothing) divided by the round-trip efficiency.
+ *   Discharge during a cut is backup, not arbitrage, and is left out, as is
+ *   discharge in a bin with no grid power reading; a day with no grid
+ *   reading at all has no arbitrage figure. From `arbitrage_from` on, and
+ *   only on a day with at least `ARBITRAGE_MIN_BATTERY_MINUTES` of battery
+ *   power readings.
  * - A day with no tariff in force has no money figures; it is counted in
  *   `missingTariffDays` instead.
  */
 import type { GridTariffBand } from "@/lib/types/domain";
-import type { SiteDayOperations } from "@/lib/metering/site-operations";
+import type { SiteDayOperations, SiteFlow } from "@/lib/metering/site-operations";
 
 /** A day needs this many minutes of battery power readings for arbitrage. */
 export const ARBITRAGE_MIN_BATTERY_MINUTES = 600;
@@ -134,6 +142,35 @@ export function rateAt(bands: GridTariffBand[], hour: number): number {
   return band.rate;
 }
 
+/**
+ * What of a bin's solar and battery discharge the site used itself, in W:
+ * each less its share of the bin's export. Null where the bin cannot say:
+ * that power is unread, or the grid's is, so the export is unknown.
+ *
+ * Signs follow `SiteFlow`: `gridW` + import / − export, `batteryW`
+ * + discharge / − charge. The OpenEMS provider passes the grid meter's and
+ * the battery's `ActivePower` through unchanged, and OpenEMS uses those
+ * signs. If a provider reports grid power with the opposite sign, every
+ * import reads here as export and the savings collapse toward zero; battery
+ * power with the opposite sign swaps charging and discharging. Revisit then.
+ *
+ * Export is taken from solar first, then from discharge (from discharge
+ * alone when the bin's solar is unknown). A discharged kWh is credited at
+ * its rate less its storage cost, a solar kWh at its full rate, so this
+ * split never gives the higher total of the two. A charging battery
+ * discharges nothing, so then all export is solar's.
+ */
+function selfConsumed(f: SiteFlow): { solarW: number | null; dischargeW: number | null } {
+  if (f.gridW === null) return { solarW: null, dischargeW: null };
+  const dischargeW = f.batteryW === null ? null : Math.max(0, f.batteryW);
+  const exportW = Math.max(0, -f.gridW);
+  const solarExportW = Math.min(exportW, f.solarW ?? 0);
+  return {
+    solarW: f.solarW === null ? null : f.solarW - solarExportW,
+    dischargeW: dischargeW === null ? null : Math.max(0, dischargeW - (exportW - solarExportW)),
+  };
+}
+
 type DayValue = {
   date: string;
   solar: number | null;
@@ -163,12 +200,14 @@ function valueDay(
 
   const kwh = (watts: number) => (watts * day.resolutionMinutes) / 60 / 1000;
 
-  // No solar meter and no balance to estimate from: unknown, not zero.
+  // No solar meter and no balance to estimate from, or no bin whose export
+  // is known: unknown, not zero.
   let solar: number | null = null;
   if (solarApplies && day.solarKwh !== null) {
-    solar = 0;
     for (const f of day.flows) {
-      if (f.solarW !== null) solar += kwh(f.solarW) * rateAt(bands, f.hour);
+      const used = selfConsumed(f).solarW;
+      if (used === null) continue;
+      solar = (solar ?? 0) + kwh(used) * rateAt(bands, f.hour);
     }
   }
 
@@ -191,7 +230,9 @@ function valueDay(
           chargedKwh += e;
           chargeCost += e * rate;
         } else if (f.batteryW > 0 && f.gridPresent === true) {
-          const e = kwh(f.batteryW);
+          const used = selfConsumed(f).dischargeW;
+          if (used === null) continue;
+          const e = kwh(used);
           arbKwh += e;
           arbValue += e * rate;
         }

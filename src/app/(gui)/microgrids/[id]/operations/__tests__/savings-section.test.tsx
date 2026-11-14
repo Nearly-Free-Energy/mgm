@@ -96,7 +96,9 @@ function solarDay(date: string): SiteDayOperations {
     atMs: base.dayStartMs + (12 * 60 + i * 5) * 60_000,
     hour: 12,
     batteryW: null,
-    gridW: null,
+    // Neither importing nor exporting: solar in a bin with no grid reading
+    // is left out of the savings (its export is unknown).
+    gridW: 0,
     solarW: 1200,
     gridPresent: true,
   }));
