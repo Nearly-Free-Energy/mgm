@@ -15,16 +15,25 @@
  *   - The web app manifest loads without a session.
  *   - Page requests forward x-mgm-path and carry a report-only content
  *     security policy with a fresh nonce; API requests get neither.
+ *   - The matcher skips only Next.js's asset folders, the GUI stylesheets'
+ *     folder and each file in public/ by name, and each skipped folder has
+ *     a 404 route; a static-looking path with no file answers 404 before
+ *     the session check and forwards nothing.
  *
  * Located in src/lib/__tests__ so it runs under the `lib` vitest
  * project (vitest.config.ts only globs src/lib, src/components, src/app
  * and src/gui).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import * as path from "node:path";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { renderNotReleasedPage } from "@/lib/public-html/not-released";
 import { PUBLIC_PAGE_SECURITY_HEADERS } from "@/lib/public-html/page";
+
+const REPO_ROOT = path.resolve(__dirname, "../../..");
+const PUBLIC_DIR = path.join(REPO_ROOT, "public");
 
 // Mock @supabase/ssr so getClaims() (every request) and getUser() (a
 // signed-in visit to /login) resolve to deterministic values.
@@ -570,6 +579,46 @@ describe("middleware request path and content security policy", () => {
     expect(res.headers.get("x-mgm-path")).toBeNull();
   });
 
+  // The (gui) layout and catch-all page answer 404 without x-mgm-path,
+  // taking its absence to mean this middleware did not run
+  // (src/lib/gui/host/server/middleware-path.ts). So every page request it
+  // passes on carries it: full renders, the router's RSC and prefetch
+  // requests, public pages, and a signed-in visit to /login whose session
+  // turns out dead.
+  it.each<{ url: string; session: () => void; headers?: Record<string, string> }>([
+    { url: "/", session: signedIn },
+    { url: "/communities?tab=all", session: signedIn },
+    { url: "/microgrids/m1/operations?_rsc=abc", session: signedIn, headers: { rsc: "1" } },
+    { url: "/organizations", session: signedIn, headers: { rsc: "1", "next-router-prefetch": "1" } },
+    { url: "/settings/plugins", session: signedIn, headers: { "next-action": "abc", "x-mgm-path": "" } },
+    { url: "/login?next=%2Fcommunities", session: signedOut },
+    { url: "/accept-invite", session: signedOut },
+    { url: "/forgot-password", session: signedOut },
+    { url: "/reset-password", session: signedOut },
+    { url: "/setup", session: signedIn },
+    { url: "/no-access", session: signedIn },
+  ])("forwards x-mgm-path on every page request it passes on: $url", async ({ url, session, headers }) => {
+    session();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(url, headers));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe(url);
+  });
+
+  it("forwards x-mgm-path when a dead session's visit to /login is let through", async () => {
+    signedIn();
+    getUserMock.mockResolvedValue({ data: { user: null }, error: null });
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/login"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe("/login");
+  });
+
+  it("matches the start page, which the (gui) layout renders", async () => {
+    expect(unstable_doesMiddlewareMatch({ config: await middlewareConfig(), url: "/" })).toBe(true);
+  });
+
   it("replaces an x-mgm-path the client sent", async () => {
     signedIn();
     const middleware = await loadMiddleware();
@@ -712,22 +761,145 @@ describe("middleware request path and content security policy", () => {
 describe("middleware matcher", () => {
   it.each([
     ["/gui-styles/gridtop.3f9a1c2e4b5d.css", false],
+    // The name `npm run dev` writes.
+    ["/gui-styles/gridtop.css", false],
+    ["/_next/static/chunks/main-0123456789abcdef.js", false],
+    ["/_next/image", false],
     ["/microgrids", true],
     ["/gui-stylesheet", true],
+    ["/gui-styles", true],
     ["/api/gui-styles/x", true],
     ["/settings.css", true],
-    // Images in public/ skip middleware; a page path that happens to end in
-    // an image extension does not.
+    // Only Next.js's own two asset paths skip it, not every _next path.
+    ["/_next/staticx/a.js", true],
+    ["/_next/images/a.png", true],
+    ["/_next/nope", true],
+    // The files in public/ skip middleware; a page path that happens to end
+    // in an image extension does not.
     ["/icon.svg", false],
+    ["/favicon.ico", false],
     ["/apple-touch-icon.png", false],
     ["/icons/icon-192.png", false],
     ["/organizations/x.png", true],
     ["/communities/a.svg", true],
     ["/microgrids/1/setup/edges/e.png", true],
+    // A static-looking path with no file in public/ goes through it, so it
+    // never reaches the (gui) catch-all page without the release check.
+    ["/x.png", true],
+    ["/apple-touch-icon-precomposed.png", true],
+    ["/apple-touch-icon-120x120.png", true],
+    ["/icons/x.png", true],
+    ["/icons/icon-192.png.map", true],
+    ["/favicon.ico.map", true],
+    ["/favicon.icon", true],
+    ["/robots.txt", true],
   ])("matches %s: %s", async (url, expected) => {
     vi.resetModules();
     const { config } = await import("../../middleware");
     expect(unstable_doesMiddlewareMatch({ config, url })).toBe(expected);
+  });
+});
+
+/**
+ * The matcher's one pattern, split into what it skips: Next.js's own asset
+ * paths, the GUI stylesheets' folder, and each file in public/ by name.
+ */
+async function matcherSkips(): Promise<string[]> {
+  vi.resetModules();
+  const { config } = await import("../../middleware");
+  expect(config.matcher).toHaveLength(1);
+  const inner = /^\/\(\(\?!(.*)\)\.\*\)$/.exec(config.matcher[0])?.[1];
+  expect(inner, "the matcher keeps the shape /((?!a|b|c).*)").toBeTruthy();
+  return inner!.split("|");
+}
+
+/** The folders whose missing files must not reach the (gui) catch-all page. */
+const SKIPPED_FOLDERS: Record<string, string> = {
+  "_next/static/": "src/app/%5Fnext/static/[...file]/route.ts",
+  "gui-styles/": "src/app/gui-styles/[...file]/route.ts",
+};
+
+/** Every file in public/ as its URL path without the leading slash. */
+function publicFiles(dir = PUBLIC_DIR, prefix = ""): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === ".DS_Store") return [];
+    const name = `${prefix}${entry.name}`;
+    return entry.isDirectory() ? publicFiles(path.join(dir, entry.name), `${name}/`) : [name];
+  });
+}
+
+describe("middleware matcher and public/", () => {
+  // Every request the matcher skips is served without the middleware, so
+  // without its content security policy, its security headers and the
+  // x-mgm-path it sets. The (gui) layout and catch-all page must never be
+  // among them: the matcher skips only files that exist, and folders whose
+  // missing files have a 404 route of their own.
+  it("skips each file in public/ by its exact name, and no name that is not there", async () => {
+    const files = publicFiles().filter((file) => !file.startsWith("gui-styles/"));
+    const named = (await matcherSkips())
+      .filter((entry) => !(entry in SKIPPED_FOLDERS) && entry !== "_next/image$")
+      .map((entry) => {
+        expect(entry, "a file is named whole, ending in $").toMatch(/\$$/);
+        return entry.slice(0, -1).replace(/\\\./g, ".");
+      });
+    expect(named.sort(), "List each file in public/ in the matcher of src/middleware.ts").toEqual(files.sort());
+    for (const file of files) {
+      expect(unstable_doesMiddlewareMatch({ config: await middlewareConfig(), url: `/${file}` }), file).toBe(false);
+    }
+  });
+
+  it("skips every built GUI stylesheet, whatever its name", async () => {
+    const built = publicFiles().filter((file) => file.startsWith("gui-styles/"));
+    for (const file of [...built, "gui-styles/gridtop.0123456789ab.css"]) {
+      expect(unstable_doesMiddlewareMatch({ config: await middlewareConfig(), url: `/${file}` }), file).toBe(false);
+    }
+  });
+
+  it("gives each folder it skips a 404 route, so a missing file there never reaches the (gui) layout", async () => {
+    const skips = await matcherSkips();
+    const folders = skips.filter((entry) => entry.endsWith("/"));
+    expect(folders.sort()).toEqual(Object.keys(SKIPPED_FOLDERS).sort());
+    for (const route of Object.values(SKIPPED_FOLDERS)) {
+      expect(existsSync(path.join(REPO_ROOT, route)), route).toBe(true);
+      expect(readFileSync(path.join(REPO_ROOT, route), "utf8")).toContain("notReleasedResponse");
+    }
+  });
+});
+
+async function middlewareConfig() {
+  return (await import("../../middleware")).config;
+}
+
+describe("middleware for a static-looking path with no file in public/", () => {
+  it.each([
+    { path: "/apple-touch-icon-precomposed.png", who: "signed out", session: signedOut },
+    { path: "/apple-touch-icon-precomposed.png", who: "signed in", session: signedIn },
+    { path: "/x.png", who: "signed out", session: signedOut },
+    { path: "/x.png", who: "signed in", session: signedIn },
+    { path: "/icons/x.svg", who: "signed in", session: signedIn },
+    { path: "/favicon.ico.map", who: "signed out", session: signedOut },
+    // Served from public/ without the middleware; were the file removed and
+    // the matcher not updated, this is the answer it would get.
+    { path: "/apple-touch-icon.png", who: "signed out", session: signedOut },
+  ])("answers $path ($who) with 404 and the security headers, before the session check", async ({ path, session }) => {
+    session();
+    const middleware = await loadMiddleware();
+    const res = await middleware(
+      makeRequest(path, { "accept-language": "en", "x-mgm-path": "/microgrids/m/operations?org=other" }),
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    for (const [name, value] of Object.entries(PUBLIC_PAGE_SECURITY_HEADERS)) {
+      expect(res.headers.get(name), name).toBe(value);
+    }
+    expect(createServerClientMock).not.toHaveBeenCalled();
+    expect(getClaimsMock).not.toHaveBeenCalled();
+    // Nothing is passed on to a page or layout: no rewrite, no forwarded
+    // request, so neither the client's x-mgm-path nor any other reaches one.
+    expect(res.headers.get("x-middleware-next")).toBeNull();
+    expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(res.headers.get("x-middleware-override-headers")).toBeNull();
+    expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
   });
 });
 

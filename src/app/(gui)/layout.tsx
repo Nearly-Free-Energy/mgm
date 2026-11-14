@@ -6,6 +6,8 @@ import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { HostKitProvider } from "@/lib/gui/host/client/host-kit-provider";
 import { getManifest, preloadManifest } from "@/lib/gui/host/server/manifest";
+import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
+import { resolveInitialView } from "@/lib/gui/host/server/render-view";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
 import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
 import { organizationExists } from "@/lib/mgm/organization-exists";
@@ -23,6 +25,11 @@ export default async function GuiLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // The request's path and query, which src/middleware.ts forwards; a
+  // render the middleware did not see answers 404 here, before any read
+  // below (middleware-path.ts says why).
+  const [path, requestCookies] = await Promise.all([requireMiddlewarePath(), cookies()]);
+
   // The organization check is global and does not depend on the user, so it
   // runs alongside the user and role read; the redirects below still apply
   // in their original order. A failed check surfaces where it is awaited,
@@ -31,8 +38,9 @@ export default async function GuiLayout({
   const hasOrganization = organizationExists();
   hasOrganization.catch(() => {});
 
-  const [requestHeaders, requestCookies] = await Promise.all([headers(), cookies()]);
-  const { path, requested, preferred } = manifestHints(requestHeaders, requestCookies);
+  // Read as /go/<nav> reads them (manifest-hints.ts), so the two share one
+  // cached manifest.
+  const { requested, preferred } = manifestHints(await headers(), requestCookies);
 
   // An MGM_GUI naming no compiled-in GUI is reported only after the
   // redirects, so a signed-out visitor still reaches /login: the interface
@@ -54,7 +62,8 @@ export default async function GuiLayout({
 
   // One read of the user and their user_roles rows, shared with the
   // manifest and the page in this render (`@/lib/auth/request-access`).
-  const { user, roles } = await getRequestUserAccess();
+  const access = await getRequestUserAccess();
+  const { user, roles } = access;
 
   if (!user) {
     redirect("/login");
@@ -86,7 +95,10 @@ export default async function GuiLayout({
   const outcome = await getManifest(gui, path, requested, preferred);
   if (!outcome.ok) redirect(outcome.status === 401 ? "/login" : "/no-access");
   const { manifest } = outcome;
-  const initial = resolveLegacyView(path ?? "/", manifest);
+  // A page a contributed view serves gets the view's own title and trail,
+  // from the same load as the page (render-view.tsx); any other path, or a
+  // view that does not load, gets resolveLegacyView's.
+  const initial = (await resolveInitialView(access, path, manifest)) ?? resolveLegacyView(path ?? "/", manifest);
   const { Shell, Overlay, forms } = INSTALLED_GUIS[gui];
 
   return (

@@ -12,7 +12,7 @@
  * act on the path re-check membership on the server.
  */
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type BundledPlugin, type CoreEntityKind } from "@/lib/plugins/bundled";
-import type { EntityRef, Href, Id, InitialView, NavEntry, OrgManifest, Trail } from "../../contract";
+import type { EntityRef, Href, Id, InitialView, NavEntry, OrgManifest, Trail, ViewModel } from "../../contract";
 
 export interface LegacyView extends InitialView {
   view: null;
@@ -36,10 +36,10 @@ function decode(value: string): string | null {
   }
 }
 
-function parsePath(path: string, plugins: readonly BundledPlugin[]): ParsedPath | null {
+function parsePath(path: string, plugins: readonly BundledPlugin[], views = false): ParsedPath | null {
   if (!path.startsWith("/")) return null;
   const match = matchCatalogPage(path, plugins);
-  if (!match || match.page.servedBy === "view") return null;
+  if (!match || (match.page.servedBy === "view" && !views)) return null;
   const parsed: ParsedPath = { segments: match.page.path.split("/").filter(Boolean), kinds: [], ids: [] };
   for (const segment of parsed.segments) {
     const name = /^\[(.+)\]$/.exec(segment)?.[1];
@@ -78,7 +78,37 @@ export function legacyView(
   plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS,
 ): LegacyView | null {
   const parsed = parsePath(pathWithQuery, plugins);
-  if (!parsed) return null;
+  return parsed && placeView(parsed, manifest);
+}
+
+/**
+ * What the shell shows above a contributed view on its own page: the view's
+ * id and title, with the scope, trail and current app derived from the path
+ * as legacyView derives them. Off the catalog, the organization and the
+ * model's own trail. Both the (gui) layout (on the server, for the first
+ * paint) and ViewBoundary (in the browser) call it, so the two agree.
+ */
+export function contributedView(
+  pathWithQuery: string,
+  model: Pick<ViewModel, "view" | "title" | "trail">,
+  manifest: { org: OrgManifest },
+  plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS,
+): InitialView & { view: Id; nav: Id | null; unplaced: boolean } {
+  const parsed = parsePath(pathWithQuery, plugins, true);
+  if (parsed) return { ...placeView(parsed, manifest), view: model.view, title: model.title };
+  const { org } = manifest;
+  return {
+    view: model.view,
+    title: model.title,
+    trail: [{ label: org.name, href: org.href }, ...model.trail],
+    tabs: [],
+    scope: { organization: { kind: "organization", id: org.id, label: org.name, href: org.href } },
+    nav: null,
+    unplaced: false,
+  };
+}
+
+function placeView(parsed: ParsedPath, manifest: { org: OrgManifest }): LegacyView {
   const { org } = manifest;
   const placeOf = (kind: CoreEntityKind, id: string | undefined) =>
     org.places.find((p) => p.kind === kind && p.id === id);
@@ -125,8 +155,8 @@ export function legacyView(
 /**
  * What the shell shows for any path under the (gui) layout: legacyView's
  * answer, or, for a path that is no catalog page served outside the contract
- * (a not-found page, or a page a view serves before the host renders views),
- * the organization alone.
+ * (a not-found page, or a page a view serves, until its ViewBoundary
+ * publishes contributedView's answer), the organization alone.
  */
 export function resolveLegacyView(
   pathWithQuery: string,

@@ -2,7 +2,8 @@
  * The (gui) layout: the redirects for signed-out, first-run and revoked
  * users, in their order; the manifest read started alongside them; and every
  * page rendered inside the shell of the GUI MGM_GUI selects, with the
- * manifest and the view the path names.
+ * manifest and the view the path names. A render the middleware did not
+ * see answers 404 before any of that.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BILLING_SURFACE } from "@/lib/billing/surface";
@@ -18,15 +19,19 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn((path: string) => {
     throw new Error(`redirect:${path}`);
   }),
+  notFound: vi.fn(() => {
+    throw new Error("not-found");
+  }),
   getRequestUserAccess: vi.fn(),
   organizationExists: vi.fn(),
   getManifest: vi.fn(),
   preloadManifest: vi.fn(),
+  resolveInitialView: vi.fn(),
   headers: new Headers(),
   cookies: new Map<string, string>(),
 }));
 
-vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("next/headers", () => ({
   headers: async () => mocks.headers,
   cookies: async () => ({
@@ -42,6 +47,9 @@ vi.mock("@/lib/mgm/organization-exists", () => ({
 vi.mock("@/lib/gui/host/server/manifest", () => ({
   getManifest: mocks.getManifest,
   preloadManifest: mocks.preloadManifest,
+}));
+vi.mock("@/lib/gui/host/server/render-view", () => ({
+  resolveInitialView: mocks.resolveInitialView,
 }));
 vi.mock("@/components/ui/navigation-progress", () => ({
   NavigationProgress: () => null,
@@ -112,11 +120,15 @@ const NO_ORGANIZATION = {
   message: "Your account has no organization yet.",
 } as const;
 
+/** What the middleware forwards for "/" (src/middleware.ts). */
+const MIDDLEWARE_SAW = () => new Headers({ "x-mgm-path": "/" });
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.headers = new Headers();
+  mocks.headers = MIDDLEWARE_SAW();
   mocks.cookies.clear();
   mocks.getManifest.mockResolvedValue({ ok: true, manifest: MANIFEST });
+  mocks.resolveInitialView.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -198,8 +210,8 @@ describe("GuiLayout first-run routing", () => {
     mocks.organizationExists.mockResolvedValue(true);
 
     const rendering = GuiLayout({ children: null });
-    expect(mocks.organizationExists).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(mocks.preloadManifest).toHaveBeenCalledOnce());
+    expect(mocks.organizationExists).toHaveBeenCalledOnce();
     expect(mocks.getManifest).not.toHaveBeenCalled();
 
     resolveAccess({
@@ -224,6 +236,45 @@ function all(node: unknown): Node[] {
 
 const byType = (tree: unknown, type: unknown) => all(tree).filter((el) => el.type === type);
 
+describe("GuiLayout for a render the middleware did not see", () => {
+  // The middleware sets x-mgm-path on every page request it passes on, and
+  // a browser never sends it, so a request without it reached this layout
+  // without the middleware: no content security policy, no release
+  // allowlist, no session check. Such a request answers 404 before the
+  // layout reads anything.
+  it.each([
+    { who: "signed in", session: SIGNED_IN },
+    { who: "signed out", session: { user: null, orgCount: 1, roleCount: 0 } },
+  ])("answers 404 with no reads for a request without x-mgm-path ($who)", async ({ session }) => {
+    wire(session);
+    mocks.headers = new Headers();
+    mocks.cookies.set("mgm-org", ORG);
+    await expect(GuiLayout({ children: "page" })).rejects.toThrow("not-found");
+    expect(mocks.notFound).toHaveBeenCalledOnce();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.organizationExists).not.toHaveBeenCalled();
+    expect(mocks.getRequestUserAccess).not.toHaveBeenCalled();
+    expect(mocks.preloadManifest).not.toHaveBeenCalled();
+    expect(mocks.getManifest).not.toHaveBeenCalled();
+    expect(mocks.resolveInitialView).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for an empty x-mgm-path, which the middleware never sends", async () => {
+    wire(SIGNED_IN);
+    mocks.headers = new Headers({ "x-mgm-path": "" });
+    await expect(GuiLayout({ children: null })).rejects.toThrow("not-found");
+    expect(mocks.organizationExists).not.toHaveBeenCalled();
+    expect(mocks.getRequestUserAccess).not.toHaveBeenCalled();
+    expect(mocks.preloadManifest).not.toHaveBeenCalled();
+  });
+
+  it("renders as usual once the middleware has set it", async () => {
+    wire(SIGNED_IN);
+    expect(await GuiLayout({ children: null })).toBeTruthy();
+    expect(mocks.notFound).not.toHaveBeenCalled();
+  });
+});
+
 describe("GuiLayout shell", () => {
   it("renders every page inside the selected GUI's shell, inside the kit", async () => {
     wire(SIGNED_IN);
@@ -241,6 +292,24 @@ describe("GuiLayout shell", () => {
     expect(shell.props).toMatchObject({ manifest: MANIFEST, initial });
     expect(initial).toMatchObject({ nav: "billing.periods", unplaced: false });
     expect(initial.scope.microgrid?.id).toBe(MICROGRID);
+  });
+
+  it("takes a contributed view's initial view from resolveInitialView, with the render's access read", async () => {
+    wire(SIGNED_IN);
+    const path = `/microgrids/${MICROGRID}/operations?date=2026-11-10`;
+    mocks.headers = new Headers({ "x-mgm-path": path });
+    const initial = { view: "metering.site-day", title: "Tuesday", trail: [], tabs: [], scope: {} };
+    mocks.resolveInitialView.mockResolvedValue(initial);
+    const tree = await GuiLayout({ children: "page" });
+
+    const access = await mocks.getRequestUserAccess.mock.results[0].value;
+    expect(mocks.resolveInitialView).toHaveBeenCalledWith(access, path, MANIFEST);
+    // The same object, not a copy: the page's renderView shares the load only through React cache(), which keys on identity.
+    expect(mocks.resolveInitialView.mock.calls[0][0]).toBe(access);
+    const [provider] = byType(tree, HostKitProvider);
+    const [shell] = byType(provider?.props?.children, INSTALLED_GUIS.gridtop.Shell);
+    expect(provider.props?.initial).toBe(initial);
+    expect(shell.props?.initial).toBe(initial);
   });
 
   it("hands the GUI's own overlay and forms to the action host", async () => {
@@ -264,10 +333,10 @@ describe("GuiLayout shell", () => {
     expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", `/microgrids?org=${OTHER_ORG}#top`, OTHER_ORG, ORG);
   });
 
-  it("shows the organization alone for a path without a header or a catalog page", async () => {
+  it("shows the organization alone for the start page or a path with no catalog page", async () => {
     wire(SIGNED_IN);
     const tree = await GuiLayout({ children: null });
-    expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", null, null, null);
+    expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", "/", null, null);
     const [provider] = byType(tree, HostKitProvider);
     expect(provider.props?.initial).toEqual(resolveLegacyView("/", MANIFEST));
 
