@@ -33,6 +33,7 @@ const HOST_PAGES: Record<string, string> = {
   "/no-access": "Shown to a signed-in user with no role.",
   "/setup": "First-run setup, before any organization exists.",
   "/review": "Redirects old bookmarks to the dashboard; owns no content.",
+  "/go/[nav]": "Opens any plugin's navigation entry by its id; owns no content.",
 };
 
 /**
