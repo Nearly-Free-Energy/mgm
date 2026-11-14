@@ -20,7 +20,8 @@
  * GUI host: contributed views, signals and search for the signed-in person's
  * organization, and the step that prepares an action's form and
  * confirmation. That step writes nothing; the write goes to the action's own
- * route, which keeps its own gate.
+ * route, which keeps its own gate. /go/<nav> opens a navigation entry by its
+ * id.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -124,6 +125,12 @@ const OPERATIONS_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/operations$/,
 ];
 
+// The GUI host's page that opens a navigation entry by its id
+// (src/app/(gui)/go/[nav]/page.tsx). It sends the person on only to another
+// released page, because go.ts checks each target here; if that check goes,
+// revisit.
+const GUI_HOST_PAGE_ROUTES = [/^\/go\/[^/]+$/];
+
 // The GUI host (src/app/api/gui/). Each name here is a release decision in the
 // pull request that adds its route.
 const GUI_HOST_API_ROUTES = [/^\/api\/gui\/(?:view|prepare|signals|search)$/];
@@ -144,6 +151,7 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_3_PAGE_ROUTES,
     ...RELEASE_4_PAGE_ROUTES,
     ...OPERATIONS_PAGE_ROUTES,
+    ...GUI_HOST_PAGE_ROUTES,
     ...PUBLIC_METADATA_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,

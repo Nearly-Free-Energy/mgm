@@ -263,6 +263,17 @@ describe("middleware PUBLIC_PATHS", () => {
     );
   });
 
+  it("sends a signed-out /go link to /login, which returns to it", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(makeRequest("/go/billing.periods"));
+
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/go/billing.periods");
+  });
+
   it("sends a signed-out visit to the start page to a plain /login", async () => {
     signedOut();
     const middleware = await loadMiddleware();

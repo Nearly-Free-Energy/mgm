@@ -176,6 +176,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Reads the snapshot and runs contributed status loaders from it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
   },
+  "src/lib/gui/host/server/go.ts": {
+    privilegedExports: ["resolveGoTarget"],
+    reason:
+      "Reads the manifest with getManifest, which reads the session with getRequestUserAccess first. goTarget only reads a manifest it is handed.",
+  },
   "src/lib/runtime/root.ts": {
     privilegedExports: [],
     reason:
@@ -221,6 +226,11 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads.",
+  },
+  "src/app/(gui)/go/[nav]/page.tsx": {
+    kind: "session",
+    reason:
+      "getRequestUserAccess (getUser) redirects to /login before resolveGoTarget, whose getManifest reads the session again before the manifest's reads.",
   },
   "src/app/setup/page.tsx": {
     kind: "session",

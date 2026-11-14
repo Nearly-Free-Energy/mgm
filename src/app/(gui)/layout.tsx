@@ -7,18 +7,9 @@ import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { HostKitProvider } from "@/lib/gui/host/client/host-kit-provider";
 import { getManifest, preloadManifest } from "@/lib/gui/host/server/manifest";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
-import { ORG_COOKIE } from "@/lib/gui/host/shared/org-cookie";
+import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
-
-/** The request's path and query, which middleware forwards (src/middleware.ts). */
-const MGM_PATH_HEADER = "x-mgm-path";
-
-/** The `?org=` of a path with its query, or null. */
-function requestedOrganization(path: string | null): string | null {
-  const query = path?.split("#", 1)[0].split("?")[1];
-  return query ? new URLSearchParams(query).get("org") : null;
-}
 
 /**
  * Every signed-in page, inside the shell of the GUI MGM_GUI selects. The
@@ -41,9 +32,7 @@ export default async function GuiLayout({
   hasOrganization.catch(() => {});
 
   const [requestHeaders, requestCookies] = await Promise.all([headers(), cookies()]);
-  const path = requestHeaders.get(MGM_PATH_HEADER);
-  const requested = requestedOrganization(path);
-  const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
+  const { path, requested, preferred } = manifestHints(requestHeaders, requestCookies);
 
   // An MGM_GUI naming no compiled-in GUI is reported only after the
   // redirects, so a signed-out visitor still reaches /login: the interface

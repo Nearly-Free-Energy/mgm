@@ -9,10 +9,10 @@
  *
  * Radix traps focus inside, closes on Escape or a press outside, and puts
  * focus back on the trigger. The sheet is open for one pathname only, and
- * following a link inside it in the same tab closes it. Without a trigger,
- * the caller holds the open state (`open`, `onOpenChange`) and the pathname
- * rule, as the command palette does, and names in `returnFocus` where focus
- * goes back to.
+ * following a link inside it in the same tab closes it, as does pressing a
+ * control marked data-closes-sheet. Without a trigger, the caller holds the
+ * open state (`open`, `onOpenChange`) and the pathname rule, as the command
+ * palette does, and names in `returnFocus` where focus goes back to.
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
@@ -39,7 +39,7 @@ export const SHEET_ROW =
   "gt:focus-visible:outline-2 gt:focus-visible:outline-offset-2 gt:focus-visible:outline-ring";
 
 /** A plain left click, which follows a link in this tab; a modified one opens a new tab or window. */
-const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+export const sameTab = (event: MouseEvent) => event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 type SheetProps = { title: string; children: ReactNode } & (
   | { trigger: ReactElement; open?: never; onOpenChange?: never; returnFocus?: never }
@@ -77,8 +77,12 @@ export function Sheet(props: SheetProps) {
               <span className="gt:sr-only">Close</span>
             </Dialog.Close>
           </div>
-          {/* A link to the page already shown changes no pathname, so following any link closes the sheet too. */}
-          <div className="gt:p-3" onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href]") && setOpen(false)}>
+          {/* A link to the page already shown changes no pathname, so following any link closes the sheet too,
+              as does a control marked data-closes-sheet, such as one that opens the action host's own dialog. */}
+          <div
+            className="gt:p-3"
+            onClick={(event) => sameTab(event) && (event.target as Element).closest("a[href], [data-closes-sheet]") && setOpen(false)}
+          >
             {children}
           </div>
         </Dialog.Content>
