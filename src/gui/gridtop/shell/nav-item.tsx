@@ -8,7 +8,8 @@ import type { NavEntry } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { cx } from "../ui/cx";
 import { hasIcon, Icon } from "../ui/icon";
-import { pickStep, PlacePicker } from "./place-picker";
+import { pickStep } from "./pick-step";
+import { PlacePicker } from "./place-picker";
 
 export interface NavItemStyle {
   item: string;

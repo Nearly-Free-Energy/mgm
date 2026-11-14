@@ -10,5 +10,5 @@ export const GRIDTOP_META = {
   version: "0.1.0",
   contract: "^0.1",
   styles: "./styles.css",
-  dependencies: ["@radix-ui/react-dialog", "clsx", "lucide-react"],
+  dependencies: ["@radix-ui/react-dialog", "clsx", "cmdk", "lucide-react"],
 } as const satisfies GuiMeta;
