@@ -6,7 +6,7 @@
  * clock. The layout that mounts it persists across soft navigations, so after
  * the first paint the view comes from `resolve(pathname)` or the boundary.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
 import type { EntityRef, Href, InitialView, Manifest, NavEntry, Signals, ViewModel, ViewState } from "../../contract";
 import { isHref } from "../shared/href";
@@ -40,6 +40,35 @@ export function useKitState(): KitState | null {
   return useContext(KitContext);
 }
 
+/**
+ * Rebuilds the manifest (runtime.refresh) at most once per key while the
+ * manifest shows `organization`. A manifest for another organization starts
+ * afresh, so switching back and forth between organizations rebuilds each
+ * time; a rebuild that comes back for the same organization (a place past the
+ * places cap, or a hint the server does not follow) adds nothing, so it can
+ * never loop. Called from effects.
+ */
+export function useRefreshOnce(organization: string | null): (key: string) => void {
+  const runtime = useKitRuntime();
+  const done = useRef<{ organization: string | null; keys: Set<string> }>({ organization, keys: new Set() });
+  // Start afresh as soon as a manifest for another organization commits, not
+  // only when this hook is next asked to refresh: a switch made through
+  // another provider's hook must not leave stale keys here. Layout effects
+  // run before the effects that call the returned function in the same commit.
+  useLayoutEffect(() => {
+    if (done.current.organization !== organization) done.current = { organization, keys: new Set() };
+  }, [organization]);
+  return useCallback(
+    (key: string) => {
+      if (done.current.organization !== organization) done.current = { organization, keys: new Set() };
+      if (done.current.keys.has(key)) return;
+      done.current.keys.add(key);
+      runtime.refresh();
+    },
+    [organization, runtime],
+  );
+}
+
 export function KitProvider(props: {
   manifest: Manifest | null;
   initial: InitialView;
@@ -62,14 +91,13 @@ export function KitProvider(props: {
   );
 
   // A place the manifest cannot show means it was built for another
-  // organization or past the places cap: rebuild it once per pathname.
-  const refreshed = useRef(new Set<string>());
+  // organization or past the places cap: rebuild it once per pathname for
+  // each organization the manifest shows.
+  const refreshOnce = useRefreshOnce(manifest?.org.id ?? null);
   const unplaced = "unplaced" in resolved && resolved.unplaced === true;
   useEffect(() => {
-    if (!unplaced || refreshed.current.has(pathname)) return;
-    refreshed.current.add(pathname);
-    runtime.refresh();
-  }, [unplaced, pathname, runtime]);
+    if (unplaced) refreshOnce(`path:${pathname}`);
+  }, [unplaced, pathname, refreshOnce]);
 
   const state = useMemo<KitState>(
     () => ({ manifest, view: resolved, boundary, setBoundary, skew, signals }),

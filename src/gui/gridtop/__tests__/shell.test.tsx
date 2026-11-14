@@ -441,6 +441,10 @@ describe("Gridtop's shell", () => {
     expect(main.getAttribute("tabindex")).toBe("-1");
     expect(screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")).toBe("#main");
     expect(screen.getAllByRole("banner")).toHaveLength(1);
+    // With the root viewport's viewportFit "cover", the frame keeps clear of
+    // a notch in landscape.
+    expect(main.parentElement!.classList).toContain("gt:pl-[env(safe-area-inset-left)]");
+    expect(main.parentElement!.classList).toContain("gt:pr-[env(safe-area-inset-right)]");
     // One Apps nav is shown at a time: the dock from 600 px, the bottom dock below.
     expect(dock.className).toMatch(/(^| )gt:hidden( |$)/);
     expect(dock.className).toContain("gt:medium:block");

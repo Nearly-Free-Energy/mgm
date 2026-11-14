@@ -3,7 +3,7 @@
 // Each loading.tsx below is what a navigation shows at once instead of
 // freezing on the old page until the server responds. Next.js shows a
 // folder's loading.tsx when the route segment directly below that folder
-// changes, so each file covers one kind of move (sidebar section, list →
+// changes, so each file covers one kind of move (top-level section, list →
 // detail, tab switch). This checks every boundary still exists and announces
 // itself once.
 //
