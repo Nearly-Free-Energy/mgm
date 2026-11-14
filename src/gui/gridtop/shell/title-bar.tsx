@@ -1,10 +1,11 @@
 /**
  * The 48 px band above the page: the mark, which opens the dashboard when
- * the manifest's nav has one, the context path with its switchers, and the
- * tray.
+ * the manifest's nav has one, the context path with its switchers, the
+ * command palette's button, and the tray.
  */
 import type { Id } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
+import { PaletteLauncher } from "../palette/launcher";
 import { cx } from "../ui/cx";
 import { ContextPath } from "./context-path";
 import { Tray } from "./tray";
@@ -34,6 +35,7 @@ export function TitleBar({ app }: { app: Id | null }) {
         </span>
       )}
       <ContextPath app={app} />
+      <PaletteLauncher />
       <Tray />
     </header>
   );
