@@ -1,4 +1,4 @@
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import type { GuiName } from "@/gui/meta";
@@ -6,14 +6,12 @@ import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { HostKitProvider } from "@/lib/gui/host/client/host-kit-provider";
 import { getManifest, preloadManifest } from "@/lib/gui/host/server/manifest";
+import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
 import { resolveInitialView } from "@/lib/gui/host/server/render-view";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
 import { ORG_COOKIE } from "@/lib/gui/host/shared/org-cookie";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
-
-/** The request's path and query, which middleware forwards (src/middleware.ts). */
-const MGM_PATH_HEADER = "x-mgm-path";
 
 /** The `?org=` of a path with its query, or null. */
 function requestedOrganization(path: string | null): string | null {
@@ -33,6 +31,11 @@ export default async function GuiLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // The request's path and query, which src/middleware.ts forwards; a
+  // render the middleware did not see answers 404 here, before any read
+  // below (middleware-path.ts says why).
+  const [path, requestCookies] = await Promise.all([requireMiddlewarePath(), cookies()]);
+
   // The organization check is global and does not depend on the user, so it
   // runs alongside the user and role read; the redirects below still apply
   // in their original order. A failed check surfaces where it is awaited,
@@ -41,8 +44,6 @@ export default async function GuiLayout({
   const hasOrganization = organizationExists();
   hasOrganization.catch(() => {});
 
-  const [requestHeaders, requestCookies] = await Promise.all([headers(), cookies()]);
-  const path = requestHeaders.get(MGM_PATH_HEADER);
   const requested = requestedOrganization(path);
   const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
 

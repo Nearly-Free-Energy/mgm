@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
+import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
 import { readGuiName } from "@/lib/config/gui";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { renderView, type PageSearch } from "@/lib/gui/host/server/render-view";
@@ -19,9 +20,14 @@ export default async function ContributedViewPage({
   params: Promise<{ path: string[] }>;
   searchParams: Promise<PageSearch>;
 }) {
-  // Next.js 16 hands catch-all segments over percent-encoded
-  // (next/dist/shared/lib/router/utils/get-dynamic-param.js). If it starts
-  // decoding them, drop this decode.
+  // A render the middleware did not see answers 404 before any read
+  // (middleware-path.ts says why). The path comes from params below.
+  await requireMiddlewarePath();
+
+  // Next.js 16 hands catch-all segments over percent-encoded, one level
+  // (next/dist/shared/lib/router/utils/get-dynamic-param.js): a request for
+  // /a%20b arrives as "a%20b". If it starts decoding them, drop this decode;
+  // the page test's %20, %2F and %25 cases then fail.
   let path: string[] = [];
   try {
     path = (await params).path.map(decodeURIComponent);
@@ -30,10 +36,10 @@ export default async function ContributedViewPage({
   }
   // An /api path with no route handler would otherwise render as a page.
   if (path.length === 0 || path[0] === "api") notFound();
-  // Middleware applies the release allowlist, but its matcher skips
-  // static-file paths (src/middleware.ts), and a missing file there lands
-  // here; such a path is never released. If the matcher stops skipping
-  // them, this check is redundant but stays correct.
+  // Middleware has already applied the release allowlist to this path
+  // (requireMiddlewarePath above shows it ran). The check is repeated here
+  // so a request that sent x-mgm-path itself still answers 404 before any
+  // read for a path outside the release.
   if (!isReleasedRoute(`/${path.map(encodeURIComponent).join("/")}`)) notFound();
 
   // Its own session check: App Router renders the layout alongside the page.

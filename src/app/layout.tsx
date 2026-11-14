@@ -31,8 +31,8 @@ export const metadata: Metadata = {
   description: "Run community microgrids: households, meters, tariffs, bills and payments.",
   applicationName: "MGM",
   // Files in public/, drawn by scripts/icons/render-icons.mjs. They load
-  // without a session because the middleware matcher skips favicon.ico and
-  // image extensions; app-icons.test.ts fails if it stops skipping them.
+  // without a session because the middleware matcher skips each file in
+  // public/ by name; app-icons.test.ts fails if it stops skipping them.
   // Declaring the ICO as 32x32 keeps Chrome from preferring it to icon.svg.
   icons: {
     icon: [

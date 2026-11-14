@@ -34,13 +34,13 @@ const PUBLIC_PATHS = [
 
 /**
  * The request header that carries a page request's path and query to
- * layouts, which Next.js does not otherwise give them. Middleware always
- * replaces it on the paths the matcher below matches. The matcher skips
- * static-file paths, and one with no file in public/ reaches the (gui)
- * catch-all page (src/app/(gui)/[...path]/page.tsx) without this
- * middleware, so there the (gui) layout can receive a value the client
- * sent; that page answers 404 for such a path, because none is released.
- * It is a hint for display and for choosing among the caller's visible
+ * layouts, which Next.js does not otherwise give them. Middleware sets it
+ * on every page request it passes on and replaces any value the client
+ * sent. The (gui) layout and catch-all page answer 404 without it, before
+ * any read (src/lib/gui/host/server/middleware-path.ts), because then this
+ * middleware did not run; so a page request passed on without it would
+ * break that page, and middleware.test.ts checks every such response. It
+ * is a hint for display and for choosing among the caller's visible
  * organizations, never an authorization; if a reader starts using it for
  * anything else, revisit.
  */
@@ -239,15 +239,32 @@ export const config = {
   runtime: "nodejs",
   matcher: [
     /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - gui-styles/ (compiled GUI stylesheets, static files in public/)
-     * - favicon.ico (favicon file)
-     * - images in public/, which sit at the top level or in icons/. Deeper
-     *   paths ending in an image extension still match, because a dynamic
-     *   page segment such as /organizations/x.png must pass through here.
+     * Match every request path except the ones Next.js serves itself:
+     * - _next/static/ (its build output) and _next/image (its image
+     *   optimizer)
+     * - gui-styles/ (the compiled GUI stylesheets, written to public/ at
+     *   build time with content-hashed names)
+     * - each file in public/, named whole
+     * A skipped request gets none of what this middleware adds: the content
+     * security policy, the release allowlist, the session check and
+     * x-mgm-path. So nothing skipped should reach the (gui) layout. A file
+     * that exists is served before any page is consulted. A missing one
+     * under a skipped folder reaches that folder's own 404 route
+     * (src/app/%5Fnext/static/[...file]/route.ts,
+     * src/app/gui-styles/[...file]/route.ts) instead of the (gui) catch-all
+     * page, because Next.js prefers the longer route. Every other path comes
+     * through here: /x.png or /apple-touch-icon-precomposed.png gets the
+     * release allowlist's 404 before the session check, and a page path
+     * such as /organizations/x.png is checked as a page. middleware.test.ts
+     * fails when this list and public/ disagree, or when a skipped folder
+     * has no 404 route.
+     *
+     * A host may apply this pattern differently from `next start` (Vercel's
+     * routing appears to match it without regard to case, so /FAVICON.ICO
+     * would be skipped there and reach the (gui) catch-all page). The (gui)
+     * layout and that page therefore answer 404 themselves, before any
+     * read, when x-mgm-path is missing (see MGM_PATH_HEADER above).
      */
-    "/((?!_next/static|_next/image|gui-styles/|favicon.ico|(?:icons/)?[^/]+\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static/|_next/image$|gui-styles/|favicon\\.ico$|apple-touch-icon\\.png$|icon\\.svg$|icons/icon-192\\.png$|icons/icon-512\\.png$|icons/icon-maskable-512\\.png$).*)",
   ],
 };
