@@ -1996,10 +1996,6 @@ export type Database = {
         Returns: boolean
       }
       user_can_access_org: { Args: { _org_id: string }; Returns: boolean }
-      user_can_configure_ems: {
-        Args: { _microgrid_id: string }
-        Returns: boolean
-      }
       user_can_see_user_profile: {
         Args: { _target_user_id: string }
         Returns: boolean

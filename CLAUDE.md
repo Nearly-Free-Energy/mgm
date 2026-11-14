@@ -129,14 +129,13 @@ The schema follows Org → Community → Microgrid → Edge → Device plus a pa
 
 ### RLS helper functions (migration 00002_rls.sql)
 
-**Three** `SECURITY DEFINER STABLE` helpers, pinned to `search_path = public, pg_temp`, owned by `postgres`. All policies chain through these — do not inline JOIN chains in `USING` clauses. The table below lists **four**: the fourth is a deprecated alias that no policy chains through and that a follow-up migration deletes.
+**Three** `SECURITY DEFINER STABLE` helpers, pinned to `search_path = public, pg_temp`, owned by `postgres`. All policies chain through these — do not inline JOIN chains in `USING` clauses. The deprecated alias `user_can_configure_ems` (00053) was dropped by `20261114223000`.
 
 | Helper | Contract |
 |---|---|
 | `is_super_admin() -> BOOLEAN` | True iff `auth.uid()` has any `user_roles` row with `role='super_admin'`. |
 | `user_can_access_org(_org_id UUID) -> BOOLEAN` | True iff `is_super_admin()` OR exists a `user_roles` row with `role='org_manager' AND scope_type='org' AND scope_id=_org_id`. |
 | `user_can_access_microgrid(_microgrid_id UUID) -> BOOLEAN` | True iff `user_can_access_org(<microgrid's org_id>)` — resolves via `microgrids → communities → org_id`. |
-| `user_can_configure_ems(_microgrid_id UUID) -> BOOLEAN` (00053) | **Thin alias for `user_can_access_microgrid`** — org access *is* configuration access (#321). Kept only so code deployed before #321 keeps working; a follow-up migration drops it once nothing calls it. **Do not add call sites.** |
 
 RLS policies are written with `FOR ALL` (not split per-verb) to match the existing pattern.
 
@@ -202,7 +201,7 @@ This became true in **#324**, which took `SKIP_RLS_TESTS=1` out of the `Test` ga
 
 **The ordering constraint is inside one PR, not across a deploy.** Do not reach for the deploy-ordering framing used for schema changes that must interleave with an app release (`00053`'s header is the worked example of *that* problem) — it names events on the wrong axis for this one and produces a plan nobody can follow.
 
-Worked example: dropping the deprecated `user_can_configure_ems` alias requires, in one commit, the migration, the alias assertions in `ems_config_access.test.ts`, the regenerated `database.gen.ts`, and the helper-table row in this file.
+Worked example: dropping the deprecated `user_can_configure_ems` alias took, in one commit, the migration (`20261114223000`), the alias assertions in `ems_config_access.test.ts`, the regenerated `database.gen.ts`, and the helper-table row in this file.
 
 ### Seed migration generation
 
