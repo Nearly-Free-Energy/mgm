@@ -16,6 +16,7 @@
 # (is_super_admin, user_can_access_org, user_can_access_microgrid), so it is
 # covered by this line.
 /supabase/migrations/                  @tushabe @arindahills
+/supabase/migrations.sha256            @tushabe @arindahills
 
 # Role constants that mirror the user_role enum the RLS helpers evaluate.
 /src/lib/roles.ts                      @tushabe @arindahills

@@ -188,6 +188,10 @@ Regression-test pattern: assert `error.code === "42501" || error.message?.toLowe
 | New fn + REVOKE+GRANT in same DDL (A) | `401 42501` |
 | Fully REVOKEd (no role retains EXECUTE except service_role) (B2 trigger fn) | `404 PGRST202` |
 
+### Migration conventions — a merged migration is never edited
+
+**Never edit or delete a migration after it merges to `main`; write a new one.** Databases that ran it keep the old version, which is how NFE's production drifted from the chain (00057 and the pilot overlay were both edited after production ran them). A new migration adds its line to `supabase/migrations.sha256` in the same commit (`shasum -a 256 supabase/migrations/<file> | sed 's#supabase/migrations/##' >> supabase/migrations.sha256`); `src/lib/__tests__/migration-hashes.test.ts` fails otherwise. While a migration's own PR is still open, editing it and its line together is fine.
+
 ### Migration conventions — a migration and the tests that assert its objects ship in one commit
 
 **A migration that changes a database object a database-backed test asserts must ship in the same commit as that test and as the regenerated `database.gen.ts`.** Not the commit before, not the commit after.
