@@ -1,10 +1,10 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PAGE_MODEL, renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
+import { PAGE_MODEL, renderInKit, renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
 import type { ActionRef, EntityHit, EntityRef, NavEntry } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
-import { isPaletteShortcut } from "../palette/launcher";
+import { isPaletteShortcut, PaletteLauncher } from "../palette/launcher";
 
 const nav = (id: NavEntry["id"], title: string, group: NavEntry["group"], order: number, href: string): NavEntry => ({
   id,
@@ -359,5 +359,35 @@ describe("open in new window", () => {
     });
     expect(open).toHaveBeenCalledWith(`${window.location.origin}/?ui.sheet=more`, "_blank", "noopener,noreferrer");
     window.history.replaceState(null, "", "/");
+  });
+});
+
+describe("when the palette's code fails to load", () => {
+  // A tab left open across a deploy asks for a chunk that no longer exists,
+  // or the person is offline.
+  it("shows nothing, keeps the title bar working, and loads again on the next open", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const load = vi
+      .fn<() => Promise<typeof import("../palette/palette")>>()
+      .mockRejectedValueOnce(new Error("Failed to fetch dynamically imported module"))
+      .mockImplementation(() => import("../palette/palette"));
+    const view = await renderInKit(<PaletteLauncher load={load} />, FIXTURE);
+    try {
+      const button = screen.getByRole("button", { name: "Go to or find" });
+
+      await act(async () => fireEvent.keyDown(document, { key: "k", ctrlKey: true }));
+      await settle();
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(button.isConnected).toBe(true);
+      expect(button.getAttribute("aria-expanded")).toBe("false");
+
+      await act(async () => fireEvent.click(button));
+      await settle();
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(await screen.findByRole("dialog")).toBeTruthy();
+    } finally {
+      view.unmount();
+    }
   });
 });
