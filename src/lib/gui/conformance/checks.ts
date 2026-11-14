@@ -9,27 +9,23 @@ import { screen } from "@testing-library/react";
 import { isDeepStrictEqual } from "node:util";
 import { GUI_META } from "@/gui/meta";
 import { setViewportWidth } from "@/test/gui-setup";
-import { GUI_CONTRACT, type CoreEntityKind, type EntityRef, type GuiMeta, type GuiPlugin, type Manifest } from "../contract";
+import { GUI_CONTRACT, type GuiMeta, type GuiPlugin } from "../contract";
 import { fillNavHref } from "../host/client/kit-provider";
 import { satisfiesContract } from "../host/shared/contract-range";
 import { crawl } from "./crawl";
-import { MANIFEST_FIXTURES, type ManifestFixture } from "./fixtures/manifests";
+import { WIDTHS, type CheckId, type Finding } from "./findings";
+import { frameFindings } from "./frames";
+import { MANIFEST_FIXTURES, PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
 import { renderShell, type Rendered } from "./harness";
+import { choicesOf, controlIssues, hostHrefs, refsOf } from "./inspect";
+import { exactRefsAndHrefs, modelFindings, signalFindings, unknownFindings } from "./views";
 
-/** The checks this kit runs so far; the view checks are still to come. */
-export type CheckId = "version" | "manifests" | "writes" | "a11y";
-export interface Finding {
-  check: CheckId;
-  fixture: string;
-  message: string;
-}
+export { WIDTHS, type CheckId, type Finding };
 export interface CheckOptions {
   /** The installed metadata the GUI must match; GUI_META by default. */
   installed?: Readonly<Record<string, GuiMeta>>;
 }
 type Check = (gui: GuiPlugin, options?: CheckOptions) => Promise<Finding[]>;
-
-export const WIDTHS = [360, 800, 1366] as const;
 
 /** Renders the Shell for every fixture at every width, and collects what `inspect` reports. */
 async function eachShell(
@@ -74,14 +70,9 @@ const version: Check = async (gui, options = {}) => {
   return found.map((message) => ({ check: "version", fixture: "metadata", message }));
 };
 
-function choicesOf(manifest: Manifest, kind: CoreEntityKind): EntityRef[] {
-  if (kind === "organization") return manifest.orgs.map((o) => ({ kind, id: o.id, label: o.name, href: o.href }));
-  return manifest.org.places.filter((place) => place.kind === kind);
-}
-
-/** 2. Everything the manifest offers is reachable from the Shell. */
-const manifests: Check = async (gui) =>
-  tag(
+/** 2. Everything the manifest offers is reachable from the Shell, and the Needs-you count shows. */
+const manifests: Check = async (gui) => [
+  ...tag(
     "manifests",
     await eachShell(gui, async ({ manifest, initial, text = [] }, { log }) => {
       const found: string[] = [];
@@ -115,36 +106,57 @@ const manifests: Check = async (gui) =>
       if (log.signOut === 0) found.push("no control reaches kit.SignOut");
       return found;
     }),
-  );
+  ),
+  ...(await signalFindings(gui)).filter((f) => f.check === "manifests"),
+];
 
-/** 6, on mount: rendering writes nothing. Exact refs during use come with the view checks. */
-const writes: Check = async (gui) =>
-  tag(
+/** The model checks' findings for one check. */
+const fromModels = (check: CheckId): Check => async (gui) => (await modelFindings(gui)).filter((f) => f.check === check);
+
+/** 3. Every view kind and value type shows, with its marks, bare columns, totals and empty state. */
+const kinds = fromModels("kinds");
+
+/** 4. Another plugin's action on each entity is reachable and acts with the exact ref the host merged. */
+const targeted = fromModels("targeted");
+
+/**
+ * 5. Proposed actions are marked as proposed, and a your-move signal only
+ * links. A Shell may offer a proposal signal as a link to its `href` (where
+ * it is decided) or as a control acting on its exact action; any control
+ * that acts on it must say "proposed", even when the link is there too.
+ */
+const proposals: Check = async (gui) =>
+  [...(await modelFindings(gui)), ...(await signalFindings(gui))].filter((f) => f.check === "proposals");
+
+/**
+ * 6. Nothing writes on mount; every act passes a ref the host gave, never a
+ * disabled one; every link and navigation goes where the host pointed.
+ */
+const writes: Check = async (gui) => [
+  ...tag(
     "writes",
-    await eachShell(gui, (_, { log }) =>
-      log.act.map((ref) => `called kit.act(${ref.action}) without a person asking`),
-    ),
-  );
+    await eachShell(gui, async (fixture, { log }) => {
+      const found = log.act.map((ref) => `called kit.act(${ref.action}) without a person asking`);
+      const reach = await crawl(log);
+      return [...found, ...exactRefsAndHrefs(reach, refsOf(PAGE_MODEL), hostHrefs(fixture, PAGE_MODEL))];
+    }),
+  ),
+  ...(await modelFindings(gui)).filter((f) => f.check === "writes"),
+];
 
-const NAMED_ROLES = ["button", "link", "menuitem", "tab", "checkbox", "textbox", "combobox"] as const;
+/** 7. A kind past the GUI's range and a value type it does not know still show. */
+const unknowns: Check = unknownFindings;
 
-/** 8. Landmarks, names, focus order and the current place. */
-const a11y: Check = async (gui) =>
-  tag(
+/** 8. Landmarks, names, focus order and the current place; on model renders, names and focus order. */
+const a11y: Check = async (gui) => [
+  ...tag(
     "a11y",
     await eachShell(gui, (_, { pathname }) => {
       const found: string[] = [];
       const mains = screen.queryAllByRole("main").length;
       if (mains !== 1) found.push(`has ${mains} main landmarks, not one`);
       if (screen.queryAllByRole("navigation").length === 0) found.push("has no navigation landmark");
-      for (const role of NAMED_ROLES) {
-        const unnamed = screen.queryAllByRole(role, { name: "" }).length;
-        if (unnamed > 0) found.push(`has ${unnamed} ${role} element(s) without an accessible name`);
-      }
-      for (const el of document.body.querySelectorAll("[tabindex]")) {
-        if (Number(el.getAttribute("tabindex")) > 0) found.push(`sets tabindex="${el.getAttribute("tabindex")}" on a <${el.tagName.toLowerCase()}>`);
-      }
-      if (document.body.querySelector('[role="tab"][href]')) found.push('gives an element with role="tab" an href');
+      found.push(...controlIssues());
       for (const link of document.body.querySelectorAll('nav a[href], [role="navigation"] a[href]')) {
         const href = link.getAttribute("href") ?? "";
         if (href.split(/[?#]/, 1)[0] === pathname && !link.hasAttribute("aria-current")) {
@@ -153,6 +165,11 @@ const a11y: Check = async (gui) =>
       }
       return found;
     }),
-  );
+  ),
+  ...(await modelFindings(gui)).filter((f) => f.check === "a11y"),
+];
 
-export const CHECKS: Readonly<Record<CheckId, Check>> = { version, manifests, writes, a11y };
+/** 9. The Overlay, PublicFrame and Loading the GUI brings, if any. */
+const frames: Check = frameFindings;
+
+export const CHECKS: Readonly<Record<CheckId, Check>> = { version, manifests, kinds, targeted, proposals, writes, unknowns, a11y, frames };

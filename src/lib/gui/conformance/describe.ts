@@ -11,8 +11,17 @@ import { CHECKS, type CheckId, type CheckOptions, type Finding } from "./checks"
 
 export interface TestApi {
   describe(name: string, body: () => void): void;
-  it(name: string, body: () => Promise<void>): void;
+  it(name: string, body: () => Promise<void>, timeout?: number): void;
 }
+
+/**
+ * Each case renders every fixture at three widths and crawls each render,
+ * pressing every control, so its time grows with the GUI: Gridtop's
+ * `manifests` takes about 5 s alone on a fast machine. The gui project's
+ * 15 s default is sized for one component, and the checks share memoised
+ * passes, so one timeout under load fails several cases at once.
+ */
+export const CHECK_TIMEOUT_MS = 60_000;
 
 const describeFinding = (f: Finding) => `${f.fixture}: ${f.message}`;
 
@@ -20,11 +29,15 @@ const describeFinding = (f: Finding) => `${f.fixture}: ${f.message}`;
 export function registerConformance(gui: GuiPlugin, options: CheckOptions, api: TestApi): void {
   api.describe(`${gui.name} conforms to the GUI contract`, () => {
     for (const id of Object.keys(CHECKS) as CheckId[]) {
-      api.it(id, async () => {
-        const findings = await CHECKS[id](gui, options);
-        const lines = findings.map(describeFinding);
-        expect(lines, lines.join("\n")).toEqual([]);
-      });
+      api.it(
+        id,
+        async () => {
+          const findings = await CHECKS[id](gui, options);
+          const lines = findings.map(describeFinding);
+          expect(lines, lines.join("\n")).toEqual([]);
+        },
+        CHECK_TIMEOUT_MS,
+      );
     }
   });
 }

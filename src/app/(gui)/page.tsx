@@ -2,8 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import type { Organization, Microgrid } from "@/lib/types/domain";
 import { COMMUNITY_MANAGEMENT_PLUGIN_NAME } from "@/lib/plugins/bundled";
-import { getCurrentUserRoles } from "@/lib/auth/access";
-import { SUPER_ADMIN } from "@/lib/roles";
 import { microgridHref } from "@/lib/microgrid-links";
 
 type MicrogridWithHouseholdCount = {
@@ -18,17 +16,12 @@ type MicrogridWithHouseholdCount = {
 export default async function DashboardPage() {
   const supabase = await createClient();
 
-  const [
-    { data: organizations, error: orgError },
-    { data: pluginStates },
-    roles,
-  ] = await Promise.all([
+  const [{ data: organizations, error: orgError }, { data: pluginStates }] = await Promise.all([
     supabase.from("organizations").select("*").returns<Organization[]>(),
     supabase
       .from("mgm_plugins")
       .select("org_id, enabled")
       .eq("plugin_name", COMMUNITY_MANAGEMENT_PLUGIN_NAME),
-    getCurrentUserRoles(supabase),
   ]);
 
   if (orgError) {
@@ -44,7 +37,6 @@ export default async function DashboardPage() {
       .filter((row) => row.enabled === false)
       .map((row) => row.org_id as string)
   );
-  const isSuperAdmin = roles.some((role) => role.role === SUPER_ADMIN);
 
   if (!organizations || organizations.length === 0) {
     return (
@@ -63,37 +55,6 @@ export default async function DashboardPage() {
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-foreground">Dashboard</h1>
-      <nav
-        aria-label="Setup"
-        className="mb-6 flex flex-wrap gap-2 text-sm"
-      >
-        {isSuperAdmin ? (
-          <Link
-            href="/organizations"
-            className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-          >
-            + Organization
-          </Link>
-        ) : null}
-        <Link
-          href="/communities"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-        >
-          Communities
-        </Link>
-        <Link
-          href="/microgrids"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-        >
-          Microgrids
-        </Link>
-        <Link
-          href="/settings/plugins"
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-foreground hover:bg-muted pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-        >
-          Plugin settings
-        </Link>
-      </nav>
       <div className="space-y-6">
         {organizations.map((org) => (
           <OrgCard

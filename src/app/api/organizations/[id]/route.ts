@@ -174,7 +174,7 @@ export async function PATCH(
  * See 00015 header for the full rationale.
  *
  * Revalidation (AC-UI-6): `/organizations` layout is busted post-delete
- * so the sidebar/nav tree reflects the removal on next navigation.
+ * so the shell's organization list reflects the removal on next navigation.
  */
 export async function DELETE(
   _request: NextRequest,

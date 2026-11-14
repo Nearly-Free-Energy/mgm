@@ -122,6 +122,30 @@ export function legacyView(
   };
 }
 
+/**
+ * What the shell shows for any path under the (gui) layout: legacyView's
+ * answer, or, for a path that is no catalog page served outside the contract
+ * (a not-found page, or a page a view serves before the host renders views),
+ * the organization alone.
+ */
+export function resolveLegacyView(
+  pathWithQuery: string,
+  manifest: { org: OrgManifest },
+  plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS,
+): InitialView & { unplaced: boolean } {
+  const view = legacyView(pathWithQuery, manifest, plugins);
+  if (view) return view;
+  const { org } = manifest;
+  return {
+    view: null,
+    title: org.name,
+    trail: [{ label: org.name, href: org.href }],
+    tabs: [],
+    scope: { organization: { kind: "organization", id: org.id, label: org.name, href: org.href } },
+    unplaced: false,
+  };
+}
+
 /** The entry whose pattern is the longest segment prefix of the path; "/" matches only itself. */
 function currentApp(nav: readonly NavEntry[], parsed: ParsedPath): NavEntry | null {
   let best: { entry: NavEntry; length: number } | null = null;

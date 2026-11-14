@@ -338,7 +338,7 @@ describe("design tokens", () => {
       /(?<![\w-])(?:bg|text|border(?:-[trblxyse])?|ring-offset|ring|outline|fill|stroke|divide|from|via|to|placeholder|decoration|caret|accent|shadow)-((?:background|foreground|card|popover|primary|secondary|muted|accent|destructive|success|warning|border|input|ring|surface|subtle|energy|stale|sidebar|chart)(?:-[a-z0-9]+)*)(?:\/\d+)?(?![\w-])/g;
     const defined = new Set(themeNames("color"));
     const used = new Map<string, string>();
-    for (const root of ["src/app", "src/components", "src/lib"]) {
+    for (const root of ["src/app", "src/components", "src/lib", "src/gui"]) {
       for (const file of walk(path.join(REPO_ROOT, root))) {
         for (const m of readFileSync(file, "utf8").matchAll(SEMANTIC_COLOUR_CLASS)) {
           if (!used.has(m[1])) used.set(m[1], `${path.relative(REPO_ROOT, file)}: ${m[0]}`);

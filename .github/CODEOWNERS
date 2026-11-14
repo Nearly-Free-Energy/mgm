@@ -39,13 +39,18 @@
 # own so it stays owned if the line above is ever narrowed.
 /src/lib/gui/conformance/              @tushabe @arindahills
 /src/gui/meta.ts                       @tushabe @arindahills
+# The compiled-in GUIs' entry points, which host pages render.
+/src/gui/installed.ts                  @tushabe @arindahills
 /src/gui/__tests__/installed-guis.test.ts @tushabe @arindahills
 
 # The MGM_GUI setting: which compiled-in GUI serves the installation's pages.
 /src/lib/config/gui.ts                 @tushabe @arindahills
 
-# The GUI host's routes (decision 4 on #115).
+# The GUI host's routes, and the layout that checks the session, sends
+# signed-out, first-run and revoked users on, and renders the selected GUI's
+# shell (decision 4 on #115).
 /src/app/api/gui/                      @tushabe @arindahills
+/src/app/(gui)/layout.tsx              @tushabe @arindahills
 
 # Request middleware and the released-route allowlist it enforces.
 /src/middleware.ts                     @tushabe @arindahills

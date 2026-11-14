@@ -20,7 +20,7 @@
  * absolutely, so a menu or tooltip that must show past the box's edges has
  * to render in a portal (Radix `Portal`), or it is cut off at those edges.
  *
- * This test reads every `.tsx` file under src/app, src/components and src/lib/gui (tests
+ * This test reads every `.tsx` file under src/app, src/components, src/lib/gui and src/gui (tests
  * excluded) and checks that each `<table>` has an ancestor element whose
  * className makes it scroll sideways and positions it. The nearest ancestor
  * that sets an overflow decides; responsive variants (`md:overflow-x-auto`,
@@ -60,7 +60,7 @@ import * as path from "node:path";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const ROOTS = ["src/app", "src/components", "src/lib/gui"];
+const ROOTS = ["src/app", "src/components", "src/lib/gui", "src/gui"];
 
 /** Components whose own markup puts their table in a scroll container. */
 const CONTAINED: Record<string, string> = {
@@ -111,6 +111,9 @@ function classTokens(el: ts.JsxOpeningLikeElement): Set<string> {
     texts
       .join(" ")
       .split(/\s+/)
+      // Gridtop writes every class with gt:, a variant that changes nothing
+      // (src/gui/gridtop/styles.css); if that variant starts to, revisit.
+      .map((token) => (token.startsWith("gt:") ? token.slice(3) : token))
       .filter((token) => token && !token.includes(":")),
   );
 }
@@ -322,6 +325,8 @@ describe("the table scan", () => {
     ['<div className="rounded-lg"><table /></div>', "uncontained"],
     ['<section>{rows.length > 0 && <table />}</section>', "uncontained"],
     ['<div className="relative md:overflow-x-auto"><table /></div>', "uncontained"],
+    ['<div className="gt:relative gt:overflow-x-auto"><table /></div>', "scrolls"],
+    ['<div className="gt:relative gt:medium:overflow-x-auto"><table /></div>', "uncontained"],
     ['<div className="relative overflow-hidden overflow-x-auto"><table /></div>', "scrolls"],
     ['<div className="relative overflow-auto overflow-x-hidden"><table /></div>', "clips"],
     ['<div className="relative overflow-y-auto"><table /></div>', "scrolls"],

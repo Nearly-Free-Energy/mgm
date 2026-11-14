@@ -95,6 +95,10 @@ describe("RootLayout", () => {
     expect(viewport.themeColor).toBe(THEME_COLOR.light);
   });
 
+  it("covers the whole screen, so bottom bars clear the home indicator themselves", () => {
+    expect(viewport).toMatchObject({ width: "device-width", initialScale: 1, viewportFit: "cover" });
+  });
+
   it("loads one variable Inter, not preloaded, that never swaps in mid-page", () => {
     // The loader runs once, when the module is imported.
     expect(fontCalls).toEqual([

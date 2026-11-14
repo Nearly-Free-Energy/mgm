@@ -6,12 +6,13 @@
  * Confirm row pinned on screen. A dialog that bypasses it is cut off or
  * unreachable on a phone.
  *
- * This test reads every .ts/.tsx file under src/app, src/components and src/lib/gui
+ * This test reads every .ts/.tsx file under src/app, src/components, src/lib/gui and src/gui
  * (skipping __tests__/ and *.test.* files) with the TypeScript parser and
  * fails when:
  *
- *   1. a file other than the frame renders Radix Dialog's `Content` or
- *      `Overlay` itself: `Dialog.Content` on a namespace import, or a named
+ *   1. a file other than the frame (or Gridtop's sheet, FRAME_FILES)
+ *      renders Radix Dialog's `Content` or `Overlay` itself:
+ *      `Dialog.Content` on a namespace import, or a named
  *      or aliased `Content` / `Overlay` / `DialogContent` / `DialogOverlay`
  *      import from the Radix dialog packages;
  *   2. an HTML element carries `role="dialog"` or `role="alertdialog"`:
@@ -41,8 +42,15 @@ import * as path from "node:path";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
-const ROOTS = ["src/app", "src/components", "src/lib/gui"];
+const ROOTS = ["src/app", "src/components", "src/lib/gui", "src/gui"];
 const FRAME_FILE = "src/components/ui/dialog.tsx";
+/**
+ * Files allowed to render Content and Overlay: the frame, and Gridtop's
+ * sheet, which copies the frame's approach because an interface package may
+ * import nothing from src/components (gui-boundary.test.ts, rule 6). If that
+ * rule starts admitting the frame, the sheet should use it and leave this list.
+ */
+const FRAME_FILES = new Set([FRAME_FILE, "src/gui/gridtop/ui/sheet.tsx"]);
 const FRAME_MODULE = "src/components/ui/dialog";
 
 const RADIX_DIALOG_MODULES = new Set(["@radix-ui/react-dialog", "@radix-ui/react-alert-dialog"]);
@@ -305,7 +313,7 @@ function scanRepository() {
   for (const root of ROOTS) {
     for (const file of walk(path.join(REPO_ROOT, root))) {
       const rel = path.relative(REPO_ROOT, file).split(path.sep).join("/");
-      const result = scanSource(rel, readFileSync(file, "utf8"), { isFrame: rel === FRAME_FILE });
+      const result = scanSource(rel, readFileSync(file, "utf8"), { isFrame: FRAME_FILES.has(rel) });
       findings.push(...result.findings);
       panels += result.panels;
       dynamicHeights += result.dynamicHeights;

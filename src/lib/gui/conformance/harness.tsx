@@ -9,9 +9,9 @@ import type { ReactNode } from "react";
 import type { ActionRef, GuiPlugin, Href, LinkRef, ShellProps, ViewModel } from "../contract";
 import { KitProvider } from "../host/client/kit-provider";
 import { KitRuntimeProvider, type KitRuntime } from "../host/client/kit-runtime";
-import { pickRenderer } from "../host/shared/pick-renderer";
+import { pickRenderer, type KindsSince } from "../host/shared/pick-renderer";
 import { RawView } from "../kit/raw-view";
-import { PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
+import { MANIFEST_FIXTURES, PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
 
 export interface Recorded {
   act: ActionRef[];
@@ -62,8 +62,8 @@ export function recordingRuntime(input: { pathname: string; model?: ViewModel | 
 }
 
 /** A model drawn the way production draws it: bespoke renderer, the GUI's View, or RawView. */
-export function ModelView({ gui, model }: { gui: GuiPlugin; model: ViewModel }) {
-  const choice = pickRenderer(gui, model);
+export function ModelView({ gui, model, kindsSince }: { gui: GuiPlugin; model: ViewModel; kindsSince?: KindsSince }) {
+  const choice = pickRenderer(gui, model, kindsSince);
   const Component = choice.source === "raw" ? RawView : choice.Component;
   return <Component model={model} />;
 }
@@ -71,10 +71,22 @@ export function ModelView({ gui, model }: { gui: GuiPlugin; model: ViewModel }) 
 export interface Rendered {
   log: Recorded;
   pathname: string;
+  /** Renders the same Shell as if the page had moved to `pathname`. */
+  goTo(pathname: string): Promise<void>;
   unmount(): void;
 }
 
 const isAsync = (fn: unknown) => Object.prototype.toString.call(fn) === "[object AsyncFunction]";
+
+/**
+ * What a component that may be a server component renders: an async one is
+ * awaited once and its result returned, so it must not nest further async
+ * components.
+ */
+export async function serverNode<P extends object>(Component: (props: P) => ReactNode | Promise<ReactNode>, props: P): Promise<ReactNode> {
+  const Sync = Component as (p: P) => ReactNode;
+  return isAsync(Component) ? await Component(props) : <Sync {...props} />;
+}
 
 /**
  * How many rounds of zero-delay timers settle() lets run. Work a GUI chains
@@ -105,6 +117,38 @@ export async function settle(): Promise<void> {
  */
 export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, child?: ReactNode): Promise<Rendered> {
   const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
+  const tree = (content: ReactNode, at: KitRuntime = runtime) => (
+    <KitRuntimeProvider runtime={at}>
+      <KitProvider manifest={fixture.manifest} initial={fixture.initial} signals={fixture.signals ?? null}>
+        {content}
+      </KitProvider>
+    </KitRuntimeProvider>
+  );
+  let rerender: (ui: ReactNode) => void = () => {};
+  await act(async () => {
+    rerender = render(tree(null)).rerender;
+  });
+  const props: ShellProps = { manifest: fixture.manifest, initial: fixture.initial, children: child ?? <ModelView gui={gui} model={PAGE_MODEL} /> };
+  const shell = await serverNode(gui.Shell, props);
+  await act(async () => {
+    rerender(tree(shell));
+  });
+  await settle();
+  const goTo = async (pathname: string) => {
+    await act(async () => {
+      rerender(tree(shell, { ...runtime, pathname }));
+    });
+  };
+  return { log, pathname: fixture.pathname, goTo, unmount: cleanup };
+}
+
+/**
+ * Renders `child` inside the kit, on the first manifest fixture's page, with
+ * no Shell. Like renderShell, it mounts the providers empty first, so a kit
+ * call the child makes while it renders reaches this render's log.
+ */
+export async function renderInKit(child: ReactNode, fixture: ManifestFixture = MANIFEST_FIXTURES[0]): Promise<Omit<Rendered, "goTo">> {
+  const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
   const tree = (content: ReactNode) => (
     <KitRuntimeProvider runtime={runtime}>
       <KitProvider manifest={fixture.manifest} initial={fixture.initial}>
@@ -116,12 +160,14 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
   await act(async () => {
     rerender = render(tree(null)).rerender;
   });
-  const props: ShellProps = { manifest: fixture.manifest, initial: fixture.initial, children: child ?? <ModelView gui={gui} model={PAGE_MODEL} /> };
-  const Shell = gui.Shell as (p: ShellProps) => ReactNode;
-  const shell = isAsync(gui.Shell) ? await gui.Shell(props) : <Shell {...props} />;
   await act(async () => {
-    rerender(tree(shell));
+    rerender(tree(child));
   });
   await settle();
   return { log, pathname: fixture.pathname, unmount: cleanup };
+}
+
+/** Renders a model the way production picks its renderer, inside the kit and with no Shell. */
+export function renderModel(gui: GuiPlugin, model: ViewModel, kindsSince?: KindsSince): Promise<Omit<Rendered, "goTo">> {
+  return renderInKit(<ModelView gui={gui} model={model} kindsSince={kindsSince} />);
 }

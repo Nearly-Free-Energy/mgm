@@ -7,7 +7,7 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { Id, Manifest } from "../../../contract";
 import { buildManifestModel, type ManifestInput } from "../manifest-model";
-import { entityFromPath, legacyView } from "../legacy-view";
+import { entityFromPath, legacyView, resolveLegacyView } from "../legacy-view";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e7300000-0000-4000-8000-000000000002";
@@ -253,5 +253,25 @@ describe("legacyView on an untrusted path", () => {
     expect(legacyView(`/forged/${MICROGRID}`, MANIFEST, [forged])).not.toBeNull();
     const served: BundledPlugin = { ...forged, pages: [{ path: "/forged/[id]", params: { id: "microgrid" }, servedBy: "view" }] };
     expect(legacyView(`/forged/${MICROGRID}`, MANIFEST, [served])).toBeNull();
+  });
+});
+
+describe("resolveLegacyView", () => {
+  it("is legacyView on a catalog page served outside the contract", () => {
+    const path = `/microgrids/${MICROGRID}/billing`;
+    expect(resolveLegacyView(path, MANIFEST)).toEqual(legacyView(path, MANIFEST));
+  });
+
+  it("shows the organization alone on any other path", () => {
+    for (const path of ["/no-such-page", `/microgrids/${MICROGRID}`, "", "https://example.test/"]) {
+      expect(resolveLegacyView(path, MANIFEST), path).toEqual({
+        view: null,
+        title: "Org One",
+        trail: [{ label: "Org One", href: `/organizations/${ORG}` }],
+        tabs: [],
+        scope: { organization: { kind: "organization", id: ORG, label: "Org One", href: `/organizations/${ORG}` } },
+        unplaced: false,
+      });
+    }
   });
 });

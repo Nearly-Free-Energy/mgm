@@ -52,7 +52,15 @@ export const metadata: Metadata = {
 // data-theme="dark", which nothing sets, so every page renders light and a
 // dark browser bar would sit over a light page. When pages render dark, add
 // THEME_COLOR.dark under the same condition that switches them.
+// `viewportFit: "cover"` lets pages reach under a phone's home indicator,
+// notch and rounded corners, so a bar fixed to the bottom pads itself with
+// env(safe-area-inset-bottom) instead of stopping short of the edge. The
+// GUI's shell pads the left and right insets (Gridtop's shell.tsx); a GUI
+// or a page outside the shell that reaches the screen's sides must too.
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: THEME_COLOR.light,
 };
 

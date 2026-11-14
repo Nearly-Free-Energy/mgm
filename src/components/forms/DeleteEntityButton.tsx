@@ -172,7 +172,7 @@ export function DeleteEntityButton({
       // Bust the Server-Component cache for the CURRENT route, then push.
       // The DELETE route also calls `revalidatePath(..., "layout")` for
       // parent-scoped trees (AC-UI-6), so the combination covers both
-      // the current route and nav/sidebar caches.
+      // the current route and the shell's navigation caches.
       router.refresh();
       const parentPath = parentPathFor(entity, preview.parent);
       const qs = new URLSearchParams({
