@@ -105,6 +105,34 @@ describe("the site-day picker", () => {
     expect(log.refresh).toBe(0);
   });
 
+  it("marks Show busy from submitting another day until a new day is shown", async () => {
+    function Switching() {
+      const [ext, setExt] = useState(extOf(DATE, TODAY));
+      return (
+        <>
+          <DayPicker ext={ext} links={dayLinks(ext.date, TODAY)} heading={ext.date} kit={kit} />
+          <button type="button" onClick={() => setExt(extOf("2026-11-03", TODAY))}>
+            Arrive
+          </button>
+        </>
+      );
+    }
+    unmount = (await renderInKit(<Switching />)).unmount;
+    const show = screen.getByRole("button", { name: "Show" });
+    expect(show.getAttribute("aria-busy")).toBeNull();
+    fireEvent.change(dayInput(), { target: { value: "2026-11-03" } });
+    expect(await submit()).toBe(true);
+    expect(show.getAttribute("aria-busy")).toBe("true");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Arrive" })));
+    expect(show.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("does not mark Show busy when it reads the day shown again", async () => {
+    await picker(TODAY, TODAY);
+    expect(await submit()).toBe(true);
+    expect(screen.getByRole("button", { name: "Show" }).getAttribute("aria-busy")).toBeNull();
+  });
+
   it("does not navigate when a day is typed", async () => {
     const log = await picker();
     fireEvent.change(dayInput(), { target: { value: "2026-11-03" } });

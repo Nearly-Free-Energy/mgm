@@ -9,13 +9,17 @@
  */
 import { createContext, useContext, useLayoutEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { announceNavigationStart } from "@/components/ui/navigation-progress";
+import { announceNavigationStart, isCurrentLocation } from "@/components/ui/navigation-progress";
 import type { ActionRef, ActionResult, EntityHit, Href, Json, LinkRef, ViewModel } from "../../contract";
 import { isHref } from "../shared/href";
 import { openLink } from "./open";
 
 export interface KitRuntime {
-  /** A soft navigation to a same-origin page. */
+  /**
+   * A soft navigation to a same-origin page. The default one starts the
+   * global NavigationProgress bar first, as a kit Link's click does, unless
+   * `href` is the page already shown (path and query).
+   */
   navigate(href: Href): void;
   /** Re-runs the server components of the current page. */
   refresh(): void;
@@ -69,7 +73,7 @@ export const hostAct: Act = (ref, options) => (actionHost ? actionHost(ref, opti
 export const defaultRuntime: KitRuntime = {
   navigate(href) {
     if (!isHref(href)) return;
-    announceNavigationStart(href);
+    if (!isCurrentLocation(href)) announceNavigationStart(href);
     if (router) router.push(href);
     else window.location.assign(href);
   },
