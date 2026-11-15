@@ -12,7 +12,7 @@ import type { ModelOf, Tone, Value } from "@/lib/gui/contract";
 
 export type Tile = ModelOf<"metrics">["body"]["tiles"][number];
 
-/** Shown in another tile, or after the tiles: evening-supply. */
+/** Shown in another tile, or by the evening strip (./evening-strip.tsx): evening-supply. */
 const FOLDED = new Set(["battery-evening", "cut-time", "evening-supply"]);
 /** The tiles in the page's order; any other key follows them. */
 const ORDER = ["solar", "houses-evening", "cuts", "lowest-soc", "soc-17", "lights-on"];
@@ -85,7 +85,6 @@ export function Tiles({ tiles }: { tiles: Tile[] }) {
   const byKey = new Map(tiles.map((t) => [t.key, t]));
   const batteryEvening = byKey.get("battery-evening");
   const cutTime = byKey.get("cut-time");
-  const evening = byKey.get("evening-supply");
   const shown = [...ORDER.flatMap((key) => byKey.get(key) ?? []), ...tiles.filter((t) => !ORDER.includes(t.key) && !FOLDED.has(t.key))];
 
   const figureOf = (tile: Tile) => {
@@ -113,14 +112,6 @@ export function Tiles({ tiles }: { tiles: Tile[] }) {
           />
         ))}
       </div>
-      {evening && (
-        <section data-tile={evening.key} className="gt:flex gt:flex-col gt:gap-1">
-          <h3 className="gt:text-caption gt:font-semibold gt:uppercase gt:tracking-wide gt:text-muted-foreground">{evening.label}</h3>
-          <p className="gt:text-dense gt:text-foreground">
-            <Figure value={evening.value} />
-          </p>
-        </section>
-      )}
     </>
   );
 }

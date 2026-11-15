@@ -2,11 +2,11 @@
 
 /**
  * Gridtop's renderer for `metering.site-day@1`, the Operations day, loaded
- * on its own by ./index.tsx: the day picker, the six tiles, the notes, and
- * the view's actions and links, which the window bar leaves to it
- * (../../shell/window-bar.tsx). It prints the text the server formatted and
- * writes only through kit.act. A model whose ext it cannot read is drawn by
- * the kit's view instead.
+ * on its own by ./index.tsx: the day picker, the six tiles, the battery
+ * chart, the evening strip, the notes, and the view's actions and links,
+ * which the window bar leaves to it (../../shell/window-bar.tsx). It prints
+ * the text the server formatted and writes only through kit.act. A model
+ * whose ext it cannot read is drawn by the kit's view instead.
  *
  * The kit comes from ./index.tsx as a prop, and these files import nothing
  * else of Gridtop's or the kit's, so this chunk shares no module with the
@@ -16,7 +16,9 @@
  */
 import { useId, useState } from "react";
 import type { ActionRef, GuiKit, Href, LinkRef, ModelOf, SyncNode, Tone, ViewModel, ViewProps } from "@/lib/gui/contract";
+import { BatteryChart } from "./battery-chart";
 import { DAY_LINKS, DayPicker } from "./day-picker";
+import { EveningStrip } from "./evening-strip";
 import { readSiteDayExt, type SiteDayExt, cls } from "./ext";
 import { Tiles } from "./tiles";
 
@@ -26,6 +28,9 @@ const CONTROL =
   "gt:pointer-coarse:h-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring gt:disabled:cursor-not-allowed gt:disabled:opacity-60";
 
 const EDGES_LINK = "metering.edges";
+// The battery series and the evening tile, as site-day-model.ts (src/lib/metering/surface) keys them; if it renames them, revisit.
+const SOC = "soc";
+const EVENING_SUPPLY = "evening-supply";
 const SYNTHETIC_BAND = "Synthetic data: generated for demonstration, not measured";
 
 const BAND: Record<Tone, string> = {
@@ -175,7 +180,8 @@ function SiteDay({ model, ext, kit }: { model: ModelOf<"metrics">; ext: SiteDayE
       {ext.state === "day" ? (
         <>
           <Tiles tiles={model.body.tiles} />
-          {/* The battery chart and the evening strip go here. */}
+          <BatteryChart chart={ext} points={model.body.series?.find((s) => s.key === SOC)?.points ?? []} />
+          <EveningStrip chart={ext} tile={model.body.tiles.find((t) => t.key === EVENING_SUPPLY)} />
           {ext.notes.map((note, i) => (
             <p key={i} className="gt:text-caption gt:text-muted-foreground">
               {note}
