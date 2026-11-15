@@ -18,6 +18,7 @@ export { POKE_ACTION, POKE_LABEL, withPoke } from "./fixtures/acme";
 export { MANIFEST_FIXTURES, PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
 export { MODEL_FIXTURES, SIGNALS, type ModelFixture } from "./fixtures/models";
 export {
+  loadLazyRenderers,
   ModelView,
   recordingRuntime,
   renderInKit,

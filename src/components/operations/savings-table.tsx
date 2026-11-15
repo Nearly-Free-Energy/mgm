@@ -183,16 +183,18 @@ export function SavingsTable({
       <div className="mt-4 space-y-1 text-xs text-muted-foreground">
         <p>
           <strong className="font-medium">Solar savings</strong> is every kWh of solar the site
-          produced, priced at what the grid would have charged for it at that hour
+          used itself, by its load or to charge the battery, priced at what the grid would have
+          charged for it at that hour
           {solarEstimated ? " (solar is estimated from the load, grid and battery where there is no solar meter)" : ""}
-          .
+          . Solar sent to the grid saves nothing.
         </p>
         <p>
           <strong className="font-medium">Arbitrage gain</strong> is the battery charging when
-          power is cheap and discharging when it is dear: each kWh it gave out while the grid was
-          on, at that hour&apos;s rate, less what it cost to put in, allowing for the energy the
-          battery loses. Power the battery gave during a cut is backup and is not counted. A day
-          with too few battery readings is left out.
+          power is cheap and discharging when it is dear: each kWh it gave the site while the grid
+          was on, at that hour&apos;s rate, less what it cost to put in, allowing for the energy
+          the battery loses. Power the battery sent to the grid saves nothing. Power the battery
+          gave during a cut is backup and is not counted. A day with too few battery readings is
+          left out.
         </p>
         <p>
           Solar that charged the battery appears in both lines, as a saving and as a charging

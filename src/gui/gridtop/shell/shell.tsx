@@ -2,24 +2,46 @@
 
 /**
  * Gridtop's frame: skip link, title bar, the apps, the page with the window
- * bar of a contributed view above it, and the status bar. `main` is
- * what scrolls, at every size (decision 14 on #115), so a bar a page pins to
- * its bottom stays above the phone dock. Its padding is the old layout's,
+ * bar of a contributed view above it and the views attached to it as
+ * sections below, and the status bar. `main` is what scrolls, at every
+ * size (decision 14 on #115), so a bar a page pins to its bottom stays
+ * above the phone dock. Its padding is the old layout's,
  * except that it widens at 600 px rather than 768 px, and its zero minimum
  * width keeps wide legacy tables inside it. The frame pads itself by the
  * left and right safe-area insets, which the root viewport's
  * viewportFit "cover" leaves to the page (src/app/layout.tsx); the bottom
  * dock pads the bottom one.
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ShellProps } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
+import { GRIDTOP_RENDERERS } from "../renderers";
 import { BottomDock } from "./bottom-dock";
 import { Dock } from "./dock";
 import { currentApp } from "./groups";
+import type { SectionList } from "./section-list";
 import { StatusBar } from "./status-bar";
 import { TitleBar } from "./title-bar";
 import { WindowBar } from "./window-bar";
+
+/**
+ * The views attached to the page's view as sections, below it. They load
+ * after the first paint: the page's model reaches kit.useView() in a layout
+ * effect (the host's ViewBoundary; if it starts publishing during render,
+ * they load with the first paint), and the list (./section-list.tsx) is
+ * loaded by hand on demand, so it stays out of the shell's first load. If
+ * that load fails, nothing is shown and the page stays as it is.
+ */
+function AttachedSections() {
+  const page = kit.useView().model;
+  const sections = page?.attached.filter((a) => a.hint === "section") ?? [];
+  const [List, setList] = useState<typeof SectionList | null>(null);
+  const wanted = sections.length > 0;
+  useEffect(() => {
+    if (wanted && !List) import("./section-list").then((m) => setList(() => m.SectionList), () => {});
+  }, [wanted, List]);
+  return page && wanted && List ? <List sections={sections} page={page} kit={kit} renderers={GRIDTOP_RENDERERS} /> : null;
+}
 
 export function GridtopShell({ children }: ShellProps) {
   const view = kit.useView();
@@ -40,6 +62,7 @@ export function GridtopShell({ children }: ShellProps) {
       <main ref={main} id="main" tabIndex={-1} className="gt:min-w-0 gt:overflow-y-auto gt:p-4 gt:outline-none gt:medium:p-6">
         <WindowBar main={main} />
         {children}
+        <AttachedSections />
       </main>
       <BottomDock nav={nav} current={current} />
       <StatusBar />

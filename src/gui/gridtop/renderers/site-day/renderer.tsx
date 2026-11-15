@@ -165,8 +165,11 @@ function SiteDay({ model, ext, kit }: { model: ModelOf<"metrics">; ext: SiteDayE
   // "<day> · <timezone>"; if that format changes, revisit.
   const zone = ` · ${ext.timezone}`;
   const heading = model.subtitle?.endsWith(zone) ? model.subtitle.slice(0, -zone.length) : (model.subtitle ?? ext.date);
-  // Views attached as tabs are among the window bar's tabs.
-  const attached = model.attached.filter((a) => a.hint !== "tab");
+  // Views attached as tabs are among the window bar's tabs, and those
+  // attached as sections are drawn below the page by Gridtop's content frame
+  // (AttachedSections in ../../shell/shell.tsx); if the frame stops drawing
+  // them, list them here again.
+  const attached = model.attached.filter((a) => a.hint !== "tab" && a.hint !== "section");
   return (
     <article data-gui-view={model.view} className="gt:flex gt:flex-col gt:gap-4">
       <h1 className="gt:sr-only">{model.title}</h1>

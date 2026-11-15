@@ -10,21 +10,12 @@
 
 import * as React from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Chip, type ChipProps } from "./chip";
+import { CHIP_TONE, Chip, type ChipProps } from "./chip";
 import { cn } from "@/lib/utils";
-import type { Tone } from "@/lib/gui/contract";
 import { statusEntry, type StatusKind } from "@/lib/gui/status-maps";
 
 // The labels and tones live in src/lib/gui/status-maps.ts, which the server
-// also serves to GUIs. Chip names its tones differently; CHIP_TONE maps them.
-export const CHIP_TONE: Record<Tone, NonNullable<ChipProps["tone"]>> = {
-  neutral: "neutral",
-  info: "neutral", // Chip has no info tone; if it gains one, map info to it
-  success: "success",
-  warning: "warn",
-  danger: "alert",
-  accent: "brand",
-};
+// also serves to GUIs; CHIP_TONE (./chip.tsx) maps their tones to Chip's.
 
 export interface StatusChipProps extends Omit<ChipProps, "tone" | "children" | "dot"> {
   kind: StatusKind;

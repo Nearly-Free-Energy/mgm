@@ -180,8 +180,10 @@ describe("legacy navigation", () => {
 
   it("reaches every released catalog page from a nav entry or a page link", async () => {
     const hrefs = new Set<string>((await legacyNav()).map((e) => e.def.href));
-    const released = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages.map((page) => page.path)).filter((p) =>
-      isReleasedRoute(fill(p)),
+    // A page a view serves is reached through the views it is attached to or
+    // linked from, which the host lists, not through a page file.
+    const released = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages.filter((page) => page.servedBy === undefined).map((page) => page.path)).filter(
+      (p) => isReleasedRoute(fill(p)),
     );
     expect(released.filter((p) => !hrefs.has(p) && !Object.hasOwn(REACHED_IN_PAGE, p))).toEqual([]);
     // Each listed page is a released page without an entry, and leads back to one.

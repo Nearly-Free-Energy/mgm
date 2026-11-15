@@ -107,6 +107,8 @@ export const MAX_EVENING_MINUTES = (24 - EVENING_START_HOUR + CLOCK_CHANGE_ALLOW
 export const MAX_DAY_BINS = MAX_DAY_MINUTES / FINEST_RESOLUTION_MINUTES;
 /** The most bins the evening window holds, at the finest resolution. */
 export const MAX_EVENING_BINS = MAX_EVENING_MINUTES / FINEST_RESOLUTION_MINUTES;
+/** The longest range `getSiteDays` reads, in days. Here, not in the capability, so client-safe code can read it. */
+export const SITE_DAYS_MAX = 366;
 
 /** Whether `minutes` is a bin length a day can be read at: whole, at least the finest, dividing an hour. */
 export function isSiteResolution(minutes: number): boolean {

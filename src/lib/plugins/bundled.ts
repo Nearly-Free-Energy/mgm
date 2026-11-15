@@ -265,6 +265,12 @@ export const BILLING_PLUGIN: BundledPlugin = {
     },
     { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
     { path: "/communities/[id]/invoice", params: { id: "community" } },
+    // The savings under the Operations day, as the billing.savings view.
+    {
+      path: "/microgrids/[id]/operations/savings",
+      params: { id: "microgrid" },
+      servedBy: "view",
+    },
   ],
   tables: [
     "rate_schedules",

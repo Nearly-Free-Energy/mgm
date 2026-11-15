@@ -190,7 +190,10 @@ describe("SavingsTable", () => {
     renderTable();
     const text = document.body.textContent ?? "";
 
-    expect(text).toContain("priced at what the grid would have charged for it at that hour.");
+    expect(text).toContain("every kWh of solar the site used itself, by its load or to charge the battery");
+    expect(text).toContain("priced at what the grid would have charged for it at that hour. Solar sent to the grid saves nothing.");
+    expect(text).toContain("each kWh it gave the site while the grid was on");
+    expect(text).toContain("Power the battery sent to the grid saves nothing.");
     expect(text).toContain("Power the battery gave during a cut is backup and is not counted.");
     expect(text).toContain("total is the figure to rely on");
     expect(text).not.toContain("estimated from the load");

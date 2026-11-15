@@ -75,6 +75,7 @@ const PAGE_OWNERS: Record<string, MgmPluginName> = {
   "/microgrids/[id]/setup/households": "community-management",
   "/microgrids/[id]/setup/households/[householdId]": "community-management",
   "/microgrids/[id]/operations": "metering",
+  "/microgrids/[id]/operations/savings": "billing",
   "/microgrids/[id]/setup/edges": "metering",
   "/microgrids/[id]/setup/edges/[edgeId]": "metering",
   "/microgrids/[id]/setup/edges/shared": "metering",

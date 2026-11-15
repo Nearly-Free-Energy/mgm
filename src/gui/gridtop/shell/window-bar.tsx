@@ -10,15 +10,15 @@
  * opens the href in a new tab or window. Below 600 px it is one 44 px bar: the title opens the tabs, ⋯
  * opens the actions and links, and it slides away while `main` scrolls down.
  *
- * A view Gridtop draws with a bespoke renderer (../renderers/reads.ts) places
- * its own actions and links, so the bar then shows only the title, subtitle
- * and tabs, and nothing is drawn twice.
+ * When Gridtop draws the page's view with a renderer that places its own
+ * actions and links (drawnBespoke in ../renderers/index.ts), the bar shows
+ * only the title, subtitle and tabs, so nothing is drawn twice.
  */
 import { ChevronDown, Ellipsis } from "lucide-react";
 import { useEffect, useId, useState, type RefObject } from "react";
 import type { ActionRef, Href, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
-import { drawnBespoke } from "../renderers/reads";
+import { drawnBespoke } from "../renderers";
 import { cx } from "../ui/cx";
 import { openable } from "../ui/href";
 import { SHEET_ROW, Sheet, sameTab } from "../ui/sheet";

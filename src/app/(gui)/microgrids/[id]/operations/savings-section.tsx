@@ -5,33 +5,16 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { SavingsTable } from "@/components/operations/savings-table";
 import { createClient } from "@/lib/supabase/server";
 import { composeMetering, type MeteringResult } from "@/lib/metering/compose";
-import { SITE_DAYS_MAX } from "@/lib/metering/capability";
 import type { SiteDayOperations } from "@/lib/metering/site-operations";
 import {
+  savingsReadRange,
   valueSiteDays,
   type SavingsSettingsInput,
   type TariffInput,
 } from "@/lib/billing/site-savings";
 import type { GridTariffBand } from "@/lib/types/domain";
-import { addDaysToDateKey } from "@/lib/timezone/day-key";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
-
-/**
- * The days to read for `date`: from the earlier of the savings start dates
- * and the 1st of the month, to `date`, cut to the last `SITE_DAYS_MAX` days.
- */
-export function savingsReadRange(
-  date: string,
-  settings: SavingsSettingsInput
-): { start: string; capped: boolean } {
-  const monthStart = `${date.slice(0, 7)}-01`;
-  const wanted = [settings.solar_savings_from, settings.arbitrage_from, monthStart]
-    .filter((d): d is string => !!d)
-    .sort()[0];
-  const earliest = addDaysToDateKey(date, -(SITE_DAYS_MAX - 1));
-  return wanted < earliest ? { start: earliest, capped: true } : { start: wanted, capped: false };
-}
 
 async function readSiteDays(
   supabase: SupabaseClient,

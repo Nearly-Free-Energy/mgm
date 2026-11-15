@@ -49,7 +49,9 @@ function manifest(superAdmin = true): Manifest {
 
 const MANIFEST = manifest();
 const ID_OF: Partial<Record<CoreEntityKind, string>> = { organization: ORG, community: COMMUNITY, microgrid: MICROGRID };
-const PAGES = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages);
+const ALL_PAGES = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages);
+/** The pages served outside the contract, the only ones legacyView describes. */
+const PAGES = ALL_PAGES.filter((p) => p.servedBy === undefined);
 
 /** A catalog page's path with each segment filled by the fixture id of its kind. */
 const filled = (page: (typeof PAGES)[number]) =>
@@ -127,6 +129,17 @@ describe("legacyView on every catalog page", () => {
       }
     });
   }
+
+  it("leaves each page a view serves to contributedView", () => {
+    const served = ALL_PAGES.filter((p) => p.servedBy === "view");
+    expect(served.map((p) => p.path)).toEqual(["/microgrids/[id]/operations/savings"]);
+    for (const page of served) {
+      expect(legacyView(filled(page), MANIFEST), page.path).toBeNull();
+      const view = contributedView(filled(page), { view: "billing.savings", title: "Savings", trail: [] }, MANIFEST);
+      expect(view).toMatchObject({ view: "billing.savings", title: "Savings", nav: "metering.operations", unplaced: false });
+      expect(view.scope.microgrid?.label).toBe("Kasana East");
+    }
+  });
 
   it("entityFromPath gives the deepest organization, community or microgrid of each page", () => {
     for (const page of PAGES) {

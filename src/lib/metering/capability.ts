@@ -13,6 +13,7 @@ import { MeteringError } from "./errors";
 import { computeAssignmentGaps } from "./assignment-gaps";
 import {
   computeSiteDay,
+  SITE_DAYS_MAX,
   type SiteDayOperations,
   type SiteSourceAvailability,
 } from "./site-operations";
@@ -43,8 +44,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** The daily operations view reads 5-minute bins (what OpenEMS keeps). */
 const SITE_RESOLUTION_MINUTES = 5;
-/** The longest range `getSiteDays` reads, in days. */
-export const SITE_DAYS_MAX = 366;
+export { SITE_DAYS_MAX };
 /** How many chunk reads `getSiteDays` runs at once. */
 export const SITE_DAYS_PARALLEL = 3;
 

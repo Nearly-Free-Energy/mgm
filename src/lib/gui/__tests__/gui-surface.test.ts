@@ -81,7 +81,7 @@ const SECRET_LIKE_EXEMPTIONS: Readonly<Record<string, string>> = {};
 const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   BillingCapabilityContract: ["getPeriodSummary", "listTariffs"],
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
-  MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay"],
+  MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
   PaymentsCapabilityContract: ["getReadiness", "listHistory"],
 };
 const CONTRACT = /CapabilityContract$/;
