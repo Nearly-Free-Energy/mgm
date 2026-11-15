@@ -363,6 +363,20 @@ describe("dispatchView", () => {
     expect(nested.ok && nested.value.attached).toEqual([]);
   });
 
+  it("lists a disabled plugin's section, whose load gets the gate's notice, but not its tabs or an unchecked gate's section", async () => {
+    const section = view("payments", { id: "payments.section", path: "/microgrids/[id]/billing", attach: { to: "microgrid", order: 0, hint: "section" } });
+    const tab = view("payments", { id: "payments.tab", path: "/microgrids/[id]/billing", attach: { to: "microgrid", order: 1, hint: "tab" } });
+    snapshot = snapshotOf([siteDay, section, tab]);
+    gates.set("payments", { ...DISABLED, code: "payments_disabled" } as GateDecision);
+    const out = await dispatch(`/microgrids/${MG}/operations`);
+    expect(out.ok && out.value.attached).toEqual([
+      { view: "payments.section", title: "payments.section example", href: `/microgrids/${MG}/billing`, hint: "section" },
+    ]);
+    gates.set("payments", { ok: false, status: 503, code: "payments_gate_unavailable", message: "Could not check." });
+    const unchecked = await dispatch(`/microgrids/${MG}/operations`);
+    expect(unchecked.ok && unchecked.value.attached).toEqual([]);
+  });
+
   it("lists views attached to this view, never itself, in order, with only the query both declare", async () => {
     const other = view("metering", {
       id: "metering.other",

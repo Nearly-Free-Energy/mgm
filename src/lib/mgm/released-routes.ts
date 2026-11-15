@@ -15,7 +15,8 @@
  * checkout, verified receipts, and manager reconciliation.
  * Operations: the daily operations view of a microgrid (battery level, power
  * cuts, dark time and who served the houses), read through the metering
- * capability, and the grid tariffs and savings settings that value it.
+ * capability, what the site saved, and the grid tariffs and savings
+ * settings that value it.
  * Install metadata: the web app manifest.
  * GUI host: contributed views, signals and search for the signed-in person's
  * organization, and the step that prepares an action's form and
@@ -123,6 +124,8 @@ const RELEASE_4_API_ROUTES = [
 
 const OPERATIONS_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/operations$/,
+  // What the site saved, the billing.savings view shown under the day.
+  /^\/microgrids\/[^/]+\/operations\/savings$/,
 ];
 
 // The GUI host's page that opens a navigation entry by its id

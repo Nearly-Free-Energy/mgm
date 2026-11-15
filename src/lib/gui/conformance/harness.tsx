@@ -4,7 +4,7 @@
  * the fixture, and the runtime is installed before the GUI first renders.
  * Imported only by test files (gui-boundary.test.ts).
  */
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { ActionRef, GuiPlugin, Href, LinkRef, ShellProps, ViewModel } from "../contract";
 import { KitProvider } from "../host/client/kit-provider";
@@ -165,6 +165,35 @@ export async function renderInKit(child: ReactNode, fixture: ManifestFixture = M
   });
   await settle();
   return { log, pathname: fixture.pathname, unmount: cleanup };
+}
+
+/**
+ * Loads the renderers a GUI draws `models` with, for a GUI that loads one as
+ * a chunk of its own (React.lazy): checkModel checks what a render shows once
+ * it settles and does not wait for a pending chunk. For each view, draws its
+ * models one at a time until one shows any text, then unmounts, which leaves
+ * that view's chunk loaded. A view none of whose models shows text within
+ * `timeout` ms is not failed here: checkModel then reports each value it does
+ * not show. Assumes a pending renderer shows no text (a Suspense fallback of
+ * null); a GUI whose fallback shows text would stop waiting too early.
+ */
+export async function loadLazyRenderers(gui: GuiPlugin, models: readonly ViewModel[], timeout = 15_000): Promise<void> {
+  const byView = new Map<string, ViewModel[]>();
+  for (const model of models) byView.set(model.view, [...(byView.get(model.view) ?? []), model]);
+  for (const group of byView.values()) {
+    for (const model of group) {
+      await renderModel(gui, model);
+      const shown = () => {
+        if (!document.body.textContent) throw new Error("nothing shown yet");
+      };
+      const drawn = await waitFor(shown, { timeout }).then(
+        () => true,
+        () => false,
+      );
+      cleanup();
+      if (drawn) break;
+    }
+  }
 }
 
 /** Renders a model the way production picks its renderer, inside the kit and with no Shell. */

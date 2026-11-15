@@ -50,7 +50,8 @@ vi.mock("next/link", () => ({
 
 // ── Import (after mocks) ──────────────────────────────────────────────────────
 
-import { SavingsLoading, SavingsSection, savingsReadRange } from "../savings-section";
+import { SavingsLoading, SavingsSection } from "../savings-section";
+import { savingsReadRange } from "@/lib/billing/site-savings";
 import { SavingsTable } from "@/components/operations/savings-table";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

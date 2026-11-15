@@ -123,8 +123,10 @@ type Place = {
 /**
  * Views attached to this one's entity kind or to this view, other than
  * itself: each with its path filled from the same entities, released, and
- * its plugin enabled. A query parameter both views declare is passed on. A
- * view with no path segments gets `?org=`, so it opens in this organization.
+ * its plugin enabled (a section is listed while its plugin is disabled, so
+ * its place shows the gate's notice). A query parameter both views declare
+ * is passed on. A view with no path segments gets `?org=`, so it opens in
+ * this organization.
  */
 async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unknown>["attached"]> {
   const { def } = p.view;
@@ -155,7 +157,13 @@ async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unk
       }
       const query = search.toString();
       const href = query ? `${path}?${query}` : path;
-      if (!isPageHref(href) || !(await decide(p.gate, other.plugin)).ok) return null;
+      if (!isPageHref(href)) return null;
+      // A section of a disabled plugin is still listed, so the GUI loads it and
+      // shows the gate's notice in its place (decision 18 on #115); a disabled
+      // plugin's tabs and tiles are left out. If the gate's 409 stops meaning
+      // "disabled", revisit.
+      const decision = await decide(p.gate, other.plugin);
+      if (!decision.ok && !(other.def.attach!.hint === "section" && decision.status === 409)) return null;
       const title =
         p.snapshot.nav.find((n) => "view" in n.def && n.def.view === other.def.id)?.def.title ??
         other.def.examples[0]?.title ??

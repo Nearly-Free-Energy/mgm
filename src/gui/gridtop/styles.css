@@ -21,6 +21,10 @@
 /* Tests are not scanned: their copy is not drawn, and a word in it such as
    a utility's name would otherwise be generated here. */
 @source not "./**/__tests__";
+/* Words in this package's source that also name a utility without
+   gt:, such as an HTML element or a keyword of React's class components.
+   Gridtop writes every utility with gt:, so it never emits these. */
+@source not inline("block grid inline start static table");
 
 /* Layout widths: 600px and 1280px. */
 @theme {

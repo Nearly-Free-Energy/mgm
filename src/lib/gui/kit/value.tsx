@@ -7,8 +7,7 @@
  * a measured one shows its age, and "stale" once the view's live settings
  * say so.
  */
-import { Chip } from "@/components/ui/chip";
-import { CHIP_TONE } from "@/components/ui/status-chip";
+import { CHIP_TONE, Chip } from "@/components/ui/chip";
 import type { LiveState, Value as ValueOf } from "../contract";
 import { isHref } from "../host/shared/href";
 import { Link } from "../host/client/navigation";

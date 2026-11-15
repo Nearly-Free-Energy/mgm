@@ -10,7 +10,7 @@ import type { ActionRef, ActionResult, LinkRef, ViewModel, ViewState } from "@/l
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "../../..";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__/places-fixture";
-import { RENDERER_READS, drawnBespoke } from "../../reads";
+import { GRIDTOP_RENDERERS, drawnBespoke } from "../..";
 import { readSiteDayExt } from "../ext";
 import { SiteDayView } from "../renderer";
 import { MG, NOTES, SYNTHETIC_NOTICE, dayModel, noSiteDevicesModel } from "./site-day-fixture";
@@ -40,13 +40,15 @@ const CANCELLED: ActionResult = { type: "result", ok: false, status: 0, code: "c
 const versioned = (schema: `${string}.${string}@${number}`): ViewModel => ({ ...dayModel(), ext: { ...dayModel().ext!, schema } });
 
 describe("Gridtop's site-day renderer", () => {
-  it("is registered for the versions reads.ts lists, which is what the window bar checks", () => {
-    expect(GridtopGui.renderers["metering.site-day"].reads).toBe(RENDERER_READS["metering.site-day"]);
-    expect(RENDERER_READS["metering.site-day"]).toEqual([1]);
+  it("is registered for version 1 in the table the window bar checks, which marks it as placing its own controls", () => {
+    expect(GridtopGui.renderers).toBe(GRIDTOP_RENDERERS);
+    expect(GRIDTOP_RENDERERS["metering.site-day"].reads).toEqual([1]);
     expect(drawnBespoke(dayModel())).toBe(true);
     expect(drawnBespoke(versioned("metering.site-day@2"))).toBe(false);
     expect(drawnBespoke({ ...dayModel(), ext: undefined })).toBe(false);
     expect(drawnBespoke({ ...dayModel(), view: "billing.periods" })).toBe(false);
+    // Drawn bespoke too, but on its own page it leaves its controls to the window bar.
+    expect(drawnBespoke({ view: "billing.savings", ext: { schema: "billing.savings@1", data: {} } })).toBe(false);
   });
 
   it("draws version 1 itself, once its chunk loads, and leaves @2 or no ext to the kit's view", async () => {
@@ -206,17 +208,19 @@ describe("Gridtop's site-day renderer", () => {
     expect(log.open).toEqual([EXPORT, SHARE, OUTSIDE]);
   });
 
-  it("lists views attached as sections, and leaves those attached as tabs to the window bar", async () => {
+  it("lists views attached as tiles, and leaves tabs to the window bar and sections to the content frame", async () => {
     await draw(
       dayModel({
         attached: [
           { view: "billing.savings", title: "Savings", href: `/microgrids/${MG}/operations/savings`, hint: "section" },
           { view: "acme.notes", title: "Notes", href: `/microgrids/${MG}/notes`, hint: "tab" },
+          { view: "acme.log", title: "Log", href: `/microgrids/${MG}/log`, hint: "tile" },
         ],
       }),
     );
     const related = within(screen.getByRole("navigation", { name: "Related views" }));
-    expect(related.getByRole("link", { name: "Savings" }).getAttribute("href")).toBe(`/microgrids/${MG}/operations/savings`);
+    expect(related.getByRole("link", { name: "Log" }).getAttribute("href")).toBe(`/microgrids/${MG}/log`);
+    expect(related.queryByRole("link", { name: "Savings" })).toBeNull();
     expect(related.queryByRole("link", { name: "Notes" })).toBeNull();
   });
 

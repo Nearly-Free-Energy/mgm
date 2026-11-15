@@ -32,7 +32,8 @@
  *   `missingTariffDays` instead.
  */
 import type { GridTariffBand } from "@/lib/types/domain";
-import type { SiteDayOperations, SiteFlow } from "@/lib/metering/site-operations";
+import { SITE_DAYS_MAX, type SiteDayOperations, type SiteFlow } from "@/lib/metering/site-operations";
+import { addDaysToDateKey } from "@/lib/timezone/day-key";
 
 /** A day needs this many minutes of battery power readings for arbitrage. */
 export const ARBITRAGE_MIN_BATTERY_MINUTES = 600;
@@ -71,6 +72,22 @@ export type SavingsSummary = {
   /** Days in the month or since-start range that needed a tariff and had none. */
   missingTariffDays: number;
 };
+
+/**
+ * The days to read for `date`: from the earlier of the savings start dates
+ * and the 1st of the month, to `date`, cut to the last `SITE_DAYS_MAX` days.
+ */
+export function savingsReadRange(
+  date: string,
+  settings: SavingsSettingsInput
+): { start: string; capped: boolean } {
+  const monthStart = `${date.slice(0, 7)}-01`;
+  const wanted = [settings.solar_savings_from, settings.arbitrage_from, monthStart]
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  const earliest = addDaysToDateKey(date, -(SITE_DAYS_MAX - 1));
+  return wanted < earliest ? { start: earliest, capped: true } : { start: wanted, capped: false };
+}
 
 type Validation = { ok: true; bands: GridTariffBand[] } | { ok: false; message: string };
 

@@ -84,6 +84,7 @@ describe("isReleasedRoute", () => {
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",
+    "/microgrids/mg-1/operations/savings",
     // Install metadata: the web app manifest.
     "/manifest.webmanifest",
     // The GUI host.
@@ -113,6 +114,7 @@ describe("isReleasedRoute", () => {
     "/settings",
     "/admin",
     "/microgrids/mg-1/operations/extra",
+    "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",
     "/icons/manifest.webmanifest",
     // The old tenants URL has no page and no released route; it stays a 404.
