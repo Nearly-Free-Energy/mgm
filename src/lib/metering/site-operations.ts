@@ -135,6 +135,27 @@ export type EveningSupply =
 
 export type EveningSegment = TimeRange & { supply: EveningSupply };
 
+/**
+ * One bin's power flows, for valuing the day against a time-of-use tariff.
+ * Every bin read has one, offline bins included (all powers null).
+ */
+export type SiteFlow = {
+  atMs: number;
+  /** Local wall-clock hour of the bin start in the day's timezone, 0–23. */
+  hour: number;
+  /** + discharge, − charge. */
+  batteryW: number | null;
+  /** + import, − export. */
+  gridW: number | null;
+  /**
+   * Solar output: the solar meter clipped at 0 when the site has one, else
+   * load − grid − battery clipped at 0 when all three were read, else null.
+   */
+  solarW: number | null;
+  /** Grid state carried through gaps, as for cuts; null while unknown. */
+  gridPresent: boolean | null;
+};
+
 export type SiteDayOperations = {
   date: string;
   timezone: string;
@@ -198,12 +219,25 @@ export type SiteDayOperations = {
    * whose state is known (no-data time is left out).
    */
   lightsOnPct: number | null;
+  /** Minutes of the period read whose state is known (read − no data). */
+  knownMinutes: number;
   soc: { atMs: number; pct: number | null }[];
   evening: EveningSegment[];
   eveningHours: Record<EveningSupply, number>;
   /** Set when the samples came from a synthetic provider; computeSiteDay never sets it. */
   synthetic?: true;
+  /**
+   * Per-bin flows. Large (288 entries a day): a server page strips it before
+   * passing a day to a client component.
+   */
+  flows: SiteFlow[];
 };
+
+/**
+ * A day without its per-bin flows: what a server page passes to a client
+ * component (the flows are large and only the savings figures need them).
+ */
+export type SiteDaySummary = Omit<SiteDayOperations, "flows">;
 
 type Bin = {
   startMs: number;
@@ -270,6 +304,22 @@ function ranges(bins: Bin[], test: (bin: Bin) => boolean, binMs: number): TimeRa
   return out;
 }
 
+const hourFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** The local wall-clock hour (0–23) of an instant in `timezone`. */
+function localHour(ms: number, timezone: string): number {
+  let formatter = hourFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      hourCycle: "h23",
+    });
+    hourFormatters.set(timezone, formatter);
+  }
+  return Number(formatter.format(ms)) % 24;
+}
+
 const minutesOf = (list: TimeRange[]) =>
   list.reduce((sum, r) => sum + (r.endMs - r.startMs) / MINUTE, 0);
 
@@ -313,12 +363,15 @@ export function computeSiteDay(input: {
     )
   );
 
-  // Carry-in: the grid state and battery level at the last sample before
-  // the day.
+  // Carry-in: the grid state and battery level at the last sample of the
+  // previous day. Earlier samples are ignored, so a day works out the same
+  // whether it is read alone (from the day before) or inside a longer range.
+  const carryStartMs = startOfDayInZone(addDaysToDateKey(date, -1), timezone).getTime();
   let carried: boolean | null = null;
   let lastSoc: number | null = null;
   const byBin = new Map<number, number>();
   samples.timestamps.forEach((t, i) => {
+    if (t < carryStartMs) return;
     if (t < dayStartMs) {
       const v = samples.gridVoltageV[i];
       if (v !== null) carried = v >= GRID_PRESENT_MIN_V;
@@ -377,19 +430,24 @@ export function computeSiteDay(input: {
 
   // Solar: a solar meter if there is one, else the balance at the inverter
   // (what the load drew that neither the grid nor the battery supplied).
+  const solarEstimated = !sources.pv && sources.load && sources.battery && sources.gridMeter;
+  const solarWOf = (b: Bin): number | null => {
+    if (sources.pv) return b.pvW !== null ? Math.max(0, b.pvW) : null;
+    if (!solarEstimated) return null;
+    if (b.loadW === null || b.batteryW === null || b.gridW === null) return null;
+    return Math.max(0, b.loadW - b.gridW - b.batteryW);
+  };
+  const flows: SiteFlow[] = bins.map((b) => ({
+    atMs: b.startMs,
+    hour: localHour(b.startMs, timezone),
+    batteryW: b.batteryW,
+    gridW: b.gridW,
+    solarW: solarWOf(b),
+    gridPresent: b.gridPresent,
+  }));
   // Null rather than zero when no bin had a usable reading.
-  let solarKwh: number | null = null;
-  let solarEstimated = false;
-  if (sources.pv) {
-    const read = bins.filter((b) => b.pvW !== null);
-    solarKwh = read.length ? read.reduce((sum, b) => sum + kwh(Math.max(0, b.pvW!)), 0) : null;
-  } else if (sources.load && sources.battery && sources.gridMeter) {
-    solarEstimated = true;
-    const read = bins.filter((b) => b.loadW !== null && b.batteryW !== null && b.gridW !== null);
-    solarKwh = read.length
-      ? read.reduce((sum, b) => sum + kwh(Math.max(0, b.loadW! - b.gridW! - b.batteryW!)), 0)
-      : null;
-  }
+  const solarRead = flows.filter((f) => f.solarW !== null);
+  const solarKwh = solarRead.length ? solarRead.reduce((sum, f) => sum + kwh(f.solarW!), 0) : null;
 
   const eveningBins = bins.filter((b) => b.startMs >= eveningStartMs);
   // Null before the window (no evening bins) and when no evening bin had a
@@ -539,8 +597,10 @@ export function computeSiteDay(input: {
     darkInferredMinutes,
     noDataMinutes,
     lightsOnPct: knownMinutes > 0 ? (100 * (knownMinutes - darkMinutes)) / knownMinutes : null,
+    knownMinutes,
     soc: bins.map((b) => ({ atMs: b.startMs, pct: b.soc })),
     evening,
     eveningHours,
+    flows,
   };
 }

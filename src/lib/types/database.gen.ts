@@ -455,6 +455,38 @@ export type Database = {
           },
         ]
       }
+      grid_tariffs: {
+        Row: {
+          bands: Json
+          created_at: string
+          effective_from: string
+          id: string
+          microgrid_id: string
+        }
+        Insert: {
+          bands: Json
+          created_at?: string
+          effective_from: string
+          id?: string
+          microgrid_id: string
+        }
+        Update: {
+          bands?: Json
+          created_at?: string
+          effective_from?: string
+          id?: string
+          microgrid_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "grid_tariffs_microgrid_id_fkey"
+            columns: ["microgrid_id"]
+            isOneToOne: false
+            referencedRelation: "microgrids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       household_devices: {
         Row: {
           created_at: string
@@ -747,6 +779,38 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      microgrid_savings_settings: {
+        Row: {
+          arbitrage_from: string | null
+          microgrid_id: string
+          round_trip_efficiency: number
+          solar_savings_from: string | null
+          updated_at: string
+        }
+        Insert: {
+          arbitrage_from?: string | null
+          microgrid_id: string
+          round_trip_efficiency?: number
+          solar_savings_from?: string | null
+          updated_at?: string
+        }
+        Update: {
+          arbitrage_from?: string | null
+          microgrid_id?: string
+          round_trip_efficiency?: number
+          solar_savings_from?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "microgrid_savings_settings_microgrid_id_fkey"
+            columns: ["microgrid_id"]
+            isOneToOne: true
+            referencedRelation: "microgrids"
             referencedColumns: ["id"]
           },
         ]

@@ -380,6 +380,11 @@ const GATED: { method: string; run: (capability: MeteringCapability) => Promise<
       c.recordOpeningRegister({ deviceId: DEV_ID, readingKwh: 10, readAt: "2026-09-01T00:00:00Z" }),
   },
   { method: "getSiteDay", run: (c) => c.getSiteDay({ microgrid_id: MG_ID, date: "2026-09-01" }) },
+  {
+    method: "getSiteDays",
+    run: (c) =>
+      c.getSiteDays({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" }),
+  },
 ];
 
 function spiedSetup(isPluginEnabled: MeteringRepository["isPluginEnabled"]) {

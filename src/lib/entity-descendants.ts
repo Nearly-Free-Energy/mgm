@@ -78,7 +78,11 @@ async function countTable(
   filter: { column: string; values: string[] }
 ): Promise<number> {
   if (filter.values.length === 0) return 0;
-  const query = supabase.from(table).select("id", { count: "exact", head: true });
+  // Selecting the filter column works for tables without an `id` column
+  // (microgrid_savings_settings is keyed by microgrid_id).
+  const query = supabase
+    .from(table)
+    .select(filter.column, { count: "exact", head: true });
   const { count } = await (filter.values.length === 1
     ? query.eq(filter.column, filter.values[0])
     : query.in(filter.column, filter.values));
@@ -232,6 +236,8 @@ async function countForOrganization(
     householdUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
+    gridTariffsCount,
+    savingsSettingsCount,
     userRolesCount,
     bpWithPayments,
   ] = await Promise.all([
@@ -259,6 +265,14 @@ async function countForOrganization(
           values: microgridIds,
         })
       : Promise.resolve(0),
+    countTable(supabase, "grid_tariffs", {
+      column: "microgrid_id",
+      values: microgridIds,
+    }),
+    countTable(supabase, "microgrid_savings_settings", {
+      column: "microgrid_id",
+      values: microgridIds,
+    }),
     countTableWith(supabase, "user_roles", (qb) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (qb as any).eq("scope_type", "org").eq("scope_id", orgId)
@@ -280,6 +294,8 @@ async function countForOrganization(
     billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
+    grid_tariffs: gridTariffsCount,
+    microgrid_savings_settings: savingsSettingsCount,
     user_roles: userRolesCount,
   };
 }
@@ -327,6 +343,8 @@ async function countForCommunity(
     householdUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
+    gridTariffsCount,
+    savingsSettingsCount,
     bpWithPayments,
   ] = await Promise.all([
     householdIds.length
@@ -353,6 +371,14 @@ async function countForCommunity(
           values: microgridIds,
         })
       : Promise.resolve(0),
+    countTable(supabase, "grid_tariffs", {
+      column: "microgrid_id",
+      values: microgridIds,
+    }),
+    countTable(supabase, "microgrid_savings_settings", {
+      column: "microgrid_id",
+      values: microgridIds,
+    }),
     countDraftPeriodsWithPayments(supabase, draftPeriodIds),
   ]);
 
@@ -371,6 +397,8 @@ async function countForCommunity(
     billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
+    grid_tariffs: gridTariffsCount,
+    microgrid_savings_settings: savingsSettingsCount,
   };
 }
 
@@ -411,6 +439,8 @@ async function countForMicrogrid(
     householdUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
+    gridTariffsCount,
+    savingsSettingsCount,
     bpWithPayments,
   ] = await Promise.all([
     householdIds.length
@@ -435,6 +465,14 @@ async function countForMicrogrid(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (qb as any).eq("microgrid_id", microgridId)
     ),
+    countTable(supabase, "grid_tariffs", {
+      column: "microgrid_id",
+      values: [microgridId],
+    }),
+    countTable(supabase, "microgrid_savings_settings", {
+      column: "microgrid_id",
+      values: [microgridId],
+    }),
     countDraftPeriodsWithPayments(supabase, draftPeriodIds),
   ]);
 
@@ -450,6 +488,8 @@ async function countForMicrogrid(
     billing_periods_with_payments: bpWithPayments,
     billing_line_items: billingLineItemsCount,
     rate_schedules: rateSchedulesCount,
+    grid_tariffs: gridTariffsCount,
+    microgrid_savings_settings: savingsSettingsCount,
   };
 }
 

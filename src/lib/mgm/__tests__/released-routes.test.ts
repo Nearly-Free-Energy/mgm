@@ -91,6 +91,10 @@ describe("isReleasedRoute", () => {
     "/api/gui/prepare",
     "/api/gui/signals",
     "/api/gui/search",
+    // Operations APIs: grid tariffs and savings settings.
+    "/api/microgrids/mg-1/grid-tariffs",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1",
+    "/api/microgrids/mg-1/savings-settings",
     "/go/billing.periods",
     "/go/metering.operations",
   ])("allows released route %s", (path) => {
@@ -121,6 +125,9 @@ describe("isReleasedRoute", () => {
     "/api/gui/signals/x",
     "/api/gui/search/extra",
     "/api/gui/searches",
+    "/api/microgrids/mg-1/grid-tariffs/gt-1/extra",
+    "/api/microgrids/mg-1/savings-settings/extra",
+    "/api/grid-tariffs",
     // /go takes one nav id and nothing else.
     "/go",
     "/go/billing.periods/extra",
@@ -136,6 +143,7 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/api/gui/prepare/")).toBe(true);
     expect(isReleasedRoute("/api/gui/signals/")).toBe(true);
     expect(isReleasedRoute("/api/gui/search/")).toBe(true);
+    expect(isReleasedRoute("/api/microgrids/mg-1/savings-settings/")).toBe(true);
     expect(isReleasedRoute("/go/billing.periods/")).toBe(true);
   });
 });

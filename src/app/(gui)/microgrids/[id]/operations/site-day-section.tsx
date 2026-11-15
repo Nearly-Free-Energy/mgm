@@ -5,7 +5,7 @@ import { LoadingSkeleton } from "@/components/ui/loading-skeleton";
 import { DailyOperations } from "@/components/operations/daily-operations";
 import { createClient } from "@/lib/supabase/server";
 import { composeMetering, type MeteringResult } from "@/lib/metering/compose";
-import type { SiteDayOperations } from "@/lib/metering/site-operations";
+import type { SiteDayOperations, SiteDaySummary } from "@/lib/metering/site-operations";
 
 async function readSiteDay(
   organizationId: string,
@@ -22,6 +22,13 @@ async function readSiteDay(
   }
 }
 
+/** The day without its per-bin flows, which only the server needs. */
+export function withoutFlows(day: SiteDayOperations): SiteDaySummary {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { flows, ...rest } = day;
+  return rest;
+}
+
 /**
  * One day's figures. Rendered inside a Suspense boundary keyed on the day,
  * so changing day shows the placeholder at once while OpenEMS answers.
@@ -36,7 +43,7 @@ export async function SiteDaySection({
   date: string;
 }) {
   const result = await readSiteDay(organizationId, microgridId, date);
-  if (result.ok) return <DailyOperations day={result.data} />;
+  if (result.ok) return <DailyOperations day={withoutFlows(result.data)} />;
   if (result.code === "metering_no_site_devices") {
     return (
       <EmptyState

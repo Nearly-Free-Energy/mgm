@@ -1,6 +1,6 @@
 // daily-operations.test.tsx — the daily operations view (Operations tab).
 //
-// Renders DailyOperations with hand-built SiteDayOperations fixtures (no
+// Renders DailyOperations with hand-built SiteDaySummary fixtures (no
 // computeSiteDay) so each assertion pins one field to one piece of copy:
 //   - stat tiles: solar, houses' evening use (with the battery's share), cuts, lowest battery, 17:00
 //     battery, lights on; em dash and "needs …" copy when a value is null
@@ -21,7 +21,7 @@ vi.mock("@/components/format/locale-context", () => ({
 }));
 
 import { DailyOperations, formatDuration } from "../daily-operations";
-import type { SiteDayOperations } from "@/lib/metering/site-operations";
+import type { SiteDaySummary } from "@/lib/metering/site-operations";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -31,13 +31,14 @@ const MIN = 60_000;
 const DAY_START = Date.parse("2026-11-04T21:00:00Z");
 const at = (hour: number, minute = 0) => DAY_START + hour * HOUR + minute * MIN;
 
-function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations {
+function makeDay(overrides: Partial<SiteDaySummary> = {}): SiteDaySummary {
   return {
     date: "2026-11-05",
     timezone: "Africa/Kampala",
     dayStartMs: DAY_START,
     dayEndMs: at(24),
     readUntilMs: at(24),
+    knownMinutes: 1440,
     resolutionMinutes: 15,
     eveningStartMs: at(18),
     hourMarks: [0, 3, 6, 9, 12, 15, 18, 21, 24].map((hour) => ({ hour, atMs: at(hour) })),
@@ -86,7 +87,7 @@ function makeDay(overrides: Partial<SiteDayOperations> = {}): SiteDayOperations 
   };
 }
 
-const NULL_DAY: Partial<SiteDayOperations> = {
+const NULL_DAY: Partial<SiteDaySummary> = {
   sources: {
     battery: false,
     gridMeter: false,
@@ -111,7 +112,7 @@ const NULL_DAY: Partial<SiteDayOperations> = {
   soc: [],
 };
 
-function render(day: SiteDayOperations): { html: string; root: HTMLElement } {
+function render(day: SiteDaySummary): { html: string; root: HTMLElement } {
   const html = renderToStaticMarkup(<DailyOperations day={day} />);
   const root = document.createElement("div");
   root.innerHTML = html;

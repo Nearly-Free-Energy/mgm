@@ -34,6 +34,12 @@ export type DescendantCounts =
       billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
+      /**
+       * Grid tariffs and savings settings of the Operations savings view
+       * (migration 20261111200000). Both cascade with their microgrid.
+       */
+      grid_tariffs: number;
+      microgrid_savings_settings: number;
       user_roles: number;
     }
   | {
@@ -49,6 +55,8 @@ export type DescendantCounts =
       billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
+      grid_tariffs: number;
+      microgrid_savings_settings: number;
     }
   | {
       kind: "microgrid";
@@ -62,6 +70,8 @@ export type DescendantCounts =
       billing_periods_with_payments: number;
       billing_line_items: number;
       rate_schedules: number;
+      grid_tariffs: number;
+      microgrid_savings_settings: number;
     }
   | {
       kind: "edge";
@@ -104,6 +114,8 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
         counts.rate_schedules === 0 &&
+        counts.grid_tariffs === 0 &&
+        counts.microgrid_savings_settings === 0 &&
         counts.user_roles === 0
       );
     case "community":
@@ -118,7 +130,9 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
-        counts.rate_schedules === 0
+        counts.rate_schedules === 0 &&
+        counts.grid_tariffs === 0 &&
+        counts.microgrid_savings_settings === 0
       );
     case "microgrid":
       return (
@@ -131,7 +145,9 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
         counts.billing_line_items === 0 &&
-        counts.rate_schedules === 0
+        counts.rate_schedules === 0 &&
+        counts.grid_tariffs === 0 &&
+        counts.microgrid_savings_settings === 0
       );
     case "edge":
       return (

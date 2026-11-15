@@ -136,6 +136,20 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {pluralize(counts.rate_schedules, "schedule")}
           </li>
         );
+      if (counts.grid_tariffs > 0)
+        items.push(
+          <li key="gt">
+            {fmt(counts.grid_tariffs)} grid tariff{" "}
+            {pluralize(counts.grid_tariffs, "version")}
+          </li>
+        );
+      if (counts.microgrid_savings_settings > 0)
+        items.push(
+          <li key="ss">
+            {fmt(counts.microgrid_savings_settings)} savings{" "}
+            {pluralize(counts.microgrid_savings_settings, "setting")}
+          </li>
+        );
       if (counts.user_roles > 0)
         items.push(
           <li key="ur">
@@ -213,6 +227,20 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {pluralize(counts.rate_schedules, "schedule")}
           </li>
         );
+      if (counts.grid_tariffs > 0)
+        items.push(
+          <li key="gt">
+            {fmt(counts.grid_tariffs)} grid tariff{" "}
+            {pluralize(counts.grid_tariffs, "version")}
+          </li>
+        );
+      if (counts.microgrid_savings_settings > 0)
+        items.push(
+          <li key="ss">
+            {fmt(counts.microgrid_savings_settings)} savings{" "}
+            {pluralize(counts.microgrid_savings_settings, "setting")}
+          </li>
+        );
       break;
 
     case "microgrid":
@@ -275,6 +303,20 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
           <li key="rs">
             {fmt(counts.rate_schedules)} rate{" "}
             {pluralize(counts.rate_schedules, "schedule")}
+          </li>
+        );
+      if (counts.grid_tariffs > 0)
+        items.push(
+          <li key="gt">
+            {fmt(counts.grid_tariffs)} grid tariff{" "}
+            {pluralize(counts.grid_tariffs, "version")}
+          </li>
+        );
+      if (counts.microgrid_savings_settings > 0)
+        items.push(
+          <li key="ss">
+            {fmt(counts.microgrid_savings_settings)} savings{" "}
+            {pluralize(counts.microgrid_savings_settings, "setting")}
           </li>
         );
       break;
