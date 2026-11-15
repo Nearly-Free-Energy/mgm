@@ -77,6 +77,13 @@ export const BILLING_SURFACE: Contribution = {
   // Deleting a tariff version is not contributed (decision 6): it stays on
   // the Rates page. A DELETE would need typed or ceremony confirmation and a
   // prepare step.
+  // Both `targeted: false`: offered only by the savings view, whose loader
+  // prefills them with the stored settings and the newest tariff's bands
+  // (savingsActions in ./surface/savings-model.ts). Appended to another
+  // plugin's view of the microgrid they would open empty, and the settings
+  // PUT replaces the whole row, so saving would clear both stored dates. If
+  // the host's prepare comes to supply starting values, or the route stops
+  // replacing the row, revisit.
   actions: [
     {
       ...SAVINGS_SETTINGS_ACTION,
@@ -89,6 +96,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      targeted: false,
     },
     {
       ...GRID_TARIFF_ADD_ACTION,
@@ -101,6 +109,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "confirm",
       humanOnly: true,
+      targeted: false,
     },
   ],
 };

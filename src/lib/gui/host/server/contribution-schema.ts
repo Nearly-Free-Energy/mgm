@@ -286,6 +286,7 @@ const actionSchema = z
     method: z.enum(["POST", "PUT", "PATCH", "DELETE"]),
     bind: z.strictObject({ path: kindMap.optional(), body: kindMap.optional() }),
     available: fn.optional(),
+    targeted: z.literal(false).optional(),
     risk: z.enum(["write", "money", "external", "destructive"]),
     confirm: confirmSchema,
     humanOnly: z.boolean(),

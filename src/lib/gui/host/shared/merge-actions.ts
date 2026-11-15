@@ -20,7 +20,7 @@ export type ActionSlots<A, V = unknown> = { [K in ViewKind]: { kind: K; body: Bo
 /** What the merge reads of an action definition. */
 export type MergeActionDef = Pick<
   ActionDef,
-  "id" | "title" | "target" | "path" | "method" | "risk" | "confirm" | "bind"
+  "id" | "title" | "target" | "path" | "method" | "risk" | "confirm" | "bind" | "targeted"
 >;
 export type MergeAction = { plugin: MgmPluginName; def: MergeActionDef };
 /**
@@ -185,7 +185,9 @@ const sameLabel = (label: string) => label.trim().toLowerCase();
  * action whose bound kinds are not all there is left out. They follow the
  * view's own actions, in catalog order and then by id. An action already in
  * the list is not repeated, and one whose label matches an action already in
- * the list is left out. Other slots get no targeted actions.
+ * the list is left out. Other slots get no targeted actions. An action
+ * contributed with `targeted: false` is never appended: it is offered only
+ * where a view's loader links it.
  */
 export function appendTargetedActions<V, M extends ActionSlots<ActionRef, V>>(
   model: M,
@@ -193,7 +195,7 @@ export function appendTargetedActions<V, M extends ActionSlots<ActionRef, V>>(
 ): { model: M; dropped: Dropped[] } {
   const dropped: Dropped[] = [];
   const foreign = input.actions
-    .filter((a) => a.plugin !== input.plugin)
+    .filter((a) => a.plugin !== input.plugin && a.def.targeted !== false)
     .sort((x, y) => catalogIndex(x.plugin) - catalogIndex(y.plugin) || byId(x.def.id, y.def.id));
 
   const targeted = (entities: readonly (EntityRef | undefined)[]) =>

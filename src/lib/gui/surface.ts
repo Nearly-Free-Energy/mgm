@@ -147,6 +147,20 @@ type ActionBase = {
   bind: { path?: Record<string, EntityKind>; body?: Record<string, EntityKind> };
   /** true, or the reason the action is not available for that id. */
   available?(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>>;
+  /**
+   * false: never appended to another plugin's view of the target by
+   * appendTargetedActions; offered only where a loader links it. The host
+   * does not check that the linking loader is this plugin's own
+   * (resolveOwnAndTargeted resolves any view's links), so a copy another
+   * plugin's loader links starts from that loader's prefill, or none; if
+   * resolveOwnAndTargeted comes to check the plugin, revisit this sentence.
+   *
+   * For an action whose form must start from values only its own loader
+   * supplies as prefill, such as a PUT that replaces a whole row: `prepare`
+   * returns a confirmation, not starting values. If Prepare comes to supply
+   * a prefill, such an action can use that instead.
+   */
+  targeted?: false;
 };
 type WriteMethod = "POST" | "PUT" | "PATCH";
 type LightLevel =
