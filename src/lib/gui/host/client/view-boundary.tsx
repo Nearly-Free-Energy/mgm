@@ -6,8 +6,10 @@
  * current, so a shell never shows a model after navigating away.
  *
  * Without `initial`, the view's title, trail and scope come from
- * contributedView over the provider's manifest, as the (gui) layout derives
- * them for the first paint (../server/render-view.tsx).
+ * contributedView over the provider's manifest. The (gui) layout's first
+ * paint derives the same trail and scope without the model, so its title is
+ * the nav entry's until this boundary publishes the model's
+ * (resolveInitialView in ../server/render-view.tsx).
  */
 import { useLayoutEffect, useMemo, type ReactNode } from "react";
 import type { InitialView, ViewModel } from "../../contract";

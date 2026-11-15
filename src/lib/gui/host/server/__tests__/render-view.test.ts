@@ -34,21 +34,6 @@ vi.mock("../snapshot", () => ({ surfaceSnapshot: mocks.snapshot }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en" }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-// The Operations page as a view would serve it, once its page.tsx is gone.
-vi.mock("@/lib/plugins/bundled", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/plugins/bundled")>();
-  const plugins = real.MGM_BUNDLED_PLUGINS.map((plugin) => ({
-    ...plugin,
-    pages: plugin.pages.map((page) =>
-      page.path === "/microgrids/[id]/operations" ? { ...page, servedBy: "view" as const } : page,
-    ),
-  }));
-  return {
-    ...real,
-    MGM_BUNDLED_PLUGINS: plugins,
-    matchCatalogPage: (path: string, list = plugins) => real.matchCatalogPage(path, list),
-  };
-});
 
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { pageHref, renderView, resolveInitialView } from "../render-view";
@@ -81,7 +66,7 @@ const MANIFEST: Manifest = buildManifestModel({
   orgs: [{ id: ORG, name: "Org One" }],
   gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
   nav: SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["nav"],
-  views: [],
+  views: SURFACES.flatMap((s) => (s.views ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["views"],
   status: [],
   communities: [{ id: COMMUNITY, name: "Kasana" }],
   microgrids: [{ id: MICROGRID, name: "Kasana East", communityId: COMMUNITY, timezone: null }],
