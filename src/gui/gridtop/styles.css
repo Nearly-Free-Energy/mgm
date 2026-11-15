@@ -43,3 +43,9 @@
 @custom-variant gt {
   @slot;
 }
+
+/* Words the site-day renderer uses as data, not as classes: SVG text anchors
+   and a supply name from the ext. Every class here starts with gt:, so none
+   of them is meant as a utility; scanned, each would emit one globals.css
+   also emits. */
+@source not inline("{start,end,grid}");

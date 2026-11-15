@@ -26,12 +26,12 @@ const value = (root: HTMLElement, label: string) => tile(root, label).querySelec
 const hint = (root: HTMLElement, label: string) => tile(root, label).querySelectorAll("p")[1]?.textContent ?? null;
 
 describe("the site-day tiles", () => {
-  it("shows the six tiles in the page's order, and the evening supply after them", () => {
+  it("shows the six tiles in the page's order, and leaves the evening supply to the evening strip", () => {
     const root = draw();
     expect([...root.querySelectorAll("[data-tile]")].map((s) => s.getAttribute("data-tile"))).toEqual([
-      "solar", "houses-evening", "cuts", "lowest-soc", "soc-17", "lights-on", "evening-supply",
+      "solar", "houses-evening", "cuts", "lowest-soc", "soc-17", "lights-on",
     ]);
-    expect(tile(root, "Who served the houses, 18:00–24:00").textContent).toContain(`Battery 3.0 h · Battery + grid 1.0 h`);
+    expect(root.textContent).not.toContain("Who served the houses");
   });
 
   // Legacy: "shows solar, and what the houses used in the evening with the battery's share, in kWh".
@@ -157,7 +157,7 @@ describe("the site-day tiles", () => {
 
   it("prints figures at the KPI size with tabular digits and labels at the caption size, with no decorative colour", () => {
     const root = draw();
-    for (const section of root.querySelectorAll("[data-tile]:not([data-tile='evening-supply'])")) {
+    for (const section of root.querySelectorAll("[data-tile]")) {
       expect(section.querySelector("h3")?.className).toContain("gt:text-caption");
       const figure = section.querySelector("p")!;
       expect(figure.className).toContain("gt:text-kpi");

@@ -46,6 +46,53 @@ export const TILES: Tile[] = [
   { key: "evening-supply", label: "Who served the houses, 18:00–24:00", value: text(`Battery 3.0 h · Battery + grid 1.0 h · Grid alone 1.0 h · Dark 1.0 h`) },
 ];
 
+// 2026-11-05 in Africa/Kampala (UTC+3, no DST) starts at 21:00 UTC the day before.
+const DAY_START = Date.parse("2026-11-04T21:00:00Z");
+/** The instant `hour:minute` into the day shown, as the server writes it. */
+export const at = (hour: number, minute = 0) => new Date(DAY_START + (hour * 60 + minute) * 60_000).toISOString();
+const range = (from: [number, number], to: [number, number], label: string) => ({ start: at(...from), end: at(...to), label });
+
+/** The battery's readings: a null at 00:30 breaks the line in two. */
+export const SOC: [string, number | null][] = [
+  [at(0), 80],
+  [at(0, 15), 78],
+  [at(0, 30), null],
+  [at(0, 45), 70],
+  [at(1), 69],
+];
+
+/** The chart and strip fields of the ext: two cuts, an hour dark, and the evening's four supplies. */
+export const CHART = {
+  dayStart: at(0),
+  dayEnd: at(24),
+  readUntil: at(24),
+  eveningStart: at(18),
+  resolutionMinutes: 15,
+  hourMarks: [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => ({ at: at(h), label: String(h).padStart(2, "0") })),
+  eveningTicks: [18, 19, 20, 21, 22, 23, 24].map((h) => ({ at: at(h), label: `${h}:00` })),
+  cuts: [range([2, 0], [4, 30], "02:00–04:30"), range([13, 0], [14, 40], "13:00–14:40")],
+  dark: [range([23, 0], [24, 0], "23:00–24:00")],
+  evening: [
+    { start: at(18), end: at(21), supply: "battery", label: "Battery, 18:00–21:00" },
+    { start: at(21), end: at(22), supply: "battery_and_grid", label: "Battery + grid, 21:00–22:00" },
+    { start: at(22), end: at(23), supply: "grid", label: "Grid alone, 22:00–23:00" },
+    { start: at(23), end: at(24), supply: "dark", label: "Dark, 23:00–00:00" },
+  ],
+  legend: [
+    { supply: "battery", label: "Battery", hours: "3.0 h" },
+    { supply: "battery_and_grid", label: "Battery + grid", hours: "1.0 h" },
+    { supply: "grid", label: "Grid alone", hours: "1.0 h" },
+    { supply: "dark", label: "Dark", hours: "1.0 h" },
+  ],
+  eveningHours: { battery: 3, battery_and_grid: 1, grid: 1, dark: 1, no_data: 0 },
+  sources: { battery: true, gridMeter: true, load: true, pv: true, houses: true },
+  thresholds: { gridPresentMinV: 170, lowBatteryPct: 15 },
+  chartLabel: "Battery level from 00:00 to 24:00. Lowest 12% at 05:30. 2 power cuts. Houses dark for 1h 0m.",
+  chartEmpty: null,
+  eveningLabel: "Battery 3.0 h, Battery + grid 1.0 h, Grid alone 1.0 h, Dark 1.0 h",
+  eveningEmpty: null,
+} satisfies Record<string, Json>;
+
 export const NOTES = [
   `A power cut is any grid phase below 170 V over a 15-minute reading. Dark means the gateway went silent during a cut: the battery had cut off and the houses had no power. When it went silent with the battery at or below 15%, the houses are taken to be dark and the grid off, since the gateway cannot outlive the battery; that time is shown as inferred. Lights on is the share of the day that was not dark, leaving out time with no data. Times are Africa/Kampala.`,
 ];
@@ -61,6 +108,8 @@ type Options = {
   actions?: ActionRef[];
   links?: LinkRef[];
   ext?: Record<string, Json>;
+  /** The battery series' points; null leaves the series out, as for a site without a battery. */
+  soc?: [string, number | null][] | null;
 } & Partial<Pick<ModelOf<"metrics">, "notice" | "attached">>;
 
 function withTile(tile: Tile, change: Options["tiles"]): Tile {
@@ -91,7 +140,7 @@ export function dayModel(o: Options = {}): ModelOf<"metrics"> {
     org: "o1",
     entity: { kind: "microgrid", id: MG, label: "East" },
     trail: [],
-    body: { tiles },
+    body: { tiles, ...(o.soc === null ? {} : { series: [{ key: "soc", label: "Battery level", unit: "%", points: o.soc ?? SOC }] }) },
     actions: o.actions ?? [],
     links: o.links ?? dayLinks(date, today),
     attached: o.attached ?? [],
@@ -106,6 +155,7 @@ export function dayModel(o: Options = {}): ModelOf<"metrics"> {
         dayHref: DAY_HREF,
         synthetic: o.synthetic === true,
         partial: false,
+        ...CHART,
         notes: o.notes ?? NOTES,
         ...o.ext,
       },

@@ -74,6 +74,17 @@ describe("Gridtop's site-day renderer", () => {
     ["a note that is not text", { notes: [1] }],
     ["a date with text around it", { date: "x2026-11-05" }],
     ["a today with text around it", { today: "2026-11-07x" }],
+    ["a day start that is not an instant", { dayStart: "midnight" }],
+    ["an evening that starts after the day ends", { eveningStart: "2026-11-06T00:00:00.000Z" }],
+    ["a supply it does not know", { evening: [{ start: "2026-11-05T15:00:00.000Z", end: "2026-11-05T16:00:00.000Z", supply: "wind", label: "Wind" }] }],
+    ["cuts that are not a list", { cuts: "two" }],
+    ["an hour mark without its label", { hourMarks: [{ at: "2026-11-04T21:00:00.000Z" }] }],
+    ["no chart description", { chartLabel: null }],
+    ["no resolution", { resolutionMinutes: 0 }],
+    ["a day that ends before it starts", { dayStart: "2026-11-05T21:00:00.000Z", dayEnd: "2026-11-04T22:00:00.000Z", eveningStart: "2026-11-04T15:00:00.000Z" }],
+    ["a read-until that is not an instant", { readUntil: "now" }],
+    ["an evening tick without its instant", { eveningTicks: [{ label: "18:00" }] }],
+    ["a cut without its end", { cuts: [{ start: "2026-11-04T23:00:00.000Z", label: "02:00" }] }],
   ])("reads no ext with %s", (_, data) => {
     expect(readSiteDayExt(dayModel({ ext: data }).ext)).toBeNull();
   });
@@ -81,6 +92,28 @@ describe("Gridtop's site-day renderer", () => {
   it("reads the ext as the server sends it", () => {
     expect(readSiteDayExt(dayModel().ext)).toMatchObject({ state: "day", date: "2026-11-05", dayHref: `/microgrids/${MG}/operations` });
     expect(readSiteDayExt(noSiteDevicesModel().ext)).toMatchObject({ state: "no-site-devices" });
+  });
+
+  it("draws the battery chart and the evening strip between the tiles and the notes, from the soc series", async () => {
+    await draw(dayModel());
+    const order = [
+      document.querySelector("[data-tile='lights-on']")!,
+      screen.getByRole("img", { name: /^Battery level from 00:00/ }),
+      screen.getByRole("img", { name: /^Battery 3\.0 h/ }),
+      screen.getByText(/Times are Africa\/Kampala\./),
+    ];
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(document.querySelectorAll("svg path")).toHaveLength(2);
+    expect(count("Who served the houses, 18:00–24:00")).toBe(1);
+  });
+
+  // Legacy: "replaces the chart with a note when no battery is registered".
+  it("shows the server's note in place of the chart on a site without a battery", async () => {
+    await draw(dayModel({ soc: null, ext: { chartEmpty: "No battery is registered on this microgrid." } }));
+    expect(text()).toContain("No battery is registered on this microgrid.");
+    expect(document.querySelector("svg")).toBeNull();
   });
 
   it("heads the day without the zone the window bar shows, and keeps the title for assistive tech", async () => {
