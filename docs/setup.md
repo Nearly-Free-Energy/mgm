@@ -420,9 +420,16 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 Chromium at 360 × 800 with touch as the pointer, it signs in, opens the home
 page and a microgrid's households list, and checks that no page scrolls
 sideways, that tables scroll inside their own box and that controls are at
-least 44 px. It creates its own organization, microgrids, households and
-user in the local database and deletes them afterwards. Timings are printed,
-not enforced.
+least 44 px. It also opens a community's invoice branding page, checks that
+the invoice logo loads from its signed Supabase Storage URL, and runs
+Preview bill, checking that the popup is sent to a `blob:` URL holding a
+PDF. Every page fails on a page error, a console error or a content
+security policy violation, popups included. The headless Chromium it runs
+has no PDF viewer, so it sees the preview as a download; it cannot show
+that a desktop browser displays it. It creates its own organization,
+community (with an invoice logo in the `invoice-logos` bucket), microgrids,
+households and user in the local database and deletes them afterwards.
+Timings are printed, not enforced.
 
 ```bash
 npx playwright install chromium        # once

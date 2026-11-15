@@ -6,7 +6,7 @@ import { readSmokeFixtures } from "./fixtures";
 // 360 px touch screen (playwright.config.ts).
 
 test("home renders at 360 px", async ({ page }) => {
-  const watch = watchPage(page);
+  const watch = await watchPage(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Smoke microgrid 1" })).toBeVisible();
@@ -17,7 +17,7 @@ test("home renders at 360 px", async ({ page }) => {
 
 test("the households page renders at 360 px", async ({ page }) => {
   const { microgridId } = readSmokeFixtures();
-  const watch = watchPage(page);
+  const watch = await watchPage(page);
   await page.goto(`/microgrids/${microgridId}/setup/households`);
   await expect(page.getByRole("heading", { name: "3 households" })).toBeVisible();
   const table = page.getByRole("table");

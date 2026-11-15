@@ -1,29 +1,70 @@
 import { appendFileSync, closeSync, openSync, readFileSync } from "node:fs";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { TOUCH_TALL, TOUCH_WIDE } from "./touch-selectors";
 
 /**
- * Collects page errors, console errors, requests to any origin other than
- * the app and its Supabase, and writes (non-GET requests to the app's /api).
+ * The one write the smoke makes: the invoice page's Preview bill posts the
+ * form's unsaved configuration to the preview route, which reads the
+ * community, its organization and rate schedule and a signed logo URL, and
+ * returns a PDF without writing anything
+ * (src/app/api/communities/[id]/invoice-preview/route.ts). If that route
+ * starts writing, take it out of here.
  */
-export function watchPage(page: Page) {
+const READ_ONLY_POSTS = [/^\/api\/communities\/[0-9a-f-]{36}\/invoice-preview$/];
+
+/** Contexts whose pages already report content security policy violations. */
+const reportingContexts = new WeakSet<BrowserContext>();
+
+/**
+ * Reports every content security policy violation in every page of the
+ * context, popups included, as a console error the watcher records. The
+ * event fires for report-only policies too, so a smoke run fails on what
+ * the policy would block, whichever mode it ships in.
+ */
+async function reportCspViolations(context: BrowserContext) {
+  if (reportingContexts.has(context)) return;
+  reportingContexts.add(context);
+  await context.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      console.error(
+        `content security policy violation: ${event.effectiveDirective} blocked ${event.blockedURI || "inline"}` +
+          ` (${event.disposition}) at ${event.sourceFile || document.URL}:${event.lineNumber}`
+      );
+    });
+  });
+}
+
+/**
+ * Collects page errors, console errors, content security policy
+ * violations, requests to any origin other than the app and its Supabase,
+ * and writes (non-GET requests to the app's /api other than
+ * READ_ONLY_POSTS), on the page and on every popup it opens. Await it before
+ * the page's first navigation, so the violation listener is in place.
+ */
+export async function watchPage(page: Page) {
   const app = new URL(String(test.info().project.use.baseURL)).origin;
   const allowed = new Set([app, new URL(process.env.MGM_PUBLIC_SUPABASE_URL ?? app).origin]);
   const problems: string[] = [];
-  page.on("pageerror", (error) => problems.push(`page error: ${error.message}`));
-  // No allowlist. If an error proves unavoidable, match it here with a
-  // comment that says why.
-  page.on("console", (message) => {
-    if (message.type() === "error") problems.push(`console error: ${message.text()}`);
-  });
-  page.on("request", (request) => {
-    const url = new URL(request.url());
-    if (!url.protocol.startsWith("http")) return; // data: and blob: URLs
-    if (!allowed.has(url.origin)) problems.push(`request to ${url.origin}`);
-    if (url.origin === app && url.pathname.startsWith("/api/") && request.method() !== "GET") {
-      problems.push(`write: ${request.method()} ${url.pathname}`);
-    }
-  });
+  await reportCspViolations(page.context());
+  const watch = (target: Page, label: string) => {
+    target.on("pageerror", (error) => problems.push(`${label}page error: ${error.message}`));
+    // No allowlist. If an error proves unavoidable, match it here with a
+    // comment that says why.
+    target.on("console", (message) => {
+      if (message.type() === "error") problems.push(`${label}console error: ${message.text()}`);
+    });
+    target.on("request", (request) => {
+      const url = new URL(request.url());
+      if (!url.protocol.startsWith("http")) return; // data: and blob: URLs
+      if (!allowed.has(url.origin)) problems.push(`${label}request to ${url.origin}`);
+      const readOnly = request.method() === "POST" && READ_ONLY_POSTS.some((path) => path.test(url.pathname));
+      if (url.origin === app && url.pathname.startsWith("/api/") && request.method() !== "GET" && !readOnly) {
+        problems.push(`${label}write: ${request.method()} ${url.pathname}`);
+      }
+    });
+    target.on("popup", (popup) => watch(popup, "popup: "));
+  };
+  watch(page, "");
   return { assertClean: () => expect(problems).toEqual([]) };
 }
 

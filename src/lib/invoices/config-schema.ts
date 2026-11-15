@@ -21,6 +21,22 @@
 
 import { z } from "zod";
 
+/**
+ * In the browser (the invoice page's form imports this module), build the
+ * schemas below without Zod's compiled parsers. Zod compiles an object
+ * schema with `new Function` unless `jitless` is set, and first probes for
+ * it with `Function("")` when the schema is built. The pages' content
+ * security policy has no 'unsafe-eval' (src/lib/mgm/content-security-policy.ts),
+ * so the probe is a violation the browser smoke fails on (e2e/checks.ts);
+ * Zod would fall back to its plain parser anyway. Set here rather than in a
+ * start-up file, because importing Zod there adds it to every page's first
+ * load (scripts/budgets/limits.json). Servers keep the compiled parsers.
+ * This is the only module the browser loads Zod through; a client component
+ * that reaches Zod another way needs the same setting first. If the policy
+ * gains 'unsafe-eval', or Zod stops probing, this can go.
+ */
+if (typeof window !== "undefined") z.config({ jitless: true });
+
 // ── Field validators ─────────────────────────────────────────────────────────
 
 /**
