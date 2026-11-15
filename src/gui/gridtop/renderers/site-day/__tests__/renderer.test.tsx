@@ -282,11 +282,15 @@ describe("Gridtop's site-day renderer", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(document.querySelector("[data-tile]")).toBeNull();
     expect(screen.getByRole("heading", { level: 3 }).closest("section")!.className).toContain("gt:text-destructive-fg");
+    // Announced when it appears, as after Try again.
+    expect(screen.getByRole("alert").textContent).toContain(NO_CONNECTION);
   });
 
-  it("draws a warning problem in the warning tone", async () => {
+  it("draws a warning problem in the warning tone, announced as a status", async () => {
     await draw(problemModel({ ext: { tone: "warning" } }));
     expect(screen.getByRole("heading", { level: 3 }).closest("section")!.className).toContain("gt:text-warning-fg");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(NO_CONNECTION);
   });
 
   it("reads the same day again through kit.refresh when the problem is only retried, and writes nothing", async () => {
@@ -309,6 +313,7 @@ describe("Gridtop's site-day renderer", () => {
     const title = screen.getByText(TIMEZONE_NOTICE.title);
     expect(text()).toContain(TIMEZONE_NOTICE.text);
     expect(screen.getAllByRole("link", { name: SET_TIMEZONE.label }).map((a) => a.getAttribute("href"))).toEqual([SET_TIMEZONE.href]);
+    expect(screen.getByRole("status", { name: TIMEZONE_NOTICE.title })).toBeTruthy();
     const picker = screen.getByRole("heading", { level: 2 });
     expect(title.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

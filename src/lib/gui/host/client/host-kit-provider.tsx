@@ -5,8 +5,8 @@
  * KitProvider a function, so this client module supplies `resolve`: after a
  * soft navigation, the view is resolveLegacyView of the new pathname, and a
  * place the manifest does not list rebuilds the manifest once (KitProvider).
- * On a contributed view's page (../server/render-view.tsx) its ViewBoundary
- * supplies the view instead.
+ * On a contributed view's page (../server/render-view.tsx) resolveLegacyView
+ * gives the place its path names until its ViewBoundary supplies the view.
  *
  * The layout persists across soft navigations and the resolver sees only the
  * pathname, so a navigation that changes only `?org=` (HierarchyNav's

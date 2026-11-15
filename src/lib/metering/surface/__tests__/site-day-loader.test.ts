@@ -228,6 +228,18 @@ describe("loadSiteDay when the metering source cannot read the day", () => {
     expect(JSON.stringify(out)).not.toContain(UPSTREAM);
   });
 
+  it.each([
+    [503, "metering_site_devices_unavailable"],
+    [500, "metering_site_day_failed"],
+  ] as const)("keeps the day navigation and offers another try when getSiteDay fails after the gate (%i %s)", async (status, code) => {
+    fails(status, code);
+    const out = await loadSiteDay(request("date=2026-11-01"));
+    if (!out.ok) throw new Error("refused");
+    expect(out.model.ext?.data).toMatchObject({ state: "problem", message: SITE_DAY_PROBLEMS.unavailable.message, retry: true });
+    expect(out.model.links?.map((l) => l.id)).toEqual(["metering.day-previous", "metering.day-next", "metering.day-today", "metering.microgrid-setup"]);
+    expect(JSON.stringify(out)).not.toContain(UPSTREAM);
+  });
+
   it("still refuses a failure that is not the source's", async () => {
     fails(403, "metering_forbidden");
     expect(await loadSiteDay(request())).toEqual(SITE_DAY_REFUSALS.forbidden);
@@ -276,6 +288,8 @@ describe("siteDayProblem", () => {
     [403, "METERING_UNAUTHORIZED", "rejected"],
     [404, "METERING_INVALID_DATA", "unavailable"],
     [502, "METERING_UPSTREAM", "unavailable"],
+    [503, "metering_site_devices_unavailable", "unavailable"],
+    [500, "metering_site_day_failed", "unavailable"],
   ] as const)("maps %i %s to %s", (status, code, problem) => {
     expect(siteDayProblem({ status, code })).toBe(SITE_DAY_PROBLEMS[problem]);
   });

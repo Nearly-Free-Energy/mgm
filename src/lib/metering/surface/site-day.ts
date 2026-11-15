@@ -75,7 +75,8 @@ export async function loadSiteDay(req: SurfaceRequest): Promise<Loaded<LoadedMod
   // Through row-level security. The host resolved this microgrid to
   // req.organizationId first (resolveSegments in dispatchView), and getSiteDay
   // checks the organization again; if both stop doing so, revisit. The
-  // address columns are the time zone nudge's; all are in MICROGRID_PUBLIC_COLUMNS.
+  // address columns are the time zone nudge's; all are in MICROGRID_PUBLIC_COLUMNS
+  // (src/lib/types/microgrid-columns.ts). If one leaves that projection, revisit this select.
   const { data: microgrid, error } = await req.supabase
     .from("microgrids")
     .select("id, name, timezone, address_country, lat, lng")

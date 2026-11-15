@@ -104,6 +104,12 @@ export function siteDayProblem(failure: { status: number; code: string }): SiteD
   if (code === "METERING_CONFIGURATION") return status === 409 ? SITE_DAY_PROBLEMS.mixed : SITE_DAY_PROBLEMS.noConnection;
   if (code === "METERING_UNAUTHORIZED") return SITE_DAY_PROBLEMS.rejected;
   if (code.startsWith("METERING_")) return SITE_DAY_PROBLEMS.unavailable;
+  // getSiteDay's own failures after the plugin gate: reading the site's
+  // devices (openSiteReader) or computing the day (siteReadFailed) in
+  // src/lib/metering/capability.ts. Neither is the person's or the gate's,
+  // so the day keeps its picker and offers Try again; if getSiteDay gains
+  // another such failure or renames these, revisit.
+  if (code === "metering_site_devices_unavailable" || code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.unavailable;
   return null;
 }
 

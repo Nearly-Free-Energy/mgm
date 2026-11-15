@@ -174,9 +174,11 @@ function placeView(parsed: ParsedPath, manifest: { org: OrgManifest }): LegacyVi
 
 /**
  * What the shell shows for any path under the (gui) layout: legacyView's
- * answer, or, for a path that is no catalog page served outside the contract
- * (a not-found page, or a page a view serves, until its ViewBoundary
- * publishes contributedView's answer), the organization alone.
+ * answer; for a catalog page a view serves, the place its path names, with
+ * no view, until its ViewBoundary publishes contributedView's answer (the
+ * scope and trail unloadedView gives the first paint, so a soft navigation
+ * keeps the microgrid while the view loads); for any other path (a
+ * not-found page), the organization alone.
  */
 export function resolveLegacyView(
   pathWithQuery: string,
@@ -185,6 +187,8 @@ export function resolveLegacyView(
 ): InitialView & { unplaced: boolean } {
   const view = legacyView(pathWithQuery, manifest, plugins);
   if (view) return view;
+  const served = parsePath(pathWithQuery, plugins, true);
+  if (served) return placeView(served, manifest);
   const { org } = manifest;
   return {
     view: null,

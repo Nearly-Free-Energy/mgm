@@ -68,7 +68,7 @@ function Notices({ model, ext, timezoneLink, kit }: { model: ViewModel; ext: Sit
       {notice && <Band tone={notice.tone} text={notice.text} />}
       {ext.synthetic && !said && <Band tone="warning" text={SYNTHETIC_BAND} />}
       {zone && (
-        <section aria-label={zone.title} className={cls("gt:flex gt:flex-col gt:items-start gt:gap-1 gt:rounded-md gt:px-3 gt:py-2 gt:text-dense", BAND.warning)}>
+        <section role="status" aria-label={zone.title} className={cls("gt:flex gt:flex-col gt:items-start gt:gap-1 gt:rounded-md gt:px-3 gt:py-2 gt:text-dense", BAND.warning)}>
           <p className="gt:font-semibold">{zone.title}</p>
           <p>{zone.text}</p>
           {timezoneLink && <LinkControl kit={kit} link={timezoneLink} className={cls(CONTROL, "gt:border-border gt:bg-card gt:text-foreground gt:hover:bg-muted")} />}
@@ -157,7 +157,12 @@ function Problem(props: { ext: Extract<SiteDayExt, { state: "problem" }>; fix: L
   const { ext, fix, kit } = props;
   const control = cls(CONTROL, "gt:border-border gt:bg-card gt:text-foreground gt:hover:bg-muted");
   return (
-    <section className={cls("gt:flex gt:flex-col gt:items-start gt:gap-2 gt:rounded-lg gt:px-4 gt:py-3", BAND[ext.tone])}>
+    // Announced when it appears, as after Try again or a move to a day that
+    // fails: an alert for a danger tone, a status for a warning.
+    <section
+      role={ext.tone === "danger" ? "alert" : "status"}
+      className={cls("gt:flex gt:flex-col gt:items-start gt:gap-2 gt:rounded-lg gt:px-4 gt:py-3", BAND[ext.tone])}
+    >
       <h3 className="gt:text-body gt:font-semibold">{ext.title}</h3>
       <p className="gt:max-w-prose gt:text-body">{ext.message}</p>
       {fix && <LinkControl kit={kit} link={fix} className={control} />}

@@ -7,7 +7,7 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { Id, Manifest } from "../../../contract";
 import { buildManifestModel, type ManifestInput } from "../manifest-model";
-import { contributedView, entityFromPath, legacyView, resolveLegacyView } from "../legacy-view";
+import { contributedView, entityFromPath, legacyView, resolveLegacyView, unloadedView } from "../legacy-view";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e7300000-0000-4000-8000-000000000002";
@@ -288,6 +288,17 @@ describe("resolveLegacyView", () => {
   it("is legacyView on a catalog page served outside the contract", () => {
     const path = `/microgrids/${MICROGRID}/billing`;
     expect(resolveLegacyView(path, MANIFEST)).toEqual(legacyView(path, MANIFEST));
+  });
+
+  it("gives a page a view serves its place with no view, as the first paint does, until the view is published", () => {
+    for (const path of [`/microgrids/${MICROGRID}/operations?date=2026-11-10`, `/microgrids/${MICROGRID}/operations/savings`]) {
+      const resolved = resolveLegacyView(path, MANIFEST);
+      expect(resolved.view, path).toBeNull();
+      expect(resolved.scope.microgrid?.id, path).toBe(MICROGRID);
+      expect(resolved.trail.map((crumb) => crumb.label), path).toEqual(["Org One", "Kasana", "Kasana East"]);
+      expect(resolved, path).toEqual({ ...unloadedView(path, "metering.site-day", MANIFEST)!, view: null });
+    }
+    expect(resolveLegacyView(`/microgrids/${STRANGER}/operations`, MANIFEST).unplaced).toBe(true);
   });
 
   it("shows the organization alone on any other path", () => {
