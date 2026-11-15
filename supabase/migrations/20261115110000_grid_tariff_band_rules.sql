@@ -1,12 +1,10 @@
 -- Check a grid tariff's bands in the database, not only in the application.
 --
 -- 20261111200000 created `grid_tariffs` with a CHECK on the shape of `bands`
--- alone (a JSON array of 1 to 24 entries) and left the band rules to the
--- application. RLS lets anyone who manages the microgrid write the table
--- directly, through PostgREST, so a write could store bands the
--- application refuses. This trigger refuses them on every insert, and on
--- every update that changes `bands`, whoever writes: the rules describe
--- valid data, not who may write it, so no role is exempt.
+-- (a JSON array of 1 to 24 entries). This trigger adds the band rules the
+-- application applies, on every insert and on every update that changes
+-- `bands`, whoever writes: the rules describe valid data, not who may write
+-- it, so no role is exempt.
 --
 -- The rules are the request body's for POST /api/microgrids/[id]/grid-tariffs
 -- (AddGridTariffBody in src/lib/billing/schemas.ts, which adds strict keys to
