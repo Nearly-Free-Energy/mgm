@@ -126,19 +126,45 @@ describe("Gridtop's attached sections", () => {
     expect(screen.getByText("The page")).toBeTruthy();
   });
 
-  it("loads the new day's section when the page's date changes, and drops the old day's figures", async () => {
+  it("loads the new day's section when the page's date changes, keeping the old day's figures busy and dimmed until it arrives", async () => {
     const NEXT_HREF = "/microgrids/m1/operations/savings?date=2026-11-06" as const;
     let page: ViewModel = PAGE;
     const real = kit.useView;
     vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
     const next = savings({ ...(READY.ext!.data as object), columns: [{ id: "day", label: "6 Nov", sub: null }] });
-    const load = vi.spyOn(kit, "loadView").mockImplementation(async (href) => (href === NEXT_HREF ? next : READY));
+    let resolve: (m: ViewModel) => void = () => {};
+    const load = vi
+      .spyOn(kit, "loadView")
+      .mockImplementation((href) => (href === NEXT_HREF ? new Promise<ViewModel>((r) => (resolve = r)) : Promise.resolve(READY)));
     await shell();
-    await screen.findByRole("columnheader", { name: "5 Nov" });
+    const old = await screen.findByRole("columnheader", { name: "5 Nov" });
     page = { ...PAGE, attached: PAGE.attached.map((a) => (a.hint === "section" ? { ...a, href: NEXT_HREF } : a)) };
     await rendered!.goTo("/microgrids/m1/operations");
-    await screen.findByRole("columnheader", { name: "6 Nov" });
-    expect(load.mock.calls).toEqual([[SAVINGS_HREF], [NEXT_HREF]]);
+    await waitFor(() => expect(load.mock.calls).toEqual([[SAVINGS_HREF], [NEXT_HREF]]));
+    // No skeleton: the old day stays, marked busy, until the new one arrives.
+    expect(screen.queryByRole("status", { name: "Loading What the site saved" })).toBeNull();
+    expect(old.isConnected).toBe(true);
+    expect(old.closest("[aria-busy]")?.getAttribute("aria-busy")).toBe("true");
+    resolve(next);
+    const fresh = await screen.findByRole("columnheader", { name: "6 Nov" });
+    expect(screen.queryByRole("columnheader", { name: "5 Nov" })).toBeNull();
+    expect(fresh.closest("[aria-busy]")).toBeNull();
+  });
+
+  it.each([
+    ["another entity's section", "/microgrids/m2/operations", "/microgrids/m2/operations/savings?date=2026-11-05"],
+    // The same section path, attached to another page.
+    ["the section another page attached", "/microgrids/m1/notes", "/microgrids/m1/operations/savings?date=2026-11-06"],
+  ])("never shows %s while its own loads", async (_, pathname, href) => {
+    let page: ViewModel = PAGE;
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
+    vi.spyOn(kit, "loadView").mockImplementation((h) => (h === href ? new Promise<ViewModel>(() => {}) : Promise.resolve(READY)));
+    await shell();
+    await screen.findByRole("columnheader", { name: "5 Nov" });
+    page = { ...PAGE, attached: PAGE.attached.map((a) => (a.hint === "section" ? { ...a, href: href as typeof a.href } : a)) };
+    await rendered!.goTo(pathname);
+    await waitFor(() => expect(screen.getByRole("status", { name: "Loading What the site saved" })).toBeTruthy());
     expect(screen.queryByRole("columnheader", { name: "5 Nov" })).toBeNull();
   });
 
