@@ -71,7 +71,9 @@ function Section({ entry, page, kit, renderers }: { entry: Entry; page: ViewMode
   }
   if (loaded.type !== "view") {
     return loaded.ok ? null : (
-      <p role="alert" className={NOTE}>
+      // A status, not an alert: the page's own view may already be
+      // announcing the same failure as an alert above it.
+      <p role="status" className={NOTE}>
         {loaded.message}
       </p>
     );

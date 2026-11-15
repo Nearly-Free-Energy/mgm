@@ -4,8 +4,9 @@
  * Pure: the caller passes `now`. The metering.site-day loader
  * (src/lib/metering/surface/site-day.ts) and the billing.savings loader
  * (src/lib/billing/surface/savings.ts) both resolve `?date=` through it, so
- * the savings shown under a day are for that same day; if either stops
- * using it, revisit.
+ * the savings shown under a day are for that same day when the host passes
+ * the day's `?date=` on (loadSavings says what happens without it); if
+ * either stops using it, revisit.
  *
  * - The microgrid's stored zone, or UTC when it is not one this installation
  *   supports.

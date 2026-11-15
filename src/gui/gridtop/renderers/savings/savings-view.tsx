@@ -117,11 +117,19 @@ export default function SavingsView({ model, kit }: Props) {
   const headingId = useId();
   const page = kit.useView().model;
   const ext = model.ext?.data as SavingsExt | undefined;
-  // Nothing of its own: the day above explains. Another plugin's controls still show.
+  // Under the day, nothing of its own: the day above explains. On its own
+  // page there is no day above, so say where the reason is: the Operations
+  // day, attached to the microgrid as a tab (metering.site-day). If that
+  // view stops being offered there, revisit. Another plugin's controls still show.
   if (!ext || ext.state === "unavailable") {
     return (
       <>
         <Notice model={model} />
+        {page?.view === model.view && (
+          <p className="gt:max-w-prose gt:text-body gt:text-muted-foreground">
+            The savings cannot be worked out for this microgrid right now. The Operations day says why.
+          </p>
+        )}
         <Footer model={model} kit={kit} />
       </>
     );

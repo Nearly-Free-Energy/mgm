@@ -87,8 +87,9 @@ export function KitProvider(props: {
   const [boundary, setBoundary] = useState<Boundary | null>(null);
   const [skew] = useState(() => (manifest ? Date.parse(manifest.now) - Date.now() : 0) || 0);
   // A contributed view's `initial` holds for the pathname the layout rendered
-  // it for, so the first paint is right before its ViewBoundary publishes;
-  // `resolve` knows only pages served outside the contract. A new `initial`
+  // it for, so the first paint is right before its ViewBoundary publishes:
+  // `resolve` gives a page a view serves only its place, with no view
+  // (resolveLegacyView), and `initial` alone carries the view id. A new `initial`
   // (the layout rendered again) belongs to the pathname current at the time.
   const [initialAt, setInitialAt] = useState({ initial, pathname });
   if (initialAt.initial !== initial) setInitialAt({ initial, pathname });

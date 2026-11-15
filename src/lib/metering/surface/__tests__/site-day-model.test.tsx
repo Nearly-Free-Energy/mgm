@@ -387,6 +387,7 @@ const PROBLEM: SiteDayProblem = {
   title: "Could not load this day's operations",
   message: "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.",
   link: { label: "Set up the OpenEMS connection", page: "openems-backend" },
+  retry: false,
 };
 const problemModel = (problem: SiteDayProblem, date = "2026-11-05") =>
   buildSiteDayProblemModel({ microgrid: MG, date, today: "2026-11-06", timezone: "Africa/Kampala", locale: LOCALE, fmt, problem });
@@ -419,7 +420,7 @@ describe("buildSiteDayProblemModel", () => {
   });
 
   it("offers another try, with no link of its own, when there is nothing to set up", () => {
-    const model = problemModel({ ...PROBLEM, link: null }, "2026-11-06");
+    const model = problemModel({ ...PROBLEM, link: null, retry: true }, "2026-11-06");
     expect(model.links!.map((l) => l.id)).toEqual(["metering.day-previous"]);
     expect(model.ext!.data).toMatchObject({ retry: true });
   });

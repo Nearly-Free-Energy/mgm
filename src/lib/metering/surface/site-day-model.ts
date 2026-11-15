@@ -56,6 +56,8 @@ export type SiteDayProblem = {
   title: string;
   message: string;
   link: { label: string; page: "edges" | "openems-backend" } | null;
+  /** Reading the same day again may work; false when it fails the same way each time. */
+  retry: boolean;
 };
 
 // The problems live here rather than beside the loader (./site-day.ts):
@@ -71,24 +73,37 @@ export const SITE_DAY_PROBLEMS = {
     title: "Synthetic and real edges are mixed",
     message: "This microgrid mixes synthetic and real edges; keep synthetic data in its own microgrid.",
     link: { label: "Go to Edges", page: "edges" },
+    retry: false,
   },
   noConnection: {
     tone: "danger",
     title: NOT_LOADED,
     message: "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.",
     link: { label: "Set up the OpenEMS connection", page: "openems-backend" },
+    retry: false,
   },
   rejected: {
     tone: "danger",
     title: NOT_LOADED,
     message: "OpenEMS did not accept this microgrid's connection settings. Check them under Setup → OpenEMS Backend.",
     link: { label: "Check the OpenEMS connection", page: "openems-backend" },
+    retry: false,
   },
   unavailable: {
     tone: "danger",
     title: NOT_LOADED,
     message: "This day's operations could not be loaded right now. Try again shortly.",
     link: null,
+    retry: true,
+  },
+  // The day's samples could not be worked out. Reading them again fails the
+  // same way, so the picker is the way on, as the capability's own copy says.
+  dayFailed: {
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This day's operations could not be worked out. Try another day.",
+    link: null,
+    retry: false,
   },
 } as const satisfies Record<string, SiteDayProblem>;
 
@@ -104,12 +119,17 @@ export function siteDayProblem(failure: { status: number; code: string }): SiteD
   if (code === "METERING_CONFIGURATION") return status === 409 ? SITE_DAY_PROBLEMS.mixed : SITE_DAY_PROBLEMS.noConnection;
   if (code === "METERING_UNAUTHORIZED") return SITE_DAY_PROBLEMS.rejected;
   if (code.startsWith("METERING_")) return SITE_DAY_PROBLEMS.unavailable;
-  // getSiteDay's own failures after the plugin gate: reading the site's
-  // devices (openSiteReader) or computing the day (siteReadFailed) in
-  // src/lib/metering/capability.ts. Neither is the person's or the gate's,
-  // so the day keeps its picker and offers Try again; if getSiteDay gains
-  // another such failure or renames these, revisit.
-  if (code === "metering_site_devices_unavailable" || code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.unavailable;
+  // getSiteDay's own failures after the plugin gate, in
+  // src/lib/metering/capability.ts: reading the site's devices
+  // (openSiteReader), which may pass, and computing the day
+  // (siteReadFailed), which fails the same way each time. A date the
+  // capability refuses (metering_invalid_date) can only mean it worked out
+  // today in another zone than the loader, which already clamped the date,
+  // so it is a passing failure too. None is the person's or the gate's, so
+  // the day keeps its picker; if getSiteDay gains another such failure or
+  // renames these, revisit.
+  if (code === "metering_site_devices_unavailable" || code === "metering_invalid_date") return SITE_DAY_PROBLEMS.unavailable;
+  if (code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.dayFailed;
   return null;
 }
 
@@ -417,7 +437,7 @@ export function buildSiteDayProblemModel(o: {
     tone: problem.tone,
     title: problem.title,
     message: problem.message,
-    retry: problem.link === null,
+    retry: problem.retry,
   };
   const fix: LinkRef[] = problem.link
     ? [{ id: `metering.${problem.link.page}`, label: problem.link.label, href: setupHref(microgrid.id, problem.link.page) }]

@@ -157,8 +157,8 @@ function Problem(props: { ext: Extract<SiteDayExt, { state: "problem" }>; fix: L
   const { ext, fix, kit } = props;
   const control = cls(CONTROL, "gt:border-border gt:bg-card gt:text-foreground gt:hover:bg-muted");
   return (
-    // Announced when it appears, as after Try again or a move to a day that
-    // fails: an alert for a danger tone, a status for a warning.
+    // Announced when the problem first replaces the day: an alert for a
+    // danger tone, a status for a warning.
     <section
       role={ext.tone === "danger" ? "alert" : "status"}
       className={cls("gt:flex gt:flex-col gt:items-start gt:gap-2 gt:rounded-lg gt:px-4 gt:py-3", BAND[ext.tone])}

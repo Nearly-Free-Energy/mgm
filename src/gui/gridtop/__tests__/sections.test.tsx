@@ -109,7 +109,8 @@ describe("Gridtop's attached sections", () => {
     withPage(PAGE);
     answer({ type: "result", ok: false, status: 503, code: "gui_view_refused", message: "Could not load the savings settings" });
     await shell();
-    expect((await screen.findByRole("alert")).textContent).toBe("Could not load the savings settings");
+    // A status, not an alert: the page's own view may be announcing the same failure.
+    expect((await screen.findByText("Could not load the savings settings")).getAttribute("role")).toBe("status");
     expect(screen.getByText("The page")).toBeTruthy();
   });
 
@@ -119,7 +120,8 @@ describe("Gridtop's attached sections", () => {
       throw new Error("offline");
     });
     await shell();
-    expect((await screen.findByRole("alert")).textContent).toBe("This section could not be loaded.");
+    // A status, not an alert: the page's own view may be announcing the same failure.
+    expect((await screen.findByText("This section could not be loaded.")).getAttribute("role")).toBe("status");
     expect(screen.queryByRole("status", { name: "Loading What the site saved" })).toBeNull();
     expect(screen.getByText("The page")).toBeTruthy();
   });
