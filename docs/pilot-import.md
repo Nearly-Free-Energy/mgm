@@ -1,6 +1,6 @@
 # Synthetic pilot import foundation
 
-This foundation supports review and bounded import metadata in a fresh MGM database. It does not connect to a source system or retain source files or raw source identifiers. There is no browser route for importing data. The standalone SQL is in supabase/pilot/20260924_mgm_review_import_essentials.sql and requires the reviewed base migration files through 00015. Use this curated setup script for the pilot database.
+This foundation supports review and bounded import metadata in a fresh MGM database. It does not connect to a source system or retain source files or raw source identifiers. There is no browser route for importing data. Its batch ledger, `pilot_import_batches`, comes from the ordinary migration chain (`20261114222000_chain_matches_production_grants.sql`). The curated overlay that once set up the pilot database outside the chain (`supabase/pilot/`) was retired when `20261114230100_converge_production.sql` brought NFE's production database onto the chain.
 
 ## Accepted input
 
