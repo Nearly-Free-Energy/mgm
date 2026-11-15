@@ -95,10 +95,11 @@ export default async function GuiLayout({
   const outcome = await getManifest(gui, path, requested, preferred);
   if (!outcome.ok) redirect(outcome.status === 401 ? "/login" : "/no-access");
   const { manifest } = outcome;
-  // A page a contributed view serves gets the view's own title and trail,
-  // from the same load as the page (render-view.tsx); any other path, or a
-  // view that does not load, gets resolveLegacyView's.
-  const initial = (await resolveInitialView(access, path, manifest)) ?? resolveLegacyView(path ?? "/", manifest);
+  // A page a contributed view serves gets the view's id, title and trail
+  // without loading the view, so the shell paints while the page below
+  // loading.tsx waits on the view's loader (render-view.tsx); any other path
+  // gets resolveLegacyView's.
+  const initial = (await resolveInitialView(path, manifest)) ?? resolveLegacyView(path ?? "/", manifest);
   const { Shell, Overlay, forms } = INSTALLED_GUIS[gui];
 
   return (

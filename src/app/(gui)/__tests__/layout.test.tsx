@@ -294,18 +294,16 @@ describe("GuiLayout shell", () => {
     expect(initial.scope.microgrid?.id).toBe(MICROGRID);
   });
 
-  it("takes a contributed view's initial view from resolveInitialView, with the render's access read", async () => {
+  it("takes a contributed view's initial view from resolveInitialView, which loads no view", async () => {
     wire(SIGNED_IN);
-    const path = `/microgrids/${MICROGRID}/operations?date=2026-11-10`;
+    const path = `/microgrids/${MICROGRID}/operations/savings?date=2026-11-10`;
     mocks.headers = new Headers({ "x-mgm-path": path });
-    const initial = { view: "metering.site-day", title: "Tuesday", trail: [], tabs: [], scope: {} };
+    const initial = { view: "billing.savings", title: "Operations", trail: [], tabs: [], scope: {} };
     mocks.resolveInitialView.mockResolvedValue(initial);
     const tree = await GuiLayout({ children: "page" });
 
-    const access = await mocks.getRequestUserAccess.mock.results[0].value;
-    expect(mocks.resolveInitialView).toHaveBeenCalledWith(access, path, MANIFEST);
-    // The same object, not a copy: the page's renderView shares the load only through React cache(), which keys on identity.
-    expect(mocks.resolveInitialView.mock.calls[0][0]).toBe(access);
+    // Only the path and the manifest: with no access read, it cannot load the view, which the page alone does.
+    expect(mocks.resolveInitialView).toHaveBeenCalledWith(path, MANIFEST);
     const [provider] = byType(tree, HostKitProvider);
     const [shell] = byType(provider?.props?.children, INSTALLED_GUIS.gridtop.Shell);
     expect(provider.props?.initial).toBe(initial);
