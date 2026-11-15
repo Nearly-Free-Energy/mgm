@@ -19,12 +19,12 @@
 
 SET search_path = public, pg_temp;
 
--- From supabase/migrations/00017_user_profile_auto_create.sql
+-- From supabase/migrations/20261114230100_converge_production.sql
 DROP TRIGGER IF EXISTS trg_create_profile_on_auth_user ON auth.users;
 CREATE TRIGGER trg_create_profile_on_auth_user
   AFTER INSERT ON auth.users
   FOR EACH ROW
-  EXECUTE FUNCTION fn_create_profile_on_auth_user();
+  EXECUTE FUNCTION public.fn_create_profile_on_auth_user();
 
 -- From supabase/migrations/00064_mgm_release3_pilot_billing_bridge.sql
 DROP POLICY IF EXISTS "invoice_logos_select" ON storage.objects;
