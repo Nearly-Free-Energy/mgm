@@ -9,11 +9,16 @@
  * kit.open on a plain click; a modified click is left to the browser, which
  * opens the href in a new tab or window. Below 600 px it is one 44 px bar: the title opens the tabs, ⋯
  * opens the actions and links, and it slides away while `main` scrolls down.
+ *
+ * A view Gridtop draws with a bespoke renderer (../renderers/reads.ts) places
+ * its own actions and links, so the bar then shows only the title, subtitle
+ * and tabs, and nothing is drawn twice.
  */
 import { ChevronDown, Ellipsis } from "lucide-react";
 import { useEffect, useId, useState, type RefObject } from "react";
 import type { ActionRef, Href, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
+import { drawnBespoke } from "../renderers/reads";
 import { cx } from "../ui/cx";
 import { openable } from "../ui/href";
 import { SHEET_ROW, Sheet, sameTab } from "../ui/sheet";
@@ -157,7 +162,7 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
   const [error, setError] = useState<{ pathname: string; message: string } | null>(null);
   if (!model) return null;
   const tabs = tabsOf(view, model, pathname);
-  const hasControls = model.actions.length + model.links.length > 0;
+  const hasControls = !drawnBespoke(model) && model.actions.length + model.links.length > 0;
   const onResult = (message: string | null) => setError(message === null ? null : { pathname, message });
   const tabLinks = (className: string) =>
     tabs.map((tab) => (
