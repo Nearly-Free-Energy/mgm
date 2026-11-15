@@ -1,6 +1,7 @@
 import { render } from "@testing-library/react";
 import { createElement, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT } from "@/components/ui/navigation-progress";
 import type { Manifest, OverlayProps, Signals, ViewState } from "../../../contract";
 import { HostKitProvider } from "../host-kit-provider";
 import { useView, type KitProvider } from "../kit-provider";
@@ -175,6 +176,58 @@ describe("HostKitProvider", () => {
       expect(runtime.refresh).toHaveBeenCalledTimes(2);
       rerender(tree(runtime, "/communities", showing(ORG)));
       expect(runtime.refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it("holds the navigation bar from the rebuild until the manifest shows the requested organization", () => {
+      const events: string[] = [];
+      const record = (e: Event) => events.push(e.type);
+      window.addEventListener(MGM_NAVIGATION_HOLD_EVENT, record);
+      window.addEventListener(MGM_NAVIGATION_SETTLED_EVENT, record);
+      try {
+        const runtime = recordingRuntime();
+        next.searchParams = query(ORG);
+        const { rerender } = render(tree(runtime, "/communities", showing(ORG)));
+        expect(events).toEqual([]);
+
+        next.searchParams = query(OTHER);
+        rerender(tree(runtime, "/communities", showing(ORG)));
+        expect(runtime.refresh).toHaveBeenCalledTimes(1);
+        expect(events).toEqual([MGM_NAVIGATION_HOLD_EVENT]);
+        // The same manifest rendered again starts no second rebuild and no second hold.
+        rerender(tree(runtime, "/communities", showing(ORG)));
+        expect(events).toEqual([MGM_NAVIGATION_HOLD_EVENT]);
+
+        rerender(tree(runtime, "/communities", showing(OTHER)));
+        expect(events).toEqual([MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT]);
+        rerender(tree(runtime, "/communities", showing(OTHER)));
+        expect(events).toHaveLength(2);
+      } finally {
+        window.removeEventListener(MGM_NAVIGATION_HOLD_EVENT, record);
+        window.removeEventListener(MGM_NAVIGATION_SETTLED_EVENT, record);
+      }
+    });
+
+    it("settles a hold it still has when it unmounts, and announces nothing otherwise", () => {
+      const events: string[] = [];
+      const record = (e: Event) => events.push(e.type);
+      window.addEventListener(MGM_NAVIGATION_HOLD_EVENT, record);
+      window.addEventListener(MGM_NAVIGATION_SETTLED_EVENT, record);
+      try {
+        next.searchParams = query(ORG);
+        render(tree(recordingRuntime(), "/communities", showing(ORG))).unmount();
+        expect(events).toEqual([]);
+
+        const runtime = recordingRuntime();
+        const { rerender, unmount } = render(tree(runtime, "/communities", showing(ORG)));
+        next.searchParams = query(OTHER);
+        rerender(tree(runtime, "/communities", showing(ORG)));
+        expect(events).toEqual([MGM_NAVIGATION_HOLD_EVENT]);
+        unmount();
+        expect(events).toEqual([MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT]);
+      } finally {
+        window.removeEventListener(MGM_NAVIGATION_HOLD_EVENT, record);
+        window.removeEventListener(MGM_NAVIGATION_SETTLED_EVENT, record);
+      }
     });
 
     it("rebuilds at most once for an ?org= the server does not follow", () => {

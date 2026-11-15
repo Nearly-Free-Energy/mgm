@@ -97,7 +97,10 @@ function Section({ entry, page, kit, renderers }: { entry: Entry; page: ViewMode
       </SectionBoundary>
     );
   }
-  // One wrapper whether stale or not, so the section is not remounted when the new one arrives.
+  // One wrapper whether stale or not, so dimming and aria-busy toggle on one
+  // node. What it holds is remounted when the next href's model arrives
+  // (SectionBoundary is keyed by href, so a failed draw is tried again), so
+  // no state that must outlive a change of day belongs in a section.
   return (
     <div aria-busy={stale || undefined} className={stale ? "gt:opacity-60 gt:transition-opacity" : "gt:transition-opacity"}>
       {body}

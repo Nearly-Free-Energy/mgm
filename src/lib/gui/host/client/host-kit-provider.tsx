@@ -14,14 +14,19 @@
  * `?org=` names another organization the manifest lists, the manifest is
  * rebuilt once for it; the (gui) layout reads `?org=` from x-mgm-path and
  * pickOrganization (../server/organization.ts) compares it trimmed and in
- * lower case, as here. If either stops honouring `?org=`, revisit.
+ * lower case, as here. If either stops honouring `?org=`, revisit. The
+ * rebuild changes no URL, so the navigation bar, which hides once the URL
+ * has changed, is held (announceNavigationHold) from the rebuild until the
+ * manifest no longer needs one for the requested organization, or this
+ * provider unmounts; its own safety timeout ends a rebuild that never lands.
  *
  * It also remembers the organization the manifest shows in the mgm-org
  * cookie, so the next full load of a page with no organization in its path
  * opens there (the layout reads it as a hint).
  */
 import { useSearchParams } from "next/navigation";
-import { useEffect, type ComponentProps } from "react";
+import { useEffect, useRef, type ComponentProps } from "react";
+import { announceNavigationHold, announceNavigationSettled } from "@/components/ui/navigation-progress";
 import { resolveLegacyView } from "../shared/legacy-view";
 import { ORG_COOKIE } from "../shared/org-cookie";
 import { KitProvider, useRefreshOnce, type ResolveView } from "./kit-provider";
@@ -48,8 +53,23 @@ export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, 
   const switched =
     requested !== null && requested !== organization && (manifest?.orgs.some((org) => org.id === requested) ?? false);
   const refreshOnce = useRefreshOnce(organization);
+  const holding = useRef(false);
   useEffect(() => {
-    if (switched && requested) refreshOnce(`org:${requested}`);
+    if (switched && requested) {
+      if (refreshOnce(`org:${requested}`)) {
+        holding.current = true;
+        announceNavigationHold();
+      }
+    } else if (holding.current) {
+      holding.current = false;
+      announceNavigationSettled();
+    }
   }, [switched, requested, refreshOnce]);
+  useEffect(
+    () => () => {
+      if (holding.current) announceNavigationSettled();
+    },
+    [],
+  );
   return <KitProvider {...props} resolve={resolve} />;
 }

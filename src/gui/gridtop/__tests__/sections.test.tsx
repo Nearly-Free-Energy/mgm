@@ -5,7 +5,7 @@
  */
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { renderShell, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
+import { renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
 import type { ActionResult, ModelOf, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
@@ -13,6 +13,7 @@ import { rendererFor } from "../shell/section-list";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "./places-fixture";
 
 const SAVINGS_HREF = "/microgrids/m1/operations/savings?date=2026-11-05" as const;
+const NEXT_HREF = "/microgrids/m1/operations/savings?date=2026-11-06" as const;
 
 const PAGE: ViewModel = {
   type: "view",
@@ -51,6 +52,10 @@ const READY = savings({
   warnings: [],
   notes: [],
 });
+
+const NEXT = savings({ ...(READY.ext!.data as object), columns: [{ id: "day", label: "6 Nov", sub: null }] });
+/** PAGE as the next day's page model hands it: the section at NEXT_HREF. */
+const NEXT_PAGE: ViewModel = { ...PAGE, attached: PAGE.attached.map((a) => (a.hint === "section" ? { ...a, href: NEXT_HREF } : a)) };
 
 const fixture = (): ManifestFixture =>
   placesFixture({
@@ -127,7 +132,6 @@ describe("Gridtop's attached sections", () => {
   });
 
   it("loads the new day's section when the page's date changes, keeping the old day's figures busy and dimmed until it arrives", async () => {
-    const NEXT_HREF = "/microgrids/m1/operations/savings?date=2026-11-06" as const;
     let page: ViewModel = PAGE;
     const real = kit.useView;
     vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
@@ -149,6 +153,66 @@ describe("Gridtop's attached sections", () => {
     const fresh = await screen.findByRole("columnheader", { name: "6 Nov" });
     expect(screen.queryByRole("columnheader", { name: "5 Nov" })).toBeNull();
     expect(fresh.closest("[aria-busy]")).toBeNull();
+  });
+
+  it("ignores the older day's section when it arrives after the newer one", async () => {
+    let page: ViewModel = PAGE;
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
+    const pending = new Map<string, (m: ViewModel) => void>();
+    const load = vi.spyOn(kit, "loadView").mockImplementation((href) => new Promise<ViewModel>((r) => void pending.set(href, r)));
+    await shell();
+    await waitFor(() => expect(pending.has(SAVINGS_HREF)).toBe(true));
+    page = NEXT_PAGE;
+    await rendered!.goTo("/microgrids/m1/operations");
+    await waitFor(() => expect(load.mock.calls).toEqual([[SAVINGS_HREF], [NEXT_HREF]]));
+    pending.get(NEXT_HREF)!(NEXT);
+    const fresh = await screen.findByRole("columnheader", { name: "6 Nov" });
+    pending.get(SAVINGS_HREF)!(READY);
+    await settle();
+    expect(screen.queryByRole("columnheader", { name: "5 Nov" })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "6 Nov" })).toBe(fresh);
+    expect(fresh.closest("[aria-busy]")).toBeNull();
+  });
+
+  it("draws a section that failed to draw again for the next day", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let page: ViewModel = PAGE;
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
+    // Version 1 by name, but not its shape, for the first day: the renderer throws.
+    vi.spyOn(kit, "loadView").mockImplementation(async (href) => (href === NEXT_HREF ? NEXT : savings({ state: "ready" })));
+    await shell();
+    await screen.findByText("What the site saved could not be shown.");
+    page = NEXT_PAGE;
+    await rendered!.goTo("/microgrids/m1/operations");
+    const fresh = await screen.findByRole("columnheader", { name: "6 Nov" });
+    expect(screen.queryByText("What the site saved could not be shown.")).toBeNull();
+    expect(fresh.closest("[aria-busy]")).toBeNull();
+  });
+
+  it.each([
+    ["is refused", async () => ({ type: "result", ok: false, status: 503, code: "gui_view_refused", message: "Could not load the savings settings" }) as ActionResult, "Could not load the savings settings"],
+    [
+      "cannot be fetched",
+      async (): Promise<ActionResult> => {
+        throw new Error("offline");
+      },
+      "This section could not be loaded.",
+    ],
+  ])("is no longer busy or dimmed when the next day's section %s", async (_, next, message) => {
+    let page: ViewModel = PAGE;
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model: page }));
+    vi.spyOn(kit, "loadView").mockImplementation((href) => (href === NEXT_HREF ? next() : Promise.resolve(READY)));
+    await shell();
+    await screen.findByRole("columnheader", { name: "5 Nov" });
+    page = NEXT_PAGE;
+    await rendered!.goTo("/microgrids/m1/operations");
+    const note = await screen.findByText(message);
+    expect(screen.queryByRole("columnheader", { name: "5 Nov" })).toBeNull();
+    expect(note.closest("[aria-busy]")).toBeNull();
+    expect(note.parentElement!.className).not.toContain("gt:opacity-60");
   });
 
   it.each([

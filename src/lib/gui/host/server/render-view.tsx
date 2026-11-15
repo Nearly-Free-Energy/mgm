@@ -24,7 +24,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { GuiPlugin, InitialView, Manifest, ViewModel } from "../../contract";
 import { createFmt } from "../../fmt";
 import { RawView } from "../../kit/raw-view";
-import { ViewBoundary } from "../client/view-boundary";
+import { ViewBoundary, ViewUnavailable } from "../client/view-boundary";
 import { unloadedView } from "../shared/legacy-view";
 import { pickRenderer } from "../shared/pick-renderer";
 import { hostContext } from "./access";
@@ -87,8 +87,10 @@ async function loadPageView(access: CurrentUserAccess, href: string): Promise<Ho
  * only picks among the places listed (unloadedView). The title is that of
  * the manifest's nav entry for the view, else the one unloadedView derives
  * from the path; the page's ViewBoundary replaces it with the model's own
- * title once the view has loaded. If renderView stops drawing a
- * ViewBoundary, the shell keeps this title.
+ * title once the view has loaded; where the view's load is refused, the
+ * page's ViewUnavailable publishes this view with no view, so the shell stops
+ * waiting for a model. If renderView stops drawing one of the two, the shell
+ * keeps this view and waits for a model that never comes.
  */
 export async function resolveInitialView(pathWithQuery: string | null, manifest: Manifest): Promise<InitialView | null> {
   const href = pathWithQuery === null ? null : hrefOfPath(pathWithQuery);
@@ -108,7 +110,8 @@ export async function resolveInitialView(pathWithQuery: string | null, manifest:
  * The contributed view at `path` (decoded segments), drawn by `gui` inside a
  * ViewBoundary, so the shell shows its title, trail and actions. No view, or
  * one the caller cannot see, is not found; a refusal with its own copy (a
- * disabled plugin, a loader's refusal) is shown as a banner.
+ * disabled plugin, a loader's refusal) is shown as a banner inside a
+ * ViewUnavailable.
  */
 export async function renderView(input: {
   path: readonly string[];
@@ -125,13 +128,17 @@ export async function renderView(input: {
     if (out.status === 401) redirect("/login");
     if (out.code === "gui_no_access") redirect("/no-access");
     if (out.status === 400 || out.status === 404) notFound();
+    // ViewUnavailable tells the shell this page will publish no model, so it
+    // stops waiting on the view resolveInitialView named for the first paint.
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="sr-only">This view could not be shown</h1>
-        <Banner tone={out.status === 409 ? "warn" : "destructive"} title={out.message}>
-          {null}
-        </Banner>
-      </div>
+      <ViewUnavailable>
+        <div className="flex flex-col gap-4">
+          <h1 className="sr-only">This view could not be shown</h1>
+          <Banner tone={out.status === 409 ? "warn" : "destructive"} title={out.message}>
+            {null}
+          </Banner>
+        </div>
+      </ViewUnavailable>
     );
   }
   const model = out.value;

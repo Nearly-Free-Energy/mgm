@@ -12,6 +12,12 @@
 //     A 4s safety timeout hides it if the URL never changes (failed nav).
 //   • Back and forward start it as well, unless the history entry differs
 //     only in its hash (the page stays where it is).
+//   • Work that changes no URL can hold the bar: `announceNavigationHold()`
+//     shows it and keeps it up through URL changes, until
+//     `announceNavigationSettled()` hides it after the same short delay, or
+//     the 4s safety timeout does. HostKitProvider holds it while it rebuilds
+//     the manifest for an organization switch (`?org=`), which lands after
+//     the URL has already changed.
 //   • Token classes only (`bg-primary`); animation is `motion-safe` so
 //     `prefers-reduced-motion` users get a static bar, not motion.
 //   • `role="status"` + sr-only "Loading…" text announces the transition to
@@ -24,12 +30,26 @@ import * as React from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 export const MGM_NAVIGATION_START_EVENT = "mgm:navigation-start";
+export const MGM_NAVIGATION_HOLD_EVENT = "mgm:navigation-hold";
+export const MGM_NAVIGATION_SETTLED_EVENT = "mgm:navigation-settled";
 
 export function announceNavigationStart(href: string) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent<string>(MGM_NAVIGATION_START_EVENT, { detail: href }),
   );
+}
+
+/** Shows the bar until announceNavigationSettled(), whatever the URL does meanwhile. */
+export function announceNavigationHold() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MGM_NAVIGATION_HOLD_EVENT));
+}
+
+/** Ends a hold; the bar hides after the usual short delay. A start that is not a hold is left alone. */
+export function announceNavigationSettled() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(MGM_NAVIGATION_SETTLED_EVENT));
 }
 
 /**
@@ -77,6 +97,9 @@ export function NavigationProgress() {
   // transitions AWAY from this value — never off `visible`, which would
   // re-fire the effect on show and strangle the 4s safety (pr-374 review).
   const startRef = React.useRef<string | null>(null);
+  // Whether the bar is held (announceNavigationHold): only a settle or the
+  // safety timeout hides it then, not a URL change.
+  const heldRef = React.useRef(false);
   // Latest committed location, readable from the listeners below.
   // Synced in an effect (never during render): clicks only land on committed
   // UI, so this is always the location the announced navigation starts from.
@@ -91,23 +114,39 @@ export function NavigationProgress() {
   // the one being left; an entry that differs only in its hash is skipped,
   // since nothing will commit to hide the bar.
   React.useEffect(() => {
-    const onStart = () => {
+    const show = (held: boolean) => {
       if (hideTimer.current) clearTimeout(hideTimer.current);
-      startRef.current = locationRef.current;
+      heldRef.current = held;
+      // A hold keys off no location, so a URL change does not end it.
+      startRef.current = held ? null : locationRef.current;
       setVisible(true);
       // Safety: never trap the bar on screen if the route never settles.
       hideTimer.current = setTimeout(() => {
         startRef.current = null;
+        heldRef.current = false;
         setVisible(false);
       }, 4000);
+    };
+    const onStart = () => show(false);
+    const onHold = () => show(true);
+    const onSettled = () => {
+      if (!heldRef.current) return;
+      heldRef.current = false;
+      startRef.current = null;
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => setVisible(false), 350);
     };
     const onPopState = () => {
       if (locationKey(window.location.pathname, window.location.search) !== locationRef.current) onStart();
     };
     window.addEventListener(MGM_NAVIGATION_START_EVENT, onStart);
+    window.addEventListener(MGM_NAVIGATION_HOLD_EVENT, onHold);
+    window.addEventListener(MGM_NAVIGATION_SETTLED_EVENT, onSettled);
     window.addEventListener("popstate", onPopState);
     return () => {
       window.removeEventListener(MGM_NAVIGATION_START_EVENT, onStart);
+      window.removeEventListener(MGM_NAVIGATION_HOLD_EVENT, onHold);
+      window.removeEventListener(MGM_NAVIGATION_SETTLED_EVENT, onSettled);
       window.removeEventListener("popstate", onPopState);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };

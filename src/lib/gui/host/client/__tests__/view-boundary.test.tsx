@@ -4,7 +4,7 @@ import type { InitialView, Manifest, ViewState } from "../../../contract";
 import { HostKitProvider } from "../host-kit-provider";
 import { useKitState, useView } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
-import { ViewBoundary } from "../view-boundary";
+import { ViewBoundary, ViewUnavailable } from "../view-boundary";
 import { initial, manifest, MG, model, ORG, recordingRuntime } from "./kit-test-utils";
 
 vi.mock("next/navigation", () => ({
@@ -145,5 +145,29 @@ describe("ViewBoundary publishing a model", () => {
     expect(views[0]).toMatchObject({ view: "metering.site-day", title: "Operations", model: null });
     expect(views.at(-1)).toMatchObject({ title: "Tuesday 10 November", model: day });
     expect(states).toHaveLength(1);
+  });
+});
+
+describe("ViewUnavailable on a page whose view could not be loaded", () => {
+  it("publishes the layout's view with no view and no model, keeping its title and trail, and withdraws on unmount", () => {
+    const runtime = recordingRuntime();
+    const views: ViewState[] = [];
+    function Probe() {
+      views.push(useView());
+      return null;
+    }
+    const first: InitialView = { ...initial, view: "metering.site-day", title: "Operations" };
+    const page = (refused: boolean) => (
+      <KitRuntimeProvider runtime={{ ...runtime, pathname: OPERATIONS }}>
+        <HostKitProvider manifest={withNav()} initial={first}>
+          {refused && <ViewUnavailable />}
+          <Probe />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    const { rerender } = render(page(true));
+    expect(views.at(-1)).toMatchObject({ view: null, title: "Operations", model: null, trail: first.trail });
+    rerender(page(false));
+    expect(views.at(-1)).toMatchObject({ view: "metering.site-day", title: "Operations", model: null });
   });
 });

@@ -10,7 +10,7 @@ import { Banner } from "@/components/ui/banner";
 import type { GuiPlugin, Manifest, ViewModel, ViewProps } from "../../../contract";
 import { KitView } from "../../../kit/kit-view";
 import { RawView } from "../../../kit/raw-view";
-import { ViewBoundary } from "../../client/view-boundary";
+import { ViewBoundary, ViewUnavailable } from "../../client/view-boundary";
 import { buildManifestModel, type ManifestInput } from "../../shared/manifest-model";
 import type { HostContext } from "../access";
 import type { SurfaceSnapshot } from "../surface-registry";
@@ -158,7 +158,10 @@ describe("renderView", () => {
 
   it("shows a refusal with its own copy as a banner", async () => {
     mocks.dispatchView.mockResolvedValue({ ok: false, status: 409, code: "metering_disabled", message: "Metering is turned off." });
-    const off = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
+    const refused = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
+    // Inside a ViewUnavailable, so the shell stops waiting for a model that will not come.
+    expect(refused.type).toBe(ViewUnavailable);
+    const off = refused.props?.children as Node;
     const [heading, banner] = off.props?.children as Node[];
     // The page keeps a level-one heading, which neither the banner nor the shell gives it.
     expect(heading).toMatchObject({ type: "h1", props: { className: "sr-only", children: "This view could not be shown" } });
@@ -167,7 +170,8 @@ describe("renderView", () => {
 
     mocks.dispatchView.mockResolvedValue({ ok: false, status: 500, code: "gui_view_failed", message: "This view could not be loaded." });
     const failed = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
-    expect((failed.props?.children as Node[])[1].props).toMatchObject({ tone: "destructive", title: "This view could not be loaded." });
+    expect(failed.type).toBe(ViewUnavailable);
+    expect(((failed.props?.children as Node).props?.children as Node[])[1].props).toMatchObject({ tone: "destructive", title: "This view could not be loaded." });
   });
 });
 

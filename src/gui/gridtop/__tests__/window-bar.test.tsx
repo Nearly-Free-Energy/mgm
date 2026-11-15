@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
+import { RefusedView, renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
 import type { ActionRef, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
@@ -83,6 +83,13 @@ describe("Gridtop's window bar", () => {
     expect(within(el).queryByRole("button", { name: "Refresh" })).toBeNull();
     expect(within(el).queryByRole("button", { name: "Actions" })).toBeNull();
     expect(within(screen.getByRole("navigation", { name: "Tabs" })).getAllByRole("link").map((a) => a.textContent)).toEqual(["Day"]);
+  });
+
+  it("goes away on a page a view serves whose view could not be loaded, as no model will come", async () => {
+    rendered = await renderShell(GridtopGui, atEast(), <RefusedView><p>Metering is turned off.</p></RefusedView>);
+    expect(screen.getByText("Metering is turned off.")).toBeTruthy();
+    expect(bar()).toBeNull();
+    expect(document.querySelector("[aria-busy]")).toBeNull();
   });
 
   it("keeps the bar and the page's own nodes when the model arrives, and adds its title, subtitle and controls", async () => {

@@ -10,6 +10,11 @@
  * paint derives the same trail and scope without the model, so its title is
  * the nav entry's until this boundary publishes the model's
  * (resolveInitialView in ../server/render-view.tsx).
+ *
+ * ViewUnavailable is drawn instead where a view's page could not load its
+ * model (renderView's refusal banner). It publishes the view the shell
+ * already shows with no view and no model, so the shell stops waiting for a
+ * model that will not come, as it does after a soft navigation to that page.
  */
 import { useLayoutEffect, useMemo, type ReactNode } from "react";
 import type { InitialView, ViewModel } from "../../contract";
@@ -33,4 +38,17 @@ export function ViewBoundary(props: { initial?: InitialView; model: ViewModel; c
     return () => setBoundary(null);
   }, [setBoundary, pathname, initial, model]);
   return children ?? null;
+}
+
+export function ViewUnavailable(props: { children?: ReactNode }) {
+  const state = useKitState();
+  const setBoundary = state?.setBoundary;
+  const view = state?.view ?? null;
+  const pathname = usePathname();
+  useLayoutEffect(() => {
+    if (!setBoundary || !view) return;
+    setBoundary({ pathname, initial: { ...view, view: null }, model: null });
+    return () => setBoundary(null);
+  }, [setBoundary, pathname, view]);
+  return props.children ?? null;
 }

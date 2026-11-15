@@ -34,7 +34,8 @@ import { usePathname } from "./navigation";
  */
 export type ResolveView = (pathname: string, manifest: Manifest) => InitialView & { unplaced?: boolean };
 
-export type Boundary = { pathname: string; initial: InitialView; model: ViewModel };
+/** What a page published: its view and model, or (ViewUnavailable) no view and no model. */
+export type Boundary = { pathname: string; initial: InitialView; model: ViewModel | null };
 
 /**
  * The model a ViewBoundary published, held outside React state so that
@@ -100,9 +101,10 @@ export function useKitState(): KitState | null {
  * afresh, so switching back and forth between organizations rebuilds each
  * time; a rebuild that comes back for the same organization (a place past the
  * places cap, or a hint the server does not follow) adds nothing, so it can
- * never loop. Called from effects.
+ * never loop. Called from effects; the returned function says whether it
+ * started a rebuild.
  */
-export function useRefreshOnce(organization: string | null): (key: string) => void {
+export function useRefreshOnce(organization: string | null): (key: string) => boolean {
   const runtime = useKitRuntime();
   const done = useRef<{ organization: string | null; keys: Set<string> }>({ organization, keys: new Set() });
   // Start afresh as soon as a manifest for another organization commits, not
@@ -115,9 +117,10 @@ export function useRefreshOnce(organization: string | null): (key: string) => vo
   return useCallback(
     (key: string) => {
       if (done.current.organization !== organization) done.current = { organization, keys: new Set() };
-      if (done.current.keys.has(key)) return;
+      if (done.current.keys.has(key)) return false;
       done.current.keys.add(key);
       runtime.refresh();
+      return true;
     },
     [organization, runtime],
   );

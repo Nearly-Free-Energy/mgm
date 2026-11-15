@@ -8,6 +8,7 @@
  *   - hides after pathname settles, or after only the query changes
  *   - back and forward show it, unless only the hash changes
  *   - announceNavigationStart dispatches the window event
+ *   - a hold stays up through URL changes until it settles, or 4s pass
  *   - isCurrentLocation compares path and query
  */
 
@@ -24,6 +25,8 @@ vi.mock("next/navigation", () => ({
 
 import {
   NavigationProgress,
+  announceNavigationHold,
+  announceNavigationSettled,
   announceNavigationStart,
   isCurrentLocation,
   locationKey,
@@ -152,6 +155,86 @@ describe("NavigationProgress", () => {
       vi.advanceTimersByTime(400);
     });
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("stays up for a hold through the URL change until it settles (an organization switch's rebuild)", () => {
+    vi.useFakeTimers();
+    mockPathname = "/communities";
+    mockSearch = "org=a";
+    const { rerender } = render(<NavigationProgress />);
+    act(() => {
+      announceNavigationStart("/communities?org=b");
+    });
+    // The URL changes, and the manifest's rebuild for the new organization starts.
+    mockSearch = "org=b";
+    rerender(<NavigationProgress />);
+    act(() => {
+      announceNavigationHold();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
+    // A later URL change does not end the hold either.
+    mockSearch = "org=b&ui.row=x";
+    rerender(<NavigationProgress />);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
+    act(() => {
+      announceNavigationSettled();
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("holds the bar even when the hold arrives before the URL change commits", () => {
+    vi.useFakeTimers();
+    mockPathname = "/communities";
+    const { rerender } = render(<NavigationProgress />);
+    act(() => {
+      announceNavigationStart("/communities?org=b");
+      announceNavigationHold();
+    });
+    mockSearch = "org=b";
+    rerender(<NavigationProgress />);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
+  });
+
+  it("hides a hold that never settles after the 4s safety timeout", () => {
+    vi.useFakeTimers();
+    render(<NavigationProgress />);
+    act(() => {
+      announceNavigationHold();
+    });
+    act(() => {
+      vi.advanceTimersByTime(3900);
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("leaves a navigation that is not a hold to its URL change when a settle arrives", () => {
+    vi.useFakeTimers();
+    render(<NavigationProgress />);
+    act(() => {
+      announceNavigationStart("/microgrids");
+      announceNavigationSettled();
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole("status", { name: "Loading page" })).toBeDefined();
   });
 
   it("does not show on back or forward between entries that differ only in their hash", () => {
