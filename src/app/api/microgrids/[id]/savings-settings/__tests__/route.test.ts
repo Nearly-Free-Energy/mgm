@@ -115,14 +115,25 @@ describe("PUT /api/microgrids/[id]/savings-settings", () => {
     expect(upsertCall()?.args[0]).toMatchObject({ round_trip_efficiency: 0.888 });
   });
 
-  it("does not write fields outside the contract", async () => {
+  it("writes only the contract's fields, with the microgrid from the path", async () => {
     results.microgrid_savings_settings = [{ data: {}, error: null }];
-    await put({ ...VALID, microgrid_id: "someone-else", extra: true });
+    await put(VALID);
     const values = upsertCall()?.args[0] as Record<string, unknown>;
     expect(Object.keys(values).sort()).toEqual(
       ["arbitrage_from", "microgrid_id", "round_trip_efficiency", "solar_savings_from", "updated_at"]
     );
     expect(values.microgrid_id).toBe(MICROGRID_ID);
+  });
+
+  it("refuses fields outside the contract, before the gate or any write", async () => {
+    results.microgrid_savings_settings = [{ data: {}, error: null }];
+    const res = await put({ ...VALID, microgrid_id: "someone-else", extra: true });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.code).toBe("invalid_body");
+    expect(json).not.toHaveProperty("field");
+    expect(upsertCall()).toBeUndefined();
+    expect(mockGateRoute).not.toHaveBeenCalled();
   });
 
   it("gates the billing plugin as a write on the microgrid", async () => {
@@ -153,14 +164,27 @@ describe("PUT /api/microgrids/[id]/savings-settings", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("answers 401 without a session before reading a malformed body", async () => {
+    mockUser = null;
+    for (const body of ["{nope", { ...VALID, extra: true }]) {
+      const res = await put(body);
+      expect(res.status).toBe(401);
+      expect(await res.json()).not.toHaveProperty("code");
+    }
+    expect(mockGateRoute).not.toHaveBeenCalled();
+  });
+
   it("answers 400 for a microgrid id that is not a UUID", async () => {
     const res = await put(VALID, "nope");
     expect(res.status).toBe(400);
   });
 
   it("answers 400 for a body that is not JSON or not an object", async () => {
-    expect((await put("{nope")).status).toBe(400);
-    expect((await put([VALID])).status).toBe(400);
+    for (const body of ["{nope", [VALID]]) {
+      const res = await put(body);
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe("invalid_body");
+    }
   });
 
   it.each([

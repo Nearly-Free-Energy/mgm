@@ -150,6 +150,22 @@ describe("POST /api/microgrids/[id]/grid-tariffs", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("answers 401 without a session before reading a malformed body", async () => {
+    mockUser = null;
+    for (const body of ["{not json", { effective_from: "2026-10-01", bands: BANDS, extra: 1 }]) {
+      const res = await post(body);
+      expect(res.status).toBe(401);
+      expect(await res.json()).not.toHaveProperty("code");
+    }
+    expect(mockGateRoute).not.toHaveBeenCalled();
+  });
+
+  it("names effective_from first when it and the bands are both invalid", async () => {
+    const res = await post({ effective_from: "October", bands: [] });
+    expect(res.status).toBe(400);
+    expect((await res.json()).field).toBe("effective_from");
+  });
+
   it("answers 400 for a microgrid id that is not a UUID", async () => {
     const res = await post({ effective_from: "2026-10-01", bands: BANDS }, "not-a-uuid");
     expect(res.status).toBe(400);
@@ -158,6 +174,35 @@ describe("POST /api/microgrids/[id]/grid-tariffs", () => {
   it("answers 400 for a body that is not JSON", async () => {
     const res = await post("{not json");
     expect(res.status).toBe(400);
+  });
+
+  it("answers 400 with code invalid_body for a body that is not JSON, before the gate", async () => {
+    const res = await post("{not json");
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("invalid_body");
+    expect(mockGateRoute).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown top-level key with no field, writing nothing", async () => {
+    const res = await post({ effective_from: "2026-10-01", bands: BANDS, microgrid_id: "someone-else" });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.code).toBe("invalid_body");
+    expect(json).not.toHaveProperty("field");
+    expect(mockGateRoute).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.table === "grid_tariffs")).toBe(false);
+  });
+
+  it("refuses a band with an extra key under field bands", async () => {
+    const res = await post({
+      effective_from: "2026-10-01",
+      bands: [{ from_hour: 0, to_hour: 24, rate: 400, currency: "UGX" }],
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.field).toBe("bands");
+    expect(json.code).toBe("invalid_body");
+    expect(calls.some((c) => c.table === "grid_tariffs")).toBe(false);
   });
 
   it.each([
