@@ -310,44 +310,26 @@ describe.skipIf(skip)("#321 — and on nothing else", () => {
   });
 });
 
-// ── 3. The deprecated alias, which deployed code still calls ──────────────
+// ── 3. The deprecated alias is gone ───────────────────────────────────────
 
 describe.skipIf(skip)("#321 — user_can_configure_ems alias", () => {
-  it("is still callable by an authenticated user and answers the org rule", async () => {
-    // This is the acceptance criterion that cannot be checked by reading the
-    // migration: a lost grant or a changed signature surfaces to the caller as
-    // an error, and the caller turns every error into `false` — the config
-    // surface would go read-only for everyone with nothing logged.
-    const { data: inOrg, error } = await MGR.client.rpc(
-      "user_can_configure_ems",
+  it("no longer exists; configuration access is user_can_access_microgrid", async () => {
+    // 20261114223000 dropped it. A caller would get a missing-function error,
+    // which the guard and route never see because neither calls it.
+    const { error } = await MGR.client.rpc("user_can_configure_ems", {
+      _microgrid_id: FIXTURE.microgridB,
+    });
+    expect(
+      error?.code === "PGRST202" || error?.code === "42883",
+      `expected a missing-function error, got ${error?.code}: ${error?.message}`
+    ).toBe(true);
+
+    const { data: viaHelper, error: helperError } = await MGR.client.rpc(
+      "user_can_access_microgrid",
       { _microgrid_id: FIXTURE.microgridB }
     );
-    expect(error).toBeNull();
-    expect(inOrg).toBe(true);
-
-    const { data: crossOrg } = await MGR.client.rpc("user_can_configure_ems", {
-      _microgrid_id: FIXTURE.microgridC,
-    });
-    expect(crossOrg).toBe(false);
-  });
-
-  it("agrees with user_can_access_microgrid on every fixture microgrid", async () => {
-    // It is an alias, not a second rule. If these ever disagree, the alias has
-    // grown a body of its own.
-    for (const mgId of [
-      FIXTURE.microgridA,
-      FIXTURE.microgridB,
-      FIXTURE.microgridC,
-    ]) {
-      const { data: viaAlias } = await MGR.client.rpc("user_can_configure_ems", {
-        _microgrid_id: mgId,
-      });
-      const { data: viaHelper } = await MGR.client.rpc(
-        "user_can_access_microgrid",
-        { _microgrid_id: mgId }
-      );
-      expect(viaAlias).toBe(viaHelper);
-    }
+    expect(helperError).toBeNull();
+    expect(viaHelper).toBe(true);
   });
 });
 

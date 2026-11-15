@@ -1401,6 +1401,65 @@ export type Database = {
           },
         ]
       }
+      pilot_import_batches: {
+        Row: {
+          applied_at: string | null
+          billing_period_id: string
+          conflict_count: number
+          created_at: string
+          duplicate_source_row_count: number
+          household_count: number
+          id: string
+          initiated_by: string | null
+          inserted_reading_count: number
+          is_baseline: boolean
+          reading_count: number
+          source_label: string
+          status: string
+          unchanged_reading_count: number
+        }
+        Insert: {
+          applied_at?: string | null
+          billing_period_id: string
+          conflict_count?: number
+          created_at?: string
+          duplicate_source_row_count?: number
+          household_count?: number
+          id?: string
+          initiated_by?: string | null
+          inserted_reading_count?: number
+          is_baseline?: boolean
+          reading_count?: number
+          source_label: string
+          status?: string
+          unchanged_reading_count?: number
+        }
+        Update: {
+          applied_at?: string | null
+          billing_period_id?: string
+          conflict_count?: number
+          created_at?: string
+          duplicate_source_row_count?: number
+          household_count?: number
+          id?: string
+          initiated_by?: string | null
+          inserted_reading_count?: number
+          is_baseline?: boolean
+          reading_count?: number
+          source_label?: string
+          status?: string
+          unchanged_reading_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pilot_import_batches_billing_period_id_fkey"
+            columns: ["billing_period_id"]
+            isOneToOne: false
+            referencedRelation: "billing_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rate_schedules: {
         Row: {
           created_at: string
@@ -2001,10 +2060,6 @@ export type Database = {
         Returns: boolean
       }
       user_can_access_org: { Args: { _org_id: string }; Returns: boolean }
-      user_can_configure_ems: {
-        Args: { _microgrid_id: string }
-        Returns: boolean
-      }
       user_can_see_user_profile: {
         Args: { _target_user_id: string }
         Returns: boolean

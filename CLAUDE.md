@@ -129,14 +129,13 @@ The schema follows Org → Community → Microgrid → Edge → Device plus a pa
 
 ### RLS helper functions (migration 00002_rls.sql)
 
-**Three** `SECURITY DEFINER STABLE` helpers, pinned to `search_path = public, pg_temp`, owned by `postgres`. All policies chain through these — do not inline JOIN chains in `USING` clauses. The table below lists **four**: the fourth is a deprecated alias that no policy chains through and that a follow-up migration deletes.
+**Three** `SECURITY DEFINER STABLE` helpers, pinned to `search_path = public, pg_temp`, owned by `postgres`. All policies chain through these — do not inline JOIN chains in `USING` clauses. The deprecated alias `user_can_configure_ems` (00053) was dropped by `20261114223000`.
 
 | Helper | Contract |
 |---|---|
 | `is_super_admin() -> BOOLEAN` | True iff `auth.uid()` has any `user_roles` row with `role='super_admin'`. |
 | `user_can_access_org(_org_id UUID) -> BOOLEAN` | True iff `is_super_admin()` OR exists a `user_roles` row with `role='org_manager' AND scope_type='org' AND scope_id=_org_id`. |
 | `user_can_access_microgrid(_microgrid_id UUID) -> BOOLEAN` | True iff `user_can_access_org(<microgrid's org_id>)` — resolves via `microgrids → communities → org_id`. |
-| `user_can_configure_ems(_microgrid_id UUID) -> BOOLEAN` (00053) | **Thin alias for `user_can_access_microgrid`** — org access *is* configuration access (#321). Kept only so code deployed before #321 keeps working; a follow-up migration drops it once nothing calls it. **Do not add call sites.** |
 
 RLS policies are written with `FOR ALL` (not split per-verb) to match the existing pattern.
 
@@ -189,6 +188,10 @@ Regression-test pattern: assert `error.code === "42501" || error.message?.toLowe
 | New fn + REVOKE+GRANT in same DDL (A) | `401 42501` |
 | Fully REVOKEd (no role retains EXECUTE except service_role) (B2 trigger fn) | `404 PGRST202` |
 
+### Migration conventions — a merged migration is never edited
+
+**Never edit or delete a migration after it merges to `main`; write a new one.** Databases that ran it keep the old version, which is how NFE's production drifted from the chain (00057 and the pilot overlay were both edited after production ran them). A new migration adds its line to `supabase/migrations.sha256` in the same commit (`shasum -a 256 supabase/migrations/<file> | sed 's#supabase/migrations/##' >> supabase/migrations.sha256`); `src/lib/__tests__/migration-hashes.test.ts` fails otherwise. While a migration's own PR is still open, editing it and its line together is fine.
+
 ### Migration conventions — a migration and the tests that assert its objects ship in one commit
 
 **A migration that changes a database object a database-backed test asserts must ship in the same commit as that test and as the regenerated `database.gen.ts`.** Not the commit before, not the commit after.
@@ -202,7 +205,7 @@ This became true in **#324**, which took `SKIP_RLS_TESTS=1` out of the `Test` ga
 
 **The ordering constraint is inside one PR, not across a deploy.** Do not reach for the deploy-ordering framing used for schema changes that must interleave with an app release (`00053`'s header is the worked example of *that* problem) — it names events on the wrong axis for this one and produces a plan nobody can follow.
 
-Worked example: dropping the deprecated `user_can_configure_ems` alias requires, in one commit, the migration, the alias assertions in `ems_config_access.test.ts`, the regenerated `database.gen.ts`, and the helper-table row in this file.
+Worked example: dropping the deprecated `user_can_configure_ems` alias took, in one commit, the migration (`20261114223000`), the alias assertions in `ems_config_access.test.ts`, the regenerated `database.gen.ts`, and the helper-table row in this file.
 
 ### Seed migration generation
 

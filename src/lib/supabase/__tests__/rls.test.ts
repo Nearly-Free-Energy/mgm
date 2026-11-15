@@ -904,9 +904,11 @@ describe("RLS: user_roles", () => {
     });
   });
 
-  it("User D (super_admin) can INSERT a user_roles row", async () => {
+  it("User D (super_admin) cannot INSERT a user_roles row directly", async () => {
     if (skipIfRequested()) return;
-    // Insert a temporary role row, then clean it up
+    // Role changes go through fn_change_user_role, which checks the change;
+    // a direct insert would skip those checks
+    // (20261114222000_chain_matches_production_grants.sql).
     const { data, error } = await userD.client
       .from("user_roles")
       .insert({
@@ -916,14 +918,17 @@ describe("RLS: user_roles", () => {
         scope_id: FIXTURE.orgA,
       })
       .select("id");
-    expect(error).toBeNull();
-    expect(data?.length).toBeGreaterThanOrEqual(1);
+    expect(error?.code).toBe("42501");
+    expect(data).toBeNull();
 
-    // Cleanup: delete the temporary row
-    if (data?.[0]?.id) {
-      const svc = await serviceClient();
-      await svc.from("user_roles").delete().eq("id", data[0].id);
-    }
+    const svc = await serviceClient();
+    const { data: rows } = await svc
+      .from("user_roles")
+      .select("id")
+      .eq("user_id", userC.userId)
+      .eq("scope_id", FIXTURE.orgA)
+      .eq("role", "org_manager");
+    expect(rows).toEqual([]);
   });
 });
 
@@ -1316,12 +1321,12 @@ describe("RLS: fn_create_household_with_meter cross-org denied (#74)", () => {
 // context applies to the underlying tables. An org_manager for Org A
 // must not be able to read activity rows belonging to Org B's microgrid.
 //
-// Test strategy:
-//   - User A (org_manager for Org A) queries the VIEW filtered to
-//     microgridB (belonging to Org B) → expects zero rows.
-//   - User A queries the VIEW filtered to microgridA (own org) → may get
-//     rows (non-zero is acceptable; we only assert no error AND zero for B).
-//   - User D (super_admin) can read both.
+// No application code reads this legacy view, and since
+// 20261114222000_chain_matches_production_grants.sql no API role holds a
+// grant on it, as on NFE's production database. Every read is refused with
+// 42501; the cross-org test below still passes because a refusal returns no
+// rows. If the view gets a grant again, the isolation test is the one that
+// matters.
 // ══════════════════════════════════════════════════════════════════════════
 
 describe("RLS: microgrid_recent_activity VIEW cross-org isolation (#73)", () => {
@@ -1342,43 +1347,22 @@ describe("RLS: microgrid_recent_activity VIEW cross-org isolation (#73)", () => 
     ).toBe(0);
   });
 
-  it("User A can read activity for Microgrid A (own org)", async () => {
+  it("no API role can read the view, own org included", async () => {
     if (skipIfRequested()) return;
 
-    // This should not error — may return 0 rows if no events, but should not be denied.
-    const { error } = await userA.client
-      .from("microgrid_recent_activity")
-      .select("microgrid_id, kind")
-      .eq("microgrid_id", FIXTURE.microgridA);
-
-    // No RLS-block error expected for own org.
-    const isRlsError =
-      error?.code === "42501" ||
-      (error?.message ?? "").includes("row-level security");
-    expect(
-      isRlsError,
-      `Unexpected RLS block on own microgrid: ${error?.message}`
-    ).toBe(false);
-  });
-
-  it("User D (super_admin) can read activity for both microgrids", async () => {
-    if (skipIfRequested()) return;
-
-    // super_admin bypasses all RLS — should be able to query both.
-    const [resA, resB] = await Promise.all([
-      userD.client
+    const [ownOrg, superAdmin] = await Promise.all([
+      userA.client
         .from("microgrid_recent_activity")
-        .select("microgrid_id")
+        .select("microgrid_id, kind")
         .eq("microgrid_id", FIXTURE.microgridA),
       userD.client
         .from("microgrid_recent_activity")
         .select("microgrid_id")
-        .eq("microgrid_id", FIXTURE.microgridB),
+        .eq("microgrid_id", FIXTURE.microgridA),
     ]);
 
-    // No errors expected for super_admin.
-    expect(resA.error, `super_admin error on A: ${resA.error?.message}`).toBeNull();
-    expect(resB.error, `super_admin error on B: ${resB.error?.message}`).toBeNull();
+    expect(ownOrg.error?.code).toBe("42501");
+    expect(superAdmin.error?.code).toBe("42501");
   });
 });
 

@@ -35,6 +35,11 @@ discussion first, not a PR.
 6. **Releases are explicit.** A route is reachable only once it is listed in
    `src/lib/mgm/released-routes.ts`; inherited or unfinished surfaces stay
    behind it.
+7. **A merged migration is never edited or deleted.** Databases that ran it
+   keep the version they ran, so an edit makes the chain describe a schema no
+   installation has. A change is a new migration. `supabase/migrations.sha256`
+   records every file's SHA-256, and `migration-hashes.test.ts` fails when a
+   file and its line disagree.
 
 ## Configuration
 

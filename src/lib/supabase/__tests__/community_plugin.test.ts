@@ -17,6 +17,7 @@ import {
   assertEnvironmentReady,
   cleanupTestData,
   createTestUser,
+  LOCAL_SUPABASE_URL,
   serviceClient,
   shouldSkip,
   type TestUser,
@@ -318,10 +319,7 @@ describe("mgm plugin state + enforcement", () => {
   it("anonymous callers cannot resolve plugin state", async () => {
     if (shouldSkip()) return;
     const { createClient } = await import("@supabase/supabase-js");
-    const anon = createClient(
-      "http://localhost:54321",
-      testAnonKey() ?? ""
-    );
+    const anon = createClient(LOCAL_SUPABASE_URL, testAnonKey() ?? "");
     const { error } = await anon.rpc("mgm_plugin_enabled_for_org", {
       _org_id: FIXTURE.orgA,
       _plugin_name: "community-management",
