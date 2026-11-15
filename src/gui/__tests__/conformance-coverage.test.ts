@@ -45,9 +45,13 @@ export function callsConformance(source: string, file: string, name: string, exp
   const guiLocals = new Set<string>();
   for (const statement of sf.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const bindings = statement.importClause?.namedBindings;
-    if (!bindings || !ts.isNamedImports(bindings) || statement.importClause?.isTypeOnly) continue;
+    const clause = statement.importClause;
+    if (!clause || clause.isTypeOnly) continue;
     const specifier = statement.moduleSpecifier.text;
+    // A package entry may export its plugin as its default.
+    if (clause.name && exportName === "default" && isPackageEntry(specifier, file, name)) guiLocals.add(clause.name.text);
+    const bindings = clause.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
     for (const element of bindings.elements) {
       if (element.isTypeOnly) continue;
       const imported = (element.propertyName ?? element.name).text;
@@ -71,7 +75,9 @@ export function callsConformance(source: string, file: string, name: string, exp
 
 /** The name under which GUI `name`'s package entry exports its INSTALLED_GUIS plugin. */
 async function entryExportName(name: GuiName): Promise<string | undefined> {
-  const entry = (await import(`../${name}/index.ts`)) as Record<string, unknown>;
+  // Resolved without an extension, as src/gui/installed.ts imports it, so an
+  // index.ts or an index.tsx entry both load.
+  const entry = (await import(`../${name}`)) as Record<string, unknown>;
   return Object.keys(entry).find((key) => entry[key] === INSTALLED_GUIS[name]);
 }
 
@@ -98,6 +104,12 @@ describe("conformance coverage", () => {
     it("accepts a top-level call with the package entry's plugin, aliases included", () => {
       expect(holds(`${kit}${gui}describeGuiConformance(ProbeGui);`)).toBe(true);
       expect(holds(`import { describeGuiConformance as run } from "${KIT}";\nimport { ProbeGui as G } from "@/gui/probe";\nrun(G);`)).toBe(true);
+    });
+
+    it("accepts a package entry that exports its plugin as its default", () => {
+      const fromDefault = (source: string) => callsConformance(source, file, "probe", "default");
+      expect(fromDefault(`${kit}import Probe from "..";\ndescribeGuiConformance(Probe);`)).toBe(true);
+      expect(fromDefault(`${kit}import Probe from "../other";\ndescribeGuiConformance(Probe);`)).toBe(false);
     });
 
     it("refuses a missing, nested, commented or mis-targeted call", () => {

@@ -19,10 +19,15 @@
  * Next.js reads the nonce from the forwarded request's
  * `content-security-policy` header (or the report-only one) and adds it to
  * the scripts it renders (checked in Next 16.4, `parse-request-headers`).
- * Every page is rendered per request (none is prerendered), so each gets
- * the nonce; a prerendered page would carry none, and its scripts would be
- * blocked. If Next.js stops reading the header, or a page becomes static,
- * scripts stop running; revisit then.
+ * Every page under the force-dynamic root layout is rendered per request, so
+ * each gets the nonce. The one exception is Next.js's built-in global error
+ * page: the build prerenders it (/_global-error) and serves it as the static
+ * /500 page when an error escapes rendering. Its scripts carry no nonce and
+ * are blocked, which is accepted: its text and inline styles still show, and
+ * its Reload button is a plain form GET that form-action 'self' allows. If
+ * another page becomes static (.next/prerender-manifest.json lists it), a
+ * src/app/global-error.tsx that needs scripts is added, or Next.js stops
+ * reading the header, scripts stop running there; revisit then.
  */
 
 export type CspMode = "report-only" | "enforce";
