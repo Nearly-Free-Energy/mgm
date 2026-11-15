@@ -4,15 +4,21 @@ import "server-only";
  * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation to
  * its pages, which are served outside the GUI contract (`legacy: true`), with
  * the labels the current chrome uses, and the savings as the
- * `billing.savings` view, shown under the Operations day. A page that moves
- * to a view keeps its nav id.
+ * `billing.savings` view, shown under the Operations day, with the writes
+ * that change what it counts. A page that moves to a view keeps its nav id.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
+import {
+  ADD_GRID_TARIFF_BODY_VERSION,
+  AddGridTariffBody,
+  SAVE_SAVINGS_SETTINGS_BODY_VERSION,
+  SaveSavingsSettingsBody,
+} from "./schemas";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
 import { loadSavings } from "./surface/savings";
 import { SavingsExt } from "./surface/savings-ext";
-import { SAVINGS_EXT_SCHEMA, SAVINGS_KEYS } from "./surface/savings-model";
+import { GRID_TARIFF_ADD_ACTION, SAVINGS_EXT_SCHEMA, SAVINGS_KEYS, SAVINGS_SETTINGS_ACTION } from "./surface/savings-model";
 
 export const BILLING_SURFACE: Contribution = {
   plugin: BILLING_PLUGIN_NAME,
@@ -65,6 +71,45 @@ export const BILLING_SURFACE: Contribution = {
       ext: { schema: SAVINGS_EXT_SCHEMA, zod: SavingsExt },
       examples: SAVINGS_EXAMPLES,
       load: loadSavings,
+    },
+  ],
+  // Both human-only: no assistant proposes them (decision 6 on #115).
+  // Deleting a tariff version is not contributed (decision 6): it stays on
+  // the Rates page. A DELETE would need typed or ceremony confirmation and a
+  // prepare step.
+  // Both `targeted: false`: offered only by the savings view, whose loader
+  // prefills them with the stored settings and the newest tariff's bands
+  // (savingsActions in ./surface/savings-model.ts). Appended to another
+  // plugin's view of the microgrid they would open empty, and the settings
+  // PUT replaces the whole row, so saving would clear both stored dates. If
+  // the host's prepare comes to supply starting values, or the route stops
+  // replacing the row, revisit.
+  actions: [
+    {
+      ...SAVINGS_SETTINGS_ACTION,
+      target: "microgrid",
+      input: SaveSavingsSettingsBody,
+      inputVersion: SAVE_SAVINGS_SETTINGS_BODY_VERSION,
+      method: "PUT",
+      path: "/api/microgrids/[id]/savings-settings",
+      bind: { path: { id: "microgrid" } },
+      risk: "write",
+      confirm: "none",
+      humanOnly: true,
+      targeted: false,
+    },
+    {
+      ...GRID_TARIFF_ADD_ACTION,
+      target: "microgrid",
+      input: AddGridTariffBody,
+      inputVersion: ADD_GRID_TARIFF_BODY_VERSION,
+      method: "POST",
+      path: "/api/microgrids/[id]/grid-tariffs",
+      bind: { path: { id: "microgrid" } },
+      risk: "write",
+      confirm: "confirm",
+      humanOnly: true,
+      targeted: false,
     },
   ],
 };

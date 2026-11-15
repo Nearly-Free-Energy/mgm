@@ -221,6 +221,28 @@ describe("appendTargetedActions", () => {
     ]);
   });
 
+  it("never appends an action contributed with targeted: false, on the view or on its rows", () => {
+    const actions: MergeAction[] = [
+      { plugin: "metering", def: def("metering.own-view-only", { targeted: false }) },
+      { plugin: "metering", def: def("metering.assign") },
+    ];
+    const start: ActionSlots<ActionRef> = {
+      kind: "collection",
+      entity: HH,
+      body: { columns: [], rows: [{ id: "r1", entity: HH, cells: {}, actions: [] }], empty: { title: "None" } },
+      actions: [],
+    };
+    const { model, dropped } = appendTargetedActions(start, input(actions));
+    if (model.kind !== "collection") throw new Error("kind changed");
+    expect(model.actions.map((a) => a.action)).toEqual(["metering.assign"]);
+    expect(model.body.rows[0].actions.map((a) => a.action)).toEqual(["metering.assign"]);
+    // Not offered there at all, so not reported as dropped.
+    expect(dropped).toEqual([]);
+    // Its own plugin's view keeps placing it itself: the flag is about other views only.
+    const ownView = appendTargetedActions(record(HH, [own("metering.own-view-only")]), input(actions, { plugin: "metering" }));
+    expect(ownView.model.actions.map((a) => a.action)).toEqual(["metering.own-view-only"]);
+  });
+
   it("marks typed, ceremony, destructive and DELETE actions as danger", () => {
     const actions: MergeAction[] = [
       { plugin: "metering", def: def("metering.a", { confirm: "typed" }) },

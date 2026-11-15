@@ -14,7 +14,7 @@ import { composeMetering } from "@/lib/metering/compose";
 import { resolveRequestedDay } from "@/lib/timezone/requested-day";
 import type { GridTariffBand } from "@/lib/types/domain";
 import { savingsReadRange, valueSiteDays, type SavingsSettingsInput, type TariffInput } from "../site-savings";
-import { buildSavingsModel } from "./savings-model";
+import { buildSavingsModel, savingsActions } from "./savings-model";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
@@ -84,8 +84,11 @@ export async function loadSavings(req: SurfaceRequest): Promise<Loaded<LoadedMod
   const settings: SavingsSettingsInput | null = row
     ? { solar_savings_from: row.solar_savings_from, arbitrage_from: row.arbitrage_from, round_trip_efficiency: Number(row.round_trip_efficiency) }
     : null;
+  // The newest version, whatever order the rows came in.
+  const newest = tariffs.reduce<TariffInput | null>((a, t) => (!a || t.effective_from > a.effective_from ? t : a), null);
+  const actions = savingsActions(microgrid.id, settings, newest?.bands ?? null);
   if (!settings || (!settings.solar_savings_from && !settings.arbitrage_from) || tariffs.length === 0) {
-    return ready(buildSavingsModel({ state: "setup", microgridId: microgrid.id, fmt: req.fmt }));
+    return ready(buildSavingsModel({ state: "setup", microgridId: microgrid.id, fmt: req.fmt, actions }));
   }
 
   // The host passes on the day page's ?date= (query on both views). With
@@ -103,6 +106,7 @@ export async function loadSavings(req: SurfaceRequest): Promise<Loaded<LoadedMod
     return ready(
       buildSavingsModel({
         state: "ready",
+        actions,
         // Only the summary goes into the model; the days and their per-bin flows stay here.
         summary: valueSiteDays({ days: days.data, tariffs, settings, date }),
         date,

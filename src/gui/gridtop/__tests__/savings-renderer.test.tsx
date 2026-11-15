@@ -258,6 +258,17 @@ describe("the savings table's own controls", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
+  it("keeps its own prefilled action when the page's window bar offers the same one without a prefill", async () => {
+    const poked = withPoke(READY);
+    const bare = poked.actions[0];
+    const prefilled = { ...bare, prefill: { round_trip_efficiency: 0.85 } };
+    const day = { ...UNAVAILABLE, view: "metering.site-day" as const, kind: "metrics" as const, actions: [bare] };
+    const kit = fakeKit(day);
+    render(<SavingsView model={{ ...poked, actions: [prefilled] }} kit={kit} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: POKE_LABEL })));
+    expect(kit.act).toHaveBeenCalledWith(prefilled);
+  });
+
   it("gives every control a 44 px touch target on a coarse pointer", () => {
     const { unmount } = render(<SavingsView model={{ ...withPoke(READY), links: [MORE] }} kit={fakeKit(null)} />);
     expect(screen.getByRole("button", { name: POKE_LABEL }).className).toContain(TOUCH);

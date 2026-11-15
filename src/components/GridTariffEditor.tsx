@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GridTariff, MicrogridSavingsSettings } from "@/lib/types/domain";
-import { validateGridTariffBands } from "@/lib/billing/site-savings";
+import { DEFAULT_ROUND_TRIP_EFFICIENCY, validateGridTariffBands } from "@/lib/billing/site-savings";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -22,8 +22,6 @@ const DEFAULT_ROWS: BandRow[] = [
   { from_hour: 6, to_hour: 18, rate: "" },
   { from_hour: 18, to_hour: 24, rate: "" },
 ];
-
-const DEFAULT_EFFICIENCY = 0.9;
 
 type BandRow = { from_hour: number; to_hour: number; rate: string };
 
@@ -470,7 +468,7 @@ export function SavingsSettingsForm({
   const [solarFrom, setSolarFrom] = useState(settings?.solar_savings_from ?? "");
   const [arbitrageFrom, setArbitrageFrom] = useState(settings?.arbitrage_from ?? "");
   const [efficiency, setEfficiency] = useState(
-    efficiencyPct(settings?.round_trip_efficiency ?? DEFAULT_EFFICIENCY)
+    efficiencyPct(settings?.round_trip_efficiency ?? DEFAULT_ROUND_TRIP_EFFICIENCY)
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

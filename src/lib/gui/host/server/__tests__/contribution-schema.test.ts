@@ -88,6 +88,12 @@ describe("parseContribution", () => {
     expect(() => parseContribution(c, CATALOG)).not.toThrow();
   });
 
+  it("accepts an action offered only on its own plugin's views", () => {
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.actions[0].targeted = false;
+    expect(parseContribution(c, CATALOG).contribution.actions?.[0].targeted).toBe(false);
+  });
+
   it("accepts placeholder names with underscores", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     Object.assign(c.actions[2], { path: "/api/billing-periods/[period_id]/close", bind: { path: { period_id: "billingPeriod" } } });
@@ -122,6 +128,7 @@ describe("parseContribution", () => {
     ["unknown attach key", (c) => (c.views[0].attach.x = 1), ["views", 0, "attach"], 'Unrecognized key: "x"'],
     ["unknown live key", (c) => (c.views[1].live.x = 1), ["views", 1, "live"], 'Unrecognized key: "x"'],
     ["risk outside the enum", (c) => (c.actions[0].risk = "fatal"), ["actions", 0, "risk"]],
+    ["targeted set to true, which is the default spelled out", (c) => (c.actions[0].targeted = true), ["actions", 0, "targeted"]],
     ["icon outside the enum", (c) => (c.nav[0].icon = "rocket"), ["nav", 0, "icon"]],
     ["view kind outside the enum", (c) => (c.views[0].kind = "grid"), ["views", 0, "kind"]],
     ["a loader that is not a function", (c) => (c.views[0].load = "load"), ["views", 0, "load"], "Expected a function"],

@@ -262,6 +262,46 @@ describe("loadSavings", () => {
     expect(composeMetering).not.toHaveBeenCalled();
   });
 
+  it("offers the settings and tariff actions, started from the stored settings and the newest bands", async () => {
+    const NEWER = [
+      { from_hour: 12, to_hour: 24, rate: 700 },
+      { from_hour: 0, to_hour: 12, rate: 450 },
+    ];
+    const rows = [
+      { effective_from: "2026-01-01", bands: BANDS },
+      { effective_from: "2026-06-01", bands: NEWER },
+    ];
+    // Either order of rows gives the newest bands.
+    for (const data of [rows, [...rows].reverse()]) {
+      tables.grid_tariffs = { data, error: null };
+      const out = await loadSavings(request());
+      expect(stateOf(out)).toBe("ready");
+      expect(out.ok && out.model.actions).toEqual([
+        {
+          action: "billing.savings-settings",
+          params: { id: MG },
+          prefill: { solar_savings_from: "2026-11-01", arbitrage_from: null, round_trip_efficiency: 0.9 },
+        },
+        { action: "billing.grid-tariff-add", params: { id: MG }, prefill: { bands: [NEWER[1], NEWER[0]] } },
+      ]);
+    }
+  });
+
+  it("offers the actions with the setup note, with no bands to start from when there is no tariff", async () => {
+    tables.grid_tariffs = { data: [], error: null };
+    tables.microgrid_savings_settings = { data: null, error: null };
+    const out = await loadSavings(request());
+    expect(stateOf(out)).toBe("setup");
+    expect(out.ok && out.model.actions).toEqual([
+      {
+        action: "billing.savings-settings",
+        params: { id: MG },
+        prefill: { solar_savings_from: null, arbitrage_from: null, round_trip_efficiency: 0.9 },
+      },
+      { action: "billing.grid-tariff-add", params: { id: MG } },
+    ]);
+  });
+
   it.each(["grid_tariffs", "microgrid_savings_settings"])("refuses with fixed copy when %s cannot be read", async (table) => {
     tables[table] = { data: null, error: { message: UPSTREAM } };
     const out = await loadSavings(request());
@@ -285,6 +325,7 @@ describe("loadSavings", () => {
     const out = await loadSavings(request());
     expect(stateOf(out)).toBe("unavailable");
     expect(out.ok && out.model.body.tiles).toEqual([]);
+    expect(out.ok && out.model.actions).toEqual([]);
     expect(dispose).toHaveBeenCalledOnce();
   });
 
