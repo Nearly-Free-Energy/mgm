@@ -23,9 +23,10 @@ const UUID_RE =
  * Parsed with `AddGridTariffBody` (`@/lib/billing/schemas`); unknown keys,
  * at the top level or in a band, are refused.
  *
- * The database checks only that `bands` has 1 to 24 entries;
- * `AddGridTariffBody` checks 0-24 coverage, so anything else that writes
- * `grid_tariffs` must parse with it too.
+ * The database refuses the same bands `AddGridTariffBody` refuses (trigger
+ * `trg_grid_tariffs_check_bands`, migration 20261115110000), so the 23514
+ * branch below is reached only if the two disagree; if either rule changes,
+ * change the other.
  *
  * Access: the user's own RLS client only. The `grid_tariffs` FOR ALL policy
  * chains through `user_can_access_microgrid`, so the insert succeeds only for
