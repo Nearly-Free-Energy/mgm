@@ -13,6 +13,17 @@
  * When Gridtop draws the page's view with a renderer that places its own
  * actions and links (drawnBespoke in ../renderers/index.ts), the bar shows
  * only the title, subtitle and tabs, so nothing is drawn twice.
+ *
+ * On the first paint of a page a view serves, the model is not published yet
+ * (the page's ViewBoundary publishes it once it has hydrated), but the view
+ * the (gui) layout resolved names the view and its title
+ * (resolveInitialView in src/lib/gui/host/server/render-view.tsx). The bar
+ * then stands in place with that title, the page's own tabs and a blank
+ * subtitle line, marked aria-busy, so the page below it does not move when
+ * the model brings the subtitle and controls. After a soft navigation the
+ * view resolved for the new path names no view (resolveLegacyView), so the
+ * bar appears with the model, which the boundary publishes before the
+ * browser paints the page.
  */
 import { ChevronDown, Ellipsis } from "lucide-react";
 import { useEffect, useId, useState, type RefObject } from "react";
@@ -157,12 +168,15 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
   const view = kit.useView();
   const pathname = kit.usePathname();
   const model = view.model;
-  const [away, show] = useScrolledAway(main, model !== null);
+  // A page a view serves, before its model is published (see above).
+  const waiting = model === null && view.view !== null;
+  const [away, show] = useScrolledAway(main, model !== null || waiting);
   // Kept here, so a failure is still shown once the sheet that held the action has closed.
   const [error, setError] = useState<{ pathname: string; message: string } | null>(null);
-  if (!model) return null;
-  const tabs = tabsOf(view, model, pathname);
-  const hasControls = !drawnBespoke(model) && model.actions.length + model.links.length > 0;
+  if (!model && !waiting) return null;
+  const title = model ? model.title : view.title;
+  const tabs = model ? tabsOf(view, model, pathname) : view.tabs;
+  const hasControls = model !== null && !drawnBespoke(model) && model.actions.length + model.links.length > 0;
   const onResult = (message: string | null) => setError(message === null ? null : { pathname, message });
   const tabLinks = (className: string) =>
     tabs.map((tab) => (
@@ -175,6 +189,7 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
   return (
     <div
       data-window-bar=""
+      aria-busy={waiting || undefined}
       onFocus={show}
       className={cx(
         "gt:sticky gt:top-0 gt:z-10 gt:-mx-4 gt:-mt-4 gt:mb-4 gt:border-b gt:border-border gt:bg-card gt:px-2 gt:transition-transform",
@@ -186,10 +201,10 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
       <div className="gt:flex gt:h-11 gt:min-w-0 gt:items-center gt:gap-1 gt:medium:hidden">
         {tabs.length > 0 ? (
           <Sheet
-            title={model.title}
+            title={title}
             trigger={
-              <button type="button" aria-label={`${model.title}, tabs`} className={cx(BAR_BUTTON, "gt:min-w-0 gt:flex-1 gt:justify-start")}>
-                <span className="gt:truncate gt:text-body gt:font-medium">{model.title}</span>
+              <button type="button" aria-label={`${title}, tabs`} className={cx(BAR_BUTTON, "gt:min-w-0 gt:flex-1 gt:justify-start")}>
+                <span className="gt:truncate gt:text-body gt:font-medium">{title}</span>
                 <ChevronDown aria-hidden="true" focusable="false" className="gt:size-4 gt:shrink-0 gt:text-muted-foreground" />
               </button>
             }
@@ -197,11 +212,11 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
             <ul className="gt:flex gt:flex-col gt:gap-1">{tabLinks(SHEET_ROW)}</ul>
           </Sheet>
         ) : (
-          <p className="gt:min-w-0 gt:flex-1 gt:truncate gt:px-2 gt:text-body gt:font-medium">{model.title}</p>
+          <p className="gt:min-w-0 gt:flex-1 gt:truncate gt:px-2 gt:text-body gt:font-medium">{title}</p>
         )}
-        {hasControls && (
+        {model && hasControls && (
           <Sheet
-            title={`${model.title}: actions`}
+            title={`${title}: actions`}
             trigger={
               <button type="button" aria-label="Actions" className={cx(BAR_BUTTON, "gt:min-w-11")}>
                 <Ellipsis aria-hidden="true" focusable="false" className="gt:size-5" />
@@ -215,10 +230,17 @@ export function WindowBar({ main }: { main: RefObject<HTMLElement | null> }) {
       {/* From 600 px: title and subtitle, controls, then tabs. */}
       <div className="gt:hidden gt:min-w-0 gt:items-start gt:gap-4 gt:pb-2 gt:medium:flex">
         <div className="gt:min-w-0 gt:flex-1">
-          <p className="gt:truncate gt:text-title gt:font-semibold">{model.title}</p>
-          {model.subtitle && <p className="gt:truncate gt:text-dense gt:text-muted-foreground">{model.subtitle}</p>}
+          <p className="gt:truncate gt:text-title gt:font-semibold">{title}</p>
+          {model ? (
+            model.subtitle && <p className="gt:truncate gt:text-dense gt:text-muted-foreground">{model.subtitle}</p>
+          ) : (
+            // The subtitle's line, held until the model brings the subtitle.
+            <p aria-hidden="true" className="gt:invisible gt:truncate gt:text-dense">
+              {"\u00a0"}
+            </p>
+          )}
         </div>
-        {hasControls && <Controls model={model} onResult={onResult} inSheet={false} />}
+        {model && hasControls && <Controls model={model} onResult={onResult} inSheet={false} />}
       </div>
       {tabs.length > 0 && (
         <nav aria-label="Tabs" className="gt:hidden gt:medium:block">
