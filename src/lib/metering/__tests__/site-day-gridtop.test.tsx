@@ -14,7 +14,15 @@ import type { ViewModel } from "@/lib/gui/contract";
 import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
 import { SITE_DAY_EXAMPLES } from "../surface/examples";
 
-const NAMES = ["a clear day", "a day with cuts and dark time", "a site with no battery", "no site devices"];
+const NAMES = [
+  "a clear day",
+  "a day with cuts and dark time",
+  "a site with no battery",
+  "no site devices",
+  "mixed edges",
+  "no OpenEMS connection",
+  "a day to retry, with the time zone notice",
+];
 const EXAMPLES = SITE_DAY_EXAMPLES.map((model, i) => [NAMES[i], model] as const);
 const text = () => document.body.textContent ?? "";
 const count = (needle: string) => text().split(needle).length - 1;
@@ -31,8 +39,10 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("the site-day examples in Gridtop", () => {
-  it("covers each state: three generated days and no site devices", () => {
-    expect(SITE_DAY_EXAMPLES.map((m) => (m.ext?.data as { state: string }).state)).toEqual(["day", "day", "day", "no-site-devices"]);
+  it("covers each state: three generated days, no site devices, and three problems", () => {
+    expect(SITE_DAY_EXAMPLES.map((m) => (m.ext?.data as { state: string }).state)).toEqual([
+      "day", "day", "day", "no-site-devices", "problem", "problem", "problem",
+    ]);
   });
 
   // The host's own notice, so the renderer's check on its wording is tested against the real text.
@@ -55,6 +65,28 @@ describe("the site-day examples in Gridtop", () => {
     expect(screen.getByRole("link", { name: "Go to Edges" }).getAttribute("href")).toMatch(/\/setup\/edges$/);
     expect(document.querySelector("[data-tile]")).toBeNull();
     expect(text()).not.toMatch(/synthetic/i);
+    cleanup();
+  });
+
+  it.each([
+    [4, "Go to Edges", /\/setup\/edges$/],
+    [5, "Set up the OpenEMS connection", /\/setup\/openems-backend$/],
+  ] as const)("draws problem %i with the day picker and its fix as a link", async (i, label, href) => {
+    await draw(SITE_DAY_EXAMPLES[i]);
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe((SITE_DAY_EXAMPLES[i].ext?.data as { title: string }).title);
+    expect(screen.getByRole("link", { name: label }).getAttribute("href")).toMatch(href);
+    expect(screen.getByRole("link", { name: "Previous day" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(document.querySelector("[data-tile]")).toBeNull();
+    cleanup();
+  });
+
+  it("draws the day to retry with a Try again button and the time zone notice with its link", async () => {
+    await draw(SITE_DAY_EXAMPLES[6]);
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(text()).toContain("Billing timezone is still UTC");
+    expect(screen.getByRole("link", { name: "Set timezone" }).getAttribute("href")).toMatch(/\/setup\/edges$/);
+    expect(screen.getByRole("link", { name: "Microgrid setup" })).toBeTruthy();
     cleanup();
   });
 

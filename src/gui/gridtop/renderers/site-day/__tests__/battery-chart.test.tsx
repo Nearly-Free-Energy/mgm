@@ -1,9 +1,7 @@
 /**
- * The battery chart in Gridtop: the legacy page's chart cases
- * (src/components/operations/__tests__/daily-operations.test.tsx), ported,
- * and the bands, grid and line it draws from the ext and the `soc` series.
- * The description's copy is the server's now (site-day-model.test.tsx pins
- * it); these pin that it is printed as given.
+ * The battery chart in Gridtop: the bands, grid and line it draws from the
+ * ext and the `soc` series. The description's copy is the server's
+ * (site-day-model.test.tsx pins it); these pin that it is printed as given.
  */
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -23,14 +21,12 @@ function draw(chart: DayChart = chartOf(), points: SocPoints = SOC) {
 const bands = (root: HTMLElement, kind: string) => [...root.querySelectorAll<SVGRectElement>(`rect[data-band='${kind}']`)];
 
 describe("the battery chart", () => {
-  // Legacy: "is an image with a description of the day".
   it("is an image labelled with the server's description of the day", () => {
     const svg = draw().querySelector("svg")!;
     expect(svg.getAttribute("role")).toBe("img");
     expect(svg.getAttribute("aria-label")).toBe("Battery level from 00:00 to 24:00. Lowest 12% at 05:30. 2 power cuts. Houses dark for 1h 0m.");
   });
 
-  // Legacy: "ends a complete day's description at 24:00" and "ends a partial day's description at the time read".
   it("prints a partial day's description as given, and shades the part of the day not read yet", () => {
     expect(bands(draw(), "future")).toHaveLength(0);
     const root = draw(chartOf({ partial: true, readUntil: at(14, 15), chartLabel: "Battery level from 00:00 to 14:15." }));
@@ -42,7 +38,6 @@ describe("the battery chart", () => {
     expect(future.getAttribute("class")).toContain("gt:fill-background");
   });
 
-  // Legacy: "breaks the battery line at a missing bin".
   it("breaks the battery line at a missing reading, drawing each reading at the middle of its bin", () => {
     const paths = [...draw().querySelectorAll("svg path")];
     expect(paths).toHaveLength(2);
@@ -56,7 +51,6 @@ describe("the battery chart", () => {
     expect(draw(chartOf(), [[at(0), null]]).querySelectorAll("svg path")).toHaveLength(0);
   });
 
-  // Legacy: "replaces the chart with a note when no battery is registered".
   it("replaces the chart with the server's note when no battery is registered", () => {
     const root = draw(chartOf({ chartEmpty: "No battery is registered on this microgrid." }), []);
     expect(root.textContent).toContain("No battery is registered on this microgrid.");
@@ -122,7 +116,7 @@ describe("the battery chart", () => {
     expect(Number(hours[8].getAttribute("x"))).toBe(712);
   });
 
-  it("keeps the legacy geometry, and scrolls sideways in its own positioned box on a narrow screen", () => {
+  it("keeps its geometry, and scrolls sideways in its own positioned box on a narrow screen", () => {
     const svg = draw().querySelector("svg")!;
     expect(svg.getAttribute("viewBox")).toBe("0 0 720 240");
     expect(svg.getAttribute("class")).toContain("gt:min-w-[560px]");
@@ -135,7 +129,6 @@ describe("the battery chart", () => {
     expect(key).toEqual(["Battery", "Power cut", "Houses dark", "Evening window"]);
   });
 
-  // Legacy: "uses token colour classes only, no hard-coded Tailwind palette".
   it("uses token colour classes only", () => {
     const palette = /\b(?:bg|text|fill|stroke|border)-(?:red|blue|green|gray|slate|zinc|amber|orange|yellow|emerald)-\d/;
     for (const chart of [chartOf(), chartOf({ chartEmpty: "No battery is registered on this microgrid." })]) {

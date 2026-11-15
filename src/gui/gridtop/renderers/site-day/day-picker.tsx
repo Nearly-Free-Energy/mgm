@@ -7,7 +7,7 @@
  * today. Typing a date does nothing until it is submitted, and a submitted
  * date after today is refused here as well as clamped by the server.
  * Submitting the day already shown reads it again, which is how today's
- * partial day is brought up to date, as the legacy GET form did.
+ * partial day is brought up to date.
  */
 import { useState, type FormEvent } from "react";
 import type { GuiKit, Href, LinkRef } from "@/lib/gui/contract";

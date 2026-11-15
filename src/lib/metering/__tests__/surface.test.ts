@@ -65,7 +65,7 @@ describe("the site-day examples", () => {
     for (const model of SITE_DAY_LOADED_EXAMPLES) expect(strictParseModel(view, model)).toMatchObject({ ok: true });
   });
 
-  it("are a normal day, a day with cuts and dark time, a site with no battery, and no site devices", () => {
+  it("are a normal day, a day with cuts and dark time, a site with no battery, no site devices, and three problems", () => {
     expect(tile(0, "cuts")?.value.text).toBe("0");
     expect(tile(0, "lights-on")).not.toHaveProperty("status");
     expect(Number(tile(1, "cuts")?.value.text)).toBeGreaterThan(0);
@@ -76,6 +76,14 @@ describe("the site-day examples", () => {
     expect(SITE_DAY_LOADED_EXAMPLES[3].links?.[0].id).toBe("metering.edges");
     // Each generated day links to the page that holds the microgrid's Edit, as the loader's day does.
     for (const i of [0, 1, 2]) expect(SITE_DAY_LOADED_EXAMPLES[i].links?.at(-1)?.id).toBe("metering.microgrid-setup");
+    // A problem fixed under Edges, one fixed under OpenEMS Backend, and one only retried, which carries the time zone notice.
+    const data = (i: number) => SITE_DAY_LOADED_EXAMPLES[i].ext?.data as { state: string; retry?: boolean; timezoneNotice: unknown };
+    for (const i of [4, 5, 6]) expect(tiles(i).map((t) => t.key)).toEqual(["problem"]);
+    expect(SITE_DAY_LOADED_EXAMPLES[4].links?.[0].id).toBe("metering.edges");
+    expect(SITE_DAY_LOADED_EXAMPLES[5].links?.[0].id).toBe("metering.openems-backend");
+    expect([4, 5, 6].map((i) => data(i).retry)).toEqual([false, false, true]);
+    expect(SITE_DAY_LOADED_EXAMPLES[6].links?.map((l) => l.id)).toContain("metering.set-timezone");
+    expect(SITE_DAY_LOADED_EXAMPLES.map((_, i) => data(i).timezoneNotice !== null)).toEqual([false, false, false, false, false, false, true]);
   });
 
   it("mark generated days synthetic, with the notice the host adds", () => {

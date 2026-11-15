@@ -48,7 +48,7 @@ vi.mock("../snapshot", async (importOriginal) => {
   return { surfaceSnapshot: async () => served ?? actual.surfaceSnapshot() };
 });
 
-import { SITE_DAY_REFUSALS } from "@/lib/metering/surface/site-day";
+import { SITE_DAY_PROBLEMS } from "@/lib/metering/surface/site-day-model";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import type { ActionDef, ViewDef } from "../../../surface";
 import { createFmt } from "../../../fmt";
@@ -248,35 +248,35 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     });
     expect(sentFor("keycloak"), "keycloak: no request to the canary backend").toEqual([]);
 
-    // The Operations day: generated on the synthetic microgrid, refused with
-    // fixed copy elsewhere. A bearer, Basic or AWS microgrid fails with
-    // OPENEMS_UNREACHABLE: its client contacted the address and found nothing
-    // there (the requests above show with which credential); Keycloak's http
-    // token address is refused first. "Unavailable" copy alone would not show
-    // this, since any unexpected failure reads the same, so the OpenEMS code
-    // is read from the line siteSamplesError in
-    // src/lib/metering/openems-provider.ts logs; if that line stops naming
-    // the code, revisit.
+    // The Operations day: generated on the synthetic microgrid, and elsewhere
+    // loaded in its problem state with fixed copy. A bearer, Basic or AWS
+    // microgrid fails with OPENEMS_UNREACHABLE: its client contacted the
+    // address and found nothing there (the requests above show with which
+    // credential); Keycloak's http token address is refused first.
+    // "Unavailable" copy alone would not show this, since any unexpected
+    // failure reads the same, so the OpenEMS code is read from the line
+    // siteSamplesError in src/lib/metering/openems-provider.ts logs; if that
+    // line stops naming the code, revisit.
     const site = results.filter((r) => r.id === "metering.site-day");
-    type Refused = (typeof SITE_DAY_REFUSALS)[keyof typeof SITE_DAY_REFUSALS];
-    const refused: Record<string, [Refused, string | null]> = {
-      [IDS.microgridIds.keycloak]: [SITE_DAY_REFUSALS.noConnection, "OPENEMS_INVALID_BACKEND_URL"],
-      [IDS.microgridIds.bearer]: [SITE_DAY_REFUSALS.unavailable, "OPENEMS_UNREACHABLE"],
-      [IDS.microgridIds.basic]: [SITE_DAY_REFUSALS.unavailable, "OPENEMS_UNREACHABLE"],
-      [IDS.microgridIds.aws]: [SITE_DAY_REFUSALS.unavailable, "OPENEMS_UNREACHABLE"],
-      [IDS.mixedMicrogridId]: [SITE_DAY_REFUSALS.mixed, null],
+    type Problem = (typeof SITE_DAY_PROBLEMS)[keyof typeof SITE_DAY_PROBLEMS];
+    const problems: Record<string, [Problem, string | null]> = {
+      [IDS.microgridIds.keycloak]: [SITE_DAY_PROBLEMS.noConnection, "OPENEMS_INVALID_BACKEND_URL"],
+      [IDS.microgridIds.bearer]: [SITE_DAY_PROBLEMS.unavailable, "OPENEMS_UNREACHABLE"],
+      [IDS.microgridIds.basic]: [SITE_DAY_PROBLEMS.unavailable, "OPENEMS_UNREACHABLE"],
+      [IDS.microgridIds.aws]: [SITE_DAY_PROBLEMS.unavailable, "OPENEMS_UNREACHABLE"],
+      [IDS.mixedMicrogridId]: [SITE_DAY_PROBLEMS.mixed, null],
     };
     expect(site.map((r) => r.href)).toEqual(MICROGRIDS.map((id) => `/microgrids/${id}/operations`));
     for (const [i, r] of site.entries()) {
       const [body, ...logged] = r.output.split("\n");
       const parsed = JSON.parse(body);
-      const expected = refused[MICROGRIDS[i]];
+      const expected = problems[MICROGRIDS[i]];
       if (!expected) {
         expect([r.status, parsed], r.href).toMatchObject([200, { view: "metering.site-day", notice: { tone: "warning" }, ext: { data: { synthetic: true } } }]);
         continue;
       }
-      const [refusal, code] = expected;
-      expect([r.status, parsed.message], r.href).toEqual([refusal.status, refusal.message]);
+      const [problem, code] = expected;
+      expect([r.status, parsed.ext?.data?.state, parsed.ext?.data?.message], r.href).toEqual([200, "problem", problem.message]);
       if (code) expect(logged.join("\n"), r.href).toMatch(new RegExp(`MGM site samples: OpenEMS failed\\n.*code: '${code}'`));
     }
   });

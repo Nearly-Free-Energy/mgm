@@ -2,11 +2,13 @@
 
 /**
  * Gridtop's renderer for `metering.site-day@1`, the Operations day, loaded
- * on its own by ./index.tsx: the day picker, the six tiles, the battery
- * chart, the evening strip, the notes, and the view's actions and links,
- * which the window bar leaves to it (../../shell/window-bar.tsx). It prints
- * the text the server formatted and writes only through kit.act. A model
- * whose ext it cannot read is drawn by the kit's view instead.
+ * on its own by ./index.tsx: the notices, the day picker, then the day (six
+ * tiles, the battery chart, the evening strip and the notes), what to
+ * register, or the problem that kept the day from being read, and the
+ * view's actions and links, which the window bar leaves to it
+ * (../../shell/window-bar.tsx). It prints the text the server formatted and
+ * writes only through kit.act. A model whose ext it cannot read is drawn by
+ * the kit's view instead.
  *
  * The kit comes from ./index.tsx as a prop, and these files import nothing
  * else of Gridtop's or the kit's, so this chunk shares no module with the
@@ -28,6 +30,10 @@ const CONTROL =
   "gt:pointer-coarse:h-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring gt:disabled:cursor-not-allowed gt:disabled:opacity-60";
 
 const EDGES_LINK = "metering.edges";
+// The links site-day-model.ts (src/lib/metering/surface) gives a problem's
+// fix and the time zone notice; if it renames them, revisit.
+const FIX_LINKS = [EDGES_LINK, "metering.openems-backend"];
+const TIMEZONE_LINK = "metering.set-timezone";
 // The battery series and the evening tile, as site-day-model.ts (src/lib/metering/surface) keys them; if it renames them, revisit.
 const SOC = "soc";
 const EVENING_SUPPLY = "evening-supply";
@@ -47,19 +53,27 @@ function Band({ tone, text }: { tone: Tone; text: string }) {
 }
 
 /**
- * The model's notice, and the synthetic band unless the notice already says
- * so. The host puts SYNTHETIC_NOTICE (src/lib/gui/host/server/view.ts) on a
- * synthetic model unless the gate's notice is shown, and its text says
- * "synthetic"; if that wording changes, revisit this check, or the band is
- * drawn under it as well.
+ * The model's notice, the synthetic band unless the notice already says so,
+ * and the time zone notice with its link. The host puts SYNTHETIC_NOTICE
+ * (src/lib/gui/host/server/view.ts) on a synthetic model unless the gate's
+ * notice is shown, and its text says "synthetic"; if that wording changes,
+ * revisit this check, or the band is drawn under it as well.
  */
-function Notices({ model, ext }: { model: ViewModel; ext: SiteDayExt }) {
+function Notices({ model, ext, timezoneLink, kit }: { model: ViewModel; ext: SiteDayExt; timezoneLink: LinkRef | undefined; kit: GuiKit }) {
   const notice = model.notice;
   const said = notice !== undefined && /synthetic/i.test(notice.text);
+  const zone = ext.timezoneNotice;
   return (
     <>
       {notice && <Band tone={notice.tone} text={notice.text} />}
       {ext.synthetic && !said && <Band tone="warning" text={SYNTHETIC_BAND} />}
+      {zone && (
+        <section aria-label={zone.title} className={cls("gt:flex gt:flex-col gt:items-start gt:gap-1 gt:rounded-md gt:px-3 gt:py-2 gt:text-dense", BAND.warning)}>
+          <p className="gt:font-semibold">{zone.title}</p>
+          <p>{zone.text}</p>
+          {timezoneLink && <LinkControl kit={kit} link={timezoneLink} className={cls(CONTROL, "gt:border-border gt:bg-card gt:text-foreground gt:hover:bg-muted")} />}
+        </section>
+      )}
     </>
   );
 }
@@ -122,7 +136,7 @@ function LinkControl({ link, className, kit }: { link: LinkRef; className: strin
   );
 }
 
-/** The legacy page's empty state: what to register, and the link to where it is done. */
+/** The empty state: what to register, and the link to where it is done. */
 function NoSiteDevices(props: { ext: Extract<SiteDayExt, { state: "no-site-devices" }>; edges: LinkRef | undefined; kit: GuiKit }) {
   const { ext, edges, kit } = props;
   return (
@@ -134,7 +148,29 @@ function NoSiteDevices(props: { ext: Extract<SiteDayExt, { state: "no-site-devic
   );
 }
 
-/** Every action, and each link the picker and the empty state did not place. */
+/**
+ * The problem that kept the day from being read, in its tone: the server's
+ * copy, then the link to its fix, or a button that reads the same day again
+ * through kit.refresh, as the day picker does for the day shown.
+ */
+function Problem(props: { ext: Extract<SiteDayExt, { state: "problem" }>; fix: LinkRef | undefined; kit: GuiKit }) {
+  const { ext, fix, kit } = props;
+  const control = cls(CONTROL, "gt:border-border gt:bg-card gt:text-foreground gt:hover:bg-muted");
+  return (
+    <section className={cls("gt:flex gt:flex-col gt:items-start gt:gap-2 gt:rounded-lg gt:px-4 gt:py-3", BAND[ext.tone])}>
+      <h3 className="gt:text-body gt:font-semibold">{ext.title}</h3>
+      <p className="gt:max-w-prose gt:text-body">{ext.message}</p>
+      {fix && <LinkControl kit={kit} link={fix} className={control} />}
+      {ext.retry && (
+        <button type="button" onClick={() => kit.refresh()} className={control}>
+          Try again
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** Every action, and each link the picker, the notices, the empty state and the problem did not place. */
 function Controls({ model, placed, kit }: { model: ViewModel; placed: Set<string>; kit: GuiKit }) {
   const [error, setError] = useState<string | null>(null);
   const links = model.links.filter((l) => !placed.has(l.id));
@@ -164,7 +200,9 @@ function Controls({ model, placed, kit }: { model: ViewModel; placed: Set<string
 
 function SiteDay({ model, ext, kit }: { model: ModelOf<"metrics">; ext: SiteDayExt; kit: GuiKit }) {
   const edges = ext.state === "no-site-devices" ? model.links.find((l) => l.id === EDGES_LINK) : undefined;
-  const placed = new Set([...DAY_LINKS, ...(edges ? [EDGES_LINK] : [])]);
+  const fix = ext.state === "problem" ? model.links.find((l) => FIX_LINKS.includes(l.id)) : undefined;
+  const timezoneLink = ext.timezoneNotice ? model.links.find((l) => l.id === TIMEZONE_LINK) : undefined;
+  const placed = new Set([...DAY_LINKS, ...[edges, fix, timezoneLink].flatMap((l) => (l ? [l.id] : []))]);
   // The window bar shows the subtitle; the heading is the day without its
   // zone. site-day-model.ts (src/lib/metering/surface) builds the subtitle as
   // "<day> · <timezone>"; if that format changes, revisit.
@@ -178,7 +216,7 @@ function SiteDay({ model, ext, kit }: { model: ModelOf<"metrics">; ext: SiteDayE
   return (
     <article data-gui-view={model.view} className="gt:flex gt:flex-col gt:gap-4">
       <h1 className="gt:sr-only">{model.title}</h1>
-      <Notices model={model} ext={ext} />
+      <Notices model={model} ext={ext} timezoneLink={timezoneLink} kit={kit} />
       <DayPicker ext={ext} links={model.links} heading={heading} kit={kit} />
       {ext.state === "day" ? (
         <>
@@ -191,8 +229,10 @@ function SiteDay({ model, ext, kit }: { model: ModelOf<"metrics">; ext: SiteDayE
             </p>
           ))}
         </>
-      ) : (
+      ) : ext.state === "no-site-devices" ? (
         <NoSiteDevices ext={ext} edges={edges} kit={kit} />
+      ) : (
+        <Problem ext={ext} fix={fix} kit={kit} />
       )}
       <Controls model={model} placed={placed} kit={kit} />
       {attached.length > 0 && (
