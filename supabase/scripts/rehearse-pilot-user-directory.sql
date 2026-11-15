@@ -59,8 +59,8 @@ SET SESSION AUTHORIZATION postgres;
 
 DROP FUNCTION IF EXISTS public.fn_list_visible_users(UUID[]);
 
--- Mirrors supabase/pilot/20260924_mgm_review_import_essentials.sql for the
--- three objects the bridge touches.
+-- Mirrors the pilot overlay (supabase/pilot/20260924_mgm_review_import_essentials.sql,
+-- retired with 20261114230100) for the three objects the bridge touches.
 REVOKE ALL ON TABLE public.user_profiles, public.user_roles
   FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.user_profiles, public.user_roles TO authenticated;
