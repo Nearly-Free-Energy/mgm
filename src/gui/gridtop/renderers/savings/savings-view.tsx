@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Gridtop's drawing of `billing.savings@1`: the Operations page's savings
- * table (src/components/operations/savings-table.tsx), built from the tiles,
- * keyed `<column>.<row>`, and the ext's headings, warnings and notes. Every
- * string is the server's. The setup state is the page's empty state with its
+ * Gridtop's drawing of `billing.savings@1`: the savings table, built from
+ * the tiles, keyed `<column>.<row>`, and the ext's headings, warnings and
+ * notes. Every string is the server's. The setup state is a note with its
  * link to Setup › Rates (left to the window bar on the page's own view); the
  * unavailable state draws nothing, since the day above already explains. The
  * host's notice and the model's controls are drawn here too, since the

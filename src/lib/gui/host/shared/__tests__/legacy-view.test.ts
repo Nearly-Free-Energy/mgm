@@ -37,7 +37,8 @@ function manifest(superAdmin = true): Manifest {
     orgs: [],
     gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
     nav: SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["nav"],
-    views: [],
+    // A nav entry that names a view takes its href from the view's path.
+    views: SURFACES.flatMap((s) => (s.views ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["views"],
     status: [],
     communities: [{ id: COMMUNITY, name: "Kasana" }],
     microgrids: [
@@ -52,6 +53,11 @@ const ID_OF: Partial<Record<CoreEntityKind, string>> = { organization: ORG, comm
 const ALL_PAGES = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages);
 /** The pages served outside the contract, the only ones legacyView describes. */
 const PAGES = ALL_PAGES.filter((p) => p.servedBy === undefined);
+/** The catalog with no page served by a view, so legacyView describes every page. */
+const UNSERVED: BundledPlugin[] = MGM_BUNDLED_PLUGINS.map((p) => ({
+  ...p,
+  pages: p.pages.map((page) => ({ path: page.path, params: page.params })),
+}));
 
 /** A catalog page's path with each segment filled by the fixture id of its kind. */
 const filled = (page: (typeof PAGES)[number]) =>
@@ -72,7 +78,6 @@ const CURRENT_APP: Record<string, Id | null> = {
   "/microgrids/[id]/setup": "community.microgrids",
   "/microgrids/[id]/setup/households": "community.households",
   "/microgrids/[id]/setup/households/[householdId]": "community.households",
-  "/microgrids/[id]/operations": "metering.operations",
   "/microgrids/[id]/setup/edges": "metering.devices",
   "/microgrids/[id]/setup/edges/[edgeId]": "metering.devices",
   "/microgrids/[id]/setup/edges/shared": "metering.devices",
@@ -131,12 +136,18 @@ describe("legacyView on every catalog page", () => {
   }
 
   it("leaves each page a view serves to contributedView", () => {
+    /** The view that serves each page, and its current app. */
+    const SERVED: Record<string, [view: Id, nav: Id]> = {
+      "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
+      "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+    };
     const served = ALL_PAGES.filter((p) => p.servedBy === "view");
-    expect(served.map((p) => p.path)).toEqual(["/microgrids/[id]/operations/savings"]);
+    expect(served.map((p) => p.path).sort()).toEqual(Object.keys(SERVED).sort());
     for (const page of served) {
+      const [id, nav] = SERVED[page.path];
       expect(legacyView(filled(page), MANIFEST), page.path).toBeNull();
-      const view = contributedView(filled(page), { view: "billing.savings", title: "Savings", trail: [] }, MANIFEST);
-      expect(view).toMatchObject({ view: "billing.savings", title: "Savings", nav: "metering.operations", unplaced: false });
+      const view = contributedView(filled(page), { view: id, title: "Title", trail: [] }, MANIFEST);
+      expect(view, page.path).toMatchObject({ view: id, title: "Title", nav, unplaced: false });
       expect(view.scope.microgrid?.label).toBe("Kasana East");
     }
   });
@@ -159,7 +170,11 @@ describe("legacyView trails", () => {
       `/microgrids/${MICROGRID}/billing`,
     );
     // The microgrid's own href is its Operations page, so the app is not repeated.
-    expect(crumbs(`/microgrids/${MICROGRID}/operations`)).toEqual(["Org One", "Kasana", "Kasana East"]);
+    expect(legacyView(`/microgrids/${MICROGRID}/operations`, MANIFEST, UNSERVED)!.trail.map((c) => c.label)).toEqual([
+      "Org One",
+      "Kasana",
+      "Kasana East",
+    ]);
     expect(crumbs(`/communities/${COMMUNITY}/payment`)).toEqual(["Org One", "Kasana", "Communities"]);
     expect(crumbs(`/microgrids/${ORPHAN}/setup/rates`)).toEqual(["Org One", "Loose", "Rate Schedule"]);
   });
@@ -294,7 +309,9 @@ describe("contributedView", () => {
 
   it("takes the view's id and title, and the scope, trail and current app from the path", () => {
     const path = `/microgrids/${MICROGRID}/operations?date=2026-11-10`;
-    const legacy = legacyView(path, MANIFEST)!;
+    // What legacyView would say if the page were served outside the contract.
+    const legacy = legacyView(path, MANIFEST, UNSERVED)!;
+    expect(legacy.nav).toBe("metering.operations");
     expect(contributedView(path, model, MANIFEST)).toEqual({ ...legacy, view: "metering.site-day", title: "Tuesday" });
   });
 

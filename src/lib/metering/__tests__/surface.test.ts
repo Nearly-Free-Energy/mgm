@@ -1,7 +1,7 @@
 /**
  * Metering's GUI contribution: the Operations day as `metering.site-day`,
- * accepted by the registry and removed with it, with examples a GUI can be
- * tested against, while the Operations page itself is still served.
+ * which serves the Operations page and its nav entry, accepted by the
+ * registry and removed with it, with examples a GUI can be tested against.
  */
 import { describe, expect, it } from "vitest";
 import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
@@ -39,12 +39,15 @@ describe("METERING_SURFACE", () => {
     expect(view).not.toHaveProperty("agent");
   });
 
-  it("keeps the Operations page served: a legacy nav entry, and a catalog page with no servedBy", () => {
-    expect(METERING_SURFACE.nav?.find((n) => n.id === "metering.operations")).toMatchObject({
-      href: "/microgrids/[id]/operations",
-      legacy: true,
+  it("serves the Operations page through the view: a nav entry naming it, and a catalog page served by a view", () => {
+    const entry = METERING_SURFACE.nav?.find((n) => n.id === "metering.operations");
+    expect(entry).toMatchObject({ view: "metering.site-day", group: "operate", order: 40 });
+    expect(entry).not.toHaveProperty("href");
+    expect(entry).not.toHaveProperty("legacy");
+    expect(matchCatalogPage(`/microgrids/${"0".repeat(8)}/operations`)?.page).toMatchObject({
+      path: view.path,
+      servedBy: "view",
     });
-    expect(matchCatalogPage(`/microgrids/${"0".repeat(8)}/operations`)?.page).not.toHaveProperty("servedBy");
   });
 
   it("is accepted by the registry, and removed when its plugin unloads", () => {

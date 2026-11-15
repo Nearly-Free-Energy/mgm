@@ -1,12 +1,12 @@
 import "server-only";
 
 /**
- * What metering contributes to GUIs (src/lib/gui/surface.ts): navigation to
- * its pages, which are served outside the GUI contract (`legacy: true`),
- * with the labels the current chrome uses, and the Operations day as the
- * `metering.site-day` view. A page that moves to a view keeps its nav id.
- * `metering.live` is reserved for a later live view of a microgrid; the
- * Operations page's nav id is `metering.operations`.
+ * What metering contributes to GUIs (src/lib/gui/surface.ts): the Operations
+ * day as the `metering.site-day` view, with its nav entry, and navigation to
+ * the pages still served outside the GUI contract (`legacy: true`), with the
+ * labels the current chrome uses. A page that moves to a view keeps its nav
+ * id, so the Operations entry is still `metering.operations`.
+ * `metering.live` is reserved for a later live view of a microgrid.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { METERING_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -18,17 +18,13 @@ import { SITE_DAY_EXT_SCHEMA, SITE_DAY_KEYS } from "./surface/site-day-model";
 export const METERING_SURFACE: Contribution = {
   plugin: METERING_PLUGIN_NAME,
   nav: [
-    // Stays a legacy entry, and the catalog page keeps its page.tsx, until the
-    // Operations page is switched to the view.
     {
       id: "metering.operations",
       title: "Operations",
       icon: "live",
       group: "operate",
       order: 40,
-      href: "/microgrids/[id]/operations",
-      needs: ["microgrid"],
-      legacy: true,
+      view: "metering.site-day",
     },
     {
       id: "metering.devices",

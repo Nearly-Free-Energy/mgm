@@ -3,6 +3,7 @@ import {
   ARBITRAGE_MIN_BATTERY_MINUTES,
   MIN_CHARGED_KWH,
   rateAt,
+  savingsReadRange,
   tariffForDate,
   validateGridTariffBands,
   valueSiteDays,
@@ -11,6 +12,7 @@ import {
 } from "../site-savings";
 import type { SiteDayOperations, SiteFlow } from "@/lib/metering/site-operations";
 import type { GridTariffBand } from "@/lib/types/domain";
+import { addDaysToDateKey } from "@/lib/timezone/day-key";
 
 /** Night, day and evening rates (neutral example figures). */
 const BANDS: GridTariffBand[] = [
@@ -806,5 +808,54 @@ describe("valueSiteDays — total", () => {
       arbitrageGain: null,
       total: null,
     });
+  });
+});
+
+describe("savingsReadRange", () => {
+  const DATE = "2026-11-06";
+  const SETTINGS: SavingsSettingsInput = {
+    solar_savings_from: "2026-11-01",
+    arbitrage_from: null,
+    round_trip_efficiency: 0.9,
+  };
+
+  it("starts at the 1st of the month when the start dates are later", () => {
+    expect(
+      savingsReadRange(DATE, { ...SETTINGS, solar_savings_from: "2026-11-04" })
+    ).toEqual({ start: "2026-11-01", capped: false });
+  });
+
+  it("starts at the earlier start date when it is before the month", () => {
+    expect(
+      savingsReadRange(DATE, {
+        solar_savings_from: "2026-09-15",
+        arbitrage_from: "2026-08-20",
+        round_trip_efficiency: 0.9,
+      })
+    ).toEqual({ start: "2026-08-20", capped: false });
+  });
+
+  it("ignores a missing start date", () => {
+    expect(
+      savingsReadRange(DATE, {
+        solar_savings_from: null,
+        arbitrage_from: "2026-10-01",
+        round_trip_efficiency: 0.9,
+      })
+    ).toEqual({ start: "2026-10-01", capped: false });
+  });
+
+  it("reads exactly 366 days without capping", () => {
+    const start = addDaysToDateKey(DATE, -365);
+    expect(savingsReadRange(DATE, { ...SETTINGS, solar_savings_from: start })).toEqual({
+      start,
+      capped: false,
+    });
+  });
+
+  it("caps a longer range to the last 366 days", () => {
+    expect(
+      savingsReadRange(DATE, { ...SETTINGS, solar_savings_from: "2024-01-01" })
+    ).toEqual({ start: "2025-11-06", capped: true });
   });
 });

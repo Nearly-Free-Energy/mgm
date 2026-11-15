@@ -3,8 +3,8 @@ import "server-only";
 /**
  * The loader of the `billing.savings` view: what a microgrid's solar and
  * battery saved for a day, its month so far and since the savings were
- * first counted, as the Operations page's savings section works it out
- * (src/app/(gui)/microgrids/[id]/operations/savings-section.tsx).
+ * first counted, valued by ../site-savings.ts over the days savingsReadRange
+ * picks.
  *
  * A refusal carries fixed copy chosen by its status and code, never a
  * database or capability message.
@@ -50,9 +50,10 @@ const explainedAbove = (f: { status: number; code: string }) => f.code === "mete
 const ready = (model: LoadedModel<"metrics">) => ({ ok: true, model }) as const;
 
 export async function loadSavings(req: SurfaceRequest): Promise<Loaded<LoadedModel<"metrics">>> {
-  // The person's own client (row-level security), as the Operations page
-  // reads: both savings tables are FOR ALL on user_can_access_microgrid. If
-  // their policies change, revisit what this shows.
+  // The person's own client (row-level security), as the metering.site-day
+  // loader reads: both savings tables are FOR ALL on
+  // user_can_access_microgrid. If their policies change, revisit what this
+  // shows.
   const id = req.params.id;
   const { data: microgrid, error } = await req.supabase
     .from("microgrids")
@@ -91,11 +92,11 @@ export async function loadSavings(req: SurfaceRequest): Promise<Loaded<LoadedMod
     return ready(buildSavingsModel({ state: "setup", microgridId: microgrid.id, fmt: req.fmt, actions }));
   }
 
-  // The host passes on the day page's ?date= (query on both views). With
-  // none, this works out yesterday itself, in a request made after the day
-  // drew, so across the site's midnight it can value a day after the one
-  // shown above. If the host comes to pass on the day the page's loader
-  // resolved, that gap closes.
+  // The host passes on the Operations page's ?date= (query on both views).
+  // With none, this works out yesterday itself, in a request made after the
+  // day drew, so across the site's midnight it can value a day after the one
+  // shown above. If the host comes to pass on the day the metering.site-day
+  // loader resolved, that gap closes.
   const { date } = resolveRequestedDay({ requested: req.search.getAll("date"), stored: microgrid.timezone, now: req.now });
   const { start, capped } = savingsReadRange(date, settings);
   const composed = await composeMetering({ supabase: req.supabase, organizationId: req.organizationId });

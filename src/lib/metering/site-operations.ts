@@ -229,17 +229,13 @@ export type SiteDayOperations = {
   /** Set when the samples came from a synthetic provider; computeSiteDay never sets it. */
   synthetic?: true;
   /**
-   * Per-bin flows. Large (288 entries a day): a server page strips it before
-   * passing a day to a client component.
+   * Per-bin flows. Large (288 entries a day): they stay on the server, since
+   * the view models built from a day (metering.site-day, billing.savings)
+   * carry only what they show; a model that copied the day whole would ship
+   * them to the browser.
    */
   flows: SiteFlow[];
 };
-
-/**
- * A day without its per-bin flows: what a server page passes to a client
- * component (the flows are large and only the savings figures need them).
- */
-export type SiteDaySummary = Omit<SiteDayOperations, "flows">;
 
 type Bin = {
   startMs: number;
