@@ -4,13 +4,14 @@ import "server-only";
  * Examples of the `billing.savings` view, so every GUI can be tested against
  * it: generated figures with both savings counted, both warnings and an
  * estimated solar, the setup note, and the state the day above already
- * explains. Built at import the way the loader builds them.
+ * explains. The first two offer the settings and tariff actions. Built at
+ * import the way the loader builds them.
  */
 import type { ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { LoadedModel } from "@/lib/gui/surface";
 import type { SavingsColumn } from "../site-savings";
-import { buildSavingsModel } from "./savings-model";
+import { buildSavingsModel, GRID_TARIFF_ADD_ACTION, SAVINGS_SETTINGS_ACTION, savingsActions } from "./savings-model";
 
 const ORG = "00000000-0000-4000-8000-0000000000a0";
 const MICROGRID = { id: "00000000-0000-4000-8000-0000000000a1", name: "Example site" };
@@ -28,6 +29,11 @@ const SYNTHETIC_NOTICE = {
   tone: "warning",
   text: "Synthetic data: these figures are generated for demonstration, not measured.",
 } as const;
+
+const TITLES: Record<string, string> = {
+  [SAVINGS_SETTINGS_ACTION.id]: SAVINGS_SETTINGS_ACTION.title,
+  [GRID_TARIFF_ADD_ACTION.id]: GRID_TARIFF_ADD_ACTION.title,
+};
 
 const column = (solarSavings: number | null, arbitrageGain: number | null, lightsOnPct: number | null, days: number): SavingsColumn => ({
   solarSavings,
@@ -59,8 +65,17 @@ export const SAVINGS_LOADED_EXAMPLES: readonly LoadedModel<"metrics">[] = [
     cappedFrom: "2025-11-06",
     solarEstimated: true,
     synthetic: true,
+    actions: savingsActions(
+      MICROGRID.id,
+      { solar_savings_from: "2025-10-01", arbitrage_from: "2026-01-01", round_trip_efficiency: 0.9 },
+      [
+        { from_hour: 0, to_hour: 6, rate: 520 },
+        { from_hour: 6, to_hour: 18, rate: 780 },
+        { from_hour: 18, to_hour: 24, rate: 910 },
+      ],
+    ),
   }),
-  buildSavingsModel({ state: "setup", microgridId: MICROGRID.id, fmt }),
+  buildSavingsModel({ state: "setup", microgridId: MICROGRID.id, fmt, actions: savingsActions(MICROGRID.id, null, null) }),
   buildSavingsModel({ state: "unavailable" }),
 ];
 
@@ -76,7 +91,8 @@ export const SAVINGS_EXAMPLES: readonly ModelOf<"metrics">[] = SAVINGS_LOADED_EX
     // The host fills the entity from the path when a loader gives none.
     entity: { kind: "microgrid", id: MICROGRID.id, label: MICROGRID.name },
     trail: [{ label: MICROGRID.name, href: `/microgrids/${MICROGRID.id}` }],
-    actions: [],
+    // Each ActionLink as the host resolves it while billing is enabled.
+    actions: loaded.actions.map((link) => ({ ...link, label: link.label ?? TITLES[link.action], enabled: true })),
     links: loaded.links ?? [],
     attached: [],
     ...(synthetic ? { notice: { ...SYNTHETIC_NOTICE } } : {}),

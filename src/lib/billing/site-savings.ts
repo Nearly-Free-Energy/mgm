@@ -43,6 +43,8 @@ export const ARBITRAGE_MIN_BATTERY_MINUTES = 600;
  * lowest rate stands in, so that energy is never counted as free.
  */
 export const MIN_CHARGED_KWH = 0.05;
+/** The battery round-trip efficiency a settings form starts with when none is stored. */
+export const DEFAULT_ROUND_TRIP_EFFICIENCY = 0.9;
 
 export type TariffInput = { effective_from: string; bands: GridTariffBand[] };
 

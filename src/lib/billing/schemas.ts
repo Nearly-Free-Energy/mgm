@@ -1,8 +1,9 @@
 /**
  * Body schemas for billing's write actions. The billing routes parse with
- * these (schemas-routes.test.ts checks it). A form that offers one of these
- * actions should parse with the same schema; GridTariffEditor still runs its
- * own checks, so revisit this when it or a GUI surface imports this module.
+ * these (schemas-routes.test.ts checks it), and BILLING_SURFACE's actions
+ * take their input from them, so the GUI form and the routes share one
+ * definition. GridTariffEditor still runs its own checks; drop this note if
+ * it starts parsing with these schemas.
  * A change to a schema's JSON Schema is a new input version: bump its
  * constant (schemas.test.ts pins each version's shape).
  *

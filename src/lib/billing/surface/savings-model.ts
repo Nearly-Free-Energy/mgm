@@ -7,14 +7,16 @@
  * on the client is built here, with the same copy. Each figure is a tile
  * keyed `<column>.<row>`; the table's headings, warnings and notes go in the
  * `billing.savings@1` ext (./savings-ext.ts) for a renderer that draws the
- * table.
+ * table. The setup and ready states also offer the writes that change what
+ * is counted (`savingsActions`).
  */
 import { formatRate } from "@/components/format/currency";
 import { formatLocalDate } from "@/components/format/local-date";
 import type { LinkRef, Value } from "@/lib/gui/contract";
 import { markSynthetic } from "@/lib/gui/mark-synthetic";
-import type { Fmt, LoadedModel } from "@/lib/gui/surface";
-import type { SavingsColumn, SavingsSummary } from "../site-savings";
+import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
+import type { GridTariffBand } from "@/lib/types/domain";
+import { DEFAULT_ROUND_TRIP_EFFICIENCY, type SavingsColumn, type SavingsSettingsInput, type SavingsSummary } from "../site-savings";
 import type { SavingsExtData } from "./savings-ext";
 
 /** The ext this model carries; its shape is SavingsExt in ./savings-ext.ts. */
@@ -29,14 +31,50 @@ export const SAVINGS_KEYS = [
 
 export const SAVINGS_TITLE = "What the site saved";
 
+/** The billing actions the view offers; BILLING_SURFACE (../surface.ts) defines them. */
+export const SAVINGS_SETTINGS_ACTION = { id: "billing.savings-settings", title: "Edit savings settings" } as const;
+export const GRID_TARIFF_ADD_ACTION = { id: "billing.grid-tariff-add", title: "Add a grid tariff version" } as const;
+
+/**
+ * The two writes, on the microgrid. The settings form starts from the stored
+ * settings, or the Rates page's default efficiency; the tariff form starts
+ * from the newest version's bands, with no date.
+ */
+export function savingsActions(
+  microgridId: string,
+  settings: SavingsSettingsInput | null,
+  newestBands: readonly GridTariffBand[] | null,
+): ActionLink[] {
+  const stored = settings ?? { solar_savings_from: null, arbitrage_from: null, round_trip_efficiency: DEFAULT_ROUND_TRIP_EFFICIENCY };
+  const bands = newestBands && [...newestBands].sort((a, b) => a.from_hour - b.from_hour);
+  return [
+    {
+      action: SAVINGS_SETTINGS_ACTION.id,
+      params: { id: microgridId },
+      prefill: {
+        solar_savings_from: stored.solar_savings_from,
+        arbitrage_from: stored.arbitrage_from,
+        round_trip_efficiency: stored.round_trip_efficiency,
+      },
+    },
+    {
+      action: GRID_TARIFF_ADD_ACTION.id,
+      params: { id: microgridId },
+      ...(bands ? { prefill: { bands: bands.map((b) => ({ from_hour: b.from_hour, to_hour: b.to_hour, rate: b.rate })) } } : {}),
+    },
+  ];
+}
+
 type Tile = LoadedModel<"metrics">["body"]["tiles"][number];
 type Row = (typeof SAVINGS_ROWS)[number];
 
 export type SavingsModelInput =
-  | { state: "setup"; microgridId: string; fmt: Fmt }
+  | { state: "setup"; microgridId: string; fmt: Fmt; actions: ActionLink[] }
   | { state: "unavailable" }
   | {
       state: "ready";
+      /** From savingsActions. */
+      actions: ActionLink[];
       summary: SavingsSummary;
       /** The day shown, YYYY-MM-DD. */
       date: string;
@@ -64,8 +102,8 @@ const ROW_NAMES: Record<Row, string> = {
   "lights-on": "Lights on",
 };
 
-function base(tiles: Tile[], ext: SavingsExtData, links: LinkRef[] = []): LoadedModel<"metrics"> {
-  return { title: SAVINGS_TITLE, body: { tiles }, actions: [], links, ext: { schema: SAVINGS_EXT_SCHEMA, data: ext } };
+function base(tiles: Tile[], ext: SavingsExtData, links: LinkRef[] = [], actions: ActionLink[] = []): LoadedModel<"metrics"> {
+  return { title: SAVINGS_TITLE, body: { tiles }, actions, links, ext: { schema: SAVINGS_EXT_SCHEMA, data: ext } };
 }
 
 export function buildSavingsModel(input: SavingsModelInput): LoadedModel<"metrics"> {
@@ -77,7 +115,7 @@ export function buildSavingsModel(input: SavingsModelInput): LoadedModel<"metric
     const href = `/microgrids/${encodeURIComponent(input.microgridId)}/setup/rates` as const;
     return base([{ key: "setup", label: title, value: input.fmt.text(text) }], { state: "setup", synthetic: false, title, text }, [
       { id: "billing.setup-rates", label: "Go to Setup > Rates", href },
-    ]);
+    ], input.actions);
   }
 
   const { summary, date, currency, locale, fmt } = input;
@@ -150,6 +188,6 @@ export function buildSavingsModel(input: SavingsModelInput): LoadedModel<"metric
       "Solar that charged the battery appears in both lines, as a saving and as a charging cost, so the total is the figure to rely on. Lights on is the share of the time with a known state that the houses had power.",
     ],
   };
-  const model = base(tiles, ext);
+  const model = base(tiles, ext, [], input.actions);
   return input.synthetic ? markSynthetic(model) : model;
 }

@@ -10,7 +10,15 @@ import type { Value } from "@/lib/gui/contract";
 import type { SavingsColumn, SavingsSummary } from "../../site-savings";
 import { SAVINGS_EXAMPLES, SAVINGS_LOADED_EXAMPLES } from "../examples";
 import { SavingsExt, type SavingsExtData } from "../savings-ext";
-import { buildSavingsModel, SAVINGS_EXT_SCHEMA, SAVINGS_KEYS, type SavingsModelInput } from "../savings-model";
+import {
+  buildSavingsModel,
+  GRID_TARIFF_ADD_ACTION,
+  SAVINGS_EXT_SCHEMA,
+  SAVINGS_KEYS,
+  SAVINGS_SETTINGS_ACTION,
+  savingsActions,
+  type SavingsModelInput,
+} from "../savings-model";
 
 const fmt = createFmt({ locale: "en-GB" });
 const col = (solarSavings: number | null, arbitrageGain: number | null, total: number | null, lightsOnPct: number | null): SavingsColumn => ({
@@ -39,6 +47,7 @@ const ready = (o: Partial<Ready> = {}) =>
     cappedFrom: null,
     solarEstimated: false,
     synthetic: false,
+    actions: [],
     ...o,
   });
 const tile = (model: ReturnType<typeof ready>, key: string) => model.body.tiles.find((t) => t.key === key)!;
@@ -154,7 +163,7 @@ describe("buildSavingsModel, ready", () => {
 
 describe("buildSavingsModel, setup and unavailable", () => {
   it("shows the setup note with the page's copy and its link to Setup > Rates", () => {
-    const model = buildSavingsModel({ state: "setup", microgridId: "mg 1", fmt });
+    const model = buildSavingsModel({ state: "setup", microgridId: "mg 1", fmt, actions: [] });
     expect(model.body.tiles).toEqual([
       { key: "setup", label: "Count what the site saves", value: { t: "text", text: expect.stringContaining("Enter the grid tariff") } },
     ]);
@@ -170,6 +179,47 @@ describe("buildSavingsModel, setup and unavailable", () => {
   });
 });
 
+const MG = "00000000-0000-4000-8000-0000000000b1";
+
+describe("savingsActions", () => {
+  it("starts the settings form from the stored settings, and the tariff form from the newest bands in hour order", () => {
+    const bands = [
+      { from_hour: 18, to_hour: 24, rate: 910 },
+      { from_hour: 0, to_hour: 18, rate: 600 },
+    ];
+    const settings = { solar_savings_from: "2026-10-01", arbitrage_from: null, round_trip_efficiency: 0.85 };
+    expect(savingsActions(MG, settings, bands)).toEqual([
+      { action: "billing.savings-settings", params: { id: MG }, prefill: settings },
+      {
+        action: "billing.grid-tariff-add",
+        params: { id: MG },
+        prefill: { bands: [bands[1], bands[0]] },
+      },
+    ]);
+    // The stored list is not reordered.
+    expect(bands[0].from_hour).toBe(18);
+  });
+
+  it("starts with nothing counted and the Rates page's efficiency when nothing is stored, and with no tariff bands", () => {
+    expect(savingsActions(MG, null, null)).toEqual([
+      {
+        action: SAVINGS_SETTINGS_ACTION.id,
+        params: { id: MG },
+        prefill: { solar_savings_from: null, arbitrage_from: null, round_trip_efficiency: 0.9 },
+      },
+      { action: GRID_TARIFF_ADD_ACTION.id, params: { id: MG } },
+    ]);
+  });
+
+  it("are offered in the setup and ready states, and not when the day above explains", () => {
+    const actions = savingsActions(MG, null, null);
+    expect(buildSavingsModel({ state: "setup", microgridId: MG, fmt, actions }).actions).toEqual(actions);
+    expect(ready({ actions }).actions).toEqual(actions);
+    expect(ready({ actions, synthetic: true }).actions).toEqual(actions);
+    expect(buildSavingsModel({ state: "unavailable" }).actions).toEqual([]);
+  });
+});
+
 describe("SAVINGS_EXAMPLES", () => {
   it("covers each state, parses with SavingsExt, and carries the host's synthetic notice where it is", () => {
     expect(SAVINGS_LOADED_EXAMPLES.map((m) => (m.ext!.data as SavingsExtData).state)).toEqual(["ready", "setup", "unavailable"]);
@@ -178,5 +228,14 @@ describe("SAVINGS_EXAMPLES", () => {
       expect(example.view).toBe("billing.savings");
     }
     expect(SAVINGS_EXAMPLES.map((e) => e.notice ?? null)).toEqual([SYNTHETIC_NOTICE, null, null]);
+  });
+
+  it("offer both actions, enabled and labelled as the host resolves them, in the setup and ready states", () => {
+    const offered = SAVINGS_EXAMPLES.map((e) => e.actions.map((a) => [a.action, a.label, a.enabled]));
+    const both = [
+      ["billing.savings-settings", "Edit savings settings", true],
+      ["billing.grid-tariff-add", "Add a grid tariff version", true],
+    ];
+    expect(offered).toEqual([both, both, []]);
   });
 });
