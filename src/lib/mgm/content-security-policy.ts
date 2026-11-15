@@ -1,22 +1,33 @@
 /**
  * The content security policy for the pages middleware lets through: where
- * a page may load scripts, styles, images, fonts and connections from.
+ * a page may load scripts, styles, images, fonts and connections from. The
+ * public payment pages are left out: their route handlers set a stricter
+ * policy of their own (src/middleware.ts, ownPolicy).
  *
- * It ships report-only (decision 19 on #115): browsers report what it
- * would block and block nothing. Switching CSP_MODE to "enforce" is a
- * separate change, made once a browser check covers the invoice logo and
- * the invoice PDF preview.
+ * It is enforced (decision 19 on #115): browsers block what it does not
+ * allow. It shipped report-only first, and was switched once the browser
+ * smoke covered the invoice logo and the invoice PDF preview and failed on
+ * any violation (e2e/invoice.spec.ts, e2e/checks.ts). That smoke runs a
+ * headless Chromium with no PDF viewer; the preview's popup, a blob:
+ * document that inherits this policy, object-src 'none' included, was
+ * checked by hand to display in desktop Chrome 157, headed and headless,
+ * against a production build sending the enforced header. If the preview
+ * stops opening as a blob: document in a popup
+ * (src/app/(gui)/communities/[id]/invoice/invoice-shell.tsx), check again.
+ * "report-only" stays available for a policy change that needs a trial.
  *
  * Next.js reads the nonce from the forwarded request's
- * `content-security-policy` or `content-security-policy-report-only`
- * header and adds it to the scripts it renders (checked in Next 16.4,
- * `parse-request-headers`). If it stops reading the report-only header,
- * the nonce is lost while in report-only mode; revisit then.
+ * `content-security-policy` header (or the report-only one) and adds it to
+ * the scripts it renders (checked in Next 16.4, `parse-request-headers`).
+ * Every page is rendered per request (none is prerendered), so each gets
+ * the nonce; a prerendered page would carry none, and its scripts would be
+ * blocked. If Next.js stops reading the header, or a page becomes static,
+ * scripts stop running; revisit then.
  */
 
 export type CspMode = "report-only" | "enforce";
 
-export const CSP_MODE: CspMode = "report-only";
+export const CSP_MODE: CspMode = "enforce";
 
 export type CspHeaderName =
   | "content-security-policy"

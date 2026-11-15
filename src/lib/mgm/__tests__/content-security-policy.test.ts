@@ -16,10 +16,10 @@ function directives(policy: string): Record<string, string[]> {
 }
 
 describe("content security policy", () => {
-  it("is report-only (decision 19 on #115)", () => {
-    expect(CSP_MODE).toBe("report-only");
-    expect(cspHeaderName()).toBe("content-security-policy-report-only");
-    expect(cspHeaderName("enforce")).toBe("content-security-policy");
+  it("is enforced (decision 19 on #115)", () => {
+    expect(CSP_MODE).toBe("enforce");
+    expect(cspHeaderName()).toBe("content-security-policy");
+    expect(cspHeaderName("report-only")).toBe("content-security-policy-report-only");
   });
 
   it("builds the exact directive set", () => {

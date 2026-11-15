@@ -13,7 +13,7 @@
  *   - A page outside the installed release answers 404 with the
  *     not-released HTML page; an API path keeps its plain-text 404.
  *   - The web app manifest loads without a session.
- *   - Page requests forward x-mgm-path and carry a report-only content
+ *   - Page requests forward x-mgm-path and carry an enforced content
  *     security policy with a fresh nonce; API requests get neither.
  *   - The matcher skips only Next.js's asset folders, the GUI stylesheets'
  *     folder and each file in public/ by name, and each skipped folder has
@@ -554,13 +554,15 @@ describe("middleware session check", () => {
     expect(res.headers.get("x-middleware-request-x-mgm-path")).toBe(
       "/settings/plugins?tab=all",
     );
-    expect(
-      res.headers.get("x-middleware-request-content-security-policy-report-only"),
-    ).toBe(res.headers.get("content-security-policy-report-only"));
+    expect(res.headers.get("x-middleware-request-content-security-policy")).toBe(
+      res.headers.get("content-security-policy"),
+    );
   });
 });
 
-const CSP = "content-security-policy-report-only";
+const CSP = "content-security-policy";
+/** The header middleware does not send while the policy is enforced. */
+const REPORT_ONLY = "content-security-policy-report-only";
 
 function nonceOf(policy: string | null): string | undefined {
   return policy?.match(/'nonce-([^']+)'/)?.[1];
@@ -638,7 +640,7 @@ describe("middleware request path and content security policy", () => {
     expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
     expect(res.headers.get("x-middleware-override-headers")).not.toContain("x-mgm-path");
     expect(res.headers.get(CSP)).toBeNull();
-    expect(res.headers.get("content-security-policy")).toBeNull();
+    expect(res.headers.get(REPORT_ONLY)).toBeNull();
   });
 
   it("caps x-mgm-path at 2,048 characters", async () => {
@@ -651,7 +653,7 @@ describe("middleware request path and content security policy", () => {
   it.each([
     { path: "/communities", session: signedIn },
     { path: "/login", session: signedOut },
-  ])("gives $path a report-only policy with the Supabase origin and a nonce", async ({ path, session }) => {
+  ])("gives $path an enforced policy with the Supabase origin and a nonce", async ({ path, session }) => {
     session();
     const middleware = await loadMiddleware();
     const res = await middleware(makeRequest(path));
@@ -660,10 +662,26 @@ describe("middleware request path and content security policy", () => {
     expect(policy).toContain("img-src 'self' data: blob: http://localhost:54321");
     expect(policy).toContain("object-src 'none'");
     expect(nonceOf(policy)).toBeTruthy();
-    expect(res.headers.get("content-security-policy")).toBeNull();
+    expect(res.headers.get(REPORT_ONLY)).toBeNull();
     // The page's request carries the same policy, which is where Next.js
     // reads the nonce from.
     expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
+  });
+
+  // Their route handlers set PUBLIC_PAGE_SECURITY_HEADERS, which a policy
+  // from middleware would replace (src/middleware.ts, ownPolicy).
+  it.each([
+    { path: "/p/Kp9XrA", session: signedOut },
+    { path: "/payment/callback", session: signedOut },
+    { path: "/payment/callback", session: signedIn },
+  ])("leaves $path to the stricter policy its route sets", async ({ path, session }) => {
+    session();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path, { [CSP]: "script-src 'nonce-chosen'" }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get(CSP)).toBeNull();
+    expect(res.headers.get(REPORT_ONLY)).toBeNull();
+    expect(res.headers.get(`x-middleware-request-${CSP}`)).toBeNull();
   });
 
   it("takes the Supabase origin from the runtime settings", async () => {
@@ -687,8 +705,9 @@ describe("middleware request path and content security policy", () => {
   });
 
   it.each([
-    { path: "/communities", header: "content-security-policy", value: "script-src 'nonce-chosen'" },
     { path: "/communities", header: CSP, value: "script-src 'nonce-chosen'" },
+    { path: "/communities", header: REPORT_ONLY, value: "script-src 'nonce-chosen'" },
+    { path: "/api/communities", header: CSP, value: "script-src 'nonce-chosen'" },
     { path: "/communities", header: "x-mgm-path", value: "/organizations/other" },
     { path: "/api/communities", header: "x-mgm-path", value: "/organizations/other" },
   ])("drops a client-sent $header on $path after a token refresh too", async ({ path, header, value }) => {
@@ -712,9 +731,12 @@ describe("middleware request path and content security policy", () => {
     );
     const forwarded = res.headers.get(`x-middleware-request-${header}`);
     if (forwarded !== null) expect(forwarded).not.toBe(value);
-    expect(res.headers.get("x-middleware-request-content-security-policy")).toBeNull();
+    expect(res.headers.get(`x-middleware-request-${REPORT_ONLY}`)).toBeNull();
     if (path.startsWith("/api/")) {
       expect(res.headers.get("x-middleware-request-x-mgm-path")).toBeNull();
+      expect(res.headers.get(`x-middleware-request-${CSP}`)).toBeNull();
+    } else {
+      expect(nonceOf(res.headers.get(`x-middleware-request-${CSP}`))).toBeTruthy();
     }
   });
 
@@ -731,10 +753,15 @@ describe("middleware request path and content security policy", () => {
     signedIn();
     const middleware = await loadMiddleware();
     const res = await middleware(
-      makeRequest("/communities", { "content-security-policy": "script-src 'nonce-chosen'" }),
+      makeRequest("/communities", {
+        [CSP]: "script-src 'nonce-chosen'",
+        [REPORT_ONLY]: "script-src 'nonce-chosen'",
+      }),
     );
-    expect(res.headers.get("x-middleware-request-content-security-policy")).toBeNull();
-    expect(nonceOf(res.headers.get(`x-middleware-request-${CSP}`))).not.toBe("chosen");
+    expect(res.headers.get(`x-middleware-request-${REPORT_ONLY}`)).toBeNull();
+    const nonce = nonceOf(res.headers.get(`x-middleware-request-${CSP}`));
+    expect(nonce).toBeTruthy();
+    expect(nonce).not.toBe("chosen");
   });
 
   it("adds eval and websockets in development", async () => {
