@@ -33,9 +33,10 @@ export type BillingPeriod =
   Database["public"]["Tables"]["billing_periods"]["Row"];
 
 /**
- * grid_tariffs row with JSONB `bands` narrowed to GridTariffBand[]. The
- * database checks only that `bands` is an array of 1 to 24 entries; the
- * application validates the bands themselves (validateGridTariffBands).
+ * grid_tariffs row with JSONB `bands` narrowed to GridTariffBand[]. Rows
+ * written since migration 20261115110000 hold bands that pass
+ * validateGridTariffBands (trigger `trg_grid_tariffs_check_bands`); an older
+ * row may not, so readers still validate.
  */
 export type GridTariff = Omit<
   Database["public"]["Tables"]["grid_tariffs"]["Row"],

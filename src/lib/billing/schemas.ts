@@ -63,7 +63,9 @@ export const AddGridTariffBody = z.strictObject(
       .array(GridTariffBandBody, { error: "Bands must be a list." })
       .min(1, { error: BAND_COUNT })
       .max(24, { error: BAND_COUNT })
-      // Contiguous 0-24 coverage; the database checks only the array's length.
+      // Contiguous 0-24 coverage. The database's trigger on grid_tariffs
+      // (migration 20261115110000) checks the same rules with the same
+      // messages; if this changes, change it in a new migration.
       .superRefine((bands, ctx) => {
         const checked = validateGridTariffBands(bands);
         if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message });

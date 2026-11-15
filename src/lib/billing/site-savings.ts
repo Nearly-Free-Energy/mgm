@@ -98,6 +98,11 @@ type Validation = { ok: true; bands: GridTariffBand[] } | { ok: false; message: 
  * covering 0–24 with no gap or overlap, each with a finite rate of 0 or
  * more. Bands may arrive in any order; the result is sorted by start hour
  * and carries only the three band fields.
+ *
+ * The trigger trg_grid_tariffs_check_bands (migration 20261115110000)
+ * repeats these rules and messages for every write to grid_tariffs;
+ * grid_tariff_bands.test.ts compares the two. A change here needs a new
+ * migration that changes the trigger.
  */
 export function validateGridTariffBands(input: unknown): Validation {
   if (!Array.isArray(input)) return { ok: false, message: "Bands must be a list." };
