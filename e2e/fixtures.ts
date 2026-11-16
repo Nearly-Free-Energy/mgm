@@ -8,9 +8,10 @@ import {
   serviceClient,
 } from "../src/lib/supabase/__tests__/rls.helpers";
 
-// The smoke's own rows: one organization, one community, three microgrids,
-// three households on the first, and an org_manager who signs in with a
-// random password. This file writes only the ids and the email to disk, for
+// The smoke's own rows: one organization, one community with an invoice
+// configuration whose logo is an object in the invoice-logos bucket, three
+// microgrids, three households on the first, and an org_manager who signs in
+// with a random password. This file writes only the ids and the email to disk, for
 // the narrow project and the teardown. The password is not secret: the
 // Playwright report and a failed run's trace record it as typed, for a user
 // the teardown deletes from a local database.
@@ -18,7 +19,19 @@ import {
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");
 
-export type SmokeFixtures = { orgId: string; microgridId: string; email: string };
+export type SmokeFixtures = { orgId: string; communityId: string; microgridId: string; email: string };
+
+/**
+ * The invoice logo: an 8 x 8 PNG, uploaded where the invoice-logo route puts
+ * uploads (`<community id>/<name>.<ext>` in the private invoice-logos
+ * bucket, src/app/api/communities/[id]/invoice-logo/route.ts). If that route
+ * changes its bucket or path scheme, change these with it.
+ */
+const LOGO_BUCKET = "invoice-logos";
+const LOGO_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR42mMQs4rHihiGlgQABocrwYGtYIoAAAAASUVORK5CYII=",
+  "base64"
+);
 
 /** The app under test must use a local Supabase, as the rls suites do. */
 function assertLocalSupabase(): void {
@@ -64,11 +77,25 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures & { password:
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
-  const fixtures: SmokeFixtures = { orgId, microgridId: microgridIds[0], email };
+  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], email };
   writeFileSync(FIXTURES_FILE, JSON.stringify(fixtures));
 
   await must("organization", svc.from("organizations").insert({ id: orgId, name: `Smoke organization ${tag}` }));
   await must("community", svc.from("communities").insert({ id: communityId, org_id: orgId, name: "Smoke community" }));
+  const logoPath = `${communityId}/smoke-logo.png`;
+  await must(
+    "invoice logo",
+    svc.storage.from(LOGO_BUCKET).upload(logoPath, LOGO_PNG, { contentType: "image/png", upsert: true })
+  );
+  // communities.invoice_config, the JSONB the invoice page reads and the
+  // invoice-config route writes (src/lib/invoices/config-schema.ts).
+  await must(
+    "invoice configuration",
+    svc
+      .from("communities")
+      .update({ invoice_prefix: "SMOKE", invoice_config: { branding: { logo_storage_path: logoPath } } })
+      .eq("id", communityId)
+  );
   await must(
     "microgrids",
     svc.from("microgrids").insert(
@@ -100,7 +127,17 @@ export function readSmokeFixtures(): SmokeFixtures {
 export async function deleteSmokeFixtures(): Promise<void> {
   if (!existsSync(FIXTURES_FILE)) return;
   assertLocalSupabase();
-  const { orgId, email } = readSmokeFixtures();
+  const { orgId, communityId, email } = readSmokeFixtures();
+  // Storage objects are not rows under the organization, so deleting it
+  // leaves them; remove everything under the community's prefix first.
+  if (communityId) {
+    const svc = await serviceClient();
+    const bucket = svc.storage.from(LOGO_BUCKET);
+    const listed = (await must("invoice logos", bucket.list(communityId))) ?? [];
+    if (listed.length > 0) {
+      await must("invoice logos", bucket.remove(listed.map((object) => `${communityId}/${object.name}`)));
+    }
+  }
   await cleanupTestData({ orgIds: [orgId], userEmails: [email] });
   rmSync(FIXTURES_FILE);
 }

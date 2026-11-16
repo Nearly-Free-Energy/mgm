@@ -188,9 +188,10 @@ jobs:
           export MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
           npm test
 
-      # The browser smoke (e2e/, playwright.config.ts): sign-in, home and a
-      # households list at 360 px against the production build and the local
-      # Supabase above, as a throwaway user it creates and deletes. Every
+      # The browser smoke (e2e/, playwright.config.ts): sign-in, home, a
+      # households list and the invoice page's logo and PDF preview at 360 px,
+      # against the production build and the local Supabase above, as a
+      # throwaway user it creates and deletes. Every
       # value comes from `supabase status` on this runner; none is a
       # repository secret. Timings go to the job summary and are not enforced.
       - name: Cache Playwright's Chromium

@@ -84,11 +84,19 @@ export async function middleware(request: NextRequest) {
   // Pages get the request path and a content security policy with a fresh
   // nonce; API requests get neither.
   const isApi = request.nextUrl.pathname.startsWith("/api/");
+  // The public payment pages (/p/<slug>, /payment/callback) are route
+  // handlers that set a stricter policy of their own
+  // (PUBLIC_PAGE_SECURITY_HEADERS, src/lib/public-html/page.ts). Next.js
+  // applies middleware's response headers over the route's, so sending this
+  // one, now that both use the enforced header name, would replace theirs.
+  // If one of them starts rendering through the app, or stops setting its
+  // own policy, revisit.
+  const ownPolicy = !isApi && isPublicPaymentRoute(request.nextUrl.pathname);
   const pathWithQuery = `${request.nextUrl.pathname}${request.nextUrl.search}`.slice(
     0,
     MGM_PATH_MAX_LENGTH,
   );
-  const csp = isApi
+  const csp = isApi || ownPolicy
     ? null
     : {
         header: cspHeaderName(),

@@ -5,7 +5,7 @@ import { AUTH_DIR, createSmokeFixtures } from "./fixtures";
 
 setup("sign-in works at 360 px", async ({ page }) => {
   const fixtures = await createSmokeFixtures();
-  const watch = watchPage(page);
+  const watch = await watchPage(page);
 
   await page.goto("/login");
   const email = page.getByLabel("Email", { exact: true });
