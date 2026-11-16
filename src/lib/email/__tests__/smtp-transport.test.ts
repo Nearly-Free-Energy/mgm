@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { classifySmtpError, createSmtpTransport, SEND_TIMEOUT_MS } from "../smtp/transport";
+import { EventEmitter } from "node:events";
+import { CONNECT_TIMEOUT_MS, classifySmtpError, createSmtpTransport, SEND_TIMEOUT_MS } from "../smtp/transport";
 import type { SmtpSenderSettings } from "../types";
 
 const SETTINGS: SmtpSenderSettings = {
@@ -103,6 +104,82 @@ describe("createSmtpTransport", () => {
   });
 });
 
+/** A socket that connects when told to, and records whether it was destroyed. */
+function fakeSocket() {
+  const socket = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+  return socket;
+}
+
+type GetSocket = (options: unknown, callback: (error: Error | null, socket?: { connection: unknown }) => void) => void;
+
+describe("createSmtpTransport deadline", () => {
+  it("gives up on a DNS lookup that never answers, inside the same deadline, and never connects", async () => {
+    vi.useFakeTimers();
+    const fake = fakeTransport(async () => ({}));
+    const pending = createSmtpTransport(SETTINGS, {
+      lookup: () => new Promise(() => {}),
+      createTransport: fake.createTransport,
+    }).send(MESSAGE);
+    await vi.advanceTimersByTimeAsync(SEND_TIMEOUT_MS);
+    await expect(pending).resolves.toMatchObject({ ok: false, reason: "unreachable" });
+    expect(fake.created).toHaveLength(0);
+  });
+
+  it("connects to the checked address and destroys the socket at the deadline", async () => {
+    vi.useFakeTimers();
+    const socket = fakeSocket();
+    const connect = vi.fn(() => socket);
+    const fake = fakeTransport(() => new Promise(() => {}));
+    const createTransport = (options: Record<string, unknown>) => {
+      // What nodemailer does first: ask for a socket.
+      (options.getSocket as GetSocket)({}, () => {});
+      return fake.createTransport(options);
+    };
+    const pending = createSmtpTransport(SETTINGS, { lookup: PUBLIC, connect, createTransport }).send(MESSAGE);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(connect).toHaveBeenCalledWith("142.250.1.27", 587);
+    socket.emit("connect");
+    await vi.advanceTimersByTimeAsync(SEND_TIMEOUT_MS);
+    await expect(pending).resolves.toMatchObject({ ok: false, reason: "unreachable" });
+    expect(socket.destroy).toHaveBeenCalledOnce();
+    expect(fake.close).toHaveBeenCalledOnce();
+  });
+
+  it("hands nodemailer the socket once it connects, and keeps it after a send that finishes in time", async () => {
+    const socket = fakeSocket();
+    let handed: unknown;
+    const fake = fakeTransport(async () => ({ messageId: "<id>" }));
+    const createTransport = (options: Record<string, unknown>) => {
+      (options.getSocket as GetSocket)({}, (error, opened) => {
+        handed = error ?? opened?.connection;
+      });
+      socket.emit("connect");
+      return fake.createTransport(options);
+    };
+    const result = await createSmtpTransport(SETTINGS, { lookup: PUBLIC, connect: () => socket, createTransport }).send(MESSAGE);
+    expect(result).toMatchObject({ ok: true });
+    expect(handed).toBe(socket);
+    expect(socket.destroy).not.toHaveBeenCalled();
+  });
+
+  it("fails a connection that does not open within the connect timeout, and destroys it", async () => {
+    vi.useFakeTimers();
+    const socket = fakeSocket();
+    const errors: (Error | null)[] = [];
+    const fake = fakeTransport(() => new Promise(() => {}));
+    const createTransport = (options: Record<string, unknown>) => {
+      (options.getSocket as GetSocket)({}, (error) => errors.push(error));
+      return fake.createTransport(options);
+    };
+    void createSmtpTransport(SETTINGS, { lookup: PUBLIC, connect: () => socket, createTransport }).send(MESSAGE);
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ code: "ETIMEDOUT" });
+    expect(socket.destroy).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(SEND_TIMEOUT_MS);
+  });
+});
+
 describe("classifySmtpError", () => {
   it.each([
     [{ code: "EAUTH" }, "auth_failed"],
@@ -110,6 +187,10 @@ describe("classifySmtpError", () => {
     [{ code: "ETLS" }, "tls_failed"],
     [{ code: "ESOCKET", cause: { code: "ERR_TLS_CERT_ALTNAME_INVALID" } }, "tls_failed"],
     [{ code: "ESOCKET", cause: { code: "DEPTH_ZERO_SELF_SIGNED_CERT" } }, "tls_failed"],
+    // As nodemailer 10 reports a name mismatch (seen against a live server).
+    [{ code: "ESOCKET", message: "Hostname/IP does not match certificate's altnames: Host: smtp.example.com. is not in the cert's altnames: DNS:smtp.gmail.com" }, "tls_failed"],
+    [{ code: "ESOCKET", message: "self-signed certificate" }, "tls_failed"],
+    [{ code: "ESOCKET", message: "connect ECONNREFUSED 142.250.1.27:587" }, "unreachable"],
     [{ code: "EENVELOPE" }, "rejected"],
     [{ code: "EMESSAGE" }, "rejected"],
     [{ code: "ETIMEDOUT" }, "unreachable"],

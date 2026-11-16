@@ -43,7 +43,7 @@ BEGIN
  IF fn_ems_decrypt_secret((SELECT ems_bearer_token_encrypted FROM microgrids WHERE id=grid))<>'meter-secret'
    OR fn_ems_decrypt_secret((SELECT payment_provider_secret_encrypted FROM communities WHERE id=community))<>'community-secret'
    OR fn_ems_decrypt_secret((SELECT secret_encrypted FROM payment_merchant_accounts WHERE id=account))<>'merchant-v2'
-   OR fn_organization_email_sender_password(org)<>'sender-secret' THEN
+   OR fn_organization_email_sender_password(org,1,'smtp.example.test',587,'notices')<>'sender-secret' THEN
    RAISE EXCEPTION 'Active credentials did not survive rotation';
  END IF;
  RAISE NOTICE 'OK: historical identities, pending attempt, active credentials survive rotation';

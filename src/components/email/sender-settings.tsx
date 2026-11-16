@@ -40,14 +40,18 @@ export function SenderSettings({ orgId }: { orgId: string }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const url = `/api/organizations/${orgId}/email-sender`;
 
-  const load = useCallback(async () => {
-    const response = await fetch(url);
-    const value = await response.json();
-    if (!response.ok) throw new Error(value.error);
-    setSender(value.sender);
-    setFields(fieldsOf(value.sender));
-    setReady(true);
-  }, [url]);
+  /** Reads the saved sender; `keepFields` leaves what the person typed in place. */
+  const load = useCallback(
+    async (keepFields = false) => {
+      const response = await fetch(url);
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error);
+      setSender(value.sender);
+      if (!keepFields) setFields(fieldsOf(value.sender));
+      setReady(true);
+    },
+    [url]
+  );
   useEffect(() => {
     load().catch((error) => setErrorMessage(error.message));
   }, [load]);
@@ -67,8 +71,9 @@ export function SenderSettings({ orgId }: { orgId: string }) {
       });
       const value = await response.json();
       if (!response.ok) {
-        // A failed test of the saved settings is recorded on them; show it.
-        if (sender) await load().catch(() => undefined);
+        // A failed test of the saved settings is recorded on them; show it,
+        // and keep the edited fields so the person can correct them.
+        if (sender) await load(true).catch(() => undefined);
         throw new Error(value.error);
       }
       setSender(value.sender);

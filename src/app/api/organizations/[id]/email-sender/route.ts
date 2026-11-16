@@ -128,11 +128,25 @@ export async function PUT(request: NextRequest, { params }: RouteContext): Promi
         { status: 422 }
       );
     }
-    const { data: saved } = await service.rpc("fn_organization_email_sender_password", { _org_id: orgId });
-    if (typeof saved !== "string" || !saved) {
+    // Decrypts only while the saved row is still the one read above, so a
+    // password saved for another server meanwhile never reaches this one.
+    const { data: saved, error: decryptError } = await service.rpc("fn_organization_email_sender_password", {
+      _org_id: orgId,
+      _version: existing.version,
+      _host: existing.host,
+      _port: existing.port,
+      _username: existing.username,
+    });
+    if (decryptError) {
       return NextResponse.json(
         { error: "Could not read the saved password. Enter it again.", field: "password" },
         { status: 500 }
+      );
+    }
+    if (typeof saved !== "string" || !saved) {
+      return NextResponse.json(
+        { error: "These email settings were changed elsewhere. Reload the page and try again.", code: "version_conflict" },
+        { status: 409 }
       );
     }
     password = saved;

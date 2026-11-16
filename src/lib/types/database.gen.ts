@@ -1932,7 +1932,13 @@ export type Database = {
         Returns: number
       }
       fn_organization_email_sender_password: {
-        Args: { _org_id: string }
+        Args: {
+          _host: string
+          _org_id: string
+          _port: number
+          _username: string
+          _version: number
+        }
         Returns: string
       }
       fn_payment_account_version: {

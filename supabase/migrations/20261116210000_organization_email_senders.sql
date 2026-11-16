@@ -125,11 +125,24 @@ GRANT ALL ON organization_email_senders TO service_role;
 
 -- ── 4. The saved password, for the service role only ───────────────────
 --
+-- The caller names the row it read: its version and the server and username
+-- the password will be sent to. The function returns NULL unless the saved
+-- row still matches all four, so a password saved for another server between
+-- the caller's read and this call is never handed to the old one. Every save
+-- through the settings route bumps `version`; host, port and username are
+-- checked as well so the rule holds for any other service-role writer.
+--
 -- SECURITY INVOKER: it runs as the service role, which may already execute
 -- fn_ems_decrypt_secret (00049); the function only saves the route reading
 -- the ciphertext itself.
 
-CREATE OR REPLACE FUNCTION public.fn_organization_email_sender_password(_org_id UUID)
+CREATE OR REPLACE FUNCTION public.fn_organization_email_sender_password(
+  _org_id UUID,
+  _version INTEGER,
+  _host TEXT,
+  _port INTEGER,
+  _username TEXT
+)
 RETURNS TEXT
 LANGUAGE plpgsql
 STABLE
@@ -140,7 +153,11 @@ DECLARE
 BEGIN
   SELECT password_encrypted INTO v_ciphertext
   FROM organization_email_senders
-  WHERE org_id = _org_id;
+  WHERE org_id = _org_id
+    AND version = _version
+    AND host = _host
+    AND port = _port
+    AND username = _username;
 
   IF v_ciphertext IS NULL THEN
     RETURN NULL;
@@ -150,5 +167,5 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.fn_organization_email_sender_password(UUID) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.fn_organization_email_sender_password(UUID) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.fn_organization_email_sender_password(UUID, INTEGER, TEXT, INTEGER, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.fn_organization_email_sender_password(UUID, INTEGER, TEXT, INTEGER, TEXT) TO service_role;

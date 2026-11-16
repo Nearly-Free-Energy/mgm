@@ -166,12 +166,27 @@ describe("PUT /api/organizations/[id]/email-sender", () => {
   it("keeps the saved password while the server and username are unchanged", async () => {
     const response = await put({ ...FORM, fromName: "Kiwumu" });
     expect(response.status).toBe(200);
-    expect(mocks.decrypt).toHaveBeenCalledWith("fn_organization_email_sender_password", { _org_id: ORG });
+    expect(mocks.decrypt).toHaveBeenCalledWith("fn_organization_email_sender_password", {
+      _org_id: ORG,
+      _version: 3,
+      _host: "smtp.example.com",
+      _port: 587,
+      _username: "notices@example.com",
+    });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ password: "saved-password" }));
     const [update] = serviceOps("update");
     expect(update.args[0]).toMatchObject({ from_name: "Kiwumu", version: 4 });
     expect(update.args[0]).not.toHaveProperty("password_encrypted");
     expect(mocks.serviceCalls).toContainEqual({ table: "organization_email_senders", op: "eq", args: ["version", 3] });
+  });
+
+  it("answers 409 without sending when the saved row changed before the password was decrypted", async () => {
+    // The function returns NULL once the row no longer matches the one read.
+    mocks.decrypt.mockResolvedValue({ data: null, error: null });
+    const response = await put(FORM);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "version_conflict" });
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it.each([

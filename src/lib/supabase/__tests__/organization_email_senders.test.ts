@@ -164,16 +164,43 @@ describe.skipIf(skip)("organization email senders (RFC #186)", () => {
     expect(error?.code).toBe("23514");
   });
 
+  const READ = { _org_id: FIXTURE.org, _version: 1, _host: "smtp.example.com", _port: 587, _username: "notices@example.com" };
+
   it("decrypts the saved password for the service role only", async () => {
     const svc = await serviceClient();
-    const { data } = await svc.rpc("fn_organization_email_sender_password", { _org_id: FIXTURE.org });
+    const { data } = await svc.rpc("fn_organization_email_sender_password", READ);
     expect(data).toBe(PASSWORD);
 
-    const { data: signedIn, error } = await MGR.client.rpc("fn_organization_email_sender_password", {
-      _org_id: FIXTURE.org,
-    });
+    const { data: signedIn, error } = await MGR.client.rpc("fn_organization_email_sender_password", READ);
     expect(signedIn).toBeNull();
     expect(error?.code === "42501" || error?.code === "PGRST202" || error?.message?.toLowerCase().includes("permission denied")).toBe(true);
+  });
+
+  it("never decrypts a password saved for another server after the caller's read", async () => {
+    // The race: a request reads version 1 at smtp.example.com, then another
+    // admin saves a new server and password before it decrypts.
+    const svc = await serviceClient();
+    const moved = await svc
+      .from("organization_email_senders")
+      .update({ host: "attacker.example.net", password_encrypted: await encrypt("new-server-password"), version: 2 })
+      .eq("org_id", FIXTURE.org);
+    expect(moved.error).toBeNull();
+
+    const { data, error } = await svc.rpc("fn_organization_email_sender_password", READ);
+    expect(error).toBeNull();
+    expect(data).toBeNull();
+  });
+
+  it.each([
+    ["version", { _version: 2 }],
+    ["host", { _host: "mail.example.net" }],
+    ["port", { _port: 465 }],
+    ["username", { _username: "other@example.com" }],
+  ])("returns nothing when the %s does not match the saved row", async (_name, change) => {
+    const svc = await serviceClient();
+    const { data, error } = await svc.rpc("fn_organization_email_sender_password", { ...READ, ...change });
+    expect(error).toBeNull();
+    expect(data).toBeNull();
   });
 
   it("goes when its organization is deleted", async () => {

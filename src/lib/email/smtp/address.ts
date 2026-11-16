@@ -13,7 +13,7 @@
 import "server-only";
 
 import { BlockList, isIP } from "node:net";
-import { lookup as dnsLookup } from "node:dns/promises";
+import { Resolver } from "node:dns/promises";
 
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
@@ -76,7 +76,25 @@ export function isNonPublicAddress(address: string): boolean {
 
 export type Lookup = (host: string) => Promise<{ address: string; family: number }[]>;
 
-const defaultLookup: Lookup = (host) => dnsLookup(host, { all: true, verbatim: true });
+/** Each DNS query gets this long per try, and two tries. */
+export const DNS_TIMEOUT_MS = 2_000;
+
+/**
+ * A and AAAA records through c-ares, not getaddrinfo: a stalled resolver then
+ * times out on its own instead of holding a libuv threadpool thread, and
+ * /etc/hosts plays no part. The transport also abandons the lookup at its
+ * overall deadline (transport.ts).
+ */
+const defaultLookup: Lookup = async (host) => {
+  const resolver = new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 2 });
+  const [v4, v6] = await Promise.allSettled([resolver.resolve4(host), resolver.resolve6(host)]);
+  const addresses = [
+    ...(v4.status === "fulfilled" ? v4.value.map((address) => ({ address, family: 4 })) : []),
+    ...(v6.status === "fulfilled" ? v6.value.map((address) => ({ address, family: 6 })) : []),
+  ];
+  if (addresses.length === 0 && v4.status === "rejected") throw v4.reason;
+  return addresses;
+};
 
 export type ResolvedHost =
   | { ok: true; address: string }
