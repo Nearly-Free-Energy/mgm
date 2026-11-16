@@ -117,7 +117,8 @@ describe("isReleasedRoute", () => {
     "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",
     "/icons/manifest.webmanifest",
-    // The old tenants URL has no page and no released route; it stays a 404.
+    // The pre-#50 tenants URL has no page and no released route; it stays a
+    // 404. Tenants live under setup/tenants.
     "/microgrids/abc/tenants",
     // The GUI host releases one route at a time.
     "/api/gui",

@@ -1,12 +1,12 @@
 # Tenant API — contract sketch
 
-**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: tenant (tenant) access" for the A/B decision that must be resolved before implementation begins.
+**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: tenant access" for the A/B decision that must be resolved before implementation begins.
 
 ---
 
 ## Overview
 
-The Tenant (tenant) API provides read-only access for tenant members to view their own billing data. It sits behind `src/app/api/v1/tenants/me/` and is authenticated via Supabase Auth (JWT), with RLS enforcing that callers can only read their own tenant's data through the `tenant_users` join table.
+The Tenant API gives the people on a tenant's account read-only access to their own billing data. It sits behind `src/app/api/v1/tenants/me/` and is authenticated via Supabase Auth (JWT), with RLS enforcing that callers can only read their own tenant's data through the `tenant_users` join table.
 
 ---
 
@@ -105,4 +105,4 @@ Returns the current rate schedule for the caller's microgrid.
 - RLS on `tenant_users` enforces this automatically — no application-layer auth check needed.
 - `tenant_users` is seeded empty (population pattern depends on API user pattern A/B decision).
 - Currency is inherited from the microgrid; response payloads omit the currency symbol — callers format locally.
-- These endpoints are **read-only** — tenant members cannot update billing data or rate schedules.
+- These endpoints are **read-only** — nobody can update billing data or rate schedules through them.

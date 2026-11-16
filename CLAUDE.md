@@ -124,7 +124,7 @@ The schema follows Org → Community → Microgrid → Edge → Device plus a pa
 
 **Schema change notes:**
 - `microgrids.location` TEXT was **dropped** — use the structured address columns instead (`address_city`, `address_region`, `address_country`, `lat`, `lng`). Downstream pages that read `location` are expected to fail at type-check until Ticket C (#51) lands.
-- Old `meters` table renamed to `devices` with a `device_type` enum; old `tenants` → `tenants` + `tenant_devices` many-to-many.
+- Old `meters` table renamed to `devices` with a `device_type` enum; old `tenants` → `households` + `household_devices` many-to-many, renamed to `tenants` + `tenant_devices` by `20261116230000` (`docs/entity-model.md` § "Naming").
 - `user_roles` moved from `(user_id, org_id, role)` to `(user_id, role, scope_type, scope_id)`; the old `system_admin` / `org_admin` role names are gone.
 
 ### RLS helper functions (migration 00002_rls.sql)

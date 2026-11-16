@@ -34,6 +34,20 @@ Addresses live at organization, community, and microgrid level, and
 optionally on a tenant. `microgrids` uses structured address columns
 (`address_city`, `address_region`, `address_country`, `lat`, `lng`).
 
+## Naming
+
+A tenant is a customer the microgrid bills: a family, a shop, or an
+institution. MGM uses the word in that sense only. The operator business is
+an organization, never a tenant, even where hosting vocabulary would say
+"multi-tenant".
+
+Tenants were called households until
+`20261116230000_rename_households_to_tenants.sql` renamed the tables
+(`households`, `household_devices`, `household_users`), the `household_id`
+columns, and the functions and messages that used the word. Migrations
+applied before that file use the old name, and bills generated before it keep
+`household_name` in their audit details.
+
 ## Why this shape
 
 - **Access follows the organization.** Every Row Level Security policy
@@ -60,15 +74,15 @@ ship: `super_admin` (all organizations) and `org_manager` (one organization,
 extensions by enum addition; before adding one, read `CLAUDE.md` on why a
 scoped configuration role was added and then removed.
 
-## Open decision: tenant (tenant) access
+## Open decision: tenant access
 
-`tenant_users` exists so a tenant member could sign in and see their
-own bills (`docs/tenant-api.md` sketches the endpoints). The original
-write-up of this decision is no longer available; these are the two
+`tenant_users` exists so the people on a tenant's account could sign in and
+see their own bills (`docs/tenant-api.md` sketches the endpoints). The
+original write-up of this decision is no longer available; these are the two
 realistic options, and neither is built:
 
-- **A — tenant members are Supabase Auth users**, linked through
-  `tenant_users`, with RLS letting them read their own tenant's rows.
+- **A — the people on a tenant's account are Supabase Auth users**, linked
+  through `tenant_users`, with RLS letting them read their tenant's rows.
 - **B — no tenant login**; tenants reach their bill and payment link
   through a signed, single-purpose link (as the payment link `/p/<slug>` does
   today), and only operators have accounts.

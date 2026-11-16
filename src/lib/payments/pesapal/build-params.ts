@@ -6,8 +6,9 @@
  * human-readable description.
  *
  * Adapted from PR #58 (`src/lib/pesapal/build-params.ts` by @rhussain21).
- * Major change: joins `tenants` instead of the dead `tenants` table, using
- * `display_name`, `primary_email`, `primary_phone`.
+ * Major change: reads the tenant from the entity model (#50) rather than the
+ * pre-#50 `tenants` table PR #58 used, taking `display_name`,
+ * `primary_email`, `primary_phone`.
  *
  * Kept as a separate module so both the UI click flow and any future CLI
  * smoke-test paths log identical inputs/outputs and enforce the same trust

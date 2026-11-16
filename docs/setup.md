@@ -353,7 +353,7 @@ runbook.
 ## RLS Tests (local Supabase only)
 
 The RLS test suite (`src/lib/supabase/__tests__/rls.test.ts`) verifies that Row Level Security
-policies correctly constrain cross-tenant access. These tests **require a running local Supabase CLI
+policies correctly constrain cross-organization access. These tests **require a running local Supabase CLI
 instance** — they never run against cloud Supabase to prevent polluting shared data.
 
 ### Prerequisites
