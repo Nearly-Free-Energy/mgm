@@ -15,6 +15,9 @@
  *   - The web app manifest loads without a session.
  *   - Page requests forward x-mgm-path and carry an enforced content
  *     security policy with a fresh nonce; API requests get neither.
+ *   - The two public payment pages keep their route's own policy; a
+ *     trailing-slash, deeper, differently cased or percent-encoded
+ *     neighbour is not exempt and never passes on without a policy.
  *   - The matcher skips only Next.js's asset folders, the GUI stylesheets'
  *     folder and each file in public/ by name, and each skipped folder has
  *     a 404 route; a static-looking path with no file answers 404 before
@@ -668,6 +671,15 @@ describe("middleware request path and content security policy", () => {
     expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
   });
 
+  // Next.js applies middleware's response headers over a route's, so the
+  // policy a browser receives is middleware's when it sends one and the
+  // route's otherwise. The exempt routes set PUBLIC_PAGE_SECURITY_HEADERS
+  // (their route tests check it); if Next.js changes which side wins, revisit.
+  const ROUTE_POLICY = PUBLIC_PAGE_SECURITY_HEADERS["Content-Security-Policy"];
+  function policyReceived(res: Response, routePolicy: string | null): string | null {
+    return res.headers.get(CSP) ?? routePolicy;
+  }
+
   // Their route handlers set PUBLIC_PAGE_SECURITY_HEADERS, which a policy
   // from middleware would replace (src/middleware.ts, ownPolicy).
   it.each([
@@ -682,6 +694,63 @@ describe("middleware request path and content security policy", () => {
     expect(res.headers.get(CSP)).toBeNull();
     expect(res.headers.get(REPORT_ONLY)).toBeNull();
     expect(res.headers.get(`x-middleware-request-${CSP}`)).toBeNull();
+    expect(policyReceived(res, ROUTE_POLICY)).toBe(ROUTE_POLICY);
+  });
+
+  // Released pages next to the exempt ones. Each passes through with
+  // middleware's own policy, so the exemption is exactly the two paths: a
+  // trailing slash (which isReleasedRoute strips) or a deeper path is not
+  // exempt.
+  it.each([
+    "/payment/callback/",
+    "/p/Kp9XrA/",
+    "/communities/c1/payment",
+    "/organizations/o1/payments",
+  ])("gives the released page %s middleware's enforced policy, not the exemption", async path => {
+    signedIn();
+    expect(unstable_doesMiddlewareMatch({ config: await middlewareConfig(), url: path })).toBe(true);
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(path));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    const policy = res.headers.get(CSP);
+    expect(policy).toContain("object-src 'none'");
+    expect(nonceOf(policy)).toBeTruthy();
+    expect(res.headers.get(`x-middleware-request-${CSP}`)).toBe(policy);
+    expect(policyReceived(res, ROUTE_POLICY)).toBe(policy);
+  });
+
+  // Near misses outside the release: none is exempt, and none is passed on
+  // without a policy. Each gets the not-released page, which carries
+  // PUBLIC_PAGE_SECURITY_HEADERS itself. The URL parser keeps percent
+  // escapes in the path, so an encoded slash or letter matches neither the
+  // exemption nor the release allowlist.
+  it.each([
+    "/payment",
+    "/payment/callbackx",
+    "/payment/callback/extra",
+    "/payment/callback.html",
+    "/p",
+    "/p/",
+    "/p/a/b",
+    "/pay/x",
+    "/P/Kp9XrA",
+    "/p%2FKp9XrA",
+    "/%70/Kp9XrA",
+    "/payment%2Fcallback",
+    "/payment/callback%2F",
+    "/payment/%63allback",
+  ])("answers the unreleased near miss %s with a policy-carrying 404, not the exemption", async path => {
+    for (const session of [signedIn, signedOut]) {
+      session();
+      expect(unstable_doesMiddlewareMatch({ config: await middlewareConfig(), url: path })).toBe(true);
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest(path));
+      expect(res.status).toBe(404);
+      expect(res.headers.get("x-middleware-next")).toBeNull();
+      expect(res.headers.get(CSP)).toBe(ROUTE_POLICY);
+      expect(res.headers.get(REPORT_ONLY)).toBeNull();
+    }
   });
 
   it("takes the Supabase origin from the runtime settings", async () => {
