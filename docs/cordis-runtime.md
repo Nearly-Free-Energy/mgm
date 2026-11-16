@@ -21,9 +21,16 @@ loads the platform plugins into it:
 | `fixture-metering` | registers the `synthetic` factory, only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |
 | `payment-providers` | `paymentProviders` — registry of payment provider factories | — |
 | `pesapal` | registers the `pesapal` factory | `paymentProviders` |
+| `mail-transports` | `mailTransports` — registry of mail transport factories, keyed by the settings' kind (RFC #186) | — |
+| `smtp` | registers the `smtp` factory (`src/lib/email/smtp/`) | `mailTransports` |
 | `community-management`, `metering`, `billing`, `billing-review`, `payments` | capability *plugins* (loaded per request, see below) | `mgmRequest` + the platform services they need |
 
 Platform plugins hold no request data, credentials, or database clients.
+A mail transport is built for one send from settings its caller has already
+authorized and decrypted (an organization's email sender, read by
+`PUT /api/organizations/[id]/email-sender` after its access check); the
+registry keeps only the factories. Organization senders carry notices only,
+never sign-in links or codes (RFC #186 decision 5).
 Provider factories receive the request's Supabase client when a request asks
 for a provider, so RLS always applies to the caller. Adding a second metering
 source or payment provider is a new platform plugin that registers into the

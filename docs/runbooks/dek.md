@@ -16,6 +16,7 @@ This runbook covers creating, backing up, recovering, and rotating it.
 | `payment_merchant_accounts` | `secret_encrypted` | Payment provider (Pesapal) consumer secret |
 | `payment_merchant_versions` | `configuration.secret_encrypted` | Historical credentials used by existing payment attempts |
 | `communities` | `payment_provider_secret_encrypted` | Legacy per-community payment secret |
+| `organization_email_senders` | `password_encrypted` | Organization mail server (SMTP) password, for notices |
 
 Values are encrypted with `pgp_sym_encrypt` through `fn_ems_encrypt_secret`
 and decrypted by `fn_ems_decrypt_secret`, which only `service_role` may
@@ -24,9 +25,12 @@ falling back to the legacy name `mbe_ems_dek` if the new one is missing.
 The plaintext never leaves the database except to the server code that
 needs it.
 
-If you add a new encrypted column, add it to the table above, to the
-rotation step below, and to the guard at the top of
-`supabase/scripts/rehearse-credential-key-bootstrap.sql` in the same PR.
+If you add a new encrypted column, add it in the same PR to the table
+above; to `supabase/scripts/rotate-credential-key.sql` (the rotation step
+below) and its rehearsal, `supabase/scripts/rehearse-credential-key.sql`; to
+the checks in `supabase/scripts/retire-legacy-credential-key.sql` and in
+[backup-and-restore.md](backup-and-restore.md); and to the guard at the top
+of `supabase/scripts/rehearse-credential-key-bootstrap.sql`.
 
 ## Create the key (new environment)
 
@@ -263,7 +267,9 @@ psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-
 ```
 
 After committing, run **Test connection** on one microgrid and one payment
-account, then verify an existing payment attempt's status. Resume credential
+account, send a test email from one organization's email settings (leave the
+password blank to use the saved one), then verify an existing payment
+attempt's status. Resume credential
 writes after these checks. Retain the old key backup until verification is
 complete; replacing Vault names does not make a key backup obsolete immediately.
 

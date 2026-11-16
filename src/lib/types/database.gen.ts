@@ -972,6 +972,65 @@ export type Database = {
           },
         ]
       }
+      organization_email_senders: {
+        Row: {
+          created_at: string
+          from_address: string
+          from_name: string | null
+          host: string
+          last_test_message: string | null
+          last_test_status: string | null
+          last_tested_at: string | null
+          org_id: string
+          password_encrypted: string
+          port: number
+          reply_to: string | null
+          updated_at: string
+          username: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          from_address: string
+          from_name?: string | null
+          host: string
+          last_test_message?: string | null
+          last_test_status?: string | null
+          last_tested_at?: string | null
+          org_id: string
+          password_encrypted: string
+          port: number
+          reply_to?: string | null
+          updated_at?: string
+          username: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          from_address?: string
+          from_name?: string | null
+          host?: string
+          last_test_message?: string | null
+          last_test_status?: string | null
+          last_tested_at?: string | null
+          org_id?: string
+          password_encrypted?: string
+          port?: number
+          reply_to?: string | null
+          updated_at?: string
+          username?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_email_senders_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           address_city: string | null
@@ -1871,6 +1930,16 @@ export type Database = {
       fn_next_invoice_number: {
         Args: { p_community_id: string; p_year: number }
         Returns: number
+      }
+      fn_organization_email_sender_password: {
+        Args: {
+          _host: string
+          _org_id: string
+          _port: number
+          _username: string
+          _version: number
+        }
+        Returns: string
       }
       fn_payment_account_version: {
         Args: { _account_id: string; _org_id: string; _version: number }

@@ -971,6 +971,7 @@ starts only when every other item has passed.
     PERFORM fn_ems_decrypt_secret(secret_encrypted) FROM payment_merchant_accounts;
     PERFORM fn_ems_decrypt_secret(payment_provider_secret_encrypted) FROM communities;
     PERFORM fn_ems_decrypt_secret((configuration->>'secret_encrypted')::bytea) FROM payment_merchant_versions;
+    PERFORM fn_ems_decrypt_secret(password_encrypted) FROM organization_email_senders;
     RAISE NOTICE 'every stored credential decrypts';
   END $$;
   ```

@@ -125,12 +125,13 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     { path: "/", params: {} },
     { path: "/organizations", params: {} },
     { path: "/organizations/[id]", params: { id: "organization" } },
+    { path: "/organizations/[id]/email", params: { id: "organization" } },
     { path: "/settings/profile", params: {} },
     { path: "/settings/users", params: {} },
     { path: "/settings/plugins", params: {} },
     { path: "/settings/api-tokens", params: {} },
   ],
-  tables: ["organizations", "user_roles", "user_profiles", "mgm_plugins"],
+  tables: ["organizations", "user_roles", "user_profiles", "mgm_plugins", "organization_email_senders"],
 };
 
 export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {

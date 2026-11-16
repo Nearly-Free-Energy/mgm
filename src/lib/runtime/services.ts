@@ -16,6 +16,7 @@ import type { MeteringProvider } from "@/lib/metering/types";
 import { MeteringError } from "@/lib/metering/errors";
 import type { MeteringProviderName } from "@/lib/metering/registry";
 import type { ProviderFactory } from "@/lib/payments/repository";
+import type { MailSenderSettings, MailTransport, MailTransportFactory } from "@/lib/email/types";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { MgmGate } from "./gate";
 
@@ -123,6 +124,35 @@ export class PaymentProviderRegistry implements ProviderFactory {
   };
 }
 
+/**
+ * Root registry of mail transports, keyed by the settings' `kind` (RFC #186).
+ * A transport is built per send from settings the caller has already
+ * authorized and decrypted; the registry holds factories only.
+ */
+export class MailTransportRegistry {
+  private readonly factories = new Map<MailSenderSettings["kind"], MailTransportFactory>();
+
+  register(kind: MailSenderSettings["kind"], factory: MailTransportFactory): () => void {
+    if (this.factories.has(kind)) {
+      throw new Error(`Mail transport "${kind}" is already registered`);
+    }
+    this.factories.set(kind, factory);
+    return () => {
+      if (this.factories.get(kind) === factory) this.factories.delete(kind);
+    };
+  }
+
+  has(kind: MailSenderSettings["kind"]): boolean {
+    return this.factories.has(kind);
+  }
+
+  create(settings: MailSenderSettings): MailTransport {
+    const factory = this.factories.get(settings.kind);
+    if (!factory) throw new Error(`Mail transport "${settings.kind}" is not registered`);
+    return factory(settings);
+  }
+}
+
 export type MgmCatalog = {
   plugins: readonly BundledPlugin[];
   get(name: string): BundledPlugin | undefined;
@@ -137,6 +167,7 @@ declare module "cordis" {
     mgmSurface: MgmSurface;
     meteringProviders: MeteringProviderFactories;
     paymentProviderRegistry: PaymentProviderRegistry;
+    mailTransports: MailTransportRegistry;
     mgmRequest: MgmRequest;
   }
 }

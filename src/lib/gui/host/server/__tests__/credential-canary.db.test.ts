@@ -62,6 +62,7 @@ import {
   encryptedColumnsInSchema,
   NOWHERE,
   OPENEMS_PATHS,
+  ROW_KEY,
   prepareEveryAction,
   seedCanaries,
   type Canary,
@@ -185,7 +186,7 @@ const scanAll = (results: { output: string }[]) => () => results.forEach((r) => 
 /** A canary read back as a loader with the service role could: the stored row, decrypted. */
 async function decrypted(c: Canary): Promise<string> {
   const svc = await serviceClient();
-  const { data: row, error: readError } = await svc.from(c.table).select(c.field).eq("id", c.rowId).single();
+  const { data: row, error: readError } = await svc.from(c.table).select(c.field).eq(ROW_KEY[c.table] ?? "id", c.rowId).single();
   if (readError) throw new Error(`[self-test] read ${c.column}: ${readError.message}`);
   const stored = (row as unknown as Record<string, unknown>)[c.field];
   const { data, error } = await svc.rpc("fn_ems_decrypt_secret", { p_ciphertext: stored });
