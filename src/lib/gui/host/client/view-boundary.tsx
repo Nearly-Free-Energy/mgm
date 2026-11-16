@@ -12,7 +12,8 @@
  * (resolveInitialView in ../server/render-view.tsx).
  *
  * ViewUnavailable is drawn instead where a view's page could not load its
- * model (renderView's refusal banner). It publishes the view the shell
+ * model: renderView's refusal banner, and the (gui) group's not-found.tsx and
+ * error.tsx for a page that is not found or throws. It publishes the view the shell
  * already shows with no view and no model, so the shell stops waiting for a
  * model that will not come, as it does after a soft navigation to that page.
  */

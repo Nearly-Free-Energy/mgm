@@ -87,10 +87,12 @@ async function loadPageView(access: CurrentUserAccess, href: string): Promise<Ho
  * only picks among the places listed (unloadedView). The title is that of
  * the manifest's nav entry for the view, else the one unloadedView derives
  * from the path; the page's ViewBoundary replaces it with the model's own
- * title once the view has loaded; where the view's load is refused, the
- * page's ViewUnavailable publishes this view with no view, so the shell stops
- * waiting for a model. If renderView stops drawing one of the two, the shell
- * keeps this view and waits for a model that never comes.
+ * title once the view has loaded. Every other way the page can end publishes
+ * this view with no view through a ViewUnavailable, so the shell stops waiting
+ * for a model: renderView's refusal banner, and src/app/(gui)/not-found.tsx
+ * and src/app/(gui)/error.tsx for a page that is not found or throws. If one
+ * of them stops drawing it, the shell keeps this view and waits for a model
+ * that never comes.
  */
 export async function resolveInitialView(pathWithQuery: string | null, manifest: Manifest): Promise<InitialView | null> {
   const href = pathWithQuery === null ? null : hrefOfPath(pathWithQuery);
@@ -127,6 +129,7 @@ export async function renderView(input: {
   if (!out.ok) {
     if (out.status === 401) redirect("/login");
     if (out.code === "gui_no_access") redirect("/no-access");
+    // src/app/(gui)/not-found.tsx draws the ViewUnavailable for this one.
     if (out.status === 400 || out.status === 404) notFound();
     // ViewUnavailable tells the shell this page will publish no model, so it
     // stops waiting on the view resolveInitialView named for the first paint.

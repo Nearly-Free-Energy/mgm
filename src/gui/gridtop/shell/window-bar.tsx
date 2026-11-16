@@ -23,10 +23,11 @@
  * the model brings the subtitle and controls. After a soft navigation the
  * view resolved for the new path names no view (resolveLegacyView), so the
  * bar appears with the model, which the boundary publishes before the
- * browser paints the page. A page whose view could not be loaded draws a
- * ViewUnavailable in place of the boundary, which publishes the same view
- * with no view and no model, so the bar goes away there, as it is absent
- * after a soft navigation to that page.
+ * browser paints the page. A page whose view could not be loaded, was not
+ * found or threw draws a ViewUnavailable in place of the boundary (renderView's
+ * refusal banner, src/app/(gui)/not-found.tsx, src/app/(gui)/error.tsx), which
+ * publishes the same view with no view and no model, so the bar goes away
+ * there, as it is absent after a soft navigation to that page.
  */
 import { ChevronDown, Ellipsis } from "lucide-react";
 import { useEffect, useId, useState, type RefObject } from "react";

@@ -229,7 +229,7 @@ describe("resolveInitialView", () => {
   });
 
   it("spells the header's path as the page spells its params before matching it", async () => {
-    const escaped = `/microgrids/${MICROGRID.replace("-", "%2D")}/operations`;
+    const escaped = `/microgrids/${MICROGRID.replaceAll("-", "%2D")}/operations`;
     expect(await resolveInitialView(escaped, MANIFEST)).toMatchObject({ view: "metering.site-day", unplaced: false });
     expect(pageHref(["microgrids", "a b/c", "operations"], new URLSearchParams())).toBe("/microgrids/a%20b%2Fc/operations");
     // An encoded slash is no page href, so dispatchView answers 400 for it and the page is not found.
