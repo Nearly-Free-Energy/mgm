@@ -328,6 +328,10 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason: "currentUserCanAccessOrg answers 403 before the service-role logo read.",
   },
+  "src/app/api/organizations/[id]/email-sender/route.ts": {
+    kind: "session",
+    reason: "currentUserCanAccessOrg answers 403 before the service client decrypts or writes the sender.",
+  },
   "src/app/api/organizations/[id]/payment-accounts/route.ts": {
     kind: "session",
     reason: "currentUserCanAccessOrg answers 403 before the service client is used.",

@@ -52,7 +52,11 @@ export const CREDENTIAL_COLUMNS = {
   microgrids: Object.values(OPENEMS_PATHS).map(([column]) => column),
   communities: ["payment_provider_secret_encrypted"],
   payment_merchant_accounts: ["secret_encrypted"],
+  organization_email_senders: ["password_encrypted"],
 } as const;
+
+/** The key column of a credential table whose key is not `id`. */
+export const ROW_KEY: Readonly<Record<string, string>> = { organization_email_senders: "org_id" };
 
 /** `table.column` for every `*_encrypted` column of a public table in database.gen.ts. */
 export function encryptedColumnsInSchema(): string[] {
@@ -103,7 +107,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * Each microgrid has an edge with a battery and a grid meter, so a view that
  * reads the site reaches its metering source: the edges of the synthetic
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
- * one, and the mixed microgrid has one edge of each.
+ * one, and the mixed microgrid has one edge of each. The organization also
+ * gets an email sender (RFC #186) whose password is a canary.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -156,6 +161,17 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       display_name: "GUI Canary Merchant",
       consumer_key: "canary-consumer",
       ...(await secret("payment_merchant_accounts", "secret_encrypted", ids.merchantId)),
+    },
+  ]);
+  rows.push([
+    "organization_email_senders",
+    {
+      org_id: ids.orgId,
+      host: "smtp.canary.invalid",
+      port: 587,
+      username: "canary",
+      from_address: "canary@canary.invalid",
+      ...(await secret("organization_email_senders", "password_encrypted", ids.orgId)),
     },
   ]);
   for (const [table, row] of [...rows, ...site]) {

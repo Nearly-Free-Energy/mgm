@@ -40,7 +40,8 @@ BEGIN
        SELECT 1 FROM payment_merchant_versions
        WHERE configuration->>'secret_encrypted' IS NOT NULL
      )
-     OR EXISTS (SELECT 1 FROM communities WHERE payment_provider_secret_encrypted IS NOT NULL) THEN
+     OR EXISTS (SELECT 1 FROM communities WHERE payment_provider_secret_encrypted IS NOT NULL)
+     OR EXISTS (SELECT 1 FROM organization_email_senders) THEN
     RAISE EXCEPTION 'This database holds encrypted credentials. Run this rehearsal only on a local scratch or CI database.';
   END IF;
 END $$;

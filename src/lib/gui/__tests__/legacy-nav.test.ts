@@ -88,6 +88,7 @@ const pageFile = (pattern: string) => `${GUI}${pattern === "/" ? "" : pattern}/p
 type Reach = ({ from: string } | { redirectsTo: string }) & { via?: string[]; link: string };
 const REACHED_IN_PAGE: Record<string, Reach> = {
   "/organizations/[id]": { from: "/organizations", link: "href={`/organizations/${org.id}`}" },
+  "/organizations/[id]/email": { from: "/organizations/[id]", link: "href={`/organizations/${id}/email`}" },
   "/communities/[id]": { from: "/communities", link: "href={`/communities/${community.id}`}" },
   "/microgrids/[id]/setup": {
     redirectsTo: "/microgrids/[id]/setup/edges",

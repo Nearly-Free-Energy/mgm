@@ -23,6 +23,8 @@
  * confirmation. That step writes nothing; the write goes to the action's own
  * route, which keeps its own gate. /go/<nav> opens a navigation entry by its
  * id.
+ * Email senders (RFC #186): an organization's mail server for its notices,
+ * with a test send before saving. It never sends sign-in links or codes.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -153,6 +155,10 @@ const OPERATIONS_API_ROUTES = [
   /^\/api\/microgrids\/[^/]+\/savings-settings$/,
 ];
 
+const EMAIL_SENDER_PAGE_ROUTES = [/^\/organizations\/[^/]+\/email$/];
+
+const EMAIL_SENDER_API_ROUTES = [/^\/api\/organizations\/[^/]+\/email-sender$/];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -162,6 +168,7 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_4_PAGE_ROUTES,
     ...OPERATIONS_PAGE_ROUTES,
     ...GUI_HOST_PAGE_ROUTES,
+    ...EMAIL_SENDER_PAGE_ROUTES,
     ...PUBLIC_METADATA_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
@@ -169,5 +176,6 @@ export function isReleasedRoute(pathname: string): boolean {
     ...RELEASE_4_API_ROUTES,
     ...GUI_HOST_API_ROUTES,
     ...OPERATIONS_API_ROUTES,
+    ...EMAIL_SENDER_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

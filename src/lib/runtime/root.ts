@@ -21,6 +21,7 @@ import { GUI_META } from "@/gui/meta";
 import type { GuiMeta } from "@/lib/gui/contract";
 import { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
 import { PesapalProviderPlugin } from "@/lib/payments/providers/pesapal/plugin";
+import { SmtpTransportPlugin } from "@/lib/email/smtp/plugin";
 import { OrganizationDirectorySurfacePlugin } from "@/lib/organization-directory/surface-plugin";
 import { CommunityManagementSurfacePlugin } from "@/lib/community-management/surface-plugin";
 import { MeteringSurfacePlugin } from "@/lib/metering/surface-plugin";
@@ -28,6 +29,7 @@ import { BillingSurfacePlugin } from "@/lib/billing/surface-plugin";
 import { PaymentsSurfacePlugin } from "@/lib/payments/surface-plugin";
 import { MgmGate } from "./gate";
 import {
+  MailTransportRegistry,
   MeteringProviderFactories,
   PaymentProviderRegistry,
   type MgmCatalog,
@@ -95,6 +97,13 @@ export const PaymentProvidersPlugin = {
   },
 } satisfies Plugin.Object<void>;
 
+export const MailTransportsPlugin = {
+  name: "mail-transports",
+  apply(ctx: Context) {
+    ctx.provide("mailTransports", new MailTransportRegistry());
+  },
+} satisfies Plugin.Object<void>;
+
 /** Load order matters only for readability; Cordis resolves `inject`. */
 export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   CatalogPlugin,
@@ -111,6 +120,8 @@ export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   FixtureMeteringPlugin,
   PaymentProvidersPlugin,
   PesapalProviderPlugin,
+  MailTransportsPlugin,
+  SmtpTransportPlugin,
 ];
 
 export type MgmRuntime = {
@@ -121,6 +132,7 @@ export type MgmRuntime = {
   mgmSurface: SurfaceRegistry;
   meteringProviders: MeteringProviderFactories;
   paymentProviders: PaymentProviderRegistry;
+  mailTransports: MailTransportRegistry;
   /** Platform plugin fibers, for diagnostics and tests. */
   fibers: readonly Fiber[];
 };
@@ -172,6 +184,7 @@ async function createRuntime(): Promise<MgmRuntime> {
     mgmSurface: root.get("mgmSurface") as SurfaceRegistry,
     meteringProviders: root.get("meteringProviders") as MeteringProviderFactories,
     paymentProviders: root.get("paymentProviderRegistry") as PaymentProviderRegistry,
+    mailTransports: root.get("mailTransports") as MailTransportRegistry,
     fibers,
   };
 }

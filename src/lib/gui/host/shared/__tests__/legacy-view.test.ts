@@ -88,6 +88,7 @@ const CURRENT_APP: Record<string, Id | null> = {
   "/microgrids/[id]/setup/rates": "billing.tariff",
   "/communities/[id]/invoice": "billing.invoice-branding",
   "/organizations/[id]/payments": "payments.org-accounts",
+  "/organizations/[id]/email": "org.organizations",
   "/communities/[id]/payment": "community.communities",
 };
 

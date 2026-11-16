@@ -17,7 +17,7 @@ import {
   resetMgmRuntimeForTests,
 } from "../root";
 import { openOrganizationScope, REQUEST_SERVICES } from "../scope";
-import { PaymentProviderRegistry, type MgmRequest } from "../services";
+import { MailTransportRegistry, PaymentProviderRegistry, type MgmRequest } from "../services";
 import "../services";
 
 vi.mock("@/lib/metering/openems-provider", () => ({
@@ -86,10 +86,13 @@ describe("MGM root runtime", () => {
       "fixture-metering",
       "payment-providers",
       "pesapal",
+      "mail-transports",
+      "smtp",
     ]);
     expect(runtime.catalog.plugins).toBe(MGM_BUNDLED_PLUGINS);
     expect(runtime.meteringProviders.names()).toEqual(["openems"]);
     expect(runtime.paymentProviders.names()).toEqual(["pesapal"]);
+    expect(runtime.mailTransports.has("smtp")).toBe(true);
     // Each contribution or compiled-in GUI added later shows up here.
     expect(runtime.mgmSurface.snapshot().views.map((v) => `${v.plugin} ${v.def.id}`)).toEqual([
       "metering metering.site-day",
@@ -491,5 +494,32 @@ describe("PaymentProviderRegistry", () => {
     const factory = { forAccount: vi.fn() };
     registry.register("pesapal", factory);
     expect(() => registry.register("pesapal", factory)).toThrow("already registered");
+  });
+});
+
+describe("MailTransportRegistry", () => {
+  const settings = {
+    kind: "smtp" as const,
+    host: "smtp.example.com",
+    port: 587 as const,
+    username: "u",
+    password: "p",
+    fromAddress: "notices@example.com",
+    fromName: null,
+    replyTo: null,
+  };
+
+  it("refuses a kind nothing registered", () => {
+    expect(() => new MailTransportRegistry().create(settings)).toThrow("not registered");
+  });
+
+  it("rejects duplicate registration, and unregisters only its own factory", () => {
+    const registry = new MailTransportRegistry();
+    const transport = { send: vi.fn() };
+    const unregister = registry.register("smtp", () => transport);
+    expect(() => registry.register("smtp", () => transport)).toThrow("already registered");
+    expect(registry.create(settings)).toBe(transport);
+    unregister();
+    expect(registry.has("smtp")).toBe(false);
   });
 });

@@ -8,7 +8,7 @@ BEGIN
     RAISE EXCEPTION 'A new credential key of at least 32 characters is required';
   END IF;
   LOCK TABLE microgrids, communities, payment_merchant_accounts,
-    payment_merchant_versions, vault.secrets IN SHARE ROW EXCLUSIVE MODE;
+    payment_merchant_versions, organization_email_senders, vault.secrets IN SHARE ROW EXCLUSIVE MODE;
   SELECT decrypted_secret INTO current_key FROM vault.decrypted_secrets WHERE name='mgm_ems_dek';
   SELECT decrypted_secret INTO legacy_key FROM vault.decrypted_secrets WHERE name='mbe_ems_dek';
   IF current_key IS NULL THEN RAISE EXCEPTION 'Apply the MGM key-name migration first'; END IF;
@@ -33,6 +33,9 @@ BEGIN
   SELECT account_id,version,configuration,
     fn_ems_decrypt_secret((configuration->>'secret_encrypted')::bytea) AS plaintext
   FROM payment_merchant_versions;
+  CREATE TEMP TABLE mgm_rotation_senders ON COMMIT DROP AS
+  SELECT org_id, fn_ems_decrypt_secret(password_encrypted) AS plaintext
+  FROM organization_email_senders;
 
   PERFORM vault.update_secret(id,new_key) FROM vault.secrets
     WHERE name IN ('mgm_ems_dek','mbe_ems_dek');
@@ -46,6 +49,9 @@ BEGIN
   FROM mgm_rotation_values r WHERE r.tbl='payment_merchant_accounts' AND r.id=a.id;
   UPDATE communities c SET payment_provider_secret_encrypted=fn_ems_encrypt_secret(r.community)
   FROM mgm_rotation_values r WHERE r.tbl='communities' AND r.id=c.id;
+  -- Only the password changes, so the sender's password guard allows it.
+  UPDATE organization_email_senders s SET password_encrypted=fn_ems_encrypt_secret(r.plaintext)
+  FROM mgm_rotation_senders r WHERE r.org_id=s.org_id;
   -- Rekey physical ciphertext, preserving each historical identity and all
   -- non-secret configuration. Active-account triggers may add a new version.
   UPDATE payment_merchant_versions v SET configuration=jsonb_set(
@@ -58,5 +64,5 @@ BEGIN
     WHERE v.account_id IS NULL OR (v.configuration-'secret_encrypted') IS DISTINCT FROM (r.configuration-'secret_encrypted')
       OR fn_ems_decrypt_secret((v.configuration->>'secret_encrypted')::bytea) IS DISTINCT FROM r.plaintext
   ) THEN RAISE EXCEPTION 'Historical merchant configuration verification failed'; END IF;
-  DROP TABLE mgm_rotation_versions,mgm_rotation_values;
+  DROP TABLE mgm_rotation_versions,mgm_rotation_values,mgm_rotation_senders;
 END $$;
