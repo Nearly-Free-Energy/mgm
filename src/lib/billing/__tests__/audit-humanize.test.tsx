@@ -115,6 +115,17 @@ describe("humanizeAuditEvent — line_item_generated", () => {
     expect(result.label).toBe("Bill generated for HH-Snapshot");
   });
 
+  it("falls back to details.household_name on rows written before the tenants rename", () => {
+    const result = humanizeAuditEvent(
+      entry({
+        eventType: "line_item_generated",
+        tenantName: null,
+        details: { household_name: "HH-Before-Rename", new_total_amount: 1000 },
+      })
+    );
+    expect(result.label).toBe("Bill generated for HH-Before-Rename");
+  });
+
   it("falls back to 'Unknown tenant' when both entry.tenantName AND details.tenant_name missing", () => {
     const result = humanizeAuditEvent(
       entry({

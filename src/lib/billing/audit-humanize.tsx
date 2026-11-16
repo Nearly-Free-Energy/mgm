@@ -61,7 +61,8 @@ function resolveTenantName(entry: BillingAuditLogEntry): string {
   // → "Unknown tenant". The fetch helper already collapses live → snapshot
   // into entry.tenantName, but we re-check details defensively.
   if (entry.tenantName) return entry.tenantName;
-  const snap = entry.details?.["tenant_name"];
+  // `household_name`: rows written before the households → tenants rename.
+  const snap = entry.details?.["tenant_name"] ?? entry.details?.["household_name"];
   if (typeof snap === "string" && snap.length > 0) return snap;
   return "Unknown tenant";
 }

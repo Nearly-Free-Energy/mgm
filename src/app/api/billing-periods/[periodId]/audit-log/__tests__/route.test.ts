@@ -349,4 +349,24 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
     const json = await res.json();
     expect(json.entries[0].tenantName).toBe("HH-Snapshot");
   });
+
+  it("reads the household_name snapshot of a row written before the tenants rename", async () => {
+    mockAuditRows = [
+      {
+        id: "aaaaaaaa-6666-4111-8111-111111111111",
+        billing_period_id: PERIOD_ID,
+        billing_line_item_id: null,
+        event_type: "line_item_regenerated",
+        actor_user_id: null,
+        created_at: "2026-04-25T10:00:00Z",
+        details: { household_name: "HH-Before-Rename", new_total_amount: 0 },
+      },
+    ];
+    const { GET } = await import("../route");
+    const res = await GET(makeGetRequest(), {
+      params: Promise.resolve({ periodId: PERIOD_ID }),
+    });
+    const json = await res.json();
+    expect(json.entries[0].tenantName).toBe("HH-Before-Rename");
+  });
 });

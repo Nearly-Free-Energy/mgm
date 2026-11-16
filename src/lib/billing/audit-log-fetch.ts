@@ -232,10 +232,10 @@ export async function fetchAuditLogEntries(
   for (const a of auditRows) {
     const detailsObj =
       a.details && typeof a.details === "object" ? a.details : {};
-    const snapshotName =
-      typeof detailsObj["tenant_name"] === "string"
-        ? (detailsObj["tenant_name"] as string)
-        : null;
+    // Rows written before 20261116230000_rename_households_to_tenants.sql
+    // keep the snapshot as `household_name`: the log is append-only.
+    const snapshot = detailsObj["tenant_name"] ?? detailsObj["household_name"];
+    const snapshotName = typeof snapshot === "string" ? snapshot : null;
     const liveName = a.billing_line_item_id
       ? lineItemNameMap.get(a.billing_line_item_id) ?? null
       : null;
