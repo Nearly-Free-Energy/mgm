@@ -34,7 +34,7 @@ import type {
   BillingLineItem,
   Community,
   Device,
-  Household,
+  Tenant,
   Organization,
   RateSchedule,
 } from "@/lib/types/domain";
@@ -146,7 +146,7 @@ const COMMUNITY_NO_PROVIDER: Community = {
   payment_provider_config: null,
 };
 
-const HOUSEHOLD_AARON: Household = {
+const TENANT_AARON: Tenant = {
   id: "hh-1",
   microgrid_id: "mg-1",
   display_name: "Aaron Tushabe",
@@ -165,7 +165,7 @@ const HOUSEHOLD_AARON: Household = {
   address_postal_code: null,
   geography_notes: null,
   created_at: "2026-01-01T00:00:00.000Z",
-} as unknown as Household;
+} as unknown as Tenant;
 
 const METER_DEVICE: Device = {
   id: "dev-1",
@@ -181,7 +181,7 @@ function makeLineItem(overrides: Partial<BillingLineItem> = {}): BillingLineItem
   return {
     id: "li-1",
     billing_period_id: "bp-1",
-    household_id: "hh-1",
+    tenant_id: "hh-1",
     device_id: "dev-1",
     start_kwh: 1240,
     end_kwh: 1360,
@@ -279,7 +279,7 @@ function maybeAssertByteStability(fixtureName: string, buf: Buffer): void {
 function buildF1Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem(),
-    household: HOUSEHOLD_AARON,
+    tenant: TENANT_AARON,
     community: COMMUNITY_FULL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
@@ -299,7 +299,7 @@ function buildF1Input(): RenderInvoiceInput {
 function buildF2Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem(),
-    household: { ...HOUSEHOLD_AARON, account_number: null, meter_serial: null },
+    tenant: { ...TENANT_AARON, account_number: null, meter_serial: null },
     community: COMMUNITY_MINIMAL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
@@ -322,7 +322,7 @@ function buildF3Input(): RenderInvoiceInput {
       entered_by_user_id: "user-aaron",
       manual_reason: "End-of-month manual read",
     }),
-    household: HOUSEHOLD_AARON,
+    tenant: TENANT_AARON,
     community: COMMUNITY_FULL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
@@ -340,7 +340,7 @@ function buildF3Input(): RenderInvoiceInput {
 function buildF4Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem({ pesapal_redirect_url: null, pesapal_order_id: null }),
-    household: HOUSEHOLD_AARON,
+    tenant: TENANT_AARON,
     community: COMMUNITY_NO_PROVIDER,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
@@ -358,7 +358,7 @@ function buildF4Input(): RenderInvoiceInput {
 function buildF5Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem({ pesapal_redirect_url: null, pesapal_order_id: null }),
-    household: HOUSEHOLD_AARON,
+    tenant: TENANT_AARON,
     community: COMMUNITY_FULL, // provider IS configured
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
@@ -390,7 +390,7 @@ function buildF6Input(): RenderInvoiceInput {
       total_amount: 13838,
       invoice_number: "NFE-2026-00003",
     }),
-    household: HOUSEHOLD_AARON,
+    tenant: TENANT_AARON,
     community: COMMUNITY_MINIMAL, // tax hidden — keep focus on rate/usage math
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE_REGRESSION,

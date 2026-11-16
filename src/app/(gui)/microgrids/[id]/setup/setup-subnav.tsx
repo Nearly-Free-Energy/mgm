@@ -34,7 +34,7 @@ type SubTab = { label: string; segment: string };
 
 const TABS: SubTab[] = [
   { label: "Edges & Devices",  segment: "edges" },
-  { label: "Households",       segment: "households" },
+  { label: "Tenants",       segment: "tenants" },
   { label: "OpenEMS Backend",  segment: "openems-backend" },
   { label: "Rate Schedule",    segment: "rates" },
 ];

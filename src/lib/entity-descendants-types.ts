@@ -20,9 +20,9 @@ export type DescendantCounts =
       microgrids: number;
       edges: number;
       devices: number;
-      households: number;
-      household_devices: number;
-      household_users: number;
+      tenants: number;
+      tenant_devices: number;
+      tenant_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       /**
@@ -47,9 +47,9 @@ export type DescendantCounts =
       microgrids: number;
       edges: number;
       devices: number;
-      households: number;
-      household_devices: number;
-      household_users: number;
+      tenants: number;
+      tenant_devices: number;
+      tenant_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       billing_periods_with_payments: number;
@@ -62,9 +62,9 @@ export type DescendantCounts =
       kind: "microgrid";
       edges: number;
       devices: number;
-      households: number;
-      household_devices: number;
-      household_users: number;
+      tenants: number;
+      tenant_devices: number;
+      tenant_users: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       billing_periods_with_payments: number;
@@ -76,7 +76,7 @@ export type DescendantCounts =
   | {
       kind: "edge";
       devices: number;
-      household_devices: number;
+      tenant_devices: number;
       /**
        * Billing line items whose `device_id` will be SET NULL (NOT deleted)
        * by cascading the edge → device chain. Historical billing rows
@@ -106,9 +106,9 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.microgrids === 0 &&
         counts.edges === 0 &&
         counts.devices === 0 &&
-        counts.households === 0 &&
-        counts.household_devices === 0 &&
-        counts.household_users === 0 &&
+        counts.tenants === 0 &&
+        counts.tenant_devices === 0 &&
+        counts.tenant_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
@@ -123,9 +123,9 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.microgrids === 0 &&
         counts.edges === 0 &&
         counts.devices === 0 &&
-        counts.households === 0 &&
-        counts.household_devices === 0 &&
-        counts.household_users === 0 &&
+        counts.tenants === 0 &&
+        counts.tenant_devices === 0 &&
+        counts.tenant_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
@@ -138,9 +138,9 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
       return (
         counts.edges === 0 &&
         counts.devices === 0 &&
-        counts.households === 0 &&
-        counts.household_devices === 0 &&
-        counts.household_users === 0 &&
+        counts.tenants === 0 &&
+        counts.tenant_devices === 0 &&
+        counts.tenant_users === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
@@ -152,7 +152,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
     case "edge":
       return (
         counts.devices === 0 &&
-        counts.household_devices === 0 &&
+        counts.tenant_devices === 0 &&
         counts.billing_line_items_nulled === 0 &&
         counts.readings_in_closed_periods === 0
       );

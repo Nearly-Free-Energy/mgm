@@ -110,9 +110,9 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
- * Cascade chain: communities → microgrids → (edges/devices/households/
- * billing_periods/billing_line_items/rate_schedules/household_devices/
- * household_users). No user_roles interaction (user_roles are org-scoped,
+ * Cascade chain: communities → microgrids → (edges/devices/tenants/
+ * billing_periods/billing_line_items/rate_schedules/tenant_devices/
+ * tenant_users). No user_roles interaction (user_roles are org-scoped,
  * not community-scoped) — the cascade-bypass GUC is still set to stay
  * consistent with the other entity DELETE routes and to future-proof if
  * role scopes ever extend below org level.

@@ -1,5 +1,5 @@
 /**
- * GET /payment/callback: where the payment provider sends a household back
+ * GET /payment/callback: where the payment provider sends a tenant back
  * after a hosted checkout. The answer is a small HTML page with no
  * JavaScript (src/lib/public-html/receipt.ts), status 200 in every case.
  *
@@ -23,7 +23,7 @@
  * GET checks. Next.js answers HEAD by running GET, so a HEAD request checks
  * the payment as a GET does; to stop that, export a HEAD that answers
  * without the lookup. POST shows the plain pending page and checks nothing,
- * so a household brought back with a POST still sees a page rather than an
+ * so a tenant brought back with a POST still sees a page rather than an
  * error. PUT, PATCH and DELETE get 405, OPTIONS the allowed methods.
  */
 import type { NextRequest } from "next/server";
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
 /**
  * The plain pending page, with no lookup and no check. The provider is
- * expected to bring a household back with a GET; this keeps a POST from
+ * expected to bring a tenant back with a GET; this keeps a POST from
  * landing them on an error. The body is never read.
  */
 export async function POST(request: NextRequest): Promise<Response> {

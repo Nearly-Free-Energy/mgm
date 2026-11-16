@@ -70,7 +70,7 @@ describe("SetupSubNav", () => {
     const tabs = screen.getAllByRole("tab");
     expect(tabs.map((t) => t.getAttribute("href"))).toEqual([
       "/microgrids/mg-1/setup/edges",
-      "/microgrids/mg-1/setup/households",
+      "/microgrids/mg-1/setup/tenants",
       "/microgrids/mg-1/setup/openems-backend",
       "/microgrids/mg-1/setup/rates",
     ]);
@@ -79,7 +79,7 @@ describe("SetupSubNav", () => {
 
   it.each([
     ["/microgrids/mg-1/setup/edges/edge-1", /edges/i],
-    ["/microgrids/mg-1/setup/households/hh-1", /households/i],
+    ["/microgrids/mg-1/setup/tenants/hh-1", /tenants/i],
   ])("keeps the parent tab selected on %s", (pathname, name) => {
     mockPathname = pathname;
     render(<SetupSubNav microgridId="mg-1" />);
@@ -91,8 +91,8 @@ describe("SetupSubNav", () => {
   it("announces the navigation when a tab is clicked", () => {
     mockPathname = "/microgrids/mg-1/setup/edges";
     render(<SetupSubNav microgridId="mg-1" />);
-    fireEvent.click(screen.getByRole("tab", { name: /households/i }));
-    expect(announced).toEqual(["/microgrids/mg-1/setup/households"]);
+    fireEvent.click(screen.getByRole("tab", { name: /tenants/i }));
+    expect(announced).toEqual(["/microgrids/mg-1/setup/tenants"]);
   });
 
   it("ArrowRight moves to the next tab and announces it", () => {
@@ -102,9 +102,9 @@ describe("SetupSubNav", () => {
       key: "ArrowRight",
     });
     expect(routerPushMock).toHaveBeenCalledWith(
-      "/microgrids/mg-1/setup/households",
+      "/microgrids/mg-1/setup/tenants",
     );
-    expect(announced).toEqual(["/microgrids/mg-1/setup/households"]);
+    expect(announced).toEqual(["/microgrids/mg-1/setup/tenants"]);
   });
 
   it("Home on the first tab does not announce a navigation to the same page", () => {

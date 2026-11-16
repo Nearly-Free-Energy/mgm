@@ -15,7 +15,7 @@
  *     sees that they're destroying in-progress work.
  *   * For `edge.billing_line_items_nulled` the copy explicitly calls out
  *     that rows SURVIVE (linkage severed, not destroyed). Same for
- *     `edge.household_devices` — households themselves are preserved
+ *     `edge.tenant_devices` — tenants themselves are preserved
  *     but their meter linkage breaks.
  *   * `edge.readings_in_closed_periods` renders as a warning banner below
  *     the list: those meter readings are deleted with the devices, while
@@ -87,24 +87,24 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {fmt(counts.devices)} {pluralize(counts.devices, "device")}
           </li>
         );
-      if (counts.households > 0)
+      if (counts.tenants > 0)
         items.push(
-          <li key="households">
-            {fmt(counts.households)} {pluralize(counts.households, "household")}
+          <li key="tenants">
+            {fmt(counts.tenants)} {pluralize(counts.tenants, "tenant")}
           </li>
         );
-      if (counts.household_devices > 0)
+      if (counts.tenant_devices > 0)
         items.push(
           <li key="hd">
-            {fmt(counts.household_devices)} household↔meter{" "}
-            {pluralize(counts.household_devices, "link")}
+            {fmt(counts.tenant_devices)} tenant↔meter{" "}
+            {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.household_users > 0)
+      if (counts.tenant_users > 0)
         items.push(
           <li key="hu">
-            {fmt(counts.household_users)} household user{" "}
-            {pluralize(counts.household_users, "link")}
+            {fmt(counts.tenant_users)} tenant user{" "}
+            {pluralize(counts.tenant_users, "link")}
           </li>
         );
       if (counts.billing_periods_draft > 0)
@@ -178,24 +178,24 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {fmt(counts.devices)} {pluralize(counts.devices, "device")}
           </li>
         );
-      if (counts.households > 0)
+      if (counts.tenants > 0)
         items.push(
-          <li key="households">
-            {fmt(counts.households)} {pluralize(counts.households, "household")}
+          <li key="tenants">
+            {fmt(counts.tenants)} {pluralize(counts.tenants, "tenant")}
           </li>
         );
-      if (counts.household_devices > 0)
+      if (counts.tenant_devices > 0)
         items.push(
           <li key="hd">
-            {fmt(counts.household_devices)} household↔meter{" "}
-            {pluralize(counts.household_devices, "link")}
+            {fmt(counts.tenant_devices)} tenant↔meter{" "}
+            {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.household_users > 0)
+      if (counts.tenant_users > 0)
         items.push(
           <li key="hu">
-            {fmt(counts.household_users)} household user{" "}
-            {pluralize(counts.household_users, "link")}
+            {fmt(counts.tenant_users)} tenant user{" "}
+            {pluralize(counts.tenant_users, "link")}
           </li>
         );
       if (counts.billing_periods_draft > 0)
@@ -256,24 +256,24 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {fmt(counts.devices)} {pluralize(counts.devices, "device")}
           </li>
         );
-      if (counts.households > 0)
+      if (counts.tenants > 0)
         items.push(
-          <li key="households">
-            {fmt(counts.households)} {pluralize(counts.households, "household")}
+          <li key="tenants">
+            {fmt(counts.tenants)} {pluralize(counts.tenants, "tenant")}
           </li>
         );
-      if (counts.household_devices > 0)
+      if (counts.tenant_devices > 0)
         items.push(
           <li key="hd">
-            {fmt(counts.household_devices)} household↔meter{" "}
-            {pluralize(counts.household_devices, "link")}
+            {fmt(counts.tenant_devices)} tenant↔meter{" "}
+            {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.household_users > 0)
+      if (counts.tenant_users > 0)
         items.push(
           <li key="hu">
-            {fmt(counts.household_users)} household user{" "}
-            {pluralize(counts.household_users, "link")}
+            {fmt(counts.tenant_users)} tenant user{" "}
+            {pluralize(counts.tenant_users, "link")}
           </li>
         );
       if (counts.billing_periods_draft > 0)
@@ -328,12 +328,12 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {fmt(counts.devices)} {pluralize(counts.devices, "device")}
           </li>
         );
-      if (counts.household_devices > 0)
+      if (counts.tenant_devices > 0)
         items.push(
           <li key="hd">
-            {fmt(counts.household_devices)} household↔meter{" "}
-            {pluralize(counts.household_devices, "link")} will be severed
-            (households preserved but will need meter re-linking before next
+            {fmt(counts.tenant_devices)} tenant↔meter{" "}
+            {pluralize(counts.tenant_devices, "link")} will be severed
+            (tenants preserved but will need meter re-linking before next
             close)
           </li>
         );

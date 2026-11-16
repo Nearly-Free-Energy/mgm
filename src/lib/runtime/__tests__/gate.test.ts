@@ -64,7 +64,7 @@ const CASES: Array<[GateTarget["kind"], string, Row]> = [
   ["microgrid", "microgrids", { id: TARGET_ID, communities: [org] }],
   ["edge", "edges", { id: TARGET_ID, microgrids: microgrid }],
   ["device", "devices", { id: TARGET_ID, edges: edge }],
-  ["household", "households", { id: TARGET_ID, microgrids: [microgrid] }],
+  ["tenant", "tenants", { id: TARGET_ID, microgrids: [microgrid] }],
   ["billingPeriod", "billing_periods", { id: TARGET_ID, microgrids: microgrid }],
   ["lineItem", "billing_line_items", { id: TARGET_ID, billing_periods: { microgrids: microgrid } }],
   ["rateSchedule", "rate_schedules", { id: TARGET_ID, microgrids: microgrid }],

@@ -26,7 +26,7 @@ import { PaymentHistory } from "@/components/payments/payment-history";
 //     `link_generated`). Confirmations for paid/refunded route through
 //     `<PaymentNotesConfirmDialog>`; cancel-link / mark-failed use a plain
 //     neutral `<ConfirmDialog>`.
-//   - View household + View history — plain `<Link>`s.
+//   - View tenant + View history — plain `<Link>`s.
 //
 // IPN auto-close: tracks the previous `payment_status` via a ref. When the
 // prop changes (parent's polling `router.refresh()` re-renders the server
@@ -65,7 +65,7 @@ export interface RowActionsMenuLineItem {
   pesapal_redirect_url: string | null;
 }
 
-export interface RowActionsMenuHousehold {
+export interface RowActionsMenuTenant {
   id: string;
   display_name: string;
 }
@@ -80,9 +80,9 @@ export interface RowActionsMenuPeriod {
 export interface RowActionsMenuProps {
   microgridId: string;
   lineItem: RowActionsMenuLineItem;
-  household: RowActionsMenuHousehold;
+  tenant: RowActionsMenuTenant;
   period: RowActionsMenuPeriod;
-  /** Whether the household has a primary_consumption_meter device on a
+  /** Whether the tenant has a primary_consumption_meter device on a
    *  configured edge. Drives visibility of "Switch back to edge data" /
    *  "Regenerate from edge data". */
   edgeAvailable: boolean;
@@ -158,7 +158,7 @@ export type MenuItem =
 export function computeMenuItems(input: {
   microgridId: string;
   lineItem: RowActionsMenuLineItem;
-  household: RowActionsMenuHousehold;
+  tenant: RowActionsMenuTenant;
   period: RowActionsMenuPeriod;
   edgeAvailable: boolean;
   isPaymentConfigured: boolean;
@@ -187,7 +187,7 @@ export function computeMenuItems(input: {
   const {
     microgridId,
     lineItem,
-    household,
+    tenant,
     period,
     edgeAvailable,
     isPaymentConfigured,
@@ -410,16 +410,16 @@ export function computeMenuItems(input: {
 
   items.push({
     kind: "link",
-    key: "view-household",
-    label: "View household",
-    href: `/microgrids/${microgridId}/setup/households/${household.id}`,
+    key: "view-tenant",
+    label: "View tenant",
+    href: `/microgrids/${microgridId}/setup/tenants/${tenant.id}`,
   });
 
   items.push({
     kind: "link",
     key: "view-history",
     label: "View history",
-    href: `/microgrids/${microgridId}/billing/${period.id}/history?household_id=${household.id}`,
+    href: `/microgrids/${microgridId}/billing/${period.id}/history?tenant_id=${tenant.id}`,
   });
 
   return items;
@@ -451,7 +451,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
   const {
     microgridId,
     lineItem,
-    household,
+    tenant,
     period,
     edgeAvailable,
     isPaymentConfigured,
@@ -723,7 +723,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
       computeMenuItems({
         microgridId,
         lineItem: { ...lineItem, payment_status: optimisticStatus },
-        household,
+        tenant,
         period,
         edgeAvailable,
         isPaymentConfigured,
@@ -746,7 +746,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
       microgridId,
       lineItem,
       optimisticStatus,
-      household,
+      tenant,
       period,
       edgeAvailable,
       isPaymentConfigured,
@@ -785,7 +785,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            aria-label={`Row actions for ${household.display_name}`}
+            aria-label={`Row actions for ${tenant.display_name}`}
             aria-haspopup="menu"
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
@@ -873,7 +873,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         onOpenChange={setMarkPaidOpen}
         title="Mark this bill as paid"
         confirmLabel="Mark as paid"
-        householdName={household.display_name}
+        tenantName={tenant.display_name}
         periodLabel={periodLabel}
         totalAmount={lineItem.total_amount}
         onConfirm={(notes) => patchStatus("paid", notes || null)}
@@ -885,7 +885,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         onOpenChange={setMarkRefundedOpen}
         title="Mark this bill as refunded"
         confirmLabel="Mark as refunded"
-        householdName={household.display_name}
+        tenantName={tenant.display_name}
         periodLabel={periodLabel}
         totalAmount={lineItem.total_amount}
         onConfirm={(notes) => patchStatus("refunded", notes || null)}
@@ -896,7 +896,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         open={cancelLinkOpen}
         onOpenChange={setCancelLinkOpen}
         title="Cancel pending payment link?"
-        description={`Cancel the payment link for ${household.display_name}? They'll need a new link to pay.`}
+        description={`Cancel the payment link for ${tenant.display_name}? They'll need a new link to pay.`}
         confirmLabel="Cancel link"
         tone="neutral"
         onConfirm={() => patchStatus("unpaid", null)}
@@ -907,7 +907,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         open={markFailedOpen}
         onOpenChange={setMarkFailedOpen}
         title="Mark this bill as failed?"
-        description={`Mark the payment for ${household.display_name} as failed.`}
+        description={`Mark the payment for ${tenant.display_name} as failed.`}
         confirmLabel="Mark as failed"
         tone="neutral"
         onConfirm={() => patchStatus("failed", null)}

@@ -150,13 +150,13 @@ describe("listing", () => {
   it("merges places matching after @ with the host's hits, without repeating a place", () => {
     const hits: EntityHit[] = [
       { kind: "microgrid", id: "m1", label: "East", href: "/microgrids/m1" },
-      { kind: "household", id: "h1", label: "East shop", href: "/microgrids/m1/households/h1" },
+      { kind: "tenant", id: "h1", label: "East shop", href: "/microgrids/m1/tenants/h1" },
     ];
     const l = listing("@ea", context(viewOf()), hits);
     expect(headings(l)).toEqual(["Places", "Found"]);
     expect(labels(section(l, "Places"))).toEqual(["East"]);
     expect(section(l, "Found")).toEqual([
-      { type: "go", key: "hit:household:h1:/microgrids/m1/households/h1", label: "East shop", href: "/microgrids/m1/households/h1" },
+      { type: "go", key: "hit:tenant:h1:/microgrids/m1/tenants/h1", label: "East shop", href: "/microgrids/m1/tenants/h1" },
     ]);
   });
 

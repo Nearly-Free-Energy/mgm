@@ -115,13 +115,13 @@ function period(id: string, microgridId: string, month: string, status: "draft" 
 function lineItem(
   id: string,
   periodId: string,
-  householdId: string,
+  tenantId: string,
   extra: Record<string, unknown> = {},
 ) {
   return {
     id,
     billing_period_id: periodId,
-    household_id: householdId,
+    tenant_id: tenantId,
     usage_kwh: 10,
     total_amount: 5000,
     // Spelled out on every row: a multi-row PostgREST insert sends the union
@@ -174,17 +174,17 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
       { id: FIXTURE.mgParent, community_id: FIXTURE.community, name: "DG MG parent", currency: "UGX" },
       { id: FIXTURE.mgOrgParent, community_id: FIXTURE.communityOrgParent, name: "DG MG org", currency: "UGX" },
     ]);
-    await insertOrThrow(svc, "households", [
+    await insertOrThrow(svc, "tenants", [
       {
         id: FIXTURE.hhKeep,
         microgrid_id: FIXTURE.mgKeep,
-        display_name: "DG Household keep",
+        display_name: "DG Tenant keep",
         primary_phone: "+256700000001",
       },
       {
         id: FIXTURE.hhParent,
         microgrid_id: FIXTURE.mgParent,
-        display_name: "DG Household parent",
+        display_name: "DG Tenant parent",
         primary_phone: "+256700000002",
       },
     ]);

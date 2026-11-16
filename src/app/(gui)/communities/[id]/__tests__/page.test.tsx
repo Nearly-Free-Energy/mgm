@@ -112,7 +112,7 @@ function makeGrid(
     id,
     name,
     address_city: city,
-    households: [{ count: hhCount }],
+    tenants: [{ count: hhCount }],
     devices: [{ count: devCount }],
   };
 }
@@ -148,7 +148,7 @@ describe("CommunityDetailPage", () => {
 
     // Community name in header
     expect(html).toContain("Kisakye");
-    // Stats: 2 microgrids, 12 households, 7 devices
+    // Stats: 2 microgrids, 12 tenants, 7 devices
     expect(html).toContain("2");
     expect(html).toContain("12");
     expect(html).toContain("7");
@@ -195,7 +195,7 @@ describe("CommunityDetailPage", () => {
   });
 
   // 4. Zero-stats community → stats strip renders zeros without crashing.
-  it("renders stats strip with zeros for community with 0 households and 0 devices", async () => {
+  it("renders stats strip with zeros for community with 0 tenants and 0 devices", async () => {
     communityData = {
       ...BASE_COMMUNITY,
       microgrids: [makeGrid("mg-1", "Block A", null, 0, 0)],
@@ -209,9 +209,9 @@ describe("CommunityDetailPage", () => {
 
     // Microgrid renders, no crash
     expect(html).toContain("Block A");
-    // Stats: 1 microgrid, 0 households, 0 devices
+    // Stats: 1 microgrid, 0 tenants, 0 devices
     expect(html).toContain("Microgrid");
-    expect(html).toContain("Household");
+    expect(html).toContain("Tenant");
     expect(html).toContain("Device");
   });
 

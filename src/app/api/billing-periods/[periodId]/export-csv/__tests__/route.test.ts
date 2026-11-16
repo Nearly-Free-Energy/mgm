@@ -34,7 +34,7 @@ type FromState = {
   microgrids: { data: unknown; error: unknown };
   rate_schedules: { data: unknown; error: unknown };
   billing_line_items: { data: unknown; error: unknown };
-  household_devices: { data: unknown; error: unknown };
+  tenant_devices: { data: unknown; error: unknown };
 };
 
 const sessionFromState: FromState = {
@@ -42,7 +42,7 @@ const sessionFromState: FromState = {
   microgrids: { data: null, error: null },
   rate_schedules: { data: null, error: null },
   billing_line_items: { data: null, error: null },
-  household_devices: { data: null, error: null },
+  tenant_devices: { data: null, error: null },
 };
 
 const serviceFromState: FromState = {
@@ -50,7 +50,7 @@ const serviceFromState: FromState = {
   microgrids: { data: null, error: null },
   rate_schedules: { data: null, error: null },
   billing_line_items: { data: null, error: null },
-  household_devices: { data: null, error: null },
+  tenant_devices: { data: null, error: null },
 };
 
 const mockGetUser = vi.fn().mockResolvedValue({
@@ -105,11 +105,11 @@ function makeServiceFromImpl(table: string) {
       }),
     };
   }
-  if (table === "household_devices") {
+  if (table === "tenant_devices") {
     return {
       select: () => ({
         in: () => ({
-          eq: () => Promise.resolve(serviceFromState.household_devices),
+          eq: () => Promise.resolve(serviceFromState.tenant_devices),
         }),
       }),
     };
@@ -202,8 +202,8 @@ const LINE_ITEM_ROW = {
   total_amount: 50000,
   payment_status: "unpaid",
   paid_at: null,
-  household_id: "hh-1",
-  households: {
+  tenant_id: "hh-1",
+  tenants: {
     id: "hh-1",
     display_name: "Aaron",
     account_number: "A-1",
@@ -230,10 +230,10 @@ beforeEach(() => {
     data: [LINE_ITEM_ROW],
     error: null,
   };
-  serviceFromState.household_devices = {
+  serviceFromState.tenant_devices = {
     data: [
       {
-        household_id: "hh-1",
+        tenant_id: "hh-1",
         devices: { openems_component_id: "meter0" },
       },
     ],
@@ -374,7 +374,7 @@ describe("GET /api/billing-periods/[periodId]/export-csv", () => {
     const stripped = body.startsWith("﻿") ? body.slice(1) : body;
     const lines = stripped.split("\r\n");
     expect(lines[0]).toBe(
-      "Invoice Number,Issue Date,Household,Account Number,OpenEMS Meter ID,Meter Serial," +
+      "Invoice Number,Issue Date,Tenant,Account Number,OpenEMS Meter ID,Meter Serial," +
         "Meter Type,Customer Type,Address,Phone,Begin kWh,End kWh,Usage kWh," +
         "Tier 1 kWh,Tier 1 UGX,Service Charge UGX,Taxable Subtotal UGX,VAT UGX,Total UGX," +
         "Payment Status,Paid At,Period Timezone",

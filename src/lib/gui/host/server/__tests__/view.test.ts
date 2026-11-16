@@ -331,7 +331,7 @@ describe("dispatchView", () => {
 
   it.each([
     ["with no path segments", "/settings/plugins", `/settings/plugins?org=${ORG_A}`],
-    ["on an entity's path", "/microgrids/[id]/setup/households", `/microgrids/${MG}/setup/households`],
+    ["on an entity's path", "/microgrids/[id]/setup/tenants", `/microgrids/${MG}/setup/tenants`],
   ])("loads an installation view %s with no organization and no gate", async (_name, path, href) => {
     const installed = view("billing", { id: "billing.installed", path, scope: "installation" } as Partial<ViewDef> & Pick<ViewDef, "id" | "path">);
     if (!path.includes("[id]")) Object.assign(installed.def, { params: {}, entity: undefined });
@@ -384,11 +384,11 @@ describe("dispatchView", () => {
       query: ["date", "extra"],
       attach: { to: { view: "billing.rates" }, order: 2, hint: "tab" },
     });
-    const second = view("metering", { id: "metering.second", path: "/microgrids/[id]/setup/households", attach: { to: "microgrid", order: 1, hint: "tab" } });
+    const second = view("metering", { id: "metering.second", path: "/microgrids/[id]/setup/tenants", attach: { to: "microgrid", order: 1, hint: "tab" } });
     snapshot = snapshotOf([siteDay, rates, other, second]);
     const out = await dispatch(`/microgrids/${MG}/setup/rates?date=2026-11-08&extra=1`);
     expect(out.ok && out.value.attached).toEqual([
-      { view: "metering.second", title: "metering.second example", href: `/microgrids/${MG}/setup/households`, hint: "tab" },
+      { view: "metering.second", title: "metering.second example", href: `/microgrids/${MG}/setup/tenants`, hint: "tab" },
       { view: "metering.other", title: "metering.other example", href: `/microgrids/${MG}/billing?date=2026-11-08`, hint: "tab" },
     ]);
   });

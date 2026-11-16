@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Device, Edge, Household, HouseholdDevice } from "@/lib/types/domain";
+import type { Device, Edge, Tenant, TenantDevice } from "@/lib/types/domain";
 import { StatusChip } from "@/components/ui/status-chip";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
@@ -16,8 +16,8 @@ import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import type { OpenEmsClientConfig } from "@/lib/openems";
 
 // Setup > Edges > [edgeId] — edge detail (D2 / #53, #77).
-// Lists devices on this edge. For each device, shows the linked household
-// (via household_devices) if any.
+// Lists devices on this edge. For each device, shows the linked tenant
+// (via tenant_devices) if any.
 //
 // #77 adds: "Configure…" button in the header (via client shell component).
 // #139 adds: edge-online fetch for the empty-state tone (warn if offline).
@@ -41,8 +41,8 @@ type DeviceRow = Pick<
   Device,
   "id" | "name" | "device_type" | "openems_component_id"
 >;
-type HhRow = Pick<Household, "id" | "display_name">;
-type HdRow = Pick<HouseholdDevice, "device_id" | "household_id" | "role">;
+type HhRow = Pick<Tenant, "id" | "display_name">;
+type HdRow = Pick<TenantDevice, "device_id" | "tenant_id" | "role">;
 
 export default async function EdgeDetailPage({
   params,
@@ -100,13 +100,13 @@ export default async function EdgeDetailPage({
   const [hdsResult, hhsResult] = await Promise.all([
     deviceIds.length > 0
       ? supabase
-          .from("household_devices")
-          .select("device_id, household_id, role")
+          .from("tenant_devices")
+          .select("device_id, tenant_id, role")
           .in("device_id", deviceIds)
           .returns<HdRow[]>()
       : Promise.resolve({ data: [] as HdRow[], error: null }),
     supabase
-      .from("households")
+      .from("tenants")
       .select("id, display_name")
       .eq("microgrid_id", id)
       .returns<HhRow[]>(),
@@ -123,12 +123,12 @@ export default async function EdgeDetailPage({
   const hhById: Record<string, string> = {};
   for (const h of hhsResult.data ?? []) hhById[h.id] = h.display_name;
 
-  // Map device_id → primary_consumption_meter household_id (first match wins;
-  // the schema allows other roles too, but the IA surfaces "billed household").
+  // Map device_id → primary_consumption_meter tenant_id (first match wins;
+  // the schema allows other roles too, but the IA surfaces "billed tenant").
   const primaryByDevice: Record<string, string> = {};
   for (const hd of hdsResult.data ?? []) {
     if (hd.role === "primary_consumption_meter") {
-      primaryByDevice[hd.device_id] = hd.household_id;
+      primaryByDevice[hd.device_id] = hd.tenant_id;
     }
   }
 
@@ -214,7 +214,7 @@ export default async function EdgeDetailPage({
                   OpenEMS component
                 </th>
                 <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                  Linked household
+                  Linked tenant
                 </th>
                 {canManage && (
                   <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
@@ -225,9 +225,9 @@ export default async function EdgeDetailPage({
             </thead>
             <tbody>
               {devices.map((device) => {
-                const householdId = primaryByDevice[device.id];
-                const householdName = householdId
-                  ? hhById[householdId] ?? "—"
+                const tenantId = primaryByDevice[device.id];
+                const tenantName = tenantId
+                  ? hhById[tenantId] ?? "—"
                   : null;
                 return (
                   <tr key={device.id} className="border-t border-border">
@@ -244,7 +244,7 @@ export default async function EdgeDetailPage({
                       {device.openems_component_id ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-sm text-foreground">
-                      {householdName ?? (
+                      {tenantName ?? (
                         <span className="text-muted-foreground">
                           Not linked
                         </span>

@@ -21,7 +21,7 @@ export interface PublicCopy {
     body: string;
     startPage: string;
   };
-  /** A bill's payment link that cannot take the household to checkout. */
+  /** A bill's payment link that cannot take the tenant to checkout. */
   paymentLink: {
     /** The link is not one MGM could have written. */
     invalidLink: PublicNotice;
@@ -41,7 +41,7 @@ export interface PublicCopy {
     lookupFailed: PublicNotice;
     /**
      * Too many payment links were opened from one network address; the body
-     * has the wait. It speaks of the network, not of this household's link,
+     * has the wait. It speaks of the network, not of this tenant's link,
      * because the pay route's limit is keyed by the client's IP address and
      * many phones on mobile data share one. If that key changes, revisit it.
      */
@@ -56,7 +56,7 @@ export interface PublicCopy {
     };
   };
   /**
-   * The page a household returns to after a hosted checkout. "Checked"
+   * The page a tenant returns to after a hosted checkout. "Checked"
    * covers a failed payment too, so no string here may say the bill is
    * paid. `{name}` is the operator's name and `{number}` their WhatsApp
    * number as they stored it.

@@ -4,13 +4,13 @@ import type { Organization, Microgrid } from "@/lib/types/domain";
 import { COMMUNITY_MANAGEMENT_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { microgridHref } from "@/lib/microgrid-links";
 
-type MicrogridWithHouseholdCount = {
+type MicrogridWithTenantCount = {
   id: string;
   name: string;
   address_city: string | null;
   address_country: string | null;
   currency: string;
-  household_count: number;
+  tenant_count: number;
 };
 
 export default async function DashboardPage() {
@@ -89,7 +89,7 @@ export async function OrgCard({
           <Link href="/settings/plugins" className="text-primary hover:underline">
             Enable it in plugin settings
           </Link>{" "}
-          to manage communities, microgrids, and households.
+          to manage communities, microgrids, and tenants.
         </p>
       </div>
     );
@@ -101,12 +101,12 @@ export async function OrgCard({
     .select("id, name, address_city, address_country, currency, community_id, communities!inner(org_id)")
     .eq("communities.org_id", org.id);
 
-  // For each microgrid, get household count
-  const microgridsWithCounts: MicrogridWithHouseholdCount[] = [];
+  // For each microgrid, get tenant count
+  const microgridsWithCounts: MicrogridWithTenantCount[] = [];
   if (microgrids) {
     for (const mg of microgrids as unknown as Microgrid[]) {
       const { count } = await supabase
-        .from("households")
+        .from("tenants")
         .select("*", { count: "exact", head: true })
         .eq("microgrid_id", mg.id);
 
@@ -116,12 +116,12 @@ export async function OrgCard({
         address_city: mg.address_city,
         address_country: mg.address_country,
         currency: mg.currency,
-        household_count: count ?? 0,
+        tenant_count: count ?? 0,
       });
     }
   }
 
-  const locationLabel = (mg: MicrogridWithHouseholdCount) => {
+  const locationLabel = (mg: MicrogridWithTenantCount) => {
     const parts = [mg.address_city, mg.address_country].filter(Boolean);
     return parts.length > 0 ? parts.join(", ") : null;
   };
@@ -147,7 +147,7 @@ export async function OrgCard({
               )}
               <div className="mt-3 flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">
-                  {mg.household_count} household{mg.household_count !== 1 ? "s" : ""}
+                  {mg.tenant_count} tenant{mg.tenant_count !== 1 ? "s" : ""}
                 </span>
                 <span className="text-muted-foreground">{mg.currency}</span>
               </div>

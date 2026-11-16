@@ -193,7 +193,7 @@ describe("parseContribution", () => {
     ["assistant reading of a view on a legacy href with renamed placeholders", (c) => (c.nav[1].href = "/microgrids/[microgridId]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
     ["a view path another plugin owns", (c) => (c.views[0].path = "/microgrids/[id]/operations"), ["views", 0, "path"], "the catalog gives /microgrids/[id]/operations to metering"],
-    ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/households"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/households to community-management"],
+    ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/tenants"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/tenants to community-management"],
     ["an action path another plugin owns", (c) => (c.actions[0].path = "/api/devices"), ["actions", 0, "path"], "the catalog gives /api/devices to metering"],
     ["a path nobody owns", (c) => (c.actions[0].path = "/api/nowhere"), ["actions", 0, "path"], "no plugin in the catalog owns /api/nowhere"],
     ["two views on one path", (c) => (c.views[2].path = c.views[1].path), ["views", 2, "path"], "another view already serves /microgrids/[id]/billing/[periodId]"],
@@ -218,7 +218,7 @@ describe("parseContribution", () => {
     ["an undeclared column", (c) => (c.views[0].declares.keys = ["period", "status", "energy", "total"]), ["views", 0, "examples", 0, "body", "columns", 2, "key"], '"bills" is not declared by the view'],
     ["an undeclared cell", (c) => (c.views[0].declares.keys = ["period", "status", "energy", "total"]), ["views", 0, "examples", 0, "body", "rows", 0, "cells", "bills"], '"bills" is not declared by the view'],
     ["an undeclared prefix", (c) => (c.views[1].declares.prefixes = []), ["views", 1, "examples", 0, "body", "rows", 0, "cells", "tier.1"], '"tier.1" is not declared by the view'],
-    ["an undeclared total", (c) => (c.views[1].declares.keys = ["household", "payment"]), ["views", 1, "examples", 0, "body", "totals", "total"], '"total" is not declared by the view'],
+    ["an undeclared total", (c) => (c.views[1].declares.keys = ["tenant", "payment"]), ["views", 1, "examples", 0, "body", "totals", "total"], '"total" is not declared by the view'],
     ["an undeclared record field", (c) => asKind(c, "record", { sections: [{ fields: [{ key: "secret", label: "S", value: TEXT }] }] }), ["views", 0, "examples", 0, "body", "sections", 0, "fields", 0, "key"], '"secret" is not declared by the view'],
     ["an undeclared tile", (c) => asKind(c, "metrics", { tiles: [{ key: "secret", label: "S", value: TEXT }] }), ["views", 0, "examples", 0, "body", "tiles", 0], '"secret" is not declared by the view'],
     ["an undeclared series", (c) => asKind(c, "metrics", { tiles: [], series: [{ key: "secret", label: "S", unit: "kW", points: [] }] }), ["views", 0, "examples", 0, "body", "series", 0], '"secret" is not declared by the view'],

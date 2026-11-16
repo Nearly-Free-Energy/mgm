@@ -10,7 +10,7 @@ import {
 
 // The smoke's own rows: one organization, one community with an invoice
 // configuration whose logo is an object in the invoice-logos bucket, three
-// microgrids, three households on the first, and an org_manager who signs in
+// microgrids, three tenants on the first, and an org_manager who signs in
 // with a random password. This file writes only the ids and the email to disk, for
 // the narrow project and the teardown. The password is not secret: the
 // Playwright report and a failed run's trace record it as typed, for a user
@@ -103,11 +103,11 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures & { password:
     )
   );
   await must(
-    "households",
-    svc.from("households").insert(
+    "tenants",
+    svc.from("tenants").insert(
       [1, 2, 3].map((n) => ({
         microgrid_id: microgridIds[0],
-        display_name: `Smoke household ${n} with a long display name`,
+        display_name: `Smoke tenant ${n} with a long display name`,
         account_number: `SMOKE-${tag}-${n}`,
         address_line1: `Plot ${n}, a long synthetic street name`,
         primary_phone: `+25670000000${n}`,

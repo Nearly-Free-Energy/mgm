@@ -33,7 +33,7 @@ export type GateTarget =
   | { kind: "microgrid"; id: string }
   | { kind: "edge"; id: string }
   | { kind: "device"; id: string }
-  | { kind: "household"; id: string }
+  | { kind: "tenant"; id: string }
   | { kind: "billingPeriod"; id: string }
   | { kind: "lineItem"; id: string }
   | { kind: "rateSchedule"; id: string }
@@ -149,15 +149,15 @@ export async function resolveTargetOrganization(
       );
       return one(one(one(row?.edges)?.microgrids)?.communities)?.org_id ?? null;
     }
-    case "household": {
-      // "Authorized users can access households" (00002_rls.sql) shows a
-      // household through user_can_access_microgrid(microgrid_id). The
+    case "tenant": {
+      // "Authorized users can access tenants" (00002_rls.sql) shows a
+      // tenant through user_can_access_microgrid(microgrid_id). The
       // microgrid policy (00057_mgm_pilot_schema_bridge.sql) and the
       // community policy (00002) decide on the same organization, so this
-      // join finds every household the caller can see. If any of the three
+      // join finds every tenant the caller can see. If any of the three
       // policies stops deciding on that organization, revisit.
       const row = await single<{ microgrids: Embedded<MicrogridRow> }>(
-        "households",
+        "tenants",
         "id, microgrids!inner(communities!inner(org_id))",
         target.id
       );

@@ -7,23 +7,23 @@ import { checkGate, gateResponse } from "@/lib/runtime/gate";
 export const runtime = "nodejs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_HOUSEHOLD_IDS = 500;
+const MAX_TENANT_IDS = 500;
 
-type PreviewBody = { periodId: string; householdIds?: string[] };
+type PreviewBody = { periodId: string; tenantIds?: string[] };
 
 function parseBody(raw: unknown): PreviewBody | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
   if (typeof record.periodId !== "string" || !UUID_RE.test(record.periodId)) return null;
-  if (record.householdIds === undefined) return { periodId: record.periodId };
+  if (record.tenantIds === undefined) return { periodId: record.periodId };
   if (
-    !Array.isArray(record.householdIds) ||
-    record.householdIds.length > MAX_HOUSEHOLD_IDS ||
-    !record.householdIds.every((id) => typeof id === "string" && UUID_RE.test(id))
+    !Array.isArray(record.tenantIds) ||
+    record.tenantIds.length > MAX_TENANT_IDS ||
+    !record.tenantIds.every((id) => typeof id === "string" && UUID_RE.test(id))
   ) {
     return null;
   }
-  return { periodId: record.periodId, householdIds: record.householdIds };
+  return { periodId: record.periodId, tenantIds: record.tenantIds };
 }
 
 /**
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   const body = parseBody(raw);
   if (!body) {
     return NextResponse.json(
-      { error: "invalid_body", details: "periodId and householdIds must be UUIDs; householdIds is limited to 500 entries" },
+      { error: "invalid_body", details: "periodId and tenantIds must be UUIDs; tenantIds is limited to 500 entries" },
       { status: 400 }
     );
   }
@@ -76,23 +76,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "billing_period_not_found" }, { status: 404 });
   }
 
-  let householdIds = body.householdIds;
-  if (householdIds === undefined) {
-    const { data: households, error: householdsError } = await supabase
-      .from("households")
+  let tenantIds = body.tenantIds;
+  if (tenantIds === undefined) {
+    const { data: tenants, error: tenantsError } = await supabase
+      .from("tenants")
       .select("id")
       .eq("microgrid_id", period.microgrid_id)
-      .limit(MAX_HOUSEHOLD_IDS + 1);
-    if (householdsError) {
-      return NextResponse.json({ error: "households_unavailable" }, { status: 500 });
+      .limit(MAX_TENANT_IDS + 1);
+    if (tenantsError) {
+      return NextResponse.json({ error: "tenants_unavailable" }, { status: 500 });
     }
-    if ((households ?? []).length > MAX_HOUSEHOLD_IDS) {
+    if ((tenants ?? []).length > MAX_TENANT_IDS) {
       return NextResponse.json(
-        { error: "too_many_households", details: "Select at most 500 households for one review" },
+        { error: "too_many_tenants", details: "Select at most 500 tenants for one review" },
         { status: 413 },
       );
     }
-    householdIds = (households ?? []).map((household) => household.id);
+    tenantIds = (tenants ?? []).map((tenant) => tenant.id);
   }
 
   // This optional pilot ledger is not present in older databases. When it is
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     // from this production composition, so a request cannot switch providers.
     const generated = await composition.billingReview.preview({
       periodId: body.periodId,
-      householdIds,
+      tenantIds,
       provider: "openems",
     });
     if (isRunGenerationFatal(generated)) {
@@ -125,8 +125,8 @@ export async function POST(request: NextRequest) {
       if (result.kind === "preview") {
         const hasSavedBill = result.previousTotalAmount !== null;
         return {
-          householdId: result.householdId,
-          label: `Household ${result.householdId.slice(0, 8)}`,
+          tenantId: result.tenantId,
+          label: `Tenant ${result.tenantId.slice(0, 8)}`,
           savedUsageKwh: result.previousUsageKwh,
           savedAmount: result.previousTotalAmount,
           proposedUsageKwh: result.usageKwh,
@@ -147,8 +147,8 @@ export async function POST(request: NextRequest) {
         };
       }
       if (result.kind === "error") return {
-        householdId: result.householdId,
-        label: `Household ${result.householdId.slice(0, 8)}`,
+        tenantId: result.tenantId,
+        label: `Tenant ${result.tenantId.slice(0, 8)}`,
         savedUsageKwh: null,
         savedAmount: null,
         proposedUsageKwh: null,
@@ -164,8 +164,8 @@ export async function POST(request: NextRequest) {
         },
       };
       return {
-        householdId: result.householdId,
-        label: `Household ${result.householdId.slice(0, 8)}`,
+        tenantId: result.tenantId,
+        label: `Tenant ${result.tenantId.slice(0, 8)}`,
         savedUsageKwh: null,
         savedAmount: null,
         proposedUsageKwh: null,

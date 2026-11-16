@@ -50,8 +50,8 @@ export type BillingAuditEventType =
  * when applicable).
  */
 export type LineItemRegeneratedDetails = {
-  /** household.display_name snapshotted at write time — survives line-item delete. */
-  household_name: string;
+  /** tenant.display_name snapshotted at write time — survives line-item delete. */
+  tenant_name: string;
   /** total_amount on the previous (pre-write) line item, NULL when it was an INSERT. */
   previous_total_amount: number | null;
   /** total_amount on the post-write line item. */
@@ -132,6 +132,6 @@ export type BillingAuditLogEntry = {
   actorDisplayName: string | null;
   createdAt: string;
   billingLineItemId: string | null;
-  householdName: string | null;
+  tenantName: string | null;
   details: Record<string, unknown>;
 };

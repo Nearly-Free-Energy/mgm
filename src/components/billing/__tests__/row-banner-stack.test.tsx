@@ -32,7 +32,7 @@ describe("RowBannerStack", () => {
       <RowBannerStack
         entries={[]}
         onDismiss={vi.fn()}
-        getHouseholdName={() => "Test"}
+        getTenantName={() => "Test"}
       />,
     );
     expect(container.firstChild).toBeNull();
@@ -45,7 +45,7 @@ describe("RowBannerStack", () => {
       <RowBannerStack
         entries={[baseEntry({ durationMs: 1000 })]}
         onDismiss={onDismiss}
-        getHouseholdName={() => "Test"}
+        getTenantName={() => "Test"}
       />,
     );
 
@@ -65,7 +65,7 @@ describe("RowBannerStack", () => {
       <RowBannerStack
         entries={[baseEntry({ id: "e-42" })]}
         onDismiss={onDismiss}
-        getHouseholdName={() => "Alice"}
+        getTenantName={() => "Alice"}
       />,
     );
 
@@ -88,7 +88,7 @@ describe("RowBannerStack", () => {
       <RowBannerStack
         entries={entries}
         onDismiss={vi.fn()}
-        getHouseholdName={() => "Bob"}
+        getTenantName={() => "Bob"}
       />,
     );
 
@@ -96,15 +96,15 @@ describe("RowBannerStack", () => {
     expect(stack.children.length).toBe(3);
   });
 
-  it("prefixes the household name in the title", () => {
+  it("prefixes the tenant name in the title", () => {
     render(
       <RowBannerStack
         entries={[baseEntry({ message: "Failed" })]}
         onDismiss={vi.fn()}
-        getHouseholdName={() => "Carol Family"}
+        getTenantName={() => "Carol Family"}
       />,
     );
-    // Title uses householdName · message format.
+    // Title uses tenantName · message format.
     expect(screen.getByText(/Carol Family · Failed/)).toBeTruthy();
   });
 
@@ -120,7 +120,7 @@ describe("RowBannerStack", () => {
           }),
         ]}
         onDismiss={vi.fn()}
-        getHouseholdName={() => "Dee"}
+        getTenantName={() => "Dee"}
       />,
     );
 

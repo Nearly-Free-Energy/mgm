@@ -1,20 +1,20 @@
 # Tenant API — contract sketch
 
-**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: household (tenant) access" for the A/B decision that must be resolved before implementation begins.
+**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: tenant (tenant) access" for the A/B decision that must be resolved before implementation begins.
 
 ---
 
 ## Overview
 
-The Tenant (household) API provides read-only access for household members to view their own billing data. It sits behind `src/app/api/v1/households/me/` and is authenticated via Supabase Auth (JWT), with RLS enforcing that callers can only read their own household's data through the `household_users` join table.
+The Tenant (tenant) API provides read-only access for tenant members to view their own billing data. It sits behind `src/app/api/v1/tenants/me/` and is authenticated via Supabase Auth (JWT), with RLS enforcing that callers can only read their own tenant's data through the `tenant_users` join table.
 
 ---
 
 ## Endpoints (contract sketch — not yet implemented)
 
-### GET /api/v1/households/me
+### GET /api/v1/tenants/me
 
-Returns the caller's household profile.
+Returns the caller's tenant profile.
 
 **Auth:** Bearer JWT (Supabase Auth)
 **Response:**
@@ -31,9 +31,9 @@ Returns the caller's household profile.
 
 ---
 
-### GET /api/v1/households/me/billing-periods
+### GET /api/v1/tenants/me/billing-periods
 
-Returns billing periods for the caller's microgrid (limited to closed periods visible to the household).
+Returns billing periods for the caller's microgrid (limited to closed periods visible to the tenant).
 
 **Auth:** Bearer JWT
 **Response:**
@@ -53,7 +53,7 @@ Returns billing periods for the caller's microgrid (limited to closed periods vi
 
 ---
 
-### GET /api/v1/households/me/billing-periods/:periodId
+### GET /api/v1/tenants/me/billing-periods/:periodId
 
 Returns the caller's line item for a specific billing period.
 
@@ -62,7 +62,7 @@ Returns the caller's line item for a specific billing period.
 ```json
 {
   "billing_period_id": "uuid",
-  "household_id": "uuid",
+  "tenant_id": "uuid",
   "usage_kwh": 85.4,
   "start_kwh": 210.0,
   "end_kwh": 295.4,
@@ -77,7 +77,7 @@ Returns the caller's line item for a specific billing period.
 
 ---
 
-### GET /api/v1/households/me/rate-schedule
+### GET /api/v1/tenants/me/rate-schedule
 
 Returns the current rate schedule for the caller's microgrid.
 
@@ -101,8 +101,8 @@ Returns the current rate schedule for the caller's microgrid.
 
 ## Implementation notes (for future ticket)
 
-- All endpoints resolve the caller's `household_id` via `household_users.user_id = auth.uid()`.
-- RLS on `household_users` enforces this automatically — no application-layer auth check needed.
-- `household_users` is seeded empty (population pattern depends on API user pattern A/B decision).
+- All endpoints resolve the caller's `tenant_id` via `tenant_users.user_id = auth.uid()`.
+- RLS on `tenant_users` enforces this automatically — no application-layer auth check needed.
+- `tenant_users` is seeded empty (population pattern depends on API user pattern A/B decision).
 - Currency is inherited from the microgrid; response payloads omit the currency symbol — callers format locally.
-- These endpoints are **read-only** — household members cannot update billing data or rate schedules.
+- These endpoints are **read-only** — tenant members cannot update billing data or rate schedules.

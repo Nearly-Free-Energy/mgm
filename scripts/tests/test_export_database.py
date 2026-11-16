@@ -126,12 +126,12 @@ CREATE FUNCTION "public"."fn_example"() RETURNS integer
 -- a comment inside a function body stays
 SELECT 1
 $$;
-CREATE TABLE "public"."households" (
+CREATE TABLE "public"."tenants" (
     "id" "uuid" NOT NULL
 );
 CREATE SEQUENCE "public"."invoice_seq";
 CREATE VIEW "public"."v_example" AS SELECT 1;
-CREATE TRIGGER "trg_example" AFTER INSERT ON "public"."households" FOR EACH ROW EXECUTE FUNCTION "public"."fn_example"();
+CREATE TRIGGER "trg_example" AFTER INSERT ON "public"."tenants" FOR EACH ROW EXECUTE FUNCTION "public"."fn_example"();
 CREATE EVENT TRIGGER "issue_pg_cron_access" ON "ddl_command_end"
          WHEN TAG IN ('CREATE EXTENSION')
    EXECUTE FUNCTION "extensions"."grant_pg_cron_access"();
@@ -163,12 +163,12 @@ CREATE OR REPLACE FUNCTION "public"."fn_example"() RETURNS integer
 -- a comment inside a function body stays
 SELECT 1
 $$;
-CREATE TABLE IF NOT EXISTS "public"."households" (
+CREATE TABLE IF NOT EXISTS "public"."tenants" (
     "id" "uuid" NOT NULL
 );
 CREATE SEQUENCE IF NOT EXISTS "public"."invoice_seq";
 CREATE OR REPLACE VIEW "public"."v_example" AS SELECT 1;
-CREATE OR REPLACE TRIGGER "trg_example" AFTER INSERT ON "public"."households" FOR EACH ROW EXECUTE FUNCTION "public"."fn_example"();
+CREATE OR REPLACE TRIGGER "trg_example" AFTER INSERT ON "public"."tenants" FOR EACH ROW EXECUTE FUNCTION "public"."fn_example"();
 -- CREATE EVENT TRIGGER "issue_pg_cron_access" ON "ddl_command_end"
 --          WHEN TAG IN ('CREATE EXTENSION')
 --    EXECUTE FUNCTION "extensions"."grant_pg_cron_access"();
@@ -209,7 +209,7 @@ DATA_SAMPLE = """\
 -- Dumped from database version {server_version}
 -- Dumped by pg_dump version 17.6
 
-COPY "public"."households" ("id") FROM stdin;
+COPY "public"."tenants" ("id") FROM stdin;
 00000000-0000-0000-0000-000000000001
 \\.
 

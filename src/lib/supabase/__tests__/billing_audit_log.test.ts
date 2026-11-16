@@ -53,7 +53,7 @@ const FIXTURE = {
   periodAClosed: "dddddddd-dddd-4000-8006-00000000002a",
   rateA: "dddddddd-dddd-4000-8007-00000000000a",
 
-  // Extra households on mgA, isolated from hhA so the link-invalidation
+  // Extra tenants on mgA, isolated from hhA so the link-invalidation
   // tests (#217 / 00037) can run against fresh rows without contaminating
   // the existing hhA-based assertions.
   hhA_inv1: "dddddddd-dddd-4000-8005-00000000001a",
@@ -70,7 +70,7 @@ const FIXTURE = {
   // #218: isolated fixture for previous_snapshot tests. Distinct from A
   // because the AC #242 UPDATE-via-CONFLICT test mutates periodA/hhA row
   // state and downstream assertions would couple to ordering. C is
-  // un-metered (no household_devices row, no edge/device) so
+  // un-metered (no tenant_devices row, no edge/device) so
   // runGenerationFor routes through the manual-override path without
   // contacting OpenEMS.
   orgC: "dddddddd-dddd-4000-8000-00000000000c",
@@ -103,7 +103,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       userEmails: [EMAIL_SUPER, EMAIL_ORGA, EMAIL_ORGB],
     });
 
-    // Org / community / microgrid / edge / device / household / period — A
+    // Org / community / microgrid / edge / device / tenant / period — A
     await svc.from("organizations").insert({ id: FIXTURE.orgA, name: "BC1 Org A" });
     await svc.from("communities").insert({ id: FIXTURE.commA, org_id: FIXTURE.orgA, name: "BC1 Comm A" });
     await svc.from("microgrids").insert({
@@ -125,30 +125,30 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       device_type: "consumption_meter",
       openems_component_id: "bc1-meter-a",
     });
-    await svc.from("households").insert({
+    await svc.from("tenants").insert({
       id: FIXTURE.hhA,
       microgrid_id: FIXTURE.mgA,
-      display_name: "BC1 Household A",
+      display_name: "BC1 Tenant A",
       primary_phone: "+256700000001",
     });
-    // Three extra households for the #217 link-invalidation cases (A/B/C).
-    await svc.from("households").insert([
+    // Three extra tenants for the #217 link-invalidation cases (A/B/C).
+    await svc.from("tenants").insert([
       {
         id: FIXTURE.hhA_inv1,
         microgrid_id: FIXTURE.mgA,
-        display_name: "BC1 Household A-inv1",
+        display_name: "BC1 Tenant A-inv1",
         primary_phone: "+256700001001",
       },
       {
         id: FIXTURE.hhA_inv2,
         microgrid_id: FIXTURE.mgA,
-        display_name: "BC1 Household A-inv2",
+        display_name: "BC1 Tenant A-inv2",
         primary_phone: "+256700001002",
       },
       {
         id: FIXTURE.hhA_inv3,
         microgrid_id: FIXTURE.mgA,
-        display_name: "BC1 Household A-inv3",
+        display_name: "BC1 Tenant A-inv3",
         primary_phone: "+256700001003",
       },
     ]);
@@ -175,7 +175,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       closed_at: new Date().toISOString(),
     });
 
-    // Org / community / microgrid / household / period — B (cross-org)
+    // Org / community / microgrid / tenant / period — B (cross-org)
     await svc.from("organizations").insert({ id: FIXTURE.orgB, name: "BC1 Org B" });
     await svc.from("communities").insert({ id: FIXTURE.commB, org_id: FIXTURE.orgB, name: "BC1 Comm B" });
     await svc.from("microgrids").insert({
@@ -184,10 +184,10 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       name: "BC1 MG B",
       currency: "UGX",
     });
-    await svc.from("households").insert({
+    await svc.from("tenants").insert({
       id: FIXTURE.hhB,
       microgrid_id: FIXTURE.mgB,
-      display_name: "BC1 Household B",
+      display_name: "BC1 Tenant B",
       primary_phone: "+256700000002",
     });
     await svc.from("billing_periods").insert({
@@ -199,7 +199,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     });
 
     // ── Fixture C — #218 previous_snapshot isolated fixture ──────────────
-    // Un-metered household: NO household_devices row, NO edge/device.
+    // Un-metered tenant: NO tenant_devices row, NO edge/device.
     // runGenerationFor routes through the manual-override path so OpenEMS
     // is never contacted. A rate_schedules row is required (un-metered or
     // not) — runGenerationFor returns fatal 400 without one.
@@ -219,10 +219,10 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       service_charge: 0,
       tax_rate: 0,
     });
-    await svc.from("households").insert({
+    await svc.from("tenants").insert({
       id: FIXTURE.hhC,
       microgrid_id: FIXTURE.mgC,
-      display_name: "BC1 Household C",
+      display_name: "BC1 Tenant C",
       primary_phone: "+256700000003",
     });
     await svc.from("billing_periods").insert({
@@ -274,7 +274,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.from("billing_line_items").insert({
       id,
       billing_period_id: FIXTURE.periodA,
-      household_id: FIXTURE.hhA,
+      tenant_id: FIXTURE.hhA,
       device_id: FIXTURE.deviceA,
       usage_kwh: 10,
       total_amount: 1000,
@@ -301,7 +301,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA,
+      _tenant_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 50,
       _start_kwh: 0,
@@ -313,7 +313,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
       _audit_details: {
-        household_name: "BC1 Household A",
+        tenant_name: "BC1 Tenant A",
         previous_total_amount: null,
         new_total_amount: 25000,
         previous_reading_source: null,
@@ -326,7 +326,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .select("id, total_amount, reading_source, payment_status")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA);
+      .eq("tenant_id", FIXTURE.hhA);
     expect(lis?.length).toBe(1);
     expect(lis?.[0]?.total_amount).toBe(25000);
     expect(lis?.[0]?.reading_source).toBe("edge");
@@ -353,7 +353,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .select("id")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA)
+      .eq("tenant_id", FIXTURE.hhA)
       .single<{ id: string }>();
     const lineItemId = existing!.id;
 
@@ -389,7 +389,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA,
+      _tenant_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 80,
       _start_kwh: 0,
@@ -401,7 +401,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
       _audit_details: {
-        household_name: "BC1 Household A",
+        tenant_name: "BC1 Tenant A",
         previous_total_amount: 25000,
         new_total_amount: 40000,
         previous_reading_source: "edge",
@@ -452,7 +452,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodAClosed,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA,
+      _tenant_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 90,
       _start_kwh: 0,
@@ -464,7 +464,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
       _audit_details: {
-        household_name: "BC1 Household A",
+        tenant_name: "BC1 Tenant A",
         previous_total_amount: 40000,
         new_total_amount: 45000,
         previous_reading_source: "edge",
@@ -485,7 +485,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
 
   // ── #217 / 00037 — payment-link auto-invalidation on amount change ────────
   //
-  // Each case uses a distinct household so the post-state on one case does
+  // Each case uses a distinct tenant so the post-state on one case does
   // not contaminate the next. The seed for each case is INSERT-via-RPC for
   // the `total_amount` baseline, then a direct UPDATE on the row to plant
   // the cached payment fields (payment_status / paid_at / paid_by_user_id /
@@ -502,7 +502,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv1,
+      _tenant_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 10,
       _start_kwh: 0,
@@ -513,7 +513,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: null,
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv1" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv1" },
     });
     const failedAt = new Date().toISOString();
     await svc
@@ -525,13 +525,13 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         // payment_status remains 'unpaid' (default)
       })
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv1);
+      .eq("tenant_id", FIXTURE.hhA_inv1);
 
     // Re-key with a different total_amount.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv1,
+      _tenant_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 15,
       _start_kwh: 0,
@@ -542,7 +542,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: alejandroSuperAdmin.userId,
       _manual_reason: "operator correction",
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv1" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv1" },
     });
     expect(error).toBeNull();
 
@@ -552,7 +552,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         "total_amount, pesapal_redirect_url, pesapal_order_id, payment_failed_at, payment_status",
       )
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv1)
+      .eq("tenant_id", FIXTURE.hhA_inv1)
       .single<{
         total_amount: number;
         pesapal_redirect_url: string | null;
@@ -574,7 +574,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv2,
+      _tenant_id: FIXTURE.hhA_inv2,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 20,
       _start_kwh: 0,
@@ -585,7 +585,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: null,
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv2" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv2" },
     });
     const failedAt = new Date().toISOString();
     await svc
@@ -596,13 +596,13 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         payment_failed_at: failedAt,
       })
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv2);
+      .eq("tenant_id", FIXTURE.hhA_inv2);
 
     // Re-run with the SAME total_amount — auto-invalidation must NOT fire.
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv2,
+      _tenant_id: FIXTURE.hhA_inv2,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 20,
       _start_kwh: 0,
@@ -613,7 +613,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: null,
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv2" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv2" },
     });
     expect(error).toBeNull();
 
@@ -623,7 +623,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         "total_amount, pesapal_redirect_url, pesapal_order_id, payment_failed_at",
       )
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv2)
+      .eq("tenant_id", FIXTURE.hhA_inv2)
       .single<{
         total_amount: number;
         pesapal_redirect_url: string | null;
@@ -645,7 +645,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv3,
+      _tenant_id: FIXTURE.hhA_inv3,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 30,
       _start_kwh: 0,
@@ -656,13 +656,13 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: null,
       _manual_reason: null,
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv3" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv3" },
     });
     const { data: row } = await svc
       .from("billing_line_items")
       .select("id")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv3)
+      .eq("tenant_id", FIXTURE.hhA_inv3)
       .single<{ id: string }>();
     const liId = row!.id;
 
@@ -698,7 +698,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv3,
+      _tenant_id: FIXTURE.hhA_inv3,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 35,
       _start_kwh: 0,
@@ -709,7 +709,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: alejandroSuperAdmin.userId,
       _manual_reason: "dispute reread",
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv3" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv3" },
     });
     expect(error).toBeNull();
 
@@ -773,7 +773,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA,
+      _tenant_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 300,
       _start_kwh: 100,
@@ -785,7 +785,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _manual_reason: "corrected",
       _actor_user_id: alejandroSuperAdmin.userId,
       _audit_details: {
-        household_name: "BC1 Household A",
+        tenant_name: "BC1 Tenant A",
         previous_total_amount: 12500,
         new_total_amount: 15000,
         previous_reading_source: "manual",
@@ -851,7 +851,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .insert({
         billing_period_id: FIXTURE.periodC,
-        household_id: FIXTURE.hhC,
+        tenant_id: FIXTURE.hhC,
         device_id: null,
         usage_kwh: 250,
         start_kwh: 100,
@@ -876,10 +876,10 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const out = await runGenerationFor({
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodC,
-      householdIds: [FIXTURE.hhC],
+      tenantIds: [FIXTURE.hhC],
       manualReadings: [
         {
-          householdId: FIXTURE.hhC,
+          tenantId: FIXTURE.hhC,
           startKwh: 100,
           endKwh: 400,
           reason: "corrected",
@@ -893,8 +893,8 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         `runGenerationFor returned fatal ${out.status}: ${out.body.error}`
       );
     }
-    const results = (out as { results: { kind: string; householdId: string }[] }).results;
-    const written = results.find((r) => r.householdId === FIXTURE.hhC);
+    const results = (out as { results: { kind: string; tenantId: string }[] }).results;
+    const written = results.find((r) => r.tenantId === FIXTURE.hhC);
     expect(written?.kind).toBe("written");
 
     // Read back the latest audit row for this line item.
@@ -945,10 +945,10 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const out = await runGenerationFor({
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodC2,
-      householdIds: [FIXTURE.hhC],
+      tenantIds: [FIXTURE.hhC],
       manualReadings: [
         {
-          householdId: FIXTURE.hhC,
+          tenantId: FIXTURE.hhC,
           startKwh: 0,
           endKwh: 100,
           reason: "first reading",
@@ -996,7 +996,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error, data } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA_inv1,
+      _tenant_id: FIXTURE.hhA_inv1,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 178.3500000000002,
       _start_kwh: 83.57,
@@ -1009,7 +1009,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: alejandroSuperAdmin.userId,
       _manual_reason: "#227 dust regression",
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: { household_name: "BC1 Household A-inv1" },
+      _audit_details: { tenant_name: "BC1 Tenant A-inv1" },
     });
     expect(error).toBeNull();
     // RPC returns the persisted row as a composite. PostgREST may wrap
@@ -1043,7 +1043,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .select("usage_kwh, start_kwh, end_kwh, total_amount, tier_breakdown")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA_inv1)
+      .eq("tenant_id", FIXTURE.hhA_inv1)
       .single<{
         usage_kwh: number | string;
         start_kwh: number | string;
@@ -1068,7 +1068,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .select("total_amount")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA)
+      .eq("tenant_id", FIXTURE.hhA)
       .single<{ total_amount: number }>();
     const totalBefore = Number(before?.total_amount);
 
@@ -1079,7 +1079,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
       _rate_schedule_id: FIXTURE.rateA,
-      _household_id: FIXTURE.hhA,
+      _tenant_id: FIXTURE.hhA,
       _device_id: FIXTURE.deviceA,
       _usage_kwh: 999,
       _start_kwh: 0,
@@ -1090,7 +1090,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: null,
       _manual_reason: null,
       _actor_user_id: fakeActor,
-      _audit_details: { household_name: "BC1 Household A" },
+      _audit_details: { tenant_name: "BC1 Tenant A" },
     });
     expect(error).toBeTruthy();
 
@@ -1099,7 +1099,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .from("billing_line_items")
       .select("total_amount")
       .eq("billing_period_id", FIXTURE.periodA)
-      .eq("household_id", FIXTURE.hhA)
+      .eq("tenant_id", FIXTURE.hhA)
       .single<{ total_amount: number }>();
     expect(Number(after?.total_amount)).toBe(totalBefore);
   });
@@ -1122,7 +1122,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       billing_period_id: FIXTURE.periodB,
       event_type: "period_created",
       actor_user_id: bobOrgManagerB.userId,
-      details: { household_name: "BC1 Household B" },
+      details: { tenant_name: "BC1 Tenant B" },
     });
 
     const { data, error } = await aaronOrgManagerA.client

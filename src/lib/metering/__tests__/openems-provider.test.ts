@@ -182,7 +182,7 @@ describe("OpenEmsMeteringProvider", () => {
     expect(readings[0].usageKwh).toBeNull();
   });
 
-  it("isolates a missing OpenEMS meter instead of failing all household reads", async () => {
+  it("isolates a missing OpenEMS meter instead of failing all tenant reads", async () => {
     const response = (result: unknown) => new Response(JSON.stringify({
       jsonrpc: "2.0", result: { payload: { jsonrpc: "2.0", result } },
     }), { status: 200 });

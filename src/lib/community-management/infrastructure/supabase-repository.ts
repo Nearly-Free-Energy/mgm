@@ -19,7 +19,7 @@ import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 import type {
   Community,
-  Household,
+  Tenant,
   Microgrid,
 } from "@/lib/types/domain";
 import type {
@@ -87,11 +87,11 @@ export function createSupabaseCommunityRepository(
       };
     },
 
-    async findHousehold(householdId: string) {
+    async findTenant(tenantId: string) {
       const { data, error } = await supabase
-        .from("households")
+        .from("tenants")
         .select("id, display_name, microgrid_id")
-        .eq("id", householdId)
+        .eq("id", tenantId)
         .maybeSingle<{ id: string; display_name: string; microgrid_id: string }>();
       if (error) return { data: null, error: toError(error) };
       return { data, error: null };
@@ -139,33 +139,33 @@ export function createSupabaseCommunityRepository(
       return { data: (data as Microgrid | null) ?? null, error: null };
     },
 
-    async createHousehold(args: Record<string, unknown>, withMeter: boolean) {
+    async createTenant(args: Record<string, unknown>, withMeter: boolean) {
       const { data, error } = withMeter
-        ? await supabase.rpc("fn_create_household_with_meter", args as never)
-        : await supabase.rpc("fn_create_household", args as never);
+        ? await supabase.rpc("fn_create_tenant_with_meter", args as never)
+        : await supabase.rpc("fn_create_tenant", args as never);
       if (error) return { data: null, error: toError(error) };
       return { data: data as string, error: null };
     },
 
-    async findDeviceLink(deviceId: string, excludeHouseholdId: string) {
+    async findDeviceLink(deviceId: string, excludeTenantId: string) {
       // Only OPEN links steal: closed historical links (effective_to set)
       // are replacement history, not live claims.
       const { data } = await supabase
-        .from("household_devices")
-        .select("household_id")
+        .from("tenant_devices")
+        .select("tenant_id")
         .eq("device_id", deviceId)
         .eq("role", "primary_consumption_meter")
-        .neq("household_id", excludeHouseholdId)
+        .neq("tenant_id", excludeTenantId)
         .is("effective_to", null)
-        .maybeSingle<{ household_id: string }>();
+        .maybeSingle<{ tenant_id: string }>();
       return data ?? null;
     },
 
-    async getOpenDeviceLink(householdId: string) {
+    async getOpenDeviceLink(tenantId: string) {
       const { data } = await supabase
-        .from("household_devices")
+        .from("tenant_devices")
         .select("id, device_id, effective_from")
-        .eq("household_id", householdId)
+        .eq("tenant_id", tenantId)
         .eq("role", "primary_consumption_meter")
         .is("effective_to", null)
         .maybeSingle<{ id: string; device_id: string; effective_from: string }>();
@@ -174,21 +174,21 @@ export function createSupabaseCommunityRepository(
 
     async closeDeviceLink(linkId: string, effectiveTo: string) {
       const { error } = await supabase
-        .from("household_devices")
+        .from("tenant_devices")
         .update({ effective_to: effectiveTo })
         .eq("id", linkId);
       return error ? toError(error) : null;
     },
 
     async replaceDeviceLink(
-      householdId: string,
+      tenantId: string,
       deviceId: string,
       effectiveDate: string
     ) {
       const { data, error } = await supabase.rpc(
-        "fn_replace_household_device",
+        "fn_replace_tenant_device",
         {
-          p_household_id: householdId,
+          p_tenant_id: tenantId,
           p_device_id: deviceId,
           p_effective_date: effectiveDate,
         }
@@ -199,45 +199,45 @@ export function createSupabaseCommunityRepository(
 
     async deleteDeviceLink(linkId: string) {
       const { error } = await supabase
-        .from("household_devices")
+        .from("tenant_devices")
         .delete()
         .eq("id", linkId);
       return error ? toError(error) : null;
     },
 
-    async updateHouseholdFields(id: string, patch: Record<string, unknown>) {
+    async updateTenantFields(id: string, patch: Record<string, unknown>) {
       const { data, error } = await supabase
-        .from("households")
+        .from("tenants")
         .update(patch)
         .eq("id", id)
         .select("*")
         .single();
       if (error) return { data: null, error: toError(error) };
-      return { data: data as Household, error: null };
+      return { data: data as Tenant, error: null };
     },
 
-    async refetchHousehold(id: string) {
+    async refetchTenant(id: string) {
       const { data, error } = await supabase
-        .from("households")
+        .from("tenants")
         .select("*")
         .eq("id", id)
         .single();
       if (error) return { data: null, error: toError(error) };
-      return { data: data as Household, error: null };
+      return { data: data as Tenant, error: null };
     },
 
-    async countBillingLineItems(householdId: string) {
+    async countBillingLineItems(tenantId: string) {
       const { count, error } = await supabase
         .from("billing_line_items")
         .select("id", { count: "exact", head: true })
-        .eq("household_id", householdId);
+        .eq("tenant_id", tenantId);
       if (error) return { count: null, error: toError(error) };
       return { count, error: null };
     },
 
-    async deleteHousehold(id: string) {
+    async deleteTenant(id: string) {
       const { data, error } = await supabase
-        .from("households")
+        .from("tenants")
         .delete()
         .eq("id", id)
         .select("id");

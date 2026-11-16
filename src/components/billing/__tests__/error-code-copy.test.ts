@@ -46,8 +46,8 @@ describe("errorCodeCopy", () => {
 
   it.each(codes)("has dedicated copy for %s", (code) => {
     const copy = errorCodeCopy({
-      householdId: "00000000-0000-4000-8000-000000000001",
-      householdName: "Nakato",
+      tenantId: "00000000-0000-4000-8000-000000000001",
+      tenantName: "Nakato",
       error: "RAW_INTERNAL_STRING",
       code,
     });

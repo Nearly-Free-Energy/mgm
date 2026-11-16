@@ -34,7 +34,7 @@ const F = {
   microgridA: "e7200000-0000-4000-8002-000000000001",
   edgeA: "e7200000-0000-4000-8003-000000000001",
   deviceA: "e7200000-0000-4000-8004-000000000001",
-  householdA: "e7200000-0000-4000-8005-000000000001",
+  tenantA: "e7200000-0000-4000-8005-000000000001",
   rateA: "e7200000-0000-4000-8006-000000000001",
   periodA: "e7200000-0000-4000-8007-000000000001",
   lineItemA: "e7200000-0000-4000-8008-000000000001",
@@ -54,7 +54,7 @@ const SEGMENTS: Record<CoreEntityKind, string> = {
   microgrid: F.microgridA,
   edge: F.edgeA,
   device: F.deviceA,
-  household: F.householdA,
+  tenant: F.tenantA,
   billingPeriod: F.periodA,
   lineItem: F.lineItemA,
   rateSchedule: F.rateA,
@@ -119,10 +119,10 @@ beforeAll(async () => {
     device_type: "consumption_meter",
     openems_component_id: "gui-entities-meter-a",
   });
-  await insert("households", {
-    id: F.householdA,
+  await insert("tenants", {
+    id: F.tenantA,
     microgrid_id: F.microgridA,
-    display_name: "GUI Entities Household A",
+    display_name: "GUI Entities Tenant A",
     primary_phone: "+256700007201",
   });
   await insert("rate_schedules", {
@@ -142,7 +142,7 @@ beforeAll(async () => {
   await insert("billing_line_items", {
     id: F.lineItemA,
     billing_period_id: F.periodA,
-    household_id: F.householdA,
+    tenant_id: F.tenantA,
     device_id: F.deviceA,
     usage_kwh: 1,
     total_amount: 500,

@@ -58,7 +58,7 @@ function stubRepo(overrides: Partial<MeteringRepository> = {}): MeteringReposito
       id === MG_ID
         ? { microgridId: MG_ID, communityId: "comm-1", orgId: ORG_ID }
         : null,
-    getHouseholdOrganization: async () => null,
+    getTenantOrganization: async () => null,
     getDeviceOrganization: async () => null,
     getStoredConnection: async () => null,
     getMicrogridTimezone: async () => "Africa/Kampala",
@@ -543,12 +543,12 @@ describe("MeteringCapability.getSiteDay", () => {
       expect(getSiteSamples).not.toHaveBeenCalled();
     });
 
-    it("answers 503, not a site without household meters, when the meter links cannot be read", async () => {
+    it("answers 503, not a site without tenant meters, when the meter links cannot be read", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { capability, getSiteSamples } = setup({
         repo: {
           getHouseMeterIds: async () => {
-            throw new Error("Could not read household meter links: boom");
+            throw new Error("Could not read tenant meter links: boom");
           },
         },
       });
@@ -561,7 +561,7 @@ describe("MeteringCapability.getSiteDay", () => {
       expect(getSiteSamples).not.toHaveBeenCalled();
       expect(consoleSpy).toHaveBeenCalledWith("MGM site devices could not be read", {
         name: "Error",
-        message: "Could not read household meter links: boom",
+        message: "Could not read tenant meter links: boom",
       });
       consoleSpy.mockRestore();
     });

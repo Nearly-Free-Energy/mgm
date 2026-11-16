@@ -75,7 +75,7 @@ const ORG_A = { id: "org-a", name: "Nearly Free Energy" };
 const COMMUNITY_K = { id: "comm-k", name: "Kisakye", org_id: "org-a" };
 const MICROGRID_1 = { id: "mg-1", name: "Block A", community_id: "comm-k" };
 const EDGE_1 = { id: "edge-1", name: "Gateway 1", microgrid_id: "mg-1" };
-const HH_1 = { id: "hh-1", display_name: "Household Alpha", microgrid_id: "mg-1" };
+const HH_1 = { id: "hh-1", display_name: "Tenant Alpha", microgrid_id: "mg-1" };
 
 // ── Empty-state: 0 orgs ────────────────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ describe("getHierarchyLevels — siblings branch", () => {
     communities: [COMMUNITY_K, COMMUNITY_K2],
     microgrids: [MICROGRID_1, MICROGRID_2],
     edges: [EDGE_1],
-    households: [HH_1],
+    tenants: [HH_1],
   });
 
   it("org count > 1 → siblings populated for Organization level; excludes self", async () => {
@@ -216,7 +216,7 @@ describe("getHierarchyLevels — siblings branch", () => {
       communities: [COMMUNITY_K],
       microgrids: [MICROGRID_1],
       edges: [],
-      households: [],
+      tenants: [],
     });
     const levels = await getHierarchyLevels(singleMgSupabase, {
       kind: "microgrid",
@@ -236,7 +236,7 @@ describe("getHierarchyLevels — scope variants", () => {
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [EDGE_1],
-    households: [HH_1],
+    tenants: [HH_1],
   });
 
   it("communities scope → 1-level [Organization]", async () => {
@@ -271,14 +271,14 @@ describe("getHierarchyLevels — scope variants", () => {
     expect(levels[2].active).toBe(false);
   });
 
-  it("household scope → 4-level [Org, Community, Microgrid, Household] with Household active", async () => {
+  it("tenant scope → 4-level [Org, Community, Microgrid, Tenant] with Tenant active", async () => {
     const levels = await getHierarchyLevels(supabase, {
-      kind: "household",
+      kind: "tenant",
       microgridId: "mg-1",
-      householdId: "hh-1",
+      tenantId: "hh-1",
     });
     expect(levels).toHaveLength(4);
-    expect(levels[3].kind).toBe("Household");
+    expect(levels[3].kind).toBe("Tenant");
     expect(levels[3].active).toBe(true);
   });
 
@@ -314,7 +314,7 @@ describe("getHierarchyLevels — href contracts", () => {
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [EDGE_1],
-    households: [HH_1],
+    tenants: [HH_1],
   });
 
   it("Organization href is /communities for the communities listing scope (#134)", async () => {
@@ -353,14 +353,14 @@ describe("getHierarchyLevels — href contracts", () => {
     expect(edgeLevel!.href).toBe("/microgrids/mg-1/setup/edges/edge-1");
   });
 
-  it("Household href points to /microgrids/<mgId>/setup/households/<hhId>", async () => {
+  it("Tenant href points to /microgrids/<mgId>/setup/tenants/<hhId>", async () => {
     const levels = await getHierarchyLevels(supabase, {
-      kind: "household",
+      kind: "tenant",
       microgridId: "mg-1",
-      householdId: "hh-1",
+      tenantId: "hh-1",
     });
-    const hhLevel = levels.find((l) => l.kind === "Household");
-    expect(hhLevel!.href).toBe("/microgrids/mg-1/setup/households/hh-1");
+    const hhLevel = levels.find((l) => l.kind === "Tenant");
+    expect(hhLevel!.href).toBe("/microgrids/mg-1/setup/tenants/hh-1");
   });
 
   it("Community href in 'community' scope points to /communities/<id> (active leaf)", async () => {
@@ -378,7 +378,7 @@ describe("getHierarchyLevels — href contracts", () => {
       communities: [COMMUNITY_K],
       microgrids: [MICROGRID_1],
       edges: [],
-      households: [],
+      tenants: [],
     });
     const levels = await getHierarchyLevels(multiOrgSupabase, {
       kind: "microgrid",
@@ -399,7 +399,7 @@ describe("getHierarchyLevels — listing scopes", () => {
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [EDGE_1],
-    households: [HH_1],
+    tenants: [HH_1],
   });
 
   it("edges-listing scope → 4-level [Org, Community, Microgrid, Edge] with 'Edges' label active", async () => {
@@ -417,17 +417,17 @@ describe("getHierarchyLevels — listing scopes", () => {
     expect(levels[3].siblings).toBeUndefined();
   });
 
-  it("households-listing scope → 4-level [Org, Community, Microgrid, Household] with 'Households' label active", async () => {
+  it("tenants-listing scope → 4-level [Org, Community, Microgrid, Tenant] with 'Tenants' label active", async () => {
     const levels = await getHierarchyLevels(supabase, {
-      kind: "households-listing",
+      kind: "tenants-listing",
       microgridId: "mg-1",
     });
     expect(levels).toHaveLength(4);
-    expect(levels[3].kind).toBe("Household");
-    expect(levels[3].label).toBe("Households");
+    expect(levels[3].kind).toBe("Tenant");
+    expect(levels[3].label).toBe("Tenants");
     expect(levels[3].active).toBe(true);
-    expect(levels[3].count).toBe(1); // 1 household in fixture
-    expect(levels[3].href).toBe("/microgrids/mg-1/setup/households");
+    expect(levels[3].count).toBe(1); // 1 tenant in fixture
+    expect(levels[3].href).toBe("/microgrids/mg-1/setup/tenants");
     expect(levels[3].siblings).toBeUndefined();
   });
 
@@ -437,7 +437,7 @@ describe("getHierarchyLevels — listing scopes", () => {
       communities: [COMMUNITY_K],
       microgrids: [MICROGRID_1],
       edges: [],
-      households: [],
+      tenants: [],
     });
     const levels = await getHierarchyLevels(emptyEdgesSupabase, {
       kind: "edges-listing",
@@ -459,7 +459,7 @@ describe("getHierarchyLevels — #134: listing-path sibling hrefs + orgId thread
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [],
-    households: [],
+    tenants: [],
   });
 
   it("communities scope: sibling hrefs use /communities?org=<id>", async () => {
@@ -553,7 +553,7 @@ describe("getHierarchyLevels — #136: All organizations label when no org filte
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [],
-    households: [],
+    tenants: [],
   });
 
   const singleOrgSupabase = makeMockSupabase({
@@ -561,7 +561,7 @@ describe("getHierarchyLevels — #136: All organizations label when no org filte
     communities: [COMMUNITY_K],
     microgrids: [MICROGRID_1],
     edges: [],
-    households: [],
+    tenants: [],
   });
 
   it("currentOrgId=undefined + multi-org → label 'All organizations', count=N, full siblings list", async () => {

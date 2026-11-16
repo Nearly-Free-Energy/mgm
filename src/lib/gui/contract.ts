@@ -50,7 +50,7 @@ export type Confirm = "none" | "confirm" | "typed" | "ceremony";
 export type NavGroup = "operate" | "money" | "configure" | "system";
 /** A fixed icon vocabulary, so every GUI can map names to its own set. An unknown name renders as text. */
 export type Icon =
-  | "today" | "live" | "sites" | "communities" | "households" | "devices" | "readings"
+  | "today" | "live" | "sites" | "communities" | "tenants" | "devices" | "readings"
   | "billing" | "payments" | "tariff" | "data-source" | "branding" | "accounts" | "plugins"
   | "users" | "profile" | "organizations" | "assistant" | "message" | "alert" | "download"
   | "share" | "contact" | "help";

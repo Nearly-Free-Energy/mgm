@@ -51,9 +51,9 @@ const collection = (body: Partial<CollectionBody>, over: Partial<ViewModel> = {}
         { key: "owed", label: "Owed", type: "money", priority: 1, copy: "bare" },
       ],
       rows: [
-        { id: "h1", href: "/households/h1", cells: { name: text("Aisha"), meter: text("M-7"), owed: text("4,216,800") }, actions: [ref("billing.remind", "Remind")] },
+        { id: "h1", href: "/tenants/h1", cells: { name: text("Aisha"), meter: text("M-7"), owed: text("4,216,800") }, actions: [ref("billing.remind", "Remind")] },
       ],
-      empty: { title: "Add the first household", action: ref("org.add-household", "Add household") },
+      empty: { title: "Add the first tenant", action: ref("org.add-tenant", "Add tenant") },
       ...body,
     },
     ...over,
@@ -66,7 +66,7 @@ describe("KitView: collection", () => {
     const meter = screen.getByText("M-7").closest("td")!;
     expect(meter.className).toContain("hidden");
     expect(meter.className).toContain("min-[600px]:table-cell");
-    expect(screen.getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/households/h1");
+    expect(screen.getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/tenants/h1");
     expect(screen.getByText("4,216,800").closest("td")!.className).toContain("text-right");
   });
 
@@ -91,9 +91,9 @@ describe("KitView: collection", () => {
   });
 
   it("keeps the create action in the header while there are rows", () => {
-    show(collection({}, { actions: [ref("org.add-household", "Add household")] }));
-    expect(screen.getAllByRole("button", { name: "Add household" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Add household" }).closest("header")).toBeTruthy();
+    show(collection({}, { actions: [ref("org.add-tenant", "Add tenant")] }));
+    expect(screen.getAllByRole("button", { name: "Add tenant" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Add tenant" }).closest("header")).toBeTruthy();
   });
 
   it("hides priority-3 headers with their cells, and links to the next page only when there are rows", () => {
@@ -106,18 +106,18 @@ describe("KitView: collection", () => {
 
   it("does not nest the row link around a value that links itself, and keeps the link for a ref without a page", () => {
     const site = { t: "ref", ref: { kind: "microgrid", id: "m", label: "Site", href: "/microgrids/m" }, text: "Site" } as Value;
-    const bare = { t: "ref", ref: { kind: "household", id: "h2", label: "Bob" }, text: "Bob" } as Value;
+    const bare = { t: "ref", ref: { kind: "tenant", id: "h2", label: "Bob" }, text: "Bob" } as Value;
     const view = show(
       collection({
         rows: [
-          { id: "h1", href: "/households/h1", cells: { name: site }, actions: [] },
-          { id: "h2", href: "/households/h2", cells: { name: bare }, actions: [] },
+          { id: "h1", href: "/tenants/h1", cells: { name: site }, actions: [] },
+          { id: "h2", href: "/tenants/h2", cells: { name: bare }, actions: [] },
         ],
       }),
     );
     expect(view.querySelector("a a")).toBeNull();
     expect(within(screen.getByText("Site").closest("td")!).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual(["/microgrids/m"]);
-    expect(screen.getByRole("link", { name: "Bob" }).getAttribute("href")).toBe("/households/h2");
+    expect(screen.getByRole("link", { name: "Bob" }).getAttribute("href")).toBe("/tenants/h2");
   });
 
   it("puts the row link in the first column that stays visible on a phone", () => {
@@ -129,19 +129,19 @@ describe("KitView: collection", () => {
         ],
       }),
     );
-    expect(screen.getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/households/h1");
+    expect(screen.getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/tenants/h1");
     expect(within(screen.getByText("M-7").closest("td")!).queryByRole("link")).toBeNull();
   });
 
   it("opens row links through kit.open", () => {
-    const link = { id: "billing.statement" as const, label: "Statement", href: "/households/h1/statement" as const };
+    const link = { id: "billing.statement" as const, label: "Statement", href: "/tenants/h1/statement" as const };
     show(collection({ rows: [{ id: "h1", cells: { name: text("Aisha") }, actions: [], links: [link] }] }));
     fireEvent.click(screen.getByRole("link", { name: "Statement" }));
     expect(runtime.open).toHaveBeenCalledWith(link);
   });
 
   it("leaves a modified or middle click on a row link to the browser, which opens a new tab or window", () => {
-    const link = { id: "billing.statement" as const, label: "Statement", href: "/households/h1/statement" as const };
+    const link = { id: "billing.statement" as const, label: "Statement", href: "/tenants/h1/statement" as const };
     show(collection({ rows: [{ id: "h1", cells: { name: text("Aisha") }, actions: [], links: [link] }] }));
     const anchor = screen.getByRole("link", { name: "Statement" });
     for (const init of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
@@ -154,7 +154,7 @@ describe("KitView: collection", () => {
   });
 
   it("at zero rows, lets the empty state own the create action, with no table and no filters", async () => {
-    const add = ref("org.add-household", "Add household");
+    const add = ref("org.add-tenant", "Add tenant");
     const view = show(
       collection(
         { rows: [], totals: { owed: text("0") }, next: "/h?after=h1", filters: [{ label: "All", href: "/h", current: true }] },
@@ -165,9 +165,9 @@ describe("KitView: collection", () => {
     expect(screen.queryByRole("link", { name: "More" })).toBeNull();
     expect(view.querySelector("[data-gui-totals]")).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Filters" })).toBeNull();
-    const region = screen.getByRole("region", { name: "Add the first household" });
-    expect(screen.getAllByRole("button", { name: "Add household" })).toHaveLength(1);
-    fireEvent.click(within(region).getByRole("button", { name: "Add household" }));
+    const region = screen.getByRole("region", { name: "Add the first tenant" });
+    expect(screen.getAllByRole("button", { name: "Add tenant" })).toHaveLength(1);
+    fireEvent.click(within(region).getByRole("button", { name: "Add tenant" }));
     await waitFor(() => expect(actedWith()).toEqual([add]));
   });
 

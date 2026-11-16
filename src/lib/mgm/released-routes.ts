@@ -4,9 +4,9 @@
  * inherited legacy surface cannot become callable through deep links or
  * direct API requests before its release.
  *
- * Release 1: organization, community, microgrid, and household management.
+ * Release 1: organization, community, microgrid, and tenant management.
  * Release 2 (issue #4): OpenEMS connection setup, meter discovery and
- * registration, household meter detail, and the metering APIs.
+ * registration, tenant meter detail, and the metering APIs.
  * Release 3 (issue #5): tariffs, billing periods, bill generation, invoice
  * exports, and manual payments. Online payment gateways, payment links,
  * customer portals, and automated notifications stay gated for future work.
@@ -33,7 +33,7 @@ const RELEASE_1_PAGE_ROUTES = [
   /^\/organizations(?:\/[^/]+)?$/,
   /^\/communities(?:\/[^/]+)?$/,
   /^\/microgrids(?:\/[^/]+)?$/,
-  /^\/microgrids\/[^/]+\/setup\/households$/,
+  /^\/microgrids\/[^/]+\/setup\/tenants$/,
   /^\/settings\/(?:profile|plugins|users)$/,
 ];
 
@@ -44,8 +44,8 @@ const RELEASE_2_PAGE_ROUTES = [
   /^\/microgrids\/[^/]+\/setup\/openems-backend$/,
   // Discovery and explicit registration (edge detail + shared devices).
   /^\/microgrids\/[^/]+\/setup\/edges(?:\/[^/]+(?:\/shared)?)?$/,
-  // Household meter detail: assignment history, gaps, opening register.
-  /^\/microgrids\/[^/]+\/setup\/households\/[^/]+$/,
+  // Tenant meter detail: assignment history, gaps, opening register.
+  /^\/microgrids\/[^/]+\/setup\/tenants\/[^/]+$/,
 ];
 
 const RELEASE_1_API_ROUTES = [
@@ -54,7 +54,7 @@ const RELEASE_1_API_ROUTES = [
   /^\/api\/organizations(?:\/[^/]+(?:\/(?:plugins|delete-preview))?)?$/,
   /^\/api\/communities(?:\/[^/]+(?:\/delete-preview)?)?$/,
   /^\/api\/microgrids(?:\/[^/]+(?:\/delete-preview)?)?$/,
-  /^\/api\/households\/(?:with-meter|[^/]+)$/,
+  /^\/api\/tenants\/(?:with-meter|[^/]+)$/,
   /^\/api\/users(?:\/invite|\/[^/]+(?:\/(?:profile|role|resend-invite))?)?$/,
 ];
 
@@ -71,7 +71,7 @@ const RELEASE_2_API_ROUTES = [
   /^\/api\/devices(?:\/[^/]+)?$/,
   // Metering capability reads and writes.
   /^\/api\/metering\/readings$/,
-  /^\/api\/households\/[^/]+\/assignments$/,
+  /^\/api\/tenants\/[^/]+\/assignments$/,
   /^\/api\/meter-readings\/opening$/,
 ];
 

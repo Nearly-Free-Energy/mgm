@@ -1,6 +1,6 @@
 import type {
   Community,
-  Household,
+  Tenant,
   Microgrid,
   UserRoleRecord,
 } from "@/lib/types/domain";
@@ -71,17 +71,17 @@ export interface CommunityManagementRepository {
   getMicrogridOrganization(
     microgridId: string
   ): Promise<{ microgridId: string; communityId: string; orgId: string } | null>;
-  findHousehold(
-    householdId: string
+  findTenant(
+    tenantId: string
   ): Promise<RepositoryResult<{
     id: string;
     display_name: string;
     microgrid_id: string;
   }>>;
-  updateHouseholdFields(
+  updateTenantFields(
     id: string,
     patch: Record<string, unknown>
-  ): Promise<RepositoryResult<Household | null>>;
+  ): Promise<RepositoryResult<Tenant | null>>;
   insertCommunity(
     row: CommunityCreateInput
   ): Promise<RepositoryResult<Community>>;
@@ -96,43 +96,43 @@ export interface CommunityManagementRepository {
     id: string,
     patch: MicrogridUpdateInput
   ): Promise<RepositoryResult<Microgrid | null>>;
-  createHousehold(
+  createTenant(
     args: Record<string, unknown>,
     withMeter: boolean
   ): Promise<{ data: string | null; error: RepositoryError | null }>;
   findDeviceLink(
     deviceId: string,
-    excludeHouseholdId: string
-  ): Promise<{ household_id: string } | null>;
+    excludeTenantId: string
+  ): Promise<{ tenant_id: string } | null>;
   /**
    * Currently open primary link (effective_to IS NULL), if any. Release 2
    * (issue #4): replacements close and open links instead of deleting them,
    * so history survives meter swaps.
    */
   getOpenDeviceLink(
-    householdId: string
+    tenantId: string
   ): Promise<{ id: string; device_id: string; effective_from: string } | null>;
   closeDeviceLink(
     linkId: string,
     effectiveTo: string
   ): Promise<RepositoryError | null>;
   /**
-   * Atomic close-and-open replacement (fn_replace_household_device):
+   * Atomic close-and-open replacement (fn_replace_tenant_device):
    * closes open primary links at the date and opens the new one in a single
-   * transaction, so a failed insert cannot leave the household meterless.
+   * transaction, so a failed insert cannot leave the tenant meterless.
    * Same-day links are deleted rather than zero-length closed.
    */
   replaceDeviceLink(
-    householdId: string,
+    tenantId: string,
     deviceId: string,
     effectiveDate: string
   ): Promise<{ id: string | null; error: RepositoryError | null }>;
   deleteDeviceLink(linkId: string): Promise<RepositoryError | null>;
-  refetchHousehold(id: string): Promise<RepositoryResult<Household>>;
+  refetchTenant(id: string): Promise<RepositoryResult<Tenant>>;
   countBillingLineItems(
-    householdId: string
+    tenantId: string
   ): Promise<{ count: number | null; error: RepositoryError | null }>;
-  deleteHousehold(
+  deleteTenant(
     id: string
   ): Promise<RepositoryResult<{ id: string }[]>>;
   resolveHierarchyLevels(
@@ -192,7 +192,7 @@ export type MicrogridUpdateInput = {
   lng?: number | string | null;
 };
 
-export type HouseholdCreateInput = {
+export type TenantCreateInput = {
   microgrid_id: string;
   display_name: string;
   device_id?: string | null;
@@ -212,7 +212,7 @@ export type HouseholdCreateInput = {
   customer_type?: string;
 };
 
-export type HouseholdUpdateInput = Record<string, unknown>;
+export type TenantUpdateInput = Record<string, unknown>;
 
 export interface CommunityManagementCapabilityContract {
   createCommunity(
@@ -229,14 +229,14 @@ export interface CommunityManagementCapabilityContract {
     id: string,
     input: unknown
   ): Promise<CommunityManagementResult<Microgrid>>;
-  createHousehold(
+  createTenant(
     input: unknown
-  ): Promise<CommunityManagementResult<{ household_id: string }>>;
-  updateHousehold(
+  ): Promise<CommunityManagementResult<{ tenant_id: string }>>;
+  updateTenant(
     id: string,
     input: unknown
-  ): Promise<CommunityManagementResult<Household>>;
-  deleteHousehold(
+  ): Promise<CommunityManagementResult<Tenant>>;
+  deleteTenant(
     id: string
   ): Promise<CommunityManagementResult<{ id: string }>>;
   resolveHierarchy(

@@ -44,13 +44,13 @@ export type SiteSources = {
   load: DeviceConfig | null;
   pv: DeviceConfig | null;
   /**
-   * The household meters (consumption meters linked to a household as its
+   * The tenant meters (consumption meters linked to a tenant as its
    * primary or secondary meter on the day read): what the houses themselves
    * used.
    */
   houseMeters: DeviceConfig[];
   /**
-   * Linked household meters that cannot be read because they have no edge
+   * Linked tenant meters that cannot be read because they have no edge
    * or component id. Not requested; reported so a total that leaves them
    * out does not look complete.
    */
@@ -101,7 +101,7 @@ export type SiteSamples = {
 export type MeterConsumptionQuery = {
   microgridId: string;
   deviceIds?: string[];
-  householdIds?: string[];
+  tenantIds?: string[];
   startDate: string;
   endDate: string;
   timezone?: string;
@@ -109,7 +109,7 @@ export type MeterConsumptionQuery = {
 
 export type DeviceConsumption = {
   deviceId: string;
-  householdId: string | null;
+  tenantId: string | null;
   usageKwh: number | null;
   source: MeteringProviderName;
   readAt: string;

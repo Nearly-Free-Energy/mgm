@@ -255,7 +255,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         status: 400 as const,
         code: "payments_missing_contact",
         message:
-          "This household has no email or phone number. Add customer contact information before creating a checkout.",
+          "This tenant has no email or phone number. Add customer contact information before creating a checkout.",
         field: "contact",
       };
     }

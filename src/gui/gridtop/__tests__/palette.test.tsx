@@ -284,7 +284,7 @@ describe("command palette", () => {
   });
 
   it("merges places with the host's hits after @, asking once typing pauses", async () => {
-    const hit: EntityHit = { kind: "household", id: "h1", label: "East shop", href: "/microgrids/m1/households/h1" };
+    const hit: EntityHit = { kind: "tenant", id: "h1", label: "East shop", href: "/microgrids/m1/tenants/h1" };
     const search = vi.spyOn(kit, "search").mockResolvedValue([hit]);
     const log = await shell();
     await press({ key: "k", ctrlKey: true });
@@ -304,8 +304,8 @@ describe("command palette", () => {
   it("drops a late answer to an earlier search", async () => {
     const answers = new Map<string, (hits: EntityHit[]) => void>();
     vi.spyOn(kit, "search").mockImplementation((query) => new Promise((resolve) => answers.set(query, resolve)));
-    const first: EntityHit = { kind: "household", id: "h1", label: "First answer", href: "/microgrids/m1/households/h1" };
-    const second: EntityHit = { kind: "household", id: "h2", label: "Second answer", href: "/microgrids/m1/households/h2" };
+    const first: EntityHit = { kind: "tenant", id: "h1", label: "First answer", href: "/microgrids/m1/tenants/h1" };
+    const second: EntityHit = { kind: "tenant", id: "h2", label: "Second answer", href: "/microgrids/m1/tenants/h2" };
     await shell();
     await press({ key: "k", ctrlKey: true });
     await type("@zz");

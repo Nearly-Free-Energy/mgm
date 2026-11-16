@@ -47,7 +47,7 @@ function model<K extends ViewKind>(kind: K, view: Id, title: string, body: Model
   } as ModelOf<K>;
 }
 
-const ADD_HOUSEHOLD: ActionRef = { action: "community.add-household", params: { microgrid_id: SITE }, label: "Add household", enabled: true };
+const ADD_TENANT: ActionRef = { action: "community.add-tenant", params: { microgrid_id: SITE }, label: "Add tenant", enabled: true };
 /** Disabled, with the reason a GUI must show. */
 export const DISABLED_REF: ActionRef = {
   action: "billing.close-period",
@@ -73,8 +73,8 @@ function house(i: number, name: string, owed: Value, usage: number, meter: strin
   const id = HOUSES[i];
   return {
     id,
-    entity: { kind: "household", id, label: name },
-    href: `/households/${id}`,
+    entity: { kind: "tenant", id, label: name },
+    href: `/tenants/${id}`,
     cells: { name: text(name), owed, usage: kwh(usage), meter: text(meter) },
     actions: [],
   };
@@ -83,9 +83,9 @@ function house(i: number, name: string, owed: Value, usage: number, meter: strin
 /** The owed column is bare: its cells carry no currency, and its header names it. */
 export const BARE_COLUMN = { key: "owed", currency: "UGX" } as const;
 
-const COLLECTION = model("collection", "community.households", "Households", {
+const COLLECTION = model("collection", "community.tenants", "Tenants", {
   columns: [
-    { key: "name", label: "Household", type: "text", priority: 1 },
+    { key: "name", label: "Tenant", type: "text", priority: 1 },
     { key: "owed", label: "Owed (UGX)", type: "money", priority: 1, copy: "bare" },
     { key: "usage", label: "Used", type: "energy", priority: 2 },
     { key: "meter", label: "Meter", type: "text", priority: 3 },
@@ -97,18 +97,18 @@ const COLLECTION = model("collection", "community.households", "Households", {
   ],
   totals: { owed: ugx(5639300, "5,639,300"), usage: kwh(67.7) },
   filters: [
-    { label: "Every household", href: `/microgrids/${SITE}/households`, count: 3, current: true },
-    { label: "Owing only", href: `/microgrids/${SITE}/households?owing=1`, count: 2, current: false },
+    { label: "Every tenant", href: `/microgrids/${SITE}/tenants`, count: 3, current: true },
+    { label: "Owing only", href: `/microgrids/${SITE}/tenants?owing=1`, count: 2, current: false },
   ],
-  empty: { title: "No households yet", text: "Add the first household to start billing.", action: ADD_HOUSEHOLD },
-}, { entity: SITE_REF, actions: [ADD_HOUSEHOLD] });
+  empty: { title: "No tenants yet", text: "Add the first tenant to start billing.", action: ADD_TENANT },
+}, { entity: SITE_REF, actions: [ADD_TENANT] });
 
-const EMPTY_COLLECTION = model("collection", "community.households", "Households", {
+const EMPTY_COLLECTION = model("collection", "community.tenants", "Tenants", {
   columns: COLLECTION.body.columns,
   rows: [],
   filters: COLLECTION.body.filters?.map((f) => ({ ...f, count: 0 })),
   empty: COLLECTION.body.empty,
-  // Only the empty state offers Add household, so a GUI that leaves out its call to action is caught.
+  // Only the empty state offers Add tenant, so a GUI that leaves out its call to action is caught.
 }, { entity: SITE_REF });
 
 /**
@@ -116,7 +116,7 @@ const EMPTY_COLLECTION = model("collection", "community.households", "Households
  * Two are derived and two synthetic, so a View that marks one and leaves its
  * neighbour unmarked is caught.
  */
-const GALLERY = model("record", "community.household", "A household", {
+const GALLERY = model("record", "community.tenant", "A tenant", {
   sections: [{
     title: "Every value",
     fields: [
@@ -135,7 +135,7 @@ const GALLERY = model("record", "community.household", "A household", {
     ],
   }],
 }, {
-  entity: { kind: "household", id: HOUSES[0], label: "First house" },
+  entity: { kind: "tenant", id: HOUSES[0], label: "First house" },
   actions: [DISABLED_REF],
   links: [
     { id: "billing.bill", label: "Download bill", icon: "download", href: `/api/billing/periods/${PERIOD}/bill.pdf`, download: { mime: "application/pdf", filename: "bill.pdf" } },
@@ -163,10 +163,10 @@ const FEED = model("feed", "community.notes", "Notes", {
       id: "e1",
       at: AT,
       author: { kind: "person", name: "Ann" },
-      text: [{ p: ["Paid in cash, see ", { link: `/households/${HOUSES[0]}`, text: "the household" }, "."] }, { li: [{ value: ugx(150000, "UGX 150,000") }] }],
+      text: [{ p: ["Paid in cash, see ", { link: `/tenants/${HOUSES[0]}`, text: "the tenant" }, "."] }, { li: [{ value: ugx(150000, "UGX 150,000") }] }],
       embed: { type: "values", values: [kwh(3.1)] },
     },
-    { id: "e2", at: AT, author: { kind: "system", name: "MGM" }, text: [{ p: ["Meter replaced."] }], embed: { type: "view", href: `/households/${HOUSES[1]}`, model: EMBEDDED } },
+    { id: "e2", at: AT, author: { kind: "system", name: "MGM" }, text: [{ p: ["Meter replaced."] }], embed: { type: "view", href: `/tenants/${HOUSES[1]}`, model: EMBEDDED } },
   ],
   compose: { action: { action: "community.add-note", params: { community_id: COMMUNITY }, label: "Add note", enabled: true }, textField: "text", placeholder: "Write a note" },
 }, { entity: { kind: "community", id: COMMUNITY, label: "Community" } });
@@ -174,7 +174,7 @@ const FEED = model("feed", "community.notes", "Notes", {
 const FLOW = model("flow", "billing.close", "Close October", {
   steps: [
     { id: "read", title: "Enter readings", state: "done", href: `/billing/periods/${PERIOD}/readings` },
-    { id: "review", title: "Review the totals", state: "current", detail: "Two households owe more than last month.", action: PROPOSED_REF },
+    { id: "review", title: "Review the totals", state: "current", detail: "Two tenants owe more than last month.", action: PROPOSED_REF },
     { id: "close", title: "Close the period", state: "todo" },
   ],
 }, { entity: { kind: "billingPeriod", id: PERIOD, label: "October 2026" } });
@@ -207,7 +207,7 @@ export const SIGNALS: Signals = {
   top: [
     { id: "s1", source: "metering.gateway", severity: "critical", kind: "alarm", title: "Gateway offline", href: SITE_HREF, at: AT },
     { id: "s2", source: "billing.periods", severity: "warn", kind: "your-move", title: "Readings due", href: `/billing/periods/${PERIOD}/readings`, at: AT },
-    { id: "s3", source: "billing.reminders", severity: "info", kind: "proposal", title: "Remind two households", href: `/billing/periods/${PERIOD}`, at: AT, action: PROPOSED_REF },
+    { id: "s3", source: "billing.reminders", severity: "info", kind: "proposal", title: "Remind two tenants", href: `/billing/periods/${PERIOD}`, at: AT, action: PROPOSED_REF },
   ],
   checked: ["metering.gateway", "billing.periods", "billing.reminders"],
   unchecked: [],

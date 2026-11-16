@@ -22,8 +22,8 @@
  *   - `actorDisplayName` = first+last, fallback email, fallback null.
  *   - Audit IDs prefixed `audit:<uuid>`; payment-event IDs prefixed
  *     `payment_event:<uuid>` for stable React keys across the union.
- *   - Audit-row householdName resolution: live join (`billing_line_items
- *     → households`) preferred over the snapshot in `details.household_name`;
+ *   - Audit-row tenantName resolution: live join (`billing_line_items
+ *     → tenants`) preferred over the snapshot in `details.tenant_name`;
  *     snapshot used when the line item is hard-deleted (FK NULL).
  *
  * The result discriminator mirrors the `unauthorized` / `not-found` /
@@ -62,7 +62,7 @@ type PaymentEventRow = {
   billing_line_items: {
     billing_period_id: string;
     payment_notes: string | null;
-    households: { display_name: string } | null;
+    tenants: { display_name: string } | null;
   } | null;
 };
 
@@ -146,7 +146,7 @@ export async function fetchAuditLogEntries(
 
   // ── 2. Read payment_events for line items in this period ─────────────────
   // Join billing_line_items to scope to this period AND to surface
-  // payment_notes + household.display_name for the response.
+  // payment_notes + tenant.display_name for the response.
   const { data: paymentEventsRaw, error: peErr } = await supabase
     .from("payment_events")
     .select(
@@ -156,7 +156,7 @@ export async function fetchAuditLogEntries(
       billing_line_items!inner (
         billing_period_id,
         payment_notes,
-        households (
+        tenants (
           display_name
         )
       )
@@ -174,10 +174,10 @@ export async function fetchAuditLogEntries(
   }
   const paymentEvents = (paymentEventsRaw ?? []) as unknown as PaymentEventRow[];
 
-  // ── 3. Resolve household_name for billing_audit_log entries that have a
+  // ── 3. Resolve tenant_name for billing_audit_log entries that have a
   //       live billing_line_item_id (preferred over the snapshot). When the
   //       line item is hard-deleted, the FK is NULL and we fall back to
-  //       details.household_name (the snapshot kept by the writer).
+  //       details.tenant_name (the snapshot kept by the writer).
   const liveLineItemIds = Array.from(
     new Set(
       auditRows
@@ -189,14 +189,14 @@ export async function fetchAuditLogEntries(
   if (liveLineItemIds.length > 0) {
     const { data: lis } = await supabase
       .from("billing_line_items")
-      .select("id, households(display_name)")
+      .select("id, tenants(display_name)")
       .in("id", liveLineItemIds);
     type LiHHRow = {
       id: string;
-      households: { display_name: string } | { display_name: string }[] | null;
+      tenants: { display_name: string } | { display_name: string }[] | null;
     };
     for (const r of (lis ?? []) as LiHHRow[]) {
-      const hh = r.households;
+      const hh = r.tenants;
       const name = Array.isArray(hh)
         ? hh[0]?.display_name ?? null
         : hh?.display_name ?? null;
@@ -233,8 +233,8 @@ export async function fetchAuditLogEntries(
     const detailsObj =
       a.details && typeof a.details === "object" ? a.details : {};
     const snapshotName =
-      typeof detailsObj["household_name"] === "string"
-        ? (detailsObj["household_name"] as string)
+      typeof detailsObj["tenant_name"] === "string"
+        ? (detailsObj["tenant_name"] as string)
         : null;
     const liveName = a.billing_line_item_id
       ? lineItemNameMap.get(a.billing_line_item_id) ?? null
@@ -248,7 +248,7 @@ export async function fetchAuditLogEntries(
       ),
       createdAt: a.created_at,
       billingLineItemId: a.billing_line_item_id,
-      householdName: liveName ?? snapshotName,
+      tenantName: liveName ?? snapshotName,
       details: detailsObj,
     });
   }
@@ -260,8 +260,8 @@ export async function fetchAuditLogEntries(
     const bli = Array.isArray(p.billing_line_items)
       ? p.billing_line_items[0]
       : p.billing_line_items;
-    const hh = bli?.households;
-    const householdName = Array.isArray(hh)
+    const hh = bli?.tenants;
+    const tenantName = Array.isArray(hh)
       ? hh[0]?.display_name ?? null
       : hh?.display_name ?? null;
 
@@ -291,7 +291,7 @@ export async function fetchAuditLogEntries(
       ),
       createdAt: p.at,
       billingLineItemId: p.line_item_id,
-      householdName,
+      tenantName,
       details,
     });
   }

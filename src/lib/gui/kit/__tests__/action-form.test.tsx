@@ -14,7 +14,7 @@ const FLAT: Json = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   type: "object",
   properties: {
-    name: { type: "string", maxLength: 40, title: "Site name", description: "As households see it." },
+    name: { type: "string", maxLength: 40, title: "Site name", description: "As tenants see it." },
     kind: { type: "string", enum: ["solar", "hybrid"], description: "System kind" },
     capacity_kw: { type: "number", minimum: 0, maximum: 500 },
     panels: { type: "integer", minimum: 1, maximum: 9007199254740991 },
@@ -83,7 +83,7 @@ describe("ActionForm", () => {
     expect(name.maxLength).toBe(40);
     expect(name.getAttribute("aria-required")).toBe("true");
     expect(name.getAttribute("aria-describedby")).toBeTruthy();
-    expect(screen.getByText("As households see it.")).toBeTruthy();
+    expect(screen.getByText("As tenants see it.")).toBeTruthy();
     expect(field(/^System kind/).tagName).toBe("SELECT");
     expect(within(field(/^System kind/)).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "solar", "hybrid"]);
     expect(field(/^Capacity kw/).inputMode).toBe("decimal");

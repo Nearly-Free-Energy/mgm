@@ -101,8 +101,8 @@ describe("TabNav", () => {
     ["/microgrids/mg-1/billing/p-1/history", "Billing"],
     ["/microgrids/mg-1/setup/edges", "Setup"],
     ["/microgrids/mg-1/setup/edges/edge-1", "Setup"],
-    ["/microgrids/mg-1/setup/households", "Setup"],
-    ["/microgrids/mg-1/setup/households/hh-1", "Setup"],
+    ["/microgrids/mg-1/setup/tenants", "Setup"],
+    ["/microgrids/mg-1/setup/tenants/hh-1", "Setup"],
     ["/microgrids/mg-1/setup/rates", "Setup"],
   ])("on %s highlights only %s", (pathname, selected) => {
     mockPathname = pathname;

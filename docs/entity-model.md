@@ -9,8 +9,8 @@ this page records the reasoning that the schema cannot.
 ```
 Organization ─▶ Community ─▶ Microgrid ─▶ Edge ─▶ Device
                               │
-                              └▶ Household ─▶ household_devices (M:N to Device, effective-dated)
-                                     └▶ household_users (M:N to auth.users)
+                              └▶ Tenant ─▶ tenant_devices (M:N to Device, effective-dated)
+                                     └▶ tenant_users (M:N to auth.users)
 ```
 
 - **Organization** — the operator business (a microgrid entrepreneur or
@@ -25,13 +25,13 @@ Organization ─▶ Community ─▶ Microgrid ─▶ Edge ─▶ Device
   list.
 - **Device** — a component on an edge. `device_type` mirrors OpenEMS's
   component model; `consumption_meter` is the billable kind.
-- **Household** — a customer of the microgrid. A household is linked to its
-  meters through `household_devices`, whose assignments carry
+- **Tenant** — a customer of the microgrid. A tenant is linked to its
+  meters through `tenant_devices`, whose assignments carry
   `effective_from` (inclusive) and `effective_to` (exclusive, `NULL` = current),
   so a period is billed against the meter that was actually connected.
 
 Addresses live at organization, community, and microgrid level, and
-optionally on a household. `microgrids` uses structured address columns
+optionally on a tenant. `microgrids` uses structured address columns
 (`address_city`, `address_region`, `address_country`, `lat`, `lng`).
 
 ## Why this shape
@@ -60,18 +60,18 @@ ship: `super_admin` (all organizations) and `org_manager` (one organization,
 extensions by enum addition; before adding one, read `CLAUDE.md` on why a
 scoped configuration role was added and then removed.
 
-## Open decision: household (tenant) access
+## Open decision: tenant (tenant) access
 
-`household_users` exists so a household member could sign in and see their
+`tenant_users` exists so a tenant member could sign in and see their
 own bills (`docs/tenant-api.md` sketches the endpoints). The original
 write-up of this decision is no longer available; these are the two
 realistic options, and neither is built:
 
-- **A — household members are Supabase Auth users**, linked through
-  `household_users`, with RLS letting them read their own household's rows.
-- **B — no household login**; households reach their bill and payment link
+- **A — tenant members are Supabase Auth users**, linked through
+  `tenant_users`, with RLS letting them read their own tenant's rows.
+- **B — no tenant login**; tenants reach their bill and payment link
   through a signed, single-purpose link (as the payment link `/p/<slug>` does
   today), and only operators have accounts.
 
-Choose one before implementing household-facing endpoints, and record the
+Choose one before implementing tenant-facing endpoints, and record the
 decision here.

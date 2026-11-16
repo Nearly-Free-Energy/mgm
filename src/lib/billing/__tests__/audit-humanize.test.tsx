@@ -7,8 +7,8 @@
  *       actorUserId === null                          → "System"
  *       actorUserId !== null && actorDisplayName null → "Restricted"
  *       actorDisplayName non-null                     → verbatim
- *   - line_item_generated with missing household_name AND missing
- *     entry.householdName → "Unknown household".
+ *   - line_item_generated with missing tenant_name AND missing
+ *     entry.tenantName → "Unknown tenant".
  *   - line_item_regenerated with previous_total_amount === new_total_amount
  *     → "Total unchanged".
  *   - line_item_regenerated with previous_reading_source === null → no
@@ -44,7 +44,7 @@ function entry(
     actorDisplayName: null,
     createdAt: "2026-04-25T10:00:00Z",
     billingLineItemId: null,
-    householdName: null,
+    tenantName: null,
     details: {},
     ...overrides,
   };
@@ -88,11 +88,11 @@ describe("humanizeAuditEvent — period_closed", () => {
 });
 
 describe("humanizeAuditEvent — line_item_generated", () => {
-  it("uses entry.householdName + renders 'Total: {amount}' summary", () => {
+  it("uses entry.tenantName + renders 'Total: {amount}' summary", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_generated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: { new_total_amount: 5000 },
       })
     );
@@ -104,26 +104,26 @@ describe("humanizeAuditEvent — line_item_generated", () => {
     expect((container.textContent ?? "").toLowerCase()).toContain("total");
   });
 
-  it("falls back to details.household_name when entry.householdName is null", () => {
+  it("falls back to details.tenant_name when entry.tenantName is null", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_generated",
-        householdName: null,
-        details: { household_name: "HH-Snapshot", new_total_amount: 1000 },
+        tenantName: null,
+        details: { tenant_name: "HH-Snapshot", new_total_amount: 1000 },
       })
     );
     expect(result.label).toBe("Bill generated for HH-Snapshot");
   });
 
-  it("falls back to 'Unknown household' when both entry.householdName AND details.household_name missing", () => {
+  it("falls back to 'Unknown tenant' when both entry.tenantName AND details.tenant_name missing", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_generated",
-        householdName: null,
+        tenantName: null,
         details: { new_total_amount: 0 },
       })
     );
-    expect(result.label).toBe("Bill generated for Unknown household");
+    expect(result.label).toBe("Bill generated for Unknown tenant");
   });
 });
 
@@ -132,7 +132,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: 4000,
           new_total_amount: 5000,
@@ -150,7 +150,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: 5000,
           new_total_amount: 5000,
@@ -165,7 +165,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: null,
           new_total_amount: 5000,
@@ -180,7 +180,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: null,
           new_total_amount: 5000,
@@ -197,7 +197,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: 4000,
           new_total_amount: 5000,
@@ -216,7 +216,7 @@ describe("humanizeAuditEvent — line_item_regenerated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: 4000,
           new_total_amount: 5000,
@@ -235,7 +235,7 @@ describe("humanizeAuditEvent — payment_status_changed", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "payment_status_changed",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: { from: "unpaid", to: "paid" },
       })
     );
@@ -251,7 +251,7 @@ describe("humanizeAuditEvent — payment_status_changed", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "payment_status_changed",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: { from: null, to: "paid" },
       })
     );
@@ -266,7 +266,7 @@ describe("humanizeAuditEvent — payment_status_changed", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "payment_status_changed",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: { from: "unpaid", to: "paid", notes: "M-Pesa #123" },
       })
     );
@@ -283,7 +283,7 @@ describe("humanizeAuditEvent — payment_link_generated", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "payment_link_generated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
       })
     );
     expect(result.label).toBe("Payment link generated for HH-A");
@@ -298,7 +298,7 @@ describe("humanizeAuditEvent — postCloseRevision flag", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_regenerated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: {
           previous_total_amount: 4000,
           new_total_amount: 5000,
@@ -313,7 +313,7 @@ describe("humanizeAuditEvent — postCloseRevision flag", () => {
     const result = humanizeAuditEvent(
       entry({
         eventType: "line_item_generated",
-        householdName: "HH-A",
+        tenantName: "HH-A",
         details: { new_total_amount: 5000 },
       })
     );

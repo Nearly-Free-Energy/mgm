@@ -31,7 +31,7 @@ const LEGACY: [MgmPluginName, Id, string, NavDef["icon"], NavDef["group"], strin
   ["community-management", "community.microgrids", "Microgrids", "sites", "operate", "/microgrids"],
   ["community-management", "community.communities", "Communities", "communities", "operate", "/communities"],
   ["metering", "metering.operations", "Operations", "live", "operate", "/microgrids/[id]/operations", "microgrid"],
-  ["community-management", "community.households", "Households", "households", "operate", "/microgrids/[id]/setup/households", "microgrid"],
+  ["community-management", "community.tenants", "Tenants", "tenants", "operate", "/microgrids/[id]/setup/tenants", "microgrid"],
   ["metering", "metering.devices", "Edges & devices", "devices", "operate", "/microgrids/[id]/setup/edges", "microgrid"],
   ["billing", "billing.periods", "Billing", "billing", "money", "/microgrids/[id]/billing", "microgrid"],
   ["billing", "billing.tariff", "Rate schedule", "tariff", "configure", "/microgrids/[id]/setup/rates", "microgrid"],
@@ -125,7 +125,7 @@ describe("buildManifestModel", () => {
     const off = buildManifestModel(input({ gate: { ...ALL_ON, metering: false }, status }));
     const ids = off.org.nav.map((n) => n.id);
     expect(ids.filter((id) => id.startsWith("metering.") || id.startsWith("billing."))).toEqual([]);
-    expect(ids).toContain("community.households");
+    expect(ids).toContain("community.tenants");
     expect(off.org.status).toEqual([]);
     expect(buildManifestModel(input({ status })).org.status).toEqual([status[0].item]);
     // A plugin the gate did not answer for counts as off.
@@ -218,7 +218,7 @@ describe("buildManifestModel", () => {
       "community.microgrids",
       "community.communities",
       "metering.operations",
-      "community.households",
+      "community.tenants",
       "metering.devices",
       "billing.periods",
       "billing.tariff",

@@ -22,7 +22,7 @@ const F = {
   periodA: id(9),
   attemptB: id(10),
   communityB: id(11),
-  householdA: id(12),
+  tenantA: id(12),
   rateA: id(13),
   periodA2: id(14),
   lineItemA2: id(15),
@@ -54,7 +54,7 @@ function seed() {
       { id: F.edgeA2, name: "Edge A2", microgrid_id: F.microgridA2 },
     ]),
     devices: rows([{ id: F.deviceA2, name: "Meter A2", edge_id: F.edgeA2 }]),
-    households: rows([{ id: F.householdA, display_name: "House 7", microgrid_id: F.microgridA }]),
+    tenants: rows([{ id: F.tenantA, display_name: "House 7", microgrid_id: F.microgridA }]),
     billing_periods: rows([
       { id: F.periodA, start_date: "2026-04-01", end_date: "2026-04-30", microgrid_id: F.microgridA },
       { id: F.periodA2, start_date: "2026-05-01", end_date: "2026-05-31", microgrid_id: F.microgridA },
@@ -70,7 +70,7 @@ const PARENT: Partial<Record<CoreEntityKind, [string, string, CoreEntityKind | "
   microgrid: ["microgrids", "community_id", "community"],
   edge: ["edges", "microgrid_id", "microgrid"],
   device: ["devices", "edge_id", "edge"],
-  household: ["households", "microgrid_id", "microgrid"],
+  tenant: ["tenants", "microgrid_id", "microgrid"],
   billingPeriod: ["billing_periods", "microgrid_id", "microgrid"],
   lineItem: ["billing_line_items", "billing_period_id", "billingPeriod"],
   rateSchedule: ["rate_schedules", "microgrid_id", "microgrid"],
@@ -193,19 +193,19 @@ describe("resolveSegments", () => {
     });
   });
 
-  it("labels a household with its display name and links its page", async () => {
+  it("labels a tenant with its display name and links its page", async () => {
     const result = await resolveSegments(contextFor([managerOf(ORG_A)], newClient), NO_ENTITIES, [
       seg("microgrid", F.microgridA),
-      seg("household", F.householdA),
+      seg("tenant", F.tenantA),
     ]);
-    const household = {
-      kind: "household",
-      id: F.householdA,
+    const tenant = {
+      kind: "tenant",
+      id: F.tenantA,
       label: "House 7",
-      href: `/microgrids/${F.microgridA}/setup/households/${F.householdA}`,
+      href: `/microgrids/${F.microgridA}/setup/tenants/${F.tenantA}`,
     };
-    expect(result.ok && result.scope.household).toEqual(household);
-    expect(result.ok && result.trail.at(-1)).toEqual({ label: household.label, href: household.href });
+    expect(result.ok && result.scope.tenant).toEqual(tenant);
+    expect(result.ok && result.trail.at(-1)).toEqual({ label: tenant.label, href: tenant.href });
   });
 
   it("lowercases core ids, so a mixed-case path resolves the same for every caller", async () => {
@@ -231,7 +231,7 @@ describe("resolveSegments", () => {
       microgrid: F.microgridA,
       edge: F.edgeA,
       device: F.deviceA2,
-      household: F.householdA,
+      tenant: F.tenantA,
       billingPeriod: F.periodA,
       lineItem: F.lineItemA2,
       rateSchedule: F.rateA,
@@ -297,7 +297,7 @@ describe("resolveSegments", () => {
     ["community", "microgrid", F.communityA, F.microgridA],
     ["microgrid", "edge", F.microgridA, F.edgeA],
     ["edge", "device", F.edgeA2, F.deviceA2],
-    ["microgrid", "household", F.microgridA, F.householdA],
+    ["microgrid", "tenant", F.microgridA, F.tenantA],
     ["microgrid", "billingPeriod", F.microgridA, F.periodA],
     ["microgrid", "rateSchedule", F.microgridA, F.rateA],
     ["billingPeriod", "lineItem", F.periodA2, F.lineItemA2],

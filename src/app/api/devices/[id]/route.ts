@@ -32,10 +32,10 @@ import type { DeviceType } from "@/lib/types/domain";
  *
  * AC-CASCADE — role/device_type conflict guard:
  *   When changing `device_type` AWAY from `consumption_meter` and the device
- *   is currently linked as a household's `primary_consumption_meter`, the
+ *   is currently linked as a tenant's `primary_consumption_meter`, the
  *   route returns 409 `device_type_role_conflict` (with the linked
- *   household's id + display_name in the body). The UI surfaces this as a
- *   destructive ConfirmDialog offering "Unlink household and reclassify",
+ *   tenant's id + display_name in the body). The UI surfaces this as a
+ *   destructive ConfirmDialog offering "Unlink tenant and reclassify",
  *   which performs the unlink then re-issues the PATCH (two sequential
  *   server calls — no transactional combiner).
  *
@@ -45,11 +45,11 @@ import type { DeviceType } from "@/lib/types/domain";
  *   between the SELECT and the UPDATE produces a zero-row result — the
  *   route then returns 409 `device_type_changed_concurrently`. This closes
  *   the unlink-then-relink race window where a parallel
- *   PATCH /api/households/[id] could reclaim the just-unlinked device.
+ *   PATCH /api/tenants/[id] could reclaim the just-unlinked device.
  *
- * Pattern mirrors `src/app/api/households/[id]/route.ts` for ALLOWED_FIELDS
+ * Pattern mirrors `src/app/api/tenants/[id]/route.ts` for ALLOWED_FIELDS
  * + UUID_RE + .maybeSingle() null-as-404, with the AC-6 compare-and-set
- * UPDATE as the one place this route diverges (households doesn't need it
+ * UPDATE as the one place this route diverges (tenants doesn't need it
  * because there's no equivalent role↔device_type cross-table invariant).
  */
 
@@ -218,8 +218,8 @@ export async function PATCH(
 
   // AC-CASCADE — role/device_type conflict guard.
   // When the type would change AWAY from consumption_meter and the device
-  // is currently linked as a household's primary_consumption_meter, abort
-  // with 409 (with the household details so the UI can offer the
+  // is currently linked as a tenant's primary_consumption_meter, abort
+  // with 409 (with the tenant details so the UI can offer the
   // unlink-and-reclassify confirm flow).
   if (
     typeIsChanging &&
@@ -227,26 +227,26 @@ export async function PATCH(
     newDeviceType !== "consumption_meter"
   ) {
     const { data: link } = await supabase
-      .from("household_devices")
-      .select("household_id")
+      .from("tenant_devices")
+      .select("tenant_id")
       .eq("device_id", id)
       .eq("role", "primary_consumption_meter")
-      .maybeSingle<{ household_id: string }>();
+      .maybeSingle<{ tenant_id: string }>();
 
-    if (link?.household_id) {
+    if (link?.tenant_id) {
       const { data: hh } = await supabase
-        .from("households")
+        .from("tenants")
         .select("id, display_name")
-        .eq("id", link.household_id)
+        .eq("id", link.tenant_id)
         .maybeSingle<{ id: string; display_name: string }>();
 
       return NextResponse.json(
         {
           error:
-            "This device is the primary consumption meter for a household. Unlink the household first, then reclassify.",
+            "This device is the primary consumption meter for a tenant. Unlink the tenant first, then reclassify.",
           reason: "device_type_role_conflict",
-          household: {
-            id: hh?.id ?? link.household_id,
+          tenant: {
+            id: hh?.id ?? link.tenant_id,
             display_name: hh?.display_name ?? null,
           },
         },
@@ -305,24 +305,24 @@ export async function PATCH(
     "page"
   );
   revalidatePath(`/microgrids/${microgridId}/setup/edges/shared`, "page");
-  revalidatePath(`/microgrids/${microgridId}/setup/households`, "page");
+  revalidatePath(`/microgrids/${microgridId}/setup/tenants`, "page");
 
-  // Loop the household-detail revalidation across every household linked
-  // through household_devices — the household-detail page filters on
-  // device_type to surface the billing meter, so any linked household must
+  // Loop the tenant-detail revalidation across every tenant linked
+  // through tenant_devices — the tenant-detail page filters on
+  // device_type to surface the billing meter, so any linked tenant must
   // be invalidated regardless of role.
-  const { data: linkedHouseholds } = await supabase
-    .from("household_devices")
-    .select("household_id")
+  const { data: linkedTenants } = await supabase
+    .from("tenant_devices")
+    .select("tenant_id")
     .eq("device_id", id)
-    .returns<{ household_id: string }[]>();
+    .returns<{ tenant_id: string }[]>();
 
   const linkedIds = new Set<string>(
-    (linkedHouseholds ?? []).map((r) => r.household_id)
+    (linkedTenants ?? []).map((r) => r.tenant_id)
   );
-  for (const householdId of linkedIds) {
+  for (const tenantId of linkedIds) {
     revalidatePath(
-      `/microgrids/${microgridId}/setup/households/${householdId}`,
+      `/microgrids/${microgridId}/setup/tenants/${tenantId}`,
       "page"
     );
   }

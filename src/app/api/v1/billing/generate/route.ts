@@ -40,14 +40,14 @@ export async function POST(request: NextRequest) {
   }
 
   // manualReadings is OPTIONAL. When omitted (or an empty array), every
-  // household's usage is pulled from OpenEMS over the billing period — the
+  // tenant's usage is pulled from OpenEMS over the billing period — the
   // automated-billing path: a scheduled caller POSTs with no manualReadings and
-  // the engine resolves each household's consumption from the OpenEMS B2B API.
-  // When present, each entry overrides that household's reading; all other
-  // households still resolve from OpenEMS. householdIds is left undefined so the
-  // engine bills the period microgrid's full household set.
+  // the engine resolves each tenant's consumption from the OpenEMS B2B API.
+  // When present, each entry overrides that tenant's reading; all other
+  // tenants still resolve from OpenEMS. tenantIds is left undefined so the
+  // engine bills the period microgrid's full tenant set.
   const manualReadings: Array<{
-    householdId: string;
+    tenantId: string;
     startKwh: number;
     endKwh: number;
     reason?: string;
@@ -62,9 +62,9 @@ export async function POST(request: NextRequest) {
     }
     for (let i = 0; i < rec.manualReadings.length; i++) {
       const m = rec.manualReadings[i] as Record<string, unknown>;
-      if (typeof m.householdId !== "string" || !UUID_RE.test(m.householdId)) {
+      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
         return NextResponse.json(
-          { error: `manualReadings[${i}].householdId must be a UUID` },
+          { error: `manualReadings[${i}].tenantId must be a UUID` },
           { status: 400 }
         );
       }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
         );
       }
       manualReadings.push({
-        householdId: m.householdId,
+        tenantId: m.tenantId,
         startKwh: m.startKwh,
         endKwh: m.endKwh,
         ...(typeof m.reason === "string" ? { reason: m.reason } : {}),
@@ -191,24 +191,24 @@ export async function POST(request: NextRequest) {
     .filter((r): r is Extract<typeof r, { kind: "written" }> => r.kind === "written")
     .map((r) => ({
       id: r.lineItem.id,
-      householdId: r.householdId,
-      householdName: r.householdName,
+      tenantId: r.tenantId,
+      tenantName: r.tenantName,
       totalAmount: r.lineItem.total_amount,
       usageKwh: r.lineItem.usage_kwh,
     }));
 
-  // Households already on a manual reading for this period are not re-read
+  // Tenants already on a manual reading for this period are not re-read
   // from OpenEMS by this bulk path (see "Manual rows" in generate.ts); they
-  // are listed so the caller can tell them from households that failed.
+  // are listed so the caller can tell them from tenants that failed.
   const kept = out.results
     .filter((r) => r.kind === "kept")
-    .map((k) => ({ householdId: k.householdId, householdName: k.householdName }));
+    .map((k) => ({ tenantId: k.tenantId, tenantName: k.tenantName }));
 
   const errors = out.results
     .filter((r) => r.kind === "error")
     .map((e) => ({
-      householdId: e.householdId,
-      householdName: e.householdName,
+      tenantId: e.tenantId,
+      tenantName: e.tenantName,
       error: e.error,
       code: e.code,
     }));

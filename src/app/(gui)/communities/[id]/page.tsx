@@ -16,7 +16,7 @@ import { microgridHref } from "@/lib/microgrid-links";
  * /communities/[id] — community detail page (#87).
  *
  * Shows community address/geography info, aggregated stats (microgrid count,
- * household count, device count) and a list of its microgrids. The Edit button
+ * tenant count, device count) and a list of its microgrids. The Edit button
  * in the header and the Invoice branding link are shown only when
  * `currentUserCanAccessCommunity` resolves truthy — explicit check, not
  * RLS-implicit.
@@ -26,7 +26,7 @@ type MicrogridRow = {
   id: string;
   name: string;
   address_city: string | null;
-  households: { count: number }[];
+  tenants: { count: number }[];
   devices: { count: number }[];
 };
 
@@ -53,7 +53,7 @@ export default async function CommunityDetailPage({
     supabase
       .from("communities")
       .select(
-        `*, microgrids(id, name, address_city, households(count), devices:edges(devices(count)))`
+        `*, microgrids(id, name, address_city, tenants(count), devices:edges(devices(count)))`
       )
       .eq("id", id)
       .single<CommunityWithMicrogrids>(),
@@ -68,8 +68,8 @@ export default async function CommunityDetailPage({
   const microgrids = community.microgrids ?? [];
   const microgridCount = microgrids.length;
 
-  const householdCount = microgrids.reduce((sum, mg) => {
-    const c = mg.households?.[0]?.count ?? 0;
+  const tenantCount = microgrids.reduce((sum, mg) => {
+    const c = mg.tenants?.[0]?.count ?? 0;
     return sum + c;
   }, 0);
 
@@ -121,10 +121,10 @@ export default async function CommunityDetailPage({
         </div>
         <div className="text-center">
           <div className="text-2xl font-semibold text-foreground">
-            {householdCount}
+            {tenantCount}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Household{householdCount !== 1 ? "s" : ""}
+            Tenant{tenantCount !== 1 ? "s" : ""}
           </div>
         </div>
         <div className="text-center">

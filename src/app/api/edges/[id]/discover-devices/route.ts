@@ -112,7 +112,7 @@ export async function GET(
   // Resolve per-microgrid OpenEMS config.
   //
   // Post-#200 (00032) org_managers are intentionally allowed here — this is
-  // the Add-Household wizard's inline discovery path, which is the surface
+  // the Add-Tenant wizard's inline discovery path, which is the surface
   // that motivated the widening. There is no super_admin gate at this
   // position by design.
   //

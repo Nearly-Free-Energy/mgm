@@ -18,7 +18,7 @@ vi.mock("@/lib/cordis/billing-review", () => ({
 }));
 
 const maybeSingle = vi.fn();
-const householdRows = vi.fn();
+const tenantRows = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
   createClient: vi.fn(async () => ({
     auth: { getUser: async () => ({ data: { user: { id: "user-1", email: "reviewer@test.local" } } }) },
@@ -27,7 +27,7 @@ vi.mock("@/lib/supabase/server", () => ({
         select: () => query,
         eq: () => query,
         order: () => query,
-        limit: () => table === "households" ? Promise.resolve(householdRows()) : query,
+        limit: () => table === "tenants" ? Promise.resolve(tenantRows()) : query,
         maybeSingle,
       };
       return query;
@@ -36,14 +36,14 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const PERIOD_ID = "550e8400-e29b-41d4-a716-446655440100";
-const HOUSEHOLD_ID = "550e8400-e29b-41d4-a716-446655440200";
+const TENANT_ID = "550e8400-e29b-41d4-a716-446655440200";
 
 describe("POST /api/billing-review/preview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     checkGate.mockResolvedValue({ ok: true, organizationId: ORG_ID });
     process.env.MGM_REVIEW_ALLOWED_EMAIL = "reviewer@test.local";
-    householdRows.mockResolvedValue({ data: [], error: null });
+    tenantRows.mockResolvedValue({ data: [], error: null });
     maybeSingle.mockResolvedValueOnce({
       data: {
         id: PERIOD_ID,
@@ -58,8 +58,8 @@ describe("POST /api/billing-review/preview", () => {
       results: [
         {
           kind: "preview",
-          householdId: HOUSEHOLD_ID,
-          householdName: "Source name must not be returned",
+          tenantId: TENANT_ID,
+          tenantName: "Source name must not be returned",
           usageKwh: 25,
           totalAmount: 5000,
           previousUsageKwh: null,
@@ -74,22 +74,22 @@ describe("POST /api/billing-review/preview", () => {
     const response = await POST(
       new NextRequest("http://localhost/api/billing-review/preview", {
         method: "POST",
-        body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+        body: JSON.stringify({ periodId: PERIOD_ID, tenantIds: [TENANT_ID] }),
       })
     );
 
     expect(response.status).toBe(200);
     expect(preview).toHaveBeenCalledWith({
       periodId: PERIOD_ID,
-      householdIds: [HOUSEHOLD_ID],
+      tenantIds: [TENANT_ID],
       provider: "openems",
     });
     expect(dispose).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toMatchObject({
       rows: [
         {
-          householdId: HOUSEHOLD_ID,
-          label: "Household 550e8400",
+          tenantId: TENANT_ID,
+          label: "Tenant 550e8400",
           status: "excluded",
           exceptions: [{ code: "missing_saved_bill" }],
         },
@@ -98,12 +98,12 @@ describe("POST /api/billing-review/preview", () => {
     });
   });
 
-  it("rejects more than 500 requested households before starting a calculation", async () => {
+  it("rejects more than 500 requested tenants before starting a calculation", async () => {
     const { POST } = await import("../route");
     const response = await POST(
       new NextRequest("http://localhost/api/billing-review/preview", {
         method: "POST",
-        body: JSON.stringify({ periodId: PERIOD_ID, householdIds: Array(501).fill(HOUSEHOLD_ID) }),
+        body: JSON.stringify({ periodId: PERIOD_ID, tenantIds: Array(501).fill(TENANT_ID) }),
       })
     );
 
@@ -121,7 +121,7 @@ describe("POST /api/billing-review/preview", () => {
     const { POST } = await import("../route");
     const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
       method: "POST",
-      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+      body: JSON.stringify({ periodId: PERIOD_ID, tenantIds: [TENANT_ID] }),
     }));
     expect(response.status).toBe(409);
     expect(preview).not.toHaveBeenCalled();
@@ -132,7 +132,7 @@ describe("POST /api/billing-review/preview", () => {
     const { POST } = await import("../route");
     const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
       method: "POST",
-      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+      body: JSON.stringify({ periodId: PERIOD_ID, tenantIds: [TENANT_ID] }),
     }));
     expect(response.status).toBe(200);
     expect(checkGate).toHaveBeenCalledWith(expect.anything(), {
@@ -150,15 +150,15 @@ describe("POST /api/billing-review/preview", () => {
     const { POST } = await import("../route");
     const response = await POST(new NextRequest("http://localhost/api/billing-review/preview", {
       method: "POST",
-      body: JSON.stringify({ periodId: PERIOD_ID, householdIds: [HOUSEHOLD_ID] }),
+      body: JSON.stringify({ periodId: PERIOD_ID, tenantIds: [TENANT_ID] }),
     }));
     expect(response.status).toBe(404);
     expect(preview).not.toHaveBeenCalled();
   });
 
-  it("rejects an implicit all-households review when the period exceeds the cap", async () => {
-    householdRows.mockResolvedValue({
-      data: Array.from({ length: 501 }, (_, index) => ({ id: `${HOUSEHOLD_ID}-${index}` })),
+  it("rejects an implicit all-tenants review when the period exceeds the cap", async () => {
+    tenantRows.mockResolvedValue({
+      data: Array.from({ length: 501 }, (_, index) => ({ id: `${TENANT_ID}-${index}` })),
       error: null,
     });
     const { POST } = await import("../route");

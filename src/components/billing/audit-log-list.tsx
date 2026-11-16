@@ -2,17 +2,17 @@
 
 // AuditLogList — renders the BC4 per-period audit history (#176).
 //
-// Receives precomputed entries + an optional `lineItemIdToHouseholdId` map
-// + an optional `filterHouseholdId`. When the filter id is set and resolves
-// to a known household, the list filters client-side by ownership of the
-// entry's billingLineItemId. The page server-component does the household
+// Receives precomputed entries + an optional `lineItemIdToTenantId` map
+// + an optional `filterTenantId`. When the filter id is set and resolves
+// to a known tenant, the list filters client-side by ownership of the
+// entry's billingLineItemId. The page server-component does the tenant
 // lookup once and passes a string→string map so the client doesn't need
 // to round-trip Supabase.
 //
 // Empty-state branches (per ticket AC6):
 //   - 0 entries for the period (no filter)        → "No changes recorded yet"
-//   - 0 entries after household filter applied    → "No changes recorded for {hh}" + "Show all"
-//   - filter id matched no household in this MG   → banner "unknown household" + same filter path
+//   - 0 entries after tenant filter applied    → "No changes recorded for {hh}" + "Show all"
+//   - filter id matched no tenant in this MG   → banner "unknown tenant" + same filter path
 // In all empty-state branches the `<ol>` is OMITTED — we never emit an empty list.
 //
 // Truncation notice: when `entries.length >= 1000` (BC1's 500/side worst
@@ -36,14 +36,14 @@ const TRUNCATION_THRESHOLD = 1000;
 
 export interface AuditLogListProps {
   entries: BillingAuditLogEntry[];
-  /** lineItemId → householdId map (server-resolved from billing_line_items). */
-  lineItemIdToHouseholdId: Record<string, string>;
-  /** householdId → display_name map (for the "filtered to {name}" banner). */
-  householdNamesById: Record<string, string>;
+  /** lineItemId → tenantId map (server-resolved from billing_line_items). */
+  lineItemIdToTenantId: Record<string, string>;
+  /** tenantId → display_name map (for the "filtered to {name}" banner). */
+  tenantNamesById: Record<string, string>;
   /** When set, only entries whose billingLineItemId belongs to this
-   *  household render. The history page reads this from
-   *  `searchParams.household_id`. */
-  filterHouseholdId?: string;
+   *  tenant render. The history page reads this from
+   *  `searchParams.tenant_id`. */
+  filterTenantId?: string;
   /** For the "Show all" link's href. */
   microgridId: string;
   periodId: string;
@@ -51,9 +51,9 @@ export interface AuditLogListProps {
 
 export function AuditLogList({
   entries,
-  lineItemIdToHouseholdId,
-  householdNamesById,
-  filterHouseholdId,
+  lineItemIdToTenantId,
+  tenantNamesById,
+  filterTenantId,
   microgridId,
   periodId,
 }: AuditLogListProps) {
@@ -61,26 +61,26 @@ export function AuditLogList({
 
   // ── Filter (client-side) ───────────────────────────────────────────────
   const filtered = React.useMemo(() => {
-    if (!filterHouseholdId) return entries;
+    if (!filterTenantId) return entries;
     return entries.filter((e) => {
       if (!e.billingLineItemId) return false;
-      const owner = lineItemIdToHouseholdId[e.billingLineItemId];
-      return owner === filterHouseholdId;
+      const owner = lineItemIdToTenantId[e.billingLineItemId];
+      return owner === filterTenantId;
     });
-  }, [entries, filterHouseholdId, lineItemIdToHouseholdId]);
+  }, [entries, filterTenantId, lineItemIdToTenantId]);
 
-  const filteredHouseholdName = filterHouseholdId
-    ? householdNamesById[filterHouseholdId] ?? null
+  const filteredTenantName = filterTenantId
+    ? tenantNamesById[filterTenantId] ?? null
     : null;
 
   // ── Filter banner ──────────────────────────────────────────────────────
-  const filterBanner = filterHouseholdId ? (
+  const filterBanner = filterTenantId ? (
     <Banner
       tone="info"
       title={
         <>
           Showing changes for{" "}
-          <strong>{filteredHouseholdName ?? "unknown household"}</strong>
+          <strong>{filteredTenantName ?? "unknown tenant"}</strong>
         </>
       }
     >
@@ -95,18 +95,18 @@ export function AuditLogList({
 
   // ── Empty-state branches ───────────────────────────────────────────────
   if (filtered.length === 0) {
-    if (filterHouseholdId) {
+    if (filterTenantId) {
       // Filter narrowed to zero. We render a per-filter empty state with
       // a "Show all" secondary so the user has an escape hatch back to
       // the unfiltered list.
-      const hhLabel = filteredHouseholdName ?? "unknown household";
+      const hhLabel = filteredTenantName ?? "unknown tenant";
       return (
         <div className="space-y-4">
           {filterBanner}
           <EmptyState
             eyebrow="Audit history"
             title={`No changes recorded for ${hhLabel}`}
-            body="Other households on this period may have entries."
+            body="Other tenants on this period may have entries."
             secondary={
               <Link
                 href={showAllHref}

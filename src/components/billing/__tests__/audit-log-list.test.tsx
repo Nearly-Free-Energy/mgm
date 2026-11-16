@@ -4,7 +4,7 @@
  * Coverage (per ticket AC9):
  *   - Renders one <li> per entry under <ol aria-label="Audit history">.
  *   - Each event type from AC4 produces the expected label + summary.
- *   - Filter by household_id: only matching entries render; <ol> contains
+ *   - Filter by tenant_id: only matching entries render; <ol> contains
  *     just those rows; "Show all" link clears the param.
  *   - Empty state #1 (no entries for period): "No changes recorded yet"
  *     copy; <ol> NOT rendered.
@@ -42,7 +42,7 @@ const ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T10:00:00Z",
     billingLineItemId: null,
-    householdName: null,
+    tenantName: null,
     details: {},
   },
   {
@@ -52,8 +52,8 @@ const ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T11:00:00Z",
     billingLineItemId: LI_A,
-    householdName: "HH-A",
-    details: { household_name: "HH-A", new_total_amount: 5000 },
+    tenantName: "HH-A",
+    details: { tenant_name: "HH-A", new_total_amount: 5000 },
   },
   {
     id: "audit:00000000-0000-0000-0000-000000000003",
@@ -62,9 +62,9 @@ const ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: null,
     createdAt: "2026-04-25T12:00:00Z",
     billingLineItemId: LI_B,
-    householdName: "HH-B",
+    tenantName: "HH-B",
     details: {
-      household_name: "HH-B",
+      tenant_name: "HH-B",
       previous_total_amount: 3000,
       new_total_amount: 4000,
       previous_reading_source: "edge",
@@ -98,7 +98,7 @@ const ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T13:00:00Z",
     billingLineItemId: LI_A,
-    householdName: "HH-A",
+    tenantName: "HH-A",
     details: { from: "unpaid", to: "paid", source: "manual" },
   },
   {
@@ -108,7 +108,7 @@ const ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: null,
     createdAt: "2026-04-25T14:00:00Z",
     billingLineItemId: LI_B,
-    householdName: "HH-B",
+    tenantName: "HH-B",
     details: { from: "unpaid", to: "link_generated", source: "generate_link" },
   },
 ];
@@ -128,8 +128,8 @@ describe("<AuditLogList> — list rendering", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -147,8 +147,8 @@ describe("<AuditLogList> — list rendering", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -167,8 +167,8 @@ describe("<AuditLogList> — list rendering", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -184,8 +184,8 @@ describe("<AuditLogList> — list rendering", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -215,7 +215,7 @@ describe("<AuditLogList> — list rendering", () => {
               actorDisplayName: null,
               createdAt: "2026-04-25T10:00:00Z",
               billingLineItemId: null,
-              householdName: null,
+              tenantName: null,
               details: {},
             },
             {
@@ -225,7 +225,7 @@ describe("<AuditLogList> — list rendering", () => {
               actorDisplayName: null,
               createdAt: "2026-04-25T11:00:00Z",
               billingLineItemId: null,
-              householdName: null,
+              tenantName: null,
               details: {},
             },
             {
@@ -235,12 +235,12 @@ describe("<AuditLogList> — list rendering", () => {
               actorDisplayName: "Alice Doe",
               createdAt: "2026-04-25T12:00:00Z",
               billingLineItemId: null,
-              householdName: null,
+              tenantName: null,
               details: {},
             },
           ]}
-          lineItemIdToHouseholdId={{}}
-          householdNamesById={{}}
+          lineItemIdToTenantId={{}}
+          tenantNamesById={{}}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -252,17 +252,17 @@ describe("<AuditLogList> — list rendering", () => {
   });
 });
 
-// ── Filter by household_id ───────────────────────────────────────────────────
+// ── Filter by tenant_id ───────────────────────────────────────────────────
 
-describe("<AuditLogList> — household_id filter", () => {
-  it("only renders entries whose billingLineItemId belongs to the filtered household", () => {
+describe("<AuditLogList> — tenant_id filter", () => {
+  it("only renders entries whose billingLineItemId belongs to the filtered tenant", () => {
     const { container } = render(
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
-          filterHouseholdId={HH_A}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
+          filterTenantId={HH_A}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -287,9 +287,9 @@ describe("<AuditLogList> — household_id filter", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
-          filterHouseholdId={HH_A}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
+          filterTenantId={HH_A}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -304,22 +304,22 @@ describe("<AuditLogList> — household_id filter", () => {
     );
   });
 
-  it("when household_id is unknown, renders 'unknown household' in the banner", () => {
+  it("when tenant_id is unknown, renders 'unknown tenant' in the banner", () => {
     render(
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
-          filterHouseholdId="ffffffff-ffff-4fff-8fff-ffffffffffff"
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
+          filterTenantId="ffffffff-ffff-4fff-8fff-ffffffffffff"
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
       </Wrapper>
     );
     // The unknown filter id matches no entries → empty-state #2 ("No
-    // changes recorded for unknown household").
-    expect(screen.getByText("No changes recorded for unknown household")).toBeTruthy();
+    // changes recorded for unknown tenant").
+    expect(screen.getByText("No changes recorded for unknown tenant")).toBeTruthy();
   });
 });
 
@@ -331,8 +331,8 @@ describe("<AuditLogList> — empty states", () => {
       <Wrapper>
         <AuditLogList
           entries={[]}
-          lineItemIdToHouseholdId={{}}
-          householdNamesById={{}}
+          lineItemIdToTenantId={{}}
+          tenantNamesById={{}}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -351,9 +351,9 @@ describe("<AuditLogList> — empty states", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={{ ...HH_NAMES, "no-entries-for-this-id": "HH-NoOne" }}
-          filterHouseholdId="no-entries-for-this-id"
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={{ ...HH_NAMES, "no-entries-for-this-id": "HH-NoOne" }}
+          filterTenantId="no-entries-for-this-id"
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -361,7 +361,7 @@ describe("<AuditLogList> — empty states", () => {
     );
     expect(screen.getByText("No changes recorded for HH-NoOne")).toBeTruthy();
     expect(
-      screen.getByText(/Other households on this period may have entries/i)
+      screen.getByText(/Other tenants on this period may have entries/i)
     ).toBeTruthy();
     // Secondary link to clear the filter.
     const showAllLinks = Array.from(
@@ -389,7 +389,7 @@ describe("<AuditLogList> — truncation notice", () => {
         actorDisplayName: null,
         createdAt: `2026-04-25T${String(i % 24).padStart(2, "0")}:00:00Z`,
         billingLineItemId: null,
-        householdName: null,
+        tenantName: null,
         details: {},
       });
     }
@@ -397,8 +397,8 @@ describe("<AuditLogList> — truncation notice", () => {
       <Wrapper>
         <AuditLogList
           entries={big}
-          lineItemIdToHouseholdId={{}}
-          householdNamesById={{}}
+          lineItemIdToTenantId={{}}
+          tenantNamesById={{}}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />
@@ -412,8 +412,8 @@ describe("<AuditLogList> — truncation notice", () => {
       <Wrapper>
         <AuditLogList
           entries={ENTRIES}
-          lineItemIdToHouseholdId={LINE_ITEM_TO_HH}
-          householdNamesById={HH_NAMES}
+          lineItemIdToTenantId={LINE_ITEM_TO_HH}
+          tenantNamesById={HH_NAMES}
           microgridId={MICROGRID_ID}
           periodId={PERIOD_ID}
         />

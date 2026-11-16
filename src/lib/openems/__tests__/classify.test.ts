@@ -154,9 +154,9 @@ describe("classifyDeviceType", () => {
       ).toBe("consumption_meter");
     });
 
-    it("returns consumption_meter for alias 'Household 3' + generic AC factory", () => {
+    it("returns consumption_meter for alias 'Tenant 3' + generic AC factory", () => {
       expect(
-        classifyDeviceType(GENERIC_AC_FACTORY, GENERIC_NATURE, "Household 3")
+        classifyDeviceType(GENERIC_AC_FACTORY, GENERIC_NATURE, "Tenant 3")
       ).toBe("consumption_meter");
     });
 

@@ -21,8 +21,8 @@ afterEach(() => vi.restoreAllMocks());
 
 const ceremony: Ceremony = {
   type: "ceremony",
-  statement: "Delete <b>Kasenge</b> and its 40 households?",
-  facts: [{ label: "Households", value: { t: "number", v: 40, text: "40" } }],
+  statement: "Delete <b>Kasenge</b> and its 40 tenants?",
+  facts: [{ label: "Tenants", value: { t: "number", v: 40, text: "40" } }],
   warnings: ["Bills already sent stay as they are."],
   acknowledgements: [
     { id: "bills", label: "I understand the bills <i>stay</i>." },
@@ -60,7 +60,7 @@ const typedBox = () => screen.getByRole("textbox");
 describe("ConfirmStep", () => {
   it("renders the ceremony verbatim as text, with every acknowledgement unticked", () => {
     mount();
-    expect(screen.getByText("Delete <b>Kasenge</b> and its 40 households?")).toBeTruthy();
+    expect(screen.getByText("Delete <b>Kasenge</b> and its 40 tenants?")).toBeTruthy();
     expect(screen.getByText("I understand the bills <i>stay</i>.")).toBeTruthy();
     expect(screen.getByText("Bills already sent stay as they are.")).toBeTruthy();
     expect(screen.getByText("40")).toBeTruthy();

@@ -29,9 +29,9 @@ function stubRepo(overrides: Partial<MeteringRepository> = {}): MeteringReposito
       id === MG_ID
         ? { microgridId: MG_ID, communityId: "comm-1", orgId: ORG_ID }
         : null,
-    getHouseholdOrganization: async (id: string) =>
+    getTenantOrganization: async (id: string) =>
       id === HH_ID
-        ? { householdId: HH_ID, microgridId: MG_ID, orgId: ORG_ID }
+        ? { tenantId: HH_ID, microgridId: MG_ID, orgId: ORG_ID }
         : null,
     getDeviceOrganization: async (id: string) =>
       id === DEV_ID
@@ -171,13 +171,13 @@ describe("MeteringCapability", () => {
     expect(result).toMatchObject({ ok: false, code: "METERING_INVALID_DATA" });
   });
 
-  it("returns consumption rows with household attribution", async () => {
+  it("returns consumption rows with tenant attribution", async () => {
     const { capability } = setup(
       {
         getAssignmentLinks: async () => [
           {
             id: "link-1",
-            householdId: HH_ID,
+            tenantId: HH_ID,
             deviceId: DEV_ID,
             role: "primary_consumption_meter",
             effectiveFrom: "2026-01-01",
@@ -190,7 +190,7 @@ describe("MeteringCapability", () => {
     );
     const result = await capability.getConsumption({
       microgrid_id: MG_ID,
-      household_ids: [HH_ID],
+      tenant_ids: [HH_ID],
       start_date: "2026-09-01",
       end_date: "2026-09-30",
       provider: "fixture",
@@ -199,7 +199,7 @@ describe("MeteringCapability", () => {
     expect(result.data).toEqual([
       {
         deviceId: DEV_ID,
-        householdId: HH_ID,
+        tenantId: HH_ID,
         usageKwh: 42.5,
         source: "fixture",
         readAt: expect.any(String),
@@ -242,7 +242,7 @@ describe("MeteringCapability", () => {
       getAssignmentLinks: async () => [
         {
           id: "link-1",
-          householdId: HH_ID,
+          tenantId: HH_ID,
           deviceId: DEV_ID,
           role: "primary_consumption_meter",
           effectiveFrom: "2026-01-01",
@@ -250,7 +250,7 @@ describe("MeteringCapability", () => {
         },
         {
           id: "link-2",
-          householdId: HH_ID,
+          tenantId: HH_ID,
           deviceId: "660e8400-e29b-41d4-a716-44665544bbbb",
           role: "primary_consumption_meter",
           effectiveFrom: "2026-04-01",

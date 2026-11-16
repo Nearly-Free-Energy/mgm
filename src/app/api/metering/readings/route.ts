@@ -53,7 +53,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await composed.data.metering.getConsumption({
       microgrid_id: microgridId,
       device_ids: body.device_ids,
-      household_ids: body.household_ids,
+      tenant_ids: body.tenant_ids,
       start_date: body.start_date,
       end_date: body.end_date,
       timezone: body.timezone,

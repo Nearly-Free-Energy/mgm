@@ -95,7 +95,7 @@ const RATE_LIMIT_PER_MIN = 10;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 /**
- * Checkout refusals that mean the household cannot pay this bill online at
+ * Checkout refusals that mean the tenant cannot pay this bill online at
  * all, so the page tells them to pay their operator the usual way. The codes
  * are the plugin gate's and the merchant-account resolution's in
  * `ensureCheckout` (src/lib/payments/capability.ts); if a code there is

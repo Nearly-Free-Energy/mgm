@@ -83,7 +83,7 @@ src/
 │   ├── (gui)/               ← authenticated pages (organizations, communities, microgrids, billing, settings)
 │   ├── login/, setup/, …    ← public auth and first-run pages
 │   └── api/                 ← route handlers; every write enters the Cordis runtime
-├── components/              ← React components (BillingTable, DiscoverDevices, HouseholdTable, etc.)
+├── components/              ← React components (BillingTable, DiscoverDevices, TenantTable, etc.)
 │   └── format/              ← format primitives (Currency, Kwh, LocalDate, locale-context)
 ├── lib/
 │   ├── runtime/             ← Cordis root context, request scopes, plugin gate
@@ -120,11 +120,11 @@ src/
 
 ### Entity model (post-AB #50)
 
-The schema follows Org → Community → Microgrid → Edge → Device plus a parallel Household → household_devices join. Two user roles ship for MVP (`super_admin`, `org_manager`); `microgrid_manager` / `community_admin` / `region_admin` / `tenant` are future extensions via enum addition (no schema migration). See `docs/entity-model.md` for the full rationale.
+The schema follows Org → Community → Microgrid → Edge → Device plus a parallel Tenant → tenant_devices join. Two user roles ship for MVP (`super_admin`, `org_manager`); `microgrid_manager` / `community_admin` / `region_admin` / `tenant` are future extensions via enum addition (no schema migration). See `docs/entity-model.md` for the full rationale.
 
 **Schema change notes:**
 - `microgrids.location` TEXT was **dropped** — use the structured address columns instead (`address_city`, `address_region`, `address_country`, `lat`, `lng`). Downstream pages that read `location` are expected to fail at type-check until Ticket C (#51) lands.
-- Old `meters` table renamed to `devices` with a `device_type` enum; old `tenants` → `households` + `household_devices` many-to-many.
+- Old `meters` table renamed to `devices` with a `device_type` enum; old `tenants` → `tenants` + `tenant_devices` many-to-many.
 - `user_roles` moved from `(user_id, org_id, role)` to `(user_id, role, scope_type, scope_id)`; the old `system_admin` / `org_admin` role names are gone.
 
 ### RLS helper functions (migration 00002_rls.sql)
@@ -219,7 +219,7 @@ Surfaces are `surface-1` (cards, panels), `surface-2` (muted areas) and `surface
 
 Six rules every contributor must follow:
 
-1. **Status chips:** Use `<Chip>` not raw `<span>` for status indicators. Use `<StatusChip kind="…" status="…">` to map domain enums (billingPeriod, meterType, edge, household) — this keeps tone-to-status mapping in one file (`src/lib/gui/status-maps.ts`), which `<StatusChip>` renders and `fmt.status` serves to GUIs. Add new domain enums by extending `STATUS_MAPS` there, not inline.
+1. **Status chips:** Use `<Chip>` not raw `<span>` for status indicators. Use `<StatusChip kind="…" status="…">` to map domain enums (billingPeriod, meterType, edge, tenant) — this keeps tone-to-status mapping in one file (`src/lib/gui/status-maps.ts`), which `<StatusChip>` renders and `fmt.status` serves to GUIs. Add new domain enums by extending `STATUS_MAPS` there, not inline.
 
 2. **Format primitives:** Use `<Currency>`, `<Kwh>`, and `<LocalDate>` — never `Intl.NumberFormat` or `toLocaleDateString` directly. Locale comes from `Accept-Language` (detected at the app root); currency comes from microgrid context (wired in `microgrids/[id]/layout.tsx` via `<LocaleProvider currency={microgrid.currency}>`). In-table currency cells use `bareNumber` prop so Aaron's URA paste workflow gets `4,216,800` not `UGX 4,216,800`; show currency code only in column headers. Numbers render in Inter's tabular figures (`tabular-nums`, as these primitives do), so columns line up; `font-mono` is for identifiers such as component ids, URLs and token prefixes.
 
@@ -227,7 +227,7 @@ Six rules every contributor must follow:
 
 4. **Copy table:** Use `<CopyTable>` for billing data tables (built-in per-cell copy + keyboard nav). Grand-total footer rows go BELOW the CopyTable as a `<div>` — CopyTable doesn't support footer rows. Retain `<CopyButton>` only for footer cells.
 
-5. **Destructive actions:** Use `<ConfirmDialog tone="destructive">` for delete flows (Delete Period, Delete Meter, Delete Tenant). Use `<ClosePeriodDialog>` for billing-period close (irreversible, needs multi-channel confirm via totals review + checkbox); when the caller passes `unfilledHouseholdNames`, the dialog renders a warning-toned banner above the totals, flips the confirm button to "Close anyway", and appends an explicit acknowledgement to the checkbox copy (warn-but-allow per #167). Styled in neutral/primary tone — closing is a final commit, not a destruction. Reserve destructive tone for delete-entity flows (`<ConfirmDialog tone="destructive">`). Use `<ConfirmDialog tone="neutral">` for non-destructive warnings (e.g. remove-last-tier). Never use `confirm()` — it blocks the main thread and can't be tested.
+5. **Destructive actions:** Use `<ConfirmDialog tone="destructive">` for delete flows (Delete Period, Delete Meter, Delete Tenant). Use `<ClosePeriodDialog>` for billing-period close (irreversible, needs multi-channel confirm via totals review + checkbox); when the caller passes `unfilledTenantNames`, the dialog renders a warning-toned banner above the totals, flips the confirm button to "Close anyway", and appends an explicit acknowledgement to the checkbox copy (warn-but-allow per #167). Styled in neutral/primary tone — closing is a final commit, not a destruction. Reserve destructive tone for delete-entity flows (`<ConfirmDialog tone="destructive">`). Use `<ConfirmDialog tone="neutral">` for non-destructive warnings (e.g. remove-last-tier). Never use `confirm()` — it blocks the main thread and can't be tested.
 
 6. **Picker / empty-state mutual exclusion:** When a list surface has both a switcher control (e.g. `<PeriodPicker>`) and an `<EmptyState>`, the switcher MUST NOT render when its underlying collection is empty. The empty-state owns the create CTA at zero; the switcher owns the create CTA at ≥1. Switchers must not include their own internal "no items" empty-state branch — that responsibility belongs to the parent surface, where the canonical first-run pedagogy copy lives. Additionally, when an inline create form is open, the parent's `<EmptyState>` must hide so the form is the sole CTA on screen; the form itself must include a `Cancel` action so the user has an escape hatch back to the empty-state.
 

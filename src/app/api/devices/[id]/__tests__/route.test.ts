@@ -15,7 +15,7 @@
  *   - RLS-hidden device → 404
  *   - Cross-org device for org_manager → 404 (RLS hides at SELECT)
  *   - AC-CASCADE: reclassify a consumption_meter that has a primary
- *     household link → 409 device_type_role_conflict
+ *     tenant link → 409 device_type_role_conflict
  *   - Race protection: simulate concurrent change (UPDATE returns 0 rows) →
  *     409 device_type_changed_concurrently
  *   - Reclassify a non-consumption_meter device with no primary link → 200
@@ -32,10 +32,10 @@ let canAccessMicrogridReturn = true;
 
 const mockDeviceFetchSingle = vi.fn();
 const mockEdgeFetchSingle = vi.fn();
-const mockHouseholdDevicesLinkSingle = vi.fn();
-const mockHouseholdsFetchSingle = vi.fn();
+const mockTenantDevicesLinkSingle = vi.fn();
+const mockTenantsFetchSingle = vi.fn();
 const mockDevicesUpdateSingle = vi.fn();
-const mockHouseholdDevicesAllForDevice = vi.fn();
+const mockTenantDevicesAllForDevice = vi.fn();
 
 let devicesFromCalls = 0;
 
@@ -74,27 +74,27 @@ const mockFrom = vi.fn((table: string) => {
       }),
     };
   }
-  if (table === "household_devices") {
+  if (table === "tenant_devices") {
     return {
       // Two distinct chains:
       //   AC-CASCADE link check: select().eq().eq().maybeSingle()
-      //   Linked-households loop: select().eq().returns()  (returns array)
+      //   Linked-tenants loop: select().eq().returns()  (returns array)
       select: () => ({
         eq: () => ({
           eq: () => ({
-            maybeSingle: () => mockHouseholdDevicesLinkSingle(),
+            maybeSingle: () => mockTenantDevicesLinkSingle(),
           }),
           // For the loop fetch: chain ends at .eq() with .returns()
-          returns: () => mockHouseholdDevicesAllForDevice(),
+          returns: () => mockTenantDevicesAllForDevice(),
         }),
       }),
     };
   }
-  if (table === "households") {
+  if (table === "tenants") {
     return {
       select: () => ({
         eq: () => ({
-          maybeSingle: () => mockHouseholdsFetchSingle(),
+          maybeSingle: () => mockTenantsFetchSingle(),
         }),
       }),
     };
@@ -162,11 +162,11 @@ describe("PATCH /api/devices/[id]", () => {
       error: null,
     });
     // Default: no primary-meter link blocks reclassification.
-    mockHouseholdDevicesLinkSingle.mockReset().mockResolvedValue({
+    mockTenantDevicesLinkSingle.mockReset().mockResolvedValue({
       data: null,
       error: null,
     });
-    mockHouseholdsFetchSingle.mockReset().mockResolvedValue({
+    mockTenantsFetchSingle.mockReset().mockResolvedValue({
       data: { id: HH_UUID, display_name: "Block A, Unit 1" },
       error: null,
     });
@@ -180,9 +180,9 @@ describe("PATCH /api/devices/[id]", () => {
       },
       error: null,
     });
-    // Default: no extra households linked to this device (just the empty
+    // Default: no extra tenants linked to this device (just the empty
     // list — drives the revalidate loop).
-    mockHouseholdDevicesAllForDevice.mockReset().mockResolvedValue({
+    mockTenantDevicesAllForDevice.mockReset().mockResolvedValue({
       data: [],
       error: null,
     });
@@ -333,7 +333,7 @@ describe("PATCH /api/devices/[id]", () => {
     expect(json.device.name).toBe("Renamed Meter");
     // Name-only change does not flip type — AC-CASCADE must NOT trigger
     // (so no link probe fires).
-    expect(mockHouseholdDevicesLinkSingle).not.toHaveBeenCalled();
+    expect(mockTenantDevicesLinkSingle).not.toHaveBeenCalled();
   });
 
   it("200: happy path — both device_type and name", async () => {
@@ -393,12 +393,12 @@ describe("PATCH /api/devices/[id]", () => {
     );
     expect(res.status).toBe(200);
     // No type change → no AC-CASCADE probe.
-    expect(mockHouseholdDevicesLinkSingle).not.toHaveBeenCalled();
+    expect(mockTenantDevicesLinkSingle).not.toHaveBeenCalled();
   });
 
   it("409: AC-CASCADE — consumption_meter with primary link → device_type_role_conflict", async () => {
-    mockHouseholdDevicesLinkSingle.mockResolvedValueOnce({
-      data: { household_id: HH_UUID },
+    mockTenantDevicesLinkSingle.mockResolvedValueOnce({
+      data: { tenant_id: HH_UUID },
       error: null,
     });
     const { PATCH } = await import("../route");
@@ -409,16 +409,16 @@ describe("PATCH /api/devices/[id]", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.reason).toBe("device_type_role_conflict");
-    expect(json.household).toBeDefined();
-    expect(json.household.id).toBe(HH_UUID);
-    expect(json.household.display_name).toBe("Block A, Unit 1");
+    expect(json.tenant).toBeDefined();
+    expect(json.tenant.id).toBe(HH_UUID);
+    expect(json.tenant.display_name).toBe("Block A, Unit 1");
     // Conflict path short-circuits BEFORE the UPDATE.
     expect(mockDevicesUpdateSingle).not.toHaveBeenCalled();
   });
 
   it("409: race protection — UPDATE returns 0 rows → device_type_changed_concurrently", async () => {
     // No primary link blocks the change…
-    mockHouseholdDevicesLinkSingle.mockResolvedValueOnce({
+    mockTenantDevicesLinkSingle.mockResolvedValueOnce({
       data: null,
       error: null,
     });
@@ -464,7 +464,7 @@ describe("PATCH /api/devices/[id]", () => {
     expect(res.status).toBe(200);
     // Going FROM "other" → not consumption_meter → AC-CASCADE doesn't
     // probe (the guard only fires when going AWAY FROM consumption_meter).
-    expect(mockHouseholdDevicesLinkSingle).not.toHaveBeenCalled();
+    expect(mockTenantDevicesLinkSingle).not.toHaveBeenCalled();
   });
 
   it("200: reclassify consumption_meter → consumption_meter (no type change) does NOT trigger AC-CASCADE", async () => {
@@ -487,6 +487,6 @@ describe("PATCH /api/devices/[id]", () => {
       { params: Promise.resolve({ id: DEVICE_UUID }) }
     );
     expect(res.status).toBe(200);
-    expect(mockHouseholdDevicesLinkSingle).not.toHaveBeenCalled();
+    expect(mockTenantDevicesLinkSingle).not.toHaveBeenCalled();
   });
 });

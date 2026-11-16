@@ -25,7 +25,7 @@ const rows: Row[] = [
 ];
 
 const columnsWithAction: ColumnDef<Row>[] = [
-  { kind: "row-header", header: "Household", accessor: (r) => r.name },
+  { kind: "row-header", header: "Tenant", accessor: (r) => r.name },
   { kind: "value",      header: "Amount",    accessor: (r) => r.amount },
   {
     kind: "action",

@@ -14,10 +14,10 @@ function repository(failedTable?: string, missingTable?: string) {
   return createSupabaseBillingRepository(client as unknown as SupabaseClient);
 }
 describe("billing summary read failures", () => {
-  it.each(["billing_periods", "households", "billing_line_items"])("rejects failed %s reads", async (table) => {
+  it.each(["billing_periods", "tenants", "billing_line_items"])("rejects failed %s reads", async (table) => {
     await expect(repository(table).getPeriodSummary("period")).rejects.toThrow();
   });
-  it.each(["households", "billing_line_items"])("rejects missing %s results", async (table) => {
+  it.each(["tenants", "billing_line_items"])("rejects missing %s results", async (table) => {
     await expect(repository(undefined, table).getPeriodSummary("period")).rejects.toThrow();
   });
   it("retains a valid empty-period summary", async () => {

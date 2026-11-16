@@ -2,7 +2,7 @@
 
 /**
  * DeviceSelect — Radix-based picker for billing devices, replacing the bare
- * native <select> + <optgroup> previously rendered inline in HouseholdTable.
+ * native <select> + <optgroup> previously rendered inline in TenantTable.
  *
  * Variant B always: every option shows the edge label as a second line and
  * groups are headed with `Edge · <edge_name>`, even on single-edge
@@ -11,8 +11,8 @@
  * the rendering doesn't shift when an edge is added later.
  *
  * Already-linked devices: greyed (`opacity-60`) + Radix `disabled` + suffix
- * "linked to <household>". They are NOT selectable from this surface; the
- * source household's edit dialog is the only place to reassign.
+ * "linked to <tenant>". They are NOT selectable from this surface; the
+ * source tenant's edit dialog is the only place to reassign.
  *
  * Empty state: when `devices.length === 0`, the dropdown collapses to an
  * inline mini empty-state with a link to the microgrid's edges page.
@@ -52,12 +52,12 @@ export type DeviceOption = {
   edge_name: string;
   /**
    * When set, this device is already the primary_consumption_meter of
-   * another household. The option renders disabled with a "linked" suffix.
+   * another tenant. The option renders disabled with a "linked" suffix.
    * The CALLER is responsible for clearing this on the option that matches
-   * `value` when this household is the device's owner — otherwise the
+   * `value` when this tenant is the device's owner — otherwise the
    * current selection would render disabled in its own picker.
    */
-  linkedToHouseholdName?: string | null;
+  linkedToTenantName?: string | null;
 };
 
 export interface DeviceSelectProps {
@@ -160,7 +160,7 @@ export function DeviceSelect({
                   Edge · {group.edge_name}
                 </SelectLabel>
                 {group.items.map((d) => {
-                  const linked = Boolean(d.linkedToHouseholdName);
+                  const linked = Boolean(d.linkedToTenantName);
                   return (
                     <SelectItem
                       key={d.id}
@@ -176,7 +176,7 @@ export function DeviceSelect({
                           <span className="text-foreground">{d.name}</span>
                           {linked && (
                             <span className="text-xs text-muted-foreground">
-                              · linked to {d.linkedToHouseholdName}
+                              · linked to {d.linkedToTenantName}
                             </span>
                           )}
                         </span>
@@ -190,7 +190,7 @@ export function DeviceSelect({
               </SelectGroup>
             ))}
             <div className="border-t border-border bg-muted px-3 py-2 text-caption text-muted-foreground">
-              Linked devices are managed from the household they&apos;re assigned to.
+              Linked devices are managed from the tenant they&apos;re assigned to.
             </div>
           </>
         )}
@@ -216,7 +216,7 @@ function DropdownEmptyState({ edgesSetupHref }: { edgesSetupHref: string }) {
       </h4>
       <p className="mt-1.5 text-xs text-muted-foreground">
         Run discovery on this microgrid&apos;s edges to make meters available
-        for household assignment.
+        for tenant assignment.
       </p>
       <Link
         href={edgesSetupHref}
@@ -251,8 +251,8 @@ function groupByEdge(
   groups.sort((a, b) => a.edge_name.localeCompare(b.edge_name));
   for (const g of groups) {
     g.items.sort((a, b) => {
-      const aLinked = Boolean(a.linkedToHouseholdName);
-      const bLinked = Boolean(b.linkedToHouseholdName);
+      const aLinked = Boolean(a.linkedToTenantName);
+      const bLinked = Boolean(b.linkedToTenantName);
       if (aLinked !== bLinked) return aLinked ? 1 : -1;
       return a.name.localeCompare(b.name);
     });

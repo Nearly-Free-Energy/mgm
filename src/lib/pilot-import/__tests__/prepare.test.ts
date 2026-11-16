@@ -8,7 +8,7 @@ import {
 
 const key = "synthetic-test-key-with-at-least-32-bytes";
 const validRow = {
-  source_household_id: "synthetic-household-01",
+  source_tenant_id: "synthetic-tenant-01",
   source_meter_id: "synthetic-meter-01",
   reading_kwh: 12.5,
   read_at: "2026-09-01T08:00:00+03:00",
@@ -27,7 +27,7 @@ describe("pilot import preparation", () => {
     const [first] = preparePilotRows([validRow], key);
     const [repeat] = preparePilotRows([validRow], key);
     expect(first).toEqual(repeat);
-    expect(JSON.stringify(first)).not.toContain("synthetic-household-01");
+    expect(JSON.stringify(first)).not.toContain("synthetic-tenant-01");
     expect(JSON.stringify(first)).not.toContain("synthetic-meter-01");
     expect(first.read_at).toBe("2026-09-01T05:00:00.000Z");
   });

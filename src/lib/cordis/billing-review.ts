@@ -30,7 +30,7 @@ export type BillingReviewProvider = MeteringProviderName;
 
 export type BillingReviewRequest = {
   periodId: string;
-  householdIds?: string[];
+  tenantIds?: string[];
   provider: BillingReviewProvider;
 };
 
@@ -65,7 +65,7 @@ export class BillingReviewCapability {
       seedReadings = await resolveReviewOnlySeedReadings(
         this.supabase,
         request.periodId,
-        request.householdIds
+        request.tenantIds
       );
     } catch {
       return {
@@ -90,7 +90,7 @@ export class BillingReviewCapability {
     return runGenerationFor({
       supabase: this.supabase,
       periodId: request.periodId,
-      householdIds: request.householdIds,
+      tenantIds: request.tenantIds,
       mode: "preview",
       actorUserId: null,
       seedReadings,

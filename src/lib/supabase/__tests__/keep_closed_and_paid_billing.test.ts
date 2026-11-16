@@ -13,13 +13,13 @@
  *     refused the same way;
  *   - an organization, community or microgrid whose only billing is unpaid
  *     drafts can still be deleted;
- *   - a bill in a closed period, a paid bill, and a household with a bill in
+ *   - a bill in a closed period, a paid bill, and a tenant with a bill in
  *     a closed period cannot be deleted, while an unpaid bill in a draft can;
  *   - a closed period cannot be reopened, by service_role either, while a
  *     resend of its status and a post-close bill regeneration
  *     (fn_record_line_item_with_audit) still work;
  *   - a bill cannot be moved into or out of a closed period, and a bill in
- *     one keeps its household and changes amount only by regeneration;
+ *     one keeps its tenant and changes amount only by regeneration;
  *   - a bill's payment_status and paid_at cannot be written directly, by
  *     service_role either, while fn_apply_payment_event still records,
  *     undoes and refunds a manual payment, and the bill stays kept;
@@ -132,7 +132,7 @@ const FIXTURE = {
   billOrgDraft: "cb11ed00-0000-4000-8007-000000000010",
 };
 
-/** The household, draft period and unpaid bill of each commRace microgrid. */
+/** The tenant, draft period and unpaid bill of each commRace microgrid. */
 const RACE_MICROGRIDS = [
   FIXTURE.mgUndo,
   FIXTURE.mgRacePaid,
@@ -143,7 +143,7 @@ const RACE_MICROGRIDS = [
 const raceIds = (microgridId: string) => {
   const suffix = microgridId.slice(-12);
   return {
-    household: `cb11ed00-0000-4000-8005-${suffix}`,
+    tenant: `cb11ed00-0000-4000-8005-${suffix}`,
     period: `cb11ed00-0000-4000-8006-${suffix}`,
     bill: `cb11ed00-0000-4000-8007-${suffix}`,
   };
@@ -197,13 +197,13 @@ function period(id: string, microgridId: string, status: "draft" | "closed") {
 function bill(
   id: string,
   periodId: string,
-  householdId: string,
+  tenantId: string,
   extra: Record<string, unknown> = {},
 ) {
   return {
     id,
     billing_period_id: periodId,
-    household_id: householdId,
+    tenant_id: tenantId,
     usage_kwh: 10,
     total_amount: 5000,
     // Spelled out on every row: a multi-row PostgREST insert sends the union
@@ -305,7 +305,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       service_charge: 0,
       tax_rate: 0,
     });
-    await insertOrThrow(svc, "households", [
+    await insertOrThrow(svc, "tenants", [
       { id: FIXTURE.hhClosed, microgrid_id: FIXTURE.mgClosed, display_name: "KB closed", primary_phone: "+256700000301" },
       { id: FIXTURE.hhPaid, microgrid_id: FIXTURE.mgPaid, display_name: "KB paid", primary_phone: "+256700000302" },
       { id: FIXTURE.hhUnpaid, microgrid_id: FIXTURE.mgPaid, display_name: "KB unpaid", primary_phone: "+256700000303" },
@@ -415,9 +415,9 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     );
     await insertOrThrow(
       svc,
-      "households",
+      "tenants",
       RACE_MICROGRIDS.map((id, i) => ({
-        id: raceIds(id).household,
+        id: raceIds(id).tenant,
         microgrid_id: id,
         display_name: `KB race ${i}`,
         primary_phone: `+25670000031${i}`,
@@ -431,7 +431,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     await insertOrThrow(
       svc,
       "billing_line_items",
-      RACE_MICROGRIDS.map((id) => bill(raceIds(id).bill, raceIds(id).period, raceIds(id).household)),
+      RACE_MICROGRIDS.map((id) => bill(raceIds(id).bill, raceIds(id).period, raceIds(id).tenant)),
     );
 
     manager = await createTestUser({
@@ -582,13 +582,13 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     expect(await exists("billing_line_items", FIXTURE.billPaid)).toBe(true);
   });
 
-  it("a household with a bill in a closed period cannot be deleted", async () => {
+  it("a tenant with a bill in a closed period cannot be deleted", async () => {
     const { error } = await manager.client
-      .from("households")
+      .from("tenants")
       .delete()
       .eq("id", FIXTURE.hhClosed);
     expectKept(error, "closed", "billing_period_kept: a bill");
-    expect(await exists("households", FIXTURE.hhClosed)).toBe(true);
+    expect(await exists("tenants", FIXTURE.hhClosed)).toBe(true);
     expect(await exists("billing_line_items", FIXTURE.billClosed)).toBe(true);
   });
 
@@ -628,10 +628,10 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     ]);
   });
 
-  it("a bill in a closed period keeps its household", async () => {
+  it("a bill in a closed period keeps its tenant", async () => {
     const { error } = await manager.client
       .from("billing_line_items")
-      .update({ household_id: FIXTURE.hhPaid })
+      .update({ tenant_id: FIXTURE.hhPaid })
       .eq("id", FIXTURE.billClosed);
     expectKept(error, "closed", "billing_period_closed: a bill in a closed billing period keeps");
     expect(await exists("billing_line_items", FIXTURE.billClosed)).toBe(true);
@@ -799,7 +799,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
     const { error } = await manager.client.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodClosed,
       _rate_schedule_id: FIXTURE.rateClosed,
-      _household_id: FIXTURE.hhClosed,
+      _tenant_id: FIXTURE.hhClosed,
       _device_id: null,
       _usage_kwh: 12,
       _start_kwh: 100,
@@ -810,7 +810,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       _entered_by_user_id: manager.userId,
       _manual_reason: "Corrected reading after close",
       _actor_user_id: manager.userId,
-      _audit_details: { household_name: "KB closed" },
+      _audit_details: { tenant_name: "KB closed" },
     });
     expect(error).toBeNull();
 
@@ -840,7 +840,7 @@ desc("20261103160000_keep_closed_and_paid_billing.sql", () => {
       ["TRUNCATE billing_periods CASCADE", "billing_periods"],
       ["TRUNCATE billing_line_items CASCADE", "billing_line_items"],
       ["TRUNCATE microgrids CASCADE", "billing_periods"],
-      ["TRUNCATE households CASCADE", "billing_line_items"],
+      ["TRUNCATE tenants CASCADE", "billing_line_items"],
       ["TRUNCATE payment_attempts CASCADE", "payment_attempts"],
       ["TRUNCATE payment_events CASCADE", "payment_events"],
     ]) {

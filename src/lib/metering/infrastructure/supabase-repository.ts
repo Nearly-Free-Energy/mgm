@@ -23,7 +23,7 @@ import type {
 /** A calendar day, as `getHouseMeterIds` puts it into a PostgREST filter. */
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Household link roles whose meter measures what the house itself used. */
+/** Tenant link roles whose meter measures what the house itself used. */
 const HOUSE_METER_ROLES = ["primary_consumption_meter", "secondary_meter"];
 
 function toError(error: { code?: string; message?: string }): RepositoryError {
@@ -71,18 +71,18 @@ export function createSupabaseMeteringRepository(
       };
     },
 
-    async getHouseholdOrganization(householdId: string) {
-      const { data: household } = await supabase
-        .from("households")
+    async getTenantOrganization(tenantId: string) {
+      const { data: tenant } = await supabase
+        .from("tenants")
         .select("id, microgrid_id")
-        .eq("id", householdId)
+        .eq("id", tenantId)
         .maybeSingle<{ id: string; microgrid_id: string }>();
-      if (!household) return null;
-      const org = await this.getMicrogridOrganization(household.microgrid_id);
+      if (!tenant) return null;
+      const org = await this.getMicrogridOrganization(tenant.microgrid_id);
       if (!org) return null;
       return {
-        householdId: household.id,
-        microgridId: household.microgrid_id,
+        tenantId: tenant.id,
+        microgridId: tenant.microgrid_id,
         orgId: org.orgId,
       };
     },
@@ -202,13 +202,13 @@ export function createSupabaseMeteringRepository(
       if (deviceIds.length === 0) return [];
       // Links in force on `date`: half-open periods, as 00058 defines them.
       const { data: links, error: linksError } = await supabase
-        .from("household_devices")
+        .from("tenant_devices")
         .select("device_id")
         .in("device_id", deviceIds)
         .in("role", HOUSE_METER_ROLES)
         .lte("effective_from", date)
         .or(`effective_to.is.null,effective_to.gt.${date}`);
-      if (linksError) throw failed("household meter links", linksError);
+      if (linksError) throw failed("tenant meter links", linksError);
       return [...new Set(((links ?? []) as { device_id: string }[]).map((l) => l.device_id))];
     },
 
@@ -239,22 +239,22 @@ export function createSupabaseMeteringRepository(
       return data?.ems_known_edge_ids ?? [];
     },
 
-    async getAssignmentLinks(householdId: string) {
+    async getAssignmentLinks(tenantId: string) {
       const { data } = await supabase
-        .from("household_devices")
-        .select("id, household_id, device_id, role, effective_from, effective_to")
-        .eq("household_id", householdId)
+        .from("tenant_devices")
+        .select("id, tenant_id, device_id, role, effective_from, effective_to")
+        .eq("tenant_id", tenantId)
         .order("effective_from", { ascending: true });
       return ((data ?? []) as {
         id: string;
-        household_id: string;
+        tenant_id: string;
         device_id: string;
         role: string;
         effective_from: string;
         effective_to: string | null;
       }[]).map((row) => ({
         id: row.id,
-        householdId: row.household_id,
+        tenantId: row.tenant_id,
         deviceId: row.device_id,
         role: row.role,
         effectiveFrom: row.effective_from,

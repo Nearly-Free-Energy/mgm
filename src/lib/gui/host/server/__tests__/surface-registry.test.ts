@@ -184,7 +184,7 @@ describe("SurfaceRegistry.contribute", () => {
     registry.contribute(c);
     (c.signals as unknown[]).push({ id: "NOT VALID", load: async () => [], extra: 1 });
     (c.actions![0] as { risk: string }).risk = "destructive";
-    (c.views![0].params as Record<string, string>).id = "household";
+    (c.views![0].params as Record<string, string>).id = "tenant";
     const s = registry.snapshot();
     expect(s.signals.map((x) => x.id)).toEqual(["billing.signal"]);
     expect(s.actions.get("billing.act")?.def.risk).toBe("money");

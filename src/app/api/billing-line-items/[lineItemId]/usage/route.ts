@@ -11,7 +11,7 @@ import {
 /**
  * PATCH /api/billing-line-items/[lineItemId]/usage (#158, rewritten in #173)
  *
- * Manual usage entry for un-metered (manual-billing) households. Today's
+ * Manual usage entry for un-metered (manual-billing) tenants. Today's
  * call surface is preserved exactly:
  *
  *   Body:  { usage_kwh?: number; end_kwh?: number }   (at least one)
@@ -19,13 +19,13 @@ import {
  *   400:   invalid body / negative / non-numeric / underflow
  *   403:   caller cannot access microgrid
  *   404:   line item not found / RLS-hidden
- *   409:   device_linked  (line_item.device_id != NULL OR household has a
+ *   409:   device_linked  (line_item.device_id != NULL OR tenant has a
  *                          primary_consumption_meter link)
  *   409:   period_closed  (per Out-of-Scope: closed-period regenerate ships
  *                          via POST /generate, not this inline-edit path)
  *
  * Internal change: the route delegates to `runGenerationFor` with
- * `householdIds: [<resolved>]` + `manualReadings: [<resolved>]` so that
+ * `tenantIds: [<resolved>]` + `manualReadings: [<resolved>]` so that
  * the line-item write goes through `fn_record_line_item_with_audit`. This
  * gives us:
  *   - One audit log entry per manual cell edit (event_type =
@@ -87,7 +87,7 @@ type LineItemScope = {
   start_kwh: number | null;
   end_kwh: number | null;
   usage_kwh: number | null;
-  household_id: string;
+  tenant_id: string;
   billing_period_id: string;
   billing_periods: {
     id: string;
@@ -153,7 +153,7 @@ export async function PATCH(
       start_kwh,
       end_kwh,
       usage_kwh,
-      household_id,
+      tenant_id,
       billing_period_id,
       billing_periods!inner (
         id,
@@ -223,14 +223,14 @@ export async function PATCH(
 
   // 4. Reject metered rows. Both signals must be checked: the line item's
   //    own device_id AND any primary_consumption_meter assignment that
-  //    overlapped this billing period (a household may have a meter but the
+  //    overlapped this billing period (a tenant may have a meter but the
   //    line item was inserted pre-link). Historical replacements outside the
   //    period must not block a correction, nor turn `.maybeSingle()` into a
   //    multi-row error.
   if (scoped.device_id !== null) {
     return NextResponse.json(
       {
-        error: "Use Refresh Readings for metered households",
+        error: "Use Refresh Readings for metered tenants",
         reason: "device_linked",
       },
       { status: 409 }
@@ -238,15 +238,15 @@ export async function PATCH(
   }
 
   const { data: meterLinks, error: linkErr } = await supabase
-    .from("household_devices")
+    .from("tenant_devices")
     .select("device_id, effective_from, effective_to")
-    .eq("household_id", scoped.household_id)
+    .eq("tenant_id", scoped.tenant_id)
     .eq("role", "primary_consumption_meter");
 
   if (linkErr) {
     return NextResponse.json(
       {
-        error: `Failed to verify household meter link: ${linkErr.message}`,
+        error: `Failed to verify tenant meter link: ${linkErr.message}`,
         reason: "unknown_error",
       },
       { status: 500 }
@@ -260,7 +260,7 @@ export async function PATCH(
   if (meterLinkOverlapsPeriod) {
     return NextResponse.json(
       {
-        error: "Use Refresh Readings for metered households",
+        error: "Use Refresh Readings for metered tenants",
         reason: "device_linked",
       },
       { status: 409 }
@@ -306,14 +306,14 @@ export async function PATCH(
     nextEnd = startKwh + (parsed.usage_kwh as number);
   }
 
-  // 6. Delegate to runGenerationFor (mode='write') with this household.
+  // 6. Delegate to runGenerationFor (mode='write') with this tenant.
   const out = await runGenerationFor({
     supabase,
     periodId: period.id,
-    householdIds: [scoped.household_id],
+    tenantIds: [scoped.tenant_id],
     manualReadings: [
       {
-        householdId: scoped.household_id,
+        tenantId: scoped.tenant_id,
         startKwh,
         endKwh: nextEnd,
       },
@@ -341,8 +341,8 @@ export async function PATCH(
     );
   }
 
-  // Locate the per-household result for our line item.
-  const result = out.results.find((r) => r.householdId === scoped.household_id);
+  // Locate the per-tenant result for our line item.
+  const result = out.results.find((r) => r.tenantId === scoped.tenant_id);
   if (!result) {
     return NextResponse.json(
       {
@@ -373,7 +373,7 @@ export async function PATCH(
     );
   }
   if (result.kind === "kept") {
-    // Should never happen — a manualReadings entry for the household lifts
+    // Should never happen — a manualReadings entry for the tenant lifts
     // the engine's keep-manual guard, and this route always sends one.
     return NextResponse.json(
       { error: "Internal error: line item was not rewritten.", reason: "unknown_error" },

@@ -22,7 +22,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: "/",
     name: "Microgrid Manager",
     short_name: "MGM",
-    description: "Run community microgrids: households, meters, tariffs, bills and payments.",
+    description: "Run community microgrids: tenants, meters, tariffs, bills and payments.",
     start_url: "/",
     scope: "/",
     display: "standalone",

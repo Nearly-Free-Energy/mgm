@@ -18,7 +18,7 @@ function mapError(error: Extract<MeteringResult<never>, { ok: false }>) {
  * The operator supplies the meter's register for its first billable period;
  * the server validates the value, timestamp, device scope, and duplicate
  * evidence before writing. Imports and live reads never invent this row —
- * without it, the billing engine reports the household as needing a seed
+ * without it, the billing engine reports the tenant as needing a seed
  * reading rather than billing zero.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {

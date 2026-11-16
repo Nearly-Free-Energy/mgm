@@ -15,18 +15,18 @@ test("home renders at 360 px", async ({ page }) => {
   watch.assertClean();
 });
 
-test("the households page renders at 360 px", async ({ page }) => {
+test("the tenants page renders at 360 px", async ({ page }) => {
   const { microgridId } = readSmokeFixtures();
   const watch = await watchPage(page);
-  await page.goto(`/microgrids/${microgridId}/setup/households`);
-  await expect(page.getByRole("heading", { name: "3 households" })).toBeVisible();
+  await page.goto(`/microgrids/${microgridId}/setup/tenants`);
+  await expect(page.getByRole("heading", { name: "3 tenants" })).toBeVisible();
   const table = page.getByRole("table");
-  await expect(table.getByText("Smoke household 1 with a long display name")).toBeVisible();
+  await expect(table.getByText("Smoke tenant 1 with a long display name")).toBeVisible();
   await checkNarrowPage(page);
-  await reportTiming(page, "Households");
+  await reportTiming(page, "Tenants");
 
-  // The Add household dialog fits the screen. Nothing is submitted.
-  await page.getByRole("button", { name: "+ Add household" }).click();
+  // The Add tenant dialog fits the screen. Nothing is submitted.
+  await page.getByRole("button", { name: "+ Add tenant" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   const box = await dialog.boundingBox();
