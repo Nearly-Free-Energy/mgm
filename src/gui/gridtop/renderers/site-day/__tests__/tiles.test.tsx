@@ -1,8 +1,7 @@
 /**
- * The Operations day's tiles in Gridtop: the legacy page's tile cases
- * (src/components/operations/__tests__/daily-operations.test.tsx), ported.
- * The copy itself is the server's now (site-day-model.test.tsx pins it);
- * these pin where each piece lands and how it is marked.
+ * The Operations day's tiles in Gridtop. The copy itself is the server's
+ * (site-day-model.test.tsx pins it); these pin where each piece lands and
+ * how it is marked.
  */
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -26,7 +25,7 @@ const value = (root: HTMLElement, label: string) => tile(root, label).querySelec
 const hint = (root: HTMLElement, label: string) => tile(root, label).querySelectorAll("p")[1]?.textContent ?? null;
 
 describe("the site-day tiles", () => {
-  it("shows the six tiles in the page's order, and leaves the evening supply to the evening strip", () => {
+  it("shows the six tiles in the view's order, and leaves the evening supply to the evening strip", () => {
     const root = draw();
     expect([...root.querySelectorAll("[data-tile]")].map((s) => s.getAttribute("data-tile"))).toEqual([
       "solar", "houses-evening", "cuts", "lowest-soc", "soc-17", "lights-on",
@@ -34,7 +33,6 @@ describe("the site-day tiles", () => {
     expect(root.textContent).not.toContain("Who served the houses");
   });
 
-  // Legacy: "shows solar, and what the houses used in the evening with the battery's share, in kWh".
   it("shows solar, and what the houses used in the evening with the battery's share", () => {
     const root = draw();
     expect(value(root, "Solar")).toBe("12.3 kWh");
@@ -43,13 +41,10 @@ describe("the site-day tiles", () => {
     expect(hint(root, "Houses used 18:00–24:00")).toBe("Battery supplied 4.6 kWh");
   });
 
-  // Legacy: "labels the evening tile from the evening start, with an en dash".
   it("labels the evening tile as the server wrote it", () => {
     expect(() => tile(draw(), "Houses used 18:00–24:00")).not.toThrow();
   });
 
-  // Legacy: meters without data; household meters needed; before 18:00; no battery registered;
-  // no battery readings; a battery that only charged.
   it.each([
     "Battery supplied 4.6 kWh · 2 meters without data",
     "Needs household meters · Battery supplied 4.6 kWh",
@@ -62,13 +57,11 @@ describe("the site-day tiles", () => {
     expect(hint(root, "Houses used 18:00–24:00")).toBe(text);
   });
 
-  // Legacy: "shows an em dash when no house meter has the evening's readings".
   it("shows an em dash when the houses' figure is empty", () => {
     const root = draw(tilesOf({ tiles: { "houses-evening": { value: empty } } }));
     expect(value(root, "Houses used 18:00–24:00")).toBe("—");
   });
 
-  // Legacy: em dash for no solar readings, and for a balance with nothing to estimate from.
   it.each(["No solar meter readings", `No complete inverter, grid and battery readings`])(
     "shows an em dash for solar with the hint %j",
     (text) => {
@@ -78,7 +71,6 @@ describe("the site-day tiles", () => {
     },
   );
 
-  // Legacy: "marks solar as estimated when it is the balance at the inverter".
   it("marks an estimated figure with ≈ and an accessible 'estimated'", () => {
     const root = draw(tilesOf({ tiles: { solar: { value: kwh(10.5, "10.5 kWh", true), hint: `≈ inverter output − grid − battery` } } }));
     const figure = tile(root, "Solar").querySelector("p")!;
@@ -88,7 +80,6 @@ describe("the site-day tiles", () => {
     expect(value(draw(), "Solar")).not.toContain("≈");
   });
 
-  // Legacy: "shows power cuts as 'count / duration'" and "shows zero cuts as '0 / 0m'".
   it("shows power cuts as 'count / duration', zero cuts included", () => {
     expect(value(draw(), "Power cuts")).toBe("2 / 4h 10m");
     const none = draw(tilesOf({ tiles: { cuts: { value: num(0, "0"), status: null }, "cut-time": { value: num(0, "0m", "min") } } }));
@@ -96,7 +87,6 @@ describe("the site-day tiles", () => {
     expect(hint(none, "Power cuts")).toBe(`Cuts / time without grid power`);
   });
 
-  // Legacy: "shows the lowest battery level, its time, and whether it was in a cut", and without one.
   it("shows the lowest battery level and its hint", () => {
     const root = draw();
     expect(value(root, "Lowest battery")).toBe("12%");
@@ -104,7 +94,6 @@ describe("the site-day tiles", () => {
     expect(hint(draw(tilesOf({ tiles: { "lowest-soc": { hint: "At 05:30" } } })), "Lowest battery")).toBe("At 05:30");
   });
 
-  // Legacy: "warns at a lowest level at or below the battery's floor, not above it".
   it("shows a status as a chip of its tone, and none without a status", () => {
     const floor = tile(draw(), "Lowest battery").querySelector("h3 + span")!;
     expect(floor.textContent).toBe("At the floor");
@@ -115,14 +104,12 @@ describe("the site-day tiles", () => {
     expect(tile(draw(), "Lights on").querySelector("h3 + span")?.className).toContain("gt:bg-destructive-muted");
   });
 
-  // Legacy: "shows the battery level at 17:00".
   it("shows the battery level at 17:00", () => {
     const root = draw();
     expect(value(root, "Battery at 17:00")).toBe("64%");
     expect(hint(root, "Battery at 17:00")).toBe("Before the evening window");
   });
 
-  // Legacy: lights on with one decimal and the dark time; inferred dark time and no data; no dark time.
   it.each(["Dark 1h 0m", "Dark 1h 0m (20m inferred from a low battery) · No data 30m", "No dark time · No data 45m", "No dark time"])(
     "shows lights on with the hint %j",
     (text) => {
@@ -132,7 +119,6 @@ describe("the site-day tiles", () => {
     },
   );
 
-  // Legacy: "shows an em dash and what is needed when values are null".
   it("shows an em dash and what is needed when values are empty", () => {
     const root = draw(
       tilesOf({
@@ -177,7 +163,6 @@ describe("the site-day tiles", () => {
     expect(draw().querySelector('[title="Synthetic"]')).toBeNull();
   });
 
-  // Legacy: "uses token colour classes only, no hard-coded Tailwind palette".
   it("uses token colour classes only", () => {
     const palette = /\b(?:bg|text|fill|stroke|border)-(?:red|blue|green|gray|slate|zinc|amber|orange|yellow|emerald)-\d/;
     for (const tiles of [TILES, tilesOf({ synthetic: true })]) expect(draw(tiles).innerHTML).not.toMatch(palette);

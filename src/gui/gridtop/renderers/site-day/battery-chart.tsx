@@ -1,12 +1,11 @@
 "use client";
 
 /**
- * The day's battery level, ported from the Operations page's chart
- * (src/components/operations/daily-operations.tsx): the evening window, the
- * cuts, dark time and the part of today not yet read as bands, grid lines
- * every 20%, and the battery line, which breaks at a missing bin. The
- * description, the hour labels and the no-battery note are the server's; the
- * heading, the key, the axis labels and the geometry are the legacy chart's.
+ * The day's battery level: the evening window, the cuts, dark time and the
+ * part of today not yet read as bands, grid lines every 20%, and the battery
+ * line, which breaks at a missing bin. The description, the hour labels and
+ * the no-battery note are the server's; the heading, the key, the axis
+ * labels and the geometry are this chart's own.
  */
 import type { DayChart } from "./ext";
 

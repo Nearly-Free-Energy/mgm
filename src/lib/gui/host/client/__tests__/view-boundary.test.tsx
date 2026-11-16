@@ -2,9 +2,9 @@ import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InitialView, Manifest, ViewState } from "../../../contract";
 import { HostKitProvider } from "../host-kit-provider";
-import { useView } from "../kit-provider";
+import { useKitState, useView } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
-import { ViewBoundary } from "../view-boundary";
+import { ViewBoundary, ViewUnavailable } from "../view-boundary";
 import { initial, manifest, MG, model, ORG, recordingRuntime } from "./kit-test-utils";
 
 vi.mock("next/navigation", () => ({
@@ -112,5 +112,62 @@ describe("ViewBoundary on a contributed view's page", () => {
     rerender(tree(runtime, elsewhere));
     expect(seen.at(-1)?.title).toBe("Tuesday 10 November");
     expect(runtime.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ViewBoundary publishing a model", () => {
+  // On a first load, part of the page can still be waiting to hydrate when
+  // its boundary publishes the model (the site-day renderer's lazy chunk). A
+  // change to the kit's context value reaches such a part and React drops
+  // its server HTML, which showed as a blank frame in the browser. So the
+  // model must reach useView() without the context value changing.
+  it("updates useView() without changing the kit's context, so the page below the provider does not render again", () => {
+    const runtime = recordingRuntime();
+    const views: ViewState[] = [];
+    function Probe() {
+      views.push(useView());
+      return null;
+    }
+    const states: unknown[] = [];
+    function Page() {
+      states.push(useKitState());
+      return null;
+    }
+    render(
+      <KitRuntimeProvider runtime={{ ...runtime, pathname: OPERATIONS }}>
+        <HostKitProvider manifest={withNav()} initial={{ ...initial, view: "metering.site-day", title: "Operations" }}>
+          <Probe />
+          <ViewBoundary model={day} />
+          <Page />
+        </HostKitProvider>
+      </KitRuntimeProvider>,
+    );
+    expect(views[0]).toMatchObject({ view: "metering.site-day", title: "Operations", model: null });
+    expect(views.at(-1)).toMatchObject({ title: "Tuesday 10 November", model: day });
+    expect(states).toHaveLength(1);
+  });
+});
+
+describe("ViewUnavailable on a page whose view could not be loaded", () => {
+  it("publishes the layout's view with no view and no model, keeping its title and trail, and withdraws on unmount", () => {
+    const runtime = recordingRuntime();
+    const views: ViewState[] = [];
+    function Probe() {
+      views.push(useView());
+      return null;
+    }
+    const first: InitialView = { ...initial, view: "metering.site-day", title: "Operations" };
+    const page = (refused: boolean) => (
+      <KitRuntimeProvider runtime={{ ...runtime, pathname: OPERATIONS }}>
+        <HostKitProvider manifest={withNav()} initial={first}>
+          {refused && <ViewUnavailable />}
+          <Probe />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    const { rerender } = render(page(true));
+    expect(views.at(-1)).toMatchObject({ view: null, title: "Operations", model: null, trail: first.trail });
+    rerender(page(false));
+    expect(views.at(-1)).toMatchObject({ view: "metering.site-day", title: "Operations", model: null });
   });
 });

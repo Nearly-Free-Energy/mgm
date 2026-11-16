@@ -179,7 +179,7 @@ const MODULES: Record<string, Module> = {
   "src/lib/gui/host/server/render-view.tsx": {
     privilegedExports: ["renderView", "resolveInitialView"],
     reason:
-      "Loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load.",
+      "renderView loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load. resolveInitialView reads only the registered view definitions from the snapshot and runs no loader.",
   },
   "src/lib/gui/host/server/go.ts": {
     privilegedExports: ["resolveGoTarget"],
@@ -230,7 +230,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
-      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects, with that same read.",
+      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader.",
   },
   "src/app/(gui)/[...path]/page.tsx": {
     kind: "session",

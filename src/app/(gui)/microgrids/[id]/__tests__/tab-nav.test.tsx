@@ -7,8 +7,10 @@
  *     instead of a full document reload.
  *   - Each tab links to the page a click lands on, not to a URL that
  *     redirects (/microgrids/<id> → Operations, /setup → Edges).
- *   - The highlighted tab for every sub-route, including Operations, whose
- *     ?date= query is not part of the pathname usePathname() returns.
+ *   - The highlighted tab for every sub-route this layout renders. Operations
+ *     is served by its view through the (gui) catch-all, outside this
+ *     layout, so TabNav never renders there; if Operations moves back under
+ *     microgrids/[id]/, test its highlight again.
  *   - A click announces the navigation to NavigationProgress, except on the
  *     page the user is already on and on a click that opens a new tab.
  */
@@ -94,9 +96,6 @@ describe("TabNav", () => {
   });
 
   it.each([
-    // usePathname() never includes the query, so /operations?date=… arrives
-    // as the bare path and must still highlight Operations.
-    ["/microgrids/mg-1/operations", "Operations"],
     ["/microgrids/mg-1/billing", "Billing"],
     ["/microgrids/mg-1/billing/p-1", "Billing"],
     ["/microgrids/mg-1/billing/p-1/history", "Billing"],
@@ -135,10 +134,10 @@ describe("TabNav", () => {
     expect(announced).toEqual(["/microgrids/mg-1/operations"]);
   });
 
-  it("does not announce a click on Operations while it is shown", () => {
-    mockPathname = "/microgrids/mg-1/operations";
+  it("does not announce a click on the tab already shown", () => {
+    mockPathname = "/microgrids/mg-1/billing";
     render(<TabNav microgridId="mg-1" />);
-    fireEvent.click(tab("Operations"));
+    fireEvent.click(tab("Billing"));
     expect(announced).toEqual([]);
   });
 

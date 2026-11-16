@@ -21,6 +21,7 @@ export {
   loadLazyRenderers,
   ModelView,
   recordingRuntime,
+  RefusedView,
   renderInKit,
   renderModel,
   renderShell,

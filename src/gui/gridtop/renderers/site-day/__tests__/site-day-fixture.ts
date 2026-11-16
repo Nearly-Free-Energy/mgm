@@ -1,7 +1,8 @@
 /**
  * Hand-built `metering.site-day@1` models, shaped as the server builds them
  * (src/lib/metering/surface/site-day-model.ts, which these tests may not
- * import): the legacy page's test day of 5 November 2026, with today the 7th.
+ * import): a test day of 5 November 2026, with today the 7th, the microgrid
+ * with nothing registered, and a day the metering source could not read.
  * Each tile's text is the copy that builder writes for it.
  */
 import type { ActionRef, Href, Json, LinkRef, ModelOf, Value } from "@/lib/gui/contract";
@@ -13,6 +14,12 @@ export const DAY_HREF = `/microgrids/${MG}/operations` as const;
 export const DATE = "2026-11-05";
 export const TODAY = "2026-11-07";
 export const SYNTHETIC_NOTICE = { tone: "warning", text: "Synthetic data: these figures are generated for demonstration, not measured." } as const;
+/** The time zone nudge's warning as the ext carries it, and the link beside it. */
+export const TIMEZONE_NOTICE = {
+  title: "Billing timezone is still UTC",
+  text: "This microgrid's address suggests Africa/Blantyre (UTC+2) but its billing timezone is UTC — set it? Billing days currently start and end at midnight UTC.",
+} as const;
+export const SET_TIMEZONE: LinkRef = { id: "metering.set-timezone", label: "Set timezone", href: `/microgrids/${MG}/setup/edges` };
 
 export const text = (t: string): Value => ({ t: "text", text: t });
 export const empty: Value = { t: "empty", text: "—" };
@@ -154,6 +161,7 @@ export function dayModel(o: Options = {}): ModelOf<"metrics"> {
         timezone: "Africa/Kampala",
         dayHref: DAY_HREF,
         synthetic: o.synthetic === true,
+        timezoneNotice: null,
         partial: false,
         ...CHART,
         notes: o.notes ?? NOTES,
@@ -164,7 +172,7 @@ export function dayModel(o: Options = {}): ModelOf<"metrics"> {
 }
 
 /** The microgrid with none of its site meters registered. */
-export function noSiteDevicesModel(o: Pick<Options, "date" | "today" | "actions"> = {}): ModelOf<"metrics"> {
+export function noSiteDevicesModel(o: Pick<Options, "date" | "today" | "actions" | "ext"> = {}): ModelOf<"metrics"> {
   const date = o.date ?? DATE;
   const today = o.today ?? TODAY;
   const message =
@@ -175,7 +183,32 @@ export function noSiteDevicesModel(o: Pick<Options, "date" | "today" | "actions"
     links: [{ id: "metering.edges", label: "Go to Edges", href: `/microgrids/${MG}/setup/edges` }, ...dayLinks(date, today)],
     ext: {
       schema: "metering.site-day@1",
-      data: { state: "no-site-devices", date, today, timezone: "Africa/Kampala", dayHref: DAY_HREF, synthetic: false, title: `Register the battery and grid meter`, message },
+      data: {
+        state: "no-site-devices", date, today, timezone: "Africa/Kampala", dayHref: DAY_HREF, synthetic: false, timezoneNotice: null,
+        title: `Register the battery and grid meter`, message, ...o.ext,
+      },
+    },
+  };
+}
+
+export const NO_CONNECTION = "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.";
+export const BACKEND: LinkRef = { id: "metering.openems-backend", label: "Set up the OpenEMS connection", href: `/microgrids/${MG}/setup/openems-backend` };
+
+/** A day the metering source could not read: by default no OpenEMS connection, fixed under OpenEMS Backend. */
+export function problemModel(o: Pick<Options, "date" | "today" | "links" | "ext"> & { retry?: boolean } = {}): ModelOf<"metrics"> {
+  const date = o.date ?? DATE;
+  const today = o.today ?? TODAY;
+  const title = "Could not load this day's operations";
+  return {
+    ...dayModel({ date, today }),
+    body: { tiles: [{ key: "problem", label: title, value: text(NO_CONNECTION) }] },
+    links: o.links ?? [...(o.retry ? [] : [BACKEND]), ...dayLinks(date, today)],
+    ext: {
+      schema: "metering.site-day@1",
+      data: {
+        state: "problem", date, today, timezone: "Africa/Kampala", dayHref: DAY_HREF, synthetic: false, timezoneNotice: null,
+        tone: "danger", title, message: NO_CONNECTION, retry: o.retry === true, ...o.ext,
+      },
     },
   };
 }

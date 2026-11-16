@@ -1,7 +1,8 @@
 /**
  * The `metering.site-day@1` ext: what a bespoke renderer of the Operations
  * day needs beyond the tiles and the battery series, such as the chart's
- * bands, the evening strip and the footnotes.
+ * bands, the evening strip and the footnotes, the time zone notice, and
+ * which state the view is in.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)
@@ -17,6 +18,7 @@
 import { z } from "zod";
 import { isSameOriginPath } from "@/lib/gui/host/shared/href";
 import { isSiteResolution, MAX_DAY_BINS, MAX_EVENING_BINS } from "../site-operations";
+import { TIMEZONE_NOTICE_MAX } from "./site-day-model";
 
 const iso = z.iso.datetime({ offset: true });
 const label = (max: number) => z.string().max(max);
@@ -32,6 +34,12 @@ const common = {
   /** The view's own path, with no query; a renderer adds ?date=YYYY-MM-DD. */
   dayHref: z.string().max(512).refine(isSameOriginPath),
   synthetic: z.boolean(),
+  /**
+   * The time zone nudge's warning (src/lib/timezone/nudge.ts) when the
+   * microgrid's zone needs it, else null. Its link is the model's
+   * `metering.set-timezone`.
+   */
+  timezoneNotice: z.strictObject({ title: label(80), text: label(TIMEZONE_NOTICE_MAX) }).nullable(),
 };
 
 export const SiteDayExt = z.discriminatedUnion("state", [
@@ -81,6 +89,16 @@ export const SiteDayExt = z.discriminatedUnion("state", [
     ...common,
     title: label(200),
     message: label(400),
+  }),
+  /** The metering source could not read the day. The fix's link, when there is one, is among the model's links. */
+  z.strictObject({
+    state: z.literal("problem"),
+    ...common,
+    tone: z.enum(["warning", "danger"]),
+    title: label(200),
+    message: label(400),
+    /** Nothing to set up: offer to read the day again. */
+    retry: z.boolean(),
   }),
 ]);
 

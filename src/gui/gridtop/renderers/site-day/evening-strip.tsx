@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Who served the houses in the evening window, ported from the Operations
- * page's strip (src/components/operations/daily-operations.tsx): one segment
- * per change of supply, each as wide as its share of the window, hourly ticks
- * under it, and a key. The heading and the summary are the model's
+ * Who served the houses in the evening window: one segment per change of
+ * supply, each as wide as its share of the window, hourly ticks under it,
+ * and a key. The heading and the summary are the model's
  * `evening-supply` tile, which the tiles leave to this strip; every label is
  * the server's.
  */

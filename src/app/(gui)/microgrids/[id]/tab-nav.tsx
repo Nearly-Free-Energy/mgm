@@ -18,9 +18,14 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 //   2. Billing    — the monthly close job (primary working surface).
 //   3. Setup      — configure-once (edges, households, rate schedule).
 //
-// Tabs are next/link <Link>s so a click is a client-side navigation: the
-// (gui) layout and this microgrid header stay mounted, and
-// [id]/loading.tsx shows while the new tab renders.
+// Tabs are next/link <Link>s so a click is a client-side navigation and the
+// (gui) layout stays mounted. Billing and Setup are pages under
+// microgrids/[id]/layout.tsx, so between them this microgrid header stays
+// mounted too, and [id]/loading.tsx shows while the new tab renders.
+// Operations is not: it is the metering.site-day view, which the catch-all
+// (gui)/[...path]/page.tsx serves outside this layout, so a click on it
+// leaves the header behind (and nothing here renders on the Operations
+// page). If Operations is served under microgrids/[id]/ again, revisit.
 //
 // Each tab links to the page a click lands on, not to a URL that redirects:
 // Setup links to its first sub-tab rather than the /setup index. Operations
@@ -28,8 +33,8 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 // Operations stays on that page if where a microgrid opens changes.
 //
 // Active-tab match: every tab uses `startsWith` on its segment, so nested
-// routes (and Operations' ?date= days) stay highlighted. The microgrid index
-// highlights nothing; middleware redirects it to Operations.
+// routes stay highlighted. The microgrid index highlights nothing;
+// middleware redirects it to Operations.
 
 const tabs = [
   { label: "Operations", segment: "operations", href: (id: string) => `/microgrids/${id}/operations` },

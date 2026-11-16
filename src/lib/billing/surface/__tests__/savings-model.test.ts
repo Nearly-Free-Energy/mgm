@@ -1,7 +1,6 @@
 /**
- * The `billing.savings` model: the Operations page's savings table
- * (savings-table.test.tsx and savings-section.test.tsx) as tiles and the
- * `billing.savings@1` ext, with the same copy.
+ * The `billing.savings` model: the savings table as tiles and the
+ * `billing.savings@1` ext, in the setup, unavailable and ready states.
  */
 import { describe, expect, it } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
@@ -94,7 +93,7 @@ describe("buildSavingsModel, ready", () => {
     }
   });
 
-  it("carries the table's headings and the page's row copy", () => {
+  it("carries the table's headings and row copy", () => {
     const data = ext(ready());
     expect(data).toMatchObject({
       state: "ready",
@@ -162,7 +161,7 @@ describe("buildSavingsModel, ready", () => {
 });
 
 describe("buildSavingsModel, setup and unavailable", () => {
-  it("shows the setup note with the page's copy and its link to Setup > Rates", () => {
+  it("shows the setup note and its link to Setup > Rates", () => {
     const model = buildSavingsModel({ state: "setup", microgridId: "mg 1", fmt, actions: [] });
     expect(model.body.tiles).toEqual([
       { key: "setup", label: "Count what the site saves", value: { t: "text", text: expect.stringContaining("Enter the grid tariff") } },

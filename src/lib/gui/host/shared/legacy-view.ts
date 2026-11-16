@@ -85,8 +85,9 @@ export function legacyView(
  * What the shell shows above a contributed view on its own page: the view's
  * id and title, with the scope, trail and current app derived from the path
  * as legacyView derives them. Off the catalog, the organization and the
- * model's own trail. Both the (gui) layout (on the server, for the first
- * paint) and ViewBoundary (in the browser) call it, so the two agree.
+ * model's own trail. ViewBoundary calls it in the browser once the model
+ * has loaded; before then the shell shows unloadedView's answer, which
+ * derives the same scope and trail from the path.
  */
 export function contributedView(
   pathWithQuery: string,
@@ -106,6 +107,25 @@ export function contributedView(
     nav: null,
     unplaced: false,
   };
+}
+
+/**
+ * What the shell shows above a contributed view on its own page before the
+ * view has loaded: the view's id, with the title, scope, trail and current
+ * app derived from the path as legacyView derives them. The (gui) layout
+ * uses it for the first paint, so the shell does not wait on the view's
+ * loader (../server/render-view.tsx); the page's ViewBoundary then
+ * publishes contributedView's answer with the model's own title. Null when
+ * the path is no catalog page.
+ */
+export function unloadedView(
+  pathWithQuery: string,
+  view: Id,
+  manifest: { org: OrgManifest },
+  plugins: readonly BundledPlugin[] = MGM_BUNDLED_PLUGINS,
+): (InitialView & { view: Id; nav: Id | null; unplaced: boolean }) | null {
+  const parsed = parsePath(pathWithQuery, plugins, true);
+  return parsed && { ...placeView(parsed, manifest), view };
 }
 
 function placeView(parsed: ParsedPath, manifest: { org: OrgManifest }): LegacyView {
@@ -154,9 +174,11 @@ function placeView(parsed: ParsedPath, manifest: { org: OrgManifest }): LegacyVi
 
 /**
  * What the shell shows for any path under the (gui) layout: legacyView's
- * answer, or, for a path that is no catalog page served outside the contract
- * (a not-found page, or a page a view serves, until its ViewBoundary
- * publishes contributedView's answer), the organization alone.
+ * answer; for a catalog page a view serves, the place its path names, with
+ * no view, until its ViewBoundary publishes contributedView's answer (the
+ * scope and trail unloadedView gives the first paint, so a soft navigation
+ * keeps the microgrid while the view loads); for any other path (a
+ * not-found page), the organization alone.
  */
 export function resolveLegacyView(
   pathWithQuery: string,
@@ -165,6 +187,8 @@ export function resolveLegacyView(
 ): InitialView & { unplaced: boolean } {
   const view = legacyView(pathWithQuery, manifest, plugins);
   if (view) return view;
+  const served = parsePath(pathWithQuery, plugins, true);
+  if (served) return placeView(served, manifest);
   const { org } = manifest;
   return {
     view: null,

@@ -1,7 +1,7 @@
 /**
  * The `billing.savings@1` ext: what a bespoke renderer of the savings needs
- * beyond the tiles to draw them as the Operations page's table: its column
- * and row headings, the warnings and the notes, all formatted on the server.
+ * beyond the tiles to draw them as a table: its column and row headings,
+ * the warnings and the notes, all formatted on the server.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)

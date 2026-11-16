@@ -7,7 +7,18 @@
  * the first paint the view comes from `resolve(pathname)` or the boundary;
  * on a contributed view's page, the layout's `initial` covers the first paint.
  */
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
 import type { EntityRef, Href, InitialView, Manifest, NavEntry, Signals, ViewModel, ViewState } from "../../contract";
 import { isHref } from "../shared/href";
@@ -23,12 +34,55 @@ import { usePathname } from "./navigation";
  */
 export type ResolveView = (pathname: string, manifest: Manifest) => InitialView & { unplaced?: boolean };
 
-export type Boundary = { pathname: string; initial: InitialView; model: ViewModel };
+/** What a page published: its view and model, or (ViewUnavailable) no view and no model. */
+export type Boundary = { pathname: string; initial: InitialView; model: ViewModel | null };
+
+/**
+ * The model a ViewBoundary published, held outside React state so that
+ * publishing it leaves the kit's context value as it was. A context change
+ * reaches every Suspense boundary below the provider that is still waiting
+ * to hydrate, and React then drops that boundary's server HTML and renders
+ * it afresh on the client: on a first load, a renderer whose chunk is still
+ * loading (the site-day renderer's lazy chunk) vanished for a frame and came
+ * back. A store update reaches only the components that read it (the
+ * shell's window bar, useView's callers, the ActionHost). If the model
+ * moves back into the context value, that blank frame returns.
+ */
+type BoundaryStore = {
+  get(): Boundary | null;
+  set(boundary: Boundary | null): void;
+  subscribe(listener: () => void): () => void;
+};
+
+function createBoundaryStore(): BoundaryStore {
+  let current: Boundary | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => current,
+    set(boundary) {
+      if (boundary === current) return;
+      current = boundary;
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** No model is published while the server renders or the page hydrates. */
+const NO_BOUNDARY = () => null;
+
+function useBoundary(store: BoundaryStore): Boundary | null {
+  return useSyncExternalStore(store.subscribe, store.get, NO_BOUNDARY);
+}
 
 type KitState = {
   manifest: Manifest | null;
   view: InitialView;
-  boundary: Boundary | null;
+  boundaries: BoundaryStore;
+  /** Publishes (or, with null, withdraws) a ViewBoundary's model; stable for the provider's life. */
   setBoundary(boundary: Boundary | null): void;
   /** Server time minus device time, in milliseconds. */
   skew: number;
@@ -47,9 +101,10 @@ export function useKitState(): KitState | null {
  * afresh, so switching back and forth between organizations rebuilds each
  * time; a rebuild that comes back for the same organization (a place past the
  * places cap, or a hint the server does not follow) adds nothing, so it can
- * never loop. Called from effects.
+ * never loop. Called from effects; the returned function says whether it
+ * started a rebuild.
  */
-export function useRefreshOnce(organization: string | null): (key: string) => void {
+export function useRefreshOnce(organization: string | null): (key: string) => boolean {
   const runtime = useKitRuntime();
   const done = useRef<{ organization: string | null; keys: Set<string> }>({ organization, keys: new Set() });
   // Start afresh as soon as a manifest for another organization commits, not
@@ -62,9 +117,10 @@ export function useRefreshOnce(organization: string | null): (key: string) => vo
   return useCallback(
     (key: string) => {
       if (done.current.organization !== organization) done.current = { organization, keys: new Set() };
-      if (done.current.keys.has(key)) return;
+      if (done.current.keys.has(key)) return false;
       done.current.keys.add(key);
       runtime.refresh();
+      return true;
     },
     [organization, runtime],
   );
@@ -84,11 +140,13 @@ export function KitProvider(props: {
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
-  const [boundary, setBoundary] = useState<Boundary | null>(null);
+  const [boundaries] = useState(createBoundaryStore);
+  const boundary = useBoundary(boundaries);
   const [skew] = useState(() => (manifest ? Date.parse(manifest.now) - Date.now() : 0) || 0);
   // A contributed view's `initial` holds for the pathname the layout rendered
-  // it for, so the first paint is right before its ViewBoundary publishes;
-  // `resolve` knows only pages served outside the contract. A new `initial`
+  // it for, so the first paint is right before its ViewBoundary publishes:
+  // `resolve` gives a page a view serves only its place, with no view
+  // (resolveLegacyView), and `initial` alone carries the view id. A new `initial`
   // (the layout rendered again) belongs to the pathname current at the time.
   const [initialAt, setInitialAt] = useState({ initial, pathname });
   if (initialAt.initial !== initial) setInitialAt({ initial, pathname });
@@ -111,9 +169,10 @@ export function KitProvider(props: {
     if (unplaced) refreshOnce(`path:${pathname}`);
   }, [unplaced, pathname, refreshOnce]);
 
+  // The published model is left out of this value on purpose (BoundaryStore).
   const state = useMemo<KitState>(
-    () => ({ manifest, view: resolved, boundary, setBoundary, skew, signals }),
-    [manifest, resolved, boundary, skew, signals],
+    () => ({ manifest, view: resolved, boundaries, setBoundary: boundaries.set, skew, signals }),
+    [manifest, resolved, boundaries, skew, signals],
   );
   return (
     <KitContext.Provider value={state}>
@@ -163,7 +222,8 @@ export function fillNavHref(manifest: Manifest, nav: NavEntry, scope: Scope, pic
 }
 
 export function useView(): ViewState {
-  const { manifest, view, boundary } = useRequiredState("useView");
+  const { manifest, view, boundaries } = useRequiredState("useView");
+  const boundary = useBoundary(boundaries);
   const pathname = usePathname();
   return useMemo(() => {
     const current = boundary?.pathname === pathname ? boundary : null;

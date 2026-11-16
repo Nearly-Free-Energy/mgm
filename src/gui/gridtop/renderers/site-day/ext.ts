@@ -31,10 +31,14 @@ export type DayChart = {
   eveningEmpty: string | null;
 };
 
-type Common = { date: string; today: string; timezone: string; dayHref: string; synthetic: boolean };
+/** The time zone nudge's warning, shown in every state; its link is the model's. */
+export type TimezoneNotice = { title: string; text: string };
+
+type Common = { date: string; today: string; timezone: string; dayHref: string; synthetic: boolean; timezoneNotice: TimezoneNotice | null };
 export type SiteDayExt =
   | (Common & DayChart & { state: "day"; notes: string[] })
-  | (Common & { state: "no-site-devices"; title: string; message: string });
+  | (Common & { state: "no-site-devices"; title: string; message: string })
+  | (Common & { state: "problem"; tone: "warning" | "danger"; title: string; message: string; retry: boolean });
 
 export const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const SUPPLIES: readonly Json[] = ["battery", "battery_and_grid", "grid", "dark", "no_data"];
@@ -93,18 +97,29 @@ function readChart(d: Obj): DayChart | null {
   };
 }
 
+/** The notice, null when there is none, or undefined when it is malformed. */
+function readNotice(v: Json | undefined): TimezoneNotice | null | undefined {
+  if (v === null) return null;
+  return isObject(v) && isString(v.title) && isString(v.text) ? { title: v.title, text: v.text } : undefined;
+}
+
 /** The ext, or null when it is missing or lacks a field this renderer reads. */
 export function readSiteDayExt(ext: ViewModel["ext"]): SiteDayExt | null {
   const d = ext?.data;
   if (!isObject(d) || !isString(d.date) || !isString(d.today) || !DATE.test(d.date) || !DATE.test(d.today)) return null;
   if (!isString(d.timezone) || !isString(d.dayHref) || !d.dayHref.startsWith("/") || typeof d.synthetic !== "boolean") return null;
-  const common: Common = { date: d.date, today: d.today, timezone: d.timezone, dayHref: d.dayHref, synthetic: d.synthetic };
+  const timezoneNotice = readNotice(d.timezoneNotice);
+  if (timezoneNotice === undefined) return null;
+  const common: Common = { date: d.date, today: d.today, timezone: d.timezone, dayHref: d.dayHref, synthetic: d.synthetic, timezoneNotice };
   if (d.state === "day" && Array.isArray(d.notes) && d.notes.every(isString)) {
     const chart = readChart(d);
     return chart && { ...common, ...chart, state: "day", notes: d.notes };
   }
   if (d.state === "no-site-devices" && isString(d.title) && isString(d.message)) {
     return { ...common, state: "no-site-devices", title: d.title, message: d.message };
+  }
+  if (d.state === "problem" && (d.tone === "warning" || d.tone === "danger") && isString(d.title) && isString(d.message) && typeof d.retry === "boolean") {
+    return { ...common, state: "problem", tone: d.tone, title: d.title, message: d.message, retry: d.retry };
   }
   return null;
 }

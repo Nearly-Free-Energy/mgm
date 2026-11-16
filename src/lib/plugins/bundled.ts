@@ -203,7 +203,12 @@ export const METERING_PLUGIN: BundledPlugin = {
     "/api/openems",
   ],
   pages: [
-    { path: "/microgrids/[id]/operations", params: { id: "microgrid" } },
+    // The Operations day, as the metering.site-day view.
+    {
+      path: "/microgrids/[id]/operations",
+      params: { id: "microgrid" },
+      servedBy: "view",
+    },
     { path: "/microgrids/[id]/setup/edges", params: { id: "microgrid" } },
     {
       path: "/microgrids/[id]/setup/edges/[edgeId]",

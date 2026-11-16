@@ -1,8 +1,6 @@
 /**
- * The day switcher in Gridtop: the legacy picker's cases
- * (src/components/operations/__tests__/day-picker.test.tsx), ported. The
- * server now decides the hrefs, and the date box navigates through
- * kit.navigate instead of a GET form.
+ * The day switcher in Gridtop. The server decides the hrefs, and the date
+ * box navigates through kit.navigate.
  */
 import { act, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
@@ -40,33 +38,28 @@ async function submit(): Promise<boolean> {
 }
 
 describe("the site-day picker", () => {
-  // Legacy: "links to the previous and next day".
   it("links to the previous and next day the model gives", async () => {
     await picker();
     expect(link("Previous day")?.getAttribute("href")).toBe(`${DAY_HREF}?date=2026-11-04`);
     expect(link("Next day")?.getAttribute("href")).toBe(`${DAY_HREF}?date=2026-11-06`);
   });
 
-  // Legacy: "crosses month and year boundaries" — the server builds the hrefs now; they are used as given.
   it("uses the model's hrefs as given, across a year boundary", async () => {
     await picker("2026-01-01", "2026-01-07");
     expect(link("Previous day")?.getAttribute("href")).toBe(`${DAY_HREF}?date=2025-12-31`);
     expect(link("Next day")?.getAttribute("href")).toBe(`${DAY_HREF}?date=2026-01-02`);
   });
 
-  // Legacy: "offers a Today link on a past day".
   it("offers a Today link on a past day", async () => {
     await picker();
     expect(link("Today")?.getAttribute("href")).toBe(`${DAY_HREF}?date=${TODAY}`);
   });
 
-  // Legacy: "offers the next day when it is today".
   it("offers the next day when it is today", async () => {
     await picker("2026-11-06", TODAY);
     expect(link("Next day")?.getAttribute("href")).toBe(`${DAY_HREF}?date=${TODAY}`);
   });
 
-  // Legacy: "has no next-day link on today, only a disabled placeholder".
   it("has no next-day link on today, only a placeholder for the eye", async () => {
     await picker(TODAY, TODAY);
     expect(link("Next day")).toBeNull();
@@ -75,19 +68,16 @@ describe("the site-day picker", () => {
     expect(placeholder?.className).toContain("gt:pointer-events-none");
   });
 
-  // Legacy: "has no Today link on today".
   it("has no Today link on today", async () => {
     await picker(TODAY, TODAY);
     expect(link("Today")).toBeNull();
   });
 
-  // Legacy: "shows the day as a heading".
   it("shows the day as a heading", async () => {
     await picker();
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Thu, 05 Nov 2026");
   });
 
-  // Legacy: "caps the date input at today and shows the day", and "names the input date, requires it and defaults it to the day shown".
   it("names the date box, requires it, caps it at today and shows the day", async () => {
     await picker();
     const input = dayInput();
@@ -98,7 +88,6 @@ describe("the site-day picker", () => {
     expect(input.value).toBe(DATE);
   });
 
-  // Legacy: "is a GET form to the base path" — now a form with onSubmit, never an action.
   it("is a form with no action, submitted with a Show button inside it", async () => {
     await picker();
     const form = dayInput().form!;
@@ -108,7 +97,6 @@ describe("the site-day picker", () => {
     expect(form.contains(show)).toBe(true);
   });
 
-  // Legacy: "serialises the chosen day as ?date= on submit".
   it("navigates once to the chosen day as ?date= on submit", async () => {
     const log = await picker();
     fireEvent.change(dayInput(), { target: { value: "2026-11-03" } });
@@ -117,7 +105,34 @@ describe("the site-day picker", () => {
     expect(log.refresh).toBe(0);
   });
 
-  // Legacy: "does not navigate when a day is typed".
+  it("marks Show busy from submitting another day until a new day is shown", async () => {
+    function Switching() {
+      const [ext, setExt] = useState(extOf(DATE, TODAY));
+      return (
+        <>
+          <DayPicker ext={ext} links={dayLinks(ext.date, TODAY)} heading={ext.date} kit={kit} />
+          <button type="button" onClick={() => setExt(extOf("2026-11-03", TODAY))}>
+            Arrive
+          </button>
+        </>
+      );
+    }
+    unmount = (await renderInKit(<Switching />)).unmount;
+    const show = screen.getByRole("button", { name: "Show" });
+    expect(show.getAttribute("aria-busy")).toBeNull();
+    fireEvent.change(dayInput(), { target: { value: "2026-11-03" } });
+    expect(await submit()).toBe(true);
+    expect(show.getAttribute("aria-busy")).toBe("true");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Arrive" })));
+    expect(show.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("does not mark Show busy when it reads the day shown again", async () => {
+    await picker(TODAY, TODAY);
+    expect(await submit()).toBe(true);
+    expect(screen.getByRole("button", { name: "Show" }).getAttribute("aria-busy")).toBeNull();
+  });
+
   it("does not navigate when a day is typed", async () => {
     const log = await picker();
     fireEvent.change(dayInput(), { target: { value: "2026-11-03" } });
@@ -136,7 +151,6 @@ describe("the site-day picker", () => {
     expect(dayInput().getAttribute("aria-invalid")).toBe("true");
   });
 
-  // Legacy: Show on the day shown sent the GET form again, which read today's partial day afresh.
   it("reads the day shown again when it is submitted", async () => {
     const log = await picker(TODAY, TODAY);
     expect(await submit()).toBe(true);
@@ -150,7 +164,6 @@ describe("the site-day picker", () => {
     expect(document.body.textContent).not.toContain("Previous day");
   });
 
-  // Legacy: "resets the input to the new day when the day changes".
   it("resets the date box to the new day when the day changes", async () => {
     function Switching() {
       const [ext, setExt] = useState(extOf(DATE, TODAY));

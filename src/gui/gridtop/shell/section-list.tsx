@@ -11,7 +11,13 @@
  * when its href changes: the host hands a new model after kit.refresh() and
  * after an action succeeds, and a section can show figures that change with
  * them (savings after its settings are saved). The previous section stays
- * on screen until the new one arrives.
+ * on screen until the new one arrives, and while it stands in for a new
+ * href (the page's next day) it is marked aria-busy and dimmed. A section is
+ * one instance per page path and section path, so the same section on the
+ * same page carries over a change of query, but nothing carries over to
+ * another page or another entity: their paths name them (every page this
+ * host serves puts its entity in the path; if one moves it to the query,
+ * revisit the key in SectionList).
  *
  * The shell hands it the kit and the renderers, so it imports no module the
  * shell's first load holds (types aside): the bundler moves a module both
@@ -53,12 +59,13 @@ export function rendererFor(model: ViewModel, renderers: Renderers): { Component
 }
 
 function Section({ entry, page, kit, renderers }: { entry: Entry; page: ViewModel; kit: GuiKit; renderers: Renderers }) {
-  const [loaded, setLoaded] = useState<ViewModel | ActionResult | null>(null);
+  const [loaded, setLoaded] = useState<{ href: string; out: ViewModel | ActionResult } | null>(null);
   useEffect(() => {
     let current = true;
-    kit.loadView(entry.href).then(
-      (out) => current && setLoaded(out),
-      () => current && setLoaded(NOT_LOADED),
+    const href = entry.href;
+    kit.loadView(href).then(
+      (out) => current && setLoaded({ href, out }),
+      () => current && setLoaded({ href, out: NOT_LOADED }),
     );
     return () => {
       current = false;
@@ -69,28 +76,54 @@ function Section({ entry, page, kit, renderers }: { entry: Entry; page: ViewMode
   if (loaded === null) {
     return <div role="status" aria-busy="true" aria-label={`Loading ${entry.title}`} className="gt:h-56 gt:animate-pulse gt:rounded-lg gt:bg-muted" />;
   }
-  if (loaded.type !== "view") {
-    return loaded.ok ? null : (
-      <p role="alert" className={NOTE}>
-        {loaded.message}
+  // The previous href's section, kept while this one loads.
+  const stale = loaded.href !== entry.href;
+  const out = loaded.out;
+  let body: ReactNode;
+  if (out.type !== "view") {
+    body = out.ok ? null : (
+      // A status, not an alert: the page's own view may already be
+      // announcing the same failure as an alert above it.
+      <p role="status" className={NOTE}>
+        {out.message}
       </p>
     );
+  } else {
+    const renderer = rendererFor(out, renderers);
+    body = (
+      // Keyed by href, so a section that failed to draw is tried again for the next one.
+      <SectionBoundary key={loaded.href} fallback={<p className={NOTE}>{entry.title} could not be shown.</p>}>
+        {renderer ? <renderer.Component model={out} /> : <kit.KitView model={out} />}
+      </SectionBoundary>
+    );
   }
-  const renderer = rendererFor(loaded, renderers);
+  // One wrapper whether stale or not, so dimming and aria-busy toggle on one
+  // node. What it holds is remounted when the next href's model arrives
+  // (SectionBoundary is keyed by href, so a failed draw is tried again), so
+  // no state that must outlive a change of day belongs in a section.
   return (
-    <SectionBoundary fallback={<p className={NOTE}>{entry.title} could not be shown.</p>}>
-      {renderer ? <renderer.Component model={loaded} /> : <kit.KitView model={loaded} />}
-    </SectionBoundary>
+    <div aria-busy={stale || undefined} className={stale ? "gt:opacity-60 gt:transition-opacity" : "gt:transition-opacity"}>
+      {body}
+    </div>
   );
 }
 
+/** A section's identity: the page's path and the section's path, without either query. */
+const sectionKey = (pathname: string, href: string) => `${pathname} ${href.split(/[?#]/, 1)[0]}`;
+
 /** `page` is the page's model, whose sections these are; a new one loads every section again. */
 export function SectionList({ sections, page, kit, renderers }: { sections: Entry[]; page: ViewModel; kit: GuiKit; renderers: Renderers }) {
+  const pathname = kit.usePathname();
+  // A section path attached twice keeps the order it is listed in.
+  const seen = new Map<string, number>();
   return (
     <div className="gt:mt-6 gt:flex gt:flex-col gt:gap-6">
-      {sections.map((entry) => (
-        <Section key={entry.href} entry={entry} page={page} kit={kit} renderers={renderers} />
-      ))}
+      {sections.map((entry) => {
+        const key = sectionKey(pathname, entry.href);
+        const n = seen.get(key) ?? 0;
+        seen.set(key, n + 1);
+        return <Section key={`${key} ${n}`} entry={entry} page={page} kit={kit} renderers={renderers} />;
+      })}
     </div>
   );
 }

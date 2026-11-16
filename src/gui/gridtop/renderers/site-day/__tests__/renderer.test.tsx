@@ -13,7 +13,19 @@ import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__
 import { GRIDTOP_RENDERERS, drawnBespoke } from "../..";
 import { readSiteDayExt } from "../ext";
 import { SiteDayView } from "../renderer";
-import { MG, NOTES, SYNTHETIC_NOTICE, dayModel, noSiteDevicesModel } from "./site-day-fixture";
+import {
+  BACKEND,
+  MG,
+  NO_CONNECTION,
+  NOTES,
+  SET_TIMEZONE,
+  SYNTHETIC_NOTICE,
+  TIMEZONE_NOTICE,
+  dayLinks,
+  dayModel,
+  noSiteDevicesModel,
+  problemModel,
+} from "./site-day-fixture";
 
 let unmount: (() => void) | null = null;
 afterEach(() => {
@@ -87,13 +99,25 @@ describe("Gridtop's site-day renderer", () => {
     ["a read-until that is not an instant", { readUntil: "now" }],
     ["an evening tick without its instant", { eveningTicks: [{ label: "18:00" }] }],
     ["a cut without its end", { cuts: [{ start: "2026-11-04T23:00:00.000Z", label: "02:00" }] }],
+    ["no time zone notice field", { timezoneNotice: undefined as never }],
+    ["a time zone notice without its text", { timezoneNotice: { title: "Billing timezone is still UTC" } }],
   ])("reads no ext with %s", (_, data) => {
     expect(readSiteDayExt(dayModel({ ext: data }).ext)).toBeNull();
   });
 
+  it.each([
+    ["a tone it does not know", { tone: "info" }],
+    ["a retry that is not a boolean", { retry: "yes" }],
+    ["no message", { message: null }],
+  ])("reads no problem with %s", (_, data) => {
+    expect(readSiteDayExt(problemModel({ ext: data }).ext)).toBeNull();
+  });
+
   it("reads the ext as the server sends it", () => {
-    expect(readSiteDayExt(dayModel().ext)).toMatchObject({ state: "day", date: "2026-11-05", dayHref: `/microgrids/${MG}/operations` });
+    expect(readSiteDayExt(dayModel().ext)).toMatchObject({ state: "day", date: "2026-11-05", dayHref: `/microgrids/${MG}/operations`, timezoneNotice: null });
     expect(readSiteDayExt(noSiteDevicesModel().ext)).toMatchObject({ state: "no-site-devices" });
+    expect(readSiteDayExt(problemModel({ retry: true }).ext)).toMatchObject({ state: "problem", tone: "danger", message: NO_CONNECTION, retry: true });
+    expect(readSiteDayExt(dayModel({ ext: { timezoneNotice: TIMEZONE_NOTICE } }).ext)).toMatchObject({ timezoneNotice: TIMEZONE_NOTICE });
   });
 
   it("draws the battery chart and the evening strip between the tiles and the notes, from the soc series", async () => {
@@ -111,7 +135,6 @@ describe("Gridtop's site-day renderer", () => {
     expect(count("Who served the houses, 18:00–24:00")).toBe(1);
   });
 
-  // Legacy: "replaces the chart with a note when no battery is registered".
   it("shows the server's note in place of the chart on a site without a battery", async () => {
     await draw(dayModel({ soc: null, ext: { chartEmpty: "No battery is registered on this microgrid." } }));
     expect(text()).toContain("No battery is registered on this microgrid.");
@@ -124,13 +147,11 @@ describe("Gridtop's site-day renderer", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Thu, 05 Nov 2026");
   });
 
-  // Legacy: "shows the partial-day note for today, up to the time read".
   it("heads today with how far it was read", async () => {
     await draw(dayModel({ date: "2026-11-07", subtitle: "Today so far, up to 14:30 · Africa/Kampala" }));
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Today so far, up to 14:30");
   });
 
-  // Legacy: footnote, missing-data note and definitions; now the server's notes.
   it("prints the notes", async () => {
     await draw(dayModel({ notes: ["No data for 30m.", ...NOTES] }));
     expect(text()).toContain("No data for 30m.");
@@ -224,7 +245,6 @@ describe("Gridtop's site-day renderer", () => {
     expect(related.queryByRole("link", { name: "Notes" })).toBeNull();
   });
 
-  // Legacy: "labels a synthetic day with a Synthetic data banner" and "shows no Synthetic data banner for a day read from meters".
   it("bands a synthetic day once, and never a measured one", async () => {
     await draw(dayModel({ synthetic: true }));
     expect(count("Synthetic data: generated for demonstration, not measured")).toBe(1);
@@ -243,7 +263,7 @@ describe("Gridtop's site-day renderer", () => {
     expect(count("Synthetic data: generated for demonstration, not measured")).toBe(1);
   });
 
-  it(`shows the legacy empty state when no battery or grid meter is registered`, async () => {
+  it(`shows the empty state when no battery or grid meter is registered`, async () => {
     await draw(noSiteDevicesModel());
     expect(screen.getByRole("heading", { level: 3 }).textContent).toBe(`Register the battery and grid meter`);
     expect(text()).toContain(`This view reads the site's battery and grid meter from OpenEMS.`);
@@ -252,9 +272,65 @@ describe("Gridtop's site-day renderer", () => {
     expect(document.querySelector("[data-tile]")).toBeNull();
   });
 
+  it("shows a problem in place of the day, with the day picker and the link to its fix, placed once", async () => {
+    await draw(problemModel());
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe("Could not load this day's operations");
+    expect(text()).toContain(NO_CONNECTION);
+    expect(screen.getAllByRole("link", { name: BACKEND.label }).map((a) => a.getAttribute("href"))).toEqual([BACKEND.href]);
+    expect(screen.getByRole("link", { name: "Previous day" })).toBeTruthy();
+    expect((screen.getByLabelText("Day") as HTMLInputElement).value).toBe("2026-11-05");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(document.querySelector("[data-tile]")).toBeNull();
+    expect(screen.getByRole("heading", { level: 3 }).closest("section")!.className).toContain("gt:text-destructive-fg");
+    // Announced when it appears, as after Try again.
+    expect(screen.getByRole("alert").textContent).toContain(NO_CONNECTION);
+  });
+
+  it("draws a warning problem in the warning tone, announced as a status", async () => {
+    await draw(problemModel({ ext: { tone: "warning" } }));
+    expect(screen.getByRole("heading", { level: 3 }).closest("section")!.className).toContain("gt:text-warning-fg");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(NO_CONNECTION);
+  });
+
+  it("reads the same day again through kit.refresh when the problem is only retried, and writes nothing", async () => {
+    const refresh = vi.fn();
+    const rendered = await renderInKit(<SiteDayView model={problemModel({ retry: true })} kit={{ ...kit, refresh }} />);
+    unmount = rendered.unmount;
+    expect(screen.queryByRole("link", { name: BACKEND.label })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Try again" })));
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(rendered.log.act).toEqual([]);
+    expect(rendered.log.navigate).toEqual([]);
+  });
+
+  it.each([
+    ["the day", () => dayModel({ ext: { timezoneNotice: TIMEZONE_NOTICE }, links: [...dayLinks("2026-11-05", "2026-11-07"), SET_TIMEZONE] })],
+    ["the empty state", () => ({ ...noSiteDevicesModel({ ext: { timezoneNotice: TIMEZONE_NOTICE } }), links: [...noSiteDevicesModel().links, SET_TIMEZONE] })],
+    ["a problem", () => problemModel({ ext: { timezoneNotice: TIMEZONE_NOTICE }, links: [BACKEND, ...dayLinks("2026-11-05", "2026-11-07"), SET_TIMEZONE] })],
+  ])("shows the time zone notice above the day picker on %s, with its link placed once", async (_, model) => {
+    await draw(model());
+    const title = screen.getByText(TIMEZONE_NOTICE.title);
+    expect(text()).toContain(TIMEZONE_NOTICE.text);
+    expect(screen.getAllByRole("link", { name: SET_TIMEZONE.label }).map((a) => a.getAttribute("href"))).toEqual([SET_TIMEZONE.href]);
+    expect(screen.getByRole("status", { name: TIMEZONE_NOTICE.title })).toBeTruthy();
+    const picker = screen.getByRole("heading", { level: 2 });
+    expect(title.compareDocumentPosition(picker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows no time zone notice when the ext carries none", async () => {
+    await draw(dayModel());
+    expect(text()).not.toContain(TIMEZONE_NOTICE.title);
+  });
+
   it("uses token colour classes only", async () => {
     const palette = /\b(?:bg|text|fill|stroke|border)-(?:red|blue|green|gray|slate|zinc|amber|orange|yellow|emerald)-\d/;
-    for (const model of [dayModel({ synthetic: true, actions: [DISABLED] }), noSiteDevicesModel()]) {
+    for (const model of [
+      dayModel({ synthetic: true, actions: [DISABLED], ext: { timezoneNotice: TIMEZONE_NOTICE } }),
+      noSiteDevicesModel(),
+      problemModel(),
+      problemModel({ retry: true, ext: { tone: "warning" } }),
+    ]) {
       await draw(model);
       expect(document.body.innerHTML).not.toMatch(palette);
       unmount?.();

@@ -209,6 +209,14 @@ const TOUCH = "gt:pointer-coarse:min-h-11";
 describe("the savings table's own controls", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("draws nothing of its own under the day when unavailable, and says where the reason is on its own page", () => {
+    const { unmount } = render(<SavingsView model={UNAVAILABLE} kit={fakeKit(null)} />);
+    expect(screen.queryByText(/The Operations day says why/)).toBeNull();
+    unmount();
+    render(<SavingsView model={UNAVAILABLE} kit={fakeKit(UNAVAILABLE)} />);
+    expect(screen.getByText(/The Operations day says why/)).toBeTruthy();
+  });
+
   it("does not press a disabled action, and says why it is disabled", () => {
     const poked = withPoke(READY);
     const disabled = { ...poked, actions: [{ ...poked.actions[0], enabled: false, reason: "Not now." }] };

@@ -1,9 +1,12 @@
 /**
  * requested-day.ts — which local day a day view shows, from its `?date=`.
  *
- * Pure: the caller passes `now`. The Operations page uses it, and the
- * Operations view's loader is meant to as well, so a link opens the same day
- * on either path; if either stops using it, revisit.
+ * Pure: the caller passes `now`. The metering.site-day loader
+ * (src/lib/metering/surface/site-day.ts) and the billing.savings loader
+ * (src/lib/billing/surface/savings.ts) both resolve `?date=` through it, so
+ * the savings shown under a day are for that same day when the host passes
+ * the day's `?date=` on (loadSavings says what happens without it); if
+ * either stops using it, revisit.
  *
  * - The microgrid's stored zone, or UTC when it is not one this installation
  *   supports.

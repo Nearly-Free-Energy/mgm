@@ -1,10 +1,9 @@
 "use client";
 
 /**
- * Gridtop's drawing of `billing.savings@1`: the Operations page's savings
- * table (src/components/operations/savings-table.tsx), built from the tiles,
- * keyed `<column>.<row>`, and the ext's headings, warnings and notes. Every
- * string is the server's. The setup state is the page's empty state with its
+ * Gridtop's drawing of `billing.savings@1`: the savings table, built from
+ * the tiles, keyed `<column>.<row>`, and the ext's headings, warnings and
+ * notes. Every string is the server's. The setup state is a note with its
  * link to Setup › Rates (left to the window bar on the page's own view); the
  * unavailable state draws nothing, since the day above already explains. The
  * host's notice and the model's controls are drawn here too, since the
@@ -118,11 +117,19 @@ export default function SavingsView({ model, kit }: Props) {
   const headingId = useId();
   const page = kit.useView().model;
   const ext = model.ext?.data as SavingsExt | undefined;
-  // Nothing of its own: the day above explains. Another plugin's controls still show.
+  // Under the day, nothing of its own: the day above explains. On its own
+  // page there is no day above, so say where the reason is: the Operations
+  // day, attached to the microgrid as a tab (metering.site-day). If that
+  // view stops being offered there, revisit. Another plugin's controls still show.
   if (!ext || ext.state === "unavailable") {
     return (
       <>
         <Notice model={model} />
+        {page?.view === model.view && (
+          <p className="gt:max-w-prose gt:text-body gt:text-muted-foreground">
+            The savings cannot be worked out for this microgrid right now. The Operations day says why.
+          </p>
+        )}
         <Footer model={model} kit={kit} />
       </>
     );

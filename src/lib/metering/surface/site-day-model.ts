@@ -3,12 +3,15 @@
  *
  * Pure: no server-only import, no clock, no I/O. The caller passes the day
  * (computeSiteDay's output), today's date in the microgrid's zone, the
- * locale and the request's Fmt. Every string the Operations page's client
- * component (src/components/operations/daily-operations.tsx) formats is
- * built here instead, with the same copy, so any GUI can print the text
- * as given. The chart and the evening strip, which tiles cannot carry, go
- * in the `metering.site-day@1` ext (./site-day-ext.ts) for a renderer that
- * draws them.
+ * locale and the request's Fmt. Every string the view shows is built here,
+ * so any GUI can print the text as given. The chart and the evening strip,
+ * which tiles cannot carry, go in the `metering.site-day@1` ext
+ * (./site-day-ext.ts) for a renderer that draws them.
+ *
+ * Three states, each with the day navigation: the day itself, a microgrid
+ * with no battery or grid meter registered, and a day the metering source
+ * could not read (a problem, with the link to its fix or another try). Each
+ * carries the time zone nudge's warning when the microgrid's zone needs it.
  */
 import { formatRate } from "@/components/format/currency";
 import { formatLocalDate } from "@/components/format/local-date";
@@ -16,6 +19,7 @@ import type { EntityRef, LinkRef, Value } from "@/lib/gui/contract";
 import { markSynthetic } from "@/lib/gui/mark-synthetic";
 import type { Fmt, LoadedModel } from "@/lib/gui/surface";
 import { addDaysToDateKey } from "@/lib/timezone/day-key";
+import type { TimezoneNudgeCopy } from "@/lib/timezone/nudge";
 import {
   EVENING_START_HOUR,
   GRID_PRESENT_MIN_V,
@@ -33,8 +37,101 @@ export const SITE_DAY_EXT_SCHEMA = "metering.site-day@1" as const;
 /** Every tile and series key the view emits. */
 export const SITE_DAY_KEYS = [
   "solar", "houses-evening", "battery-evening", "cuts", "cut-time", "lowest-soc", "soc-17",
-  "lights-on", "evening-supply", "soc", "setup",
+  "lights-on", "evening-supply", "soc", "setup", "problem",
 ] as const;
+
+/** The longest time zone notice the ext takes; the nudge's text holds the microgrid's free-text country. */
+export const TIMEZONE_NOTICE_MAX = 600;
+
+/** The link each state carries beside the time zone notice, to the page that holds the microgrid's Edit and the nudge. */
+export const TIMEZONE_LINK = "metering.set-timezone";
+
+/**
+ * A day the metering source could not read: fixed copy, never the source's
+ * message, and where the fix is. A null link means there is nothing to set
+ * up, only another try.
+ */
+export type SiteDayProblem = {
+  tone: "warning" | "danger";
+  title: string;
+  message: string;
+  link: { label: string; page: "edges" | "openems-backend" } | null;
+  /** Reading the same day again may work; false when it fails the same way each time. */
+  retry: boolean;
+};
+
+// The problems live here rather than beside the loader (./site-day.ts):
+// the loader's import of ../compose leads back through the metering plugin
+// to this view's examples (./examples.ts), which build a model from each,
+// so a module that imports the loader first would see them undefined. If
+// that cycle goes, they may move.
+const NOT_LOADED = "Could not load this day's operations";
+
+export const SITE_DAY_PROBLEMS = {
+  mixed: {
+    tone: "warning",
+    title: "Synthetic and real edges are mixed",
+    message: "This microgrid mixes synthetic and real edges; keep synthetic data in its own microgrid.",
+    link: { label: "Go to Edges", page: "edges" },
+    retry: false,
+  },
+  noConnection: {
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.",
+    link: { label: "Set up the OpenEMS connection", page: "openems-backend" },
+    retry: false,
+  },
+  rejected: {
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "OpenEMS did not accept this microgrid's connection settings. Check them under Setup → OpenEMS Backend.",
+    link: { label: "Check the OpenEMS connection", page: "openems-backend" },
+    retry: false,
+  },
+  unavailable: {
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This day's operations could not be loaded right now. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  // The day's samples could not be worked out. Reading them again fails the
+  // same way, so the picker is the way on, as the capability's own copy says.
+  dayFailed: {
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This day's operations could not be worked out. Try another day.",
+    link: null,
+    retry: false,
+  },
+} as const satisfies Record<string, SiteDayProblem>;
+
+/**
+ * The metering source's failure as a problem the view shows, or null when
+ * the failure is not the source's. Its 401 or 403 is OpenEMS refusing the
+ * stored settings, not the person, so it is a problem rather than a refusal.
+ */
+export function siteDayProblem(failure: { status: number; code: string }): SiteDayProblem | null {
+  const { status, code } = failure;
+  // The synthetic provider's refusal of a microgrid with synthetic and real
+  // edges (src/lib/metering/fixture/plugin.ts); if its status or code changes, revisit.
+  if (code === "METERING_CONFIGURATION") return status === 409 ? SITE_DAY_PROBLEMS.mixed : SITE_DAY_PROBLEMS.noConnection;
+  if (code === "METERING_UNAUTHORIZED") return SITE_DAY_PROBLEMS.rejected;
+  if (code.startsWith("METERING_")) return SITE_DAY_PROBLEMS.unavailable;
+  // getSiteDay's own failures after the plugin gate, in
+  // src/lib/metering/capability.ts: reading the site's devices
+  // (openSiteReader), which may pass, and computing the day
+  // (siteReadFailed), which fails the same way each time. A date the
+  // capability refuses (metering_invalid_date) can only mean it worked out
+  // today in another zone than the loader, which already clamped the date,
+  // so it is a passing failure too. None is the person's or the gate's, so
+  // the day keeps its picker; if getSiteDay gains another such failure or
+  // renames these, revisit.
+  if (code === "metering_site_devices_unavailable" || code === "metering_invalid_date") return SITE_DAY_PROBLEMS.unavailable;
+  if (code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.dayFailed;
+  return null;
+}
 
 type Tile = LoadedModel<"metrics">["body"]["tiles"][number];
 type Microgrid = { id: string; name: string };
@@ -58,6 +155,7 @@ const SUPPLY_ORDER: EveningSupply[] = ["battery", "battery_and_grid", "grid", "d
 const HOUR_MS = 3_600_000;
 
 const dayHref = (id: string) => `/microgrids/${encodeURIComponent(id)}/operations` as const;
+const setupHref = (id: string, page: "edges" | "openems-backend") => `/microgrids/${encodeURIComponent(id)}/setup/${page}` as const;
 const iso = (ms: number) => new Date(ms).toISOString();
 
 /** The date as the day picker heads it: "Thu, 05 Nov 2026". */
@@ -82,11 +180,28 @@ function entity(microgrid: Microgrid): EntityRef {
   return { kind: "microgrid", id: microgrid.id, label: microgrid.name };
 }
 
+/** The notice as the ext carries it, cut to the ext's bound. */
+function timezoneNotice(nudge: TimezoneNudgeCopy | null | undefined): SiteDayExtData["timezoneNotice"] {
+  if (!nudge) return null;
+  const text = nudge.text.length > TIMEZONE_NOTICE_MAX ? `${nudge.text.slice(0, TIMEZONE_NOTICE_MAX - 1)}…` : nudge.text;
+  return { title: nudge.title, text };
+}
+
+/**
+ * The link beside the notice. It goes to Setup → Edges because the
+ * microgrid layout (src/app/(gui)/microgrids/[id]/layout.tsx) shows the
+ * nudge and its Set timezone button above the Setup pages; if they move off
+ * that layout, revisit.
+ */
+function timezoneLinks(id: string, nudge: TimezoneNudgeCopy | null | undefined): LinkRef[] {
+  return nudge ? [{ id: TIMEZONE_LINK, label: "Set timezone", href: setupHref(id, "edges") }] : [];
+}
+
 export function buildSiteDayModel(
   day: SiteDayOperations,
-  o: { microgrid: Microgrid; today: string; locale: string; fmt: Fmt },
+  o: { microgrid: Microgrid; today: string; locale: string; fmt: Fmt; nudge?: TimezoneNudgeCopy | null },
 ): LoadedModel<"metrics"> {
-  const { microgrid, today, locale, fmt } = o;
+  const { microgrid, today, locale, fmt, nudge } = o;
   const clock = (ms: number) =>
     formatLocalDate(new Date(ms), locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: day.timezone });
   const until = (ms: number) => (ms >= day.dayEndMs ? "24:00" : clock(ms));
@@ -208,6 +323,7 @@ export function buildSiteDayModel(
     timezone: day.timezone,
     dayHref: dayHref(microgrid.id),
     synthetic: day.synthetic === true,
+    timezoneNotice: timezoneNotice(nudge),
     partial,
     dayStart: iso(day.dayStartMs),
     dayEnd: iso(day.dayEndMs),
@@ -248,7 +364,7 @@ export function buildSiteDayModel(
       ...(battery ? { series: [{ key: "soc", label: "Battery level", unit: "%", points: day.soc.map((p) => [iso(p.atMs), p.pct] as [string, number | null]) }] } : {}),
     },
     actions: [],
-    links: dayLinks(microgrid.id, day.date, today),
+    links: [...dayLinks(microgrid.id, day.date, today), ...timezoneLinks(microgrid.id, nudge)],
     ext: { schema: SITE_DAY_EXT_SCHEMA, data: ext },
   };
   return day.synthetic ? markSynthetic(model) : model;
@@ -262,8 +378,9 @@ export function buildNoSiteDevicesModel(o: {
   timezone: string;
   locale: string;
   fmt: Fmt;
+  nudge?: TimezoneNudgeCopy | null;
 }): LoadedModel<"metrics"> {
-  const { microgrid, date, today, timezone, locale, fmt } = o;
+  const { microgrid, date, today, timezone, locale, fmt, nudge } = o;
   const title = "Register the battery and grid meter";
   const message =
     "This view reads the site's battery and grid meter from OpenEMS. Discover them on the microgrid's edge and set their types to Battery and Grid meter. For a solar estimate, also set the meter on the inverter's output to Inverter.";
@@ -274,6 +391,7 @@ export function buildNoSiteDevicesModel(o: {
     timezone,
     dayHref: dayHref(microgrid.id),
     synthetic: false,
+    timezoneNotice: timezoneNotice(nudge),
     title,
     message,
   };
@@ -284,9 +402,53 @@ export function buildNoSiteDevicesModel(o: {
     body: { tiles: [{ key: "setup", label: title, value: fmt.text(message) }] },
     actions: [],
     links: [
-      { id: "metering.edges", label: "Go to Edges", href: `/microgrids/${encodeURIComponent(microgrid.id)}/setup/edges` },
+      { id: "metering.edges", label: "Go to Edges", href: setupHref(microgrid.id, "edges") },
       ...dayLinks(microgrid.id, date, today),
+      ...timezoneLinks(microgrid.id, nudge),
     ],
+    ext: { schema: SITE_DAY_EXT_SCHEMA, data: ext },
+  };
+}
+
+/**
+ * The day the metering source could not read: the problem's copy, the link
+ * to its fix first, and the day navigation, so another day can still be
+ * chosen. A problem with no fix to link is retried; the ext says so.
+ */
+export function buildSiteDayProblemModel(o: {
+  microgrid: Microgrid;
+  date: string;
+  today: string;
+  timezone: string;
+  locale: string;
+  fmt: Fmt;
+  problem: SiteDayProblem;
+  nudge?: TimezoneNudgeCopy | null;
+}): LoadedModel<"metrics"> {
+  const { microgrid, date, today, timezone, locale, fmt, problem, nudge } = o;
+  const ext: SiteDayExtData = {
+    state: "problem",
+    date,
+    today,
+    timezone,
+    dayHref: dayHref(microgrid.id),
+    synthetic: false,
+    timezoneNotice: timezoneNotice(nudge),
+    tone: problem.tone,
+    title: problem.title,
+    message: problem.message,
+    retry: problem.retry,
+  };
+  const fix: LinkRef[] = problem.link
+    ? [{ id: `metering.${problem.link.page}`, label: problem.link.label, href: setupHref(microgrid.id, problem.link.page) }]
+    : [];
+  return {
+    title: "Operations",
+    subtitle: `${dayLabel(date, locale)} · ${timezone}`,
+    entity: entity(microgrid),
+    body: { tiles: [{ key: "problem", label: problem.title, value: fmt.text(problem.message) }] },
+    actions: [],
+    links: [...fix, ...dayLinks(microgrid.id, date, today), ...timezoneLinks(microgrid.id, nudge)],
     ext: { schema: SITE_DAY_EXT_SCHEMA, data: ext },
   };
 }

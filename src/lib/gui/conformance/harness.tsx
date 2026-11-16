@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import type { ActionRef, GuiPlugin, Href, LinkRef, ShellProps, ViewModel } from "../contract";
 import { KitProvider } from "../host/client/kit-provider";
 import { KitRuntimeProvider, type KitRuntime } from "../host/client/kit-runtime";
+import { ViewUnavailable } from "../host/client/view-boundary";
 import { pickRenderer, type KindsSince } from "../host/shared/pick-renderer";
 import { RawView } from "../kit/raw-view";
 import { MANIFEST_FIXTURES, PAGE_MODEL, type ManifestFixture } from "./fixtures/manifests";
@@ -66,6 +67,15 @@ export function ModelView({ gui, model, kindsSince }: { gui: GuiPlugin; model: V
   const choice = pickRenderer(gui, model, kindsSince);
   const Component = choice.source === "raw" ? RawView : choice.Component;
   return <Component model={model} />;
+}
+
+/**
+ * A page whose view could not be loaded, drawn the way renderView
+ * (src/lib/gui/host/server/render-view.tsx) draws one: `children` inside a
+ * ViewUnavailable, which tells the shell no model will come.
+ */
+export function RefusedView({ children }: { children: ReactNode }) {
+  return <ViewUnavailable>{children}</ViewUnavailable>;
 }
 
 export interface Rendered {

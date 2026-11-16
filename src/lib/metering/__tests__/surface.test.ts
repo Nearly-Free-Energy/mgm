@@ -1,7 +1,7 @@
 /**
  * Metering's GUI contribution: the Operations day as `metering.site-day`,
- * accepted by the registry and removed with it, with examples a GUI can be
- * tested against, while the Operations page itself is still served.
+ * which serves the Operations page and its nav entry, accepted by the
+ * registry and removed with it, with examples a GUI can be tested against.
  */
 import { describe, expect, it } from "vitest";
 import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
@@ -39,12 +39,15 @@ describe("METERING_SURFACE", () => {
     expect(view).not.toHaveProperty("agent");
   });
 
-  it("keeps the Operations page served: a legacy nav entry, and a catalog page with no servedBy", () => {
-    expect(METERING_SURFACE.nav?.find((n) => n.id === "metering.operations")).toMatchObject({
-      href: "/microgrids/[id]/operations",
-      legacy: true,
+  it("serves the Operations page through the view: a nav entry naming it, and a catalog page served by a view", () => {
+    const entry = METERING_SURFACE.nav?.find((n) => n.id === "metering.operations");
+    expect(entry).toMatchObject({ view: "metering.site-day", group: "operate", order: 40 });
+    expect(entry).not.toHaveProperty("href");
+    expect(entry).not.toHaveProperty("legacy");
+    expect(matchCatalogPage(`/microgrids/${"0".repeat(8)}/operations`)?.page).toMatchObject({
+      path: view.path,
+      servedBy: "view",
     });
-    expect(matchCatalogPage(`/microgrids/${"0".repeat(8)}/operations`)?.page).not.toHaveProperty("servedBy");
   });
 
   it("is accepted by the registry, and removed when its plugin unloads", () => {
@@ -62,7 +65,7 @@ describe("the site-day examples", () => {
     for (const model of SITE_DAY_LOADED_EXAMPLES) expect(strictParseModel(view, model)).toMatchObject({ ok: true });
   });
 
-  it("are a normal day, a day with cuts and dark time, a site with no battery, and no site devices", () => {
+  it("are a normal day, a day with cuts and dark time, a site with no battery, no site devices, and three problems", () => {
     expect(tile(0, "cuts")?.value.text).toBe("0");
     expect(tile(0, "lights-on")).not.toHaveProperty("status");
     expect(Number(tile(1, "cuts")?.value.text)).toBeGreaterThan(0);
@@ -73,6 +76,14 @@ describe("the site-day examples", () => {
     expect(SITE_DAY_LOADED_EXAMPLES[3].links?.[0].id).toBe("metering.edges");
     // Each generated day links to the page that holds the microgrid's Edit, as the loader's day does.
     for (const i of [0, 1, 2]) expect(SITE_DAY_LOADED_EXAMPLES[i].links?.at(-1)?.id).toBe("metering.microgrid-setup");
+    // A problem fixed under Edges, one fixed under OpenEMS Backend, and one only retried, which carries the time zone notice.
+    const data = (i: number) => SITE_DAY_LOADED_EXAMPLES[i].ext?.data as { state: string; retry?: boolean; timezoneNotice: unknown };
+    for (const i of [4, 5, 6]) expect(tiles(i).map((t) => t.key)).toEqual(["problem"]);
+    expect(SITE_DAY_LOADED_EXAMPLES[4].links?.[0].id).toBe("metering.edges");
+    expect(SITE_DAY_LOADED_EXAMPLES[5].links?.[0].id).toBe("metering.openems-backend");
+    expect([4, 5, 6].map((i) => data(i).retry)).toEqual([false, false, true]);
+    expect(SITE_DAY_LOADED_EXAMPLES[6].links?.map((l) => l.id)).toContain("metering.set-timezone");
+    expect(SITE_DAY_LOADED_EXAMPLES.map((_, i) => data(i).timezoneNotice !== null)).toEqual([false, false, false, false, false, false, true]);
   });
 
   it("mark generated days synthetic, with the notice the host adds", () => {

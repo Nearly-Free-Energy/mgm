@@ -7,7 +7,7 @@
 import NextLink from "next/link";
 import { usePathname as useNextPathname, useSearchParams } from "next/navigation";
 import { useState, type MouseEvent } from "react";
-import { announceNavigationStart, isSameTabClick } from "@/components/ui/navigation-progress";
+import { announceNavigationStart, isCurrentLocation, isSameTabClick, locationKey } from "@/components/ui/navigation-progress";
 import type { LinkProps } from "../../contract";
 import { isHref } from "../shared/href";
 import { useKitRuntime } from "./kit-runtime";
@@ -20,21 +20,36 @@ export function usePathname(): string {
 }
 
 /**
+ * The shown page's path and query as one locationKey. The query is the
+ * router's; outside the Next.js router (jsdom, the conformance kit) it is the
+ * browser's address, read only after hydration (it is never rendered).
+ */
+function useLocation(): string {
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const search = params ? params.toString() : typeof window === "undefined" ? "" : window.location.search;
+  return locationKey(pathname, search);
+}
+
+/**
  * A same-origin page link. `current` sets aria-current="page"; between a
- * click and the page changing it carries aria-busy and data-pending. An href
- * that is not a page on this site renders as plain text.
+ * click and the page changing it carries aria-busy and data-pending, and the
+ * click starts the global NavigationProgress bar. A link to another query on
+ * the same path (the next day) is a navigation like any other; one to the
+ * page already shown, or a click that opens a new tab, is not. An href that
+ * is not a page on this site renders as plain text.
  */
 export function Link({ href, children, className, current }: LinkProps) {
-  const pathname = usePathname();
+  const location = useLocation();
   const [pendingFrom, setPendingFrom] = useState<string | null>(null);
-  // Cleared once the pathname moves on, so coming back later is not pending.
-  if (pendingFrom !== null && pendingFrom !== pathname) setPendingFrom(null);
-  const pending = pendingFrom === pathname && !current;
+  // Cleared once the path or query moves on, so coming back later is not pending.
+  if (pendingFrom !== null && pendingFrom !== location) setPendingFrom(null);
+  const pending = pendingFrom === location && !current;
 
   if (!isHref(href)) return <span className={className}>{children}</span>;
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (href.split(/[?#]/, 1)[0] === pathname || !isSameTabClick(event)) return;
-    setPendingFrom(pathname);
+    if (isCurrentLocation(href, location) || !isSameTabClick(event)) return;
+    setPendingFrom(location);
     announceNavigationStart(href);
   };
   return (

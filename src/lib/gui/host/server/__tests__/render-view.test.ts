@@ -10,9 +10,10 @@ import { Banner } from "@/components/ui/banner";
 import type { GuiPlugin, Manifest, ViewModel, ViewProps } from "../../../contract";
 import { KitView } from "../../../kit/kit-view";
 import { RawView } from "../../../kit/raw-view";
-import { ViewBoundary } from "../../client/view-boundary";
+import { ViewBoundary, ViewUnavailable } from "../../client/view-boundary";
 import { buildManifestModel, type ManifestInput } from "../../shared/manifest-model";
 import type { HostContext } from "../access";
+import type { SurfaceSnapshot } from "../surface-registry";
 
 const mocks = vi.hoisted(() => ({
   dispatchView: vi.fn(),
@@ -22,38 +23,17 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(() => {
     throw new Error("not-found");
   }),
-  cached: [] as unknown[][],
+  snapshot: vi.fn(),
 }));
-vi.mock("../view", () => ({ dispatchView: mocks.dispatchView }));
-// cache() memoizes nothing outside a server render; this records what the shared load is keyed on.
-vi.mock("react", async (importOriginal) => {
-  const real = await importOriginal<typeof import("react")>();
-  return {
-    ...real,
-    cache: <A extends unknown[], R>(fn: (...args: A) => R) => (...args: A) => {
-      mocks.cached.push(args);
-      return fn(...args);
-    },
-  };
-});
+// The real matchView, so the first paint names the view dispatchView would load.
+vi.mock("../view", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../view")>()),
+  dispatchView: mocks.dispatchView,
+}));
+vi.mock("../snapshot", () => ({ surfaceSnapshot: mocks.snapshot }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en" }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-// The Operations page as a view would serve it, once its page.tsx is gone.
-vi.mock("@/lib/plugins/bundled", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/plugins/bundled")>();
-  const plugins = real.MGM_BUNDLED_PLUGINS.map((plugin) => ({
-    ...plugin,
-    pages: plugin.pages.map((page) =>
-      page.path === "/microgrids/[id]/operations" ? { ...page, servedBy: "view" as const } : page,
-    ),
-  }));
-  return {
-    ...real,
-    MGM_BUNDLED_PLUGINS: plugins,
-    matchCatalogPage: (path: string, list = plugins) => real.matchCatalogPage(path, list),
-  };
-});
 
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { pageHref, renderView, resolveInitialView } from "../render-view";
@@ -70,6 +50,11 @@ const SURFACES = [
   PAYMENTS_SURFACE,
 ];
 
+const REGISTERED = {
+  views: SURFACES.flatMap((s) => (s.views ?? []).map((def) => ({ plugin: s.plugin, def }))),
+  nav: SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))),
+} as unknown as SurfaceSnapshot;
+
 const MANIFEST: Manifest = buildManifestModel({
   release: null,
   locale: "en",
@@ -81,7 +66,7 @@ const MANIFEST: Manifest = buildManifestModel({
   orgs: [{ id: ORG, name: "Org One" }],
   gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
   nav: SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["nav"],
-  views: [],
+  views: SURFACES.flatMap((s) => (s.views ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["views"],
   status: [],
   communities: [{ id: COMMUNITY, name: "Kasana" }],
   microgrids: [{ id: MICROGRID, name: "Kasana East", communityId: COMMUNITY, timezone: null }],
@@ -112,8 +97,8 @@ type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unk
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.cached.length = 0;
   mocks.dispatchView.mockResolvedValue({ ok: true, value: MODEL });
+  mocks.snapshot.mockResolvedValue(REGISTERED);
 });
 
 describe("renderView", () => {
@@ -124,8 +109,6 @@ describe("renderView", () => {
     expect(ctx.access.user).toBe(ACCESS.user);
     expect(ctx.access.roles).toEqual(ACCESS.roles);
     expect(ctx.locale).toBe("en");
-    // React cache() keys on identity, so the layout and the page share the load only with the caller's own object.
-    expect(mocks.cached[0][0]).toBe(ACCESS);
   });
 
   it("encodes each segment again, so a decoded slash stays inside its segment", async () => {
@@ -175,7 +158,10 @@ describe("renderView", () => {
 
   it("shows a refusal with its own copy as a banner", async () => {
     mocks.dispatchView.mockResolvedValue({ ok: false, status: 409, code: "metering_disabled", message: "Metering is turned off." });
-    const off = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
+    const refused = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
+    // Inside a ViewUnavailable, so the shell stops waiting for a model that will not come.
+    expect(refused.type).toBe(ViewUnavailable);
+    const off = refused.props?.children as Node;
     const [heading, banner] = off.props?.children as Node[];
     // The page keeps a level-one heading, which neither the banner nor the shell gives it.
     expect(heading).toMatchObject({ type: "h1", props: { className: "sr-only", children: "This view could not be shown" } });
@@ -184,50 +170,83 @@ describe("renderView", () => {
 
     mocks.dispatchView.mockResolvedValue({ ok: false, status: 500, code: "gui_view_failed", message: "This view could not be loaded." });
     const failed = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
-    expect((failed.props?.children as Node[])[1].props).toMatchObject({ tone: "destructive", title: "This view could not be loaded." });
+    expect(failed.type).toBe(ViewUnavailable);
+    expect(((failed.props?.children as Node).props?.children as Node[])[1].props).toMatchObject({ tone: "destructive", title: "This view could not be loaded." });
   });
 });
 
 describe("resolveInitialView", () => {
   const OPERATIONS = `/microgrids/${MICROGRID}/operations`;
+  const SAVINGS = `/microgrids/${MICROGRID}/operations/savings`;
 
-  it("gives the shell the view's title and the trail its path names, for a page a view serves", async () => {
-    const view = await resolveInitialView(ACCESS, `${OPERATIONS}?date=2026-11-10`, MANIFEST);
-    expect(mocks.dispatchView.mock.calls[0][1]).toBe(`${OPERATIONS}?date=2026-11-10`);
-    expect(view).toMatchObject({ view: "metering.site-day", title: "Tuesday 10 November" });
+  it("gives the shell the view's id and the trail its path names without loading the view", async () => {
+    const view = await resolveInitialView(`${OPERATIONS}?date=2026-11-10`, MANIFEST);
+    expect(mocks.dispatchView).not.toHaveBeenCalled();
+    expect(view).toMatchObject({ view: "metering.site-day", title: "Operations" });
     expect(view?.scope.microgrid?.id).toBe(MICROGRID);
     // A microgrid's own page is its Operations page, so the microgrid is the last crumb.
     expect(view?.trail.map((crumb) => crumb.label)).toEqual(["Org One", "Kasana", "Kasana East"]);
     expect(view?.trail.at(-1)?.href).toBe(OPERATIONS);
   });
 
-  it("names the same load as the page for the same request", async () => {
-    await resolveInitialView(ACCESS, `${OPERATIONS}?b=2&a=1`, MANIFEST);
-    await renderView({ path: ["microgrids", MICROGRID, "operations"], search: { b: "2", a: "1" }, access: ACCESS, gui: GUI });
-    const [fromLayout, fromPage] = mocks.dispatchView.mock.calls.map((call) => call[1]);
-    expect(fromLayout).toBe(fromPage);
-    expect(pageHref(["microgrids", MICROGRID, "operations"], new URLSearchParams("b=2&a=1"))).toBe(fromPage);
-    expect(mocks.cached.every((args) => args[0] === ACCESS)).toBe(true);
+  it("titles a view with no nav entry of its own after the nav entry its path falls under", async () => {
+    const view = await resolveInitialView(SAVINGS, MANIFEST);
+    expect(mocks.dispatchView).not.toHaveBeenCalled();
+    expect(view).toMatchObject({ view: "billing.savings", title: "Operations", unplaced: false });
+    expect(view?.trail.map((crumb) => crumb.label)).toEqual(["Org One", "Kasana", "Kasana East"]);
   });
 
-  it("names the same load as the page for a segment with escapes, decoding the header's path before encoding it again", async () => {
-    await resolveInitialView(ACCESS, "/microgrids/a%20b%2Fc/operations", MANIFEST);
-    await renderView({ path: ["microgrids", "a b/c", "operations"], search: {}, access: ACCESS, gui: GUI });
-    const [fromLayout, fromPage] = mocks.dispatchView.mock.calls.map((call) => call[1]);
-    expect(fromLayout).toBe("/microgrids/a%20b%2Fc/operations");
-    expect(fromLayout).toBe(fromPage);
+  it("takes the title of the manifest's nav entry that names the view", async () => {
+    const nav = { id: "billing.savings-page", title: "Savings", icon: "money", group: "money", order: 90, view: "billing.savings" };
+    mocks.snapshot.mockResolvedValue({ ...REGISTERED, nav: [...REGISTERED.nav, { plugin: "billing", def: nav }] });
+    const entry = { ...nav, href: "/microgrids/[microgrid]/operations/savings", needs: ["microgrid"] };
+    const manifest = { ...MANIFEST, org: { ...MANIFEST.org, nav: [...MANIFEST.org.nav, entry] } } as Manifest;
+    expect(await resolveInitialView(SAVINGS, manifest)).toMatchObject({ view: "billing.savings", title: "Savings" });
+    // A nav entry the manifest leaves out (its plugin off, or not for this person) lends no title.
+    expect(await resolveInitialView(SAVINGS, MANIFEST)).toMatchObject({ view: "billing.savings", title: "Operations" });
   });
 
-  it("loads nothing for a page served outside the contract, a path off the catalog, or no path", async () => {
-    expect(await resolveInitialView(ACCESS, `/microgrids/${MICROGRID}/billing`, MANIFEST)).toBeNull();
-    expect(await resolveInitialView(ACCESS, "/no-such-page", MANIFEST)).toBeNull();
-    expect(await resolveInitialView(ACCESS, "/microgrids/%E0%A4%A/operations", MANIFEST)).toBeNull();
-    expect(await resolveInitialView(ACCESS, null, MANIFEST)).toBeNull();
+  it("shows no label for a microgrid the manifest does not list, and marks the path unplaced", async () => {
+    const other = "e7300000-0000-4000-8002-000000000099";
+    const view = await resolveInitialView(`/microgrids/${other}/operations/savings`, MANIFEST);
+    expect(view).toMatchObject({ view: "billing.savings", unplaced: true });
+    expect(view?.scope.microgrid).toBeUndefined();
+    expect(view?.trail).toEqual([{ label: "Org One", href: `/organizations/${ORG}` }]);
+    expect(JSON.stringify(view)).not.toContain(other);
+  });
+
+  it("leaves the load to the page, which still refuses as before", async () => {
+    await resolveInitialView(OPERATIONS, MANIFEST);
+    await renderView({ path: ["microgrids", MICROGRID, "operations"], search: {}, access: ACCESS, gui: GUI });
+    expect(mocks.dispatchView).toHaveBeenCalledOnce();
+    expect(mocks.dispatchView.mock.calls[0][1]).toBe(OPERATIONS);
+
+    mocks.dispatchView.mockResolvedValue({ ok: false, status: 404, code: "gui_not_found", message: "This page could not be found." });
+    expect(await resolveInitialView(OPERATIONS, MANIFEST)).toMatchObject({ view: "metering.site-day" });
+    await expect(
+      renderView({ path: ["microgrids", MICROGRID, "operations"], search: {}, access: ACCESS, gui: GUI }),
+    ).rejects.toThrow("not-found");
+  });
+
+  it("spells the header's path as the page spells its params before matching it", async () => {
+    const escaped = `/microgrids/${MICROGRID.replaceAll("-", "%2D")}/operations`;
+    expect(await resolveInitialView(escaped, MANIFEST)).toMatchObject({ view: "metering.site-day", unplaced: false });
+    expect(pageHref(["microgrids", "a b/c", "operations"], new URLSearchParams())).toBe("/microgrids/a%20b%2Fc/operations");
+    // An encoded slash is no page href, so dispatchView answers 400 for it and the page is not found.
+    expect(await resolveInitialView("/microgrids/a%20b%2Fc/operations", MANIFEST)).toBeNull();
+  });
+
+  it("answers null for a page served outside the contract, a path off the catalog, or no path", async () => {
+    expect(await resolveInitialView(`/microgrids/${MICROGRID}/billing`, MANIFEST)).toBeNull();
+    expect(await resolveInitialView("/no-such-page", MANIFEST)).toBeNull();
+    expect(await resolveInitialView("/microgrids/%E0%A4%A/operations", MANIFEST)).toBeNull();
+    expect(await resolveInitialView(null, MANIFEST)).toBeNull();
     expect(mocks.dispatchView).not.toHaveBeenCalled();
   });
 
-  it("leaves the shell to resolveLegacyView when the view does not load", async () => {
-    mocks.dispatchView.mockResolvedValue({ ok: false, status: 404, code: "gui_not_found", message: "This page could not be found." });
-    expect(await resolveInitialView(ACCESS, OPERATIONS, MANIFEST)).toBeNull();
+  it("leaves the shell to resolveLegacyView when no registered view serves the path", async () => {
+    mocks.snapshot.mockResolvedValue({ ...REGISTERED, views: [] });
+    expect(await resolveInitialView(SAVINGS, MANIFEST)).toBeNull();
+    expect(mocks.dispatchView).not.toHaveBeenCalled();
   });
 });

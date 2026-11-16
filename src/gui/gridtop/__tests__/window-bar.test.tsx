@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
+import { RefusedView, renderShell, settle, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
 import type { ActionRef, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "..";
@@ -64,9 +64,50 @@ async function openSheet(button: HTMLElement, name: string | RegExp) {
 
 describe("Gridtop's window bar", () => {
   it("is absent on a page outside the contract", async () => {
-    await shell();
+    await shell(placesFixture({ pathname: "/microgrids/m1/billing", initial: { title: "Billing", trail: EAST_TRAIL, tabs: [DAY], scope: { organization: ORG, microgrid: EAST } } }));
     expect(bar()).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Tabs" })).toBeNull();
+  });
+
+  it("stands in place with the resolved view's title before the model is published, busy and with no controls", async () => {
+    await shell();
+    const el = bar()!;
+    expect(screen.getByRole("main").firstElementChild).toBe(el);
+    expect(el.getAttribute("aria-busy")).toBe("true");
+    const [compact, wide] = [...el.children] as HTMLElement[];
+    expect(within(compact).getByRole("button", { name: "Operations, tabs" })).toBeTruthy();
+    // The subtitle's line is held, blank and hidden, so the page does not move when it arrives.
+    const lines = [...wide.querySelectorAll("p")];
+    expect(lines.map((p) => p.textContent)).toEqual(["Operations", "\u00a0"]);
+    expect(lines[1].getAttribute("aria-hidden")).toBe("true");
+    expect(within(el).queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(within(el).queryByRole("button", { name: "Actions" })).toBeNull();
+    expect(within(screen.getByRole("navigation", { name: "Tabs" })).getAllByRole("link").map((a) => a.textContent)).toEqual(["Day"]);
+  });
+
+  it("goes away on a page a view serves whose view could not be loaded, as no model will come", async () => {
+    rendered = await renderShell(GridtopGui, atEast(), <RefusedView><p>Metering is turned off.</p></RefusedView>);
+    expect(screen.getByText("Metering is turned off.")).toBeTruthy();
+    expect(bar()).toBeNull();
+    expect(document.querySelector("[aria-busy]")).toBeNull();
+  });
+
+  it("keeps the bar and the page's own nodes when the model arrives, and adds its title, subtitle and controls", async () => {
+    let model: ViewModel | null = null;
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model }));
+    await shell();
+    const el = bar()!;
+    const page = screen.getByText("The page");
+    model = { ...MODEL, title: "Operations, Tuesday" };
+    await rendered!.goTo("/microgrids/m1/operations");
+    expect(bar()).toBe(el);
+    expect(page.isConnected).toBe(true);
+    expect(screen.getByText("The page")).toBe(page);
+    expect(el.getAttribute("aria-busy")).toBeNull();
+    expect(el.textContent).toContain("Operations, Tuesday");
+    expect(el.textContent).toContain("Tuesday 10 November");
+    expect(within(el).getByRole("button", { name: "Refresh" })).toBeTruthy();
   });
 
   it("shows the view's title, subtitle, tabs, actions and links, at the top of main", async () => {

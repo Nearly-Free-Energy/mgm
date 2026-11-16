@@ -6,7 +6,8 @@
  * offered has an entry with its label, every released page is reached from
  * an entry or a page link that exists, each entry's `needs` matches its
  * page's segments, and ids and groups do not change, since /go/<id> links
- * will name them.
+ * will name them. An entry that moved to a view keeps its id and its row,
+ * checked here in VIEW_ROWS; the host checks the view itself.
  */
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -19,9 +20,10 @@ import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 
 type Legacy = Extract<NavDef, { legacy: true }>;
 type Entry = { plugin: MgmPluginName; def: Legacy };
+type ViewEntry = { plugin: MgmPluginName; def: Extract<NavDef, { view: string }> };
 
 /**
- * Every entry by id, as spec-shell §6.2 lays out the dock: [title, group,
+ * Every legacy entry by id, as spec-shell §6.2 lays out the dock: [title, group,
  * icon, order]. The ids are what /go/<id> links will name; change one only
  * with a redirect from the old id. A group also decides which views an
  * assistant may not read (contribution-schema.ts refuses `agent: "read"` on a
@@ -32,7 +34,6 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
   "org.today": ["Dashboard", "operate", "today", 10],
   "community.microgrids": ["Microgrids", "operate", "sites", 20],
   "community.communities": ["Communities", "operate", "communities", 30],
-  "metering.operations": ["Operations", "operate", "live", 40],
   "community.households": ["Households", "operate", "households", 50],
   "metering.devices": ["Edges & Devices", "operate", "devices", 60],
   "billing.periods": ["Billing", "money", "billing", 10],
@@ -44,6 +45,15 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
   "org.users": ["Users", "system", "users", 20],
   "org.profile": ["Profile", "system", "profile", 30],
   "org.organizations": ["Organizations", "system", "organizations", 40],
+};
+
+/**
+ * Entries that name a view instead of a legacy page, by id: [title, group,
+ * icon, order, view]. The same rules as ROWS hold; Gridtop's pinned dock
+ * entries and app/manifest.ts name these ids too.
+ */
+const VIEW_ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: number, view: string]> = {
+  "metering.operations": ["Operations", "operate", "live", 40, "metering.site-day"],
 };
 
 /**
@@ -143,11 +153,20 @@ function linkText(file: string, href: string): string | undefined {
   return /^[^>]*>\s*([^<{]+?)\s*</.exec(source(file).slice(at))?.[1];
 }
 
+/** The entries for legacy pages; entries that name a view are skipped. */
 async function legacyNav(): Promise<Entry[]> {
   const { nav } = (await getMgmRuntime()).mgmSurface.snapshot();
-  return nav.map(({ plugin, def }) => {
-    if (!("legacy" in def)) throw new Error(`${def.id} names a view; this test covers legacy entries only`);
-    return { plugin, def };
+  return nav.flatMap(({ plugin, def }) => ("legacy" in def ? [{ plugin, def }] : []));
+}
+
+/** The entries that name a view, each with the path of the view it names. */
+async function viewNav(): Promise<(ViewEntry & { path: string })[]> {
+  const { nav, views } = (await getMgmRuntime()).mgmSurface.snapshot();
+  return nav.flatMap(({ plugin, def }) => {
+    if (!("view" in def)) return [];
+    const view = views.find((v) => v.def.id === def.view);
+    if (!view) throw new Error(`${def.id} names ${def.view}, which no plugin contributes`);
+    return [{ plugin, def, path: view.def.path }];
   });
 }
 
@@ -217,8 +236,18 @@ describe("legacy navigation", () => {
     expect(Object.fromEntries(rows)).toEqual(ROWS);
   });
 
+  it("keeps each view entry's title, group, icon, order and view", async () => {
+    const nav = await viewNav();
+    const rows = nav.map(({ def }) => [def.id, [def.title, def.group, def.icon, def.order, def.view]]);
+    expect(Object.fromEntries(rows)).toEqual(VIEW_ROWS);
+  });
+
   it("keeps the labels the sub-navs and in-page links show today", async () => {
-    const titles = new Map<string, string>((await legacyNav()).map((e) => [e.def.href, e.def.title]));
+    // A view entry's link goes to the path of the view it names.
+    const titles = new Map<string, string>([
+      ...(await legacyNav()).map((e) => [e.def.href, e.def.title] as const),
+      ...(await viewNav()).map((e) => [e.path, e.def.title] as const),
+    ]);
     const subNavs = [
       tabs(`${GUI}/microgrids/[id]/tab-nav.tsx`, "/microgrids/[id]"),
       tabs(`${GUI}/microgrids/[id]/setup/setup-subnav.tsx`, "/microgrids/[id]/setup"),
@@ -254,15 +283,16 @@ describe("legacy navigation", () => {
   });
 
   it("keeps ids unique, URL-safe and stable", async () => {
-    const ids = (await legacyNav()).map((e) => e.def.id);
+    const ids = [...(await legacyNav()), ...(await viewNav())].map((e) => e.def.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(/^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/);
-    expect([...ids].sort()).toEqual(Object.keys(ROWS).sort());
+    expect([...ids].sort()).toEqual([...Object.keys(ROWS), ...Object.keys(VIEW_ROWS)].sort());
   });
 
-  it("names the Operations day metering.operations and leaves metering.live reserved", async () => {
-    const nav = await legacyNav();
-    expect(nav.find((e) => e.def.href === "/microgrids/[id]/operations")?.def.id).toBe("metering.operations");
-    expect(nav.some((e) => e.def.id === "metering.live")).toBe(false);
+  it("names the Operations day's entry metering.operations and leaves metering.live reserved", async () => {
+    const nav = await viewNav();
+    expect(nav.find((e) => e.def.view === "metering.site-day")?.def.id).toBe("metering.operations");
+    const ids = [...(await legacyNav()), ...nav].map((e) => e.def.id);
+    expect(ids).not.toContain("metering.live");
   });
 });

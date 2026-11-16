@@ -2,10 +2,8 @@
  * savings-model.ts — what a site's solar and battery saved, as a `metrics`
  * view model.
  *
- * Pure: no server-only import, no clock, no I/O. Every string the Operations
- * page's savings table (src/components/operations/savings-table.tsx) formats
- * on the client is built here, with the same copy. Each figure is a tile
- * keyed `<column>.<row>`; the table's headings, warnings and notes go in the
+ * Pure: no server-only import, no clock, no I/O. Every string a renderer
+ * shows is built here. Each figure is a tile keyed `<column>.<row>`; the table's headings, warnings and notes go in the
  * `billing.savings@1` ext (./savings-ext.ts) for a renderer that draws the
  * table. The setup and ready states also offer the writes that change what
  * is counted (`savingsActions`).

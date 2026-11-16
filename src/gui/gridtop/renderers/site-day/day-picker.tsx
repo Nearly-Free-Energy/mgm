@@ -7,7 +7,8 @@
  * today. Typing a date does nothing until it is submitted, and a submitted
  * date after today is refused here as well as clamped by the server.
  * Submitting the day already shown reads it again, which is how today's
- * partial day is brought up to date, as the legacy GET form did.
+ * partial day is brought up to date. Show is aria-busy from submitting
+ * another day until a new day is shown, as a followed step link is.
  */
 import { useState, type FormEvent } from "react";
 import type { GuiKit, Href, LinkRef } from "@/lib/gui/contract";
@@ -16,11 +17,12 @@ import { DATE, type SiteDayExt, cls } from "./ext";
 /** The link ids this picker places; the renderer leaves them out of its other links. */
 export const DAY_LINKS = ["metering.day-previous", "metering.day-next", "metering.day-today"];
 
-// At least 44 px square on a touch screen.
+// At least 44 px square on a touch screen. A step link the person followed
+// is aria-busy until the next day's page arrives (kit.Link), and dims.
 const STEP =
   "gt:inline-flex gt:h-8 gt:min-w-8 gt:items-center gt:justify-center gt:rounded-md gt:border gt:border-border gt:bg-card gt:px-2.5 " +
   "gt:text-dense gt:text-foreground gt:hover:bg-muted gt:pointer-coarse:h-11 gt:pointer-coarse:min-w-11 " +
-  "gt:focus-visible:outline-2 gt:focus-visible:outline-ring";
+  "gt:focus-visible:outline-2 gt:focus-visible:outline-ring gt:aria-busy:cursor-progress gt:aria-busy:opacity-60";
 
 const pageHref = (link: LinkRef | undefined): Href | null =>
   link && link.href.startsWith("/") ? (link.href as Href) : null;
@@ -44,6 +46,9 @@ function Step({ link, glyph, kit }: { link: LinkRef | undefined; glyph: string; 
 
 export function DayPicker({ ext, links, heading, kit }: { ext: SiteDayExt; links: LinkRef[]; heading: string; kit: GuiKit }) {
   const [error, setError] = useState<string | null>(null);
+  // The day shown when another was submitted; busy until the shown day moves on.
+  const [leaving, setLeaving] = useState<string | null>(null);
+  if (leaving !== null && leaving !== ext.date) setLeaving(null);
   const find = (id: string) => links.find((l) => l.id === id);
   const today = find("metering.day-today");
   const todayHref = pageHref(today);
@@ -60,6 +65,7 @@ export function DayPicker({ ext, links, heading, kit }: { ext: SiteDayExt; links
       kit.refresh();
       return;
     }
+    setLeaving(ext.date);
     kit.navigate(`${ext.dayHref}?date=${day}` as Href);
   };
 
@@ -81,7 +87,7 @@ export function DayPicker({ ext, links, heading, kit }: { ext: SiteDayExt; links
             aria-invalid={error ? true : undefined}
             className="gt:h-8 gt:rounded-md gt:border gt:border-border gt:bg-card gt:px-2 gt:text-dense gt:text-foreground gt:pointer-coarse:h-11"
           />
-          <button type="submit" className={STEP}>
+          <button type="submit" aria-busy={leaving !== null || undefined} className={STEP}>
             Show
           </button>
         </form>

@@ -1,8 +1,7 @@
 /**
- * The evening strip in Gridtop: the legacy page's strip cases
- * (src/components/operations/__tests__/daily-operations.test.tsx), ported.
- * Which supplies the key lists, and every label, is the server's now
- * (site-day-model.test.tsx pins them); these pin how the strip draws them.
+ * The evening strip in Gridtop. Which supplies the key lists, and every
+ * label, is the server's (site-day-model.test.tsx pins them); these pin how
+ * the strip draws them.
  */
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -45,12 +44,10 @@ const BEFORE_EVENING: Options = {
 };
 
 describe("the evening strip", () => {
-  // Legacy: "is an image labelled with the hours of each supply".
   it("is an image labelled with the server's hours of each supply", () => {
     expect(strip(draw())?.getAttribute("aria-label")).toBe("Battery 3.0 h, Battery + grid 1.0 h, Grid alone 1.0 h, Dark 1.0 h");
   });
 
-  // Legacy: "has segment widths that sum to 100% for a complete evening".
   it("has segment widths that sum to 100% for a complete evening", () => {
     const widths = segments(draw()).map((el) => parseFloat(el.style.width));
     expect(widths).toHaveLength(4);
@@ -75,7 +72,6 @@ describe("the evening strip", () => {
     expect([...ticks.children].map((t) => t.textContent)).toEqual(["18:00", "19:00", "20:00", "21:00", "22:00", "23:00", "24:00"]);
   });
 
-  // Legacy: "lists 'No data' only when some of the evening had no data".
   it("keys the supplies the server lists, so 'No data' only when some of the evening had none", () => {
     const key = (root: HTMLElement) => [...root.querySelectorAll("li")].map((li) => li.textContent);
     expect(key(draw())).toEqual(["Battery", "Battery + grid", "Grid alone", "Dark"]);
@@ -109,7 +105,6 @@ describe("the evening strip", () => {
     expect(draw().querySelector("[title='Synthetic']")).toBeNull();
   });
 
-  // Legacy: the evening window "has not started yet" before 18:00 (the strip's empty branch).
   it("says the window has not started, once, in place of the strip", () => {
     const root = draw(BEFORE_EVENING);
     expect(strip(root)).toBeNull();
@@ -119,7 +114,6 @@ describe("the evening strip", () => {
     expect(bare.textContent).toBe(NOT_STARTED);
   });
 
-  // Legacy: "uses token colour classes only, no hard-coded Tailwind palette".
   it("uses token colour classes only", () => {
     const palette = /\b(?:bg|text|fill|stroke|border)-(?:red|blue|green|gray|slate|zinc|amber|orange|yellow|emerald)-\d/;
     for (const o of [{}, BEFORE_EVENING, { synthetic: true }]) expect(draw(o).innerHTML).not.toMatch(palette);

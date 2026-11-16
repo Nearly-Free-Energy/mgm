@@ -109,6 +109,32 @@ describe("Link", () => {
   it("is never pending while it marks the current section", () => {
     expect(clickAt("/", "/microgrids", { current: true }).getAttribute("data-pending")).toBeNull();
   });
+
+  it("starts the progress bar and is pending for a link to another query on the same path, until the query changes", () => {
+    const started: string[] = [];
+    const listener = (e: Event) => started.push((e as CustomEvent<string>).detail);
+    window.addEventListener("mgm:navigation-start", listener);
+    next.searchParams = new URLSearchParams("date=2026-11-14");
+    const runtime = recordingRuntime({ pathname: "/microgrids/m1/operations" });
+    const day = () => (
+      <KitRuntimeProvider runtime={runtime}>
+        <Link href="/microgrids/m1/operations?date=2026-11-13">Previous day</Link>
+        <Link href="/microgrids/m1/operations?date=2026-11-14">This day</Link>
+      </KitRuntimeProvider>
+    );
+    const { rerender } = render(day());
+    fireEvent.click(screen.getByRole("link", { name: "This day" }));
+    const previous = screen.getByRole("link", { name: "Previous day" });
+    fireEvent.click(previous);
+    window.removeEventListener("mgm:navigation-start", listener);
+    // The day already shown is not a navigation; the previous day is.
+    expect(started).toEqual(["/microgrids/m1/operations?date=2026-11-13"]);
+    expect(screen.getByRole("link", { name: "This day" }).getAttribute("aria-busy")).toBeNull();
+    expect(previous.getAttribute("aria-busy")).toBe("true");
+    next.searchParams = new URLSearchParams("date=2026-11-13");
+    rerender(day());
+    expect(previous.getAttribute("aria-busy")).toBeNull();
+  });
 });
 
 describe("navigate and refresh", () => {
@@ -137,6 +163,20 @@ describe("navigate and refresh", () => {
     render(<KitProvider manifest={manifest()} initial={initial}>{null}</KitProvider>);
     kit.navigate("/microgrids");
     expect(router.push).toHaveBeenCalledWith("/microgrids");
+  });
+
+  it("start the progress bar for another page or query, but not for the page already shown", () => {
+    const started: string[] = [];
+    const listener = (e: Event) => started.push((e as CustomEvent<string>).detail);
+    window.addEventListener("mgm:navigation-start", listener);
+    window.history.replaceState(null, "", "/microgrids/m1/operations?date=2026-11-14");
+    render(<KitProvider manifest={manifest()} initial={initial}>{null}</KitProvider>);
+    kit.navigate("/microgrids/m1/operations?date=2026-11-14");
+    kit.navigate("/microgrids/m1/operations?date=2026-11-10");
+    kit.navigate("/microgrids");
+    window.removeEventListener("mgm:navigation-start", listener);
+    expect(started).toEqual(["/microgrids/m1/operations?date=2026-11-10", "/microgrids"]);
+    expect(router.push).toHaveBeenCalledTimes(3);
   });
 });
 

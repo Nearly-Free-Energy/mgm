@@ -63,7 +63,8 @@ function manifest(o: Partial<Pick<ManifestInput, "communities" | "microgrids" | 
     orgs: [{ id: ORG, name: "Org One" }],
     gate: o.gate ?? ALL_ON,
     nav: SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["nav"],
-    views: [],
+    // A nav entry that names a view takes its href from the view's path.
+    views: SURFACES.flatMap((s) => (s.views ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["views"],
     status: [],
     communities: o.communities ?? [{ id: C1, name: "Kasana" }],
     microgrids: o.microgrids ?? [{ id: M1, name: "Kasana East", communityId: C1, timezone: null }],

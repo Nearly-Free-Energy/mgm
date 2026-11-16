@@ -12,35 +12,32 @@
  * nudge inline plus the forward-only seam note — the copy at the actual
  * point of change lives there, not here.
  *
- * Renders nothing when there is nothing to nudge about, so the surface
- * stays quiet for correctly-configured microgrids.
+ * Its title and text come from timezoneNudge (src/lib/timezone/nudge.ts),
+ * which views that repeat the warning print too. Renders nothing when there
+ * is nothing to nudge about, so the surface stays quiet for
+ * correctly-configured microgrids.
  */
 
 import * as React from "react";
 import { Banner } from "@/components/ui/banner";
-import { Timezone, formatTimezone } from "@/components/format/timezone";
-import { impliedNonUtcZone } from "@/lib/timezone/shortlist";
+import { timezoneNudge } from "@/lib/timezone/nudge";
 import { EditEntityButton } from "./EditEntityButton";
 import type { MicrogridPublic } from "@/lib/types/microgrid-columns";
 
 export function TimezoneNudge({ microgrid }: { microgrid: MicrogridPublic }) {
-  const implied = impliedNonUtcZone({
+  const nudge = timezoneNudge({
     address_country: microgrid.address_country,
     lat: microgrid.lat,
     lng: microgrid.lng,
     timezone: microgrid.timezone,
   });
 
-  if (!implied) return null;
-
-  const countryPhrase = microgrid.address_country?.trim()
-    ? `is in ${microgrid.address_country.trim()} (${formatTimezone(implied)})`
-    : `suggests ${formatTimezone(implied)}`;
+  if (!nudge) return null;
 
   return (
     <Banner
       tone="warn"
-      title="Billing timezone is still UTC"
+      title={nudge.title}
       className="mb-4"
       action={
         <EditEntityButton
@@ -50,9 +47,7 @@ export function TimezoneNudge({ microgrid }: { microgrid: MicrogridPublic }) {
         />
       }
     >
-      This microgrid&apos;s address {countryPhrase} but its billing timezone
-      is <Timezone iana={microgrid.timezone} className="font-medium" /> — set
-      it? Billing days currently start and end at midnight UTC.
+      {nudge.text}
     </Banner>
   );
 }

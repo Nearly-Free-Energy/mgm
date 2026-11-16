@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * The day's six tiles, as the Operations page shows them: solar, what the
- * houses used in the evening, power cuts, the lowest battery level, the
+ * The day's six tiles: solar, what the houses used in the evening, power cuts, the lowest battery level, the
  * battery at 17:00 and lights on. Every figure, hint and status is text the
  * server formatted. Colour only marks a status, as a chip of its tone.
  */
@@ -14,7 +13,7 @@ export type Tile = ModelOf<"metrics">["body"]["tiles"][number];
 
 /** Shown in another tile, or by the evening strip (./evening-strip.tsx): evening-supply. */
 const FOLDED = new Set(["battery-evening", "cut-time", "evening-supply"]);
-/** The tiles in the page's order; any other key follows them. */
+/** The tiles in the view's order; any other key follows them. */
 const ORDER = ["solar", "houses-evening", "cuts", "lowest-soc", "soc-17", "lights-on"];
 
 const CHIP: Record<Tone, string> = {
