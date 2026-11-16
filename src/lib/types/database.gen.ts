@@ -34,6 +34,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      auth_sign_in_requests: {
+        Row: {
+          created_at: string
+          email_hash: string
+          id: number
+          ip_hash: string | null
+          kind: string
+          outcome: string
+        }
+        Insert: {
+          created_at?: string
+          email_hash: string
+          id?: never
+          ip_hash?: string | null
+          kind: string
+          outcome: string
+        }
+        Update: {
+          created_at?: string
+          email_hash?: string
+          id?: never
+          ip_hash?: string | null
+          kind?: string
+          outcome?: string
+        }
+        Relationships: []
+      }
       billing_audit_log: {
         Row: {
           actor_kind: string
@@ -1721,6 +1748,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fn_auth_claim_code_attempt: {
+        Args: { _email_hash: string; _ip_hash: string }
+        Returns: number
+      }
+      fn_auth_claim_sign_in_request: {
+        Args: { _email_hash: string; _ip_hash: string }
+        Returns: number
+      }
+      fn_auth_sign_in_target: { Args: { _email: string }; Returns: string }
       fn_change_user_role: {
         Args: {
           p_role: Database["public"]["Enums"]["user_role"]

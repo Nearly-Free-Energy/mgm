@@ -112,6 +112,28 @@ function fakeSocket() {
 
 type GetSocket = (options: unknown, callback: (error: Error | null, socket?: { connection: unknown }) => void) => void;
 
+describe("createSmtpTransport for the local mail catcher", () => {
+  it("connects in plaintext to a loopback host without looking it up, and without a login", async () => {
+    const lookup = vi.fn();
+    const fake = fakeTransport(async () => ({}));
+    const result = await createSmtpTransport(
+      { ...SETTINGS, host: "localhost", port: 54325, username: "", password: "", loopback: true },
+      { lookup, createTransport: fake.createTransport }
+    ).send(MESSAGE);
+    expect(result).toMatchObject({ ok: true });
+    expect(lookup).not.toHaveBeenCalled();
+    expect(fake.created[0]).toMatchObject({ host: "127.0.0.1", port: 54325, secure: false, ignoreTLS: true });
+    expect(fake.created[0]).not.toHaveProperty("auth");
+  });
+
+  it("refuses a non-loopback host marked loopback", async () => {
+    const fake = fakeTransport(async () => ({}));
+    const result = await createSmtpTransport({ ...SETTINGS, loopback: true }, { createTransport: fake.createTransport }).send(MESSAGE);
+    expect(result).toMatchObject({ ok: false, reason: "refused_address" });
+    expect(fake.created).toHaveLength(0);
+  });
+});
+
 describe("createSmtpTransport deadline", () => {
   it("gives up on a DNS lookup that never answers, inside the same deadline, and never connects", async () => {
     vi.useFakeTimers();

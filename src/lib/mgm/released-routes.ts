@@ -25,6 +25,8 @@
  * id.
  * Email senders (RFC #186): an organization's mail server for its notices,
  * with a test send before saving. It never sends sign-in links or codes.
+ * Sign-in by email (RFC #186): the link's landing page, and the routes that
+ * send the link and check its code.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -155,9 +157,12 @@ const OPERATIONS_API_ROUTES = [
   /^\/api\/microgrids\/[^/]+\/savings-settings$/,
 ];
 
-const EMAIL_SENDER_PAGE_ROUTES = [/^\/organizations\/[^/]+\/email$/];
+const EMAIL_SENDER_PAGE_ROUTES = [/^\/organizations\/[^/]+\/email$/, /^\/auth\/confirm$/];
 
-const EMAIL_SENDER_API_ROUTES = [/^\/api\/organizations\/[^/]+\/email-sender$/];
+const EMAIL_SENDER_API_ROUTES = [
+  /^\/api\/organizations\/[^/]+\/email-sender$/,
+  /^\/api\/auth\/(?:sign-in-link|verify-code)$/,
+];
 
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";

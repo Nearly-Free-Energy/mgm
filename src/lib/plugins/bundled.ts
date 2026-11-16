@@ -113,6 +113,8 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/settings",
     "/setup",
     "/api/mgm/bootstrap",
+    // Sign-in by email link or code (RFC #186).
+    "/api/auth",
     "/api/organizations",
     "/api/users",
     "/api/org-api-tokens",

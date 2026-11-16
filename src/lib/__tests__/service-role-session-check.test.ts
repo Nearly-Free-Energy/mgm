@@ -374,6 +374,18 @@ const ENTRIES: Record<string, Entry> = {
     path: "/p/Kp9XrA",
     reason: "The short payment link; the slug is the bearer token and must match its format.",
   },
+  "src/app/api/auth/sign-in-link/route.ts": {
+    kind: "public",
+    path: "/api/auth/sign-in-link",
+    reason:
+      "Sign-in by email runs before a session exists (RFC #186). It claims the rate limit, finds a person with an MGM role, asks Supabase Auth for a token and sends it through the deployment's sender; it decrypts no stored credential.",
+  },
+  "src/app/api/auth/verify-code/route.ts": {
+    kind: "public",
+    path: "/api/auth/verify-code",
+    reason:
+      "Checking a sign-in code runs before a session exists (RFC #186). The service client only claims and records the attempt (5 per code); Supabase Auth verifies the code on the cookie client.",
+  },
   "src/app/api/payments/ipn/route.ts": {
     kind: "public",
     path: "/api/payments/ipn",

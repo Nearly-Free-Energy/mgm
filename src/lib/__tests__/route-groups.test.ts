@@ -32,6 +32,7 @@ const FORMER_GROUP = "(dashboard)";
 const PAGES_OUTSIDE_GUI = [
   "_dev/components/page.tsx",
   "accept-invite/page.tsx",
+  "auth/confirm/page.tsx",
   "forgot-password/page.tsx",
   "login/page.tsx",
   "no-access/page.tsx",
