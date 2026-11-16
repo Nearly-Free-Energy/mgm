@@ -182,6 +182,26 @@ describe("middleware PUBLIC_PATHS", () => {
   });
 
   it.each([
+    ["/microgrids/grid-1/setup/households", "/microgrids/grid-1/setup/tenants"],
+    ["/microgrids/grid-1/setup/households/", "/microgrids/grid-1/setup/tenants"],
+    ["/microgrids/grid-1/setup/households/t-1", "/microgrids/grid-1/setup/tenants/t-1"],
+    ["/microgrids/grid-1/setup/households/t-1?tab=meters", "/microgrids/grid-1/setup/tenants/t-1?tab=meters"],
+  ])("sends the old tenant page %s to %s", async (from, to) => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(from));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`http://localhost${to}`);
+  });
+
+  it("does not redirect deeper paths under the old tenant pages", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1/setup/households/t-1/extra"));
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
     { who: "signed in", session: signedIn },
     { who: "signed out", session: signedOut },
   ])(
