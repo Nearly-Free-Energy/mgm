@@ -36,6 +36,9 @@ const KEEPS_OLD_NAME: Record<string, string> = {
   "supabase/scripts/rehearse-release3.sql": "rehearses 00064 on the pilot schema of its day",
   "supabase/scripts/rehearse-pilot-user-directory.sql":
     "rehearses 20261103090000 on the pilot schema of its day",
+  "supabase/scripts/preflight-tenant-rename.sql": "checks the names the rename starts from",
+  "supabase/scripts/reverse-tenant-rename.sql": "puts the old names back to roll the rename back",
+  "supabase/scripts/rehearse-tenant-rename-reverse.sql": "uses the old names to prove the reverse works",
   "src/lib/__tests__/tenant-naming.test.ts": "this guard",
 };
 

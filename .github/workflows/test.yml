@@ -171,6 +171,15 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
+      # The rollback path of migration 20261116230000: its reverse script,
+      # the preflight on the reversed schema, and the migration again. Remove
+      # this step with the script once a later migration changes an object the
+      # rename touches (the script's header says why).
+      - name: Tenant rename reverse rehearsal
+        run: |
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-tenant-rename-reverse.sql
+
       - name: Database diagnostics on rehearsal failure
         if: failure()
         run: docker logs --tail 200 supabase_db_mgm
