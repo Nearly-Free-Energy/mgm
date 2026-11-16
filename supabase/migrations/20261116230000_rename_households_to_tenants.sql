@@ -36,10 +36,19 @@
 --
 -- Deploying: every release before the one that ships this file queries the
 -- old names, and that release queries the new ones. Apply this file and
--- promote that release back to back, at a quiet hour; between the two, the
--- running application's tenant pages, billing and checkout fail.
+-- promote that release back to back, as docs/releasing.md § "A release that
+-- needs a cutover" sets out; between the two, the running application's
+-- tenant pages, billing and checkout fail. Before the window, run
+-- supabase/scripts/preflight-tenant-rename.sql (read-only): every statement
+-- below names an object the database must have under its old name, and the
+-- function bodies below replace the chain's, so a database that differs
+-- must be found before this runs, not by it. supabase/scripts/
+-- reverse-tenant-rename.sql undoes this file;
+-- supabase/scripts/rehearse-tenant-rename-reverse.sql rehearses that in CI.
 --
--- Not idempotent: a rename runs once.
+-- No BEGIN or COMMIT: `supabase db push` applies the file as one
+-- transaction, together with its history row, so a statement that fails
+-- leaves nothing renamed. Not idempotent: a rename runs once.
 
 -- 1. Tables
 ALTER TABLE households RENAME TO tenants;
@@ -725,3 +734,7 @@ AS
   GROUP BY e.microgrid_id, e.name, date_trunc('hour', d.created_at)
 
 ORDER BY timestamp DESC, kind ASC;
+
+-- PostgREST caches the schema; reload it so the API serves the new names
+-- at once rather than after its next refresh.
+NOTIFY pgrst, 'reload schema';
