@@ -2,12 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { StatusChip } from "@/components/ui/status-chip";
-import { Currency } from "@/components/format/currency";
-import { Kwh } from "@/components/format/kwh";
 import { EmptyState } from "@/components/ui/empty-state";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { computeAssignmentGaps } from "@/lib/metering/assignment-gaps";
 import { TenantMeterSection } from "./tenant-meter-section";
+import { TenantBillingTable, type BillingLineItemRow } from "./tenant-billing-table";
 
 // Setup > Tenants > [tenantId] — Tenant detail page (D3 / #54).
 //
@@ -41,17 +40,6 @@ type TenantRow = {
   address_line2: string | null;
   unit_label: string | null;
   tenant_devices: TenantDeviceRow[];
-};
-
-type BillingLineItemRow = {
-  usage_kwh: number | null;
-  total_amount: number | null;
-  billing_periods: {
-    id: string;
-    start_date: string;
-    end_date: string;
-    status: string;
-  };
 };
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -398,55 +386,7 @@ export default async function TenantDetailPage({
             No billing history
           </p>
         ) : (
-          <div className="relative overflow-x-auto rounded-lg border border-border bg-card">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-muted">
-                <tr>
-                  <th className="px-4 py-2 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                    Period
-                  </th>
-                  <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                    Usage (kWh)
-                  </th>
-                  <th className="px-4 py-2 text-right text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                    Amount
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {closedLineItems.map((li, idx) => {
-                  const bp = li.billing_periods;
-                  return (
-                    <tr key={bp?.id ?? idx} className="border-t border-border">
-                      <td className="px-4 py-3 text-foreground">
-                        {bp ? (
-                          <span>
-                            {bp.start_date} — {bp.end_date}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {li.usage_kwh != null ? (
-                          <Kwh value={li.usage_kwh} />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {li.total_amount != null ? (
-                          <Currency value={li.total_amount} />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <TenantBillingTable items={closedLineItems} />
         )}
       </section>
     </div>
