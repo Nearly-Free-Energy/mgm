@@ -1,8 +1,11 @@
 import "server-only";
 
 /**
- * invite-data-payload.ts — shared helper to build the `data` payload
- * passed to `auth.admin.inviteUserByEmail` (UX5b / #184).
+ * invite-data-payload.ts — shared helper to build the invitation details
+ * (UX5b / #184): who invited the person, to which organization and as
+ * what. Since RFC #186 § 5 they fill MGM's invitation notice
+ * (invitation-notice.ts) and are kept on the new account's user_metadata;
+ * the notes below about Supabase's email template predate that.
  *
  * The Supabase email template renders rich content (inviter name, org
  * name, role label, app name) by reading `{{ .Data.field }}` template
@@ -62,7 +65,7 @@ export interface BuildInviteDataPayloadParams {
 }
 
 /**
- * Build the `data` payload for `auth.admin.inviteUserByEmail`.
+ * Build the invitation details for the notice and the account's user_metadata.
  *
  * Returns an object with only the populated keys — null/empty values
  * are OMITTED (not sent as JSON null) so Go template `{{ if .Data.x }}`

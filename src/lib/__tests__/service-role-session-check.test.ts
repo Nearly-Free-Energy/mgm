@@ -280,11 +280,12 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/api/users/invite/route.ts": {
     kind: "session",
     reason:
-      "currentUserIsSuperAdmin or currentUserCanAccessOrg answers 403 before the Auth admin invite.",
+      "currentUserIsSuperAdmin or currentUserCanAccessOrg answers 403 before the Auth admin calls and the invitation notice, which decrypts the organization's mail sender.",
   },
   "src/app/api/users/[id]/resend-invite/route.ts": {
     kind: "session",
-    reason: "getUser() answers 401 before any Auth admin call.",
+    reason:
+      "getUser() answers 401, and the target-role check 403, before any Auth admin call and the invitation notice, which decrypts the organization's mail sender.",
   },
   "src/app/api/microgrids/[id]/openems-backend/route.ts": {
     kind: "session",

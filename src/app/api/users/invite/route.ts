@@ -8,7 +8,9 @@ import {
 } from "@/lib/auth/access";
 import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
 import { buildInviteDataPayload } from "@/lib/auth/invite-data-payload";
-import { resolveOrigin } from "@/lib/auth/resolve-origin";
+import { invitationNotice } from "@/lib/auth/invitation-notice";
+import { sendNotice } from "@/lib/email/notices";
+import { getMgmRuntime } from "@/lib/runtime/root";
 import type { UserRole } from "@/lib/types/domain";
 
 /**
@@ -28,10 +30,13 @@ import type { UserRole } from "@/lib/types/domain";
  *                                              caller, not the function owner)
  *   svc        = createServiceClient()  → service-role, used ONLY for:
  *                                           svc.auth.admin.listUsers
- *                                           svc.auth.admin.inviteUserByEmail
+ *                                           svc.auth.admin.createUser
  *                                           svc.auth.admin.deleteUser
  *                                           reading the target's user_roles
  *                                           and user_profiles rows
+ *                                           sending the invitation notice
+ *                                           (sendNotice reads and decrypts
+ *                                           the org's mail sender)
  *
  * Steps:
  *   1. Validate body + defense-in-depth permission check.
@@ -41,16 +46,21 @@ import type { UserRole } from "@/lib/types/domain";
  *        - Already holds the requested access → 409 `already_member`.
  *        - Holds other access → 409 `other_access` (a role change).
  *        - Holds none (access removed, or an unfinished invitation) →
- *          reuse the account. Unconfirmed: re-send the invitation email.
- *          Confirmed: no email; they sign in as before. Profile fields the
- *          person already has are kept.
- *      No account: svc.auth.admin.inviteUserByEmail(email) creates one
- *      with email_confirmed_at = NULL and sends the magic-link email.
+ *          reuse the account. Profile fields the person already has are
+ *          kept.
+ *      No account: svc.auth.admin.createUser(email) creates one with no
+ *      password and email_confirmed_at = NULL, and sends nothing.
  *   3. userClient.rpc('fn_finalize_user_invitation', ...) — inserts the
  *      user_profiles + user_roles rows atomically under the caller's
  *      session.
  *   4. Cleanup on RPC failure: svc.auth.admin.deleteUser(userId), only for
  *      an account step 2 created. Best effort — log if cleanup also fails.
+ *   5. Only once the access is saved, the invitation notice (RFC #186 § 5)
+ *      through the organization's mail sender, or the deployment's for a
+ *      super admin or an organization without one. It carries no token:
+ *      the person signs in by email link, which also confirms the address.
+ *      A notice that cannot be sent leaves the access in place and answers
+ *      email_sent: false, so the inviter can tell the person directly.
  *
  * Response: 201 { user_id, existing_account, email_sent }.
  * Error contract: { error: string, field?: string, code?: string }
@@ -168,6 +178,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // Who invited them, to what and as what, for the notice; also kept on
+  // auth.users.raw_user_meta_data as before.
   const inviteData = await buildInviteDataPayload({
     caller,
     targetRole: role,
@@ -177,23 +189,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const svc = createServiceClient();
 
-  // Per-call redirectTo: lands GoTrue's verify redirect on the MGM
-  // accept-invite landing page, which calls verifyOtp + renders the
-  // set-password form (UX5c / #189). Deliberately not hardcoded —
-  // resolveOrigin honours x-forwarded-* so previews + local dev work.
-  const origin = resolveOrigin(request);
-  const inviteOptions = {
-    data: inviteData,
-    redirectTo: `${origin}/accept-invite`,
-  };
-
   // ── Step 2: does this email already have an account? ─────────────────
   //
-  // Looked up BEFORE inviting, because GoTrue's invite does not say which
-  // case it handled: for an email with an unconfirmed account it re-sends
-  // the invitation to that account instead of creating one, and returns it
-  // exactly as it returns a new user. Only an account this request created
-  // may be deleted when step 3 fails.
+  // Looked up first: an existing account is reused, and only an account
+  // this request created may be deleted when step 3 fails.
   const lookup = await findAuthUserByEmail(svc, email);
   if (!lookup.ok) {
     return NextResponse.json(
@@ -204,7 +203,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let targetUserId: string;
   let createdByThisRequest = false;
-  let emailSent = true;
   let profileValues = {
     first_name: firstName || null,
     last_name: lastName || null,
@@ -274,36 +272,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       last_name: current?.last_name || profileValues.last_name,
       phone: current?.phone || profileValues.phone,
     };
-
-    if (existing.email_confirmed_at) {
-      // They already have a password and can sign in; an invitation link
-      // would be refused for a confirmed account.
-      emailSent = false;
-    } else {
-      const resend = await svc.auth.admin.inviteUserByEmail(
-        email,
-        inviteOptions
-      );
-      if (resend.error) {
-        if (!isEmailExistsError(resend.error)) {
-          return NextResponse.json(
-            { error: `Invite failed: ${resend.error.message}` },
-            { status: 422 }
-          );
-        }
-        // Confirmed since the lookup: they can sign in already.
-        emailSent = false;
-      }
-    }
   } else {
-    // ── Step 2b: no account — invite creates one ───────────────────────
-    const inviteRes = await svc.auth.admin.inviteUserByEmail(
+    // ── Step 2b: no account — create one, with no password ─────────────
+    const inviteRes = await svc.auth.admin.createUser({
       email,
-      inviteOptions
-    );
+      email_confirm: false,
+      user_metadata: inviteData,
+    });
     if (inviteRes.error) {
       if (isEmailExistsError(inviteRes.error)) {
-        // Created between the lookup and the invite.
+        // Created between the lookup and this call.
         return NextResponse.json(
           {
             error: `${email} was just registered. Retry to see its status.`,
@@ -364,6 +342,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { error: `Invite failed: ${rpcError.message}` },
       { status }
     );
+  }
+
+  // ── Step 5: the invitation notice, once the access is saved ──────────
+  let emailSent = false;
+  try {
+    const runtime = await getMgmRuntime();
+    const notice = await sendNotice({
+      service: svc,
+      transports: runtime.mailTransports,
+      orgId: role === ORG_MANAGER ? scopeId : null,
+      message: invitationNotice({ to: email, data: inviteData }),
+    });
+    emailSent = notice.ok;
+  } catch (noticeErr) {
+    console.error("[invite] The invitation notice failed:", (noticeErr as Error).name);
   }
 
   return NextResponse.json(

@@ -7,16 +7,21 @@ import {
 } from "@/lib/auth/access";
 import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
 import { buildInviteDataPayload } from "@/lib/auth/invite-data-payload";
-import { resolveOrigin } from "@/lib/auth/resolve-origin";
+import { invitationNotice } from "@/lib/auth/invitation-notice";
+import { sendNotice } from "@/lib/email/notices";
+import { getMgmRuntime } from "@/lib/runtime/root";
+import { checkRateLimit } from "@/lib/rate-limit/in-memory";
 import type { UserRole, RoleScopeType } from "@/lib/types/domain";
 
 /**
- * POST /api/users/[id]/resend-invite — re-issue an invitation email
- * for an existing-but-unconfirmed user (UX5b / #184).
+ * POST /api/users/[id]/resend-invite — send the invitation notice again
+ * to someone who has not signed in yet (UX5b / #184, RFC #186 § 5).
  *
  * Two-client pattern (mirrors POST /api/users/invite):
  *   userClient = createClient()         → permission checks (RLS-honoring).
- *   svc        = createServiceClient()  → svc.auth.admin.* ops only.
+ *   svc        = createServiceClient()  → svc.auth.admin.* ops, and the
+ *                                         notice (sendNotice reads and
+ *                                         decrypts the org's mail sender).
  *
  * Security ordering — permission BEFORE target lookup. Probing UUIDs
  * via this endpoint must produce uniform 403 for invisible rows so
@@ -50,20 +55,21 @@ import type { UserRole, RoleScopeType } from "@/lib/types/domain";
  *           Both error.code === 'user_not_found' AND !data.user → 404.
  *
  *   Step E — pre-check email_confirmed_at IS NOT NULL → 409
- *           "User has already accepted their invitation."
+ *           "User has already accepted their invitation." The first
+ *           sign-in by email link confirms the address.
  *
  *   Step F — build the data payload (shared helper) reflecting the
  *           target's CURRENT role/scope (architect decision: invite
  *           reflects current state, not the original).
  *
- *   Step G — svc.auth.admin.inviteUserByEmail(email, { data }).
- *           - 'over_email_send_rate_limit' (or message-text fallback) → 429.
- *           - 'email_exists' (race: user confirmed between pre-check and
- *             GoTrue call) → 409 with the same shape as the pre-check.
- *           - any other error → 422.
+ *   Step G — the invitation notice, through the target's organization's
+ *           mail sender, or the deployment's (super admin, or an
+ *           organization without one). It carries no token.
+ *           - more than 3 resends for one person in 10 minutes → 429;
+ *             Supabase no longer sends, so it no longer limits this;
+ *           - a notice that cannot be sent → 502.
  *
- * Returns 200 { resent: true } on success. Idempotent at the API
- * layer; GoTrue rate-limits internally.
+ * Returns 200 { resent: true } on success.
  */
 
 const UUID_RE =
@@ -76,7 +82,7 @@ interface CurrentRoleRow {
 }
 
 export async function POST(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id: targetId } = await params;
@@ -225,49 +231,29 @@ export async function POST(
     supabase: userClient,
   });
 
-  // ── Step G: re-issue the invite ────────────────────────────────────
-  // Per-call redirectTo so resends land on the MGM accept-invite page
-  // (UX5c / #189) — same target as the original invite.
-  const origin = resolveOrigin(request);
-  const inviteRes = await svc.auth.admin.inviteUserByEmail(targetEmail, {
-    data,
-    redirectTo: `${origin}/accept-invite`,
-  });
-
-  if (inviteRes.error) {
-    const errCode = (inviteRes.error as { code?: string }).code;
-    const msg = inviteRes.error.message?.toLowerCase() ?? "";
-
-    // Rate-limit detection: code first, then message-text fallback for
-    // older GoTrue/SDK versions that don't set `code`.
-    const isRateLimited =
-      errCode === "over_email_send_rate_limit" ||
-      msg.includes("over_email_send_rate_limit") ||
-      msg.includes("rate limit") ||
-      msg.includes("too many requests");
-    if (isRateLimited) {
-      return NextResponse.json(
-        {
-          error:
-            "Too many invitations sent recently. Try again in a few minutes.",
-          code: "rate_limited",
-        },
-        { status: 429 }
-      );
-    }
-
-    // Race: target was confirmed between our pre-check and GoTrue's
-    // call. Surface the same shape as the pre-check.
-    if (errCode === "email_exists") {
-      return NextResponse.json(
-        { error: "User has already accepted their invitation." },
-        { status: 409 }
-      );
-    }
-
+  // ── Step G: send the notice again ──────────────────────────────────
+  // Per process, like the payment-link limiter; enough to stop a stuck
+  // button from flooding someone's inbox.
+  if (!checkRateLimit(`resend-invite:${targetId}`, 3, 10 * 60_000).ok) {
     return NextResponse.json(
-      { error: `Resend failed: ${inviteRes.error.message}` },
-      { status: 422 }
+      {
+        error: "Too many invitations sent recently. Try again in a few minutes.",
+        code: "rate_limited",
+      },
+      { status: 429 }
+    );
+  }
+  const runtime = await getMgmRuntime();
+  const notice = await sendNotice({
+    service: svc,
+    transports: runtime.mailTransports,
+    orgId: targetRoleRow?.role === ORG_MANAGER ? targetRoleRow.scope_id : null,
+    message: invitationNotice({ to: targetEmail, data }),
+  });
+  if (!notice.ok) {
+    return NextResponse.json(
+      { error: "The invitation email could not be sent. Check the organization's email settings, or tell them to sign in at MGM with this address." },
+      { status: 502 }
     );
   }
 

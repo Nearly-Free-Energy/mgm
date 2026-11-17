@@ -11,10 +11,10 @@
  *   - 403: org_manager → orphan target (no role row).
  *   - 404: target not found in auth.users (lookup AFTER permission has passed).
  *   - 409: pre-check email_confirmed_at IS NOT NULL.
- *   - 409: race — GoTrue returns email_exists.
- *   - 429: rate-limit by error.code.
- *   - 429: rate-limit by message-text fallback.
- *   - 422: any other GoTrue error.
+ *   - 429: more than 3 resends for one person in 10 minutes.
+ *   - 502: the notice could not be sent.
+ *   - 200: the token-free invitation notice (RFC #186 § 5), through the
+ *     target's organization's sender, or the deployment's.
  *   - Ordering: when permission would 403 AND target also doesn't
  *     exist, the route MUST 403 (permission-before-lookup).
  *   - 400: invalid UUID in path.
@@ -163,6 +163,19 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
+const sendNoticeSpy = vi.fn();
+const rateLimitSpy = vi.fn();
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/email/notices", () => ({
+  sendNotice: (...args: unknown[]) => sendNoticeSpy(...args),
+}));
+vi.mock("@/lib/runtime/root", () => ({
+  getMgmRuntime: async () => ({ mailTransports: { registry: true } }),
+}));
+vi.mock("@/lib/rate-limit/in-memory", () => ({
+  checkRateLimit: (...args: unknown[]) => rateLimitSpy(...args),
+}));
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 const CALLER_UUID = "11111111-1111-4000-8000-000000000001";
@@ -183,6 +196,11 @@ function makeContext(id: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
+  sendNoticeSpy.mockReset();
+  sendNoticeSpy.mockResolvedValue({ ok: true, via: "organization" });
+  rateLimitSpy.mockReset();
+  rateLimitSpy.mockReturnValue({ ok: true });
   inviteUserByEmailSpy.mockReset();
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
   mockCallerRoles = [];
@@ -307,11 +325,11 @@ describe("POST /api/users/[id]/resend-invite", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toMatch(/already accepted/i);
-    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    expect(sendNoticeSpy).not.toHaveBeenCalled();
   });
 
-  // ── 409: race — GoTrue returns email_exists ────────────────────
-  it("returns 409 when GoTrue races on email_exists (target confirmed mid-flight)", async () => {
+  // ── 429: resend limit ───────────────────────────────────────────
+  it("returns 429 with code: rate_limited past 3 resends for one person in 10 minutes", async () => {
     mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
     mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
     mockGetUserByIdResult = {
@@ -324,39 +342,7 @@ describe("POST /api/users/[id]/resend-invite", () => {
       },
       error: null,
     };
-    mockInviteResult = {
-      data: { user: null },
-      error: { code: "email_exists", message: "already registered" },
-    };
-
-    const { POST } = await import("../route");
-    const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
-    expect(res.status).toBe(409);
-    const json = await res.json();
-    expect(json.error).toMatch(/already accepted/i);
-  });
-
-  // ── 429: rate-limit by error.code ──────────────────────────────
-  it("returns 429 with code: rate_limited when GoTrue surfaces over_email_send_rate_limit", async () => {
-    mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
-    mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
-    mockGetUserByIdResult = {
-      data: {
-        user: {
-          id: TARGET_UUID,
-          email: "target@example.com",
-          email_confirmed_at: null,
-        },
-      },
-      error: null,
-    };
-    mockInviteResult = {
-      data: { user: null },
-      error: {
-        code: "over_email_send_rate_limit",
-        message: "rate limit exceeded",
-      },
-    };
+    rateLimitSpy.mockReturnValue({ ok: false, retryAfter: 60 });
 
     const { POST } = await import("../route");
     const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
@@ -364,10 +350,12 @@ describe("POST /api/users/[id]/resend-invite", () => {
     const json = await res.json();
     expect(json.code).toBe("rate_limited");
     expect(json.error).toMatch(/try again/i);
+    expect(rateLimitSpy).toHaveBeenCalledWith(`resend-invite:${TARGET_UUID}`, 3, 600_000);
+    expect(sendNoticeSpy).not.toHaveBeenCalled();
   });
 
-  // ── 429: rate-limit by message-text fallback (no code) ─────────
-  it("returns 429 when older SDK omits code but message contains 'rate limit'", async () => {
+  // ── 502: the notice could not be sent ─────────────────────────────
+  it("returns 502 when the notice cannot be sent", async () => {
     mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
     mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
     mockGetUserByIdResult = {
@@ -380,46 +368,16 @@ describe("POST /api/users/[id]/resend-invite", () => {
       },
       error: null,
     };
-    mockInviteResult = {
-      data: { user: null },
-      error: { message: "Email rate limit reached" }, // no code
-    };
+    sendNoticeSpy.mockResolvedValue({ ok: false, reason: "not_configured" });
 
     const { POST } = await import("../route");
     const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
-    expect(res.status).toBe(429);
-    const json = await res.json();
-    expect(json.code).toBe("rate_limited");
-  });
-
-  // ── 422: other GoTrue error ────────────────────────────────────
-  it("returns 422 for any other GoTrue error", async () => {
-    mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
-    mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
-    mockGetUserByIdResult = {
-      data: {
-        user: {
-          id: TARGET_UUID,
-          email: "target@example.com",
-          email_confirmed_at: null,
-        },
-      },
-      error: null,
-    };
-    mockInviteResult = {
-      data: { user: null },
-      error: { code: "unexpected_failure", message: "something else" },
-    };
-
-    const { POST } = await import("../route");
-    const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
-    expect(res.status).toBe(422);
-    const json = await res.json();
-    expect(json.error).toMatch(/Resend failed/i);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/could not be sent/i);
   });
 
   // ── 200: happy path (super_admin → org_manager target) ────────
-  it("returns 200 { resent: true } and forwards data payload to GoTrue", async () => {
+  it("returns 200 { resent: true } and sends the token-free notice through the target's organization", async () => {
     mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
     mockTargetRoleRow = { role: "org_manager", scope_type: "org", scope_id: ORG_A };
     mockGetUserByIdResult = {
@@ -430,34 +388,23 @@ describe("POST /api/users/[id]/resend-invite", () => {
           email_confirmed_at: null,
         },
       },
-      error: null,
-    };
-    mockInviteResult = {
-      data: { user: { id: TARGET_UUID } },
       error: null,
     };
 
     const { POST } = await import("../route");
     const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
     expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.resent).toBe(true);
+    expect((await res.json()).resent).toBe(true);
 
-    // Verify the data payload was forwarded with the expected shape.
-    expect(inviteUserByEmailSpy).toHaveBeenCalledTimes(1);
-    const [emailArg, optsArg] = inviteUserByEmailSpy.mock.calls[0]!;
-    expect(emailArg).toBe("target@example.com");
-    expect(optsArg).toMatchObject({
-      data: {
-        invited_by_name: expect.any(String),
-        org_name: "Test Org",
-        role_label: "an organization manager",
-        app_name: "Metering & Billing Engine",
-      },
-      // UX5c / #189 — per-call redirectTo so resends land on the same
-      // /accept-invite page as fresh invites.
-      redirectTo: "http://localhost/accept-invite",
-    });
+    // Supabase sends nothing; MGM's notice names the organization and role.
+    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
+    const notice = sendNoticeSpy.mock.calls[0]![0] as { orgId: string | null; message: { to: string; subject: string; text: string } };
+    expect(notice.orgId).toBe(ORG_A);
+    expect(notice.message.to).toBe("target@example.com");
+    expect(notice.message.subject).toBe("You have access to Test Org in MGM");
+    expect(notice.message.text).toContain("as an organization manager");
+    expect(notice.message.text).toContain("https://mgm.example.org/login");
   });
 
   // ── 200: org_manager resending an org_manager in their org ──────
