@@ -35,7 +35,15 @@ describe("parseDeploymentSender", () => {
       host: "127.0.0.1",
       port: 54325,
       username: "",
-      loopback: true,
+      plaintextLocal: true,
+    });
+  });
+
+  it("allows plaintext to a container-network name with no dot, for docker compose's mail catcher", () => {
+    expect(parseDeploymentSender({ MGM_SMTP_URL: "smtp://mailpit:1025", MGM_MAIL_FROM: FROM })).toMatchObject({
+      host: "mailpit",
+      port: 1025,
+      plaintextLocal: true,
     });
   });
 

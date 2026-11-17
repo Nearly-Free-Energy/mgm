@@ -52,8 +52,8 @@ supabase/.temp/
 .supabase/
 supabase/.branches/
 
-# Generated seed migration — contains bcrypt password hashes injected at setup time
-# (template is committed as supabase/migrations/00003_seed.sql.template).
+# Generated seed migration, copied by setup.sh from the committed
+# supabase/migrations/00003_seed.sql.template.
 supabase/migrations/00003_seed.sql
 
 # Browser smoke (playwright.config.ts). e2e/.auth/ holds session cookies.

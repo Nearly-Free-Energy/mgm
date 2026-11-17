@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
@@ -11,10 +11,9 @@ import {
 // The smoke's own rows: one organization, one community with an invoice
 // configuration whose logo is an object in the invoice-logos bucket, three
 // microgrids, three tenants on the first, and an org_manager who signs in
-// with a random password. This file writes only the ids and the email to disk, for
-// the narrow project and the teardown. The password is not secret: the
-// Playwright report and a failed run's trace record it as typed, for a user
-// the teardown deletes from a local database.
+// by email link (RFC #186), read from the local mail catcher. This file
+// writes only the ids and the email to disk, for the narrow project and the
+// teardown.
 
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");
@@ -64,7 +63,7 @@ async function must<T>(label: string, query: PromiseLike<{ data: T; error: { mes
   return data;
 }
 
-export async function createSmokeFixtures(): Promise<SmokeFixtures & { password: string }> {
+export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   assertLocalSupabase();
   await deleteSmokeFixtures(); // rows left by an earlier, interrupted run
   const svc = await serviceClient();
@@ -73,7 +72,6 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures & { password:
   const communityId = randomUUID();
   const microgridIds = [randomUUID(), randomUUID(), randomUUID()];
   const email = `smoke-${tag}@test.local`; // the domain the database suites use
-  const password = randomBytes(18).toString("base64url");
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
@@ -114,10 +112,35 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures & { password:
       }))
     )
   );
-  const user = await createTestUser({ email, role: "org_manager", scopeId: orgId });
-  const { error } = await svc.auth.admin.updateUserById(user.userId, { password });
-  if (error) throw new Error(`[browser smoke] password: ${error.message}`);
-  return { ...fixtures, password };
+  await createTestUser({ email, role: "org_manager", scopeId: orgId });
+  return fixtures;
+}
+
+/**
+ * The local mail catcher's API (Mailpit, as `supabase start` runs it). The
+ * app under test sends sign-in links there (MGM_SMTP_URL in
+ * playwright.config.ts).
+ */
+const MAIL_CATCHER = process.env.MGM_MAIL_CATCHER_URL ?? "http://127.0.0.1:54324";
+
+/** The sign-in link in the newest email to `email`, waiting up to 30 s for it to arrive. */
+export async function signInLinkFor(email: string): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const found = await fetch(`${MAIL_CATCHER}/api/v1/search?query=${encodeURIComponent(`to:"${email}"`)}`);
+    if (found.ok) {
+      const { messages } = (await found.json()) as { messages?: { ID: string }[] };
+      if (messages?.length) {
+        const message = await fetch(`${MAIL_CATCHER}/api/v1/message/${messages[0].ID}`);
+        const { Text } = (await message.json()) as { Text: string };
+        const link = /https?:\/\/\S+\/auth\/confirm\?token_hash=\S+/.exec(Text)?.[0];
+        if (link) return link;
+        throw new Error("[browser smoke] the sign-in email has no link");
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`[browser smoke] no sign-in email reached ${MAIL_CATCHER} within 30 s`);
 }
 
 export function readSmokeFixtures(): SmokeFixtures {

@@ -113,11 +113,11 @@ function fakeSocket() {
 type GetSocket = (options: unknown, callback: (error: Error | null, socket?: { connection: unknown }) => void) => void;
 
 describe("createSmtpTransport for the local mail catcher", () => {
-  it("connects in plaintext to a loopback host without looking it up, and without a login", async () => {
+  it("connects in plaintext to a loopback host without the public-address check, and without a login", async () => {
     const lookup = vi.fn();
     const fake = fakeTransport(async () => ({}));
     const result = await createSmtpTransport(
-      { ...SETTINGS, host: "localhost", port: 54325, username: "", password: "", loopback: true },
+      { ...SETTINGS, host: "localhost", port: 54325, username: "", password: "", plaintextLocal: true },
       { lookup, createTransport: fake.createTransport }
     ).send(MESSAGE);
     expect(result).toMatchObject({ ok: true });
@@ -126,9 +126,20 @@ describe("createSmtpTransport for the local mail catcher", () => {
     expect(fake.created[0]).not.toHaveProperty("auth");
   });
 
-  it("refuses a non-loopback host marked loopback", async () => {
+  it("connects to a container-network name, such as docker compose's mailpit, without the public-address check", async () => {
+    const lookup = vi.fn();
     const fake = fakeTransport(async () => ({}));
-    const result = await createSmtpTransport({ ...SETTINGS, loopback: true }, { createTransport: fake.createTransport }).send(MESSAGE);
+    await createSmtpTransport(
+      { ...SETTINGS, host: "mailpit", port: 1025, username: "", password: "", plaintextLocal: true },
+      { lookup, createTransport: fake.createTransport }
+    ).send(MESSAGE);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(fake.created[0]).toMatchObject({ host: "mailpit", port: 1025, secure: false, ignoreTLS: true });
+  });
+
+  it("refuses a dotted name marked plaintextLocal", async () => {
+    const fake = fakeTransport(async () => ({}));
+    const result = await createSmtpTransport({ ...SETTINGS, plaintextLocal: true }, { createTransport: fake.createTransport }).send(MESSAGE);
     expect(result).toMatchObject({ ok: false, reason: "refused_address" });
     expect(fake.created).toHaveLength(0);
   });

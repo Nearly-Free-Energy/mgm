@@ -42,6 +42,14 @@ export default defineConfig({
   webServer: {
     // Warns that standalone output prefers its own server; it serves normally.
     command: `npm run start -- -H 127.0.0.1 -p ${PORT}`,
+    // Sign-in links go to the local Supabase's mail catcher, where
+    // e2e/fixtures.ts reads them (RFC #186). Playwright gives the server
+    // exactly this environment, so the rest of process.env is spread in.
+    env: {
+      ...(process.env as Record<string, string>),
+      MGM_SMTP_URL: process.env.MGM_SMTP_URL ?? "smtp://127.0.0.1:54325",
+      MGM_MAIL_FROM: process.env.MGM_MAIL_FROM ?? "MGM <no-reply@smoke.test>",
+    },
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

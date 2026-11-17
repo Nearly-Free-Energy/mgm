@@ -25,9 +25,10 @@ cd mgm
 ./setup.sh --docker
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and log in:
-- **Email:** `admin@eiot.energy`
-- **Password:** `admin123`
+Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
+passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+link**, then open the email in Mailpit at
+[http://localhost:8025](http://localhost:8025) and follow its link.
 
 ### Data persistence
 
@@ -73,9 +74,12 @@ cd mgm
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and log in:
-- **Email:** `admin@eiot.energy`
-- **Password:** `admin123`
+Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
+passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+link**, then open the email in the local mail catcher at
+[http://127.0.0.1:54324](http://127.0.0.1:54324) and follow its link. This
+needs `MGM_SMTP_URL` and `MGM_MAIL_FROM` in `.env.local`, which
+`.env.local.example` sets for the catcher.
 
 `npm run dev` builds the interface's stylesheet once before it starts. While
 you change classes under `src/gui/` or the tokens in `src/styles/tokens.css`,
@@ -419,7 +423,8 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 ## Browser smoke test (local Supabase only)
 
 `e2e/` holds a Playwright smoke test that `Test` runs after `npm test`. In
-Chromium at 360 × 800 with touch as the pointer, it signs in, opens the home
+Chromium at 360 × 800 with touch as the pointer, it signs in by email link
+(RFC #186), reading the link from the local Supabase's mail catcher, opens the home
 page and a microgrid's tenants list, and checks that no page scrolls
 sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
@@ -439,11 +444,16 @@ npm run build
 eval "$(supabase status -o env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY|JWT_SECRET)=')"
 MGM_PUBLIC_SUPABASE_URL="$API_URL" MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
   SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY" SUPABASE_JWT_SECRET="$JWT_SECRET" \
-  npm run test:e2e
+  MGM_APP_URL="http://127.0.0.1:3100" npm run test:e2e
 ```
 
 It starts the app on port 3100, or reuses one already listening there. It
-refuses to run unless `MGM_PUBLIC_SUPABASE_URL` is the local Supabase.
+refuses to run unless `MGM_PUBLIC_SUPABASE_URL` is the local Supabase. The
+app sends its sign-in link to the mail catcher on the default local ports
+(`MGM_SMTP_URL=smtp://127.0.0.1:54325`, read through
+`MGM_MAIL_CATCHER_URL=http://127.0.0.1:54324`); set both if your Supabase
+uses other ports. `MGM_APP_URL` must be the app on port 3100, because the
+link is built from it.
 
 ## Full-Stack Setup (with OpenEMS)
 
@@ -473,7 +483,7 @@ If using local/dev mode, run `npm run dev` after setup.
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
 | `[mgm] NEXT_PUBLIC_… is set but no longer read` at `npm run dev` | Rename the variable in `.env.local` ([Upgrading from v0.0.1 or v0.0.2](#upgrading-from-v001-or-v002)), or rerun `./setup.sh --force` (in local mode this also resets the local database) |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
-| Login fails with "Invalid credentials" | Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
+| No sign-in email arrives | Check the server log for `auth.sign_in_link`: `no_access` means the address has no MGM role (run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset`, or `./setup.sh --docker --force` in docker mode, to re-seed the admin user); `send_failed` with a setting name means `MGM_SMTP_URL` or `MGM_MAIL_FROM` is missing; `limited` means wait a minute (1 a minute, 5 an hour per address) |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
 | Billing generation shows "No meter reading data" | Ensure OpenEMS edge simulations are running and meters are assigned to tenants |
 | Docker mode: app not starting | Check `docker compose logs mgm-app` for errors |

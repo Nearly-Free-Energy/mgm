@@ -76,11 +76,18 @@ function failure(reason: MailFailureReason, message = COPY[reason]): MailSendRes
 }
 
 const LOOPBACK: Record<string, string> = { localhost: "127.0.0.1", "127.0.0.1": "127.0.0.1", "::1": "::1" };
+const SINGLE_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-/** The address of a loopback host, for the local mail catcher only. */
-function loopbackAddress(host: string): { ok: true; address: string } | { ok: false; reason: "refused_address"; message: string } {
-  const address = LOOPBACK[host];
-  if (!address) return { ok: false, reason: "refused_address", message: "A plaintext mail server must be on this machine (localhost)." };
+/**
+ * Where to connect for a local mail catcher: a loopback address, or a name
+ * with no dot, which only a local or container network resolves (docker
+ * compose's `mailpit`). Anything else is refused.
+ */
+function localAddress(host: string): { ok: true; address: string } | { ok: false; reason: "refused_address"; message: string } {
+  const address = LOOPBACK[host] ?? (SINGLE_LABEL.test(host) ? host : undefined);
+  if (!address) {
+    return { ok: false, reason: "refused_address", message: "A plaintext mail server must be on this machine or in its container network." };
+  }
   return { ok: true, address };
 }
 
@@ -127,13 +134,13 @@ export function createSmtpTransport(settings: SmtpSenderSettings, deps: SmtpDeps
       };
 
       const work = async (): Promise<MailSendResult> => {
-        const resolved = settings.loopback
-          ? loopbackAddress(settings.host)
+        const resolved = settings.plaintextLocal
+          ? localAddress(settings.host)
           : await resolvePublicAddress(settings.host, deps.lookup);
         if (!resolved.ok) return failure(resolved.reason, resolved.message);
         if (abandoned) return failure("unreachable");
 
-        const encryption = settings.loopback
+        const encryption = settings.plaintextLocal
           ? { secure: false, ignoreTLS: true }
           : {
               secure: settings.port === 465,

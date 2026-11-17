@@ -7,7 +7,10 @@ import "server-only";
  *   MGM_SMTP_URL   smtps://user:password@smtp.example.com:465
  *                  smtp://user:password@smtp.example.com:587   (STARTTLS required)
  *                  smtp://127.0.0.1:54325   local mail catcher, plaintext;
- *                                           allowed only on a loopback host
+ *                  smtp://mailpit:1025      allowed only on a loopback host, or
+ *                                           a name with no dot, which only a
+ *                                           local or container network
+ *                                           resolves (docker compose)
  *   MGM_MAIL_FROM  MGM <no-reply@example.com>, or a bare address
  *
  * Read per call, like MGM_APP_URL (app-url.ts), and errors name the variable
@@ -21,6 +24,7 @@ import { RuntimeConfigError, type RuntimeEnv } from "./public-runtime-config";
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const SINGLE_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 function present(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -58,7 +62,7 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
     throw new RuntimeConfigError("MGM_SMTP_URL must not have a path, query or fragment.");
   }
 
-  const loopback = LOOPBACK_HOSTS.has(url.hostname);
+  const local = LOOPBACK_HOSTS.has(url.hostname) || SINGLE_LABEL.test(url.hostname);
   let port: number;
   if (url.protocol === "smtps:") {
     port = Number(url.port || 465);
@@ -72,8 +76,9 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
   const password = decodeURIComponent(url.password);
   const { fromAddress, fromName } = parseFrom(from);
 
-  if (loopback && url.protocol === "smtp:") {
-    // The local mail catcher: plaintext, on this machine only.
+  if (local && url.protocol === "smtp:") {
+    // The local mail catcher: plaintext, on this machine or in its
+    // container network only.
     return {
       kind: "smtp",
       host: url.hostname === "[::1]" ? "::1" : url.hostname,
@@ -83,14 +88,14 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
       fromAddress,
       fromName,
       replyTo: null,
-      loopback: true,
+      plaintextLocal: true,
     };
   }
 
   const host = normalizeMailHost(url.hostname);
   if (!host) {
     throw new RuntimeConfigError(
-      "MGM_SMTP_URL must name its mail server by a public DNS name (plaintext smtp:// is allowed only for localhost)."
+      "MGM_SMTP_URL must name its mail server by a public DNS name (plaintext smtp:// is allowed only for localhost or a container-network name with no dot)."
     );
   }
   if (url.protocol === "smtps:" && port !== 465) {

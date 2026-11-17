@@ -38,10 +38,11 @@ async function reportCspViolations(context: BrowserContext) {
  * Collects page errors, console errors, content security policy
  * violations, requests to any origin other than the app and its Supabase,
  * and writes (non-GET requests to the app's /api other than
- * READ_ONLY_POSTS), on the page and on every popup it opens. Await it before
- * the page's first navigation, so the violation listener is in place.
+ * READ_ONLY_POSTS and the caller's `expectedWrites`), on the page and on
+ * every popup it opens. Await it before the page's first navigation, so the
+ * violation listener is in place.
  */
-export async function watchPage(page: Page) {
+export async function watchPage(page: Page, options: { expectedWrites?: RegExp[] } = {}) {
   const app = new URL(String(test.info().project.use.baseURL)).origin;
   const allowed = new Set([app, new URL(process.env.MGM_PUBLIC_SUPABASE_URL ?? app).origin]);
   const problems: string[] = [];
@@ -58,7 +59,8 @@ export async function watchPage(page: Page) {
       if (!url.protocol.startsWith("http")) return; // data: and blob: URLs
       if (!allowed.has(url.origin)) problems.push(`${label}request to ${url.origin}`);
       const readOnly = request.method() === "POST" && READ_ONLY_POSTS.some((path) => path.test(url.pathname));
-      if (url.origin === app && url.pathname.startsWith("/api/") && request.method() !== "GET" && !readOnly) {
+      const expected = (options.expectedWrites ?? []).some((path) => path.test(url.pathname));
+      if (url.origin === app && url.pathname.startsWith("/api/") && request.method() !== "GET" && !readOnly && !expected) {
         problems.push(`${label}write: ${request.method()} ${url.pathname}`);
       }
     });
