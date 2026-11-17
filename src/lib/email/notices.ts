@@ -77,9 +77,22 @@ async function organizationSender(
   };
 }
 
-/** Records the outcome of a notice on the saved settings, for the version that sent it. */
-async function flag(service: SupabaseClient, orgId: string, row: SavedSender, sent: MailSendResult): Promise<void> {
+/**
+ * Records the outcome of a notice on the saved settings, for the version
+ * that sent it. A failure is recorded once the fallback has been tried, so
+ * the message says whether MGM's own server delivered it.
+ */
+async function flag(
+  service: SupabaseClient,
+  orgId: string,
+  row: SavedSender,
+  sent: MailSendResult,
+  fallbackDelivered = false
+): Promise<void> {
   if (sent.ok && row.last_test_status === "success") return;
+  const fallback = fallbackDelivered
+    ? "MGM's own mail server sent it instead."
+    : "MGM's own mail server could not send it either, so it was not delivered.";
   await service
     .from("organization_email_senders")
     .update(
@@ -88,7 +101,7 @@ async function flag(service: SupabaseClient, orgId: string, row: SavedSender, se
         : {
             last_tested_at: new Date().toISOString(),
             last_test_status: sent.reason,
-            last_test_message: `A notice could not be sent, so MGM's own mail server sent it. ${sent.message}`,
+            last_test_message: `A notice could not be sent through this server. ${fallback} ${sent.message}`,
           }
     )
     .eq("org_id", orgId)
@@ -103,19 +116,28 @@ export async function sendNotice(input: {
 }): Promise<NoticeResult> {
   const { service, transports, orgId, message } = input;
 
+  // The organization's failed attempt, flagged once the fallback is tried.
+  let failed: { row: SavedSender; sent: MailSendResult } | null = null;
   if (orgId) {
     const saved = await organizationSender(service, orgId);
     if (saved) {
       const sent = await transports.create(saved.settings).send(message);
-      await flag(service, orgId, saved.row, sent);
       if (sent.ok) {
+        await flag(service, orgId, saved.row, sent);
         log("sent_by_organization");
         return { ok: true, via: "organization" };
       }
       log(`organization_failed_${sent.reason}`);
+      failed = { row: saved.row, sent };
     }
   }
 
+  const result = await sendByDeployment(transports, message);
+  if (failed && orgId) await flag(service, orgId, failed.row, failed.sent, result.ok);
+  return result;
+}
+
+async function sendByDeployment(transports: MailTransportRegistry, message: MailMessage): Promise<NoticeResult> {
   let deployment: SmtpSenderSettings;
   try {
     deployment = getDeploymentSender();

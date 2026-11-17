@@ -3,9 +3,10 @@
  *
  * Runs sendNotice against the local database with recording transports:
  *   1. an organization's saved sender sends it, with the decrypted password;
- *   2. when that server fails, the failure is flagged on the saved settings
- *      and the deployment's sender sends it (decision 2); a later notice
- *      that gets through clears the flag;
+ *   2. when that server fails, the deployment's sender sends it (decision
+ *      2) and the failure is flagged on the saved settings, saying whether
+ *      the fallback delivered it; a later notice that gets through clears
+ *      the flag;
  *   3. an organization without a sender, or no organization, uses the
  *      deployment's sender (decision 1);
  *   4. without a deployment sender, the notice is not sent.
@@ -106,7 +107,7 @@ describe.skipIf(skip)("notices (RFC #186 § 5)", () => {
     expect(sent.map((s) => s.settings.host)).toEqual(["smtp.org.example", "smtp.deployment.example"]);
     const flagged = await savedStatus();
     expect(flagged.last_test_status).toBe("auth_failed");
-    expect(flagged.last_test_message).toContain("MGM's own mail server sent it");
+    expect(flagged.last_test_message).toContain("MGM's own mail server sent it instead");
     // Flagging does not count as a settings change.
     expect(flagged.version).toBe(1);
 
@@ -116,6 +117,19 @@ describe.skipIf(skip)("notices (RFC #186 § 5)", () => {
       via: "organization",
     });
     expect((await savedStatus()).last_test_status).toBe("success");
+  });
+
+  it("says the notice was not delivered when the fallback fails too", async () => {
+    vi.stubEnv("MGM_SMTP_URL", "");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { registry } = transports(() => ({ ok: false, reason: "unreachable", message: "Could not connect." }));
+    const result = await sendNotice({ service: await serviceClient(), transports: registry, orgId: ORG, message: MESSAGE });
+    expect(result).toEqual({ ok: false, reason: "not_configured" });
+    const flagged = await savedStatus();
+    expect(flagged.last_test_status).toBe("unreachable");
+    expect(flagged.last_test_message).toContain("could not send it either, so it was not delivered");
+    expect(flagged.last_test_message).not.toContain("sent it instead");
+    error.mockRestore();
   });
 
   it.each([
