@@ -109,8 +109,9 @@ openai_api_key = "env(OPENAI_API_KEY)"
 enabled = true
 # Port to use for the email testing server web interface.
 port = 54324
-# Uncomment to expose additional ports for testing user applications that send emails.
-# smtp_port = 54325
+# The SMTP port the local mail catcher listens on. MGM's deployment sender
+# points here in local development (MGM_SMTP_URL=smtp://127.0.0.1:54325).
+smtp_port = 54325
 # pop3_port = 54326
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
@@ -220,10 +221,12 @@ enable_confirmations = false
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
-# Number of characters used in the email OTP.
-otp_length = 6
+# Number of characters used in the email OTP. Ten, so the one-time token a
+# sign-in link carries is long (RFC #186); production sets the same.
+otp_length = 10
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# Sign-in links last 15 minutes (RFC #186); production sets the same.
+otp_expiry = 900
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]

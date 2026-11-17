@@ -75,6 +75,15 @@ function failure(reason: MailFailureReason, message = COPY[reason]): MailSendRes
   return { ok: false, reason, message };
 }
 
+const LOOPBACK: Record<string, string> = { localhost: "127.0.0.1", "127.0.0.1": "127.0.0.1", "::1": "::1" };
+
+/** The address of a loopback host, for the local mail catcher only. */
+function loopbackAddress(host: string): { ok: true; address: string } | { ok: false; reason: "refused_address"; message: string } {
+  const address = LOOPBACK[host];
+  if (!address) return { ok: false, reason: "refused_address", message: "A plaintext mail server must be on this machine (localhost)." };
+  return { ok: true, address };
+}
+
 function formatFrom(settings: SmtpSenderSettings): string | { name: string; address: string } {
   return settings.fromName ? { name: settings.fromName, address: settings.fromAddress } : settings.fromAddress;
 }
@@ -118,19 +127,26 @@ export function createSmtpTransport(settings: SmtpSenderSettings, deps: SmtpDeps
       };
 
       const work = async (): Promise<MailSendResult> => {
-        const resolved = await resolvePublicAddress(settings.host, deps.lookup);
+        const resolved = settings.loopback
+          ? loopbackAddress(settings.host)
+          : await resolvePublicAddress(settings.host, deps.lookup);
         if (!resolved.ok) return failure(resolved.reason, resolved.message);
         if (abandoned) return failure("unreachable");
 
+        const encryption = settings.loopback
+          ? { secure: false, ignoreTLS: true }
+          : {
+              secure: settings.port === 465,
+              requireTLS: settings.port !== 465,
+              servername: settings.host,
+              tls: { servername: settings.host, rejectUnauthorized: true, minVersion: "TLSv1.2" },
+            };
         transport = create({
           host: resolved.address,
           port: settings.port,
           getSocket: getSocket(resolved.address),
-          secure: settings.port === 465,
-          requireTLS: settings.port === 587,
-          servername: settings.host,
-          tls: { servername: settings.host, rejectUnauthorized: true, minVersion: "TLSv1.2" },
-          auth: { user: settings.username, pass: settings.password },
+          ...encryption,
+          ...(settings.username ? { auth: { user: settings.username, pass: settings.password } } : {}),
           connectionTimeout: CONNECT_TIMEOUT_MS,
           greetingTimeout: CONNECT_TIMEOUT_MS,
           socketTimeout: SEND_TIMEOUT_MS,

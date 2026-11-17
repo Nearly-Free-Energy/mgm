@@ -9,6 +9,7 @@
  *   - The sign-in button and the "Forgot password?" link are at least
  *     44 px tall, and the button's focus ring is offset on the card colour.
  *   - A sign-in error is announced to screen readers as an alert.
+ *   - Sign-in by email link (RFC #186).
  */
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -117,5 +118,61 @@ describe("LoginPage", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("Invalid login credentials");
     expect(replace).not.toHaveBeenCalledWith("/");
+  });
+
+  describe("sign-in by email", () => {
+    function respond(...bodies: [number, unknown][]) {
+      const fetchMock = vi.fn();
+      for (const [status, body] of bodies) {
+        fetchMock.mockResolvedValueOnce({ ok: status < 400, status, json: async () => body });
+      }
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("asks for the address before sending a link", async () => {
+      const fetchMock = respond();
+      const { default: LoginPage } = await import("../page");
+      render(<LoginPage />);
+      fireEvent.click(screen.getByRole("button", { name: /email me a sign-in link/i }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/email address/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    });
+
+    it("sends the link request with the return path, and offers a new email", async () => {
+      window.history.replaceState(null, "", "/login?next=%2Fmicrogrids%2Fm1");
+      const fetchMock = respond(
+        [202, { message: "If this address has access to MGM, a sign-in email is on its way." }],
+        [202, { message: "If this address has access to MGM, a sign-in email is on its way." }],
+      );
+      try {
+        const { default: LoginPage } = await import("../page");
+        render(<LoginPage />);
+        fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: "someone@example.com" } });
+        fireEvent.click(screen.getByRole("button", { name: /email me a sign-in link/i }));
+        expect((await screen.findByRole("status")).textContent).toMatch(/on its way.*this device/);
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/auth/sign-in-link",
+          expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "someone@example.com", next: "/microgrids/m1" }) }),
+        );
+        expect(screen.queryByLabelText(/code/i)).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: /send a new email/i }));
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      } finally {
+        window.history.replaceState(null, "", "/");
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("shows why a link was not sent", async () => {
+      respond([429, { error: "Too many requests. Wait a minute and try again." }]);
+      const { default: LoginPage } = await import("../page");
+      render(<LoginPage />);
+      fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: "someone@example.com" } });
+      fireEvent.click(screen.getByRole("button", { name: /email me a sign-in link/i }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/too many requests/i);
+      vi.unstubAllGlobals();
+    });
   });
 });

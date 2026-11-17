@@ -23,6 +23,10 @@ const PUBLIC_PATHS = [
   "/accept-invite",
   "/forgot-password",
   "/reset-password",
+  // Sign-in by email link (RFC #186): the link's landing page and the route
+  // that sends it, before a session exists.
+  "/auth/confirm",
+  "/api/auth/sign-in-link",
   "/api/mgm/health",
   // Release 4 (payments): Pesapal IPN webhook is an unauthenticated
   // server-to-server callback with no MGM session.

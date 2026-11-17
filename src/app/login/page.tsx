@@ -6,13 +6,51 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { RETURN_PATH_PARAM, safeReturnPath } from "@/lib/auth/return-path";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Sign-in by email link (RFC #186).
+  const [linkSent, setLinkSent] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+
+  /** The same-site page the middleware sent the person here from (#126). */
+  function returnPath(): string | null {
+    return new URLSearchParams(window.location.search).get(RETURN_PATH_PARAM);
+  }
+
+  async function sendLink() {
+    setError(null);
+    setNotice(null);
+    if (!EMAIL_RE.test(email.trim())) {
+      setError("Enter your email address first.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/sign-in-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), next: returnPath() }),
+      });
+      const value = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setError(value.error ?? "Could not send the sign-in email. Try again.");
+        return;
+      }
+      setLinkSent(true);
+      setNotice(value.message ?? "If this address has access to MGM, a sign-in email is on its way.");
+    } catch {
+      setError("Could not send the sign-in email. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,10 +71,7 @@ export default function LoginPage() {
     // Back to the page the middleware sent the person here from (#126), when
     // it is on this site. Read from the address bar at submit time rather
     // than useSearchParams(), which would need a Suspense boundary to build.
-    const next = new URLSearchParams(window.location.search).get(
-      RETURN_PATH_PARAM,
-    );
-    router.replace(safeReturnPath(next));
+    router.replace(safeReturnPath(returnPath()));
     router.refresh();
   }
 
@@ -105,6 +140,34 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+        <div className="mt-6 border-t border-border pt-6">
+          {!linkSent ? (
+            <button
+              type="button"
+              onClick={() => void sendLink()}
+              disabled={loading}
+              className="min-h-11 w-full rounded-md border border-border px-4 py-2 text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-card disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Email me a sign-in link
+            </button>
+          ) : (
+            <div className="space-y-3">
+              {notice && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {notice} Open the link in it on this device. It works once, for 15 minutes.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => void sendLink()}
+                disabled={loading}
+                className="min-h-11 w-full text-sm text-primary underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                Send a new email
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

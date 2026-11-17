@@ -30,6 +30,7 @@ const HOST_PAGES: Record<string, string> = {
   "/forgot-password": "Password reset request, signed out.",
   "/reset-password": "Password reset from the emailed link.",
   "/accept-invite": "Invitation acceptance, before the user has a role.",
+  "/auth/confirm": "Where the sign-in email's link lands, signed out (RFC #186).",
   "/no-access": "Shown to a signed-in user with no role.",
   "/setup": "First-run setup, before any organization exists.",
   "/review": "Redirects old bookmarks to the dashboard; owns no content.",
