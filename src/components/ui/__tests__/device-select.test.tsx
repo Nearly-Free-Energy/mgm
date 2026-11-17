@@ -103,7 +103,7 @@ const WITH_LINKED: DeviceOption[] = [
     device_type: "consumption_meter",
     edge_id: "edge-1",
     edge_name: "Alpha Edge",
-    linkedToHouseholdName: "Household X",
+    linkedToTenantName: "Tenant X",
   },
 ];
 
@@ -165,8 +165,8 @@ describe("DeviceSelect (#145)", () => {
     );
     openTrigger();
 
-    // "linked to Household X" suffix is rendered for the linked device
-    expect(screen.getByText(/linked to Household X/i)).toBeTruthy();
+    // "linked to Tenant X" suffix is rendered for the linked device
+    expect(screen.getByText(/linked to Tenant X/i)).toBeTruthy();
 
     // The linked option carries aria-disabled (Radix sets this from the
     // `disabled` prop on Select.Item).

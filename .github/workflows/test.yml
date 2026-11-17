@@ -171,6 +171,15 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-key.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-credential-retirement.sql
 
+      # The rollback path of migration 20261116230000: its reverse script,
+      # the preflight on the reversed schema, and the migration again. Remove
+      # this step with the script once a later migration changes an object the
+      # rename touches (the script's header says why).
+      - name: Tenant rename reverse rehearsal
+        run: |
+          eval "$(npx supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-tenant-rename-reverse.sql
+
       - name: Database diagnostics on rehearsal failure
         if: failure()
         run: docker logs --tail 200 supabase_db_mgm
@@ -189,7 +198,7 @@ jobs:
           npm test
 
       # The browser smoke (e2e/, playwright.config.ts): sign-in, home, a
-      # households list and the invoice page's logo and PDF preview at 360 px,
+      # tenants list and the invoice page's logo and PDF preview at 360 px,
       # against the production build and the local Supabase above, as a
       # throwaway user it creates and deletes. Every
       # value comes from `supabase status` on this runner; none is a

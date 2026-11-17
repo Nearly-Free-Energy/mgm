@@ -86,7 +86,7 @@ describe("community-management import boundary", () => {
       [
         "capability.ts",
         path.join("operations", "communities.ts"),
-        path.join("operations", "households.ts"),
+        path.join("operations", "tenants.ts"),
         path.join("operations", "microgrids.ts"),
         path.join("operations", "shared.ts"),
       ].sort()

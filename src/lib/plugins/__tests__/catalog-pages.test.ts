@@ -56,7 +56,7 @@ const SEGMENT_KINDS: Record<string, CoreEntityKind> = {
   "communities/[id]": "community",
   "microgrids/[id]": "microgrid",
   "[edgeId]": "edge",
-  "[householdId]": "household",
+  "[tenantId]": "tenant",
   "[periodId]": "billingPeriod",
 };
 
@@ -73,8 +73,8 @@ const PAGE_OWNERS: Record<string, MgmPluginName> = {
   "/communities/[id]": "community-management",
   "/microgrids": "community-management",
   "/microgrids/[id]/setup": "community-management",
-  "/microgrids/[id]/setup/households": "community-management",
-  "/microgrids/[id]/setup/households/[householdId]": "community-management",
+  "/microgrids/[id]/setup/tenants": "community-management",
+  "/microgrids/[id]/setup/tenants/[tenantId]": "community-management",
   "/microgrids/[id]/operations": "metering",
   "/microgrids/[id]/operations/savings": "billing",
   "/microgrids/[id]/setup/edges": "metering",

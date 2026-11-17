@@ -26,7 +26,7 @@ import * as React from "react";
 import type { ColumnDef } from "@/components/ui/copy-table";
 
 export interface MultiSelectColumnArgs<Row> {
-  /** Function that maps a row to its select-key (typically the household id). */
+  /** Function that maps a row to its select-key (typically the tenant id). */
   getRowId: (row: Row) => string;
   /** Function that returns the display name for a row's aria-label. */
   getRowName: (row: Row) => string;

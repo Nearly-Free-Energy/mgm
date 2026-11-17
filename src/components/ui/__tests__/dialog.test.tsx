@@ -168,10 +168,10 @@ describe("dialogs built on the frame", () => {
           open
           onOpenChange={vi.fn()}
           periodLabel="April 2026"
-          summaryRows={[{ label: "Households", value: "12" }]}
+          summaryRows={[{ label: "Tenants", value: "12" }]}
           grandTotal={4_216_800}
           onConfirm={vi.fn().mockResolvedValue(undefined)}
-          unfilledHouseholdNames={["House 1"]}
+          unfilledTenantNames={["House 1"]}
         />
       </LocaleProvider>,
     );

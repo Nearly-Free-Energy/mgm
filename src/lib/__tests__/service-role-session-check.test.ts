@@ -433,9 +433,9 @@ const ENTRIES: Record<string, Entry> = {
     path: "/api/v1/microgrids",
     reason: "The token-authenticated v1 API is not released.",
   },
-  "src/app/api/v1/microgrids/[microgrid_id]/households/route.ts": {
+  "src/app/api/v1/microgrids/[microgrid_id]/tenants/route.ts": {
     kind: "unreleased",
-    path: "/api/v1/microgrids/grid-1/households",
+    path: "/api/v1/microgrids/grid-1/tenants",
     reason: "The token-authenticated v1 API is not released.",
   },
 };

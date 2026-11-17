@@ -1,6 +1,6 @@
 # MGM — Microgrid Manager
 
-An operating system for microgrid operators. Organizations manage their communities, microgrids, households, and meters; read consumption from OpenEMS; bill households against tariffs; and collect payments — each as a plugin they can turn on or off.
+An operating system for microgrid operators. Organizations manage their communities, microgrids, tenants, and meters; read consumption from OpenEMS; bill tenants against tariffs; and collect payments — each as a plugin they can turn on or off.
 
 **Stack:** Next.js (App Router) + [Cordis](https://github.com/cordiverse/cordis) plugin runtime + Supabase (Postgres, Auth, RLS) + OpenEMS (meter data via its B2B API) + Pesapal (payments)
 

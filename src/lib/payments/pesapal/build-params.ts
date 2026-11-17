@@ -2,12 +2,13 @@
  * Build Pesapal submitOrder params from a single billing_line_items row.
  *
  * One bill → one payment link. The line item carries both the amount and the
- * household to charge; the joined period supplies the date range used in the
+ * tenant to charge; the joined period supplies the date range used in the
  * human-readable description.
  *
  * Adapted from PR #58 (`src/lib/pesapal/build-params.ts` by @rhussain21).
- * Major change: joins `households` instead of the dead `tenants` table, using
- * `display_name`, `primary_email`, `primary_phone`.
+ * Major change: reads the tenant from the entity model (#50) rather than the
+ * pre-#50 `tenants` table PR #58 used, taking `display_name`,
+ * `primary_email`, `primary_phone`.
  *
  * Kept as a separate module so both the UI click flow and any future CLI
  * smoke-test paths log identical inputs/outputs and enforce the same trust
@@ -28,13 +29,13 @@ type PeriodRow = {
 
 type LineItemRow = {
   id: string;
-  household_id: string;
+  tenant_id: string;
   total_amount: number;
   billing_period_id: string;
   billing_periods: PeriodRow | PeriodRow[] | null;
 };
 
-type HouseholdRow = {
+type TenantRow = {
   id: string;
   display_name: string;
   primary_email: string | null;
@@ -48,7 +49,7 @@ export interface BuildParamsResult {
   debug: {
     lineItem: { id: string; total_amount: number };
     period: PeriodRow;
-    household: HouseholdRow;
+    tenant: TenantRow;
     dateRange: string;
   };
 }
@@ -97,7 +98,7 @@ export async function buildOrderParamsFromLineItem(
     .select(
       `
       id,
-      household_id,
+      tenant_id,
       total_amount,
       billing_period_id,
       billing_periods!inner (
@@ -132,25 +133,25 @@ export async function buildOrderParamsFromLineItem(
     );
   }
 
-  // 2. Fetch the household named on this line item.
-  const { data: household, error: householdErr } = await supabase
-    .from("households")
+  // 2. Fetch the tenant named on this line item.
+  const { data: tenant, error: tenantErr } = await supabase
+    .from("tenants")
     .select("id, display_name, primary_email, primary_phone")
-    .eq("id", lineItem.household_id)
-    .single<HouseholdRow>();
-  if (householdErr || !household) {
+    .eq("id", lineItem.tenant_id)
+    .single<TenantRow>();
+  if (tenantErr || !tenant) {
     throw new PesapalError(
-      `Household ${lineItem.household_id} not found`,
-      "PESAPAL_HOUSEHOLD_NOT_FOUND",
+      `Tenant ${lineItem.tenant_id} not found`,
+      "PESAPAL_TENANT_NOT_FOUND",
       404,
-      householdErr,
+      tenantErr,
     );
   }
 
   // 3. Pesapal requires email OR phone on billing_address.
-  if (!household.primary_email && !household.primary_phone) {
+  if (!tenant.primary_email && !tenant.primary_phone) {
     throw new PesapalError(
-      `Household "${household.display_name}" has neither primary_email nor primary_phone — Pesapal needs one of them`,
+      `Tenant "${tenant.display_name}" has neither primary_email nor primary_phone — Pesapal needs one of them`,
       "PESAPAL_MISSING_CONTACT",
       400,
     );
@@ -167,15 +168,15 @@ export async function buildOrderParamsFromLineItem(
   }
 
   // 5. Build the billing-address and description.
-  const { firstName, lastName } = splitName(household.display_name);
+  const { firstName, lastName } = splitName(tenant.display_name);
   const dateRange = formatDateRange(period.start_date, period.end_date);
 
   const billingAddress: BillingAddress = {
-    ...(household.primary_email
-      ? { email_address: household.primary_email }
+    ...(tenant.primary_email
+      ? { email_address: tenant.primary_email }
       : {}),
-    ...(household.primary_phone
-      ? { phone_number: household.primary_phone }
+    ...(tenant.primary_phone
+      ? { phone_number: tenant.primary_phone }
       : {}),
     first_name: firstName,
     last_name: lastName,
@@ -188,7 +189,7 @@ export async function buildOrderParamsFromLineItem(
     debug: {
       lineItem: { id: lineItem.id, total_amount: totalAmount },
       period,
-      household,
+      tenant,
       dateRange,
     },
   };

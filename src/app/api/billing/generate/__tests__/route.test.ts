@@ -5,18 +5,18 @@
  *   - 401 unauthorized when supabase.auth.getUser() returns no user.
  *   - 400 invalid_body for malformed manualReadings.
  *   - Bulk path delegates to fn_record_line_item_with_audit (one RPC call
- *     per processed household; `mode='write'`).
+ *     per processed tenant; `mode='write'`).
  *   - manualReadings override path sets reading_source='manual' on the RPC
  *     payload (`_reading_source: 'manual'`) plus entered_by_user_id from
  *     auth.uid().
- *   - Empty householdIds (`[]`) writes nothing AND returns
+ *   - Empty tenantIds (`[]`) writes nothing AND returns
  *     `{ lineItems: 0, errors: [] }` (AC3 explicit no-op).
  *   - Cross-microgrid manualReadings entry surfaces in errors[] with
- *     code='unknown_household' (AC3 attack defense).
- *   - a manual-source household named in householdIds without a
+ *     code='unknown_tenant' (AC3 attack defense).
+ *   - a manual-source tenant named in tenantIds without a
  *     manualReadings entry surfaces in errors[] with code='currently_manual'
- *     (AC3 Q5); a bulk run without householdIds keeps it instead.
- *   - revertToEdgeHouseholdIds is validated and forwarded; kept households
+ *     (AC3 Q5); a bulk run without tenantIds keeps it instead.
+ *   - revertToEdgeTenantIds is validated and forwarded; kept tenants
  *     are returned in kept[], not errors[].
  *
  * Test pattern: the route is mocked at the supabase + auth + composeBilling
@@ -40,9 +40,9 @@ let mockCapabilityResult: { ok: boolean; status?: number; code?: string; message
 };
 let lastCapabilityCall: {
   billingPeriodId?: string;
-  householdIds?: string[];
+  tenantIds?: string[];
   manualReadings?: unknown[];
-  revertToEdgeHouseholdIds?: string[];
+  revertToEdgeTenantIds?: string[];
   seedReadings?: unknown[];
 } | null = null;
 let periodRow: { id: string; microgrid_id: string } | null = {
@@ -85,16 +85,16 @@ vi.mock("@/lib/billing/compose", () => ({
         billing: {
           generateBills: vi.fn(async (input: {
             billingPeriodId: string;
-            householdIds?: string[];
+            tenantIds?: string[];
             manualReadings?: unknown[];
-            revertToEdgeHouseholdIds?: string[];
+            revertToEdgeTenantIds?: string[];
             seedReadings?: unknown[];
           }) => {
             lastCapabilityCall = {
               billingPeriodId: input.billingPeriodId,
-              householdIds: input.householdIds,
+              tenantIds: input.tenantIds,
               manualReadings: input.manualReadings,
-              revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
+              revertToEdgeTenantIds: input.revertToEdgeTenantIds,
               seedReadings: input.seedReadings,
             };
             return mockCapabilityResult;
@@ -155,7 +155,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
       makePostRequest({
         billingPeriodId: PERIOD_ID,
         manualReadings: [
-          { householdId: HH_A, startKwh: 100, endKwh: 50 },
+          { tenantId: HH_A, startKwh: 100, endKwh: 50 },
         ],
       })
     );
@@ -170,7 +170,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
       makePostRequest({
         billingPeriodId: PERIOD_ID,
         manualReadings: [
-          { householdId: HH_A, startKwh: -1, endKwh: 50 },
+          { tenantId: HH_A, startKwh: -1, endKwh: 50 },
         ],
       })
     );
@@ -184,8 +184,8 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
         results: [
           {
             kind: "written",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             lineItem: { id: "li-x" },
             previousTotalAmount: null,
             previousPaymentStatus: null,
@@ -204,7 +204,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     // actor, and assignment-date enforcement are capability-owned (the UI
     // must never be able to switch them off per-call).
     expect(lastCapabilityCall?.billingPeriodId).toBe(PERIOD_ID);
-    expect(lastCapabilityCall?.householdIds).toBeUndefined();
+    expect(lastCapabilityCall?.tenantIds).toBeUndefined();
     expect(lastCapabilityCall?.manualReadings).toBeUndefined();
   });
 
@@ -215,8 +215,8 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
         results: [
           {
             kind: "written",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             lineItem: { id: "li-x" },
             previousTotalAmount: null,
             previousPaymentStatus: null,
@@ -231,7 +231,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
         billingPeriodId: PERIOD_ID,
         manualReadings: [
           {
-            householdId: HH_A,
+            tenantId: HH_A,
             startKwh: 100,
             endKwh: 180,
             reason: "Aaron read the meter manually",
@@ -242,7 +242,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     expect(res.status).toBe(200);
     expect(lastCapabilityCall?.manualReadings).toEqual([
       {
-        householdId: HH_A,
+        tenantId: HH_A,
         startKwh: 100,
         endKwh: 180,
         reason: "Aaron read the meter manually",
@@ -257,8 +257,8 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
         results: [
           {
             kind: "written",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             lineItem: { id: "li-x" },
             previousTotalAmount: null,
             previousPaymentStatus: null,
@@ -272,7 +272,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
       makePostRequest({
         billingPeriodId: PERIOD_ID,
         manualReadings: [
-          { householdId: HH_A, startKwh: 100, endKwh: 100 },
+          { tenantId: HH_A, startKwh: 100, endKwh: 100 },
         ],
       })
     );
@@ -286,8 +286,8 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
         results: [
           {
             kind: "written",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             lineItem: { id: "li-x" },
             previousTotalAmount: null,
             previousPaymentStatus: null,
@@ -295,17 +295,17 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
           },
           {
             kind: "error",
-            householdId: "660e8400-e29b-41d4-a716-446655442002",
-            householdName: "HH B",
+            tenantId: "660e8400-e29b-41d4-a716-446655442002",
+            tenantName: "HH B",
             error: "Currently set to manual entry — use per-row regenerate to change.",
             code: "currently_manual",
           },
           {
             kind: "error",
-            householdId: "660e8400-e29b-41d4-a716-446655442003",
-            householdName: "660e8400-e29b-41d4-a716-446655442003",
-            error: "Household 660e8400-e29b-41d4-a716-446655442003 is not in this microgrid.",
-            code: "unknown_household",
+            tenantId: "660e8400-e29b-41d4-a716-446655442003",
+            tenantName: "660e8400-e29b-41d4-a716-446655442003",
+            error: "Tenant 660e8400-e29b-41d4-a716-446655442003 is not in this microgrid.",
+            code: "unknown_tenant",
           },
         ],
       },
@@ -314,7 +314,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     const res = await POST(
       makePostRequest({
         billingPeriodId: PERIOD_ID,
-        householdIds: [HH_A, "660e8400-e29b-41d4-a716-446655442002"],
+        tenantIds: [HH_A, "660e8400-e29b-41d4-a716-446655442002"],
       })
     );
     expect(res.status).toBe(200);
@@ -322,7 +322,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     expect(json.lineItems).toBe(1);
     expect(json.errors).toHaveLength(2);
     expect(json.errors[0].code).toBe("currently_manual");
-    expect(json.errors[1].code).toBe("unknown_household");
+    expect(json.errors[1].code).toBe("unknown_tenant");
   });
 
   it("propagates capability failures (engine fatal mapped by the capability)", async () => {
@@ -363,55 +363,55 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     expect(lastCapabilityCall).toBeNull();
   });
 
-  describe("revertToEdgeHouseholdIds", () => {
+  describe("revertToEdgeTenantIds", () => {
     async function post(body: Record<string, unknown>) {
       const { POST } = await import("../route");
       return POST(makePostRequest({ billingPeriodId: PERIOD_ID, ...body }));
     }
 
     it("forwards a well-formed array to the billing capability", async () => {
-      const res = await post({ householdIds: [HH_A], revertToEdgeHouseholdIds: [HH_A] });
+      const res = await post({ tenantIds: [HH_A], revertToEdgeTenantIds: [HH_A] });
       expect(res.status).toBe(200);
-      expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toEqual([HH_A]);
+      expect(lastCapabilityCall?.revertToEdgeTenantIds).toEqual([HH_A]);
     });
 
     it("leaves it undefined when omitted", async () => {
       const res = await post({});
       expect(res.status).toBe(200);
-      expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toBeUndefined();
+      expect(lastCapabilityCall?.revertToEdgeTenantIds).toBeUndefined();
     });
 
     it("400 when it is not an array", async () => {
-      const res = await post({ revertToEdgeHouseholdIds: HH_A });
+      const res = await post({ revertToEdgeTenantIds: HH_A });
       expect(res.status).toBe(400);
       expect(lastCapabilityCall).toBeNull();
     });
 
     it("400 on a non-UUID entry", async () => {
-      const res = await post({ revertToEdgeHouseholdIds: ["not-a-uuid"] });
+      const res = await post({ revertToEdgeTenantIds: ["not-a-uuid"] });
       expect(res.status).toBe(400);
       expect(lastCapabilityCall).toBeNull();
     });
 
-    it("400 when a household is also in manualReadings", async () => {
+    it("400 when a tenant is also in manualReadings", async () => {
       const res = await post({
-        manualReadings: [{ householdId: HH_A, startKwh: 1, endKwh: 2 }],
-        revertToEdgeHouseholdIds: [HH_A],
+        manualReadings: [{ tenantId: HH_A, startKwh: 1, endKwh: 2 }],
+        revertToEdgeTenantIds: [HH_A],
       });
       expect(res.status).toBe(400);
       expect(lastCapabilityCall).toBeNull();
     });
   });
 
-  it("returns kept households in kept[], not errors[]", async () => {
+  it("returns kept tenants in kept[], not errors[]", async () => {
     mockCapabilityResult = {
       ok: true,
       data: {
         results: [
           {
             kind: "kept",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             readingSource: "manual",
           },
         ],
@@ -423,7 +423,7 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     const json = await res.json();
     expect(json).toEqual({
       lineItems: 0,
-      kept: [{ householdId: HH_A, householdName: "HH A" }],
+      kept: [{ tenantId: HH_A, tenantName: "HH A" }],
       errors: [],
     });
   });

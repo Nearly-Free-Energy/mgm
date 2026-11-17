@@ -36,7 +36,7 @@ if (skip) {
 
 // Fail-loud insert helper — surface fixture drift instead of silently
 // swallowing PostgREST errors. Catches things like the
-// idx_billing_line_items_period_household UNIQUE collision and the missing
+// idx_billing_line_items_period_tenant UNIQUE collision and the missing
 // openems_edge_id NOT NULL violation that masked two failures in this file
 // before #242.
 async function insertOrThrow(
@@ -53,15 +53,15 @@ async function insertOrThrow(
   }
 }
 
-// householdA and householdB are distinct so that lineItemA and lineItemB do
-// NOT collide on idx_billing_line_items_period_household (UNIQUE, added by
+// tenantA and tenantB are distinct so that lineItemA and lineItemB do
+// NOT collide on idx_billing_line_items_period_tenant (UNIQUE, added by
 // migration 00029 AFTER this test was originally written). See #242.
 const FIXTURE = {
   orgId: "eeeeeeee-eeee-4000-8000-00000000023a",
   communityId: "eeeeeeee-eeee-4000-8001-00000000023a",
   microgridId: "eeeeeeee-eeee-4000-8002-00000000023a",
-  householdA: "eeeeeeee-eeee-4000-8003-00000000023a",
-  householdB: "eeeeeeee-eeee-4000-8003-00000000023b",
+  tenantA: "eeeeeeee-eeee-4000-8003-00000000023a",
+  tenantB: "eeeeeeee-eeee-4000-8003-00000000023b",
   deviceId: "eeeeeeee-eeee-4000-8004-00000000023a",
   edgeId: "eeeeeeee-eeee-4000-8005-00000000023a",
   periodId: "eeeeeeee-eeee-4000-8006-00000000023a",
@@ -110,15 +110,15 @@ desc("00038_billing_line_items_short_slug.sql (#223)", () => {
       name: "Meter",
       openems_component_id: "short-slug-meter",
     });
-    await insertOrThrow(svc, "households", [
+    await insertOrThrow(svc, "tenants", [
       {
-        id: FIXTURE.householdA,
+        id: FIXTURE.tenantA,
         microgrid_id: FIXTURE.microgridId,
         display_name: "Sam A",
         primary_phone: "+256700000001",
       },
       {
-        id: FIXTURE.householdB,
+        id: FIXTURE.tenantB,
         microgrid_id: FIXTURE.microgridId,
         display_name: "Sam B",
         primary_phone: "+256700000002",
@@ -131,20 +131,20 @@ desc("00038_billing_line_items_short_slug.sql (#223)", () => {
       end_date: "2026-04-30",
     });
     // Two line items for the duplicate / NULL tests. They must NOT share
-    // (billing_period_id, household_id) — migration 00029 added that as a
-    // UNIQUE index. Route each to a distinct household.
+    // (billing_period_id, tenant_id) — migration 00029 added that as a
+    // UNIQUE index. Route each to a distinct tenant.
     await insertOrThrow(svc, "billing_line_items", [
       {
         id: FIXTURE.lineItemA,
         billing_period_id: FIXTURE.periodId,
-        household_id: FIXTURE.householdA,
+        tenant_id: FIXTURE.tenantA,
         total_amount: 1000,
         tier_breakdown: [],
       },
       {
         id: FIXTURE.lineItemB,
         billing_period_id: FIXTURE.periodId,
-        household_id: FIXTURE.householdB,
+        tenant_id: FIXTURE.tenantB,
         total_amount: 1000,
         tier_breakdown: [],
       },

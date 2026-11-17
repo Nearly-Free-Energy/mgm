@@ -1,7 +1,7 @@
 // BillingTable integration test (jsdom, component environment)
 //
 // Strategy:
-//   - Mount BillingTable with a minimal fixture (one period, two tiers, three households,
+//   - Mount BillingTable with a minimal fixture (one period, two tiers, three tenants,
 //     three line items) wrapped in <LocaleProvider locale="en-UG" currency="UGX">.
 //   - Assert rendered markup only; does NOT fire mutation handlers (Close / Delete /
 //     Generate) — those handlers instantiate a Supabase client and router, both mocked.
@@ -20,7 +20,7 @@ import { LocaleProvider } from "../format/locale-context";
 import type {
   BillingLineItem,
   BillingPeriod,
-  Household,
+  Tenant,
   TierConfig,
 } from "@/lib/types/domain";
 
@@ -97,7 +97,7 @@ const period: BillingPeriod = {
   rate_schedule_id: null,
 };
 
-const households: Household[] = [
+const tenants: Tenant[] = [
   {
     id: "h-1",
     microgrid_id: "mg-1",
@@ -113,7 +113,7 @@ const households: Household[] = [
     address_postal_code: null,
     geography_notes: null,
     created_at: "2026-01-01T00:00:00Z",
-    // PDF1a (#202) household identity fields.
+    // PDF1a (#202) tenant identity fields.
     account_number: null,
     customer_type: "residential",
     meter_serial: null,
@@ -165,7 +165,7 @@ const lineItems: BillingLineItem[] = [
   {
     id: "li-1",
     billing_period_id: "period-1",
-    household_id: "h-1",
+    tenant_id: "h-1",
     device_id: "d-1",
     usage_kwh: 80,
     start_kwh: 200,
@@ -199,7 +199,7 @@ const lineItems: BillingLineItem[] = [
   {
     id: "li-2",
     billing_period_id: "period-1",
-    household_id: "h-2",
+    tenant_id: "h-2",
     device_id: "d-2",
     usage_kwh: 45,
     start_kwh: 100,
@@ -232,7 +232,7 @@ const lineItems: BillingLineItem[] = [
   {
     id: "li-3",
     billing_period_id: "period-1",
-    household_id: "h-3",
+    tenant_id: "h-3",
     device_id: "d-3",
     usage_kwh: 110,
     start_kwh: 50,
@@ -276,7 +276,7 @@ const baseProps = {
   microgridId: "mg-1",
   period,
   lineItems,
-  households,
+  tenants,
   tiers,
   currency: "UGX",
 };
@@ -338,7 +338,7 @@ describe("BillingTable", () => {
     const statusHeader = headers.find((h) => h.textContent === "Status");
     expect(statusHeader).not.toBeNull();
 
-    // One row-actions kebab per row with a line item (3 households).
+    // One row-actions kebab per row with a line item (3 tenants).
     const kebabs = Array.from(container.querySelectorAll("button")).filter(
       (b) => /row actions for/i.test(b.getAttribute("aria-label") ?? ""),
     );
@@ -559,7 +559,7 @@ describe("BillingTable", () => {
   it("(f) row-actions kebab still renders when !isPaymentConfigured (gate banner explains the why)", () => {
     // BC2 (#174) — payment-link generate items are HIDDEN inside the menu
     // when !isPaymentConfigured, but the kebab itself still renders so the
-    // operator can mark-paid / view-history / view-household.
+    // operator can mark-paid / view-history / view-tenant.
     const { container } = render(
       <Wrapper>
         <BillingTable
@@ -656,7 +656,7 @@ describe("BillingTable", () => {
       }
     });
 
-    it("disabled with 'Generate readings before exporting' tooltip when lineItems.length === 0 (but households exist)", () => {
+    it("disabled with 'Generate readings before exporting' tooltip when lineItems.length === 0 (but tenants exist)", () => {
       const { container } = render(
         <Wrapper>
           <BillingTable {...baseProps} lineItems={[]} />
@@ -670,10 +670,10 @@ describe("BillingTable", () => {
       expect(btn.title).toBe("Generate readings before exporting");
     });
 
-    it("disabled with 'No households to export' tooltip when households.length === 0", () => {
+    it("disabled with 'No tenants to export' tooltip when tenants.length === 0", () => {
       const { container } = render(
         <Wrapper>
-          <BillingTable {...baseProps} households={[]} lineItems={[]} />
+          <BillingTable {...baseProps} tenants={[]} lineItems={[]} />
         </Wrapper>,
       );
       const btn = Array.from(container.querySelectorAll("button")).find(
@@ -681,7 +681,7 @@ describe("BillingTable", () => {
       ) as HTMLButtonElement;
       expect(btn).toBeDefined();
       expect(btn.disabled).toBe(true);
-      expect(btn.title).toBe("No households to export");
+      expect(btn.title).toBe("No tenants to export");
     });
 
     it("close-dialog's 'Export CSV for URA' button invokes onExportCsv which triggers /api/.../export-csv navigation", async () => {
@@ -873,7 +873,7 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
     );
   }
 
-  function renderTableWithUnfilledHousehold() {
+  function renderTableWithUnfilledTenant() {
     return render(
       <Wrapper>
         <BillingTable
@@ -915,7 +915,7 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
       status: 200,
       json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
     });
-    renderTableWithUnfilledHousehold();
+    renderTableWithUnfilledTenant();
     await openDialogAndConfirm();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -928,8 +928,8 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
         ok: false,
         status: 409,
         json: async () => ({
-          code: "billing_unresolved_households",
-          message: "Period has 1 unresolved household(s). Confirm explicitly to close anyway.",
+          code: "billing_unresolved_tenants",
+          message: "Period has 1 unresolved tenant(s). Confirm explicitly to close anyway.",
         }),
       })
       .mockResolvedValueOnce({

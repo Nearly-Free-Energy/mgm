@@ -8,7 +8,7 @@
  *   - RFC 4180 compliance (CRLF, double-quote escaping).
  *   - UTF-8 BOM (`0xEF 0xBB 0xBF`) so Excel for Mac / Windows detects
  *     UTF-8 without falling back to the system locale and mangling
- *     accents in household names.
+ *     accents in tenant names.
  *   - Locale-neutral raw decimal values — operators' spreadsheets do the
  *     display formatting. We do NOT call `Intl.NumberFormat` or
  *     `toLocaleString`.
@@ -33,7 +33,7 @@ import { roundKwh, roundAmount } from "./precision";
 
 /** Per-row input to {@link buildBillingPeriodCsv}. */
 export interface CsvExportRow {
-  household: {
+  tenant: {
     display_name: string;
     account_number: string | null;
     meter_serial: string | null;
@@ -136,7 +136,7 @@ function csvCell(value: unknown): string {
 
 /** Compose the service Address from the same 5 fields as the PDF renderer
  * (`render.tsx:665-674`): filter empty/blank, comma-join the rest. */
-function composeAddress(h: CsvExportRow["household"]): string {
+function composeAddress(h: CsvExportRow["tenant"]): string {
   return [
     h.unit_label,
     h.address_line1,
@@ -196,7 +196,7 @@ export const UTF8_BOM = "﻿";
  *     to bytes `0xEF 0xBB 0xBF`.
  *   - One header row + N data rows separated by `\r\n` (RFC 4180).
  *   - Per-tier columns are expanded in `rateSchedule.tiers` order.
- *   - Rows are sorted by `household.display_name` (case-insensitive,
+ *   - Rows are sorted by `tenant.display_name` (case-insensitive,
  *     locale-stable via `localeCompare`); ties broken by `lineItem.id`.
  *   - Empty rows array → header-only CSV.
  */
@@ -216,7 +216,7 @@ export function buildBillingPeriodCsv(input: CsvExportInput): string {
   const header: string[] = [
     "Invoice Number",
     "Issue Date",
-    "Household",
+    "Tenant",
     "Account Number",
     "OpenEMS Meter ID",
     "Meter Serial",
@@ -247,8 +247,8 @@ export function buildBillingPeriodCsv(input: CsvExportInput): string {
 
   // ── Sort rows (stable secondary by line-item id) ──────────────────────────
   const sortedRows = [...input.rows].sort((a, b) => {
-    const nameCmp = a.household.display_name.localeCompare(
-      b.household.display_name,
+    const nameCmp = a.tenant.display_name.localeCompare(
+      b.tenant.display_name,
     );
     if (nameCmp !== 0) return nameCmp;
     return a.lineItem.id.localeCompare(b.lineItem.id);
@@ -256,7 +256,7 @@ export function buildBillingPeriodCsv(input: CsvExportInput): string {
 
   // ── Data rows ─────────────────────────────────────────────────────────────
   const dataRows: string[][] = sortedRows.map((row) => {
-    const { household: h, device, lineItem: li } = row;
+    const { tenant: h, device, lineItem: li } = row;
 
     // Tier lookup by label — handles tier_breakdown arrays that have
     // shifted order or omit unreached tiers entirely.

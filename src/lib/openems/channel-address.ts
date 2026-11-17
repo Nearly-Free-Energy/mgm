@@ -24,11 +24,11 @@ export function channelAddressFor(
     case "grid_meter":
       // Grid meters expose signed ActiveEnergy or separate
       // ActiveProductionEnergy / ActiveConsumptionEnergy pairs.
-      // No single scalar is correct for household billing; deferred.
+      // No single scalar is correct for tenant billing; deferred.
       return null;
 
     case "pv_meter":
-      // Bi-directional semantics; not billed as household consumption.
+      // Bi-directional semantics; not billed as tenant consumption.
       return null;
 
     case "battery":

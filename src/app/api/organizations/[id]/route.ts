@@ -162,8 +162,8 @@ export async function PATCH(
  * than chase 204-on-already-gone.
  *
  * Cascade chain: organizations → communities → microgrids → edges → devices
- * → household_devices + billing_line_items (device_id SET NULL, survives);
- * microgrids → households → household_users + household_devices; microgrids
+ * → tenant_devices + billing_line_items (device_id SET NULL, survives);
+ * microgrids → tenants → tenant_users + tenant_devices; microgrids
  * → billing_periods → billing_line_items; microgrids → rate_schedules; and,
  * via 00015's new FK, organizations → user_roles (org-scoped).
  *

@@ -12,7 +12,7 @@ import type { Contribution, Loaded } from "@/lib/gui/surface";
 const ORG = "00000000-0000-4000-8000-0000000000a1";
 const MICROGRID = "00000000-0000-4000-8000-0000000000b1";
 const PERIOD = "00000000-0000-4000-8000-0000000000c1";
-const HOUSEHOLD = "00000000-0000-4000-8000-0000000000d1";
+const TENANT = "00000000-0000-4000-8000-0000000000d1";
 
 const CreatePeriodBody = z.strictObject({
   microgrid_id: z.uuid(),
@@ -108,17 +108,17 @@ const reviewExample: ModelOf<"collection"> = {
   ext: { schema: "billing.period-review@1", data: { tariffVersion: 1, preflight: { readings: 12, missing: 0 } } },
   body: {
     columns: [
-      { key: "household", label: "Household", type: "ref", priority: 1 },
+      { key: "tenant", label: "Tenant", type: "ref", priority: 1 },
       { key: "tier.1", label: "Tier 1 (kWh)", type: "energy", priority: 2 },
       { key: "total", label: "Total (UGX)", type: "money", priority: 1, copy: "bare" },
       { key: "payment", label: "Payment", type: "status", priority: 2 },
     ],
     rows: [
       {
-        id: HOUSEHOLD,
-        entity: { kind: "household", id: HOUSEHOLD, label: "House 1" },
+        id: TENANT,
+        entity: { kind: "tenant", id: TENANT, label: "House 1" },
         cells: {
-          household: { t: "ref", ref: { kind: "household", id: HOUSEHOLD, label: "House 1" }, text: "House 1" },
+          tenant: { t: "ref", ref: { kind: "tenant", id: TENANT, label: "House 1" }, text: "House 1" },
           "tier.1": { t: "energy", v: 153.4, unit: "kWh", text: "153.4" },
           total: { t: "money", v: 351400, currency: "UGX", text: "351,400" },
           payment: { t: "status", v: "pending", tone: "neutral", text: "Pending" },
@@ -191,7 +191,7 @@ export const BILLING_SURFACE: Contribution = {
       cost: "db",
       agent: "read",
       live: { refreshSeconds: 30, staleAfterSeconds: 120 },
-      declares: { keys: ["household", "total", "payment"], prefixes: ["tier."] },
+      declares: { keys: ["tenant", "total", "payment"], prefixes: ["tier."] },
       ext: { schema: "billing.period-review@1", zod: PeriodReviewExt },
       examples: [reviewExample],
       load: unavailable,

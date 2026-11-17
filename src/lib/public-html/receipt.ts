@@ -1,5 +1,5 @@
 /**
- * The page a household sees when the payment provider sends them back to
+ * The page a tenant sees when the payment provider sends them back to
  * MGM after a hosted checkout (src/app/payment/callback/route.ts). It says
  * one of two things: the payment's status has been checked with the
  * provider, or confirmation is pending. "Checked" covers a failed payment
@@ -46,7 +46,7 @@ export function whatsappHref(number: string): string | null {
  * src/lib/invoices/render.tsx): the seller's trade name, else the
  * organization's name; the WhatsApp number from the branding, else the
  * seller's contact phone; the operator's colour from the branding. If the
- * bill's rule changes, change this one with it, so a household sees the
+ * bill's rule changes, change this one with it, so a tenant sees the
  * same name on both. The community goes beneath when it differs. An
  * invoice configuration that does not parse gives the names only.
  */

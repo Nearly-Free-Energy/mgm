@@ -27,7 +27,7 @@
  * - Any other gap is missing data, not dark, and is left out of the
  *   lights-on share.
  * - A cut continues through a gap until a sample shows the grid back.
- * - Houses used, evening: what the household meters' cumulative consumption
+ * - Houses used, evening: what the tenant meters' cumulative consumption
  *   counters advanced over the evening window (the report's "sold 18–24h").
  *   A bin's value is the counter's mean over the bin, about its reading at
  *   the bin's middle, so a meter's start is its reading in the bin before
@@ -120,9 +120,9 @@ export type SiteSourceAvailability = {
   gridMeter: boolean;
   load: boolean;
   pv: boolean;
-  /** At least one household meter is linked, readable or not. */
+  /** At least one tenant meter is linked, readable or not. */
   houses: boolean;
-  /** Linked household meters without the identifiers to read them. */
+  /** Linked tenant meters without the identifiers to read them. */
   houseMetersUnreadable: number;
 };
 

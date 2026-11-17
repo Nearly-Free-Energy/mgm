@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { LocaleProvider } from "@/components/format/locale-context";
 import { RegenerateMultiDialog } from "../regenerate-multi-dialog";
-import type { BillingLineItem, Household } from "@/lib/types/domain";
+import type { BillingLineItem, Tenant } from "@/lib/types/domain";
 
 const refreshMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -26,7 +26,7 @@ if (typeof globalThis.PointerEvent === "undefined") {
   } as typeof PointerEvent;
 }
 
-function makeHousehold(id: string, name: string): Household {
+function makeTenant(id: string, name: string): Tenant {
   return {
     id,
     microgrid_id: "mg-1",
@@ -42,7 +42,7 @@ function makeHousehold(id: string, name: string): Household {
     address_postal_code: null,
     geography_notes: null,
     created_at: "2026-01-01T00:00:00Z",
-  } as unknown as Household;
+  } as unknown as Tenant;
 }
 
 function makeLineItem(
@@ -53,7 +53,7 @@ function makeLineItem(
   return {
     id: `li-${hid}`,
     billing_period_id: "p-1",
-    household_id: hid,
+    tenant_id: hid,
     device_id: null,
     usage_kwh: 50,
     start_kwh: 100,
@@ -96,10 +96,10 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
@@ -116,9 +116,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2", "h-3"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2", "h-3"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={pushParentBanner}
           pushRowBanner={pushRowBanner}
           onSuccess={onSuccess}
@@ -136,10 +136,10 @@ describe("RegenerateMultiDialog", () => {
       "Manual readings are per-row only",
     );
 
-    // Confirm button label is "Regenerate 2 households".
+    // Confirm button label is "Regenerate 2 tenants".
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 2 households");
+      .find((b) => b.textContent === "Regenerate 2 tenants");
     expect(confirmBtn).toBeDefined();
 
     await act(async () => {
@@ -152,15 +152,15 @@ describe("RegenerateMultiDialog", () => {
     const body = JSON.parse(call[1].body as string);
     expect(body.billingPeriodId).toBe("p-1");
     // Manual h-3 must be excluded.
-    expect(body.householdIds.sort()).toEqual(["h-1", "h-2"].sort());
+    expect(body.tenantIds.sort()).toEqual(["h-1", "h-2"].sort());
     expect(body.manualReadings).toBeUndefined();
 
-    // Success info banner with copy "Regenerated 2 households".
+    // Success info banner with copy "Regenerated 2 tenants".
     await waitFor(() => expect(pushParentBanner).toHaveBeenCalled());
     const banner = (pushParentBanner.mock.calls.find(
       (c) => c[0].tone === "info",
     )?.[0] ?? null) as { tone: string; message: string } | null;
-    expect(banner?.message).toContain("Regenerated 2 household");
+    expect(banner?.message).toContain("Regenerated 2 tenant");
 
     expect(onSuccess).toHaveBeenCalled();
     expect(refreshMock).toHaveBeenCalled();
@@ -169,7 +169,7 @@ describe("RegenerateMultiDialog", () => {
   });
 
   it("when ALL selected rows are manual, confirm is disabled with 'nothing to regenerate'", () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "manual", 5000));
 
@@ -179,9 +179,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={vi.fn()}
         />
@@ -201,8 +201,8 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 1,
           errors: [
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "No meter reading data available",
               code: "no_meter_reading",
             },
@@ -211,9 +211,9 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
     ];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
@@ -228,9 +228,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={pushParentBanner}
           pushRowBanner={pushRowBanner}
         />
@@ -239,7 +239,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 2 households");
+      .find((b) => b.textContent === "Regenerate 2 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -260,7 +260,7 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")];
+    const tenants = [makeTenant("h-1", "Alice"), makeTenant("h-2", "Bob")];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
     lineItems.set("h-2", makeLineItem("h-2", "edge", 12000));
@@ -274,9 +274,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={onOpenChange}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={pushParentBanner}
           pushRowBanner={vi.fn()}
           onSuccess={onSuccess}
@@ -286,7 +286,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 2 households");
+      .find((b) => b.textContent === "Regenerate 2 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -300,7 +300,7 @@ describe("RegenerateMultiDialog", () => {
     const banner = pushParentBanner.mock.calls.find(
       (c) => c[0].tone === "info",
     )?.[0];
-    expect(banner?.message).toContain("Regenerated 2 household");
+    expect(banner?.message).toContain("Regenerated 2 tenant");
     vi.unstubAllGlobals();
   });
 
@@ -312,8 +312,8 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 2,
           errors: [
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "Currently set to manual entry — use per-row regenerate.",
               code: "currently_manual",
             },
@@ -322,10 +322,10 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
@@ -342,9 +342,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={onOpenChange}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2", "h-3"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2", "h-3"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={pushParentBanner}
           pushRowBanner={pushRowBanner}
           onSuccess={onSuccess}
@@ -354,7 +354,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 3 households");
+      .find((b) => b.textContent === "Regenerate 3 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -376,7 +376,7 @@ describe("RegenerateMultiDialog", () => {
 
     // Title reflects partial-success summary.
     expect(document.body.textContent).toContain(
-      "Regenerated 2 of 3 households",
+      "Regenerated 2 of 3 tenants",
     );
 
     // Per-row banner pushed for the failure (AC4).
@@ -387,7 +387,7 @@ describe("RegenerateMultiDialog", () => {
     const info = pushParentBanner.mock.calls.find(
       (c) => c[0].tone === "info",
     )?.[0];
-    expect(info?.message).toContain("Regenerated 2 household");
+    expect(info?.message).toContain("Regenerated 2 tenant");
 
     // onSuccess called (partial-success — clear selection).
     expect(onSuccess).toHaveBeenCalled();
@@ -403,32 +403,32 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "no meter reading",
               code: "no_meter_reading",
             },
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "missing config",
               code: "missing_openems_config",
             },
             {
-              householdId: "h-3",
-              householdName: "Carol",
-              error: "no household",
-              code: "unknown_household",
+              tenantId: "h-3",
+              tenantName: "Carol",
+              error: "no tenant",
+              code: "unknown_tenant",
             },
           ],
         }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
@@ -443,9 +443,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2", "h-3"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2", "h-3"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={pushParentBanner}
           pushRowBanner={vi.fn()}
           onSuccess={onSuccess}
@@ -455,7 +455,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 3 households");
+      .find((b) => b.textContent === "Regenerate 3 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -468,7 +468,7 @@ describe("RegenerateMultiDialog", () => {
 
     // Title for full failure.
     expect(document.body.textContent).toContain(
-      "Could not regenerate 3 households",
+      "Could not regenerate 3 tenants",
     );
 
     // 3 list items (no truncation).
@@ -501,8 +501,8 @@ describe("RegenerateMultiDialog", () => {
 
   it("truncation: 7 failures → renders 5 + '+ 2 more'", async () => {
     const errs = Array.from({ length: 7 }, (_, i) => ({
-      householdId: `h-${i + 1}`,
-      householdName: `Person${i + 1}`,
+      tenantId: `h-${i + 1}`,
+      tenantName: `Person${i + 1}`,
       error: "no meter reading",
       code: "no_meter_reading",
     }));
@@ -512,9 +512,9 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = errs.map((e) => makeHousehold(e.householdId, e.householdName));
+    const tenants = errs.map((e) => makeTenant(e.tenantId, e.tenantName));
     const lineItems = new Map<string, BillingLineItem>();
-    households.forEach((h) => lineItems.set(h.id, makeLineItem(h.id, "edge", 1000)));
+    tenants.forEach((h) => lineItems.set(h.id, makeLineItem(h.id, "edge", 1000)));
 
     render(
       <Wrap>
@@ -522,9 +522,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={households.map((h) => h.id)}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={tenants.map((h) => h.id)}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={vi.fn()}
         />
@@ -533,7 +533,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 7 households");
+      .find((b) => b.textContent === "Regenerate 7 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -558,7 +558,7 @@ describe("RegenerateMultiDialog", () => {
     vi.unstubAllGlobals();
   });
 
-  it("per-error-code copy smoke: maps unknown_household, no_meter_reading, missing_openems_config", async () => {
+  it("per-error-code copy smoke: maps unknown_tenant, no_meter_reading, missing_openems_config", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -566,20 +566,20 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "raw1",
-              code: "unknown_household",
+              code: "unknown_tenant",
             },
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "raw2",
               code: "no_meter_reading",
             },
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "raw3",
               code: "missing_openems_config",
             },
@@ -588,13 +588,13 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     const lineItems = new Map<string, BillingLineItem>();
-    households.forEach((h) =>
+    tenants.forEach((h) =>
       lineItems.set(h.id, makeLineItem(h.id, "edge", 1000)),
     );
 
@@ -604,9 +604,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2", "h-3"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2", "h-3"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={vi.fn()}
         />
@@ -615,7 +615,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 3 households");
+      .find((b) => b.textContent === "Regenerate 3 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -650,8 +650,8 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "Some unmapped server message",
               code: "future_code",
             },
@@ -660,7 +660,7 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
 
@@ -670,9 +670,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={vi.fn()}
         />
@@ -681,7 +681,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 1 household");
+      .find((b) => b.textContent === "Regenerate 1 tenant");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -708,8 +708,8 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 1,
           errors: [
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "no meter",
               code: "no_meter_reading",
             },
@@ -718,7 +718,7 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")];
+    const tenants = [makeTenant("h-1", "Alice"), makeTenant("h-2", "Bob")];
     const lineItems = new Map<string, BillingLineItem>();
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
     lineItems.set("h-2", makeLineItem("h-2", "edge", 12000));
@@ -731,9 +731,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={onOpenChange}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1", "h-2"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1", "h-2"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={vi.fn()}
           onSuccess={onSuccess}
@@ -743,7 +743,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 2 households");
+      .find((b) => b.textContent === "Regenerate 2 tenants");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });
@@ -780,8 +780,8 @@ describe("RegenerateMultiDialog", () => {
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error:
                 "Currently set to manual entry — use per-row regenerate to change.",
               code: "currently_manual",
@@ -791,7 +791,7 @@ describe("RegenerateMultiDialog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = new Map<string, BillingLineItem>();
     // Client thinks Alice is edge, but server says she's manual.
     lineItems.set("h-1", makeLineItem("h-1", "edge", 10000));
@@ -803,9 +803,9 @@ describe("RegenerateMultiDialog", () => {
           open
           onOpenChange={vi.fn()}
           billingPeriodId="p-1"
-          selectedHouseholdIds={["h-1"]}
-          households={households}
-          lineItemsByHouseholdId={lineItems}
+          selectedTenantIds={["h-1"]}
+          tenants={tenants}
+          lineItemsByTenantId={lineItems}
           pushParentBanner={vi.fn()}
           pushRowBanner={pushRowBanner}
         />
@@ -814,7 +814,7 @@ describe("RegenerateMultiDialog", () => {
 
     const confirmBtn = screen
       .getAllByRole("button")
-      .find((b) => b.textContent === "Regenerate 1 household");
+      .find((b) => b.textContent === "Regenerate 1 tenant");
     await act(async () => {
       fireEvent.click(confirmBtn!);
     });

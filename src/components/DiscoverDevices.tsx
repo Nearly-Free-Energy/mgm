@@ -314,7 +314,7 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
                         {/* Observability-only note for null-channel devices */}
                         {hasNullChannel && (
                           <p className="mb-2 text-xs text-muted-foreground">
-                            No auto-billing channel for this device type — this device will be registered for observability but won&apos;t contribute to household billing.
+                            No auto-billing channel for this device type — this device will be registered for observability but won&apos;t contribute to tenant billing.
                           </p>
                         )}
 

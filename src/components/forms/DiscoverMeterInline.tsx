@@ -2,7 +2,7 @@
 
 /**
  * DiscoverMeterInline — single-pick consumption-meter discovery for the
- * Add-Household wizard's Step 3 (#200).
+ * Add-Tenant wizard's Step 3 (#200).
  *
  * Distinct from `<DiscoverDevices>` (the multi-pick edge-detail surface):
  *   - single-pick RadioGroup (one meter at a time)
@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select";
 import type { DiscoveredDevice, EdgeDiscoveryResponse } from "@/lib/openems/types";
 import { humanReadable } from "@/lib/openems/device-descriptions";
-import type { AvailableMeter } from "@/components/forms/HouseholdWizard";
+import type { AvailableMeter } from "@/components/forms/TenantWizard";
 
 export type DiscoverMeterInlineEdge = {
   id: string;
@@ -229,14 +229,14 @@ export function DiscoverMeterInline({
 
       // Construct the AvailableMeter from the picked-edge object in scope —
       // POST /api/devices does not return edge_id / edge_name. Freshly-saved
-      // devices are never linked, so linked_household_name is null.
+      // devices are never linked, so linked_tenant_name is null.
       const newMeter: AvailableMeter = {
         id: saved.id,
         name: saved.name,
         device_type: saved.device_type as AvailableMeter["device_type"],
         edge_id: pickedEdge.id,
         edge_name: pickedEdge.name,
-        linked_household_name: null,
+        linked_tenant_name: null,
       };
 
       onDevicePersisted(newMeter);
@@ -276,7 +276,7 @@ export function DiscoverMeterInline({
       </header>
       <p className="text-xs text-muted-foreground">
         Scan an edge for new consumption meters and link one directly to this
-        household — no need to leave the wizard.
+        tenant — no need to leave the wizard.
       </p>
 
       {/* Edge picker. Collapses to a static label when there's exactly one. */}
@@ -374,7 +374,7 @@ export function DiscoverMeterInline({
               {discovered.length === 1 ? "device" : "devices"} on this edge, but{" "}
               {discovered.length === 1 ? "it is not" : "none are"} classified as
               a consumption meter, so {discovered.length === 1 ? "it" : "none"}{" "}
-              can bill a household.
+              can bill a tenant.
             </p>
             <ul className="mt-2 space-y-1">
               {discovered.map((d) => (
@@ -387,7 +387,7 @@ export function DiscoverMeterInline({
               ))}
             </ul>
             <p className="mt-2">
-              If one of these meters a household, open it on the edge&apos;s
+              If one of these meters a tenant, open it on the edge&apos;s
               device list and change its type to Consumption meter.
             </p>
           </div>

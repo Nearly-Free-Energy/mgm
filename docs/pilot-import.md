@@ -8,14 +8,14 @@ This foundation supports review and bounded import metadata in a fresh MGM datab
 
 | Field | Meaning |
 | --- | --- |
-| `source_household_id` | Synthetic stable household reference |
+| `source_tenant_id` | Synthetic stable tenant reference |
 | `source_meter_id` | Synthetic stable meter reference |
 | `reading_kwh` | Non-negative cumulative meter value |
 | `read_at` | ISO timestamp including a timezone |
 
-Unexpected columns fail the whole preparation step. In particular, names, phone numbers, email addresses, and addresses are not accepted. Household and meter references are converted to stable HMAC pseudonyms with a server-held key of at least 32 bytes. Keep that key outside the repository and never expose it through a `NEXT_PUBLIC_` variable. The returned records contain no source IDs.
+Unexpected columns fail the whole preparation step. In particular, names, phone numbers, email addresses, and addresses are not accepted. Tenant and meter references are converted to stable HMAC pseudonyms with a server-held key of at least 32 bytes. Keep that key outside the repository and never expose it through a `NEXT_PUBLIC_` variable. The returned records contain no source IDs.
 
-One preparation run is capped at 5,000 readings and 500 distinct households. The result is in memory only. `reconcilePilotRows` produces inserts, unchanged counts, and conflicts; conflicting values for the same meter and timestamp are never overwritten.
+One preparation run is capped at 5,000 readings and 500 distinct tenants. The result is in memory only. `reconcilePilotRows` produces inserts, unchanged counts, and conflicts; conflicting values for the same meter and timestamp are never overwritten.
 
 ## Target and operator controls
 
@@ -25,13 +25,13 @@ The import must be started explicitly by an operator after reviewing the reconci
 
 ## Atomic write protocol for a future persistence adapter
 
-The persistence adapter must apply one prepared batch in one Postgres transaction: lock the dedicated pilot microgrid row; verify the exact configured target and batch identifier; resolve only pseudonymized household and meter keys; apply effective-dated meter assignments; compare existing values and abort on any conflict; record only batch ID, counts, and outcome in `pilot_import_batches`; then commit. On any validation, constraint, or reconciliation error, roll back the entire batch. Never log the payload, pseudonym key, or raw source rows. The review API derives `baselineImportedAt` from the earliest `applied_at` for an applied baseline batch belonging to the requested billing period.
+The persistence adapter must apply one prepared batch in one Postgres transaction: lock the dedicated pilot microgrid row; verify the exact configured target and batch identifier; resolve only pseudonymized tenant and meter keys; apply effective-dated meter assignments; compare existing values and abort on any conflict; record only batch ID, counts, and outcome in `pilot_import_batches`; then commit. On any validation, constraint, or reconciliation error, roll back the entire batch. Never log the payload, pseudonym key, or raw source rows. The review API derives `baselineImportedAt` from the earliest `applied_at` for an applied baseline batch belonging to the requested billing period.
 
 The current module intentionally ends at preparation and reconciliation. A persistence adapter requires a confirmed target schema and operator workflow. It must remain server-side and use a transaction-capable database path; multiple independent PostgREST writes are not an atomic import. The batch ledger stores counts and timestamps only, with RLS-scoped reads for authorized organization users; client roles cannot alter it. The setup script checks the reviewed base migration identities, rejects later inherited migrations, and refuses to apply the UTC default where billing periods already exist.
 
 ## Meter assignment dates
 
-`household_devices.effective_from` is inclusive and `effective_to` is exclusive; `NULL` means current. Existing assignments are backfilled from their creation date. The pilot review schema records the effective period for assignments represented in the database; confirm the source assignment history and mapping with the operator before preparing a real import.
+`tenant_devices.effective_from` is inclusive and `effective_to` is exclusive; `NULL` means current. Existing assignments are backfilled from their creation date. The pilot review schema records the effective period for assignments represented in the database; confirm the source assignment history and mapping with the operator before preparing a real import.
 
 ## Synthetic rehearsal
 

@@ -110,9 +110,9 @@ describe("middleware PUBLIC_PATHS", () => {
   it.each([
     "/api/communities",
     "/api/microgrids/grid-1",
-    "/api/households/with-meter",
+    "/api/tenants/with-meter",
     "/settings/plugins",
-    "/microgrids/grid-1/setup/households",
+    "/microgrids/grid-1/setup/tenants",
     "/api/microgrids/grid-1/openems-backend",
     "/api/microgrids/grid-1/openems-backend/test",
     "/api/microgrids/grid-1/openems-backend/discover",
@@ -120,7 +120,7 @@ describe("middleware PUBLIC_PATHS", () => {
     "/api/meter-readings/opening",
     "/microgrids/grid-1/setup/edges",
     "/microgrids/grid-1/setup/openems-backend",
-    "/microgrids/grid-1/setup/households/hh-1",
+    "/microgrids/grid-1/setup/tenants/hh-1",
     "/api/billing/generate",
     "/api/billing-periods",
     "/api/billing-line-items/abc/payment-status",
@@ -179,6 +179,26 @@ describe("middleware PUBLIC_PATHS", () => {
     const res = await middleware(makeRequest("/microgrids/grid-1?date=2026-11-01"));
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/login");
+  });
+
+  it.each([
+    ["/microgrids/grid-1/setup/households", "/microgrids/grid-1/setup/tenants"],
+    ["/microgrids/grid-1/setup/households/", "/microgrids/grid-1/setup/tenants"],
+    ["/microgrids/grid-1/setup/households/t-1", "/microgrids/grid-1/setup/tenants/t-1"],
+    ["/microgrids/grid-1/setup/households/t-1?tab=meters", "/microgrids/grid-1/setup/tenants/t-1?tab=meters"],
+  ])("sends the old tenant page %s to %s", async (from, to) => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest(from));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(`http://localhost${to}`);
+  });
+
+  it("does not redirect deeper paths under the old tenant pages", async () => {
+    signedIn();
+    const middleware = await loadMiddleware();
+    const res = await middleware(makeRequest("/microgrids/grid-1/setup/households/t-1/extra"));
+    expect(res.status).toBe(404);
   });
 
   it.each([

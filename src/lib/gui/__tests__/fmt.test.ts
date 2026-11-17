@@ -25,7 +25,7 @@ function everyBuilder(fmt: Fmt): Value[] {
     fmt.text("Hello"),
     fmt.empty(),
     fmt.number(1234.567),
-    fmt.number(42, "households"),
+    fmt.number(42, "tenants"),
     fmt.percent(87.4),
     fmt.percent(87.4, { at: AT, synthetic: true }),
     fmt.money(4216800, "UGX"),
@@ -61,11 +61,11 @@ describe.each(LOCALES)("createFmt in %s", (locale) => {
       v: 1234.567,
       text: formatRate(1234.567, locale, { minDigits: 0, maxDigits: 2 }),
     });
-    expect(fmt.number(42, "households")).toEqual({
+    expect(fmt.number(42, "tenants")).toEqual({
       t: "number",
       v: 42,
-      unit: "households",
-      text: `${formatRate(42, locale, { minDigits: 0, maxDigits: 2 })} households`,
+      unit: "tenants",
+      text: `${formatRate(42, locale, { minDigits: 0, maxDigits: 2 })} tenants`,
     });
   });
 

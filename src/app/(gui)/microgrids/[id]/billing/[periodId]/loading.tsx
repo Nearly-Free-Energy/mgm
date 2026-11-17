@@ -1,6 +1,6 @@
 // Billing period detail loading fallback.
 //
-// Shown while billing/[periodId]/page.tsx (period + line items + households +
+// Shown while billing/[periodId]/page.tsx (period + line items + tenants +
 // edges + schedule + microgrid + actors) resolves. Mirrors the page's frame —
 // breadcrumb, period header card, CopyTable card with header + body rows,
 // grand-total footer — so the table doesn't jump when rows land.

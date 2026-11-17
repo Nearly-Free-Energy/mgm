@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { LocaleProvider } from "@/components/format/locale-context";
 import { PreflightPanel } from "../preflight-panel";
-import type { Household } from "@/lib/types/domain";
+import type { Tenant } from "@/lib/types/domain";
 
 const refreshMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -19,7 +19,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
-function makeHousehold(id: string, name: string): Household {
+function makeTenant(id: string, name: string): Tenant {
   return {
     id,
     microgrid_id: "mg-1",
@@ -35,7 +35,7 @@ function makeHousehold(id: string, name: string): Household {
     address_postal_code: null,
     geography_notes: null,
     created_at: "2026-01-01T00:00:00Z",
-  } as unknown as Household;
+  } as unknown as Tenant;
 }
 
 function Wrap({ children }: { children: React.ReactNode }) {
@@ -53,7 +53,7 @@ describe("PreflightPanel — block-until-filled (Q1=A)", () => {
   });
 
   it("Generate button disabled when needs-manual rows are empty; enables when filled", async () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const edgeMap = { "h-1": false }; // needs manual
 
     render(
@@ -62,8 +62,8 @@ describe("PreflightPanel — block-until-filled (Q1=A)", () => {
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={edgeMap}
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeMap}
         />
       </Wrap>,
     );
@@ -98,8 +98,8 @@ describe("PreflightPanel — submit body shape", () => {
     }));
     render(<Wrap><PreflightPanel
       open onClose={vi.fn()} billingPeriodId="p-1"
-      households={[makeHousehold("h-1", "Alice")]}
-      edgeAvailableByHouseholdId={{ "h-1": true }}
+      tenants={[makeTenant("h-1", "Alice")]}
+      edgeAvailableByTenantId={{ "h-1": true }}
       allowUsageOnlyReadings
     /></Wrap>);
     fireEvent.click(screen.getByTestId("preflight-generate-button"));
@@ -111,7 +111,7 @@ describe("PreflightPanel — submit body shape", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ lineItems: 1, errors: [{
-          householdId: "h-2", householdName: "Bob", code: "no_meter_reading",
+          tenantId: "h-2", tenantName: "Bob", code: "no_meter_reading",
           error: "No meter reading data available",
         }] }),
       })
@@ -122,9 +122,9 @@ describe("PreflightPanel — submit body shape", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<Wrap><PreflightPanel
       open onClose={vi.fn()} billingPeriodId="p-1"
-      households={[makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")]}
-      edgeAvailableByHouseholdId={{ "h-1": true, "h-2": true }}
-      seedNeededByHouseholdId={{ "h-1": true, "h-2": true }}
+      tenants={[makeTenant("h-1", "Alice"), makeTenant("h-2", "Bob")]}
+      edgeAvailableByTenantId={{ "h-1": true, "h-2": true }}
+      seedNeededByTenantId={{ "h-1": true, "h-2": true }}
       allowUsageOnlyReadings
     /></Wrap>);
 
@@ -144,21 +144,21 @@ describe("PreflightPanel — submit body shape", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
       billingPeriodId: "p-1",
-      householdIds: ["h-2"],
-      manualReadings: [{ householdId: "h-2", startKwh: 100, endKwh: 125 }],
+      tenantIds: ["h-2"],
+      manualReadings: [{ tenantId: "h-2", startKwh: 100, endKwh: 125 }],
     });
   });
 
-  it("POSTs manualReadings (needs-manual + override-toggled), no householdIds", async () => {
+  it("POSTs manualReadings (needs-manual + override-toggled), no tenantIds", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ lineItems: 2, errors: [] }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = [
-      makeHousehold("h-1", "Alice"), // needs manual
-      makeHousehold("h-2", "Bob"), // edge, will be override-toggled
+    const tenants = [
+      makeTenant("h-1", "Alice"), // needs manual
+      makeTenant("h-2", "Bob"), // edge, will be override-toggled
     ];
     const edgeMap = { "h-1": false, "h-2": true };
 
@@ -169,8 +169,8 @@ describe("PreflightPanel — submit body shape", () => {
           open
           onClose={onClose}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={edgeMap}
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeMap}
         />
       </Wrap>,
     );
@@ -218,10 +218,10 @@ describe("PreflightPanel — submit body shape", () => {
     expect(call[0]).toBe("/api/billing/generate");
     const body = JSON.parse(call[1].body as string);
     expect(body.billingPeriodId).toBe("p-1");
-    expect(body.householdIds).toBeUndefined();
+    expect(body.tenantIds).toBeUndefined();
     expect(body.manualReadings).toEqual([
-      { householdId: "h-1", startKwh: 100, endKwh: 150 },
-      { householdId: "h-2", startKwh: 200, endKwh: 275 },
+      { tenantId: "h-1", startKwh: 100, endKwh: 150 },
+      { tenantId: "h-2", startKwh: 200, endKwh: 275 },
     ]);
 
     // Panel closes + refresh fires on 200.
@@ -239,10 +239,10 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
   });
 
   async function fillAndSubmit(onClose: () => void) {
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     const edgeMap = { "h-1": false, "h-2": false, "h-3": false };
     render(
@@ -251,8 +251,8 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           open
           onClose={onClose}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={edgeMap}
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeMap}
         />
       </Wrap>,
     );
@@ -306,8 +306,8 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           lineItems: 2,
           errors: [
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "raw",
               code: "invalid_manual_reading",
             },
@@ -326,7 +326,7 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
     // onClose was NOT called.
     expect(onClose).not.toHaveBeenCalled();
     // Heading shows partial-success summary.
-    expect(document.body.textContent).toContain("Generated 2 of 3 households");
+    expect(document.body.textContent).toContain("Generated 2 of 3 tenants");
     // Per-code copy renders.
     const list = document.querySelector(
       '[data-testid="preflight-result-failure-list"]',
@@ -347,20 +347,20 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "raw1",
               code: "no_meter_reading",
             },
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "raw2",
               code: "missing_openems_config",
             },
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "raw3",
               code: "unmetered_no_manual",
             },
@@ -378,7 +378,7 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
     );
     expect(onClose).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain(
-      "Could not generate 3 households",
+      "Could not generate 3 tenants",
     );
     const items = document.querySelectorAll(
       '[data-testid="preflight-result-failure-list"] > li',
@@ -399,20 +399,20 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "x",
               code: "unmetered_no_manual",
             },
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "y",
               code: "invalid_manual_reading",
             },
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "z",
               code: "currently_manual",
             },
@@ -448,20 +448,20 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "Quoted server message",
               code: "future_code",
             },
             {
-              householdId: "h-2",
-              householdName: "Bob",
+              tenantId: "h-2",
+              tenantName: "Bob",
               error: "another verbatim",
               // no code at all
             },
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "third",
               code: "no_meter_reading",
             },
@@ -488,8 +488,8 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
 
   it("truncation: 6 failures → 5 + '+ 1 more'", async () => {
     const errs = Array.from({ length: 6 }, (_, i) => ({
-      householdId: `h-${i + 1}`,
-      householdName: `Person${i + 1}`,
+      tenantId: `h-${i + 1}`,
+      tenantName: `Person${i + 1}`,
       error: "x",
       code: "no_meter_reading",
     }));
@@ -499,11 +499,11 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const households = errs.map((e) =>
-      makeHousehold(e.householdId, e.householdName),
+    const tenants = errs.map((e) =>
+      makeTenant(e.tenantId, e.tenantName),
     );
     const edgeMap: Record<string, boolean> = {};
-    households.forEach((h) => {
+    tenants.forEach((h) => {
       edgeMap[h.id] = false;
     });
     render(
@@ -512,12 +512,12 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={edgeMap}
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeMap}
         />
       </Wrap>,
     );
-    households.forEach((h, i) => {
+    tenants.forEach((h, i) => {
       fireEvent.change(
         screen.getByLabelText(new RegExp(`Start kWh for ${h.display_name}`, "i")),
         { target: { value: String(i * 10) } },
@@ -559,8 +559,8 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
           lineItems: 2,
           errors: [
             {
-              householdId: "h-3",
-              householdName: "Carol",
+              tenantId: "h-3",
+              tenantName: "Carol",
               error: "x",
               code: "no_meter_reading",
             },
@@ -588,8 +588,8 @@ describe("PreflightPanel — partial-failure result view (BC3 polish #182)", () 
 });
 
 describe("PreflightPanel — Generate button label", () => {
-  it("reads 'Generate (N households)' regardless of trigger source", () => {
-    const households = [makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")];
+  it("reads 'Generate (N tenants)' regardless of trigger source", () => {
+    const tenants = [makeTenant("h-1", "Alice"), makeTenant("h-2", "Bob")];
     const edgeMap = { "h-1": true, "h-2": true };
     render(
       <Wrap>
@@ -597,29 +597,29 @@ describe("PreflightPanel — Generate button label", () => {
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={edgeMap}
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeMap}
         />
       </Wrap>,
     );
     const btn = document.querySelector(
       '[data-testid="preflight-generate-button"]',
     );
-    expect(btn?.textContent).toContain("Generate (2 households)");
+    expect(btn?.textContent).toContain("Generate (2 tenants)");
   });
 });
 
-describe("PreflightPanel — households kept as manual entry", () => {
+describe("PreflightPanel — tenants kept as manual entry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     refreshMock.mockClear();
   });
 
   function renderKept() {
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
     render(
       <Wrap>
@@ -627,44 +627,44 @@ describe("PreflightPanel — households kept as manual entry", () => {
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={{ "h-1": true, "h-2": true, "h-3": true }}
-          seedNeededByHouseholdId={{ "h-2": true }}
-          currentlyManualByHouseholdId={{ "h-2": true }}
+          tenants={tenants}
+          edgeAvailableByTenantId={{ "h-1": true, "h-2": true, "h-3": true }}
+          seedNeededByTenantId={{ "h-2": true }}
+          currentlyManualByTenantId={{ "h-2": true }}
         />
       </Wrap>,
     );
   }
 
-  it("lists a currently-manual household as kept, not as read from OpenEMS", () => {
+  it("lists a currently-manual tenant as kept, not as read from OpenEMS", () => {
     renderKept();
 
     const ready = screen.getByTestId("preflight-ready-section");
-    expect(ready.textContent).toContain("2 households will be read from OpenEMS.");
+    expect(ready.textContent).toContain("2 tenants will be read from OpenEMS.");
     fireEvent.click(ready.querySelector("button")!);
     expect(ready.textContent).toContain("Alice");
     expect(ready.textContent).toContain("Carol");
     expect(ready.textContent).not.toContain("Bob");
 
     const kept = screen.getByTestId("preflight-kept-manual-section");
-    expect(kept.textContent).toContain("1 household will keep its manual reading.");
+    expect(kept.textContent).toContain("1 tenant will keep its manual reading.");
     fireEvent.click(kept.querySelector("button")!);
     expect(screen.getByTestId("preflight-kept-manual-row-h-2").textContent).toContain("Bob");
 
-    // A kept household is not asked for a starting reading and not counted.
+    // A kept tenant is not asked for a starting reading and not counted.
     expect(screen.queryByTestId("preflight-needs-seed-section")).toBeNull();
     expect(screen.getByTestId("preflight-generate-button").textContent).toContain(
-      "Generate (2 households)",
+      "Generate (2 tenants)",
     );
   });
 
-  it("does not send the kept household as a manual reading", async () => {
+  it("does not send the kept tenant as a manual reading", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
         Promise.resolve({
           lineItems: 2,
-          kept: [{ householdId: "h-2", householdName: "Bob" }],
+          kept: [{ tenantId: "h-2", tenantName: "Bob" }],
           errors: [],
         }),
     });
@@ -681,15 +681,15 @@ describe("PreflightPanel — households kept as manual entry", () => {
     vi.unstubAllGlobals();
   });
 
-  it("omits the section when no household is currently manual", () => {
+  it("omits the section when no tenant is currently manual", () => {
     render(
       <Wrap>
         <PreflightPanel
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={[makeHousehold("h-1", "Alice")]}
-          edgeAvailableByHouseholdId={{ "h-1": true }}
+          tenants={[makeTenant("h-1", "Alice")]}
+          edgeAvailableByTenantId={{ "h-1": true }}
         />
       </Wrap>,
     );
@@ -708,18 +708,18 @@ describe("PreflightPanel — seed readings (#339)", () => {
     priorHint?: number | null;
     periodTimezone?: string;
   } = {}) {
-    const households = [makeHousehold("h-1", "Nakato")];
+    const tenants = [makeTenant("h-1", "Nakato")];
     return render(
       <Wrap>
         <PreflightPanel
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={households}
-          edgeAvailableByHouseholdId={{ "h-1": true }}
-          seedNeededByHouseholdId={{ "h-1": opts.seedNeeded ?? true }}
-          priorHintByHouseholdId={{ "h-1": opts.priorHint ?? null }}
-          deviceIdByHouseholdId={{ "h-1": DEVICE }}
+          tenants={tenants}
+          edgeAvailableByTenantId={{ "h-1": true }}
+          seedNeededByTenantId={{ "h-1": opts.seedNeeded ?? true }}
+          priorHintByTenantId={{ "h-1": opts.priorHint ?? null }}
+          deviceIdByTenantId={{ "h-1": DEVICE }}
           periodStartDate="2026-08-01"
           periodTimezone={opts.periodTimezone}
         />
@@ -746,7 +746,7 @@ describe("PreflightPanel — seed readings (#339)", () => {
   // The section must be ABSENT when nothing needs a seed. An always-present
   // optional field is skipped, and a skipped seed is indistinguishable from a
   // seeded zero — which is the defect being fixed.
-  it("does not render the section when no household needs a seed", () => {
+  it("does not render the section when no tenant needs a seed", () => {
     renderWithSeed({ seedNeeded: false });
     expect(
       document.querySelector('[data-testid="preflight-needs-seed-section"]'),
@@ -879,7 +879,7 @@ describe("PreflightPanel — seed readings (#339)", () => {
 
   // The hint is the number the operator would otherwise go looking for. It is
   // text, never a prefill: a plausible prefilled figure is confirmed by
-  // inertia, and this one is a household's number rather than this meter's.
+  // inertia, and this one is a tenant's number rather than this meter's.
   it("shows the prior manual figure as a cause line without prefilling the input", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(energyResponse(0)));
     renderWithSeed({ priorHint: 4182 });
@@ -916,7 +916,7 @@ describe("PreflightPanel — seed readings (#339)", () => {
   // section level rather than per row still looks correct in any render
   // containing one state; only a render holding BOTH states at once
   // distinguishes them. This is the defect the copy change exists to fix.
-  it("gives each row its own cause when two households differ", () => {
+  it("gives each row its own cause when two tenants differ", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(energyResponse(0)));
     render(
       <Wrap>
@@ -924,11 +924,11 @@ describe("PreflightPanel — seed readings (#339)", () => {
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={[makeHousehold("h-1", "Nakato"), makeHousehold("h-2", "Okello")]}
-          edgeAvailableByHouseholdId={{ "h-1": true, "h-2": true }}
-          seedNeededByHouseholdId={{ "h-1": true, "h-2": true }}
-          priorHintByHouseholdId={{ "h-1": 4182, "h-2": null }}
-          deviceIdByHouseholdId={{ "h-1": "d-1", "h-2": "d-2" }}
+          tenants={[makeTenant("h-1", "Nakato"), makeTenant("h-2", "Okello")]}
+          edgeAvailableByTenantId={{ "h-1": true, "h-2": true }}
+          seedNeededByTenantId={{ "h-1": true, "h-2": true }}
+          priorHintByTenantId={{ "h-1": 4182, "h-2": null }}
+          deviceIdByTenantId={{ "h-1": "d-1", "h-2": "d-2" }}
           periodStartDate="2026-08-01"
         />
       </Wrap>,
@@ -1017,10 +1017,10 @@ describe("PreflightPanel — read date (#343)", () => {
           open
           onClose={vi.fn()}
           billingPeriodId="p-1"
-          households={[makeHousehold("h-1", "Nakato")]}
-          edgeAvailableByHouseholdId={{ "h-1": true }}
-          seedNeededByHouseholdId={{ "h-1": true }}
-          deviceIdByHouseholdId={{ "h-1": DEVICE }}
+          tenants={[makeTenant("h-1", "Nakato")]}
+          edgeAvailableByTenantId={{ "h-1": true }}
+          seedNeededByTenantId={{ "h-1": true }}
+          deviceIdByTenantId={{ "h-1": DEVICE }}
           periodStartDate="2026-08-01"
         />
       </Wrap>,

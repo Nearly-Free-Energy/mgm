@@ -18,7 +18,7 @@
  *
  *       In both edge paths a row whose `reading_source` is 'manual' is being
  *       switched back to edge data, so the request names it in
- *       `revertToEdgeHouseholdIds`; without that the engine keeps the manual
+ *       `revertToEdgeTenantIds`; without that the engine keeps the manual
  *       row and refuses with `currently_manual`.
  *
  *   2c. mode='manual':
@@ -64,7 +64,7 @@ export interface RegenerateRowDialogLineItem {
 }
 
 /**
- * Request body for an edge-mode regenerate of one household. A manual row
+ * Request body for an edge-mode regenerate of one tenant. A manual row
  * is reverted explicitly; an edge row is not named, so a row that turned
  * manual since the table rendered is refused rather than overwritten — that
  * relies on the engine's manual-row guard ("Manual rows" in
@@ -72,19 +72,19 @@ export interface RegenerateRowDialogLineItem {
  */
 function edgeRegenerateBody(
   periodId: string,
-  householdId: string,
+  tenantId: string,
   readingSource: ReadingSource | undefined,
 ) {
   return {
     billingPeriodId: periodId,
-    householdIds: [householdId],
+    tenantIds: [tenantId],
     ...(readingSource === "manual"
-      ? { revertToEdgeHouseholdIds: [householdId] }
+      ? { revertToEdgeTenantIds: [tenantId] }
       : {}),
   };
 }
 
-export interface RegenerateRowDialogHousehold {
+export interface RegenerateRowDialogTenant {
   id: string;
   display_name: string;
 }
@@ -93,7 +93,7 @@ export interface RegenerateRowDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode: RegenerateRowMode;
-  household: RegenerateRowDialogHousehold;
+  tenant: RegenerateRowDialogTenant;
   period: RegenerateRowDialogPeriod;
   lineItem: RegenerateRowDialogLineItem;
   /** Push a transient banner entry into <RowBannerStack>. */
@@ -106,8 +106,8 @@ export interface RegenerateRowDialogProps {
 }
 
 type PreviewRow = {
-  householdId: string;
-  householdName: string;
+  tenantId: string;
+  tenantName: string;
   startKwh: number;
   endKwh: number;
   usageKwh: number;
@@ -153,7 +153,7 @@ export function RegenerateRowDialog(props: RegenerateRowDialogProps) {
 function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
   const {
     onOpenChange,
-    household,
+    tenant,
     period,
     lineItem,
     pushBanner,
@@ -172,11 +172,11 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+          edgeRegenerateBody(period.id, tenant.id, lineItem.reading_source),
         ),
       });
       const body = (await res.json().catch(() => ({}))) as {
-        errors?: Array<{ householdId: string; error: string; code?: string }>;
+        errors?: Array<{ tenantId: string; error: string; code?: string }>;
         error?: string;
       };
       if (!res.ok) {
@@ -218,7 +218,7 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
       });
       onOpenChange(false);
     }
-  }, [household.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange, onSuccess, router]);
+  }, [tenant.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange, onSuccess, router]);
 
   // Keep the ref up-to-date with the latest closure each render.
   React.useEffect(() => {
@@ -242,7 +242,7 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
               Regenerating bill…
             </Dialog.Title>
             <Dialog.Description className="mt-1 text-dense text-muted-foreground">
-              Recomputing readings for {household.display_name}.
+              Recomputing readings for {tenant.display_name}.
             </Dialog.Description>
             <div className="mt-4 inline-block h-4 w-4 animate-spin rounded-full border-2 border-border border-t-transparent" />
           </div>
@@ -259,7 +259,7 @@ function EdgeUnpaidImmediateRunner(props: RegenerateRowDialogProps) {
 function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
   const {
     onOpenChange,
-    household,
+    tenant,
     period,
     lineItem,
     pushBanner,
@@ -278,12 +278,12 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
-            edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+            edgeRegenerateBody(period.id, tenant.id, lineItem.reading_source),
           ),
         });
         const body = (await res.json().catch(() => ({}))) as {
           preview?: PreviewRow[];
-          errors?: Array<{ householdId: string; error: string; code?: string }>;
+          errors?: Array<{ tenantId: string; error: string; code?: string }>;
           error?: string;
         };
         if (!res.ok) {
@@ -326,7 +326,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
         onOpenChange(false);
       }
     })();
-  }, [household.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange]);
+  }, [tenant.id, period.id, lineItem.id, lineItem.reading_source, pushBanner, onOpenChange]);
 
   const periodLabel =
     period.start_date === period.end_date
@@ -338,11 +338,11 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
-        edgeRegenerateBody(period.id, household.id, lineItem.reading_source),
+        edgeRegenerateBody(period.id, tenant.id, lineItem.reading_source),
       ),
     });
     const body = (await res.json().catch(() => ({}))) as {
-      errors?: Array<{ householdId: string; error: string; code?: string }>;
+      errors?: Array<{ tenantId: string; error: string; code?: string }>;
       error?: string;
     };
     if (!res.ok) {
@@ -353,7 +353,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
     }
     onSuccess?.(lineItem.id);
     router.refresh();
-  }, [household.id, period.id, lineItem.id, lineItem.reading_source, onSuccess, router]);
+  }, [tenant.id, period.id, lineItem.id, lineItem.reading_source, onSuccess, router]);
 
   // Body content varies by state.
   const previewBody = (() => {
@@ -394,7 +394,7 @@ function EdgePaidConfirmDialog(props: RegenerateRowDialogProps) {
         {period.status === "closed" && <ClosedPeriodBanner />}
         <div className="text-dense leading-relaxed text-muted-foreground">
           <span className="font-medium text-foreground">
-            {household.display_name}
+            {tenant.display_name}
           </span>{" "}
           · {periodLabel}
         </div>
@@ -482,7 +482,7 @@ function ClosedPeriodBanner() {
 function ManualEntryDialog(props: RegenerateRowDialogProps) {
   const {
     onOpenChange,
-    household,
+    tenant,
     period,
     lineItem,
     pushBanner,
@@ -535,10 +535,10 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           billingPeriodId: period.id,
-          householdIds: [household.id],
+          tenantIds: [tenant.id],
           manualReadings: [
             {
-              householdId: household.id,
+              tenantId: tenant.id,
               startKwh: startParsed.value,
               endKwh: endParsed.value,
               ...(reason.trim() ? { reason: reason.trim() } : {}),
@@ -547,7 +547,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
-        errors?: Array<{ householdId: string; error: string; code?: string }>;
+        errors?: Array<{ tenantId: string; error: string; code?: string }>;
         error?: string;
       };
       if (!res.ok) {
@@ -600,7 +600,7 @@ function ManualEntryDialog(props: RegenerateRowDialogProps) {
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-dense text-muted-foreground">
                 <span className="font-medium text-foreground">
-                  {household.display_name}
+                  {tenant.display_name}
                 </span>{" "}
                 · {periodLabel}
               </Dialog.Description>

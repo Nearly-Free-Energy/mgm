@@ -57,7 +57,7 @@ function makeProps(
       total_amount: 12500,
       pesapal_redirect_url: null,
     },
-    household: { id: "h-1", display_name: "Alice Mukasa" },
+    tenant: { id: "h-1", display_name: "Alice Mukasa" },
     period: {
       id: "p-1",
       status: "draft",
@@ -92,7 +92,7 @@ function openMenu(trigger: HTMLElement) {
 describe("computeMenuItems — designer matrix (6 states)", () => {
   const baseInput = {
     microgridId: "mg-1",
-    household: { id: "h-1", display_name: "Test" },
+    tenant: { id: "h-1", display_name: "Test" },
     period: {
       id: "p-1",
       status: "draft" as const,
@@ -135,7 +135,7 @@ describe("computeMenuItems — designer matrix (6 states)", () => {
     expect(labels).toContain("Switch to manual entry…");
     expect(labels).toContain("Generate payment link");
     expect(labels).toContain("Mark as paid…");
-    expect(labels).toContain("View household");
+    expect(labels).toContain("View tenant");
     // PDF3 (#205) — Download bill (PDF) is always present.
     expect(labels).toContain("Download bill (PDF)");
   });
@@ -302,7 +302,7 @@ describe("computeMenuItems — designer matrix (6 states)", () => {
 describe("computeMenuItems — #221 Generate vs Regenerate signal", () => {
   const baseInput = {
     microgridId: "mg-1",
-    household: { id: "h-1", display_name: "Test" },
+    tenant: { id: "h-1", display_name: "Test" },
     period: {
       id: "p-1",
       status: "draft" as const,

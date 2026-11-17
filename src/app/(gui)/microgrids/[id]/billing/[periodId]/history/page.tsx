@@ -2,15 +2,15 @@
 //
 // Server component. Reads the merged audit log via the shared
 // `fetchAuditLogEntries` helper (extracted from the BC1 route handler so
-// both surfaces share one implementation). Resolves household lookups
+// both surfaces share one implementation). Resolves tenant lookups
 // once on the server and hands precomputed maps to <AuditLogList>, which
 // owns the (client-side) filter pass + render.
 //
 // Route shape:
 //   /microgrids/[id]/billing/[periodId]/history
-//   /microgrids/[id]/billing/[periodId]/history?household_id=<uuid>
+//   /microgrids/[id]/billing/[periodId]/history?tenant_id=<uuid>
 //
-// The `household_id` query param is passed through from the BC2
+// The `tenant_id` query param is passed through from the BC2
 // `<RowActionsMenu>` deep link. Filter is applied client-side because
 // per-period data is already bounded at ~1000 rows by BC1's per-side
 // LIMIT 500.
@@ -25,23 +25,23 @@ import { fetchAuditLogEntries } from "@/lib/billing/audit-log-fetch";
 import { AuditLogList } from "@/components/billing/audit-log-list";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
-import type { BillingPeriod, Household } from "@/lib/types/domain";
+import type { BillingPeriod, Tenant } from "@/lib/types/domain";
 
 export default async function BillingPeriodHistoryPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string; periodId: string }>;
-  searchParams: Promise<{ household_id?: string }>;
+  searchParams: Promise<{ tenant_id?: string }>;
 }) {
   const { id, periodId } = await params;
-  const { household_id } = await searchParams;
+  const { tenant_id } = await searchParams;
   const supabase = await createClient();
 
   // Run independent queries in parallel.
   const [
     { data: period, error: periodError },
-    { data: households },
+    { data: tenants },
     levels,
     auditResult,
   ] = await Promise.all([
@@ -53,10 +53,10 @@ export default async function BillingPeriodHistoryPage({
       .single()
       .then((res) => ({ ...res, data: res.data as BillingPeriod | null })),
     supabase
-      .from("households")
+      .from("tenants")
       .select("id, display_name")
       .eq("microgrid_id", id)
-      .returns<Pick<Household, "id" | "display_name">[]>(),
+      .returns<Pick<Tenant, "id" | "display_name">[]>(),
     getHierarchyLevels(supabase, { kind: "microgrid", microgridId: id }),
     fetchAuditLogEntries(supabase, periodId),
   ]);
@@ -65,10 +65,10 @@ export default async function BillingPeriodHistoryPage({
     notFound();
   }
 
-  // We don't fail the page on a household-list error — the filter banner
-  // just falls back to "unknown household". Surface it as a soft warning
+  // We don't fail the page on a tenant-list error — the filter banner
+  // just falls back to "unknown tenant". Surface it as a soft warning
   // via dev console only.
-  const householdsList = households ?? [];
+  const tenantsList = tenants ?? [];
 
   // Resolve the audit-log result discriminator. Anything but `ok` becomes
   // either a notFound() or an inline error banner — never a hard throw.
@@ -93,7 +93,7 @@ export default async function BillingPeriodHistoryPage({
 
   const entries = auditResult.entries;
 
-  // ── Build lineItemId → householdId map ─────────────────────────────────
+  // ── Build lineItemId → tenantId map ─────────────────────────────────
   // The map only needs to cover the line items referenced by entries —
   // we query `billing_line_items` once with an `in` filter scoped to the
   // entry set. This is RLS-scoped (caller only sees line items in
@@ -106,20 +106,20 @@ export default async function BillingPeriodHistoryPage({
     )
   );
 
-  const lineItemIdToHouseholdId: Record<string, string> = {};
+  const lineItemIdToTenantId: Record<string, string> = {};
   if (lineItemIds.length > 0) {
     const { data: lis } = await supabase
       .from("billing_line_items")
-      .select("id, household_id")
+      .select("id, tenant_id")
       .in("id", lineItemIds);
-    for (const r of (lis ?? []) as { id: string; household_id: string }[]) {
-      lineItemIdToHouseholdId[r.id] = r.household_id;
+    for (const r of (lis ?? []) as { id: string; tenant_id: string }[]) {
+      lineItemIdToTenantId[r.id] = r.tenant_id;
     }
   }
 
-  const householdNamesById: Record<string, string> = {};
-  for (const h of householdsList) {
-    householdNamesById[h.id] = h.display_name;
+  const tenantNamesById: Record<string, string> = {};
+  for (const h of tenantsList) {
+    tenantNamesById[h.id] = h.display_name;
   }
 
   return (
@@ -140,9 +140,9 @@ export default async function BillingPeriodHistoryPage({
 
       <AuditLogList
         entries={entries}
-        lineItemIdToHouseholdId={lineItemIdToHouseholdId}
-        householdNamesById={householdNamesById}
-        filterHouseholdId={household_id}
+        lineItemIdToTenantId={lineItemIdToTenantId}
+        tenantNamesById={tenantNamesById}
+        filterTenantId={tenant_id}
         microgridId={id}
         periodId={periodId}
       />

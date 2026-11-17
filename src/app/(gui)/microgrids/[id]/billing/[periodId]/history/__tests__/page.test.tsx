@@ -5,7 +5,7 @@
  * can exercise the page's render branches without a live DB:
  *
  *   - Happy path: the page returns markup containing the audit list.
- *   - With searchParams.household_id set: filter narrows the visible
+ *   - With searchParams.tenant_id set: filter narrows the visible
  *     entries; the "Show all" link clears the param.
  *   - Empty period (zero entries) → "No changes recorded yet"; <ol>
  *     is NOT rendered.
@@ -35,13 +35,13 @@ let MOCK_PERIOD: { id: string; microgrid_id: string } | null = {
   id: PERIOD_ID,
   microgrid_id: MICROGRID_ID,
 };
-let MOCK_HOUSEHOLDS: { id: string; display_name: string }[] = [
+let MOCK_TENANTS: { id: string; display_name: string }[] = [
   { id: HH_A, display_name: "HH-A" },
   { id: HH_B, display_name: "HH-B" },
 ];
-let MOCK_LINE_ITEMS: { id: string; household_id: string }[] = [
-  { id: LI_A, household_id: HH_A },
-  { id: LI_B, household_id: HH_B },
+let MOCK_LINE_ITEMS: { id: string; tenant_id: string }[] = [
+  { id: LI_A, tenant_id: HH_A },
+  { id: LI_B, tenant_id: HH_B },
 ];
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -62,12 +62,12 @@ vi.mock("@/lib/supabase/server", () => ({
           }),
         };
       }
-      if (table === "households") {
+      if (table === "tenants") {
         return {
           select: () => ({
             eq: () => ({
               returns: () =>
-                Promise.resolve({ data: MOCK_HOUSEHOLDS, error: null }),
+                Promise.resolve({ data: MOCK_TENANTS, error: null }),
             }),
           }),
         };
@@ -127,7 +127,7 @@ const FIVE_ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T10:00:00Z",
     billingLineItemId: null,
-    householdName: null,
+    tenantName: null,
     details: {},
   },
   {
@@ -137,8 +137,8 @@ const FIVE_ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T11:00:00Z",
     billingLineItemId: LI_A,
-    householdName: "HH-A",
-    details: { household_name: "HH-A", new_total_amount: 5000 },
+    tenantName: "HH-A",
+    details: { tenant_name: "HH-A", new_total_amount: 5000 },
   },
   {
     id: "audit:3",
@@ -147,9 +147,9 @@ const FIVE_ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: null,
     createdAt: "2026-04-25T12:00:00Z",
     billingLineItemId: LI_B,
-    householdName: "HH-B",
+    tenantName: "HH-B",
     details: {
-      household_name: "HH-B",
+      tenant_name: "HH-B",
       previous_total_amount: 3000,
       new_total_amount: 4000,
       previous_reading_source: "edge",
@@ -163,7 +163,7 @@ const FIVE_ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: "Alice Doe",
     createdAt: "2026-04-25T13:00:00Z",
     billingLineItemId: LI_A,
-    householdName: "HH-A",
+    tenantName: "HH-A",
     details: { from: "unpaid", to: "paid", source: "manual" },
   },
   {
@@ -173,20 +173,20 @@ const FIVE_ENTRIES: BillingAuditLogEntry[] = [
     actorDisplayName: null,
     createdAt: "2026-04-25T14:00:00Z",
     billingLineItemId: LI_B,
-    householdName: "HH-B",
+    tenantName: "HH-B",
     details: { from: "unpaid", to: "link_generated", source: "generate_link" },
   },
 ];
 
 beforeEach(() => {
   MOCK_PERIOD = { id: PERIOD_ID, microgrid_id: MICROGRID_ID };
-  MOCK_HOUSEHOLDS = [
+  MOCK_TENANTS = [
     { id: HH_A, display_name: "HH-A" },
     { id: HH_B, display_name: "HH-B" },
   ];
   MOCK_LINE_ITEMS = [
-    { id: LI_A, household_id: HH_A },
-    { id: LI_B, household_id: HH_B },
+    { id: LI_A, tenant_id: HH_A },
+    { id: LI_B, tenant_id: HH_B },
   ];
   MOCK_AUDIT_RESULT = { kind: "ok", entries: [] };
 });
@@ -213,12 +213,12 @@ describe("HistoryPage — happy path", () => {
   });
 });
 
-describe("HistoryPage — household_id filter", () => {
-  it("only renders entries belonging to the filtered household + Show all link clears the param", async () => {
+describe("HistoryPage — tenant_id filter", () => {
+  it("only renders entries belonging to the filtered tenant + Show all link clears the param", async () => {
     MOCK_AUDIT_RESULT = { kind: "ok", entries: FIVE_ENTRIES };
     const node = await HistoryPage({
       params: Promise.resolve({ id: MICROGRID_ID, periodId: PERIOD_ID }),
-      searchParams: Promise.resolve({ household_id: HH_A }),
+      searchParams: Promise.resolve({ tenant_id: HH_A }),
     });
     const html = renderToStaticMarkup(node as React.ReactElement);
     // 2 entries belong to LI_A → HH_A.
@@ -259,14 +259,14 @@ describe("HistoryPage — empty states", () => {
           actorDisplayName: null,
           createdAt: "2026-04-25T10:00:00Z",
           billingLineItemId: LI_B,
-          householdName: "HH-B",
-          details: { household_name: "HH-B", new_total_amount: 100 },
+          tenantName: "HH-B",
+          details: { tenant_name: "HH-B", new_total_amount: 100 },
         },
       ],
     };
     const node = await HistoryPage({
       params: Promise.resolve({ id: MICROGRID_ID, periodId: PERIOD_ID }),
-      searchParams: Promise.resolve({ household_id: HH_A }),
+      searchParams: Promise.resolve({ tenant_id: HH_A }),
     });
     const html = renderToStaticMarkup(node as React.ReactElement);
     expect(html).toContain("No changes recorded for HH-A");

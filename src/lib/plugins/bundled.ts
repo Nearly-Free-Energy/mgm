@@ -44,7 +44,7 @@ export const CORE_ENTITY_KINDS = [
   "microgrid",
   "edge",
   "device",
-  "household",
+  "tenant",
   "rateSchedule",
   "billingPeriod",
   "lineItem",
@@ -142,13 +142,13 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
   version: COMMUNITY_MANAGEMENT_PLUGIN_VERSION,
   displayName: "Community management",
   description:
-    "Communities, microgrids, households, and hierarchy operations for one organization.",
+    "Communities, microgrids, tenants, and hierarchy operations for one organization.",
   dependencies: [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
   core: false,
   provides: [
     "communities",
     "microgrids",
-    "households",
+    "tenants",
     "hierarchy navigation",
   ],
   routes: [
@@ -156,7 +156,7 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
     "/microgrids",
     "/api/communities",
     "/api/microgrids",
-    "/api/households",
+    "/api/tenants",
     "/api/v1/microgrids",
   ],
   pages: [
@@ -166,13 +166,13 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
     // The setup index redirects to the first setup tab, whichever plugin owns
     // that tab, so it stays with the plugin that owns the microgrid.
     { path: "/microgrids/[id]/setup", params: { id: "microgrid" } },
-    { path: "/microgrids/[id]/setup/households", params: { id: "microgrid" } },
+    { path: "/microgrids/[id]/setup/tenants", params: { id: "microgrid" } },
     {
-      path: "/microgrids/[id]/setup/households/[householdId]",
-      params: { id: "microgrid", householdId: "household" },
+      path: "/microgrids/[id]/setup/tenants/[tenantId]",
+      params: { id: "microgrid", tenantId: "tenant" },
     },
   ],
-  tables: ["communities", "microgrids", "households"],
+  tables: ["communities", "microgrids", "tenants"],
 };
 
 export const METERING_PLUGIN: BundledPlugin = {
@@ -181,7 +181,7 @@ export const METERING_PLUGIN: BundledPlugin = {
   version: METERING_PLUGIN_VERSION,
   displayName: "Metering",
   description:
-    "OpenEMS connection testing, meter discovery and registration, meter-to-household assignments, and consumption reads for one organization.",
+    "OpenEMS connection testing, meter discovery and registration, meter-to-tenant assignments, and consumption reads for one organization.",
   dependencies: [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
   core: false,
   // Plugin-enabled and connection-ready are separate states (issue #4): the
@@ -200,7 +200,7 @@ export const METERING_PLUGIN: BundledPlugin = {
     "/api/microgrids/[id]/edges",
     "/api/edges",
     "/api/devices",
-    "/api/households/[id]/assignments",
+    "/api/tenants/[id]/assignments",
     "/api/metering",
     "/api/meter-readings",
     "/api/openems",
@@ -223,7 +223,7 @@ export const METERING_PLUGIN: BundledPlugin = {
       params: { id: "microgrid" },
     },
   ],
-  tables: ["devices", "edges", "household_devices", "meter_readings"],
+  tables: ["devices", "edges", "tenant_devices", "meter_readings"],
 };
 
 export const BILLING_PLUGIN: BundledPlugin = {
@@ -232,7 +232,7 @@ export const BILLING_PLUGIN: BundledPlugin = {
   version: BILLING_PLUGIN_VERSION,
   displayName: "Billing",
   description:
-    "Tariffs, billing periods, household bills, invoices, and manual payments for one organization.",
+    "Tariffs, billing periods, tenant bills, invoices, and manual payments for one organization.",
   dependencies: [METERING_PLUGIN_NAME],
   core: false,
   // Billing reads metering data through the metering capability — never a

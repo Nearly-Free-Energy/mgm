@@ -51,9 +51,9 @@ let mockCapabilityResult: { ok: boolean; status?: number; code?: string; message
 };
 let lastCapabilityCall: {
   billingPeriodId?: string;
-  householdIds?: string[];
+  tenantIds?: string[];
   manualReadings?: unknown[];
-  revertToEdgeHouseholdIds?: string[];
+  revertToEdgeTenantIds?: string[];
 } | null = null;
 let periodRow: { id: string; microgrid_id: string } | null = {
   id: "660e8400-e29b-41d4-a716-446655441000",
@@ -66,15 +66,15 @@ let microgridRow: { id: string; communities: { org_id: string } } | null = {
 let composeResult: { ok: boolean; status?: number; code?: string; message?: string } | null = null;
 const previewBills = vi.fn(async (input: {
   billingPeriodId: string;
-  householdIds?: string[];
+  tenantIds?: string[];
   manualReadings?: unknown[];
-  revertToEdgeHouseholdIds?: string[];
+  revertToEdgeTenantIds?: string[];
 }) => {
   lastCapabilityCall = {
     billingPeriodId: input.billingPeriodId,
-    householdIds: input.householdIds,
+    tenantIds: input.tenantIds,
     manualReadings: input.manualReadings,
-    revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
+    revertToEdgeTenantIds: input.revertToEdgeTenantIds,
   };
   return mockCapabilityResult;
 });
@@ -158,7 +158,7 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       makePostRequest({
         billingPeriodId: PERIOD_ID,
         manualReadings: [
-          { householdId: HH_A, startKwh: 100, endKwh: 50 },
+          { tenantId: HH_A, startKwh: 100, endKwh: 50 },
         ],
       })
     );
@@ -172,8 +172,8 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
         results: [
           {
             kind: "preview",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             startKwh: 100,
             endKwh: 200,
             usageKwh: 100,
@@ -189,19 +189,19 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     const res = await POST(
       makePostRequest({
         billingPeriodId: PERIOD_ID,
-        householdIds: [HH_A],
+        tenantIds: [HH_A],
       })
     );
     expect(res.status).toBe(200);
     // previewBills implies mode='preview' with assignment-date enforcement —
     // the route cannot switch it off per-call.
     expect(lastCapabilityCall?.billingPeriodId).toBe(PERIOD_ID);
-    expect(lastCapabilityCall?.householdIds).toEqual([HH_A]);
+    expect(lastCapabilityCall?.tenantIds).toEqual([HH_A]);
     const json = await res.json();
     expect(json.preview).toHaveLength(1);
     expect(json.preview[0]).toMatchObject({
-      householdId: HH_A,
-      householdName: "HH A",
+      tenantId: HH_A,
+      tenantName: "HH A",
       previousTotalAmount: 12000,
       previousPaymentStatus: "paid",
       totalAmount: 49000,
@@ -217,8 +217,8 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
         results: [
           {
             kind: "preview",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             startKwh: 0,
             endKwh: 0,
             usageKwh: 0,
@@ -375,8 +375,8 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
         results: [
           {
             kind: "error",
-            householdId: HH_A,
-            householdName: "HH A",
+            tenantId: HH_A,
+            tenantName: "HH A",
             error: "Currently set to manual entry — use per-row regenerate to change.",
             code: "currently_manual",
           },
@@ -385,7 +385,7 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     };
     const { POST } = await import("../route");
     const res = await POST(
-      makePostRequest({ billingPeriodId: PERIOD_ID, householdIds: [HH_A] })
+      makePostRequest({ billingPeriodId: PERIOD_ID, tenantIds: [HH_A] })
     );
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -394,24 +394,24 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     expect(json.errors[0].code).toBe("currently_manual");
   });
 
-  it("forwards revertToEdgeHouseholdIds to the billing capability", async () => {
+  it("forwards revertToEdgeTenantIds to the billing capability", async () => {
     const { POST } = await import("../route");
     const res = await POST(
       makePostRequest({
         billingPeriodId: PERIOD_ID,
-        householdIds: [HH_A],
-        revertToEdgeHouseholdIds: [HH_A],
+        tenantIds: [HH_A],
+        revertToEdgeTenantIds: [HH_A],
       })
     );
     expect(res.status).toBe(200);
-    expect(lastCapabilityCall?.revertToEdgeHouseholdIds).toEqual([HH_A]);
+    expect(lastCapabilityCall?.revertToEdgeTenantIds).toEqual([HH_A]);
   });
 
-  it("400 invalid_body for a malformed revertToEdgeHouseholdIds", async () => {
+  it("400 invalid_body for a malformed revertToEdgeTenantIds", async () => {
     const { POST } = await import("../route");
-    for (const revertToEdgeHouseholdIds of [HH_A, ["not-a-uuid"]]) {
+    for (const revertToEdgeTenantIds of [HH_A, ["not-a-uuid"]]) {
       const res = await POST(
-        makePostRequest({ billingPeriodId: PERIOD_ID, revertToEdgeHouseholdIds })
+        makePostRequest({ billingPeriodId: PERIOD_ID, revertToEdgeTenantIds })
       );
       expect(res.status).toBe(400);
       expect((await res.json()).error).toBe("invalid_body");
@@ -419,20 +419,20 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     const both = await POST(
       makePostRequest({
         billingPeriodId: PERIOD_ID,
-        manualReadings: [{ householdId: HH_A, startKwh: 1, endKwh: 2 }],
-        revertToEdgeHouseholdIds: [HH_A],
+        manualReadings: [{ tenantId: HH_A, startKwh: 1, endKwh: 2 }],
+        revertToEdgeTenantIds: [HH_A],
       })
     );
     expect(both.status).toBe(400);
     expect(previewBills).not.toHaveBeenCalled();
   });
 
-  it("returns kept households in kept[], not errors[]", async () => {
+  it("returns kept tenants in kept[], not errors[]", async () => {
     mockCapabilityResult = {
       ok: true,
       data: {
         results: [
-          { kind: "kept", householdId: HH_A, householdName: "HH A", readingSource: "manual" },
+          { kind: "kept", tenantId: HH_A, tenantName: "HH A", readingSource: "manual" },
         ],
       },
     };
@@ -440,7 +440,7 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
     const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID }));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.kept).toEqual([{ householdId: HH_A, householdName: "HH A" }]);
+    expect(json.kept).toEqual([{ tenantId: HH_A, tenantName: "HH A" }]);
     expect(json.errors).toEqual([]);
   });
 });

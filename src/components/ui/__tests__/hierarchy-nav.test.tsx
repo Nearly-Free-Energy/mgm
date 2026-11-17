@@ -2,7 +2,7 @@
  * hierarchy-nav.test.tsx — component tests for <HierarchyNav>.
  *
  * Covers:
- *   - 1-level, 3-level, and 5-level (including Household) level arrays
+ *   - 1-level, 3-level, and 5-level (including Tenant) level arrays
  *   - count === 1 → plain link (no dropdown)
  *   - count > 1 AND siblings → DropdownMenu trigger (switcher)
  *   - aria-current="page" on the active segment
@@ -47,11 +47,11 @@ const edgeLevel: HierarchyLevel = {
   active: false,
 };
 
-const householdLevelActive: HierarchyLevel = {
-  kind: "Household",
-  label: "Household Alpha",
+const tenantLevelActive: HierarchyLevel = {
+  kind: "Tenant",
+  label: "Tenant Alpha",
   count: 1,
-  href: "/microgrids/mg-1/setup/households/hh-1",
+  href: "/microgrids/mg-1/setup/tenants/hh-1",
   active: true,
 };
 
@@ -145,15 +145,15 @@ describe("HierarchyNav — 3-level (Org → Community → Microgrid)", () => {
   });
 });
 
-// ── 5-level breadcrumb including Household ─────────────────────────────────────
+// ── 5-level breadcrumb including Tenant ─────────────────────────────────────
 
-describe("HierarchyNav — 5-level (Org → Community → Microgrid → Edge → Household)", () => {
+describe("HierarchyNav — 5-level (Org → Community → Microgrid → Edge → Tenant)", () => {
   const levels: HierarchyLevel[] = [
     orgLevel,
     communityLevel,
     { ...microgridLevelActive, active: false },
     edgeLevel,
-    householdLevelActive,
+    tenantLevelActive,
   ];
 
   it("renders five segments", () => {
@@ -162,15 +162,15 @@ describe("HierarchyNav — 5-level (Org → Community → Microgrid → Edge →
     expect(links.length).toBe(5);
   });
 
-  it("renders kind label Household", () => {
+  it("renders kind label Tenant", () => {
     render(<HierarchyNav levels={levels} />);
-    expect(screen.getByText("Household")).toBeDefined();
+    expect(screen.getByText("Tenant")).toBeDefined();
   });
 
-  it("Household segment is active (aria-current=page)", () => {
+  it("Tenant segment is active (aria-current=page)", () => {
     const { container } = render(<HierarchyNav levels={levels} />);
     const activeLink = container.querySelector('[aria-current="page"]');
-    expect(activeLink?.textContent).toContain("Household Alpha");
+    expect(activeLink?.textContent).toContain("Tenant Alpha");
   });
 
   it("renders 4 separators between 5 levels", () => {

@@ -2,7 +2,7 @@
 //
 // Why: callers don't need to remember which tone maps to "draft" vs
 // "closed". The domain status enums (billing period status, edge status,
-// household status, meter type) live in ONE PLACE,
+// tenant status, meter type) live in ONE PLACE,
 // src/lib/gui/status-maps.ts; add new ones there.
 //
 // Pattern: <StatusChip kind="billingPeriod" status="draft" /> —

@@ -48,7 +48,7 @@ schedules every job the migrations schedule, and fails on any other change to
 those tables until the test is extended to cover it.
 
 An export contains personal data (Auth users and their password hashes,
-households, bills and payments) and the ciphertext of every stored
+tenants, bills and payments) and the ciphertext of every stored
 credential. Treat it as confidential even when it is encrypted. It leaves out
 Auth's sessions, refresh tokens and MFA factors, so it cannot be used to resume
 anyone's session. Everyone signs in again after a restore, and users who had

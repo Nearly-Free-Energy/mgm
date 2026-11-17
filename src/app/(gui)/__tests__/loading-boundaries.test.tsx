@@ -20,7 +20,7 @@ import CommunitiesLoading from "../communities/loading";
 import CommunityLoading from "../communities/[id]/loading";
 import MicrogridsLoading from "../microgrids/loading";
 import SetupLoading from "../microgrids/[id]/setup/loading";
-import HouseholdsLoading from "../microgrids/[id]/setup/households/loading";
+import TenantsLoading from "../microgrids/[id]/setup/tenants/loading";
 import EdgesLoading from "../microgrids/[id]/setup/edges/loading";
 import SettingsLoading from "../settings/loading";
 
@@ -32,7 +32,7 @@ const BOUNDARIES: [string, React.ComponentType, string][] = [
   ["communities/[id]", CommunityLoading, "community"],
   ["microgrids", MicrogridsLoading, "microgrid"],
   ["microgrids/[id]/setup", SetupLoading, "setup"],
-  ["microgrids/[id]/setup/households", HouseholdsLoading, "household"],
+  ["microgrids/[id]/setup/tenants", TenantsLoading, "tenant"],
   ["microgrids/[id]/setup/edges", EdgesLoading, "edge"],
   ["settings", SettingsLoading, "settings"],
 ];

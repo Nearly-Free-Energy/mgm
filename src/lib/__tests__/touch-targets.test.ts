@@ -159,7 +159,7 @@ const CONTROLS: Record<string, string> = {
   "visually hidden button": '<button class="sr-only">Skip</button>',
   "select hidden from assistive technology":
     '<select aria-hidden="true" tabindex="-1" style="position: absolute; width: 1px; height: 1px"></select>',
-  "link in a sentence": '<a class="text-primary hover:underline" href="/x">the household</a>',
+  "link in a sentence": '<a class="text-primary hover:underline" href="/x">the tenant</a>',
   "label around a text field": "<label>Name <input></label>",
 };
 

@@ -98,11 +98,11 @@ export function createSupabasePaymentsRepository(
     async loadBillSnapshot(lineItemId: string): Promise<BillSnapshot | null> {
       const { data: item, error: itemError } = await supabase
         .from("billing_line_items")
-        .select("id, household_id, total_amount, updated_at, payment_status, billing_period_id")
+        .select("id, tenant_id, total_amount, updated_at, payment_status, billing_period_id")
         .eq("id", lineItemId)
         .maybeSingle<{
           id: string;
-          household_id: string;
+          tenant_id: string;
           total_amount: number;
           payment_status: string;
           updated_at: string | null;
@@ -134,18 +134,18 @@ export function createSupabasePaymentsRepository(
         .eq("id", microgrid.community_id)
         .maybeSingle<{ id: string; org_id: string }>();
       if (!community) return null;
-      const { data: household } = await supabase
-        .from("households")
+      const { data: tenant } = await supabase
+        .from("tenants")
         .select("id, display_name, primary_email, primary_phone")
-        .eq("id", item.household_id)
+        .eq("id", item.tenant_id)
         .maybeSingle<{
           id: string;
           display_name: string;
           primary_email: string | null;
           primary_phone: string | null;
         }>();
-      if (!household) return null;
-      const parts = household.display_name.trim().split(/\s+/);
+      if (!tenant) return null;
+      const parts = tenant.display_name.trim().split(/\s+/);
       return {
         lineItemId: item.id,
         orgId: community.org_id,
@@ -155,8 +155,8 @@ export function createSupabasePaymentsRepository(
         updatedAt: item.updated_at ?? null,
         paymentStatus: item.payment_status,
         periodStatus: period.status,
-        contactEmail: household.primary_email,
-        contactPhone: household.primary_phone,
+        contactEmail: tenant.primary_email,
+        contactPhone: tenant.primary_phone,
         contactFirstName: parts[0] ?? "",
         contactLastName: parts.slice(1).join(" "),
         periodLabel: `${period.start_date} – ${period.end_date}`,

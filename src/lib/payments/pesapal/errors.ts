@@ -32,9 +32,9 @@ export class PesapalError extends PaymentError {
 //                                          refused before a provider is built)
 // "PESAPAL_REGISTER_IPN_FAILED"   (502) — RegisterIPN endpoint failed or returned no ipn_id
 // "PESAPAL_UNREACHABLE"           (503) — network/fetch failure or request timeout
-// "PESAPAL_MISSING_CONTACT"       (400) — household has neither email nor phone
+// "PESAPAL_MISSING_CONTACT"       (400) — tenant has neither email nor phone
 // "PESAPAL_ZERO_AMOUNT"           (400) — line item total is <= 0
 // "PESAPAL_LINE_ITEM_NOT_FOUND"   (404) — line item lookup returned no row
 // "PESAPAL_PERIOD_NOT_FOUND"      (404) — billing_periods join returned no row
-// "PESAPAL_HOUSEHOLD_NOT_FOUND"   (404) — household lookup returned no row
+// "PESAPAL_TENANT_NOT_FOUND"   (404) — tenant lookup returned no row
 // "PESAPAL_NO_REDIRECT"           (502) — submit order succeeded but redirect_url missing

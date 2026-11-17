@@ -43,7 +43,7 @@ const TIERS_2 = [
 
 function makeRow(overrides: Partial<CsvExportRow> = {}): CsvExportRow {
   return {
-    household: {
+    tenant: {
       display_name: "Alice",
       account_number: "A-001",
       meter_serial: "MS-001",
@@ -128,7 +128,7 @@ describe("buildBillingPeriodCsv — header + structure", () => {
     expect(headerCols.length).toBe(20 + 8);
     expect(headerCols[0]).toBe("Invoice Number");
     expect(headerCols[1]).toBe("Issue Date");
-    expect(headerCols[2]).toBe("Household");
+    expect(headerCols[2]).toBe("Tenant");
     expect(headerCols[3]).toBe("Account Number");
     expect(headerCols[4]).toBe("OpenEMS Meter ID");
     expect(headerCols[5]).toBe("Meter Serial");
@@ -171,7 +171,7 @@ describe("buildBillingPeriodCsv — bytes (BOM + CRLF)", () => {
 
   it("uses CRLF line endings between rows", () => {
     const csv = buildBillingPeriodCsv(
-      makeInput({ rows: [makeRow(), makeRow({ household: { ...makeRow().household, display_name: "Bob" } })] }),
+      makeInput({ rows: [makeRow(), makeRow({ tenant: { ...makeRow().tenant, display_name: "Bob" } })] }),
     );
     // Count CRLF occurrences = header + 2 data rows + trailing = 3
     const crlfCount = (csv.match(/\r\n/g) ?? []).length;
@@ -183,7 +183,7 @@ describe("buildBillingPeriodCsv — bytes (BOM + CRLF)", () => {
 describe("buildBillingPeriodCsv — tier lookup", () => {
   it("4-tier microgrid: rows that reached only Tier 1 emit empty cells for Tiers 2-4 (NOT zero)", () => {
     const rowOnlyT1 = makeRow({
-      household: { ...makeRow().household, display_name: "Solo" },
+      tenant: { ...makeRow().tenant, display_name: "Solo" },
       lineItem: {
         ...makeRow().lineItem,
         id: "00000000-0000-0000-0000-000000000010",
@@ -324,13 +324,13 @@ describe("buildBillingPeriodCsv — VAT/tax derivation", () => {
 describe("buildBillingPeriodCsv — RFC 4180 quoting", () => {
   it('special characters in name: O\'Brien, Inc. "Trading" → properly quoted with escaped double-quotes', () => {
     const tricky = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         display_name: 'O\'Brien, Inc. "Trading"',
       },
     });
     const csv = buildBillingPeriodCsv(makeInput({ rows: [tricky] }));
-    // The Household column is index 2.
+    // The Tenant column is index 2.
     const lines = parseLines(csv);
     // We cannot naively split on comma because the cell is quoted.
     // Assert by raw substring.
@@ -339,8 +339,8 @@ describe("buildBillingPeriodCsv — RFC 4180 quoting", () => {
 
   it("newline inside an address is quoted", () => {
     const withNewline = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         address_line1: "Line1\nWith newline",
         unit_label: null,
         address_line2: null,
@@ -356,8 +356,8 @@ describe("buildBillingPeriodCsv — RFC 4180 quoting", () => {
 describe("buildBillingPeriodCsv — null fields", () => {
   it("null account_number, meter_serial, paid_at → empty cells (NOT 'null')", () => {
     const nullRow = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         account_number: null,
         meter_serial: null,
         primary_phone: null,
@@ -384,8 +384,8 @@ describe("buildBillingPeriodCsv — null fields", () => {
 describe("buildBillingPeriodCsv — Address composition", () => {
   it("missing line2 → 4 fields joined with single comma, no double comma", () => {
     const row = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         unit_label: "Unit 7",
         address_line1: "12 Main Rd",
         address_line2: null,
@@ -401,8 +401,8 @@ describe("buildBillingPeriodCsv — Address composition", () => {
 
   it("all 5 address fields null → empty Address cell", () => {
     const row = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         unit_label: null,
         address_line1: null,
         address_line2: null,
@@ -417,8 +417,8 @@ describe("buildBillingPeriodCsv — Address composition", () => {
 
   it("blank-only address fields (whitespace) are filtered out", () => {
     const row = makeRow({
-      household: {
-        ...makeRow().household,
+      tenant: {
+        ...makeRow().tenant,
         unit_label: "   ",
         address_line1: "12 Main",
         address_line2: null,
@@ -455,18 +455,18 @@ describe("buildBillingPeriodCsv — sort stability", () => {
   it("sorts by display_name ascending", () => {
     const rows = [
       makeRow({
-        household: { ...makeRow().household, display_name: "Charlie" },
+        tenant: { ...makeRow().tenant, display_name: "Charlie" },
       }),
       makeRow({
-        household: { ...makeRow().household, display_name: "Alice" },
+        tenant: { ...makeRow().tenant, display_name: "Alice" },
       }),
       makeRow({
-        household: { ...makeRow().household, display_name: "Bob" },
+        tenant: { ...makeRow().tenant, display_name: "Bob" },
       }),
     ];
     const csv = buildBillingPeriodCsv(makeInput({ rows }));
     const lines = parseLines(csv);
-    // Household column is index 2. We can grab it from each data row
+    // Tenant column is index 2. We can grab it from each data row
     // by splitting; none of these names have commas.
     const names = lines.slice(1).map((l) => l.split(",")[2]);
     expect(names).toEqual(["Alice", "Bob", "Charlie"]);
@@ -475,7 +475,7 @@ describe("buildBillingPeriodCsv — sort stability", () => {
   it("identical display_name → secondary sort by lineItem.id ASC; re-running produces byte-identical output", () => {
     const rows = [
       makeRow({
-        household: { ...makeRow().household, display_name: "Same" },
+        tenant: { ...makeRow().tenant, display_name: "Same" },
         lineItem: {
           ...makeRow().lineItem,
           id: "00000000-0000-0000-0000-000000000002",
@@ -483,7 +483,7 @@ describe("buildBillingPeriodCsv — sort stability", () => {
         },
       }),
       makeRow({
-        household: { ...makeRow().household, display_name: "Same" },
+        tenant: { ...makeRow().tenant, display_name: "Same" },
         lineItem: {
           ...makeRow().lineItem,
           id: "00000000-0000-0000-0000-000000000001",
@@ -549,7 +549,7 @@ describe("buildBillingPeriodCsv — #232 OpenEMS Meter ID rename + Meter Serial 
 
   it("non-null meter_serial flows to data-row column index 5", () => {
     const row = makeRow({
-      household: { ...makeRow().household, meter_serial: "MS-001" },
+      tenant: { ...makeRow().tenant, meter_serial: "MS-001" },
     });
     const csv = buildBillingPeriodCsv(makeInput({ rows: [row] }));
     const cols = parseLines(csv)[1].split(",");
@@ -558,7 +558,7 @@ describe("buildBillingPeriodCsv — #232 OpenEMS Meter ID rename + Meter Serial 
 
   it("null meter_serial → empty cell at index 5 (NOT 'null')", () => {
     const row = makeRow({
-      household: { ...makeRow().household, meter_serial: null },
+      tenant: { ...makeRow().tenant, meter_serial: null },
     });
     const csv = buildBillingPeriodCsv(makeInput({ rows: [row] }));
     const cols = parseLines(csv)[1].split(",");
@@ -571,7 +571,7 @@ describe("buildBillingPeriodCsv — #232 display-side rounding masks float-dust"
   it("dusty Tier 2 / Usage / Total stored values serialize clean (Arthur / Peter fixtures)", () => {
     // Composite fixture mirroring the dust patterns from the issue.
     const dustyRow = makeRow({
-      household: { ...makeRow().household, display_name: "Dusty Row" },
+      tenant: { ...makeRow().tenant, display_name: "Dusty Row" },
       lineItem: {
         ...makeRow().lineItem,
         start_kwh: 83.57,

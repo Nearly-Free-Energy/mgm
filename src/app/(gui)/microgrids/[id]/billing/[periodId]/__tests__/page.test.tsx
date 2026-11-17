@@ -131,7 +131,7 @@ vi.mock("@/lib/supabase/server", () => ({
             ? { id: PERIOD_ID, microgrid_id: MICROGRID_ID, rate_schedule_id: MOCK_PERIOD_RATE_SCHEDULE_ID }
             : null,
         );
-      if (table === "households") return buildQuery([]);
+      if (table === "tenants") return buildQuery([]);
       if (table === "rate_schedules") return buildQuery(
         { id: SCHEDULE_ID, tiers: [] },
         (column, value) => { LAST_SCHEDULE_FILTERS.push([column, value]); },
@@ -407,7 +407,7 @@ describe("BillingPeriodDetailPage — loading", () => {
     });
     await vi.waitFor(() => {
       expect(TABLES_READ).toEqual(
-        expect.arrayContaining(["billing_periods", "billing_line_items", "households", "microgrids", "rate_schedules"]),
+        expect.arrayContaining(["billing_periods", "billing_line_items", "tenants", "microgrids", "rate_schedules"]),
       );
       expect(LAST_RPC_ARGS).not.toBeNull();
     });

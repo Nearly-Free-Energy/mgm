@@ -94,9 +94,9 @@ function validateTiers(tiers: unknown): { tiers?: TierInput[]; error?: string } 
 
 type GenerationBody = {
   billingPeriodId: string;
-  householdIds?: string[];
-  manualReadings?: { householdId: string; startKwh: number; endKwh: number; reason?: string }[];
-  revertToEdgeHouseholdIds?: string[];
+  tenantIds?: string[];
+  manualReadings?: { tenantId: string; startKwh: number; endKwh: number; reason?: string }[];
+  revertToEdgeTenantIds?: string[];
   seedReadings?: { deviceId: string; dialReadingKwh: number; readAt: string; startKwh: number }[];
 };
 
@@ -110,17 +110,17 @@ function parseGenerationBody(raw: unknown):
   if (typeof rec.billingPeriodId !== "string" || !UUID_RE.test(rec.billingPeriodId)) {
     return { error: "billingPeriodId must be a UUID string", field: "billingPeriodId" };
   }
-  let householdIds: string[] | undefined;
-  if (rec.householdIds !== undefined) {
-    if (!Array.isArray(rec.householdIds)) {
-      return { error: "householdIds must be an array of UUIDs", field: "householdIds" };
+  let tenantIds: string[] | undefined;
+  if (rec.tenantIds !== undefined) {
+    if (!Array.isArray(rec.tenantIds)) {
+      return { error: "tenantIds must be an array of UUIDs", field: "tenantIds" };
     }
-    for (const h of rec.householdIds) {
+    for (const h of rec.tenantIds) {
       if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "householdIds entries must be UUID strings", field: "householdIds" };
+        return { error: "tenantIds entries must be UUID strings", field: "tenantIds" };
       }
     }
-    householdIds = rec.householdIds as string[];
+    tenantIds = rec.tenantIds as string[];
   }
   let manualReadings: GenerationBody["manualReadings"];
   if (rec.manualReadings !== undefined) {
@@ -133,8 +133,8 @@ function parseGenerationBody(raw: unknown):
       if (!m || typeof m !== "object") {
         return { error: `manualReadings[${i}] must be an object`, field: "manualReadings" };
       }
-      if (typeof m.householdId !== "string" || !UUID_RE.test(m.householdId)) {
-        return { error: `manualReadings[${i}].householdId must be a UUID`, field: "manualReadings" };
+      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
+        return { error: `manualReadings[${i}].tenantId must be a UUID`, field: "manualReadings" };
       }
       if (typeof m.startKwh !== "number" || !Number.isFinite(m.startKwh) || m.startKwh < 0) {
         return {
@@ -162,7 +162,7 @@ function parseGenerationBody(raw: unknown):
         reason = m.reason;
       }
       out.push({
-        householdId: m.householdId as string,
+        tenantId: m.tenantId as string,
         startKwh: m.startKwh as number,
         endKwh: m.endKwh as number,
         ...(reason !== undefined ? { reason } : {}),
@@ -170,33 +170,33 @@ function parseGenerationBody(raw: unknown):
     }
     manualReadings = out;
   }
-  // Households whose manual row may switch back to an OpenEMS reading. A
-  // household cannot be both re-entered manually and reverted to OpenEMS in
+  // Tenants whose manual row may switch back to an OpenEMS reading. A
+  // tenant cannot be both re-entered manually and reverted to OpenEMS in
   // one request; which one would win is not something a caller should have
   // to guess.
-  let revertToEdgeHouseholdIds: string[] | undefined;
-  if (rec.revertToEdgeHouseholdIds !== undefined) {
-    if (!Array.isArray(rec.revertToEdgeHouseholdIds)) {
+  let revertToEdgeTenantIds: string[] | undefined;
+  if (rec.revertToEdgeTenantIds !== undefined) {
+    if (!Array.isArray(rec.revertToEdgeTenantIds)) {
       return {
-        error: "revertToEdgeHouseholdIds must be an array of UUIDs",
-        field: "revertToEdgeHouseholdIds",
+        error: "revertToEdgeTenantIds must be an array of UUIDs",
+        field: "revertToEdgeTenantIds",
       };
     }
-    for (const h of rec.revertToEdgeHouseholdIds) {
+    for (const h of rec.revertToEdgeTenantIds) {
       if (typeof h !== "string" || !UUID_RE.test(h)) {
         return {
-          error: "revertToEdgeHouseholdIds entries must be UUID strings",
-          field: "revertToEdgeHouseholdIds",
+          error: "revertToEdgeTenantIds entries must be UUID strings",
+          field: "revertToEdgeTenantIds",
         };
       }
-      if (manualReadings?.some((m) => m.householdId === h)) {
+      if (manualReadings?.some((m) => m.tenantId === h)) {
         return {
-          error: `Household ${h} cannot be in both manualReadings and revertToEdgeHouseholdIds`,
-          field: "revertToEdgeHouseholdIds",
+          error: `Tenant ${h} cannot be in both manualReadings and revertToEdgeTenantIds`,
+          field: "revertToEdgeTenantIds",
         };
       }
     }
-    revertToEdgeHouseholdIds = rec.revertToEdgeHouseholdIds as string[];
+    revertToEdgeTenantIds = rec.revertToEdgeTenantIds as string[];
   }
   let seedReadings: GenerationBody["seedReadings"];
   if (rec.seedReadings !== undefined) {
@@ -250,9 +250,9 @@ function parseGenerationBody(raw: unknown):
   return {
     parsed: {
       billingPeriodId: rec.billingPeriodId as string,
-      ...(householdIds !== undefined ? { householdIds } : {}),
+      ...(tenantIds !== undefined ? { tenantIds } : {}),
       ...(manualReadings !== undefined ? { manualReadings } : {}),
-      ...(revertToEdgeHouseholdIds !== undefined ? { revertToEdgeHouseholdIds } : {}),
+      ...(revertToEdgeTenantIds !== undefined ? { revertToEdgeTenantIds } : {}),
       ...(seedReadings !== undefined ? { seedReadings } : {}),
     },
   };
@@ -556,8 +556,8 @@ export class BillingCapability implements BillingCapabilityContract {
       return {
         ok: false as const,
         status: 409 as const,
-        code: "billing_unresolved_households",
-        message: `Period has ${summary.unresolved.length} unresolved household(s). Confirm explicitly to close anyway.`,
+        code: "billing_unresolved_tenants",
+        message: `Period has ${summary.unresolved.length} unresolved tenant(s). Confirm explicitly to close anyway.`,
         unresolved: summary.unresolved,
       };
     }
@@ -567,7 +567,7 @@ export class BillingCapability implements BillingCapabilityContract {
         return {
           ok: false as const,
           status: 409 as const,
-          code: "billing_unresolved_households",
+          code: "billing_unresolved_tenants",
           message: "Period completeness changed while closing. Refresh the summary and confirm again.",
         };
       }
@@ -619,9 +619,9 @@ export class BillingCapability implements BillingCapabilityContract {
 
     const out = await this.generation.run({
       periodId: parsed.parsed.billingPeriodId,
-      householdIds: parsed.parsed.householdIds,
+      tenantIds: parsed.parsed.tenantIds,
       manualReadings: parsed.parsed.manualReadings,
-      revertToEdgeHouseholdIds: parsed.parsed.revertToEdgeHouseholdIds,
+      revertToEdgeTenantIds: parsed.parsed.revertToEdgeTenantIds,
       seedReadings: parsed.parsed.seedReadings,
       mode,
       actorUserId: this.scope.userId,

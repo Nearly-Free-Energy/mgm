@@ -63,11 +63,11 @@ function daysBetween(from: string, to: string): number {
  *
  * The load is the inverter's AC output: a device of type `inverter` (for an
  * SRNE hybrid, its backup meter). With the battery's DC power and the grid
- * meter it gives solar where no solar meter exists. Household consumption
+ * meter it gives solar where no solar meter exists. Tenant consumption
  * meters are not the load: they miss the site's own use and unmetered loads.
  *
  * The house meters are the consumption meters in `houseMeterIds` (those
- * linked to a household on the day read), all of them, by name: what the
+ * linked to a tenant on the day read), all of them, by name: what the
  * houses used is their sum. A linked device of another type (a site's grid
  * meter standing in as a "shared" meter for un-metered houses, say) is not
  * a house meter. Linked meters without
@@ -357,10 +357,10 @@ export class MeteringCapability implements MeteringCapabilityContract {
         if (typeof id === "string") requestedIds.add(id);
       }
     }
-    if (Array.isArray(q.household_ids)) {
-      for (const householdId of q.household_ids) {
-        if (typeof householdId !== "string") continue;
-        const links = await this.repo.getAssignmentLinks(householdId);
+    if (Array.isArray(q.tenant_ids)) {
+      for (const tenantId of q.tenant_ids) {
+        if (typeof tenantId !== "string") continue;
+        const links = await this.repo.getAssignmentLinks(tenantId);
         for (const link of links) requestedIds.add(link.deviceId);
       }
     }
@@ -386,15 +386,15 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
 
-    // Household attribution comes from assignment history: a device maps to
-    // every household it was ever linked to. Reads are per meter register —
+    // Tenant attribution comes from assignment history: a device maps to
+    // every tenant it was ever linked to. Reads are per meter register —
     // never aggregated, never zero-filled.
-    const householdByDevice = new Map<string, string>();
-    if (Array.isArray(q.household_ids)) {
-      for (const householdId of q.household_ids) {
-        if (typeof householdId !== "string") continue;
-        const links = await this.repo.getAssignmentLinks(householdId);
-        for (const link of links) householdByDevice.set(link.deviceId, householdId);
+    const tenantByDevice = new Map<string, string>();
+    if (Array.isArray(q.tenant_ids)) {
+      for (const tenantId of q.tenant_ids) {
+        if (typeof tenantId !== "string") continue;
+        const links = await this.repo.getAssignmentLinks(tenantId);
+        for (const link of links) tenantByDevice.set(link.deviceId, tenantId);
       }
     }
 
@@ -418,7 +418,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
     const readAt = new Date().toISOString();
     const out: DeviceConsumption[] = readings.map((reading) => ({
       deviceId: reading.deviceId,
-      householdId: householdByDevice.get(reading.deviceId) ?? null,
+      tenantId: tenantByDevice.get(reading.deviceId) ?? null,
       usageKwh: reading.usageKwh,
       source: providerName,
       readAt,
@@ -426,24 +426,24 @@ export class MeteringCapability implements MeteringCapabilityContract {
     return { ok: true as const, data: out };
   }
 
-  async getAssignmentHistory(householdId: string) {
+  async getAssignmentHistory(tenantId: string) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
-    if (!UUID_RE.test(householdId)) {
+    if (!UUID_RE.test(tenantId)) {
       return {
         ok: false as const,
         status: 400 as const,
-        code: "metering_invalid_household",
-        message: "Invalid household id — expected UUID.",
+        code: "metering_invalid_tenant",
+        message: "Invalid tenant id — expected UUID.",
       };
     }
-    const resolved = await this.repo.getHouseholdOrganization(householdId);
+    const resolved = await this.repo.getTenantOrganization(tenantId);
     if (!resolved || resolved.orgId !== this.scope.organizationId) {
       return this.scopeMismatch();
     }
     // Reads stay available while the plugin is disabled — only scope applies.
 
-    const links = await this.repo.getAssignmentLinks(householdId);
+    const links = await this.repo.getAssignmentLinks(tenantId);
     const managed = await this.repo.getManagedDevices(resolved.microgridId);
     const names = new Map(managed.map((d) => [d.id, d.name]));
     const { sorted, gaps } = computeAssignmentGaps(links);

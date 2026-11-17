@@ -34,7 +34,7 @@ if (skip) {
 
 // Fail-loud insert helper — surface fixture drift instead of silently
 // swallowing PostgREST errors. Catches things like the
-// idx_billing_line_items_period_household UNIQUE collision that masked four
+// idx_billing_line_items_period_tenant UNIQUE collision that masked four
 // failures in this file before #242.
 async function insertOrThrow(
   client: SupabaseClient,
@@ -52,8 +52,8 @@ async function insertOrThrow(
 
 // Deterministic fixture IDs to keep teardown simple.
 //
-// householdA and householdB are distinct so that lineItemA and lineItemB do
-// NOT collide on idx_billing_line_items_period_household (UNIQUE, added by
+// tenantA and tenantB are distinct so that lineItemA and lineItemB do
+// NOT collide on idx_billing_line_items_period_tenant (UNIQUE, added by
 // migration 00029 AFTER this test was originally written). See #242.
 const FIXTURE = {
   org: "cccccccc-cccc-4000-8000-000000000001",
@@ -61,8 +61,8 @@ const FIXTURE = {
   microgrid: "cccccccc-cccc-4000-8002-000000000001",
   edge: "cccccccc-cccc-4000-8003-000000000001",
   device: "cccccccc-cccc-4000-8004-000000000001",
-  householdA: "cccccccc-cccc-4000-8005-000000000001",
-  householdB: "cccccccc-cccc-4000-8005-000000000002",
+  tenantA: "cccccccc-cccc-4000-8005-000000000001",
+  tenantB: "cccccccc-cccc-4000-8005-000000000002",
   billingPeriod: "cccccccc-cccc-4000-8006-000000000001",
   lineItemA: "cccccccc-cccc-4000-8007-000000000001",
   lineItemB: "cccccccc-cccc-4000-8007-000000000002",
@@ -109,17 +109,17 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
       device_type: "consumption_meter",
       openems_component_id: "phase-b-meter",
     });
-    await insertOrThrow(svc, "households", [
+    await insertOrThrow(svc, "tenants", [
       {
-        id: FIXTURE.householdA,
+        id: FIXTURE.tenantA,
         microgrid_id: FIXTURE.microgrid,
-        display_name: "PB Household A",
+        display_name: "PB Tenant A",
         primary_phone: "+256700000001",
       },
       {
-        id: FIXTURE.householdB,
+        id: FIXTURE.tenantB,
         microgrid_id: FIXTURE.microgrid,
-        display_name: "PB Household B",
+        display_name: "PB Tenant B",
         primary_phone: "+256700000002",
       },
     ]);
@@ -130,14 +130,14 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
       end_date: "2026-04-30",
       status: "draft",
     });
-    // lineItemA → householdA, lineItemB → householdB.
-    // They MUST NOT share (billing_period_id, household_id) — migration 00029
-    // added idx_billing_line_items_period_household as UNIQUE.
+    // lineItemA → tenantA, lineItemB → tenantB.
+    // They MUST NOT share (billing_period_id, tenant_id) — migration 00029
+    // added idx_billing_line_items_period_tenant as UNIQUE.
     await insertOrThrow(svc, "billing_line_items", [
       {
         id: FIXTURE.lineItemA,
         billing_period_id: FIXTURE.billingPeriod,
-        household_id: FIXTURE.householdA,
+        tenant_id: FIXTURE.tenantA,
         device_id: FIXTURE.device,
         usage_kwh: 100,
         total_amount: 25000,
@@ -145,7 +145,7 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
       {
         id: FIXTURE.lineItemB,
         billing_period_id: FIXTURE.billingPeriod,
-        household_id: FIXTURE.householdB,
+        tenant_id: FIXTURE.tenantB,
         device_id: FIXTURE.device,
         usage_kwh: 80,
         total_amount: 20000,
@@ -168,7 +168,7 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
     // payment_status='link_generated' and assert no error. The value being
     // accepted by the column proves it's in the enum. We use a transient
     // billing period so we don't collide with lineItemA/lineItemB on the
-    // (billing_period_id, household_id) unique index.
+    // (billing_period_id, tenant_id) unique index.
     //
     // Previously this test queried information_schema.columns via PostgREST,
     // which newer Supabase CLI versions no longer expose (PGRST106). See #242.
@@ -187,7 +187,7 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
     const { error } = await svc.from("billing_line_items").insert({
       id: tmpLineId,
       billing_period_id: tmpPeriodId,
-      household_id: FIXTURE.householdA,
+      tenant_id: FIXTURE.tenantA,
       device_id: FIXTURE.device,
       usage_kwh: 1,
       total_amount: 100,
@@ -375,8 +375,8 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
     const dup = `INV-DUP-${randomUUID()}`;
 
     // Use a transient billing period so the two transient line items don't
-    // collide with lineItemA / lineItemB on idx_billing_line_items_period_household.
-    // The two transient rows themselves use householdA and householdB so they
+    // collide with lineItemA / lineItemB on idx_billing_line_items_period_tenant.
+    // The two transient rows themselves use tenantA and tenantB so they
     // also don't collide with each other on that index — letting the assertion
     // isolate the pesapal_order_id uniqueness constraint specifically.
     const tmpPeriodId = randomUUID();
@@ -392,7 +392,7 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
     await insertOrThrow(svc, "billing_line_items", {
       id: tmpLineId,
       billing_period_id: tmpPeriodId,
-      household_id: FIXTURE.householdA,
+      tenant_id: FIXTURE.tenantA,
       device_id: FIXTURE.device,
       usage_kwh: 1,
       total_amount: 100,
@@ -403,7 +403,7 @@ desc("00027_payment_state_machine_enum.sql + 00028_payment_state_machine.sql (#1
     const { error } = await svc.from("billing_line_items").insert({
       id: randomUUID(),
       billing_period_id: tmpPeriodId,
-      household_id: FIXTURE.householdB,
+      tenant_id: FIXTURE.tenantB,
       device_id: FIXTURE.device,
       usage_kwh: 1,
       total_amount: 100,

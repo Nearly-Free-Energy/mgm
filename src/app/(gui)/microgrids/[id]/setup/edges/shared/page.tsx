@@ -7,7 +7,7 @@ import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 
 // Setup > Edges > Shared (D2 / #53).
-// Devices on this microgrid's edges that are NOT linked to any household.
+// Devices on this microgrid's edges that are NOT linked to any tenant.
 // Backed by the `microgrid_shared_devices` VIEW (see 00004_views.sql).
 //
 // Security note: the view is declared with `security_invoker = true`,
@@ -88,13 +88,13 @@ export default async function SharedDevicesPage({
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Devices on this microgrid&apos;s edges that are not linked to any
-          household. Typical examples: grid meter, PV inverter, battery.
+          tenant. Typical examples: grid meter, PV inverter, battery.
         </p>
       </div>
 
       {(!sharedDevices || sharedDevices.length === 0) ? (
         <p className="rounded-md border border-border bg-card p-6 text-sm text-muted-foreground">
-          All devices on this microgrid are linked to a household. No shared
+          All devices on this microgrid are linked to a tenant. No shared
           devices to show.
         </p>
       ) : (

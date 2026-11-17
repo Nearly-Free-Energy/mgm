@@ -33,7 +33,7 @@ export default async function SetupPage() {
         <p className="mt-2 text-sm text-muted-foreground">
           This creates the first organization and makes you its organization
           manager. You will then be able to create communities, microgrids,
-          and households.
+          and tenants.
         </p>
         <div className="mt-6">
           <SetupForm />

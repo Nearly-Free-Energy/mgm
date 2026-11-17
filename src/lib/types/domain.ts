@@ -18,11 +18,11 @@ export type Community = Database["public"]["Tables"]["communities"]["Row"];
 export type Microgrid = Database["public"]["Tables"]["microgrids"]["Row"];
 export type Edge = Database["public"]["Tables"]["edges"]["Row"];
 export type Device = Database["public"]["Tables"]["devices"]["Row"];
-export type Household = Database["public"]["Tables"]["households"]["Row"];
-export type HouseholdDevice =
-  Database["public"]["Tables"]["household_devices"]["Row"];
-export type HouseholdUser =
-  Database["public"]["Tables"]["household_users"]["Row"];
+export type Tenant = Database["public"]["Tables"]["tenants"]["Row"];
+export type TenantDevice =
+  Database["public"]["Tables"]["tenant_devices"]["Row"];
+export type TenantUser =
+  Database["public"]["Tables"]["tenant_users"]["Row"];
 /** rate_schedules row with JSONB `tiers` narrowed to TierConfig[]. */
 export type RateSchedule = Omit<
   Database["public"]["Tables"]["rate_schedules"]["Row"],
@@ -106,8 +106,8 @@ export type RoleScopeType = Database["public"]["Enums"]["role_scope_type"];
  */
 export type MicrogridEmsType = Database["public"]["Enums"]["microgrid_ems_type"];
 export type DeviceType = Database["public"]["Enums"]["device_type"];
-export type HouseholdDeviceRole =
-  Database["public"]["Enums"]["household_device_role"];
+export type TenantDeviceRole =
+  Database["public"]["Enums"]["tenant_device_role"];
 export type BillingPeriodStatus =
   Database["public"]["Enums"]["billing_period_status"];
 

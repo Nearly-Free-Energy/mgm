@@ -24,7 +24,7 @@
 //
 // A11y commitments:
 //   • <caption> describes the table (row count, column count, copy hint).
-//   • <th scope="col"> on column headers; <th scope="row"> on household name.
+//   • <th scope="col"> on column headers; <th scope="row"> on tenant name.
 //   • Each cell carries `aria-label="${columnHeader}, ${rowHeader},
 //     ${formattedValue}${copied ? ', copied' : ''}"` — semantic text, not
 //     grid coordinates.

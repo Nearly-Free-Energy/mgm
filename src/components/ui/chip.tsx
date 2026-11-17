@@ -10,7 +10,7 @@
 //   - The dot is `aria-hidden`; the chip carries a semantic
 //     `aria-label`. Pair labels with text — never color alone.
 //   - Max width with truncation handles long labels like
-//     "Disputed by household".
+//     "Disputed by tenant".
 //   - Class names compose via `cn()` so callers can extend (e.g. add
 //     `cursor-pointer` for clickable chips).
 

@@ -7,31 +7,31 @@
  * the CopyTable (or empty-state). NOT a modal.
  *
  * Sections, in render order:
- *   1. "Ready (edge data)" — collapsed by default; lists households whose
+ *   1. "Ready (edge data)" — collapsed by default; lists tenants whose
  *      `edgeAvailable` is true and have not been override-toggled to manual.
- *   2. "Needs manual entry" — expanded by default; lists households with
+ *   2. "Needs manual entry" — expanded by default; lists tenants with
  *      `edgeAvailable === false`. Each row has start/end kWh inputs and an
  *      optional reason textarea.
  *   3. "Kept as manual entry" — collapsed disclosure, shown only when some
- *      edge-available household already has a manual reading this period.
+ *      edge-available tenant already has a manual reading this period.
  *      The bulk POST below leaves those rows untouched (see "Manual rows" in
  *      `src/lib/billing/generate.ts`), so they are listed here instead of
  *      under "will be read from OpenEMS". If the engine stops keeping manual
  *      rows on a bulk run, this section becomes a false promise.
  *   4. "Override available" — collapsed disclosure; lists edge-available
- *      households with a per-row toggle. Toggling expands inline kWh inputs.
+ *      tenants with a per-row toggle. Toggling expands inline kWh inputs.
  *
  * The Generate button is DISABLED until every needs-manual row AND every
  * toggled-override row has both start_kwh + end_kwh filled with valid
  * non-negative numbers AND endKwh >= startKwh (Q1=A, no skip-and-continue).
  *
  * On submit: single POST /api/billing/generate with the manualReadings
- * array and NO householdIds filter (the implicit-add semantic in
+ * array and NO tenantIds filter (the implicit-add semantic in
  * runGenerationFor processes everything).
  *
  * View-state machine (BC3 polish #182):
  *   - `view === 'form'`   → render the form section (default).
- *   - `view === 'result'` → render a result section showing per-household
+ *   - `view === 'result'` → render a result section showing per-tenant
  *     failures + a Close button. Switched into when the response has
  *     errors.length > 0 (partial OR full failure). Per AC2 the panel is
  *     NOT a Radix dialog — view-state mutation is applied to the inline
@@ -48,27 +48,27 @@ import {
   errorCodeCopy,
   type PartialFailureError,
 } from "@/components/billing/error-code-copy";
-import type { Household } from "@/lib/types/domain";
+import type { Tenant } from "@/lib/types/domain";
 
 export interface PreflightPanelProps {
   open: boolean;
   onClose: () => void;
   billingPeriodId: string;
-  households: Household[];
-  /** Whether each household has a primary_consumption_meter on a configured edge. */
-  edgeAvailableByHouseholdId: Record<string, boolean>;
-  /** #339 — households whose meter has no prior MGM reading. */
-  seedNeededByHouseholdId?: Record<string, boolean>;
-  /** Households whose line item in this period has reading_source 'manual'. */
-  currentlyManualByHouseholdId?: Record<string, boolean>;
+  tenants: Tenant[];
+  /** Whether each tenant has a primary_consumption_meter on a configured edge. */
+  edgeAvailableByTenantId: Record<string, boolean>;
+  /** #339 — tenants whose meter has no prior MGM reading. */
+  seedNeededByTenantId?: Record<string, boolean>;
+  /** Tenants whose line item in this period has reading_source 'manual'. */
+  currentlyManualByTenantId?: Record<string, boolean>;
   /** Bill measured OpenEMS usage even when an absolute starting dial is unknown. */
   allowUsageOnlyReadings?: boolean;
-  /** #339 — the household's last recorded end_kwh. Hint text only; never
-   *  prefilled, because it is a household figure rather than a reading of
+  /** #339 — the tenant's last recorded end_kwh. Hint text only; never
+   *  prefilled, because it is a tenant figure rather than a reading of
    *  this meter and a plausible prefill is confirmed by inertia. */
-  priorHintByHouseholdId?: Record<string, number | null>;
-  /** #339 — primary consumption meter per household. */
-  deviceIdByHouseholdId?: Record<string, string>;
+  priorHintByTenantId?: Record<string, number | null>;
+  /** #339 — primary consumption meter per tenant. */
+  deviceIdByTenantId?: Record<string, string>;
   /** #339 — period start, the lower bound of the elapsed-usage query. */
   periodStartDate?: string;
   /**
@@ -170,19 +170,19 @@ export function PreflightPanel(props: PreflightPanelProps) {
     open,
     onClose,
     billingPeriodId,
-    households,
-    edgeAvailableByHouseholdId,
-    seedNeededByHouseholdId = {},
-    currentlyManualByHouseholdId = {},
+    tenants,
+    edgeAvailableByTenantId,
+    seedNeededByTenantId = {},
+    currentlyManualByTenantId = {},
     allowUsageOnlyReadings = false,
-    priorHintByHouseholdId = {},
-    deviceIdByHouseholdId = {},
+    priorHintByTenantId = {},
+    deviceIdByTenantId = {},
     periodStartDate,
     periodTimezone,
   } = props;
   const router = useRouter();
 
-  // Per-household form state. Keyed by household id.
+  // Per-tenant form state. Keyed by tenant id.
   const [forms, setForms] = React.useState<Record<string, RowFormState>>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
@@ -191,7 +191,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
   const [keptExpanded, setKeptExpanded] = React.useState(false);
   const [view, setView] = React.useState<"form" | "result">("form");
   const [result, setResult] = React.useState<ResultState | null>(null);
-  const [retryHouseholdIds, setRetryHouseholdIds] = React.useState<string[] | null>(null);
+  const [retryTenantIds, setRetryTenantIds] = React.useState<string[] | null>(null);
 
   // Reset state when the panel opens.
   React.useEffect(() => {
@@ -204,7 +204,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
       setKeptExpanded(false);
       setView("form");
       setResult(null);
-      setRetryHouseholdIds(null);
+      setRetryTenantIds(null);
     }
   }, [open]);
 
@@ -232,34 +232,34 @@ export function PreflightPanel(props: PreflightPanelProps) {
     return getRow(hid).readAtDate || todayLocalDate();
   }
 
-  // Partition households by edge availability.
-  const selectedHouseholds = retryHouseholdIds
-    ? households.filter((h) => retryHouseholdIds.includes(h.id))
-    : households;
-  const needsManual = selectedHouseholds.filter(
-    (h) => edgeAvailableByHouseholdId[h.id] === false || retryHouseholdIds?.includes(h.id),
+  // Partition tenants by edge availability.
+  const selectedTenants = retryTenantIds
+    ? tenants.filter((h) => retryTenantIds.includes(h.id))
+    : tenants;
+  const needsManual = selectedTenants.filter(
+    (h) => edgeAvailableByTenantId[h.id] === false || retryTenantIds?.includes(h.id),
   );
-  const edgeAvailableSelected = selectedHouseholds.filter(
-    (h) => edgeAvailableByHouseholdId[h.id] !== false && !retryHouseholdIds?.includes(h.id),
+  const edgeAvailableSelected = selectedTenants.filter(
+    (h) => edgeAvailableByTenantId[h.id] !== false && !retryTenantIds?.includes(h.id),
   );
-  // An edge-available household already on a manual reading is not sent in
-  // manualReadings, so the engine keeps its row as it is. Households with no
+  // An edge-available tenant already on a manual reading is not sent in
+  // manualReadings, so the engine keeps its row as it is. Tenants with no
   // edge stay in needsManual above: the panel asks for their reading anyway.
   const keptManual = edgeAvailableSelected.filter(
-    (h) => currentlyManualByHouseholdId[h.id] === true,
+    (h) => currentlyManualByTenantId[h.id] === true,
   );
   const edgeReady = edgeAvailableSelected.filter(
-    (h) => currentlyManualByHouseholdId[h.id] !== true,
+    (h) => currentlyManualByTenantId[h.id] !== true,
   );
 
-  // #339 — households whose meter has no prior reading. Disjoint from
+  // #339 — tenants whose meter has no prior reading. Disjoint from
   // needsManual by construction: a seed is only meaningful for an
   // edge-available device, and needsManual is exactly the not-available set.
-  const needsSeed = selectedHouseholds.filter(
+  const needsSeed = selectedTenants.filter(
     (h) =>
       !allowUsageOnlyReadings &&
-      seedNeededByHouseholdId[h.id] === true &&
-      currentlyManualByHouseholdId[h.id] !== true,
+      seedNeededByTenantId[h.id] === true &&
+      currentlyManualByTenantId[h.id] !== true,
   );
 
   /**
@@ -288,14 +288,14 @@ export function PreflightPanel(props: PreflightPanelProps) {
   }
 
   /**
-   * Fetch usage(period start → read date) for this household's meter.
+   * Fetch usage(period start → read date) for this tenant's meter.
    *
    * Takes the `YYYY-MM-DD` date directly (#343). It previously took an ISO
    * timestamp and sliced the first ten characters, which names the UTC day —
    * a west-of-UTC evening entry would have queried through tomorrow.
    */
   async function loadElapsed(hid: string, readDate: string) {
-    const deviceId = deviceIdByHouseholdId[hid];
+    const deviceId = deviceIdByTenantId[hid];
     if (!deviceId || !periodStartDate) return;
     setRow(hid, { elapsedState: "loading", elapsedKwh: null });
     try {
@@ -373,8 +373,8 @@ export function PreflightPanel(props: PreflightPanelProps) {
     return null;
   }
 
-  // Kept households are not generated, so they are not counted as attempted.
-  const totalCount = selectedHouseholds.length - keptManual.length;
+  // Kept tenants are not generated, so they are not counted as attempted.
+  const totalCount = selectedTenants.length - keptManual.length;
 
   async function handleSubmit() {
     // BOTH gates, not just the manual one. The button is disabled on
@@ -397,7 +397,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
       const e = parseField(f.endKwh);
       // Both ok per allValid invariant.
       return {
-        householdId: h.id,
+        tenantId: h.id,
         startKwh: s.ok ? s.value : 0,
         endKwh: e.ok ? e.value : 0,
         ...(f.reason.trim() ? { reason: f.reason.trim() } : {}),
@@ -410,7 +410,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           billingPeriodId,
-          ...(retryHouseholdIds ? { householdIds: retryHouseholdIds } : {}),
+          ...(retryTenantIds ? { tenantIds: retryTenantIds } : {}),
           manualReadings,
           // #339. Inputs travel with the derived value: the route recomputes
           // and rejects a mismatch, and a wrong seed stays diagnosable.
@@ -420,7 +420,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                   const f = getRow(h.id);
                   const dial = parseField(f.dialReading);
                   return {
-                    deviceId: deviceIdByHouseholdId[h.id],
+                    deviceId: deviceIdByTenantId[h.id],
                     dialReadingKwh: dial.ok ? dial.value : 0,
                     readAt: readAtIsoFor(readDateFor(h.id)),
                     startKwh: derivedSeed(h.id) ?? 0,
@@ -435,8 +435,8 @@ export function PreflightPanel(props: PreflightPanelProps) {
         error?: string;
         message?: string;
         errors?: Array<{
-          householdId: string;
-          householdName: string;
+          tenantId: string;
+          tenantName: string;
           error: string;
           code?: string;
         }>;
@@ -480,7 +480,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         onClose={onClose}
         onManualFallback={result.errors.some((e) => e.code === "no_meter_reading" || e.code === "meter_assignment_continuity")
           ? () => {
-              setRetryHouseholdIds(result.errors.filter((e) => e.code === "no_meter_reading" || e.code === "meter_assignment_continuity").map((e) => e.householdId));
+              setRetryTenantIds(result.errors.filter((e) => e.code === "no_meter_reading" || e.code === "meter_assignment_continuity").map((e) => e.tenantId));
               setForms({});
               setView("form");
             }
@@ -519,13 +519,13 @@ export function PreflightPanel(props: PreflightPanelProps) {
         {/* Section 1: Ready (edge data) — collapsed by default */}
         <Disclosure
           testId="preflight-ready-section"
-          summary={`${edgeReady.length} household${edgeReady.length === 1 ? "" : "s"} will be read from OpenEMS.`}
+          summary={`${edgeReady.length} tenant${edgeReady.length === 1 ? "" : "s"} will be read from OpenEMS.`}
           expanded={readyExpanded}
           onToggle={() => setReadyExpanded((e) => !e)}
         >
           {edgeReady.length === 0 ? (
             <p className="px-2 py-1 text-caption text-muted-foreground">
-              No edge-ready households.
+              No edge-ready tenants.
             </p>
           ) : (
             <ul className="space-y-1 px-2 py-1">
@@ -546,7 +546,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
             </ul>
           )}
         </Disclosure>
-        {allowUsageOnlyReadings && !retryHouseholdIds && (
+        {allowUsageOnlyReadings && !retryTenantIds && (
           <p className="text-caption text-muted-foreground">
             Bills use OpenEMS consumption for this period. If an absolute meter register is unavailable, the bill leaves its starting and ending readings blank. Manual readings are requested only when period data is missing.
           </p>
@@ -561,9 +561,9 @@ export function PreflightPanel(props: PreflightPanelProps) {
             <h4 className="mb-1 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
               Needs a starting reading ({needsSeed.length})
             </h4>
-            {/* One string, no branch. The CAUSE is a per-household fact and
+            {/* One string, no branch. The CAUSE is a per-tenant fact and
                 belongs on the row: a microgrid with history can be adding a
-                brand-new household today, so a section-level "these were
+                brand-new tenant today, so a section-level "these were
                 billed before they were connected" is false for that row while
                 true for its neighbour. Stating an unestablished cause is
                 #335's defect, and this section would have reproduced it. */}
@@ -576,7 +576,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
               {needsSeed.map((h) => {
                 const f = getRow(h.id);
                 const derived = derivedSeed(h.id);
-                const hint = priorHintByHouseholdId[h.id];
+                const hint = priorHintByTenantId[h.id];
                 const readDate = readDateFor(h.id);
                 const dateProblem = readDateProblem(h.id);
                 return (
@@ -653,11 +653,11 @@ export function PreflightPanel(props: PreflightPanelProps) {
                         {dateProblem}
                       </p>
                     )}
-                    {/* Per-row cause. `hint` is this household's own last
+                    {/* Per-row cause. `hint` is this tenant's own last
                         recorded end_kwh, so its presence IS the per-row
-                        signal: non-null means this household has been billed
+                        signal: non-null means this tenant has been billed
                         here before, null means it has not — whether because
-                        the household is new or the microgrid is. Those are the
+                        the tenant is new or the microgrid is. Those are the
                         same situation from the operator's side and take the
                         same sentence. */}
                     <p
@@ -719,14 +719,14 @@ export function PreflightPanel(props: PreflightPanelProps) {
           </h4>
           {needsManual.length === 0 ? (
             <p className="text-caption text-muted-foreground">
-              All households have an edge configured.
+              All tenants have an edge configured.
             </p>
           ) : (
             <ul className="space-y-3">
               {needsManual.map((h) => (
                 <ManualRow
                   key={h.id}
-                  household={h}
+                  tenant={h}
                   row={getRow(h.id)}
                   onChange={(partial) => setRow(h.id, partial)}
                   testIdPrefix="preflight-needs-manual"
@@ -740,7 +740,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
         {keptManual.length > 0 && (
           <Disclosure
             testId="preflight-kept-manual-section"
-            summary={`${keptManual.length} household${keptManual.length === 1 ? "" : "s"} will keep ${keptManual.length === 1 ? "its" : "their"} manual reading.`}
+            summary={`${keptManual.length} tenant${keptManual.length === 1 ? "" : "s"} will keep ${keptManual.length === 1 ? "its" : "their"} manual reading.`}
             expanded={keptExpanded}
             onToggle={() => setKeptExpanded((e) => !e)}
           >
@@ -771,13 +771,13 @@ export function PreflightPanel(props: PreflightPanelProps) {
         {/* Section 4: Override available — collapsed disclosure */}
         <Disclosure
           testId="preflight-override-section"
-          summary={`Override available — ${edgeReady.length} edge-connected household${edgeReady.length === 1 ? "" : "s"}.`}
+          summary={`Override available — ${edgeReady.length} edge-connected tenant${edgeReady.length === 1 ? "" : "s"}.`}
           expanded={overrideExpanded}
           onToggle={() => setOverrideExpanded((e) => !e)}
         >
           {edgeReady.length === 0 ? (
             <p className="px-2 py-1 text-caption text-muted-foreground">
-              No edge-connected households to override.
+              No edge-connected tenants to override.
             </p>
           ) : (
             <ul className="space-y-3 px-2 py-1">
@@ -808,7 +808,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
                     {row.overrideEnabled && (
                       <div className="mt-2">
                         <ManualRow
-                          household={h}
+                          tenant={h}
                           row={row}
                           onChange={(partial) => setRow(h.id, partial)}
                           testIdPrefix="preflight-override"
@@ -856,7 +856,7 @@ export function PreflightPanel(props: PreflightPanelProps) {
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
           )}
-          Generate ({totalCount} household{totalCount === 1 ? "" : "s"})
+          Generate ({totalCount} tenant{totalCount === 1 ? "" : "s"})
         </button>
       </div>
     </section>
@@ -884,12 +884,12 @@ function ResultSection(props: {
   const overflow = Math.max(0, errors.length - MAX_FAILURES_INLINE);
 
   const heading = isFullFailure
-    ? `Could not generate ${attemptedCount} household${attemptedCount === 1 ? "" : "s"}`
-    : `Generated ${successCount} of ${attemptedCount} household${attemptedCount === 1 ? "" : "s"}`;
+    ? `Could not generate ${attemptedCount} tenant${attemptedCount === 1 ? "" : "s"}`
+    : `Generated ${successCount} of ${attemptedCount} tenant${attemptedCount === 1 ? "" : "s"}`;
 
   const bannerTitle = isFullFailure
     ? `${errors.length} failure${errors.length === 1 ? "" : "s"}`
-    : `${errors.length} household${errors.length === 1 ? "" : "s"} could not be generated`;
+    : `${errors.length} tenant${errors.length === 1 ? "" : "s"} could not be generated`;
 
   return (
     <section
@@ -906,7 +906,7 @@ function ResultSection(props: {
           className="mt-1 list-disc space-y-1 pl-5"
         >
           {displayed.map((err) => (
-            <li key={err.householdId}>{errorCodeCopy(err)}</li>
+            <li key={err.tenantId}>{errorCodeCopy(err)}</li>
           ))}
           {overflow > 0 && (
             <li
@@ -927,7 +927,7 @@ function ResultSection(props: {
             onClick={onManualFallback}
             className="inline-flex h-8 items-center rounded-md border border-border px-3.5 text-dense font-medium text-foreground hover:bg-muted"
           >
-            Enter manual readings for unresolved households
+            Enter manual readings for unresolved tenants
           </button>
         )}
         <button
@@ -973,7 +973,7 @@ function Disclosure(props: {
 }
 
 function ManualRow(props: {
-  household: Household;
+  tenant: Tenant;
   row: RowFormState;
   onChange: (partial: Partial<RowFormState>) => void;
   testIdPrefix: string;
@@ -982,7 +982,7 @@ function ManualRow(props: {
    *  nested-<li> when the row sits inside an override section's <li>). */
   asDiv?: boolean;
 }) {
-  const { household, row, onChange, testIdPrefix, showHeader = true, asDiv = false } = props;
+  const { tenant, row, onChange, testIdPrefix, showHeader = true, asDiv = false } = props;
   const startId = React.useId();
   const endId = React.useId();
   const reasonId = React.useId();
@@ -997,12 +997,12 @@ function ManualRow(props: {
   const Wrapper = asDiv ? "div" : "li";
   return (
     <Wrapper
-      data-testid={`${testIdPrefix}-row-${household.id}`}
+      data-testid={`${testIdPrefix}-row-${tenant.id}`}
       className="space-y-2"
     >
       {showHeader && (
         <p className="text-dense font-medium text-foreground">
-          {household.display_name}
+          {tenant.display_name}
         </p>
       )}
       <div className="grid grid-cols-2 gap-2">
@@ -1021,7 +1021,7 @@ function ManualRow(props: {
             inputMode="decimal"
             value={row.startKwh}
             onChange={(e) => onChange({ startKwh: e.target.value })}
-            aria-label={`Start kWh for ${household.display_name}`}
+            aria-label={`Start kWh for ${tenant.display_name}`}
             className="block w-full rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
@@ -1040,7 +1040,7 @@ function ManualRow(props: {
             inputMode="decimal"
             value={row.endKwh}
             onChange={(e) => onChange({ endKwh: e.target.value })}
-            aria-label={`End kWh for ${household.display_name}`}
+            aria-label={`End kWh for ${tenant.display_name}`}
             aria-invalid={orderError !== null}
             className="block w-full rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
@@ -1063,7 +1063,7 @@ function ManualRow(props: {
           onChange={(e) => onChange({ reason: e.target.value })}
           maxLength={500}
           rows={1}
-          aria-label={`Manual entry reason for ${household.display_name} (optional, max 500 characters)`}
+          aria-label={`Manual entry reason for ${tenant.display_name} (optional, max 500 characters)`}
           className="block w-full resize-none rounded-md border border-border bg-card px-2 py-1 text-dense text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>

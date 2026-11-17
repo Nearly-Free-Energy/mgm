@@ -33,7 +33,7 @@ const F = {
   microgridA: "e7000000-0000-4000-8002-000000000001",
   edgeA: "e7000000-0000-4000-8003-000000000001",
   deviceA: "e7000000-0000-4000-8004-000000000001",
-  householdA: "e7000000-0000-4000-8005-000000000001",
+  tenantA: "e7000000-0000-4000-8005-000000000001",
   rateA: "e7000000-0000-4000-8006-000000000001",
   periodA: "e7000000-0000-4000-8007-000000000001",
   lineItemA: "e7000000-0000-4000-8008-000000000001",
@@ -60,7 +60,7 @@ const TARGETS: GateTarget[] = [
   { kind: "microgrid", id: F.microgridA },
   { kind: "edge", id: F.edgeA },
   { kind: "device", id: F.deviceA },
-  { kind: "household", id: F.householdA },
+  { kind: "tenant", id: F.tenantA },
   { kind: "billingPeriod", id: F.periodA },
   { kind: "lineItem", id: F.lineItemA },
   { kind: "rateSchedule", id: F.rateA },
@@ -136,10 +136,10 @@ beforeAll(async () => {
     device_type: "consumption_meter",
     openems_component_id: "gate-db-meter-a",
   });
-  await insert("households", {
-    id: F.householdA,
+  await insert("tenants", {
+    id: F.tenantA,
     microgrid_id: F.microgridA,
-    display_name: "Gate DB Household A",
+    display_name: "Gate DB Tenant A",
     primary_phone: "+256700007001",
   });
   await insert("rate_schedules", {
@@ -159,7 +159,7 @@ beforeAll(async () => {
   await insert("billing_line_items", {
     id: F.lineItemA,
     billing_period_id: F.periodA,
-    household_id: F.householdA,
+    tenant_id: F.tenantA,
     device_id: F.deviceA,
     usage_kwh: 1,
     total_amount: 500,

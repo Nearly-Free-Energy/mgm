@@ -11,11 +11,11 @@
  * `src/lib/supabase/__tests__/billing_audit_log.test.ts`. Skips
  * automatically when `SKIP_RLS_TESTS=1` or `SUPABASE_JWT_SECRET` is
  * missing. Rationale: mocking the full Supabase chain that
- * runGenerationFor traverses (periods, schedules, households,
+ * runGenerationFor traverses (periods, schedules, tenants,
  * line_items, devices, RPC) is ~150 LoC of stubs — leveraging the live
  * local DB is simpler AND exercises the SQL+TS rounding together.
  *
- * Fixture isolation: uses its own org/community/microgrid/household/
+ * Fixture isolation: uses its own org/community/microgrid/tenant/
  * period to avoid contamination from billing_audit_log.test.ts.
  */
 
@@ -37,7 +37,7 @@ if (skip) {
 
 const FIXTURE = {
   // Org/community/microgrid for the precision suite — un-metered
-  // household so runGenerationFor routes through the manual-override
+  // tenant so runGenerationFor routes through the manual-override
   // path without contacting OpenEMS.
   orgP: "dddddddd-dddd-4000-8000-00000000000d",
   commP: "dddddddd-dddd-4000-8001-00000000000d",
@@ -68,7 +68,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       userEmails: [EMAIL_SUPER],
     });
 
-    // Un-metered household setup — runGenerationFor's manual-override
+    // Un-metered tenant setup — runGenerationFor's manual-override
     // path is exercised so we don't need OpenEMS config.
     await svc.from("organizations").insert({ id: FIXTURE.orgP, name: "227 Org P" });
     await svc.from("communities").insert({
@@ -89,7 +89,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       service_charge: 0,
       tax_rate: 0,
     });
-    await svc.from("households").insert({
+    await svc.from("tenants").insert({
       id: FIXTURE.hhP,
       microgrid_id: FIXTURE.mgP,
       display_name: "227 Peter Ntale",
@@ -132,10 +132,10 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const out = await runGenerationFor({
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodP,
-      householdIds: [FIXTURE.hhP],
+      tenantIds: [FIXTURE.hhP],
       manualReadings: [
         {
-          householdId: FIXTURE.hhP,
+          tenantId: FIXTURE.hhP,
           startKwh: 83.570,
           endKwh: 261.92,
           reason: "Peter Ntale fixture",
@@ -156,7 +156,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       .from("billing_line_items")
       .select("usage_kwh, start_kwh, end_kwh, total_amount, tier_breakdown")
       .eq("billing_period_id", FIXTURE.periodP)
-      .eq("household_id", FIXTURE.hhP)
+      .eq("tenant_id", FIXTURE.hhP)
       .single<{
         usage_kwh: number | string;
         start_kwh: number | string;
@@ -197,10 +197,10 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const out = await runGenerationFor({
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodP2,
-      householdIds: [FIXTURE.hhP],
+      tenantIds: [FIXTURE.hhP],
       manualReadings: [
         {
-          householdId: FIXTURE.hhP,
+          tenantId: FIXTURE.hhP,
           startKwh: 83.570,
           endKwh: 261.92,
           reason: "Peter Ntale preview",
@@ -216,7 +216,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     }
     const results = (out as { results: Array<Record<string, unknown>> }).results;
     const preview = results.find(
-      (r) => r.householdId === FIXTURE.hhP && r.kind === "preview"
+      (r) => r.tenantId === FIXTURE.hhP && r.kind === "preview"
     ) as
       | {
           startKwh: number;
@@ -256,9 +256,9 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const input = {
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodP3,
-      householdIds: [FIXTURE.hhP],
+      tenantIds: [FIXTURE.hhP],
       manualReadings: [{
-        householdId: FIXTURE.hhP,
+        tenantId: FIXTURE.hhP,
         startKwh: 10,
         endKwh: 20,
         reason: "Pinned tariff regression",
@@ -272,7 +272,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const { data: initial } = await svc.from("billing_line_items")
       .select("total_amount")
       .eq("billing_period_id", FIXTURE.periodP3)
-      .eq("household_id", FIXTURE.hhP)
+      .eq("tenant_id", FIXTURE.hhP)
       .single();
     expect(Number(initial?.total_amount)).toBe(1000);
 
@@ -293,7 +293,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const { data: historical } = await svc.from("billing_line_items")
       .select("total_amount")
       .eq("billing_period_id", FIXTURE.periodP3)
-      .eq("household_id", FIXTURE.hhP)
+      .eq("tenant_id", FIXTURE.hhP)
       .single();
     expect(Number(historical?.total_amount)).toBe(1000);
   });
@@ -332,8 +332,8 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     const input = {
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodP4,
-      householdIds: [FIXTURE.hhP],
-      manualReadings: [{ householdId: FIXTURE.hhP, startKwh: 10, endKwh: 20 }],
+      tenantIds: [FIXTURE.hhP],
+      manualReadings: [{ tenantId: FIXTURE.hhP, startKwh: 10, endKwh: 20 }],
       actorUserId: alejandroSuperAdmin.userId,
     };
     const preview = await runGenerationFor({ ...input, mode: "preview" });
@@ -346,7 +346,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     // preview moved the empty draft's pin. The write must fail atomically.
     const { error: staleWriteError } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodP4,
-      _household_id: FIXTURE.hhP,
+      _tenant_id: FIXTURE.hhP,
       _device_id: null,
       _usage_kwh: 10,
       _start_kwh: 10,
@@ -370,7 +370,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     expect(isRunGenerationFatal(written)).toBe(false);
     const { data: lineItem } = await svc.from("billing_line_items")
       .select("total_amount").eq("billing_period_id", FIXTURE.periodP4)
-      .eq("household_id", FIXTURE.hhP).single();
+      .eq("tenant_id", FIXTURE.hhP).single();
     expect(Number(lineItem?.total_amount)).toBe(7000);
   });
 });

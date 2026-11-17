@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   BillingLineItem,
   BillingPeriod,
-  Household,
+  Tenant,
   Microgrid,
   RateSchedule,
 } from "@/lib/types/domain";
@@ -63,12 +63,12 @@ export default async function BillingPeriodDetailPage({
     communities: PaymentCommunity | PaymentCommunity[] | null;
   };
 
-  // BC2 (#174) — type for the household-edge join used to compute
-  // `edgeAvailableByHouseholdId`. Mirrors the SELECT chain in
+  // BC2 (#174) — type for the tenant-edge join used to compute
+  // `edgeAvailableByTenantId`. Mirrors the SELECT chain in
   // `src/lib/billing/generate.ts:251-264`.
-  type HouseholdEdgeRow = {
+  type TenantEdgeRow = {
     id: string;
-    household_devices: Array<{
+    tenant_devices: Array<{
       role: string;
       devices: {
         id: string;
@@ -161,8 +161,8 @@ export default async function BillingPeriodDetailPage({
     { data: period, error: periodError },
     { data: schedule, error: scheduleError },
     { data: lineItems, error: lineItemsError },
-    { data: households, error: householdsError },
-    { data: householdEdges, error: householdEdgesError },
+    { data: tenants, error: tenantsError },
+    { data: tenantEdges, error: tenantEdgesError },
     { data: microgrid, error: microgridError },
     isSuperAdmin,
     { data: actorRows },
@@ -175,16 +175,16 @@ export default async function BillingPeriodDetailPage({
     scheduleRead,
     lineItemsRead,
     supabase
-      .from("households")
+      .from("tenants")
       .select("*")
       .eq("microgrid_id", id)
       .order("display_name")
-      .returns<Household[]>(),
+      .returns<Tenant[]>(),
     supabase
-      .from("households")
+      .from("tenants")
       .select(
         `id,
-         household_devices(
+         tenant_devices(
            role,
            devices(
              id,
@@ -194,8 +194,8 @@ export default async function BillingPeriodDetailPage({
          )`,
       )
       .eq("microgrid_id", id)
-      .eq("household_devices.role", "primary_consumption_meter")
-      .returns<HouseholdEdgeRow[]>(),
+      .eq("tenant_devices.role", "primary_consumption_meter")
+      .returns<TenantEdgeRow[]>(),
     microgridRead,
     requestUserIsSuperAdmin(),
     actorRowsRead,
@@ -213,10 +213,10 @@ export default async function BillingPeriodDetailPage({
     );
   }
 
-  if (householdsError) {
+  if (tenantsError) {
     return (
       <div className="rounded-md bg-destructive-muted p-4 text-sm text-destructive-fg">
-        Error loading households: {householdsError.message}
+        Error loading tenants: {tenantsError.message}
       </div>
     );
   }
@@ -247,32 +247,32 @@ export default async function BillingPeriodDetailPage({
     );
   }
 
-  // BC2 (#174) — surface the household-edge fetch error if it occurred.
+  // BC2 (#174) — surface the tenant-edge fetch error if it occurred.
   // Defensive: failure here only suppresses the "Switch back to edge data"
   // / "Regenerate from edge data" items in the kebab; the rest of the
   // table still renders. Log silently and fall back to an empty map.
-  if (householdEdgesError) {
+  if (tenantEdgesError) {
     console.warn(
-      "[BillingPeriodDetailPage] household-edge fetch failed:",
-      householdEdgesError.message,
+      "[BillingPeriodDetailPage] tenant-edge fetch failed:",
+      tenantEdgesError.message,
     );
   }
 
   const isPaymentConfigured = await paymentConfiguredRead;
   const communityId = firstCommunity(microgrid.communities)?.id;
 
-  // BC2 (#174) — compute edgeAvailable per household. Mirrors the gate
+  // BC2 (#174) — compute edgeAvailable per tenant. Mirrors the gate
   // in `runGenerationFor` (src/lib/billing/generate.ts:289-311):
   // available iff a primary_consumption_meter device exists AND its
   // edge.openems_edge_id AND device.openems_component_id are non-null.
-  const edgeAvailableByHouseholdId: Record<string, boolean> = {};
-  for (const row of householdEdges ?? []) {
-    const primaryHD = row.household_devices.find(
+  const edgeAvailableByTenantId: Record<string, boolean> = {};
+  for (const row of tenantEdges ?? []) {
+    const primaryHD = row.tenant_devices.find(
       (hd) => hd.role === "primary_consumption_meter",
     );
     const device = primaryHD?.devices ?? null;
     const edge = device?.edges ?? null;
-    edgeAvailableByHouseholdId[row.id] =
+    edgeAvailableByTenantId[row.id] =
       device != null &&
       device.openems_component_id != null &&
       edge != null &&
@@ -318,13 +318,13 @@ export default async function BillingPeriodDetailPage({
         microgridId={id}
         period={period}
         lineItems={cleanLineItems}
-        households={households ?? []}
+        tenants={tenants ?? []}
         tiers={(schedule?.tiers ?? []) as { label: string; min_kwh: number; max_kwh: number | null; rate_per_kwh: number }[]}
         currency={microgrid.currency}
         isPaymentConfigured={isPaymentConfigured}
         isSuperAdmin={isSuperAdmin}
         communityId={communityId}
-        edgeAvailableByHouseholdId={edgeAvailableByHouseholdId}
+        edgeAvailableByTenantId={edgeAvailableByTenantId}
         allowUsageOnlyReadings
         actorByLineItemId={actorByLineItemId}
       />

@@ -127,7 +127,6 @@ export type Database = {
           end_kwh: number | null
           entered_at: string | null
           entered_by_user_id: string | null
-          household_id: string
           id: string
           invoice_number: string | null
           manual_reason: string | null
@@ -142,6 +141,7 @@ export type Database = {
           reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           short_slug: string | null
           start_kwh: number | null
+          tenant_id: string
           tier_breakdown: Json
           total_amount: number
           updated_at: string
@@ -154,7 +154,6 @@ export type Database = {
           end_kwh?: number | null
           entered_at?: string | null
           entered_by_user_id?: string | null
-          household_id: string
           id?: string
           invoice_number?: string | null
           manual_reason?: string | null
@@ -169,6 +168,7 @@ export type Database = {
           reading_source?: Database["public"]["Enums"]["billing_line_item_reading_source"]
           short_slug?: string | null
           start_kwh?: number | null
+          tenant_id: string
           tier_breakdown?: Json
           total_amount?: number
           updated_at?: string
@@ -181,7 +181,6 @@ export type Database = {
           end_kwh?: number | null
           entered_at?: string | null
           entered_by_user_id?: string | null
-          household_id?: string
           id?: string
           invoice_number?: string | null
           manual_reason?: string | null
@@ -196,6 +195,7 @@ export type Database = {
           reading_source?: Database["public"]["Enums"]["billing_line_item_reading_source"]
           short_slug?: string | null
           start_kwh?: number | null
+          tenant_id?: string
           tier_breakdown?: Json
           total_amount?: number
           updated_at?: string
@@ -224,10 +224,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "billing_line_items_household_id_fkey"
-            columns: ["household_id"]
+            foreignKeyName: "billing_line_items_tenant_id_fkey"
+            columns: ["tenant_id"]
             isOneToOne: false
-            referencedRelation: "households"
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -504,158 +504,6 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "grid_tariffs_microgrid_id_fkey"
-            columns: ["microgrid_id"]
-            isOneToOne: false
-            referencedRelation: "microgrids"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      household_devices: {
-        Row: {
-          created_at: string
-          device_id: string
-          effective_from: string
-          effective_to: string | null
-          household_id: string
-          id: string
-          role: Database["public"]["Enums"]["household_device_role"]
-        }
-        Insert: {
-          created_at?: string
-          device_id: string
-          effective_from?: string
-          effective_to?: string | null
-          household_id: string
-          id?: string
-          role: Database["public"]["Enums"]["household_device_role"]
-        }
-        Update: {
-          created_at?: string
-          device_id?: string
-          effective_from?: string
-          effective_to?: string | null
-          household_id?: string
-          id?: string
-          role?: Database["public"]["Enums"]["household_device_role"]
-        }
-        Relationships: [
-          {
-            foreignKeyName: "household_devices_device_id_fkey"
-            columns: ["device_id"]
-            isOneToOne: false
-            referencedRelation: "devices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "household_devices_device_id_fkey"
-            columns: ["device_id"]
-            isOneToOne: false
-            referencedRelation: "microgrid_shared_devices"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "household_devices_household_id_fkey"
-            columns: ["household_id"]
-            isOneToOne: false
-            referencedRelation: "households"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      household_users: {
-        Row: {
-          created_at: string
-          household_id: string
-          relationship: string | null
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          household_id: string
-          relationship?: string | null
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          household_id?: string
-          relationship?: string | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "household_users_household_id_fkey"
-            columns: ["household_id"]
-            isOneToOne: false
-            referencedRelation: "households"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      households: {
-        Row: {
-          account_number: string | null
-          address_city: string | null
-          address_country: string | null
-          address_line1: string | null
-          address_line2: string | null
-          address_postal_code: string | null
-          address_region: string | null
-          created_at: string
-          customer_type: string
-          display_name: string
-          geography_notes: string | null
-          id: string
-          meter_serial: string | null
-          meter_type: string
-          microgrid_id: string
-          primary_email: string | null
-          primary_phone: string
-          unit_label: string | null
-        }
-        Insert: {
-          account_number?: string | null
-          address_city?: string | null
-          address_country?: string | null
-          address_line1?: string | null
-          address_line2?: string | null
-          address_postal_code?: string | null
-          address_region?: string | null
-          created_at?: string
-          customer_type?: string
-          display_name: string
-          geography_notes?: string | null
-          id?: string
-          meter_serial?: string | null
-          meter_type?: string
-          microgrid_id: string
-          primary_email?: string | null
-          primary_phone: string
-          unit_label?: string | null
-        }
-        Update: {
-          account_number?: string | null
-          address_city?: string | null
-          address_country?: string | null
-          address_line1?: string | null
-          address_line2?: string | null
-          address_postal_code?: string | null
-          address_region?: string | null
-          created_at?: string
-          customer_type?: string
-          display_name?: string
-          geography_notes?: string | null
-          id?: string
-          meter_serial?: string | null
-          meter_type?: string
-          microgrid_id?: string
-          primary_email?: string | null
-          primary_phone?: string
-          unit_label?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "households_microgrid_id_fkey"
             columns: ["microgrid_id"]
             isOneToOne: false
             referencedRelation: "microgrids"
@@ -1491,7 +1339,6 @@ export type Database = {
           conflict_count: number
           created_at: string
           duplicate_source_row_count: number
-          household_count: number
           id: string
           initiated_by: string | null
           inserted_reading_count: number
@@ -1499,6 +1346,7 @@ export type Database = {
           reading_count: number
           source_label: string
           status: string
+          tenant_count: number
           unchanged_reading_count: number
         }
         Insert: {
@@ -1507,7 +1355,6 @@ export type Database = {
           conflict_count?: number
           created_at?: string
           duplicate_source_row_count?: number
-          household_count?: number
           id?: string
           initiated_by?: string | null
           inserted_reading_count?: number
@@ -1515,6 +1362,7 @@ export type Database = {
           reading_count?: number
           source_label: string
           status?: string
+          tenant_count?: number
           unchanged_reading_count?: number
         }
         Update: {
@@ -1523,7 +1371,6 @@ export type Database = {
           conflict_count?: number
           created_at?: string
           duplicate_source_row_count?: number
-          household_count?: number
           id?: string
           initiated_by?: string | null
           inserted_reading_count?: number
@@ -1531,6 +1378,7 @@ export type Database = {
           reading_count?: number
           source_label?: string
           status?: string
+          tenant_count?: number
           unchanged_reading_count?: number
         }
         Relationships: [
@@ -1574,6 +1422,158 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "rate_schedules_microgrid_id_fkey"
+            columns: ["microgrid_id"]
+            isOneToOne: false
+            referencedRelation: "microgrids"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          role: Database["public"]["Enums"]["tenant_device_role"]
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["tenant_device_role"]
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["tenant_device_role"]
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_devices_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_devices_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "microgrid_shared_devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_devices_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_users: {
+        Row: {
+          created_at: string
+          relationship: string | null
+          tenant_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          relationship?: string | null
+          tenant_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          relationship?: string | null
+          tenant_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_users_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenants: {
+        Row: {
+          account_number: string | null
+          address_city: string | null
+          address_country: string | null
+          address_line1: string | null
+          address_line2: string | null
+          address_postal_code: string | null
+          address_region: string | null
+          created_at: string
+          customer_type: string
+          display_name: string
+          geography_notes: string | null
+          id: string
+          meter_serial: string | null
+          meter_type: string
+          microgrid_id: string
+          primary_email: string | null
+          primary_phone: string
+          unit_label: string | null
+        }
+        Insert: {
+          account_number?: string | null
+          address_city?: string | null
+          address_country?: string | null
+          address_line1?: string | null
+          address_line2?: string | null
+          address_postal_code?: string | null
+          address_region?: string | null
+          created_at?: string
+          customer_type?: string
+          display_name: string
+          geography_notes?: string | null
+          id?: string
+          meter_serial?: string | null
+          meter_type?: string
+          microgrid_id: string
+          primary_email?: string | null
+          primary_phone: string
+          unit_label?: string | null
+        }
+        Update: {
+          account_number?: string | null
+          address_city?: string | null
+          address_country?: string | null
+          address_line1?: string | null
+          address_line2?: string | null
+          address_postal_code?: string | null
+          address_region?: string | null
+          created_at?: string
+          customer_type?: string
+          display_name?: string
+          geography_notes?: string | null
+          id?: string
+          meter_serial?: string | null
+          meter_type?: string
+          microgrid_id?: string
+          primary_email?: string | null
+          primary_phone?: string
+          unit_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenants_microgrid_id_fkey"
             columns: ["microgrid_id"]
             isOneToOne: false
             referencedRelation: "microgrids"
@@ -1718,7 +1718,6 @@ export type Database = {
           end_kwh: number | null
           entered_at: string | null
           entered_by_user_id: string | null
-          household_id: string
           id: string
           invoice_number: string | null
           manual_reason: string | null
@@ -1733,6 +1732,7 @@ export type Database = {
           reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           short_slug: string | null
           start_kwh: number | null
+          tenant_id: string
           tier_breakdown: Json
           total_amount: number
           updated_at: string
@@ -1799,7 +1799,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
-      fn_create_household: {
+      fn_create_tenant: {
         Args: {
           p_account_number?: string
           p_address_city?: string
@@ -1821,7 +1821,7 @@ export type Database = {
         }
         Returns: string
       }
-      fn_create_household_with_meter: {
+      fn_create_tenant_with_meter: {
         Args: {
           p_account_number?: string
           p_address_city?: string
@@ -2093,11 +2093,11 @@ export type Database = {
           _device_id: string
           _end_kwh: number
           _entered_by_user_id: string
-          _household_id: string
           _manual_reason: string
           _rate_schedule_id: string
           _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           _start_kwh: number
+          _tenant_id: string
           _tier_breakdown: Json
           _total_amount: number
           _usage_kwh: number
@@ -2109,7 +2109,6 @@ export type Database = {
           end_kwh: number | null
           entered_at: string | null
           entered_by_user_id: string | null
-          household_id: string
           id: string
           invoice_number: string | null
           manual_reason: string | null
@@ -2124,6 +2123,7 @@ export type Database = {
           reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
           short_slug: string | null
           start_kwh: number | null
+          tenant_id: string
           tier_breakdown: Json
           total_amount: number
           updated_at: string
@@ -2136,11 +2136,11 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      fn_replace_household_device: {
+      fn_replace_tenant_device: {
         Args: {
           p_device_id: string
           p_effective_date: string
-          p_household_id: string
+          p_tenant_id: string
         }
         Returns: string
       }
@@ -2190,16 +2190,16 @@ export type Database = {
         | "inverter"
         | "ev_charger"
         | "other"
-      household_device_role:
+      microgrid_ems_type: "cloud_aws" | "direct_url"
+      payment_provider_type: "pesapal"
+      role_scope_type: "org" | "microgrid"
+      tenant_device_role:
         | "primary_consumption_meter"
         | "secondary_meter"
         | "battery"
         | "solar"
         | "ev_charger"
         | "other"
-      microgrid_ems_type: "cloud_aws" | "direct_url"
-      payment_provider_type: "pesapal"
-      role_scope_type: "org" | "microgrid"
       user_role: "super_admin" | "org_manager" | "ems_operator"
     }
     CompositeTypes: {
@@ -2360,7 +2360,10 @@ export const Constants = {
         "ev_charger",
         "other",
       ],
-      household_device_role: [
+      microgrid_ems_type: ["cloud_aws", "direct_url"],
+      payment_provider_type: ["pesapal"],
+      role_scope_type: ["org", "microgrid"],
+      tenant_device_role: [
         "primary_consumption_meter",
         "secondary_meter",
         "battery",
@@ -2368,9 +2371,6 @@ export const Constants = {
         "ev_charger",
         "other",
       ],
-      microgrid_ems_type: ["cloud_aws", "direct_url"],
-      payment_provider_type: ["pesapal"],
-      role_scope_type: ["org", "microgrid"],
       user_role: ["super_admin", "org_manager", "ems_operator"],
     },
   },

@@ -75,7 +75,7 @@ const FIXTURE = {
   microgrid: "aaaaaaaa-aaaa-4000-8252-000000000001",
   edge: "aaaaaaaa-aaaa-4000-8253-000000000001",
   device: "aaaaaaaa-aaaa-4000-8254-000000000001",
-  household: "aaaaaaaa-aaaa-4000-8255-000000000001",
+  tenant: "aaaaaaaa-aaaa-4000-8255-000000000001",
   billingPeriod: "aaaaaaaa-aaaa-4000-8256-000000000001",
   rateSchedule: "aaaaaaaa-aaaa-4000-8257-000000000001",
 };
@@ -133,10 +133,10 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
       device_type: "consumption_meter",
       openems_component_id: "ak-meter",
     });
-    await insertOrThrow(svc, "households", {
-      id: FIXTURE.household,
+    await insertOrThrow(svc, "tenants", {
+      id: FIXTURE.tenant,
       microgrid_id: FIXTURE.microgrid,
-      display_name: "AK Household",
+      display_name: "AK Tenant",
       primary_phone: "+256700000250",
     });
     await insertOrThrow(svc, "rate_schedules", {
@@ -187,7 +187,7 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
     await insertOrThrow(svc, "billing_line_items", {
       id: lineItemId,
       billing_period_id: FIXTURE.billingPeriod,
-      household_id: FIXTURE.household,
+      tenant_id: FIXTURE.tenant,
       device_id: FIXTURE.device,
       usage_kwh: 50,
       total_amount: 12500,
@@ -291,20 +291,20 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
   it("E2E: fn_record_line_item_with_audit({_actor_user_id: null, _actor_kind: 'customerapp', _actor_ref: '...'}) succeeds with no FK violation (the #250 root-cause fix)", async () => {
     const svc = await serviceClient();
 
-    // Use a fresh household to avoid colliding with the (period, household)
+    // Use a fresh tenant to avoid colliding with the (period, tenant)
     // unique index from prior tests.
-    const householdB = "aaaaaaaa-aaaa-4000-8255-000000000002";
-    await insertOrThrow(svc, "households", {
-      id: householdB,
+    const tenantB = "aaaaaaaa-aaaa-4000-8255-000000000002";
+    await insertOrThrow(svc, "tenants", {
+      id: tenantB,
       microgrid_id: FIXTURE.microgrid,
-      display_name: "AK Household E2E",
+      display_name: "AK Tenant E2E",
       primary_phone: "+256700000251",
     });
 
     const { data, error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.billingPeriod,
       _rate_schedule_id: FIXTURE.rateSchedule,
-      _household_id: householdB,
+      _tenant_id: tenantB,
       _device_id: FIXTURE.device,
       _usage_kwh: 120,
       _start_kwh: 1000,
@@ -340,18 +340,18 @@ desc("00041_audit_actor_kind.sql (#250) — actor_kind / actor_ref columns + CHE
   it("E2E: fn_record_line_item_with_audit with the legacy human-actor call shape (no _actor_kind / _actor_ref) defaults to actor_kind='human' and succeeds", async () => {
     const svc = await serviceClient();
 
-    const householdC = "aaaaaaaa-aaaa-4000-8255-000000000003";
-    await insertOrThrow(svc, "households", {
-      id: householdC,
+    const tenantC = "aaaaaaaa-aaaa-4000-8255-000000000003";
+    await insertOrThrow(svc, "tenants", {
+      id: tenantC,
       microgrid_id: FIXTURE.microgrid,
-      display_name: "AK Household E2E Human",
+      display_name: "AK Tenant E2E Human",
       primary_phone: "+256700000252",
     });
 
     const { data, error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.billingPeriod,
       _rate_schedule_id: FIXTURE.rateSchedule,
-      _household_id: householdC,
+      _tenant_id: tenantC,
       _device_id: FIXTURE.device,
       _usage_kwh: 80,
       _start_kwh: 500,

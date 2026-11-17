@@ -5,7 +5,7 @@
 //
 // Extracted from the original `<PaymentStatusControl>` body (deleted in
 // BC2 #174). Wraps the shared `<ConfirmDialog tone="neutral">` and renders
-// a household / period / amount summary line plus an optional notes
+// a tenant / period / amount summary line plus an optional notes
 // textarea (max 500 chars).
 //
 // The caller owns the `onConfirm` PATCH; this component is presentational
@@ -23,8 +23,8 @@ export interface PaymentNotesConfirmDialogProps {
   title: string;
   /** Confirm button label (e.g. "Mark as paid"). */
   confirmLabel: string;
-  /** Household display name; rendered as a bold prefix in the summary line. */
-  householdName?: string;
+  /** Tenant display name; rendered as a bold prefix in the summary line. */
+  tenantName?: string;
   /** Period label (e.g. "Mar 1 – Mar 31, 2026"); separated by " · ". */
   periodLabel?: string;
   /** Total amount billed; rendered through `<Currency>`. */
@@ -44,7 +44,7 @@ export function PaymentNotesConfirmDialog({
   onOpenChange,
   title,
   confirmLabel,
-  householdName,
+  tenantName,
   periodLabel,
   totalAmount,
   onConfirm,
@@ -74,16 +74,16 @@ export function PaymentNotesConfirmDialog({
       onConfirm={handleConfirm}
       body={
         <div className="mt-1 space-y-3">
-          {/* Household + period + amount summary */}
+          {/* Tenant + period + amount summary */}
           <div className="text-dense leading-relaxed text-muted-foreground">
-            {householdName && (
+            {tenantName && (
               <span className="font-medium text-foreground">
-                {householdName}
+                {tenantName}
               </span>
             )}
             {periodLabel && (
               <span>
-                {householdName ? " · " : ""}
+                {tenantName ? " · " : ""}
                 {periodLabel}
               </span>
             )}

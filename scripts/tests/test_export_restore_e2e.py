@@ -301,7 +301,7 @@ DECLARE
   v_org uuid := '{org}';
   v_user uuid := '{user}';
   v_session uuid := gen_random_uuid();
-  v_community uuid; v_microgrid uuid; v_household uuid; v_neighbour uuid; v_tariff uuid;
+  v_community uuid; v_microgrid uuid; v_tenant uuid; v_neighbour uuid; v_tariff uuid;
   v_closed uuid; v_open uuid; v_item billing_line_items%ROWTYPE;
 BEGIN
   INSERT INTO organizations(id, name) VALUES (v_org, 'Export and restore test');
@@ -328,9 +328,9 @@ BEGIN
   RETURNING id INTO v_community;
   INSERT INTO microgrids(community_id, name, currency, timezone) VALUES (v_community, 'Export and restore microgrid', 'XXX', 'Etc/UTC')
   RETURNING id INTO v_microgrid;
-  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household A', '+10000000001')
-  RETURNING id INTO v_household;
-  INSERT INTO households(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Household B', '+10000000002')
+  INSERT INTO tenants(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Tenant A', '+10000000001')
+  RETURNING id INTO v_tenant;
+  INSERT INTO tenants(microgrid_id, display_name, primary_phone) VALUES (v_microgrid, 'Tenant B', '+10000000002')
   RETURNING id INTO v_neighbour;
   INSERT INTO rate_schedules(microgrid_id, tiers, service_charge, tax_rate)
   VALUES (v_microgrid, '[{{"label": "T1", "min_kwh": 1, "max_kwh": 10, "rate_per_kwh": 100}},
@@ -338,7 +338,7 @@ BEGIN
   RETURNING id INTO v_tariff;
 
   SELECT id INTO v_closed FROM fn_create_billing_period(v_microgrid, '2026-08-01', '2026-08-31');
-  SELECT * INTO v_item FROM fn_record_line_item_with_audit(v_closed, v_household, NULL, 12.5, 100.0, 112.5,
+  SELECT * INTO v_item FROM fn_record_line_item_with_audit(v_closed, v_tenant, NULL, 12.5, 100.0, 112.5,
     '[{{"label": "T1", "kwh": 10, "amount": 1000}}, {{"label": "T2", "kwh": 2.5, "amount": 500}}]', 2000, 'edge',
     NULL, NULL, v_user, '{{}}', v_tariff, 'human', NULL);
   PERFORM fn_apply_payment_event(v_item.id, 'paid', 'manual', v_user, '{{"payment_notes": "cash"}}', 'human', NULL);
@@ -351,7 +351,7 @@ BEGIN
   PERFORM fn_close_billing_period(v_closed, false);
 
   SELECT id INTO v_open FROM fn_create_billing_period(v_microgrid, '2026-09-01', '2026-09-30');
-  PERFORM fn_record_line_item_with_audit(v_open, v_household, NULL, 3, 112.5, 115.5,
+  PERFORM fn_record_line_item_with_audit(v_open, v_tenant, NULL, 3, 112.5, 115.5,
     '[{{"label": "T1", "kwh": 3, "amount": 300}}]', 800, 'edge', NULL, NULL, v_user, '{{}}', v_tariff, 'human', NULL);
   RESET ROLE;
 
@@ -395,8 +395,8 @@ BEGIN
   FROM billing_periods bp JOIN microgrids m ON m.id = bp.microgrid_id
   WHERE m.community_id = v_community AND bp.status <> 'closed';
   SELECT h.id INTO STRICT v_neighbour
-  FROM households h JOIN microgrids m ON m.id = h.microgrid_id
-  WHERE m.community_id = v_community AND h.display_name = 'Household B';
+  FROM tenants h JOIN microgrids m ON m.id = h.microgrid_id
+  WHERE m.community_id = v_community AND h.display_name = 'Tenant B';
 
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', v_user::text, 'role', 'authenticated')::text, true);
   SET ROLE authenticated;

@@ -20,7 +20,7 @@
  *
  * Tables covered (all 10 AC-required tables):
  *   organizations, communities, microgrids, edges, devices,
- *   household_devices, households, billing_periods, billing_line_items, user_roles
+ *   tenant_devices, tenants, billing_periods, billing_line_items, user_roles
  *
  * Helper functions tested:
  *   is_super_admin(), user_can_access_org(), user_can_access_microgrid()
@@ -64,9 +64,9 @@ const FIXTURE = {
   deviceA: "aaaaaaaa-aaaa-4000-8004-000000000001",
   deviceB: "bbbbbbbb-bbbb-4000-8004-000000000001",
 
-  // Households
-  householdA: "aaaaaaaa-aaaa-4000-8005-000000000001",
-  householdB: "bbbbbbbb-bbbb-4000-8005-000000000001",
+  // Tenants
+  tenantA: "aaaaaaaa-aaaa-4000-8005-000000000001",
+  tenantB: "bbbbbbbb-bbbb-4000-8005-000000000001",
 
   // Billing periods
   billingPeriodA: "aaaaaaaa-aaaa-4000-8006-000000000001",
@@ -76,7 +76,7 @@ const FIXTURE = {
   lineItemA: "aaaaaaaa-aaaa-4000-8007-000000000001",
   lineItemB: "bbbbbbbb-bbbb-4000-8007-000000000001",
 
-  // household_devices rows are created without explicit IDs (no AC requirement for deterministic IDs there)
+  // tenant_devices rows are created without explicit IDs (no AC requirement for deterministic IDs there)
 };
 
 // ── Test state ────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ beforeAll(async () => {
     userEmails: testUserEmails,
   });
 
-  // ── Insert fixture orgs, communities, microgrids, edges, devices, households ──
+  // ── Insert fixture orgs, communities, microgrids, edges, devices, tenants ──
 
   const { error: orgError } = await svc.from("organizations").insert([
     { id: FIXTURE.orgA, name: "Test Org NFE-A" },
@@ -172,36 +172,36 @@ beforeAll(async () => {
   ]);
   if (devError) throw new Error(`[fixture] devices: ${devError.message}`);
 
-  const { error: hhError } = await svc.from("households").insert([
+  const { error: hhError } = await svc.from("tenants").insert([
     {
-      id: FIXTURE.householdA,
+      id: FIXTURE.tenantA,
       microgrid_id: FIXTURE.microgridA,
-      display_name: "Household A",
+      display_name: "Tenant A",
       primary_phone: "+256700000001",
     },
     {
-      id: FIXTURE.householdB,
+      id: FIXTURE.tenantB,
       microgrid_id: FIXTURE.microgridB,
-      display_name: "Household B",
+      display_name: "Tenant B",
       primary_phone: "+256700000002",
     },
   ]);
-  if (hhError) throw new Error(`[fixture] households: ${hhError.message}`);
+  if (hhError) throw new Error(`[fixture] tenants: ${hhError.message}`);
 
-  // household_devices (one primary_consumption_meter per household)
-  const { error: hhdError } = await svc.from("household_devices").insert([
+  // tenant_devices (one primary_consumption_meter per tenant)
+  const { error: hhdError } = await svc.from("tenant_devices").insert([
     {
-      household_id: FIXTURE.householdA,
+      tenant_id: FIXTURE.tenantA,
       device_id: FIXTURE.deviceA,
       role: "primary_consumption_meter",
     },
     {
-      household_id: FIXTURE.householdB,
+      tenant_id: FIXTURE.tenantB,
       device_id: FIXTURE.deviceB,
       role: "primary_consumption_meter",
     },
   ]);
-  if (hhdError) throw new Error(`[fixture] household_devices: ${hhdError.message}`);
+  if (hhdError) throw new Error(`[fixture] tenant_devices: ${hhdError.message}`);
 
   // billing_periods
   const { error: bpError } = await svc.from("billing_periods").insert([
@@ -227,7 +227,7 @@ beforeAll(async () => {
     {
       id: FIXTURE.lineItemA,
       billing_period_id: FIXTURE.billingPeriodA,
-      household_id: FIXTURE.householdA,
+      tenant_id: FIXTURE.tenantA,
       device_id: FIXTURE.deviceA,
       usage_kwh: 100,
       total_amount: 25000,
@@ -235,7 +235,7 @@ beforeAll(async () => {
     {
       id: FIXTURE.lineItemB,
       billing_period_id: FIXTURE.billingPeriodB,
-      household_id: FIXTURE.householdB,
+      tenant_id: FIXTURE.tenantB,
       device_id: FIXTURE.deviceB,
       usage_kwh: 80,
       total_amount: 20000,
@@ -641,104 +641,104 @@ describe("RLS: devices", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// 6. households
+// 6. tenants
 // ══════════════════════════════════════════════════════════════════════════
 
-describe("RLS: households", () => {
-  it("User A reads own household", async () => {
+describe("RLS: tenants", () => {
+  it("User A reads own tenant", async () => {
     if (skipIfRequested()) return;
     const { data, error } = await userA.client
-      .from("households")
+      .from("tenants")
       .select("id")
-      .eq("id", FIXTURE.householdA);
+      .eq("id", FIXTURE.tenantA);
     expect(error).toBeNull();
     expect(data?.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("User A cannot read Household B", async () => {
+  it("User A cannot read Tenant B", async () => {
     if (skipIfRequested()) return;
-    await expectZeroRows(userA.client, "households", {
+    await expectZeroRows(userA.client, "tenants", {
       column: "id",
-      value: FIXTURE.householdB,
+      value: FIXTURE.tenantB,
     });
   });
 
-  it("User C (no role) cannot read any household", async () => {
+  it("User C (no role) cannot read any tenant", async () => {
     if (skipIfRequested()) return;
-    await expectZeroRows(userC.client, "households", {
+    await expectZeroRows(userC.client, "tenants", {
       column: "id",
-      value: FIXTURE.householdA,
+      value: FIXTURE.tenantA,
     });
   });
 
-  it("User D (super_admin) reads both households", async () => {
+  it("User D (super_admin) reads both tenants", async () => {
     if (skipIfRequested()) return;
     const { data, error } = await userD.client
-      .from("households")
+      .from("tenants")
       .select("id")
-      .in("id", [FIXTURE.householdA, FIXTURE.householdB]);
+      .in("id", [FIXTURE.tenantA, FIXTURE.tenantB]);
     expect(error).toBeNull();
     expect(data?.length).toBe(2);
   });
 
-  it("User A cannot INSERT household into Microgrid B", async () => {
+  it("User A cannot INSERT tenant into Microgrid B", async () => {
     if (skipIfRequested()) return;
-    await expectWriteDenied(userA.client, "households", {
+    await expectWriteDenied(userA.client, "tenants", {
       microgrid_id: FIXTURE.microgridB,
-      display_name: "Unauthorized Household",
+      display_name: "Unauthorized Tenant",
     });
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// 7. household_devices
+// 7. tenant_devices
 // ══════════════════════════════════════════════════════════════════════════
 
-describe("RLS: household_devices", () => {
-  it("User A reads own household_devices", async () => {
+describe("RLS: tenant_devices", () => {
+  it("User A reads own tenant_devices", async () => {
     if (skipIfRequested()) return;
     const { data, error } = await userA.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("id")
-      .eq("household_id", FIXTURE.householdA);
+      .eq("tenant_id", FIXTURE.tenantA);
     expect(error).toBeNull();
     expect(data?.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("User A cannot read Household B devices", async () => {
+  it("User A cannot read Tenant B devices", async () => {
     if (skipIfRequested()) return;
     const { data, error } = await userA.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("id")
-      .eq("household_id", FIXTURE.householdB);
+      .eq("tenant_id", FIXTURE.tenantB);
     const count = error ? 0 : (data ?? []).length;
     expect(count).toBe(0);
   });
 
-  it("User C (no role) cannot read any household_devices", async () => {
+  it("User C (no role) cannot read any tenant_devices", async () => {
     if (skipIfRequested()) return;
     const { data } = await userC.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("id")
-      .eq("household_id", FIXTURE.householdA);
+      .eq("tenant_id", FIXTURE.tenantA);
     expect((data ?? []).length).toBe(0);
   });
 
-  it("User D (super_admin) reads both household_devices", async () => {
+  it("User D (super_admin) reads both tenant_devices", async () => {
     if (skipIfRequested()) return;
     const { data, error } = await userD.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("id")
-      .in("household_id", [FIXTURE.householdA, FIXTURE.householdB]);
+      .in("tenant_id", [FIXTURE.tenantA, FIXTURE.tenantB]);
     expect(error).toBeNull();
     expect(data?.length).toBe(2);
   });
 
-  it("User A cannot INSERT household_device linking Household B to Device A", async () => {
+  it("User A cannot INSERT tenant_device linking Tenant B to Device A", async () => {
     if (skipIfRequested()) return;
-    // This would be a cross-org link — both RLS on household_devices AND the FK chain should block.
-    await expectWriteDenied(userA.client, "household_devices", {
-      household_id: FIXTURE.householdB,
+    // This would be a cross-org link — both RLS on tenant_devices AND the FK chain should block.
+    await expectWriteDenied(userA.client, "tenant_devices", {
+      tenant_id: FIXTURE.tenantB,
       device_id: FIXTURE.deviceA,
       role: "secondary_meter",
     });
@@ -842,7 +842,7 @@ describe("RLS: billing_line_items", () => {
     if (skipIfRequested()) return;
     await expectWriteDenied(userA.client, "billing_line_items", {
       billing_period_id: FIXTURE.billingPeriodB,
-      household_id: FIXTURE.householdB,
+      tenant_id: FIXTURE.tenantB,
       usage_kwh: 50,
       total_amount: 12500,
     });
@@ -1230,52 +1230,52 @@ describe("RLS: /api/edges cross-org POST denied (#77)", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// RLS: household creation via fn_create_household_with_meter RPC (#74)
+// RLS: tenant creation via fn_create_tenant_with_meter RPC (#74)
 // Verifies the wizard's server-side save path is denied cross-org.
-// The RPC is SECURITY INVOKER, so the underlying households INSERT RLS
+// The RPC is SECURITY INVOKER, so the underlying tenants INSERT RLS
 // policy is the authoritative gate. This test asserts that a cross-org
 // org_manager cannot invoke the RPC successfully against another org's
 // microgrid — either the RLS denies (42501) or one of the RPC's safety
 // guards trips.
 // ══════════════════════════════════════════════════════════════════════════
 
-describe("RLS: fn_create_household_with_meter cross-org denied (#74)", () => {
-  it("User A (org_manager for Org A) cannot create a household on Microgrid B via the RPC", async () => {
+describe("RLS: fn_create_tenant_with_meter cross-org denied (#74)", () => {
+  it("User A (org_manager for Org A) cannot create a tenant on Microgrid B via the RPC", async () => {
     if (skipIfRequested()) return;
 
     // User A calls the RPC targeting Microgrid B (belongs to Org B) and
-    // Device B (also Org B). RLS on households INSERT must deny.
+    // Device B (also Org B). RLS on tenants INSERT must deny.
     const { data, error } = await userA.client.rpc(
-      "fn_create_household_with_meter",
+      "fn_create_tenant_with_meter",
       {
         p_microgrid_id: FIXTURE.microgridB,
-        p_display_name: "Cross-org household attempt",
+        p_display_name: "Cross-org tenant attempt",
         p_device_id: FIXTURE.deviceB,
       }
     );
 
     // Must not succeed — either an error surfaces, or data is null, but
-    // critically there must NOT be a new household row for this call.
+    // critically there must NOT be a new tenant row for this call.
     const succeeded = !error && typeof data === "string" && data.length > 0;
     expect(
       succeeded,
-      `Expected cross-org RPC call to be denied but it returned household_id=${data}`
+      `Expected cross-org RPC call to be denied but it returned tenant_id=${data}`
     ).toBe(false);
 
-    // Belt-and-braces: confirm no household row was created by checking
+    // Belt-and-braces: confirm no tenant row was created by checking
     // via service client that the RPC's returned id (if any) doesn't exist.
     if (typeof data === "string" && data.length > 0) {
       const svc = await (await import("./rls.helpers")).serviceClient();
-      await svc.from("households").delete().eq("id", data);
+      await svc.from("tenants").delete().eq("id", data);
     }
   });
 
-  it("User A can create a household on Microgrid A (own org) via the RPC", async () => {
+  it("User A can create a tenant on Microgrid A (own org) via the RPC", async () => {
     if (skipIfRequested()) return;
 
     // Seed a fresh consumption_meter device on Edge A that has no
     // primary_consumption_meter assignment yet. We have to do this through
-    // service_role because the partial unique index on household_devices
+    // service_role because the partial unique index on tenant_devices
     // blocks reuse of FIXTURE.deviceA.
     const svc = await (await import("./rls.helpers")).serviceClient();
     const tmpDeviceId = "aaaaaaaa-aaaa-4000-8004-00000000007a";
@@ -1289,7 +1289,7 @@ describe("RLS: fn_create_household_with_meter cross-org denied (#74)", () => {
 
     try {
       const { data, error } = await userA.client.rpc(
-        "fn_create_household_with_meter",
+        "fn_create_tenant_with_meter",
         {
           p_microgrid_id: FIXTURE.microgridA,
           p_display_name: "rls-hh-rpc-own-success",
@@ -1304,9 +1304,9 @@ describe("RLS: fn_create_household_with_meter cross-org denied (#74)", () => {
         (error?.message ?? "").includes("row-level security");
       expect(isRlsError, `unexpected RLS error: ${error?.message}`).toBe(false);
 
-      // Cleanup: remove the created household (cascades household_devices).
+      // Cleanup: remove the created tenant (cascades tenant_devices).
       if (typeof data === "string" && data.length > 0) {
-        await svc.from("households").delete().eq("id", data);
+        await svc.from("tenants").delete().eq("id", data);
       }
     } finally {
       await svc.from("devices").delete().eq("id", tmpDeviceId);
@@ -1338,7 +1338,7 @@ describe("RLS: microgrid_recent_activity VIEW cross-org isolation (#73)", () => 
       .select("microgrid_id, kind, description")
       .eq("microgrid_id", FIXTURE.microgridB);
 
-    // RLS via security_invoker: the underlying billing_periods, households, devices
+    // RLS via security_invoker: the underlying billing_periods, tenants, devices
     // tables all enforce org-scoped access. Zero rows (or error) expected.
     const count = error ? 0 : (data ?? []).length;
     expect(
@@ -1384,7 +1384,7 @@ const DELETE_FIXTURE = {
   microgrid: "cccccccc-0089-4000-8002-000000000001",
   edge: "cccccccc-0089-4000-8003-000000000001",
   device: "cccccccc-0089-4000-8004-000000000001",
-  household: "cccccccc-0089-4000-8005-000000000001",
+  tenant: "cccccccc-0089-4000-8005-000000000001",
   billingPeriod: "cccccccc-0089-4000-8006-000000000001",
   lineItem: "cccccccc-0089-4000-8007-000000000001",
 };
@@ -1423,13 +1423,13 @@ async function seedEntityDeleteFixture(): Promise<void> {
     device_type: "consumption_meter",
     openems_component_id: "rls-delete-meter",
   });
-  await svc.from("households").insert({
-    id: DELETE_FIXTURE.household,
+  await svc.from("tenants").insert({
+    id: DELETE_FIXTURE.tenant,
     microgrid_id: DELETE_FIXTURE.microgrid,
-    display_name: "UX6 Delete Household",
+    display_name: "UX6 Delete Tenant",
   });
-  await svc.from("household_devices").insert({
-    household_id: DELETE_FIXTURE.household,
+  await svc.from("tenant_devices").insert({
+    tenant_id: DELETE_FIXTURE.tenant,
     device_id: DELETE_FIXTURE.device,
     role: "primary_consumption_meter",
   });
@@ -1443,7 +1443,7 @@ async function seedEntityDeleteFixture(): Promise<void> {
   await svc.from("billing_line_items").insert({
     id: DELETE_FIXTURE.lineItem,
     billing_period_id: DELETE_FIXTURE.billingPeriod,
-    household_id: DELETE_FIXTURE.household,
+    tenant_id: DELETE_FIXTURE.tenant,
     device_id: DELETE_FIXTURE.device,
     usage_kwh: 10,
     total_amount: 2500,
@@ -1533,11 +1533,11 @@ describe("UX6 (#89) entity-deletion cascade + permission matrix", () => {
         { table: "microgrids", column: "id", id: DELETE_FIXTURE.microgrid },
         { table: "edges", column: "id", id: DELETE_FIXTURE.edge },
         { table: "devices", column: "id", id: DELETE_FIXTURE.device },
-        { table: "households", column: "id", id: DELETE_FIXTURE.household },
+        { table: "tenants", column: "id", id: DELETE_FIXTURE.tenant },
         {
-          table: "household_devices",
-          column: "household_id",
-          id: DELETE_FIXTURE.household,
+          table: "tenant_devices",
+          column: "tenant_id",
+          id: DELETE_FIXTURE.tenant,
         },
         {
           table: "billing_periods",

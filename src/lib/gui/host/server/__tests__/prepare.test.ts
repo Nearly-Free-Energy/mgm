@@ -187,11 +187,11 @@ describe("prepareAction", () => {
   });
 
   it("answers 404 when two bound entities belong to different organizations", async () => {
-    use(action({ bind: { path: { id: "microgrid" }, body: { household_id: "household" } }, input: z.object({ household_id: z.uuid() }) }));
-    tables.households = { data: [{ id: HOUSE, display_name: "House", microgrid_id: MG }] };
-    resolveTargetOrganization.mockImplementation(async (_s: unknown, t: { kind: string }) => (t.kind === "household" ? ORG_B : ORG_A));
+    use(action({ bind: { path: { id: "microgrid" }, body: { tenant_id: "tenant" } }, input: z.object({ tenant_id: z.uuid() }) }));
+    tables.tenants = { data: [{ id: HOUSE, display_name: "House", microgrid_id: MG }] };
+    resolveTargetOrganization.mockImplementation(async (_s: unknown, t: { kind: string }) => (t.kind === "tenant" ? ORG_B : ORG_A));
     roles = [managerOf(ORG_A), managerOf(ORG_B)];
-    expect(await prepare({ action: "metering.backend", params: { id: MG, household_id: HOUSE } })).toMatchObject({ status: 404 });
+    expect(await prepare({ action: "metering.backend", params: { id: MG, tenant_id: HOUSE } })).toMatchObject({ status: 404 });
   });
 
   it("answers 404 for an action with no bound entity", async () => {

@@ -115,7 +115,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     });
   });
 
-  it("generateBills passes revertToEdgeHouseholdIds through to the engine", async () => {
+  it("generateBills passes revertToEdgeTenantIds through to the engine", async () => {
     const HH = "880e8400-e29b-41d4-a716-446655440000";
     const composed = await composeBilling({
       supabase: makeSupabase(),
@@ -126,16 +126,16 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     try {
       await composed.data.billing.generateBills({
         billingPeriodId: PERIOD_ID,
-        householdIds: [HH],
-        revertToEdgeHouseholdIds: [HH],
+        tenantIds: [HH],
+        revertToEdgeTenantIds: [HH],
       });
     } finally {
       await composed.data.dispose();
     }
 
     expect(capturedParams).toMatchObject({
-      householdIds: [HH],
-      revertToEdgeHouseholdIds: [HH],
+      tenantIds: [HH],
+      revertToEdgeTenantIds: [HH],
     });
   });
 

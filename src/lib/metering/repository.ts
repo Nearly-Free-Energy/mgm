@@ -66,7 +66,7 @@ export type ManagedDevice = DeviceConfig & {
 /** Assignment link row with effective dates. */
 export type AssignmentLink = {
   id: string;
-  householdId: string;
+  tenantId: string;
   deviceId: string;
   role: string;
   effectiveFrom: string;
@@ -81,9 +81,9 @@ export interface MeteringRepository {
   getMicrogridOrganization(
     microgridId: string
   ): Promise<{ microgridId: string; communityId: string; orgId: string } | null>;
-  getHouseholdOrganization(
-    householdId: string
-  ): Promise<{ householdId: string; microgridId: string; orgId: string } | null>;
+  getTenantOrganization(
+    tenantId: string
+  ): Promise<{ tenantId: string; microgridId: string; orgId: string } | null>;
   getDeviceOrganization(
     deviceId: string
   ): Promise<{ deviceId: string; microgridId: string; orgId: string } | null>;
@@ -91,18 +91,18 @@ export interface MeteringRepository {
   getMicrogridTimezone(microgridId: string): Promise<string | null>;
   getManagedDevices(microgridId: string): Promise<ManagedDevice[]>;
   /**
-   * Ids of this microgrid's devices linked to a household as its primary or
+   * Ids of this microgrid's devices linked to a tenant as its primary or
    * secondary consumption meter on `date` (YYYY-MM-DD): links whose
    * half-open period [effective_from, effective_to) contains the day. Empty
    * when there are none; throws when a read fails, so a failed read is not
-   * mistaken for a site without household meters.
+   * mistaken for a site without tenant meters.
    */
   getHouseMeterIds(microgridId: string, date: string): Promise<string[]>;
   getMicrogridEdges(
     microgridId: string
   ): Promise<{ id: string; openemsEdgeId: string; name: string }[]>;
   getKnownEdgeIds(microgridId: string): Promise<string[]>;
-  getAssignmentLinks(householdId: string): Promise<AssignmentLink[]>;
+  getAssignmentLinks(tenantId: string): Promise<AssignmentLink[]>;
   insertMeterReading(input: {
     deviceId: string;
     readingKwh: number;
@@ -147,7 +147,7 @@ export interface MeteringCapabilityContract {
     query: unknown
   ): Promise<MeteringResult<DeviceConsumption[]>>;
   getAssignmentHistory(
-    householdId: string
+    tenantId: string
   ): Promise<
     MeteringResult<{
       entries: AssignmentHistoryEntry[];

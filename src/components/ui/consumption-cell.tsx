@@ -4,7 +4,7 @@
 //
 // Contract:
 //   • Tone derives from `pct` (fraction of budget) against the
-//     `thresholds` prop. Defaults success=0.75, warn=1. Households
+//     `thresholds` prop. Defaults success=0.75, warn=1. Tenants
 //     can tune (some want green at <50% used).
 //   • `mode` switches data semantics:
 //       'budget'   — pct = used / monthlyBudget (default)

@@ -161,6 +161,53 @@ Before promoting, check that `MGM_GUI` is unset or names a GUI the release
 includes (`src/gui/meta.ts` lists them). A name the release does not include
 is logged at server start (`docs/setup.md`, "Runtime configuration").
 
+### A release that needs a cutover
+
+Usually the running release keeps working on the migrated database until the
+new one is promoted. A release whose notes say it **needs a cutover** ships a
+migration the running release cannot use. The first is the release with
+migration `20261116230000` (the tenant rename): from the moment it is applied
+until the new release is promoted, the running release's tenant pages,
+billing, payment links and checkout fail. Keep that gap short:
+
+1. **Beforehand**, deploy the release without promoting it (staged, with no
+   production domain), and run the migration's read-only preflight against
+   production. For `20261116230000` that is
+   `supabase/scripts/preflight-tenant-rename.sql`; it must print
+   `preflight passed`. Have the reverse script and the previous deployment's
+   URL ready.
+2. **At a quiet hour**, pause the payment worker, so it does not ask the old
+   release to reconcile in the gap:
+
+   ```sql
+   SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'mgm-payments-reconcile'), active := false);
+   ```
+
+   From here until step 5, record no payments by hand and start no checkout.
+3. Apply the migrations (`supabase db push`).
+4. Promote the staged deployment straight away.
+5. Resume the worker, and run it once to settle any payment a customer
+   completed in the gap, whose provider notification reached the old release
+   and failed:
+
+   ```sql
+   SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'mgm-payments-reconcile'), active := true);
+   SELECT public.fn_payment_run_worker();
+   ```
+
+6. Open a tenant's page, a payment link and a billing period.
+
+**Expected downtime** is the time between steps 3 and 4, about a minute. The
+migration itself takes milliseconds: it renames objects and rewrites no rows,
+though it first waits for queries already running on those tables. A browser
+tab opened before the cutover calls the old API paths and gets "not
+available" until it is reloaded.
+
+To roll back after step 4, run the reverse script (for `20261116230000`,
+`supabase/scripts/reverse-tenant-rename.sql`) and promote the previous
+deployment, with the worker paused as in step 2, then record the migration as
+reverted (`supabase migration repair --status reverted 20261116230000`).
+
 ## Build an asset locally
 
 Do this only to test the packaging or a deployment procedure. A local build

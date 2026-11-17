@@ -173,7 +173,7 @@ export function PluginsPageClient({ orgs }: { orgs: PluginsOrgView[] }) {
                       {!plugin.enabled ? (
                         <p className="mt-2 text-xs text-muted-foreground">
                           Disabled plugins keep existing records; community,
-                          microgrid, and household writes fail closed until the
+                          microgrid, and tenant writes fail closed until the
                           plugin is re-enabled.
                         </p>
                       ) : null}

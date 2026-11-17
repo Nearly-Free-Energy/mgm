@@ -16,7 +16,7 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 //      src/lib/microgrid-links.ts); if microgridHref points elsewhere,
 //      revisit the order.
 //   2. Billing    — the monthly close job (primary working surface).
-//   3. Setup      — configure-once (edges, households, rate schedule).
+//   3. Setup      — configure-once (edges, tenants, rate schedule).
 //
 // Tabs are next/link <Link>s so a click is a client-side navigation and the
 // (gui) layout stays mounted. Billing and Setup are pages under

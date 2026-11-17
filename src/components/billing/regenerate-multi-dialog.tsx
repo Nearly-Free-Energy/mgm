@@ -4,13 +4,13 @@
  * RegenerateMultiDialog — multi-select bulk regenerate (BC3 #175 AC4).
  *
  * Triggered by the sticky selection bar's "Regenerate selected" button.
- * Displays the selected households grouped into:
+ * Displays the selected tenants grouped into:
  *   - "Will be regenerated" (current reading_source = 'edge'),
  *   - "Will be skipped" (current reading_source = 'manual') — Q5=B: manual
  *     rows are per-row only inside this multi-flow.
  *
  * On confirm: single POST /api/billing/generate with the edge-only set as
- * householdIds (NO manualReadings). Renders inline destructive banner on
+ * tenantIds (NO manualReadings). Renders inline destructive banner on
  * non-2xx OR if errors[] is non-empty (top-level + per-row banners pushed
  * via parent callbacks).
  *
@@ -39,7 +39,7 @@ import {
 import type { RowBannerEntry } from "@/components/billing/row-banner-stack";
 import type {
   BillingLineItem,
-  Household,
+  Tenant,
   ReadingSource,
 } from "@/lib/types/domain";
 
@@ -56,12 +56,12 @@ export interface RegenerateMultiDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   billingPeriodId: string;
-  /** Selected household IDs (parent owns the Set). */
-  selectedHouseholdIds: string[];
-  /** Households indexed by id. */
-  households: Household[];
-  /** Line items for the current period, indexed by household_id. */
-  lineItemsByHouseholdId: Map<string, BillingLineItem>;
+  /** Selected tenant IDs (parent owns the Set). */
+  selectedTenantIds: string[];
+  /** Tenants indexed by id. */
+  tenants: Tenant[];
+  /** Line items for the current period, indexed by tenant_id. */
+  lineItemsByTenantId: Map<string, BillingLineItem>;
   /** Push a parent-level banner (sibling of paidToasts). */
   pushParentBanner: (entry: ParentBannerInput) => void;
   /** Push a per-row destructive banner via <RowBannerStack>. */
@@ -85,9 +85,9 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
     open,
     onOpenChange,
     billingPeriodId,
-    selectedHouseholdIds,
-    households,
-    lineItemsByHouseholdId,
+    selectedTenantIds,
+    tenants,
+    lineItemsByTenantId,
     pushParentBanner,
     pushRowBanner,
     onSuccess,
@@ -110,25 +110,25 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
 
   // Build the partition — pure derivation from props.
   type Row = {
-    householdId: string;
-    householdName: string;
+    tenantId: string;
+    tenantName: string;
     lineItemId: string | null;
     readingSource: ReadingSource | null;
     totalAmount: number | null;
   };
 
-  const householdsById = React.useMemo(() => {
-    const m = new Map<string, Household>();
-    for (const h of households) m.set(h.id, h);
+  const tenantsById = React.useMemo(() => {
+    const m = new Map<string, Tenant>();
+    for (const h of tenants) m.set(h.id, h);
     return m;
-  }, [households]);
+  }, [tenants]);
 
-  const rows: Row[] = selectedHouseholdIds.map((hid) => {
-    const h = householdsById.get(hid);
-    const li = lineItemsByHouseholdId.get(hid) ?? null;
+  const rows: Row[] = selectedTenantIds.map((hid) => {
+    const h = tenantsById.get(hid);
+    const li = lineItemsByTenantId.get(hid) ?? null;
     return {
-      householdId: hid,
-      householdName: h?.display_name ?? "Unknown",
+      tenantId: hid,
+      tenantName: h?.display_name ?? "Unknown",
       lineItemId: li?.id ?? null,
       readingSource: li?.reading_source ?? null,
       totalAmount: li?.total_amount ?? null,
@@ -143,21 +143,21 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
   // without manual memoization (React Compiler handles its own caching;
   // a useCallback whose deps include derived arrays cannot be preserved).
   const stateRef = React.useRef({
-    edgeIds: edgeRows.map((r) => r.householdId),
+    edgeIds: edgeRows.map((r) => r.tenantId),
     billingPeriodId,
     pushParentBanner,
     pushRowBanner,
-    lineItemsByHouseholdId,
+    lineItemsByTenantId,
     onSuccess,
     router,
   });
   React.useEffect(() => {
     stateRef.current = {
-      edgeIds: edgeRows.map((r) => r.householdId),
+      edgeIds: edgeRows.map((r) => r.tenantId),
       billingPeriodId,
       pushParentBanner,
       pushRowBanner,
-      lineItemsByHouseholdId,
+      lineItemsByTenantId,
       onSuccess,
       router,
     };
@@ -173,14 +173,14 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         billingPeriodId: s.billingPeriodId,
-        householdIds: s.edgeIds,
+        tenantIds: s.edgeIds,
       }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       lineItems?: number;
       errors?: Array<{
-        householdId: string;
-        householdName: string;
+        tenantId: string;
+        tenantName: string;
         error: string;
         code?: string;
       }>;
@@ -201,10 +201,10 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
     // Push per-row destructive banners for failures (preserved per AC4).
     const stamp = Date.now();
     for (const err of respErrors) {
-      const li = s.lineItemsByHouseholdId.get(err.householdId);
+      const li = s.lineItemsByTenantId.get(err.tenantId);
       if (!li) continue;
       s.pushRowBanner({
-        id: `${li.id}-multi-regen-err-${stamp}-${err.householdId}`,
+        id: `${li.id}-multi-regen-err-${stamp}-${err.tenantId}`,
         lineItemId: li.id,
         tone: "destructive",
         message: err.error,
@@ -218,7 +218,7 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
     if (successCount > 0) {
       s.pushParentBanner({
         tone: "info",
-        message: `Regenerated ${successCount} household${successCount === 1 ? "" : "s"}`,
+        message: `Regenerated ${successCount} tenant${successCount === 1 ? "" : "s"}`,
         durationMs: INFO_BANNER_DURATION_MS,
       });
     }
@@ -255,7 +255,7 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
     s.onSuccess?.();
   }
 
-  const confirmLabel = `Regenerate ${edgeRows.length} household${edgeRows.length === 1 ? "" : "s"}`;
+  const confirmLabel = `Regenerate ${edgeRows.length} tenant${edgeRows.length === 1 ? "" : "s"}`;
 
   const onConfirmHandler = allSelectedAreManual
     ? async () => {
@@ -300,12 +300,12 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
               <ul className="space-y-1">
                 {edgeRows.map((r) => (
                   <li
-                    key={r.householdId}
+                    key={r.tenantId}
                     className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
-                        {r.householdName}
+                        {r.tenantName}
                       </span>
                       {r.readingSource && (
                         <StatusChip
@@ -337,12 +337,12 @@ export function RegenerateMultiDialog(props: RegenerateMultiDialogProps) {
               <ul className="space-y-1">
                 {manualRows.map((r) => (
                   <li
-                    key={r.householdId}
+                    key={r.tenantId}
                     className="flex items-center justify-between gap-2 text-dense"
                   >
                     <span className="flex items-center gap-2">
                       <span className="font-medium text-foreground">
-                        {r.householdName}
+                        {r.tenantName}
                       </span>
                       <StatusChip
                         kind="billingLineItemReadingSource"
@@ -404,12 +404,12 @@ function ResultDialog(props: {
   const overflow = Math.max(0, errors.length - MAX_FAILURES_INLINE);
 
   const title = isFullFailure
-    ? `Could not regenerate ${attemptedCount} household${attemptedCount === 1 ? "" : "s"}`
-    : `Regenerated ${successCount} of ${attemptedCount} household${attemptedCount === 1 ? "" : "s"}`;
+    ? `Could not regenerate ${attemptedCount} tenant${attemptedCount === 1 ? "" : "s"}`
+    : `Regenerated ${successCount} of ${attemptedCount} tenant${attemptedCount === 1 ? "" : "s"}`;
 
   const bannerTitle = isFullFailure
     ? `${errors.length} failure${errors.length === 1 ? "" : "s"}`
-    : `${errors.length} household${errors.length === 1 ? "" : "s"} could not be regenerated`;
+    : `${errors.length} tenant${errors.length === 1 ? "" : "s"} could not be regenerated`;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -441,7 +441,7 @@ function ResultDialog(props: {
                 className="mt-1 list-disc space-y-1 pl-5"
               >
                 {displayed.map((err) => (
-                  <li key={err.householdId}>{errorCodeCopy(err)}</li>
+                  <li key={err.tenantId}>{errorCodeCopy(err)}</li>
                 ))}
                 {overflow > 0 && (
                   <li

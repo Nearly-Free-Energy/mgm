@@ -87,7 +87,7 @@ vi.mock("@/lib/supabase/service", () => ({
 type FromState = {
   // Per-table response shape.
   lineItem: { data: unknown; error: unknown };
-  household_devices: { data: unknown; error: unknown };
+  tenant_devices: { data: unknown; error: unknown };
   rate_schedules: { data: unknown; error: unknown };
   // #269: actor lookup was `.from("user_directory").…maybeSingle()`; it
   // is now `.rpc("fn_list_visible_users", { _target_user_ids: [...] })`.
@@ -97,7 +97,7 @@ type FromState = {
 
 const fromState: FromState = {
   lineItem: { data: null, error: null },
-  household_devices: { data: null, error: null },
+  tenant_devices: { data: null, error: null },
   rate_schedules: { data: null, error: null },
   fnListVisibleUsers: { data: [], error: null },
 };
@@ -137,13 +137,13 @@ function makeFromImpl(table: string) {
       }),
     };
   }
-  if (table === "household_devices") {
+  if (table === "tenant_devices") {
     return {
       select: () => ({
         eq: () => ({
           eq: () => ({
             order: () => ({
-              limit: () => Promise.resolve(fromState.household_devices),
+              limit: () => Promise.resolve(fromState.tenant_devices),
             }),
           }),
         }),
@@ -208,7 +208,7 @@ function lineItemRow(overrides: Record<string, unknown> = {}) {
     end_kwh: 100,
     entered_at: "2026-04-22T08:30:00Z",
     entered_by_user_id: null,
-    household_id: "hh-1",
+    tenant_id: "hh-1",
     invoice_number: null,
     manual_reason: null,
     paid_at: null,
@@ -254,7 +254,7 @@ function lineItemRow(overrides: Record<string, unknown> = {}) {
         },
       },
     },
-    households: {
+    tenants: {
       id: "hh-1",
       account_number: null,
       address_city: null,
@@ -323,7 +323,7 @@ beforeEach(() => {
   // Default: row visible, helper succeeds with mint result, renderer returns
   // a tiny PDF buffer.
   fromState.lineItem = { data: lineItemRow(), error: null };
-  fromState.household_devices = { data: [], error: null };
+  fromState.tenant_devices = { data: [], error: null };
   fromState.rate_schedules = { data: RATE_SCHEDULE_ROW, error: null };
   fromState.fnListVisibleUsers = { data: [], error: null };
   mintShortSlugMock.mockReset().mockResolvedValue("Kp9XrA");
@@ -581,7 +581,7 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     const response = GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
     await vi.waitFor(() => {
       expect(readinessMock).toHaveBeenCalled();
-      expect(mockFrom).toHaveBeenCalledWith("household_devices");
+      expect(mockFrom).toHaveBeenCalledWith("tenant_devices");
       expect(rateScheduleFilters).toContainEqual(["id", SCHEDULE_ID]);
       expect(serviceDownloadMock).toHaveBeenCalledWith("community/logo.png");
     });
@@ -620,7 +620,7 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
           reject(new Error("directory read failed")),
       } as never;
       mockFrom.mockImplementation((table: string) => {
-        if (table === "household_devices") {
+        if (table === "tenant_devices") {
           const limit = () => Promise.reject(new Error("meter read failed"));
           return { select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit }) }) }) }) };
         }

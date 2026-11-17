@@ -68,6 +68,18 @@ function isPublicPaymentRoute(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
+  // Tenants were households until 20261116230000_rename_households_to_tenants
+  // renamed them. Bookmarks and old links to the tenant pages follow the new
+  // URL, keeping the query; the old one is no longer a released route.
+  const oldTenantPage = /^(\/microgrids\/[^/]+\/setup\/)households(\/[^/]+)?\/?$/.exec(
+    request.nextUrl.pathname,
+  );
+  if (oldTenantPage) {
+    const url = new URL(request.nextUrl.href);
+    url.pathname = `${oldTenantPage[1]}tenants${oldTenantPage[2] ?? ""}`;
+    return NextResponse.redirect(url);
+  }
+
   // This fork deploys released MGM slices. Inherited legacy billing, payment,
   // and unreleased handlers must not become callable through deep links
   // or direct API requests before their Cordis plugins are released —

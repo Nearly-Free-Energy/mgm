@@ -55,7 +55,7 @@ const toneSchema = z.enum(["neutral", "info", "success", "warning", "danger", "a
 export const confirmSchema = z.enum(["none", "confirm", "typed", "ceremony"]);
 export const navGroupSchema = z.enum(["operate", "money", "configure", "system"]);
 export const iconSchema = z.enum([
-  "today", "live", "sites", "communities", "households", "devices", "readings",
+  "today", "live", "sites", "communities", "tenants", "devices", "readings",
   "billing", "payments", "tariff", "data-source", "branding", "accounts", "plugins",
   "users", "profile", "organizations", "assistant", "message", "alert", "download",
   "share", "contact", "help",

@@ -37,7 +37,7 @@ const ICONS: Readonly<Record<IconName, LucideIcon>> = {
   live: Activity,
   sites: Zap,
   communities: MapPin,
-  households: House,
+  tenants: House,
   devices: Cpu,
   readings: Gauge,
   billing: Receipt,

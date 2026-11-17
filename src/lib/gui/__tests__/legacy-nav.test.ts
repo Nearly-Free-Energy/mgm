@@ -34,7 +34,7 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
   "org.today": ["Dashboard", "operate", "today", 10],
   "community.microgrids": ["Microgrids", "operate", "sites", 20],
   "community.communities": ["Communities", "operate", "communities", 30],
-  "community.households": ["Households", "operate", "households", 50],
+  "community.tenants": ["Tenants", "operate", "tenants", 50],
   "metering.devices": ["Edges & Devices", "operate", "devices", 60],
   "billing.periods": ["Billing", "money", "billing", 10],
   "billing.tariff": ["Rate Schedule", "configure", "tariff", 10],
@@ -95,10 +95,10 @@ const REACHED_IN_PAGE: Record<string, Reach> = {
     via: ["src/lib/microgrid-links.ts"],
     link: "return `/microgrids/${microgridId}/setup/edges`;",
   },
-  "/microgrids/[id]/setup/households/[householdId]": {
-    from: "/microgrids/[id]/setup/households",
-    via: [`${GUI}/microgrids/[id]/setup/households/households-section.tsx`, "src/components/HouseholdTable.tsx"],
-    link: "href={`/microgrids/${microgridId}/setup/households/${household.id}`}",
+  "/microgrids/[id]/setup/tenants/[tenantId]": {
+    from: "/microgrids/[id]/setup/tenants",
+    via: [`${GUI}/microgrids/[id]/setup/tenants/tenants-section.tsx`, "src/components/TenantTable.tsx"],
+    link: "href={`/microgrids/${microgridId}/setup/tenants/${tenant.id}`}",
   },
   "/microgrids/[id]/setup/edges/[edgeId]": {
     from: "/microgrids/[id]/setup/edges",

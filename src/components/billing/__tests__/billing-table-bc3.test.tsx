@@ -10,7 +10,7 @@ import { LocaleProvider } from "@/components/format/locale-context";
 import type {
   BillingLineItem,
   BillingPeriod,
-  Household,
+  Tenant,
   TierConfig,
 } from "@/lib/types/domain";
 
@@ -68,7 +68,7 @@ function makePeriod(overrides?: Partial<BillingPeriod>): BillingPeriod {
   };
 }
 
-function makeHousehold(id: string, name: string): Household {
+function makeTenant(id: string, name: string): Tenant {
   return {
     id,
     microgrid_id: "mg-1",
@@ -84,7 +84,7 @@ function makeHousehold(id: string, name: string): Household {
     address_postal_code: null,
     geography_notes: null,
     created_at: "2026-01-01T00:00:00Z",
-  } as unknown as Household;
+  } as unknown as Tenant;
 }
 
 function makeLineItem(
@@ -94,7 +94,7 @@ function makeLineItem(
   return {
     id: `li-${hid}`,
     billing_period_id: "p-1",
-    household_id: hid,
+    tenant_id: hid,
     device_id: "d-x", // metered
     usage_kwh: 50,
     start_kwh: 100,
@@ -127,19 +127,19 @@ function Wrap({ children }: { children: React.ReactNode }) {
 
 describe("BillingTable BC3 — multi-select", () => {
   it("renders one checkbox per row + a Select all header checkbox", () => {
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
-    const lineItems = households.map((h) => makeLineItem(h.id));
+    const lineItems = tenants.map((h) => makeLineItem(h.id));
     render(
       <Wrap>
         <BillingTable
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -156,19 +156,19 @@ describe("BillingTable BC3 — multi-select", () => {
   });
 
   it("clicking 2 row checkboxes shows the sticky bar with '2 selected'", () => {
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
-    const lineItems = households.map((h) => makeLineItem(h.id));
+    const lineItems = tenants.map((h) => makeLineItem(h.id));
     render(
       <Wrap>
         <BillingTable
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -192,19 +192,19 @@ describe("BillingTable BC3 — multi-select", () => {
   });
 
   it("Select-all header checkbox toggles all rows; second click clears", () => {
-    const households = [
-      makeHousehold("h-1", "Alice"),
-      makeHousehold("h-2", "Bob"),
-      makeHousehold("h-3", "Carol"),
+    const tenants = [
+      makeTenant("h-1", "Alice"),
+      makeTenant("h-2", "Bob"),
+      makeTenant("h-3", "Carol"),
     ];
-    const lineItems = households.map((h) => makeLineItem(h.id));
+    const lineItems = tenants.map((h) => makeLineItem(h.id));
     render(
       <Wrap>
         <BillingTable
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -228,15 +228,15 @@ describe("BillingTable BC3 — multi-select", () => {
   });
 
   it("'Clear selection' button empties the selection set", () => {
-    const households = [makeHousehold("h-1", "Alice"), makeHousehold("h-2", "Bob")];
-    const lineItems = households.map((h) => makeLineItem(h.id));
+    const tenants = [makeTenant("h-1", "Alice"), makeTenant("h-2", "Bob")];
+    const lineItems = tenants.map((h) => makeLineItem(h.id));
     render(
       <Wrap>
         <BillingTable
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -258,7 +258,7 @@ describe("BillingTable BC3 — multi-select", () => {
 
 describe("BillingTable BC3 — switched-to-manual cell extension (AC1)", () => {
   it("metered DRAFT cell becomes editable after Switch-to-manual; closed-period stays read-only", async () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = [makeLineItem("h-1")];
 
     const { rerender } = render(
@@ -267,7 +267,7 @@ describe("BillingTable BC3 — switched-to-manual cell extension (AC1)", () => {
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -301,7 +301,7 @@ describe("BillingTable BC3 — switched-to-manual cell extension (AC1)", () => {
           microgridId="mg-1"
           period={makePeriod({ status: "closed", closed_at: "2026-05-01T00:00:00Z" })}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -318,7 +318,7 @@ describe("BillingTable BC3 — switched-to-manual cell extension (AC1)", () => {
 
 describe("BillingTable BC3 — closed-period gating (AC6)", () => {
   it("multi-select bulk button is disabled on closed period with the gating tooltip", () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = [makeLineItem("h-1")];
     render(
       <Wrap>
@@ -326,7 +326,7 @@ describe("BillingTable BC3 — closed-period gating (AC6)", () => {
           microgridId="mg-1"
           period={makePeriod({ status: "closed", closed_at: "2026-05-01T00:00:00Z" })}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -346,7 +346,7 @@ describe("BillingTable BC3 — closed-period gating (AC6)", () => {
   });
 
   it("pre-flight panel cannot open on closed period (Generate button is hidden)", () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     const lineItems = [makeLineItem("h-1")];
     render(
       <Wrap>
@@ -354,7 +354,7 @@ describe("BillingTable BC3 — closed-period gating (AC6)", () => {
           microgridId="mg-1"
           period={makePeriod({ status: "closed", closed_at: "2026-05-01T00:00:00Z" })}
           lineItems={lineItems}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
         />
@@ -376,17 +376,17 @@ describe("BillingTable BC3 — closed-period gating (AC6)", () => {
 
 describe("BillingTable BC3 — Generate button opens pre-flight panel (AC5)", () => {
   it("clicking Generate (no line items) mounts the pre-flight panel", () => {
-    const households = [makeHousehold("h-1", "Alice")];
+    const tenants = [makeTenant("h-1", "Alice")];
     render(
       <Wrap>
         <BillingTable
           microgridId="mg-1"
           period={makePeriod()}
           lineItems={[]}
-          households={households}
+          tenants={tenants}
           tiers={tiers}
           currency="UGX"
-          edgeAvailableByHouseholdId={{ "h-1": false }}
+          edgeAvailableByTenantId={{ "h-1": false }}
         />
       </Wrap>,
     );

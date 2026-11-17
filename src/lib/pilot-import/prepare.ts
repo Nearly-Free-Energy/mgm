@@ -4,26 +4,26 @@ import { createHmac } from "node:crypto";
 
 /** The only source fields accepted by the synthetic pilot importer. */
 export const PILOT_SOURCE_FIELDS = [
-  "source_household_id",
+  "source_tenant_id",
   "source_meter_id",
   "reading_kwh",
   "read_at",
 ] as const;
 
 export const PILOT_IMPORT_LIMITS = {
-  households: 500,
+  tenants: 500,
   readings: 5_000,
 } as const;
 
 export type PilotSourceRow = {
-  source_household_id: string;
+  source_tenant_id: string;
   source_meter_id: string;
   reading_kwh: number;
   read_at: string;
 };
 
 export type PreparedPilotReading = {
-  household_key: string;
+  tenant_key: string;
   meter_key: string;
   reading_kwh: number;
   read_at: string;
@@ -66,7 +66,7 @@ export function preparePilotRows(rows: unknown[], pseudonymizationKey: string): 
   }
 
   const prepared: PreparedPilotReading[] = [];
-  const householdKeys = new Set<string>();
+  const tenantKeys = new Set<string>();
 
   for (const [index, input] of rows.entries()) {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -78,7 +78,7 @@ export function preparePilotRows(rows: unknown[], pseudonymizationKey: string): 
       throw new PilotImportError(`Row ${index + 1} contains unsupported fields: ${unexpected.join(", ")}`);
     }
 
-    const sourceHouseholdId = requireNonEmptyString(row.source_household_id, "source_household_id");
+    const sourceTenantId = requireNonEmptyString(row.source_tenant_id, "source_tenant_id");
     const sourceMeterId = requireNonEmptyString(row.source_meter_id, "source_meter_id");
     const readAt = requireNonEmptyString(row.read_at, "read_at");
     const timestamp = Date.parse(readAt);
@@ -90,14 +90,14 @@ export function preparePilotRows(rows: unknown[], pseudonymizationKey: string): 
       throw new PilotImportError(`Row ${index + 1} reading_kwh must be a finite non-negative number`);
     }
 
-    const householdKey = pseudonymize("household", sourceHouseholdId, pseudonymizationKey);
-    householdKeys.add(householdKey);
-    if (householdKeys.size > PILOT_IMPORT_LIMITS.households) {
-      throw new PilotImportError(`Pilot import is limited to ${PILOT_IMPORT_LIMITS.households} households`);
+    const tenantKey = pseudonymize("tenant", sourceTenantId, pseudonymizationKey);
+    tenantKeys.add(tenantKey);
+    if (tenantKeys.size > PILOT_IMPORT_LIMITS.tenants) {
+      throw new PilotImportError(`Pilot import is limited to ${PILOT_IMPORT_LIMITS.tenants} tenants`);
     }
 
     prepared.push({
-      household_key: householdKey,
+      tenant_key: tenantKey,
       meter_key: pseudonymize("meter", sourceMeterId, pseudonymizationKey),
       reading_kwh: row.reading_kwh,
       read_at: new Date(timestamp).toISOString(),
@@ -107,7 +107,7 @@ export function preparePilotRows(rows: unknown[], pseudonymizationKey: string): 
   return prepared;
 }
 
-function pseudonymize(kind: "household" | "meter", sourceId: string, key: string): string {
+function pseudonymize(kind: "tenant" | "meter", sourceId: string, key: string): string {
   return `pilot_${createHmac("sha256", key).update(`${kind}\u0000${sourceId}`, "utf8").digest("hex").slice(0, 32)}`;
 }
 

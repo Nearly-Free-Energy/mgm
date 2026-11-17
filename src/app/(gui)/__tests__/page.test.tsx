@@ -1,7 +1,7 @@
 // Dashboard root page — server component tests.
 //
 // Strategy (mirrors microgrids/[id]/__tests__/page.test.tsx):
-//   - Mock @/lib/supabase/server to return fixture microgrids and household
+//   - Mock @/lib/supabase/server to return fixture microgrids and tenant
 //     counts via a fully chainable query proxy.
 //   - Call OrgCard() directly (async server component that renders the
 //     org-panel microgrid cards) and serialize the returned JSX to HTML with
@@ -68,7 +68,7 @@ const MICROGRID = {
 function wireFrom() {
   mockFrom.mockImplementation((table: string) => {
     if (table === "microgrids") return buildQuery([MICROGRID]);
-    if (table === "households") return buildQuery(null, 3);
+    if (table === "tenants") return buildQuery(null, 3);
     return buildQuery([]);
   });
 }
@@ -91,11 +91,11 @@ describe("DashboardPage org-panel microgrid cards", () => {
     expect(html).toContain("North Grid");
   });
 
-  it("renders the household count and currency inside the card", async () => {
+  it("renders the tenant count and currency inside the card", async () => {
     const tree = await OrgCard({ org: ORG as never });
     const html = renderToStaticMarkup(tree as React.ReactElement);
 
-    expect(html).toContain("3 households");
+    expect(html).toContain("3 tenants");
     expect(html).toContain("UGX");
   });
 });

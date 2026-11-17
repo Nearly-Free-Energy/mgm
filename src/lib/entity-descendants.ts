@@ -27,9 +27,9 @@ import "server-only";
  *     The UI surfaces this as a "loses device linkage" line, NOT a
  *     destroyed-count. See AC-FK-AUDIT.
  *
- *   * For `edge.household_devices`: devices cascade-delete household_devices
- *     rows per 00001_schema.sql:191, so this count represents meter↔household
- *     links that will be severed (the households themselves survive since
+ *   * For `edge.tenant_devices`: devices cascade-delete tenant_devices
+ *     rows per 00001_schema.sql:191, so this count represents meter↔tenant
+ *     links that will be severed (the tenants themselves survive since
  *     they hang off `microgrid_id`, not edge).
  *
  *   * Billing periods are split into `billing_periods_draft` and
@@ -213,10 +213,10 @@ async function countForOrganization(
     : { data: [] as { id: string }[] };
   const deviceIds = (devices ?? []).map((r) => r.id as string);
 
-  const { data: households } = microgridIds.length
-    ? await supabase.from("households").select("id").in("microgrid_id", microgridIds)
+  const { data: tenants } = microgridIds.length
+    ? await supabase.from("tenants").select("id").in("microgrid_id", microgridIds)
     : { data: [] as { id: string }[] };
-  const householdIds = (households ?? []).map((r) => r.id as string);
+  const tenantIds = (tenants ?? []).map((r) => r.id as string);
 
   const { data: billingPeriods } = microgridIds.length
     ? await supabase
@@ -232,8 +232,8 @@ async function countForOrganization(
     .map((r) => r.id as string);
 
   const [
-    householdDevicesCount,
-    householdUsersCount,
+    tenantDevicesCount,
+    tenantUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
@@ -241,16 +241,16 @@ async function countForOrganization(
     userRolesCount,
     bpWithPayments,
   ] = await Promise.all([
-    householdIds.length
-      ? countTable(supabase, "household_devices", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_devices", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
-    householdIds.length
-      ? countTable(supabase, "household_users", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_users", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
     billingPeriodIds.length
@@ -286,9 +286,9 @@ async function countForOrganization(
     microgrids: microgridIds.length,
     edges: edgeIds.length,
     devices: deviceIds.length,
-    households: householdIds.length,
-    household_devices: householdDevicesCount,
-    household_users: householdUsersCount,
+    tenants: tenantIds.length,
+    tenant_devices: tenantDevicesCount,
+    tenant_users: tenantUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,
@@ -320,10 +320,10 @@ async function countForCommunity(
     : { data: [] as { id: string }[] };
   const deviceIds = (devices ?? []).map((r) => r.id as string);
 
-  const { data: households } = microgridIds.length
-    ? await supabase.from("households").select("id").in("microgrid_id", microgridIds)
+  const { data: tenants } = microgridIds.length
+    ? await supabase.from("tenants").select("id").in("microgrid_id", microgridIds)
     : { data: [] as { id: string }[] };
-  const householdIds = (households ?? []).map((r) => r.id as string);
+  const tenantIds = (tenants ?? []).map((r) => r.id as string);
 
   const { data: billingPeriods } = microgridIds.length
     ? await supabase
@@ -339,24 +339,24 @@ async function countForCommunity(
     .map((r) => r.id as string);
 
   const [
-    householdDevicesCount,
-    householdUsersCount,
+    tenantDevicesCount,
+    tenantUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
     savingsSettingsCount,
     bpWithPayments,
   ] = await Promise.all([
-    householdIds.length
-      ? countTable(supabase, "household_devices", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_devices", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
-    householdIds.length
-      ? countTable(supabase, "household_users", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_users", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
     billingPeriodIds.length
@@ -389,9 +389,9 @@ async function countForCommunity(
     microgrids: microgridIds.length,
     edges: edgeIds.length,
     devices: deviceIds.length,
-    households: householdIds.length,
-    household_devices: householdDevicesCount,
-    household_users: householdUsersCount,
+    tenants: tenantIds.length,
+    tenant_devices: tenantDevicesCount,
+    tenant_users: tenantUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,
@@ -417,11 +417,11 @@ async function countForMicrogrid(
     : { data: [] as { id: string }[] };
   const deviceIds = (devices ?? []).map((r) => r.id as string);
 
-  const { data: households } = await supabase
-    .from("households")
+  const { data: tenants } = await supabase
+    .from("tenants")
     .select("id")
     .eq("microgrid_id", microgridId);
-  const householdIds = (households ?? []).map((r) => r.id as string);
+  const tenantIds = (tenants ?? []).map((r) => r.id as string);
 
   const { data: billingPeriods } = await supabase
     .from("billing_periods")
@@ -435,24 +435,24 @@ async function countForMicrogrid(
     .map((r) => r.id as string);
 
   const [
-    householdDevicesCount,
-    householdUsersCount,
+    tenantDevicesCount,
+    tenantUsersCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
     savingsSettingsCount,
     bpWithPayments,
   ] = await Promise.all([
-    householdIds.length
-      ? countTable(supabase, "household_devices", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_devices", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
-    householdIds.length
-      ? countTable(supabase, "household_users", {
-          column: "household_id",
-          values: householdIds,
+    tenantIds.length
+      ? countTable(supabase, "tenant_users", {
+          column: "tenant_id",
+          values: tenantIds,
         })
       : Promise.resolve(0),
     billingPeriodIds.length
@@ -480,9 +480,9 @@ async function countForMicrogrid(
     kind: "microgrid",
     edges: edgeIds.length,
     devices: deviceIds.length,
-    households: householdIds.length,
-    household_devices: householdDevicesCount,
-    household_users: householdUsersCount,
+    tenants: tenantIds.length,
+    tenant_devices: tenantDevicesCount,
+    tenant_users: tenantUsersCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,
@@ -507,10 +507,10 @@ async function countForEdge(
   ]);
   const deviceIds = (devices ?? []).map((r) => r.id as string);
 
-  const [householdDevicesCount, billingLineItemsNulled, readingsInClosedPeriods] =
+  const [tenantDevicesCount, billingLineItemsNulled, readingsInClosedPeriods] =
     await Promise.all([
       deviceIds.length
-        ? countTable(supabase, "household_devices", {
+        ? countTable(supabase, "tenant_devices", {
             column: "device_id",
             values: deviceIds,
           })
@@ -529,7 +529,7 @@ async function countForEdge(
   return {
     kind: "edge",
     devices: deviceIds.length,
-    household_devices: householdDevicesCount,
+    tenant_devices: tenantDevicesCount,
     billing_line_items_nulled: billingLineItemsNulled,
     readings_in_closed_periods: readingsInClosedPeriods,
   };

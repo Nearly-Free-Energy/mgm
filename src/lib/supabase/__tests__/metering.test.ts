@@ -32,7 +32,7 @@ const FIXTURE = {
   deviceA1: "d1000000-0000-4000-8004-000000000001",
   deviceA2: "d1000000-0000-4000-8004-000000000002",
   deviceB1: "d1000000-0000-4000-8004-000000000003",
-  householdA: "d1000000-0000-4000-8005-000000000001",
+  tenantA: "d1000000-0000-4000-8005-000000000001",
 };
 
 let userA: TestUser; // org_manager scoped to orgA
@@ -103,18 +103,18 @@ beforeAll(async () => {
   ]);
   if (devError) throw new Error(`[fixture] devices: ${devError.message}`);
 
-  const { error: hhError } = await svc.from("households").insert([
+  const { error: hhError } = await svc.from("tenants").insert([
     {
-      id: FIXTURE.householdA,
+      id: FIXTURE.tenantA,
       microgrid_id: FIXTURE.microgridA,
-      display_name: "Metering Household A",
+      display_name: "Metering Tenant A",
       primary_phone: "+256700000001",
     },
   ]);
-  if (hhError) throw new Error(`[fixture] households: ${hhError.message}`);
+  if (hhError) throw new Error(`[fixture] tenants: ${hhError.message}`);
 
-  const { error: linkError } = await svc.from("household_devices").insert({
-    household_id: FIXTURE.householdA,
+  const { error: linkError } = await svc.from("tenant_devices").insert({
+    tenant_id: FIXTURE.tenantA,
     device_id: FIXTURE.deviceA1,
     role: "primary_consumption_meter",
     effective_from: "2026-01-01",
@@ -181,8 +181,8 @@ describe("metering organization isolation + assignment integrity", () => {
 
   it("overlapping primary links are rejected with 23505", async () => {
     if (shouldSkip()) return;
-    const { error } = await userA.client.from("household_devices").insert({
-      household_id: FIXTURE.householdA,
+    const { error } = await userA.client.from("tenant_devices").insert({
+      tenant_id: FIXTURE.tenantA,
       device_id: FIXTURE.deviceA2,
       role: "primary_consumption_meter",
       effective_from: "2026-06-01",
@@ -195,17 +195,17 @@ describe("metering organization isolation + assignment integrity", () => {
   it("same-day close-and-open replacement is allowed and preserves history", async () => {
     if (shouldSkip()) return;
     const { error: closeError } = await userA.client
-      .from("household_devices")
+      .from("tenant_devices")
       .update({ effective_to: "2026-06-01" })
-      .eq("household_id", FIXTURE.householdA)
+      .eq("tenant_id", FIXTURE.tenantA)
       .eq("device_id", FIXTURE.deviceA1)
       .eq("role", "primary_consumption_meter");
     expect(closeError).toBeNull();
 
     const { error: openError } = await userA.client
-      .from("household_devices")
+      .from("tenant_devices")
       .insert({
-        household_id: FIXTURE.householdA,
+        tenant_id: FIXTURE.tenantA,
         device_id: FIXTURE.deviceA2,
         role: "primary_consumption_meter",
         effective_from: "2026-06-01",
@@ -214,9 +214,9 @@ describe("metering organization isolation + assignment integrity", () => {
     expect(openError).toBeNull();
 
     const { data: links, error: readError } = await userA.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("device_id, effective_from, effective_to")
-      .eq("household_id", FIXTURE.householdA)
+      .eq("tenant_id", FIXTURE.tenantA)
       .eq("role", "primary_consumption_meter")
       .order("effective_from", { ascending: true });
     expect(readError).toBeNull();
@@ -235,23 +235,23 @@ describe("metering organization isolation + assignment integrity", () => {
   it("org_manager B cannot touch orgA assignment links", async () => {
     if (shouldSkip()) return;
     const { data: rows } = await userB.client
-      .from("household_devices")
+      .from("tenant_devices")
       .select("id")
-      .eq("household_id", FIXTURE.householdA);
+      .eq("tenant_id", FIXTURE.tenantA);
     expect(rows ?? []).toEqual([]);
 
     const { error } = await userB.client
-      .from("household_devices")
+      .from("tenant_devices")
       .update({ effective_to: "2026-07-01" })
-      .eq("household_id", FIXTURE.householdA);
+      .eq("tenant_id", FIXTURE.tenantA);
     // RLS hides the rows, so the update matches nothing — or denies.
     // Either way no orgA row may change: assert no error-driven write.
     if (!error) {
       const svc = await serviceClient();
       const { data: after } = await svc
-        .from("household_devices")
+        .from("tenant_devices")
         .select("effective_to")
-        .eq("household_id", FIXTURE.householdA)
+        .eq("tenant_id", FIXTURE.tenantA)
         .eq("device_id", FIXTURE.deviceA2);
       expect(
         (after ?? []).some((row) => row.effective_to === "2026-07-01")

@@ -19,11 +19,11 @@ Chrome DevTools, device toolbar: Responsive, 360 x 640, device type "Mobile"
 so touch styles apply (More options > Add device type shows that list).
 Open every page this PR changes. If it changes something shared
 (src/components/ui, globals.css, a layout), also open a microgrid's
-Operations tab, its households list with the Add household dialog, and a
+Operations tab, its tenants list with the Add tenant dialog, and a
 billing period with its Close period dialog. Hovering in the inspector shows
 sizes. If one of those pages is removed or renamed, update this list.
-The browser smoke in `Test` already covers sign-in, home and the households
-list with the Add household dialog at 360 px (e2e/); it does not cover the
+The browser smoke in `Test` already covers sign-in, home and the tenants
+list with the Add tenant dialog at 360 px (e2e/); it does not cover the
 other pages. If e2e/ starts or stops opening a page, update this sentence.
 -->
 

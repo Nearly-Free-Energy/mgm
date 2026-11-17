@@ -1,7 +1,7 @@
 // Setup > Edges > Shared — server component test (D2 / #53).
 //
-// The ticket's seeded scenario has every device linked to a household
-// (10 households × 10 consumption_meter devices, all linked). So the
+// The ticket's seeded scenario has every device linked to a tenant
+// (10 tenants × 10 consumption_meter devices, all linked). So the
 // primary test path is the empty state.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -103,7 +103,7 @@ describe("SharedDevicesPage", () => {
     });
   });
 
-  it("renders the empty-state copy when every device is linked to a household", async () => {
+  it("renders the empty-state copy when every device is linked to a tenant", async () => {
     mockFrom.mockImplementation(() => buildEmptyQuery());
 
     const jsx = await SharedDevicesPage({
@@ -112,7 +112,7 @@ describe("SharedDevicesPage", () => {
     const html = renderToStaticMarkup(jsx as React.ReactElement);
 
     expect(html).toContain(
-      "All devices on this microgrid are linked to a household",
+      "All devices on this microgrid are linked to a tenant",
     );
   });
 
