@@ -40,7 +40,7 @@ export interface UsersPageClientProps {
  */
 type PageFeedback =
   | { kind: "invite"; email: string }
-  | { kind: "access-restored"; email: string }
+  | { kind: "not-emailed"; email: string }
   | { kind: "resend"; email: string }
   | { kind: "rate-limit"; email: string }
   | { kind: "error"; email: string; message: string };
@@ -184,13 +184,15 @@ export function UsersPageClient(props: UsersPageClientProps) {
 
       {feedback?.kind === "invite" && (
         <Banner tone="success" title="Invitation sent">
-          Invitation sent to {feedback.email}.
+          Invitation sent to {feedback.email}. They sign in with an email
+          link; there is no password to set.
         </Banner>
       )}
-      {feedback?.kind === "access-restored" && (
-        <Banner tone="success" title="Access restored">
-          {feedback.email} already had an account. They can sign in with it
-          now; no invitation email was sent.
+      {feedback?.kind === "not-emailed" && (
+        <Banner tone="warn" title="Access given, email not sent">
+          {feedback.email} has access, but the invitation email could not be
+          sent. Tell them to sign in to MGM with this address, and check the
+          organization&rsquo;s email settings.
         </Banner>
       )}
       {feedback?.kind === "resend" && (
@@ -319,7 +321,7 @@ export function UsersPageClient(props: UsersPageClientProps) {
         orgs={props.orgs}
         callerOrgIds={props.callerOrgIds}
         onSuccess={({ email, emailSent }) =>
-          setFeedback({ kind: emailSent ? "invite" : "access-restored", email })
+          setFeedback({ kind: emailSent ? "invite" : "not-emailed", email })
         }
       />
 

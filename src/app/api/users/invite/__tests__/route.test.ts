@@ -1,12 +1,12 @@
 /**
  * POST /api/users/invite — route handler tests (UX5b / #184).
  *
- * No prior test suite existed for the invite route. This file covers
- * the happy paths + the new AC2 contract (data payload forwarded to
- * inviteUserByEmail).
+ * Covers the happy paths, the account cases, and the invitation notice
+ * (RFC #186 § 5): the account is created with no password and Supabase
+ * sends nothing; MGM sends a token-free notice once the access is saved.
  *
  * Mocks: Supabase user-bound + service-role clients, including the
- * fn_finalize_user_invitation RPC.
+ * fn_finalize_user_invitation RPC, and sendNotice.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -22,7 +22,7 @@ let mockCallerRoles: Array<{
 let mockRpcResult: { error: { code?: string; message: string } | null } = {
   error: null,
 };
-let mockInviteResult: {
+let mockCreateResult: {
   data: { user: { id: string } | null };
   error: { code?: string; message: string } | null;
 } = {
@@ -30,7 +30,16 @@ let mockInviteResult: {
   error: null,
 };
 
-const inviteUserByEmailSpy = vi.fn();
+const createUserSpy = vi.fn();
+const sendNoticeSpy = vi.fn();
+
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/email/notices", () => ({
+  sendNotice: (...args: unknown[]) => sendNoticeSpy(...args),
+}));
+vi.mock("@/lib/runtime/root", () => ({
+  getMgmRuntime: async () => ({ mailTransports: { registry: true } }),
+}));
 const rpcSpy = vi.fn();
 const deleteUserSpy = vi.fn();
 
@@ -132,9 +141,9 @@ vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => ({
     auth: {
       admin: {
-        inviteUserByEmail: vi.fn(async (...args: unknown[]) => {
-          inviteUserByEmailSpy(...args);
-          return mockInviteResult;
+        createUser: vi.fn(async (...args: unknown[]) => {
+          createUserSpy(...args);
+          return mockCreateResult;
         }),
         listUsers: vi.fn(async () => mockListUsers),
         deleteUser: vi.fn(async (...args: unknown[]) => {
@@ -162,7 +171,10 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  inviteUserByEmailSpy.mockReset();
+  vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
+  sendNoticeSpy.mockReset();
+  sendNoticeSpy.mockResolvedValue({ ok: true, via: "organization" });
+  createUserSpy.mockReset();
   rpcSpy.mockReset();
   deleteUserSpy.mockReset();
   mockListUsers = { data: { users: [] }, error: null };
@@ -171,7 +183,7 @@ beforeEach(() => {
   mockTargetProfileError = null;
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
   mockRpcResult = { error: null };
-  mockInviteResult = {
+  mockCreateResult = {
     data: { user: { id: "00000000-0000-4000-8000-000000000099" } },
     error: null,
   };
@@ -181,7 +193,7 @@ beforeEach(() => {
 
 describe("POST /api/users/invite", () => {
   // ── Happy path: super_admin caller, org_manager invitee ──────────
-  it("super_admin invites an org_manager → 201 + data payload forwarded", async () => {
+  it("super_admin invites an org_manager → 201, an account with no password, and a notice after the access is saved", async () => {
     mockCallerRoles = [
       { role: "super_admin", scope_type: null, scope_id: null },
     ];
@@ -198,20 +210,30 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(201);
-    expect(inviteUserByEmailSpy).toHaveBeenCalledTimes(1);
-    const [emailArg, optsArg] = inviteUserByEmailSpy.mock.calls[0]!;
-    expect(emailArg).toBe("newuser@example.com");
-    expect(optsArg).toMatchObject({
-      data: {
+    expect(createUserSpy).toHaveBeenCalledTimes(1);
+    expect(createUserSpy.mock.calls[0]![0]).toEqual({
+      email: "newuser@example.com",
+      email_confirm: false,
+      user_metadata: {
         invited_by_name: "Inviter Name",
         org_name: "Test Org",
         role_label: "an organization manager",
         app_name: "Metering & Billing Engine",
       },
-      // UX5c / #189 — per-call redirectTo lands invitees on the
-      // /accept-invite page where verifyOtp + set-password runs.
-      redirectTo: "http://localhost/accept-invite",
     });
+    expect(createUserSpy.mock.calls[0]![0]).not.toHaveProperty("password");
+
+    // The notice goes through the invited organization's sender, after
+    // the access is saved, and carries no token.
+    expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
+    expect(rpcSpy.mock.invocationCallOrder[0]).toBeLessThan(sendNoticeSpy.mock.invocationCallOrder[0]);
+    const notice = sendNoticeSpy.mock.calls[0]![0] as { orgId: string | null; message: { to: string; subject: string; text: string } };
+    expect(notice.orgId).toBe(ORG_A);
+    expect(notice.message.to).toBe("newuser@example.com");
+    expect(notice.message.subject).toBe("You have access to Test Org in MGM");
+    expect(notice.message.text).toContain("Inviter Name gave you access to Test Org in MGM");
+    expect(notice.message.text).toContain("https://mgm.example.org/login");
+    expect(notice.message.text).not.toMatch(/token|confirm\?|accept-invite/i);
   });
 
   // ── Happy path: super_admin caller, super_admin invitee ───────────
@@ -229,14 +251,14 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(201);
-    expect(inviteUserByEmailSpy).toHaveBeenCalledTimes(1);
-    const [, optsArg] = inviteUserByEmailSpy.mock.calls[0]!;
-    const payload = (optsArg as { data: Record<string, unknown> }).data;
+    expect(createUserSpy).toHaveBeenCalledTimes(1);
+    const payload = (createUserSpy.mock.calls[0]![0] as { user_metadata: Record<string, unknown> }).user_metadata;
     expect(payload.role_label).toBe("a super administrator");
     expect(payload.app_name).toBe("Metering & Billing Engine");
-    // org_name MUST be omitted for super_admin invites (Go template
-    // `{{ if .Data.org_name }}` semantics).
+    // org_name is omitted for super_admin invites.
     expect("org_name" in payload).toBe(false);
+    // No organization: the notice goes through the deployment's sender.
+    expect((sendNoticeSpy.mock.calls[0]![0] as { orgId: string | null }).orgId).toBeNull();
   });
 
   // ── Happy path: org_manager caller, org_manager invitee ───────────
@@ -255,8 +277,7 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(201);
-    const [, optsArg] = inviteUserByEmailSpy.mock.calls[0]!;
-    const payload = (optsArg as { data: Record<string, unknown> }).data;
+    const payload = (createUserSpy.mock.calls[0]![0] as { user_metadata: Record<string, unknown> }).user_metadata;
     expect(payload.org_name).toBe("Test Org");
     expect(payload.role_label).toBe("an organization manager");
   });
@@ -277,7 +298,7 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(422);
-    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    expect(createUserSpy).not.toHaveBeenCalled();
   });
 
   // ── 403: org_manager attempting super_admin invite ───────────────
@@ -295,7 +316,7 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(403);
-    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    expect(createUserSpy).not.toHaveBeenCalled();
   });
 
   // ── Existing accounts (looked up before inviting) ────────────────
@@ -346,7 +367,7 @@ describe("POST /api/users/invite", () => {
       expect(body.error).toBe(
         "member@example.com already has access to this organization."
       );
-      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(createUserSpy).not.toHaveBeenCalled();
       expect(rpcSpy).not.toHaveBeenCalled();
       expect(deleteUserSpy).not.toHaveBeenCalled();
     });
@@ -370,11 +391,11 @@ describe("POST /api/users/invite", () => {
       const body = await res.json();
       expect(body.code).toBe("other_access");
       expect(body.error).toContain("different role");
-      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(createUserSpy).not.toHaveBeenCalled();
       expect(rpcSpy).not.toHaveBeenCalled();
     });
 
-    it("restores access for a confirmed account with no roles, without an email, keeping its profile", async () => {
+    it("restores access for a confirmed account with no roles, sends the notice, and keeps its profile", async () => {
       existingAccount(true);
       mockTargetRoles = [];
       mockTargetProfile = { first_name: "Kept", last_name: "Name", phone: null };
@@ -395,9 +416,10 @@ describe("POST /api/users/invite", () => {
       expect(await res.json()).toEqual({
         user_id: EXISTING_ID,
         existing_account: true,
-        email_sent: false,
+        email_sent: true,
       });
-      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(createUserSpy).not.toHaveBeenCalled();
+      expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
       expect(rpcSpy).toHaveBeenCalledWith("fn_finalize_user_invitation", {
         p_user_id: EXISTING_ID,
         p_first_name: "Kept",
@@ -408,7 +430,7 @@ describe("POST /api/users/invite", () => {
       });
     });
 
-    it("re-sends the invitation to an unconfirmed account with no roles", async () => {
+    it("sends the notice again to an unconfirmed account with no roles, without creating one", async () => {
       existingAccount(false);
       mockTargetRoles = [];
       mockTargetProfile = { first_name: null, last_name: null, phone: null };
@@ -429,7 +451,8 @@ describe("POST /api/users/invite", () => {
         existing_account: true,
         email_sent: true,
       });
-      expect(inviteUserByEmailSpy).toHaveBeenCalledTimes(1);
+      expect(createUserSpy).not.toHaveBeenCalled();
+      expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
       expect(rpcSpy.mock.calls[0]![1]).toMatchObject({
         p_user_id: EXISTING_ID,
         p_first_name: "New",
@@ -454,7 +477,7 @@ describe("POST /api/users/invite", () => {
 
       expect(res.status).toBe(500);
       expect(rpcSpy).not.toHaveBeenCalled();
-      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(createUserSpy).not.toHaveBeenCalled();
       expect(deleteUserSpy).not.toHaveBeenCalled();
     });
 
@@ -474,6 +497,7 @@ describe("POST /api/users/invite", () => {
 
       expect(res.status).toBe(403);
       expect(deleteUserSpy).not.toHaveBeenCalled();
+      expect(sendNoticeSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -496,6 +520,7 @@ describe("POST /api/users/invite", () => {
     expect(deleteUserSpy).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000099"
     );
+    expect(sendNoticeSpy).not.toHaveBeenCalled();
   });
 
   it("returns 500 without inviting when the account lookup fails", async () => {
@@ -514,7 +539,7 @@ describe("POST /api/users/invite", () => {
     );
 
     expect(res.status).toBe(500);
-    expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    expect(createUserSpy).not.toHaveBeenCalled();
   });
 
   it("reports a new account as invited with an email", async () => {
@@ -537,5 +562,22 @@ describe("POST /api/users/invite", () => {
       existing_account: false,
       email_sent: true,
     });
+  });
+
+  it("keeps the access and reports email_sent: false when the notice cannot be sent", async () => {
+    mockCallerRoles = [
+      { role: "org_manager", scope_type: "org", scope_id: ORG_A },
+    ];
+    sendNoticeSpy.mockResolvedValue({ ok: false, reason: "not_configured" });
+
+    const { POST } = await import("../route");
+    const res = await POST(
+      makeRequest({ email: "brand-new@example.com", role: "org_manager", scope_id: ORG_A })
+    );
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ existing_account: false, email_sent: false });
+    expect(rpcSpy).toHaveBeenCalledTimes(1);
+    expect(deleteUserSpy).not.toHaveBeenCalled();
   });
 });

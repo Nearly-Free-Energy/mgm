@@ -17,8 +17,8 @@
  * handler with a real RLS-bound user client, so the visibility helper
  * `user_can_see_user_profile(user_id)` (the WHERE clause behind the
  * `user_directory` view) is actually exercised. The service-role
- * client is mocked at the module level — `auth.admin.inviteUserByEmail`
- * is stubbed (no real email) and `auth.admin.getUserById` returns a
+ * client is mocked at the module level — the notice is stubbed (no real
+ * email) and `auth.admin.getUserById` returns a
  * synthetic unconfirmed user (so the route reaches the invite call
  * instead of 409'ing on already-confirmed test users).
  *
@@ -78,6 +78,7 @@ vi.mock("@/lib/supabase/server", () => ({
 let mockTargetEmail = "rls-target@test.local";
 let mockTargetUserId = "00000000-0000-0000-0000-000000000000";
 let mockGetUserByIdError: { code?: string; message: string } | null = null;
+// Records each invitation notice the route sends.
 const inviteSpy = vi.fn();
 
 vi.mock("@/lib/supabase/service", () => ({
@@ -96,17 +97,24 @@ vi.mock("@/lib/supabase/service", () => ({
               },
           error: mockGetUserByIdError,
         })),
-        inviteUserByEmail: vi.fn(async (...args: unknown[]) => {
-          inviteSpy(...args);
-          return {
-            data: { user: { id: mockTargetUserId } },
-            error: null,
-          };
-        }),
       },
     },
   }),
 }));
+
+// The notice (RFC #186 § 5) is stubbed: this file is about who may resend,
+// not about mail. sendNotice has its own tests.
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/email/notices", () => ({
+  sendNotice: vi.fn(async (...args: unknown[]) => {
+    inviteSpy(...args);
+    return { ok: true, via: "deployment" };
+  }),
+}));
+vi.mock("@/lib/runtime/root", () => ({
+  getMgmRuntime: async () => ({ mailTransports: {} }),
+}));
+process.env.MGM_APP_URL ??= "https://mgm.example.org";
 
 // ── Fixture state ─────────────────────────────────────────────────────
 
