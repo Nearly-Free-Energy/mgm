@@ -217,6 +217,8 @@ describe("TenantDetailPage", () => {
     // Billing history
     expect(html).toContain("2026-03-01");
     expect(html).toContain("2026-03-31");
+    expect(html).toContain("45.3");
+    expect(html).toContain("12,500");
   });
 
   // (b) Empty devices: 0 tenant_devices → EmptyState with warn tone (#139 P7)
