@@ -100,18 +100,18 @@ describe("POST /api/billing-periods/[periodId]/close (issue #5)", () => {
     expect(json.unresolved).toEqual([]);
   });
 
-  it("409 surfaces unresolved households until confirmed", async () => {
+  it("409 surfaces unresolved tenants until confirmed", async () => {
     closeImpl = async () => ({
       ok: false,
       status: 409,
-      code: "billing_unresolved_households",
-      message: "Period has 1 unresolved household(s).",
+      code: "billing_unresolved_tenants",
+      message: "Period has 1 unresolved tenant(s).",
     });
     const { POST } = await import("../close/route");
     const res = await POST(post({}), ctx());
     expect(res.status).toBe(409);
     const json = (await res.json()) as { code: string };
-    expect(json.code).toBe("billing_unresolved_households");
+    expect(json.code).toBe("billing_unresolved_tenants");
   });
 
   it("maps composition failures (e.g. billing disabled)", async () => {

@@ -234,7 +234,7 @@ export function buildSiteDayModel(
     : `Battery supplied ${kwh(day.eveningDischargeKwh).text}`;
   const missing = day.housesEveningMetersMissing;
   const housesHint = !houses
-    ? `Needs household meters · ${batteryShare}`
+    ? `Needs tenant meters · ${batteryShare}`
     : missing > 0 ? `${batteryShare} · ${missing} ${missing === 1 ? "meter" : "meters"} without data`
     : batteryShare;
 

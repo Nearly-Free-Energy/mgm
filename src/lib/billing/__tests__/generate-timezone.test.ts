@@ -115,14 +115,14 @@ function makeSupabase(opts: {
         error: null,
       },
     },
-    households: {
-      // One EDGE-METERED household — forces the OpenEMS path.
+    tenants: {
+      // One EDGE-METERED tenant — forces the OpenEMS path.
       list: {
         data: [
           {
             id: HH_METERED,
-            display_name: "Metered Household",
-            household_devices: [
+            display_name: "Metered Tenant",
+            tenant_devices: [
               {
                 role: "primary_consumption_meter",
                 effective_from: "2020-01-01",
@@ -186,11 +186,11 @@ async function generatePreview(supabase: SupabaseClient) {
   const out = await runGenerationFor({
     supabase,
     periodId: PERIOD_ID,
-    householdIds: undefined,
+    tenantIds: undefined,
     mode: "preview",
     actorUserId: null,
     // No prior end_kwh in the mocked DB → supply a seed so the metered
-    // household resolves a start reading (#339) and the OpenEMS path runs.
+    // tenant resolves a start reading (#339) and the OpenEMS path runs.
     seedReadings: [
       {
         deviceId: DEVICE_ID,

@@ -7,7 +7,7 @@
  *   - 403: caller cannot access microgrid
  *   - 404: line item not found / RLS-hidden
  *   - 409: device_linked — line item still has a device_id (metered)
- *   - 409: device_linked — household has a primary_consumption_meter link
+ *   - 409: device_linked — tenant has a primary_consumption_meter link
  *   - 409: period_closed — billing period is closed
  *   - 200: happy path with usage_kwh only — server recomputes tier_breakdown
  *   - 200: happy path with end_kwh only — server derives usage_kwh
@@ -44,7 +44,7 @@ function makeFromImpl(): any {
         }),
       };
     }
-    if (table === "household_devices") {
+    if (table === "tenant_devices") {
       const query = {
         select: () => ({
           eq: () => ({
@@ -96,8 +96,8 @@ vi.mock("@/lib/billing/generate", async () => {
       Boolean(out && out.kind === "fatal"),
     runGenerationFor: vi.fn(async (params: {
       periodId: string;
-      householdIds?: string[];
-      manualReadings?: Array<{ householdId: string; startKwh: number; endKwh: number; reason?: string }>;
+      tenantIds?: string[];
+      manualReadings?: Array<{ tenantId: string; startKwh: number; endKwh: number; reason?: string }>;
     }) => {
       const m = params.manualReadings?.[0];
       if (!m) {
@@ -128,8 +128,8 @@ vi.mock("@/lib/billing/generate", async () => {
         results: [
           {
             kind: "written" as const,
-            householdId: m.householdId,
-            householdName: "Stub HH",
+            tenantId: m.tenantId,
+            tenantName: "Stub HH",
             lineItem: {
               id: "660e8400-e29b-41d4-a716-446655440111",
               device_id: null,
@@ -209,7 +209,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     mockFrom.mockImplementation(makeFromImpl());
 
     // Default un-metered line item (device_id null), draft period, no
-    // household meter link, fresh rate schedule.
+    // tenant meter link, fresh rate schedule.
     mockLineItemMaybeSingle.mockResolvedValue({
       data: {
         id: LI_UUID,
@@ -217,7 +217,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
         start_kwh: 0,
         end_kwh: null,
         usage_kwh: null,
-        household_id: HH_UUID,
+        tenant_id: HH_UUID,
         billing_period_id: PERIOD_UUID,
         billing_periods: {
           id: PERIOD_UUID,
@@ -308,7 +308,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
         start_kwh: 0,
         end_kwh: 100,
         usage_kwh: 100,
-        household_id: HH_UUID,
+        tenant_id: HH_UUID,
         billing_period_id: PERIOD_UUID,
         billing_periods: {
           id: PERIOD_UUID,
@@ -328,9 +328,9 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     expect(json.reason).toBe("device_linked");
   });
 
-  it("409: device_linked — household has primary_consumption_meter link (line item device_id null)", async () => {
+  it("409: device_linked — tenant has primary_consumption_meter link (line item device_id null)", async () => {
     // Belt-and-braces: even when the line item itself has no device_id,
-    // a household-level meter link blocks manual edit. The meter link
+    // a tenant-level meter link blocks manual edit. The meter link
     // would be filled in on the next Refresh Readings.
     mockMeterLinks.mockResolvedValueOnce({
       data: [{ device_id: DEVICE_UUID, effective_from: "2026-01-01", effective_to: null }],
@@ -371,7 +371,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
         start_kwh: 0,
         end_kwh: null,
         usage_kwh: null,
-        household_id: HH_UUID,
+        tenant_id: HH_UUID,
         billing_period_id: PERIOD_UUID,
         billing_periods: {
           id: PERIOD_UUID,
@@ -441,7 +441,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
         start_kwh: 100,
         end_kwh: null,
         usage_kwh: null,
-        household_id: HH_UUID,
+        tenant_id: HH_UUID,
         billing_period_id: PERIOD_UUID,
         billing_periods: {
           id: PERIOD_UUID,
@@ -467,7 +467,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
         start_kwh: null,
         end_kwh: null,
         usage_kwh: null,
-        household_id: HH_UUID,
+        tenant_id: HH_UUID,
         billing_period_id: PERIOD_UUID,
         billing_periods: {
           id: PERIOD_UUID,

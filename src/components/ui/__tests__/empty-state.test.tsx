@@ -179,20 +179,20 @@ describe("EmptyState — role-locked variant", () => {
 describe("EmptyState — custom id", () => {
   it("(g) custom id propagates to wrapper element", () => {
     const { container } = render(
-      <EmptyState id="empty-households" title="Add household" body="A household." />,
+      <EmptyState id="empty-tenants" title="Add tenant" body="A tenant." />,
     );
     const region = container.querySelector("[role='region']");
-    expect(region?.id).toBe("empty-households");
+    expect(region?.id).toBe("empty-tenants");
   });
 
   it("(g) title id uses custom id as prefix", () => {
     const { container } = render(
-      <EmptyState id="empty-households" title="Add household" body="A household." />,
+      <EmptyState id="empty-tenants" title="Add tenant" body="A tenant." />,
     );
     const h3 = container.querySelector("h3");
-    expect(h3?.id).toBe("empty-households-title");
+    expect(h3?.id).toBe("empty-tenants-title");
     const region = container.querySelector("[role='region']");
-    expect(region?.getAttribute("aria-labelledby")).toBe("empty-households-title");
+    expect(region?.getAttribute("aria-labelledby")).toBe("empty-tenants-title");
   });
 });
 

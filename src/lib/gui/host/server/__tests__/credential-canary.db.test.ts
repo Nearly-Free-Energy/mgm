@@ -452,8 +452,8 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     });
 
     it("refuses a view whose path names a kind with no seeded row", async () => {
-      const fixture = surface([view("acme.house", "/households/[id]", { id: "household" }, () => ok("Battery"))]);
-      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "household"');
+      const fixture = surface([view("acme.house", "/tenants/[id]", { id: "tenant" }, () => ok("Battery"))]);
+      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "tenant"');
     });
 
     it("refuses a view whose loader did not run", async () => {

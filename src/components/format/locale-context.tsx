@@ -8,7 +8,7 @@
 //     override path, but defaults to the context.
 //   - The microgrid record carries the currency (UGX/USD/etc.); the
 //     entrepreneur sets it. The locale defaults to "en" but the tenant
-//     portal will pick this up from the household's preferred language.
+//     portal will pick this up from the tenant's preferred language.
 //   - Don't auto-format per browser locale. The currency is a
 //     deliberate per-microgrid decision, not a viewer-side preference.
 //     (See designer-context.md anti-pattern.)

@@ -6,7 +6,7 @@ import "server-only";
  * Introduced in UX5 (#79). Privileged routes that need to perform
  * `auth.admin.*` operations (invite, delete auth users, list users) use
  * this factory. Application code NEVER uses the service-role client for
- * tenant data reads/writes — that goes through the user-bound client
+ * application data reads/writes — that goes through the user-bound client
  * from `@/lib/supabase/server` so RLS evaluates against the caller.
  *
  * Guardrails:

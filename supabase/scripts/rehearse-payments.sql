@@ -8,7 +8,7 @@ END $$;
 CREATE TRIGGER rehearsal_reject_audit BEFORE INSERT ON payment_events FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_test_payment_audit();
 DO $$
 DECLARE org uuid:=gen_random_uuid(); other_org uuid:=gen_random_uuid(); manager uuid:=gen_random_uuid();
- community uuid; foreign_community uuid; grid uuid; household uuid; tariff uuid; period uuid; bill uuid;
+ community uuid; foreign_community uuid; grid uuid; tenant uuid; tariff uuid; period uuid; bill uuid;
  account uuid; attempt payment_attempts; b billing_line_items; rev timestamptz; cfg jsonb; n integer;
 BEGIN
  INSERT INTO organizations(id,name) VALUES(org,'Payments rehearsal'),(other_org,'Foreign organization');
@@ -20,8 +20,8 @@ BEGIN
  INSERT INTO rate_schedules(microgrid_id,tiers,service_charge,tax_rate) VALUES(grid,'[{"min_kwh":1,"max_kwh":null,"rate_per_kwh":100}]',0,0) RETURNING id INTO tariff;
  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',manager)::text,true);
  SELECT id INTO period FROM fn_create_billing_period(grid,'2026-09-01','2026-09-30');
- INSERT INTO households(microgrid_id,display_name,primary_phone) VALUES(grid,'Payment customer','+256700000099') RETURNING id INTO household;
- INSERT INTO billing_line_items(billing_period_id,household_id,total_amount) VALUES(period,household,5000) RETURNING id,updated_at INTO bill,rev;
+ INSERT INTO tenants(microgrid_id,display_name,primary_phone) VALUES(grid,'Payment customer','+256700000099') RETURNING id INTO tenant;
+ INSERT INTO billing_line_items(billing_period_id,tenant_id,total_amount) VALUES(period,tenant,5000) RETURNING id,updated_at INTO bill,rev;
  INSERT INTO payment_merchant_accounts(org_id,consumer_key,secret_encrypted,base_url,ipn_id,last_test_status,is_default)
  VALUES(org,'key-v1','\x00','https://cybqa.pesapal.com/pesapalv3','ipn-v1','success',true) RETURNING id INTO account;
  SELECT configuration INTO cfg FROM payment_merchant_versions WHERE account_id=account AND version=1;
@@ -56,8 +56,8 @@ BEGIN
  IF (SELECT payment_status FROM billing_line_items WHERE id=bill)<>'refunded' OR (SELECT status FROM payment_attempts WHERE id=attempt.id)<>'reversed' THEN RAISE EXCEPTION 'reversal missing'; END IF;
  RAISE NOTICE 'OK: verified provider reversal';
  -- Second customer: draft amount correction followed by a late old payment.
- INSERT INTO households(microgrid_id,display_name,primary_phone) VALUES(grid,'Revised customer','+256700000098') RETURNING id INTO household;
- INSERT INTO billing_line_items(billing_period_id,household_id,total_amount) VALUES(period,household,5000) RETURNING id,updated_at INTO bill,rev;
+ INSERT INTO tenants(microgrid_id,display_name,primary_phone) VALUES(grid,'Revised customer','+256700000098') RETURNING id INTO tenant;
+ INSERT INTO billing_line_items(billing_period_id,tenant_id,total_amount) VALUES(period,tenant,5000) RETURNING id,updated_at INTO bill,rev;
  SELECT * INTO attempt FROM fn_payment_reserve_checkout(org,bill,community,account,2,5000,'UGX',rev,'MGM-rehearsal-'||bill);
  UPDATE payment_attempts SET provider_tracking_id='TRACK-'||bill WHERE id=attempt.id;
  UPDATE billing_line_items SET total_amount=5500 WHERE id=bill;

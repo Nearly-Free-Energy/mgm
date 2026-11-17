@@ -48,7 +48,7 @@ import type {
   BillingLineItem,
   Community,
   Device,
-  Household,
+  Tenant,
   Organization,
   RateSchedule,
 } from "@/lib/types/domain";
@@ -111,7 +111,7 @@ Font.registerHyphenationCallback((word) => [word]);
 export interface RenderInvoiceInput {
   /** The line item (BC1 columns include manual_reason / reading_source / entered_at). */
   lineItem: BillingLineItem;
-  household: Household;
+  tenant: Tenant;
   /** community.invoice_config + invoice_prefix drive most of the layout. */
   community: Community;
   organization: Organization;
@@ -122,7 +122,7 @@ export interface RenderInvoiceInput {
   invoiceNumber: string;
   /** Pre-fetched logo bytes (route uses service-role download). */
   logoBytes: Buffer | null;
-  /** Single meter device for the household (route picks first by created_at). */
+  /** Single meter device for the tenant (route picks first by created_at). */
   meterDevice: Device | null;
   /** Display name for `lineItem.entered_by_user_id` when reading_source='manual'. */
   enteredByUserName: string | null;
@@ -661,20 +661,20 @@ interface RenderProps {
 
 function InvoiceDocument(props: RenderProps): React.ReactElement {
   const { input, primary, accent } = props;
-  const { lineItem, household, ratesSchedule } = input;
+  const { lineItem, tenant, ratesSchedule } = input;
 
   const meterIdValue =
-    household.meter_serial?.trim() ||
+    tenant.meter_serial?.trim() ||
     input.meterDevice?.openems_component_id ||
     input.meterDevice?.name ||
     "—";
   const customerTypeValue =
-    (household.customer_type ?? "").length > 0
-      ? household.customer_type.charAt(0).toUpperCase() +
-        household.customer_type.slice(1)
+    (tenant.customer_type ?? "").length > 0
+      ? tenant.customer_type.charAt(0).toUpperCase() +
+        tenant.customer_type.slice(1)
       : "Residential";
   const meterTypeValue =
-    household.meter_type?.trim() || "Smart Submeter";
+    tenant.meter_type?.trim() || "Smart Submeter";
 
   const startKwh = lineItem.start_kwh;
   const endKwh = lineItem.end_kwh;
@@ -683,11 +683,11 @@ function InvoiceDocument(props: RenderProps): React.ReactElement {
   const totalAmount = lineItem.total_amount ?? 0;
 
   const serviceAddress = [
-    household.unit_label,
-    household.address_line1,
-    household.address_line2,
-    household.address_city,
-    household.address_country,
+    tenant.unit_label,
+    tenant.address_line1,
+    tenant.address_line2,
+    tenant.address_city,
+    tenant.address_country,
   ]
     .map((s) => (s ?? "").trim())
     .filter((s) => s.length > 0)
@@ -826,12 +826,12 @@ function InvoiceDocument(props: RenderProps): React.ReactElement {
                   <View style={styles.detailRow}>
                     <View style={styles.detailHalf}>
                       <Text style={styles.label}>Customer Name</Text>
-                      <Text style={styles.value}>{household.display_name}</Text>
+                      <Text style={styles.value}>{tenant.display_name}</Text>
                     </View>
                     <View style={styles.detailHalf}>
                       <Text style={styles.label}>Account Number</Text>
                       <Text style={styles.value}>
-                        {household.account_number?.trim() || "—"}
+                        {tenant.account_number?.trim() || "—"}
                       </Text>
                     </View>
                   </View>

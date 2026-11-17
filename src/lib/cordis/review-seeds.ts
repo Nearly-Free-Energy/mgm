@@ -8,9 +8,9 @@ type PeriodRow = {
   timezone: string;
 };
 
-type HouseholdRow = {
+type TenantRow = {
   id: string;
-  household_devices: Array<{
+  tenant_devices: Array<{
     role: string;
     devices: { id: string } | null;
   }>;
@@ -38,7 +38,7 @@ type MeterReadingRow = {
 export async function resolveReviewOnlySeedReadings(
   supabase: SupabaseClient,
   periodId: string,
-  householdIds?: string[]
+  tenantIds?: string[]
 ): Promise<SeedReadingInput[]> {
   const { data: period, error: periodError } = await supabase
     .from("billing_periods")
@@ -47,20 +47,20 @@ export async function resolveReviewOnlySeedReadings(
     .maybeSingle<PeriodRow>();
   if (periodError || !period) return [];
 
-  const { data: rawHouseholds, error: householdsError } = await supabase
-    .from("households")
-    .select("id, household_devices(role, devices(id))")
+  const { data: rawTenants, error: tenantsError } = await supabase
+    .from("tenants")
+    .select("id, tenant_devices(role, devices(id))")
     .eq("microgrid_id", period.microgrid_id)
-    .eq("household_devices.role", "primary_consumption_meter");
-  if (householdsError) {
+    .eq("tenant_devices.role", "primary_consumption_meter");
+  if (tenantsError) {
     throw new Error("Unable to read meter assignments for review");
   }
 
-  const requested = householdIds ? new Set(householdIds) : null;
+  const requested = tenantIds ? new Set(tenantIds) : null;
   const devices = new Set<string>();
-  for (const household of (rawHouseholds ?? []) as unknown as HouseholdRow[]) {
-    if (requested && !requested.has(household.id)) continue;
-    const primaryDeviceIds = household.household_devices
+  for (const tenant of (rawTenants ?? []) as unknown as TenantRow[]) {
+    if (requested && !requested.has(tenant.id)) continue;
+    const primaryDeviceIds = tenant.tenant_devices
       .filter((link) => link.role === "primary_consumption_meter" && link.devices)
       .map((link) => link.devices!.id);
     if (primaryDeviceIds.length === 1) devices.add(primaryDeviceIds[0]);

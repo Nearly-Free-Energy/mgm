@@ -23,7 +23,7 @@ export interface RowBannerEntry {
   /** Banner tone — currently used: 'info' (IPN auto-close, BC3 stubs)
    *  and 'destructive' (payment-link failure with Retry). */
   tone: Extract<BannerTone, "info" | "destructive">;
-  /** Body text. The household-name prefix is added by the stack. */
+  /** Body text. The tenant-name prefix is added by the stack. */
   message: string;
   /** Optional action — surfaces as a button in the banner footer. */
   action?: { label: string; onClick: () => void };
@@ -35,17 +35,17 @@ export interface RowBannerStackProps {
   entries: RowBannerEntry[];
   onDismiss: (id: string) => void;
   /**
-   * Resolves a household display name from a line-item id. Returns
+   * Resolves a tenant display name from a line-item id. Returns
    * `undefined` when the line item is unknown (e.g. stale entry after a
    * row was removed). The stack falls back to a bare message in that case.
    */
-  getHouseholdName: (lineItemId: string) => string | undefined;
+  getTenantName: (lineItemId: string) => string | undefined;
 }
 
 export function RowBannerStack({
   entries,
   onDismiss,
-  getHouseholdName,
+  getTenantName,
 }: RowBannerStackProps) {
   if (entries.length === 0) return null;
 
@@ -55,7 +55,7 @@ export function RowBannerStack({
         <RowBannerItem
           key={entry.id}
           entry={entry}
-          householdName={getHouseholdName(entry.lineItemId)}
+          tenantName={getTenantName(entry.lineItemId)}
           onDismiss={onDismiss}
         />
       ))}
@@ -65,11 +65,11 @@ export function RowBannerStack({
 
 function RowBannerItem({
   entry,
-  householdName,
+  tenantName,
   onDismiss,
 }: {
   entry: RowBannerEntry;
-  householdName: string | undefined;
+  tenantName: string | undefined;
   onDismiss: (id: string) => void;
 }) {
   // Auto-dismiss timer — runs once per entry mount; the parent's setter
@@ -83,10 +83,10 @@ function RowBannerItem({
     return () => clearTimeout(timer);
   }, [entry.id, entry.durationMs, onDismiss]);
 
-  // Title: household-name prefix + a tone-appropriate label.
-  // Banners use the title as their headline; we keep the household name
+  // Title: tenant-name prefix + a tone-appropriate label.
+  // Banners use the title as their headline; we keep the tenant name
   // in the title so the alert is announceable for screen readers.
-  const titlePrefix = householdName ? `${householdName} · ` : "";
+  const titlePrefix = tenantName ? `${tenantName} · ` : "";
   const title =
     entry.tone === "destructive"
       ? `${titlePrefix}${entry.message}`
@@ -111,7 +111,7 @@ function RowBannerItem({
             type="button"
             onClick={() => onDismiss(entry.id)}
             className="text-sm font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`Dismiss notification for ${householdName ?? "row"}`}
+            aria-label={`Dismiss notification for ${tenantName ?? "row"}`}
           >
             Dismiss
           </button>

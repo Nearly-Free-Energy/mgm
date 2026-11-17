@@ -26,7 +26,7 @@ import React from "react";
 // Mirrors the pattern in src/lib/__tests__/hierarchy.test.ts:
 // each table has its data rows; .eq() filters, .single()/.maybeSingle() return
 // the first matching row, .returns() returns all matching rows.
-// households always returns count=0 (head:true shape).
+// tenants always returns count=0 (head:true shape).
 //
 // For the microgrids org-filter path the page calls:
 //   supabase.from("microgrids").select("*, communities!inner(org_id)").eq("communities.org_id", orgId)
@@ -181,7 +181,7 @@ describe("MicrogridsPage", () => {
       organizations: [ORG_ROW, ORG_ROW_2],
       communities: [],
       microgrids: [],
-      households: [],
+      tenants: [],
     };
   });
 

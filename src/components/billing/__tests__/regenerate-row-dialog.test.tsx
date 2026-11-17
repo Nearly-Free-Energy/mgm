@@ -6,7 +6,7 @@
 //     renders the diff, /api/billing/generate fires only on confirm
 //   - Edge paid + closed period: warn-banner renders inside dialog body
 //   - Manual entry path: form validation + POST body matches expected shape
-//   - currently_manual / unknown_household error display
+//   - currently_manual / unknown_tenant error display
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
@@ -45,7 +45,7 @@ function makeProps(overrides?: Partial<Parameters<typeof RegenerateRowDialog>[0]
     open: true,
     onOpenChange,
     mode: "edge" as const,
-    household: { id: "h-1", display_name: "Alice" },
+    tenant: { id: "h-1", display_name: "Alice" },
     period: {
       id: "p-1",
       status: "draft" as const,
@@ -99,7 +99,7 @@ describe("RegenerateRowDialog — edge unpaid path (2a)", () => {
     const body = JSON.parse(generateCall![1].body as string);
     expect(body).toEqual({
       billingPeriodId: "p-1",
-      householdIds: ["h-1"],
+      tenantIds: ["h-1"],
     });
 
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
@@ -116,8 +116,8 @@ describe("RegenerateRowDialog — edge unpaid path (2a)", () => {
           lineItems: 0,
           errors: [
             {
-              householdId: "h-1",
-              householdName: "Alice",
+              tenantId: "h-1",
+              tenantName: "Alice",
               error: "No meter reading data available",
               code: "no_meter_reading",
             },
@@ -153,8 +153,8 @@ describe("RegenerateRowDialog — edge paid path (2b)", () => {
     const previewResponse = {
       preview: [
         {
-          householdId: "h-1",
-          householdName: "Alice",
+          tenantId: "h-1",
+          tenantName: "Alice",
           startKwh: 100,
           endKwh: 145,
           usageKwh: 45,
@@ -242,8 +242,8 @@ describe("RegenerateRowDialog — edge paid path (2b)", () => {
     const previewResponse = {
       preview: [
         {
-          householdId: "h-1",
-          householdName: "Alice",
+          tenantId: "h-1",
+          tenantName: "Alice",
           startKwh: 100,
           endKwh: 145,
           usageKwh: 45,
@@ -298,7 +298,7 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
     refreshMock.mockClear();
   });
 
-  it("unpaid: the generate POST names the household in revertToEdgeHouseholdIds", async () => {
+  it("unpaid: the generate POST names the tenant in revertToEdgeTenantIds", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ lineItems: 1, kept: [], errors: [] }),
@@ -318,15 +318,15 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
     const generateCall = fetchMock.mock.calls.find((c) => c[0] === "/api/billing/generate");
     expect(JSON.parse(generateCall![1].body as string)).toEqual({
       billingPeriodId: "p-1",
-      householdIds: ["h-1"],
-      revertToEdgeHouseholdIds: ["h-1"],
+      tenantIds: ["h-1"],
+      revertToEdgeTenantIds: ["h-1"],
     });
     await waitFor(() => expect(props.onSuccess).toHaveBeenCalledWith("li-1"));
 
     vi.unstubAllGlobals();
   });
 
-  it("unpaid edge row: no revertToEdgeHouseholdIds is sent", async () => {
+  it("unpaid edge row: no revertToEdgeTenantIds is sent", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ lineItems: 1, kept: [], errors: [] }),
@@ -344,12 +344,12 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).not.toHaveProperty("revertToEdgeHouseholdIds");
+    expect(body).not.toHaveProperty("revertToEdgeTenantIds");
 
     vi.unstubAllGlobals();
   });
 
-  it("paid: both the preview and the confirmed generate name the household", async () => {
+  it("paid: both the preview and the confirmed generate name the tenant", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url === "/api/billing/regenerate-preview") {
         return Promise.resolve({
@@ -358,8 +358,8 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
             Promise.resolve({
               preview: [
                 {
-                  householdId: "h-1",
-                  householdName: "Alice",
+                  tenantId: "h-1",
+                  tenantName: "Alice",
                   startKwh: 100,
                   endKwh: 145,
                   usageKwh: 45,
@@ -400,8 +400,8 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
     );
     expect(JSON.parse(previewCall![1].body as string)).toEqual({
       billingPeriodId: "p-1",
-      householdIds: ["h-1"],
-      revertToEdgeHouseholdIds: ["h-1"],
+      tenantIds: ["h-1"],
+      revertToEdgeTenantIds: ["h-1"],
     });
 
     const confirmBtn = screen
@@ -418,8 +418,8 @@ describe("RegenerateRowDialog — switch a manual row back to edge data", () => 
     const generateCall = fetchMock.mock.calls.find((c) => c[0] === "/api/billing/generate");
     expect(JSON.parse(generateCall![1].body as string)).toEqual({
       billingPeriodId: "p-1",
-      householdIds: ["h-1"],
-      revertToEdgeHouseholdIds: ["h-1"],
+      tenantIds: ["h-1"],
+      revertToEdgeTenantIds: ["h-1"],
     });
 
     vi.unstubAllGlobals();
@@ -467,10 +467,10 @@ describe("RegenerateRowDialog — manual entry path (2c)", () => {
     expect(call[0]).toBe("/api/billing/generate");
     const body = JSON.parse(call[1].body as string);
     expect(body.billingPeriodId).toBe("p-1");
-    expect(body.householdIds).toEqual(["h-1"]);
+    expect(body.tenantIds).toEqual(["h-1"]);
     expect(body.manualReadings).toEqual([
       {
-        householdId: "h-1",
+        tenantId: "h-1",
         startKwh: 100,
         endKwh: 145.5,
         reason: "URA reading override",

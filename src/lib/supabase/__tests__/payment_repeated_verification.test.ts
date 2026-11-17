@@ -2,7 +2,7 @@
  * payment_repeated_verification.test.ts (migrations 00065 and 20261010202643)
  *
  * Verifies, against a live local Supabase through PostgREST, that checking
- * the same payment again records it once. Each time a household opens the
+ * the same payment again records it once. Each time a tenant opens the
  * payment return page, or the provider resends its notification, the
  * Payments capability's handleNotification makes the same two writes for a
  * completed payment: fn_payment_enqueue_notification for the notification,
@@ -35,7 +35,7 @@ const FIXTURE = {
   org: "ca11bac0-0000-4000-8000-00000000000a",
   community: "ca11bac0-0000-4000-8001-00000000000a",
   microgrid: "ca11bac0-0000-4000-8002-00000000000a",
-  household: "ca11bac0-0000-4000-8005-00000000000a",
+  tenant: "ca11bac0-0000-4000-8005-00000000000a",
   period: "ca11bac0-0000-4000-8006-00000000000a",
   bill: "ca11bac0-0000-4000-8007-00000000000a",
   merchant: "ca11bac0-0000-4000-8008-00000000000a",
@@ -92,10 +92,10 @@ desc("repeated checks of one payment", () => {
       name: "RV MG",
       currency: "UGX",
     });
-    await insertOrThrow(svc, "households", {
-      id: FIXTURE.household,
+    await insertOrThrow(svc, "tenants", {
+      id: FIXTURE.tenant,
       microgrid_id: FIXTURE.microgrid,
-      display_name: "RV household",
+      display_name: "RV tenant",
       primary_phone: "+256700000401",
     });
     await insertOrThrow(svc, "billing_periods", {
@@ -109,7 +109,7 @@ desc("repeated checks of one payment", () => {
     await insertOrThrow(svc, "billing_line_items", {
       id: FIXTURE.bill,
       billing_period_id: FIXTURE.period,
-      household_id: FIXTURE.household,
+      tenant_id: FIXTURE.tenant,
       usage_kwh: 10,
       total_amount: AMOUNT,
       payment_status: "unpaid",

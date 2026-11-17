@@ -13,7 +13,7 @@ function edgeCounts(readingsInClosedPeriods: number) {
   return {
     kind: "edge" as const,
     devices: 2,
-    household_devices: 1,
+    tenant_devices: 1,
     billing_line_items_nulled: 3,
     readings_in_closed_periods: readingsInClosedPeriods,
   };

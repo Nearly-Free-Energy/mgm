@@ -17,7 +17,7 @@ function stubRepo(): MeteringRepository {
     getUserRoles: async () => [],
     isPluginEnabled: async () => true,
     getMicrogridOrganization: async () => null,
-    getHouseholdOrganization: async () => null,
+    getTenantOrganization: async () => null,
     getDeviceOrganization: async () => null,
     getStoredConnection: async () => null,
     getMicrogridTimezone: async () => null,

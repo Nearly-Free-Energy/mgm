@@ -56,14 +56,15 @@ export function actorDisplayLabel(entry: BillingAuditLogEntry): string {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function resolveHouseholdName(entry: BillingAuditLogEntry): string {
-  // AC4: live join (entry.householdName) → snapshot (details.household_name)
-  // → "Unknown household". The fetch helper already collapses live → snapshot
-  // into entry.householdName, but we re-check details defensively.
-  if (entry.householdName) return entry.householdName;
-  const snap = entry.details?.["household_name"];
+function resolveTenantName(entry: BillingAuditLogEntry): string {
+  // AC4: live join (entry.tenantName) → snapshot (details.tenant_name)
+  // → "Unknown tenant". The fetch helper already collapses live → snapshot
+  // into entry.tenantName, but we re-check details defensively.
+  if (entry.tenantName) return entry.tenantName;
+  // `household_name`: rows written before the households → tenants rename.
+  const snap = entry.details?.["tenant_name"] ?? entry.details?.["household_name"];
   if (typeof snap === "string" && snap.length > 0) return snap;
-  return "Unknown household";
+  return "Unknown tenant";
 }
 
 function isPostCloseRevision(entry: BillingAuditLogEntry): boolean {
@@ -96,7 +97,7 @@ export function humanizeAuditEvent(
       return { label: "Period closed", postCloseRevision: post };
 
     case "line_item_generated": {
-      const hh = resolveHouseholdName(entry);
+      const hh = resolveTenantName(entry);
       const newTotal = getNumber(entry.details?.["new_total_amount"]);
       const summary =
         newTotal !== null ? (
@@ -113,7 +114,7 @@ export function humanizeAuditEvent(
     }
 
     case "line_item_regenerated": {
-      const hh = resolveHouseholdName(entry);
+      const hh = resolveTenantName(entry);
       const prevTotal = getNumber(entry.details?.["previous_total_amount"]);
       const newTotal = getNumber(entry.details?.["new_total_amount"]);
       const prevSrc = getString(entry.details?.["previous_reading_source"]);
@@ -165,7 +166,7 @@ export function humanizeAuditEvent(
     }
 
     case "payment_status_changed": {
-      const hh = resolveHouseholdName(entry);
+      const hh = resolveTenantName(entry);
       const from = getString(entry.details?.["from"]);
       const to = getString(entry.details?.["to"]);
       const notes = getString(entry.details?.["notes"]);
@@ -213,7 +214,7 @@ export function humanizeAuditEvent(
     }
 
     case "payment_link_generated": {
-      const hh = resolveHouseholdName(entry);
+      const hh = resolveTenantName(entry);
       return {
         label: `Payment link generated for ${hh}`,
         postCloseRevision: post,

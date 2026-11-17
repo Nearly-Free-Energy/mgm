@@ -1,7 +1,7 @@
 /**
  * seed-reading.test.ts — #339.
  *
- * `startKwh` for an edge-metered household has three sources and no zero
+ * `startKwh` for an edge-metered tenant has three sources and no zero
  * default. This file exercises all three against a real database, because the
  * defect being fixed was a fallback that produced a *plausible* value rather
  * than an error, and a mocked-everything test would have passed over it.
@@ -98,16 +98,16 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
       device_type: "consumption_meter",
       openems_component_id: "meter0",
     });
-    await ins("households", {
+    await ins("tenants", {
       id: F.hh,
       microgrid_id: F.mg,
-      display_name: "Seed Household",
+      display_name: "Seed Tenant",
       primary_phone: "+256700000001",
     });
-    // The household↔device link is the many-to-many join, not a column on
-    // households (post-AB #50).
-    await ins("household_devices", {
-      household_id: F.hh,
+    // The tenant↔device link is the many-to-many join, not a column on
+    // tenants (post-AB #50).
+    await ins("tenant_devices", {
+      tenant_id: F.hh,
       device_id: F.device,
       role: "primary_consumption_meter",
     });
@@ -164,7 +164,7 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
     // The whole point: no line, not a zero.
     expect(errs.some((e) => e.code === "needs_seed_reading")).toBe(true);
     const written = out.results.filter(
-      (r) => r.kind !== "error" && r.householdId === F.hh
+      (r) => r.kind !== "error" && r.tenantId === F.hh
     );
     expect(written).toHaveLength(0);
   });
@@ -179,7 +179,7 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
       },
     ]);
 
-    const row = out.results.find((r) => r.householdId === F.hh) as
+    const row = out.results.find((r) => r.tenantId === F.hh) as
       | { kind: string; startKwh?: number; endKwh?: number }
       | undefined;
 
@@ -205,7 +205,7 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
     });
     await insHere("billing_line_items", {
       billing_period_id: priorPeriod,
-      household_id: F.hh,
+      tenant_id: F.hh,
       device_id: F.device,
       start_kwh: 4000,
       end_kwh: 4100,
@@ -222,7 +222,7 @@ desc("#339 — start_kwh has three sources and no zero default", () => {
       },
     ]);
 
-    const row = out.results.find((r) => r.householdId === F.hh) as
+    const row = out.results.find((r) => r.tenantId === F.hh) as
       | { startKwh?: number }
       | undefined;
 

@@ -55,7 +55,7 @@ import type {
   BillingLineItem,
   Community,
   Device,
-  Household,
+  Tenant,
   Organization,
   RateSchedule,
 } from "@/lib/types/domain";
@@ -96,7 +96,7 @@ export async function GET(
   // 2. Resolve line item + scope joins. RLS hides cross-org rows → 404.
   //    The shape of this select is the union of all fields the renderer
   //    needs PLUS the IDs needed for downstream queries (org_id, microgrid_id,
-  //    rate-schedule lookup, household-device join). The caller's role rows
+  //    rate-schedule lookup, tenant-device join). The caller's role rows
   //    for step 3 load alongside it, for the user read above.
   const scopedRead = supabase
     .from("billing_line_items")
@@ -108,7 +108,7 @@ export async function GET(
       end_kwh,
       entered_at,
       entered_by_user_id,
-      household_id,
+      tenant_id,
       invoice_number,
       manual_reason,
       paid_at,
@@ -155,7 +155,7 @@ export async function GET(
           )
         )
       ),
-      households!inner (
+      tenants!inner (
         id,
         account_number,
         address_city,
@@ -207,9 +207,9 @@ export async function GET(
   const microgrid = period ? unwrap(period.microgrids) : null;
   const community = microgrid ? unwrap(microgrid.communities) : null;
   const organization = community ? unwrap(community.organizations) : null;
-  const household = unwrap(scoped.households);
+  const tenant = unwrap(scoped.tenants);
 
-  if (!period || !microgrid || !community || !organization || !household) {
+  if (!period || !microgrid || !community || !organization || !tenant) {
     return NextResponse.json(
       { error: "Line item not found.", reason: "not_found" },
       { status: 404 },
@@ -239,7 +239,7 @@ export async function GET(
   // now and load while the payment link and invoice number resolve; each
   // result is still checked at its own step, in the original order, so a
   // request gets the same response as when they ran one after another.
-  const meterDeviceRead = readMeterDevice(supabase, household.id as string);
+  const meterDeviceRead = readMeterDevice(supabase, tenant.id as string);
   const pinnedScheduleId = period.rate_schedule_id as string | null;
   const rateScheduleRead = pinnedScheduleId
     ? Promise.resolve(
@@ -433,7 +433,7 @@ export async function GET(
     end_kwh: scoped.end_kwh as number | null,
     entered_at: scoped.entered_at as string | null,
     entered_by_user_id: scoped.entered_by_user_id as string | null,
-    household_id: scoped.household_id as string,
+    tenant_id: scoped.tenant_id as string,
     invoice_number: invoiceNumber,
     manual_reason: scoped.manual_reason as string | null,
     paid_at: scoped.paid_at as string | null,
@@ -472,7 +472,7 @@ export async function GET(
   try {
     pdfBuf = await renderInvoicePdf({
       lineItem,
-      household: household as unknown as Household,
+      tenant: tenant as unknown as Tenant,
       community: community as unknown as Community,
       organization: organization as unknown as Organization,
       ratesSchedule: rateScheduleRow as unknown as RateSchedule,
@@ -545,13 +545,13 @@ function unwrap<T = Record<string, unknown>>(
   return candidate as T & Record<string, unknown>;
 }
 
-/** Step 6: the household's first consumption_meter device by created_at, ASC. */
+/** Step 6: the tenant's first consumption_meter device by created_at, ASC. */
 async function readMeterDevice(
   supabase: SupabaseClient,
-  householdId: string,
+  tenantId: string,
 ): Promise<Device | null> {
   const { data: meterRows } = await supabase
-    .from("household_devices")
+    .from("tenant_devices")
     .select(
       `
       device_id,
@@ -566,7 +566,7 @@ async function readMeterDevice(
       )
     `,
     )
-    .eq("household_id", householdId)
+    .eq("tenant_id", tenantId)
     .eq("devices.device_type", "consumption_meter")
     .order("created_at", { ascending: true })
     .limit(1);

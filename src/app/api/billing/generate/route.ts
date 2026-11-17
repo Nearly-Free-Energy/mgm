@@ -22,24 +22,24 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *
  * Body:
  *   billingPeriodId: string                                — required
- *   householdIds?: string[]                                — optional
- *     - undefined → process every household on the period's microgrid
+ *   tenantIds?: string[]                                — optional
+ *     - undefined → process every tenant on the period's microgrid
  *       (legacy bulk Refresh-Readings behavior)
  *     - []        → explicit no-op (writes nothing, returns empty arrays)
- *     - [uuid…]   → only those households are processed
+ *     - [uuid…]   → only those tenants are processed
  *   manualReadings?: Array<{
- *     householdId: string;
+ *     tenantId: string;
  *     startKwh: number;
  *     endKwh: number;
  *     reason?: string;
  *   }>
- *     - implicitly adds each household to the processed set
- *     - skips the OpenEMS call for that household; uses startKwh/endKwh
+ *     - implicitly adds each tenant to the processed set
+ *     - skips the OpenEMS call for that tenant; uses startKwh/endKwh
  *       as provided; usage_kwh is server-derived (endKwh - startKwh)
- *   revertToEdgeHouseholdIds?: string[]
- *     - households whose current manual row may be replaced by an OpenEMS
+ *   revertToEdgeTenantIds?: string[]
+ *     - tenants whose current manual row may be replaced by an OpenEMS
  *       reading ("Switch back to edge data"); does not add them to the
- *       processed set, and may not repeat a manualReadings household
+ *       processed set, and may not repeat a manualReadings tenant
  *
  * AC3 changes from the legacy route:
  *   - Closed periods are NOT rejected (Q4=B logs `period_was_closed: true`).
@@ -48,12 +48,12 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *     paid_by_user_id, payment_notes, pesapal_order_id, payment_failed_at,
  *     payment_refunded_at — and the payment_events history that would
  *     otherwise CASCADE away).
- *   - A household with reading_source='manual' currently, no manualReadings
- *     entry and not in revertToEdgeHouseholdIds is not rewritten (Q5). With
- *     householdIds omitted it is listed in kept[]; named in householdIds it
+ *   - A tenant with reading_source='manual' currently, no manualReadings
+ *     entry and not in revertToEdgeTenantIds is not rewritten (Q5). With
+ *     tenantIds omitted it is listed in kept[]; named in tenantIds it
  *     is surfaced in errors[] with code='currently_manual'.
- *   - manualReadings for a household NOT in the period's microgrid → skipped
- *     + surfaced in errors[] with code='unknown_household'. Cross-microgrid
+ *   - manualReadings for a tenant NOT in the period's microgrid → skipped
+ *     + surfaced in errors[] with code='unknown_tenant'. Cross-microgrid
  *     attack defense.
  *
  * Auth (NEW): explicit getUser() gate before any business logic — today's
@@ -66,7 +66,7 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * meter-assignment coverage before the engine sees the request.
  *
  * Response:
- *   { lineItems: number; kept: Array<{ householdId, householdName }>;
+ *   { lineItems: number; kept: Array<{ tenantId, tenantName }>;
  *     errors: Array<...> }
  */
 
@@ -74,7 +74,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type RawManualReading = {
-  householdId: unknown;
+  tenantId: unknown;
   startKwh: unknown;
   endKwh: unknown;
   reason?: unknown;
@@ -84,9 +84,9 @@ type ParseError = { error: string; details?: unknown };
 
 type ParsedBody = {
   billingPeriodId: string;
-  householdIds?: string[];
+  tenantIds?: string[];
   manualReadings?: ManualReadingInput[];
-  revertToEdgeHouseholdIds?: string[];
+  revertToEdgeTenantIds?: string[];
   seedReadings?: SeedReadingInput[];
 };
 
@@ -108,21 +108,21 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
   }
   const billingPeriodId = rec.billingPeriodId;
 
-  // householdIds — optional UUID array (empty array allowed).
-  let householdIds: string[] | undefined;
-  if (rec.householdIds !== undefined) {
-    if (!Array.isArray(rec.householdIds)) {
-      return { error: "householdIds must be an array of UUIDs" };
+  // tenantIds — optional UUID array (empty array allowed).
+  let tenantIds: string[] | undefined;
+  if (rec.tenantIds !== undefined) {
+    if (!Array.isArray(rec.tenantIds)) {
+      return { error: "tenantIds must be an array of UUIDs" };
     }
-    for (const h of rec.householdIds) {
+    for (const h of rec.tenantIds) {
       if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "householdIds entries must be UUID strings" };
+        return { error: "tenantIds entries must be UUID strings" };
       }
     }
-    householdIds = rec.householdIds as string[];
+    tenantIds = rec.tenantIds as string[];
   }
 
-  // manualReadings — optional array of { householdId, startKwh, endKwh, reason? }.
+  // manualReadings — optional array of { tenantId, startKwh, endKwh, reason? }.
   let manualReadings: ManualReadingInput[] | undefined;
   if (rec.manualReadings !== undefined) {
     if (!Array.isArray(rec.manualReadings)) {
@@ -134,8 +134,8 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
       if (!m || typeof m !== "object") {
         return { error: `manualReadings[${i}] must be an object` };
       }
-      if (typeof m.householdId !== "string" || !UUID_RE.test(m.householdId)) {
-        return { error: `manualReadings[${i}].householdId must be a UUID` };
+      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
+        return { error: `manualReadings[${i}].tenantId must be a UUID` };
       }
       if (
         typeof m.startKwh !== "number" ||
@@ -171,7 +171,7 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
         reason = m.reason;
       }
       out.push({
-        householdId: m.householdId,
+        tenantId: m.tenantId,
         startKwh: m.startKwh,
         endKwh: m.endKwh,
         reason,
@@ -180,25 +180,25 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
     manualReadings = out;
   }
 
-  // revertToEdgeHouseholdIds — optional UUID array. Lets a currently-manual
+  // revertToEdgeTenantIds — optional UUID array. Lets a currently-manual
   // row be replaced by an OpenEMS reading; without it such a row is kept.
-  // A household in manualReadings too is a contradiction and refused.
-  let revertToEdgeHouseholdIds: string[] | undefined;
-  if (rec.revertToEdgeHouseholdIds !== undefined) {
-    if (!Array.isArray(rec.revertToEdgeHouseholdIds)) {
-      return { error: "revertToEdgeHouseholdIds must be an array of UUIDs" };
+  // A tenant in manualReadings too is a contradiction and refused.
+  let revertToEdgeTenantIds: string[] | undefined;
+  if (rec.revertToEdgeTenantIds !== undefined) {
+    if (!Array.isArray(rec.revertToEdgeTenantIds)) {
+      return { error: "revertToEdgeTenantIds must be an array of UUIDs" };
     }
-    for (const h of rec.revertToEdgeHouseholdIds) {
+    for (const h of rec.revertToEdgeTenantIds) {
       if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "revertToEdgeHouseholdIds entries must be UUID strings" };
+        return { error: "revertToEdgeTenantIds entries must be UUID strings" };
       }
-      if (manualReadings?.some((m) => m.householdId === h)) {
+      if (manualReadings?.some((m) => m.tenantId === h)) {
         return {
-          error: `Household ${h} cannot be in both manualReadings and revertToEdgeHouseholdIds`,
+          error: `Tenant ${h} cannot be in both manualReadings and revertToEdgeTenantIds`,
         };
       }
     }
-    revertToEdgeHouseholdIds = rec.revertToEdgeHouseholdIds as string[];
+    revertToEdgeTenantIds = rec.revertToEdgeTenantIds as string[];
   }
 
   // seedReadings — optional array of { deviceId, dialReadingKwh, readAt, startKwh } (#339).
@@ -274,9 +274,9 @@ function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
   return {
     parsed: {
       billingPeriodId,
-      householdIds,
+      tenantIds,
       manualReadings,
-      revertToEdgeHouseholdIds,
+      revertToEdgeTenantIds,
       seedReadings,
     },
   };
@@ -345,25 +345,25 @@ export async function POST(request: NextRequest) {
   try {
     const result = await composed.data.billing.generateBills({
       billingPeriodId: parsed.billingPeriodId,
-      householdIds: parsed.householdIds,
+      tenantIds: parsed.tenantIds,
       manualReadings: parsed.manualReadings,
-      revertToEdgeHouseholdIds: parsed.revertToEdgeHouseholdIds,
+      revertToEdgeTenantIds: parsed.revertToEdgeTenantIds,
       seedReadings: parsed.seedReadings,
     });
     if (!result.ok) return mapError(result);
 
     // Shape the response: split written + errors.
     const lineItems = result.data.results.filter((r) => r.kind === "written").length;
-    // Currently-manual households a bulk run left as they were. Not errors:
+    // Currently-manual tenants a bulk run left as they were. Not errors:
     // nothing was asked of them that did not happen.
     const kept = result.data.results
       .filter((r) => r.kind === "kept")
-      .map((k) => ({ householdId: k.householdId, householdName: k.householdName }));
+      .map((k) => ({ tenantId: k.tenantId, tenantName: k.tenantName }));
     const errors = result.data.results
       .filter((r) => r.kind === "error")
       .map((e) => ({
-        householdId: e.householdId,
-        householdName: e.householdName,
+        tenantId: e.tenantId,
+        tenantName: e.tenantName,
         error: e.error,
         code: e.code,
       }));

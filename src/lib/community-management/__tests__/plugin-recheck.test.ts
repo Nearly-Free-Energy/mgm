@@ -24,7 +24,7 @@ const scope: OrganizationScope = { organizationId: ORG_ID, userId: "user-1", rol
 const READ_BEFORE_RECHECK = new Set<string>([
   "getCommunityOrganizationId",
   "getMicrogridOrganization",
-  "findHousehold",
+  "findTenant",
   "isPluginEnabled",
 ]);
 
@@ -41,24 +41,24 @@ function stubRepo(
       communityId: COMMUNITY_ID,
       orgId: ORG_ID,
     }),
-    findHousehold: async () => ({
-      data: { id: HH_ID, display_name: "Household 1", microgrid_id: MG_ID },
+    findTenant: async () => ({
+      data: { id: HH_ID, display_name: "Tenant 1", microgrid_id: MG_ID },
       error: null,
     }),
-    updateHouseholdFields: async () => ({ data: { id: HH_ID } as never, error: null }),
+    updateTenantFields: async () => ({ data: { id: HH_ID } as never, error: null }),
     insertCommunity: async () => ({ data: { id: COMMUNITY_ID } as never, error: null }),
     updateCommunity: async () => ({ data: { id: COMMUNITY_ID } as never, error: null }),
     insertMicrogrid: async () => ({ data: { id: MG_ID } as never, error: null }),
     updateMicrogrid: async () => ({ data: { id: MG_ID } as never, error: null }),
-    createHousehold: async () => ({ data: HH_ID, error: null }),
+    createTenant: async () => ({ data: HH_ID, error: null }),
     findDeviceLink: async () => null,
     getOpenDeviceLink: async () => null,
     closeDeviceLink: async () => null,
     replaceDeviceLink: async () => ({ id: null, error: null }),
     deleteDeviceLink: async () => null,
-    refetchHousehold: async () => ({ data: { id: HH_ID } as never, error: null }),
+    refetchTenant: async () => ({ data: { id: HH_ID } as never, error: null }),
     countBillingLineItems: async () => ({ count: 0, error: null }),
-    deleteHousehold: async () => ({ data: [{ id: HH_ID }], error: null }),
+    deleteTenant: async () => ({ data: [{ id: HH_ID }], error: null }),
     resolveHierarchyLevels: async () => [],
   };
 }
@@ -75,16 +75,16 @@ const WRITES: {
   },
   { method: "updateMicrogrid", run: (c) => c.updateMicrogrid(MG_ID, { name: "North II" }) },
   {
-    method: "createHousehold",
+    method: "createTenant",
     run: (c) =>
-      c.createHousehold({
+      c.createTenant({
         microgrid_id: MG_ID,
-        display_name: "Household 1",
+        display_name: "Tenant 1",
         primary_phone: "+256700000000",
       }),
   },
-  { method: "updateHousehold", run: (c) => c.updateHousehold(HH_ID, { display_name: "Household 2" }) },
-  { method: "deleteHousehold", run: (c) => c.deleteHousehold(HH_ID) },
+  { method: "updateTenant", run: (c) => c.updateTenant(HH_ID, { display_name: "Tenant 2" }) },
+  { method: "deleteTenant", run: (c) => c.deleteTenant(HH_ID) },
 ];
 
 function spiedSetup(isPluginEnabled: CommunityManagementRepository["isPluginEnabled"]) {

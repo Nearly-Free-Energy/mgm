@@ -28,7 +28,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: { default: "Microgrid Manager", template: "%s · MGM" },
-  description: "Run community microgrids: households, meters, tariffs, bills and payments.",
+  description: "Run community microgrids: tenants, meters, tariffs, bills and payments.",
   applicationName: "MGM",
   // Files in public/, drawn by scripts/icons/render-icons.mjs. They load
   // without a session because the middleware matcher skips each file in

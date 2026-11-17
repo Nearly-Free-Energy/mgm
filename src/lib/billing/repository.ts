@@ -66,7 +66,7 @@ export type BillingPeriodRow = {
 };
 
 export type ManualReadingInput = {
-  householdId: string;
+  tenantId: string;
   startKwh: number;
   endKwh: number;
   reason?: string;
@@ -92,18 +92,18 @@ export type GenerationFatal = RunGenerationFatal;
 export interface BillingGeneration {
   run(input: {
     periodId: string;
-    householdIds?: string[];
+    tenantIds?: string[];
     manualReadings?: ManualReadingInput[];
-    revertToEdgeHouseholdIds?: string[];
+    revertToEdgeTenantIds?: string[];
     seedReadings?: SeedReadingInput[];
     mode: "write" | "preview";
     actorUserId: string;
   }): Promise<GenerationOutput | GenerationFatal>;
 }
 
-export type UnresolvedHousehold = {
-  householdId: string;
-  householdName: string;
+export type UnresolvedTenant = {
+  tenantId: string;
+  tenantName: string;
   reason: string;
 };
 
@@ -111,7 +111,7 @@ export type PeriodSummary = {
   period: BillingPeriodRow;
   lineItemCount: number;
   totalAmount: number;
-  unresolved: UnresolvedHousehold[];
+  unresolved: UnresolvedTenant[];
 };
 
 export type ManualPaymentStatus = "paid" | "unpaid";
@@ -165,7 +165,7 @@ export interface BillingCapabilityContract {
   closePeriod(
     periodId: string,
     input?: unknown
-  ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedHousehold[] }>>;
+  ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedTenant[] }>>;
   previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
   generateBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
   recordManualPayment(

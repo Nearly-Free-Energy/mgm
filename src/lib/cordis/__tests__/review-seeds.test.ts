@@ -6,7 +6,7 @@ const PERIOD_ID = "550e8400-e29b-41d4-a716-446655440100";
 const DEVICE_ID = "550e8400-e29b-41d4-a716-446655440200";
 
 function fakeSupabase(options: {
-  householdDevices?: Array<{ role: string; devices: { id: string } | null }>;
+  tenantDevices?: Array<{ role: string; devices: { id: string } | null }>;
   readings?: Array<{ device_id: string; reading_kwh: number; read_at: string }>;
 }) {
   const period = {
@@ -14,9 +14,9 @@ function fakeSupabase(options: {
     start_date: "2026-09-01",
     timezone: "Africa/Kampala",
   };
-  const households = [{
+  const tenants = [{
     id: "550e8400-e29b-41d4-a716-446655440300",
-    household_devices: options.householdDevices ?? [
+    tenant_devices: options.tenantDevices ?? [
       { role: "primary_consumption_meter", devices: { id: DEVICE_ID } },
     ],
   }];
@@ -31,7 +31,7 @@ function fakeSupabase(options: {
       table === "billing_periods" ? { data: period, error: null } : { data: null, error: null };
     builder.then = (resolve: (value: unknown) => unknown) =>
       Promise.resolve({
-        data: table === "households" ? households : readings,
+        data: table === "tenants" ? tenants : readings,
         error: null,
         count: table === "meter_readings" ? readings.length : null,
       }).then(resolve);
@@ -67,7 +67,7 @@ describe("resolveReviewOnlySeedReadings", () => {
     expect(fromLaterReading).toEqual([]);
 
     const fromReplacement = await resolveReviewOnlySeedReadings(fakeSupabase({
-      householdDevices: [
+      tenantDevices: [
         { role: "primary_consumption_meter", devices: { id: DEVICE_ID } },
         { role: "primary_consumption_meter", devices: { id: "550e8400-e29b-41d4-a716-446655440201" } },
       ],

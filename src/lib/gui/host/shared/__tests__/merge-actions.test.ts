@@ -17,20 +17,20 @@ const H1 = "e7200000-0000-4000-8000-0000000000b1";
 const H2 = "e7200000-0000-4000-8000-0000000000b2";
 const L1 = "e7200000-0000-4000-8000-0000000000d1";
 const MG = { kind: "microgrid", id: M1, label: "Kiwumu" } as const satisfies EntityRef;
-const HH = { kind: "household", id: H1, label: "House 1" } as const satisfies EntityRef;
-const HH2 = { kind: "household", id: H2, label: "House 2" } as const satisfies EntityRef;
+const HH = { kind: "tenant", id: H1, label: "House 1" } as const satisfies EntityRef;
+const HH2 = { kind: "tenant", id: H2, label: "House 2" } as const satisfies EntityRef;
 const LINE = { kind: "lineItem", id: L1, label: "Bill 1" } as const satisfies EntityRef;
 
 function def(id: MergeActionDef["id"], over: Partial<MergeActionDef> = {}): MergeActionDef {
   return {
     id,
     title: id,
-    target: "household",
+    target: "tenant",
     path: "/api/x/[id]",
     method: "POST",
     risk: "write",
     confirm: "confirm",
-    bind: { path: { id: "household" } },
+    bind: { path: { id: "tenant" } },
     ...over,
   } as MergeActionDef;
 }
@@ -94,13 +94,13 @@ describe("appendTargetedActions", () => {
   });
 
   it("fills params from the entity for its own kind and from the path scope for others", () => {
-    const a = def("metering.assign", { bind: { path: { id: "household" }, body: { microgrid_id: "microgrid" } } });
+    const a = def("metering.assign", { bind: { path: { id: "tenant" }, body: { microgrid_id: "microgrid" } } });
     const { model } = appendTargetedActions(record(HH), input([{ plugin: "metering", def: a }]));
     expect(model.actions[0].params).toEqual({ id: H1, microgrid_id: M1 });
   });
 
   it("leaves out an action whose bound kind is not available, and reports it", () => {
-    const a = def("metering.assign", { bind: { path: { id: "household" }, body: { edge: "edge" } } });
+    const a = def("metering.assign", { bind: { path: { id: "tenant" }, body: { edge: "edge" } } });
     const { model, dropped } = appendTargetedActions(record(HH), input([{ plugin: "metering", def: a }]));
     expect(model.actions).toEqual([]);
     expect(dropped).toEqual([{ action: "metering.assign", reason: "unbound" }]);
@@ -182,14 +182,14 @@ describe("appendTargetedActions", () => {
     const released: string[] = [];
     const { model, dropped } = appendTargetedActions(
       record(HH),
-      input([{ plugin: "metering", def: def("metering.assign", { path: "/api/households/[id]/assign" }) }], {
+      input([{ plugin: "metering", def: def("metering.assign", { path: "/api/tenants/[id]/assign" }) }], {
         isReleased: (path) => {
           released.push(path);
           return false;
         },
       }),
     );
-    expect(released).toEqual([`/api/households/${H1}/assign`]);
+    expect(released).toEqual([`/api/tenants/${H1}/assign`]);
     expect(model.actions).toEqual([]);
     expect(dropped).toEqual([{ action: "metering.assign", reason: "unreleased" }]);
   });
@@ -338,10 +338,10 @@ describe("fillPath", () => {
 
 describe("idFits", () => {
   it("wants a UUID for a core kind and a short token for a plugin's own kind", () => {
-    expect(idFits("household", H1)).toBe(true);
-    expect(idFits("household", "abc_1")).toBe(false);
-    expect(idFits("household", `x${H1}`)).toBe(false);
-    expect(idFits("household", `${H1}x`)).toBe(false);
+    expect(idFits("tenant", H1)).toBe(true);
+    expect(idFits("tenant", "abc_1")).toBe(false);
+    expect(idFits("tenant", `x${H1}`)).toBe(false);
+    expect(idFits("tenant", `${H1}x`)).toBe(false);
     expect(idFits("metering.site", "abc_1")).toBe(true);
     expect(idFits("metering.site", "a".repeat(128))).toBe(true);
     for (const bad of ["a/b", "..", "", "a".repeat(129)]) expect(idFits("metering.site", bad)).toBe(false);

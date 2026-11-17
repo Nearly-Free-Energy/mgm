@@ -1,5 +1,5 @@
 /**
- * The pages a household sees when a bill's payment link cannot take them to
+ * The pages a tenant sees when a bill's payment link cannot take them to
  * checkout: the `/api/billing-line-items/<id>/pay` link and its short
  * `/p/<slug>` form. The routes choose the status and any extra header, such
  * as Retry-After; this module renders the notice in the request's language
@@ -20,7 +20,7 @@ export type PaymentLinkPage =
       notice: "tooManyTries";
       /** Whole seconds, the same number the response sends as Retry-After. */
       retryAfterSeconds: number;
-      /** The link the household opened, so Try again opens it once more. */
+      /** The link the tenant opened, so Try again opens it once more. */
       tryAgainHref: string;
     };
 

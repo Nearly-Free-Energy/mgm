@@ -47,7 +47,7 @@ describe("the site-day tiles", () => {
 
   it.each([
     "Battery supplied 4.6 kWh · 2 meters without data",
-    "Needs household meters · Battery supplied 4.6 kWh",
+    "Needs tenant meters · Battery supplied 4.6 kWh",
     "From 18:00",
     "No battery registered",
     "No battery readings",
@@ -124,7 +124,7 @@ describe("the site-day tiles", () => {
       tilesOf({
         tiles: {
           solar: { value: empty, hint: `Needs a solar meter, or an inverter output meter with the battery and grid meter` },
-          "houses-evening": { value: empty, hint: "Needs household meters · No battery registered" },
+          "houses-evening": { value: empty, hint: "Needs tenant meters · No battery registered" },
           cuts: { value: empty, hint: `Needs a grid meter`, status: null },
           "cut-time": { value: empty },
           "lowest-soc": { value: empty, hint: "Needs a battery", status: null },

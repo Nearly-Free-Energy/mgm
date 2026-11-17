@@ -64,9 +64,9 @@ DECLARE
     'microgrids',
     'edges',
     'devices',
-    'household_devices',
-    'households',
-    'household_users',
+    'tenant_devices',
+    'tenants',
+    'tenant_users',
     'user_roles',
     'billing_periods',
     'billing_line_items',
@@ -125,13 +125,13 @@ BEGIN
   ASSERT n >= 10, format('Expected >= 10 devices, found %s', n);
   RAISE NOTICE 'OK: devices = %', n;
 
-  SELECT COUNT(*) INTO n FROM households;
-  ASSERT n >= 10, format('Expected >= 10 households, found %s', n);
-  RAISE NOTICE 'OK: households = %', n;
+  SELECT COUNT(*) INTO n FROM tenants;
+  ASSERT n >= 10, format('Expected >= 10 tenants, found %s', n);
+  RAISE NOTICE 'OK: tenants = %', n;
 
-  SELECT COUNT(*) INTO n FROM household_devices;
-  ASSERT n >= 10, format('Expected >= 10 household_devices, found %s', n);
-  RAISE NOTICE 'OK: household_devices = %', n;
+  SELECT COUNT(*) INTO n FROM tenant_devices;
+  ASSERT n >= 10, format('Expected >= 10 tenant_devices, found %s', n);
+  RAISE NOTICE 'OK: tenant_devices = %', n;
 
   SELECT COUNT(*) INTO n FROM rate_schedules;
   ASSERT n >= 1, format('Expected >= 1 rate_schedule, found %s', n);
@@ -173,7 +173,7 @@ END;
 $$;
 ROLLBACK;
 
--- ── Section 5: partial unique index on household_devices ──────────────────
+-- ── Section 5: partial unique index on tenant_devices ──────────────────
 \echo ''
 \echo '-- [5] partial unique index fires for duplicate primary_consumption_meter'
 
@@ -183,12 +183,12 @@ DECLARE
   caught BOOLEAN := FALSE;
 BEGIN
   BEGIN
-  -- Attempt a second primary_consumption_meter for household 1 (already has one from seed).
-  -- Use a different device_id so the UNIQUE(household_id, device_id, role) row-constraint
+  -- Attempt a second primary_consumption_meter for tenant 1 (already has one from seed).
+  -- Use a different device_id so the UNIQUE(tenant_id, device_id, role) row-constraint
   -- doesn't fire first — only the overlap guard should fire.
-  INSERT INTO household_devices (household_id, device_id, role)
+  INSERT INTO tenant_devices (tenant_id, device_id, role)
   VALUES (
-    'f0000000-0000-0000-0000-000000000001',  -- household 1 (Block A, Unit 1)
+    'f0000000-0000-0000-0000-000000000001',  -- tenant 1 (Block A, Unit 1)
     'd0000000-0000-0000-0000-000000000002',  -- different device (Meter 02)
     'primary_consumption_meter'
   );
@@ -198,7 +198,7 @@ EXCEPTION
 END;
 
 ASSERT caught,
-  'Overlap guard fn_household_device_no_overlap did NOT fire — overlapping primary_consumption_meter was accepted';
+  'Overlap guard fn_tenant_device_no_overlap did NOT fire — overlapping primary_consumption_meter was accepted';
 RAISE NOTICE 'OK: overlap guard fired correctly (overlapping primary_consumption_meter rejected)';
 END;
 $$;

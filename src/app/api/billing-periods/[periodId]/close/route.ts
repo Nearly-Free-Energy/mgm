@@ -16,8 +16,8 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * (issue #5).
  *
  * Closing is an explicit operator gesture, never automatic. The response
- * carries the unresolved-household summary: when households have no bill in
- * the period, the first call returns 409 `billing_unresolved_households`
+ * carries the unresolved-tenant summary: when tenants have no bill in
+ * the period, the first call returns 409 `billing_unresolved_tenants`
  * and the operator must confirm explicitly (`{ confirmed: true }`) to close
  * anyway. Corrections after closure stay controlled and audited: usage edits
  * reject closed periods (`period_closed`) while regeneration is preserved

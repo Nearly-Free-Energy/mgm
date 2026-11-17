@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { announceNavigationStart } from "@/components/ui/navigation-progress";
 import { NavSpinner } from "@/components/ui/nav-spinner";
 
-export type HierarchyKind = "Organization" | "Community" | "Microgrid" | "Edge" | "Household";
+export type HierarchyKind = "Organization" | "Community" | "Microgrid" | "Edge" | "Tenant";
 
 export type HierarchyLevel = {
   kind: HierarchyKind;

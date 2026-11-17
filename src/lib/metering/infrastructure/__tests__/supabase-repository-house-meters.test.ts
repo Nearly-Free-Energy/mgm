@@ -1,7 +1,7 @@
 // getHouseMeterIds against a recording fake of the Supabase query builder:
 // which filters it sends (the links in force on the day read, half-open as
 // 00058 defines them), and that a failed read throws rather than looking
-// like a site without household meters.
+// like a site without tenant meters.
 import { describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseMeteringRepository } from "../supabase-repository";
@@ -38,14 +38,14 @@ describe("createSupabaseMeteringRepository.getHouseMeterIds", () => {
     const { supabase, calls } = fakeSupabase({
       edges: ok([{ id: "e-1" }]),
       devices: ok([{ id: "d-1" }, { id: "d-2" }]),
-      household_devices: ok([{ device_id: "d-1" }, { device_id: "d-1" }, { device_id: "d-2" }]),
+      tenant_devices: ok([{ device_id: "d-1" }, { device_id: "d-1" }, { device_id: "d-2" }]),
     });
     const ids = await createSupabaseMeteringRepository(supabase).getHouseMeterIds(
       "mg-1",
       "2026-11-01"
     );
     expect(ids).toEqual(["d-1", "d-2"]);
-    const links = calls.find((c) => c.table === "household_devices");
+    const links = calls.find((c) => c.table === "tenant_devices");
     expect(links?.steps).toEqual([
       ["select", "device_id"],
       ["in", "device_id", ["d-1", "d-2"]],
@@ -75,11 +75,11 @@ describe("createSupabaseMeteringRepository.getHouseMeterIds", () => {
     const { supabase } = fakeSupabase({
       edges: ok([{ id: "e-1" }]),
       devices: ok([{ id: "d-1" }]),
-      household_devices: { data: null, error: { code: "42501", message: "permission denied" } },
+      tenant_devices: { data: null, error: { code: "42501", message: "permission denied" } },
     });
     await expect(
       createSupabaseMeteringRepository(supabase).getHouseMeterIds("mg-1", "2026-11-01")
-    ).rejects.toThrow("Could not read household meter links: permission denied (42501)");
+    ).rejects.toThrow("Could not read tenant meter links: permission denied (42501)");
   });
 
   it("throws when the edge or device read fails", async () => {

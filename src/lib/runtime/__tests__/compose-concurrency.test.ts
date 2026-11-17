@@ -158,7 +158,7 @@ vi.mock("@/lib/metering/openems-provider", () => ({
 // runs on and reads once through the metering source it was handed, so the
 // client that source is bound to lands in `providerReads` too.
 //
-// The real engine awaits its period, rate-schedule and household reads before
+// The real engine awaits its period, rate-schedule and tenant reads before
 // it asks that source for readings (billing/generate.ts), so concurrent runs
 // interleave between the source being bound and being used. The fake waits
 // as well, longest for A, so the run that started first reads last. If the

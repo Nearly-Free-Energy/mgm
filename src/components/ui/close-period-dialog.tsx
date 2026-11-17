@@ -38,9 +38,9 @@
 //   destructive tokens (genuine failure state).
 //
 // Un-billed warning (#167):
-//   When `unfilledHouseholdNames` is non-empty, the dialog renders a
+//   When `unfilledTenantNames` is non-empty, the dialog renders a
 //   warning-toned banner above the totals grid listing the un-metered
-//   households whose `usage_kwh` is still NULL. Closing is permitted —
+//   tenants whose `usage_kwh` is still NULL. Closing is permitted —
 //   Aaron may genuinely want to bill nothing for a tenant — but the
 //   gesture becomes more deliberate: the confirm button label flips to
 //   "Close anyway" and the checkbox copy gains an explicit acknowledgement
@@ -71,12 +71,12 @@ export interface ClosePeriodDialogProps {
   onConfirm: () => Promise<void>;
   /** Called when the user clicks "Export CSV for URA" in the closed state. */
   onExportCsv?: () => void;
-  /** Display names of un-metered households whose `usage_kwh` is still NULL.
+  /** Display names of un-metered tenants whose `usage_kwh` is still NULL.
    *  When non-empty, the dialog renders a warning banner above the totals
    *  grid, flips the confirm button label to "Close anyway", and appends
    *  an acknowledgement of the un-billed count to the checkbox copy.
    *  Default: `[]` (no banner, original "Close period" behavior). */
-  unfilledHouseholdNames?: string[];
+  unfilledTenantNames?: string[];
 }
 
 type Phase = 2 | 2.5 | 3 | "E";
@@ -89,7 +89,7 @@ export function ClosePeriodDialog({
   grandTotal,
   onConfirm,
   onExportCsv,
-  unfilledHouseholdNames = [],
+  unfilledTenantNames = [],
 }: ClosePeriodDialogProps) {
   const [phase, setPhase] = React.useState<Phase>(2);
   const [confirmed, setConfirmed] = React.useState(false);
@@ -130,11 +130,11 @@ export function ClosePeriodDialog({
   // #167 — un-billed warning derivations. Only relevant in the pre-close
   // phases (2 / 2.5 / E); the closed surface intentionally drops the
   // banner since the period is now committed and listing the un-billed
-  // households after-the-fact would be misleading.
-  const unfilledCount = unfilledHouseholdNames.length;
+  // tenants after-the-fact would be misleading.
+  const unfilledCount = unfilledTenantNames.length;
   const hasUnfilled = unfilledCount > 0 && phase !== 3;
-  const unfilledHouseholdsWord = unfilledCount === 1 ? "household" : "households";
-  const unfilledNamesPreview = unfilledHouseholdNames.slice(0, 5).join(", ");
+  const unfilledTenantsWord = unfilledCount === 1 ? "tenant" : "tenants";
+  const unfilledNamesPreview = unfilledTenantNames.slice(0, 5).join(", ");
   const unfilledNamesOverflow = unfilledCount > 5 ? unfilledCount - 5 : 0;
   const confirmButtonLabel = hasUnfilled ? "Close anyway" : "Close period";
 
@@ -190,7 +190,7 @@ export function ClosePeriodDialog({
                 className="rounded-md bg-warning-muted px-3 py-2.5 text-dense text-warning-fg"
               >
                 <div className="font-semibold">
-                  {unfilledCount} {unfilledHouseholdsWord} still un-billed
+                  {unfilledCount} {unfilledTenantsWord} still un-billed
                 </div>
                 <div className="mt-0.5">
                   {unfilledNamesPreview}
@@ -231,7 +231,7 @@ export function ClosePeriodDialog({
                   I have copied the tier values into URA&apos;s portal and confirm these
                   totals are what I will file.
                   {hasUnfilled
-                    ? ` (including ${unfilledCount} un-billed ${unfilledHouseholdsWord})`
+                    ? ` (including ${unfilledCount} un-billed ${unfilledTenantsWord})`
                     : ""}
                 </span>
               </label>

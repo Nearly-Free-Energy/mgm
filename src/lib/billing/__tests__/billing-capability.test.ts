@@ -206,7 +206,7 @@ describe("BillingCapability", () => {
     expect(result).toMatchObject({ ok: false, status: 422, code: "billing_invalid_range" });
   });
 
-  it("requires explicit confirmation to close with unresolved households", async () => {
+  it("requires explicit confirmation to close with unresolved tenants", async () => {
     const close = vi.fn(async () => ({
       row: {
         id: PERIOD_ID,
@@ -232,7 +232,7 @@ describe("BillingCapability", () => {
           lineItemCount: 1,
           totalAmount: 100,
           unresolved: [
-            { householdId: "hh-1", householdName: "No Bill", reason: "No bill generated." },
+            { tenantId: "hh-1", tenantName: "No Bill", reason: "No bill generated." },
           ],
         }),
         closeBillingPeriod: close,
@@ -242,8 +242,8 @@ describe("BillingCapability", () => {
     expect(unconfirmed).toMatchObject({
       ok: false,
       status: 409,
-      code: "billing_unresolved_households",
-      unresolved: [{ householdId: "hh-1", householdName: "No Bill", reason: "No bill generated." }],
+      code: "billing_unresolved_tenants",
+      unresolved: [{ tenantId: "hh-1", tenantName: "No Bill", reason: "No bill generated." }],
     });
     expect(close).not.toHaveBeenCalled();
 
@@ -311,35 +311,35 @@ describe("BillingCapability", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview" }));
   });
 
-  it("passes revertToEdgeHouseholdIds to the generation delegate", async () => {
+  it("passes revertToEdgeTenantIds to the generation delegate", async () => {
     const HH = "990e8400-e29b-41d4-a716-446655440000";
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
     const result = await capability.generateBills({
       billingPeriodId: PERIOD_ID,
-      householdIds: [HH],
-      revertToEdgeHouseholdIds: [HH],
+      tenantIds: [HH],
+      revertToEdgeTenantIds: [HH],
     });
     expect(result).toMatchObject({ ok: true });
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "write", revertToEdgeHouseholdIds: [HH] })
+      expect.objectContaining({ mode: "write", revertToEdgeTenantIds: [HH] })
     );
   });
 
-  it("rejects a household in both manualReadings and revertToEdgeHouseholdIds", async () => {
+  it("rejects a tenant in both manualReadings and revertToEdgeTenantIds", async () => {
     const HH = "990e8400-e29b-41d4-a716-446655440000";
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
     const result = await capability.generateBills({
       billingPeriodId: PERIOD_ID,
-      manualReadings: [{ householdId: HH, startKwh: 1, endKwh: 2 }],
-      revertToEdgeHouseholdIds: [HH],
+      manualReadings: [{ tenantId: HH, startKwh: 1, endKwh: 2 }],
+      revertToEdgeTenantIds: [HH],
     });
     expect(result).toMatchObject({
       ok: false,
       status: 400,
       code: "billing_invalid_body",
-      field: "revertToEdgeHouseholdIds",
+      field: "revertToEdgeTenantIds",
     });
     expect(run).not.toHaveBeenCalled();
   });

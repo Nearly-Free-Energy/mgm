@@ -10,7 +10,7 @@
  *
  * Path chain:
  *   lineItem → billing_periods(microgrid_id, start_date, end_date)
- *            → microgrids(id) → households(display_name)
+ *            → microgrids(id) → tenants(display_name)
  *
  * Permission:
  *   - super_admin AND org_manager may trigger 'unpaid' / 'paid' transitions
@@ -86,7 +86,7 @@ type LineItemScopeRow = {
         end_date: string;
       }
     | null;
-  households: { display_name: string } | null;
+  tenants: { display_name: string } | null;
 };
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ export async function PATCH(
 
   const supabase = await createClient();
 
-  // 2. Resolve lineItem → period + household in one query.
+  // 2. Resolve lineItem → period + tenant in one query.
   //    RLS applies: RLS-hidden row surfaces as null → 404.
   const { data: scoped, error: scopedErr } = await supabase
     .from("billing_line_items")
@@ -134,7 +134,7 @@ export async function PATCH(
         start_date,
         end_date
       ),
-      households!inner (
+      tenants!inner (
         display_name
       )
     `,

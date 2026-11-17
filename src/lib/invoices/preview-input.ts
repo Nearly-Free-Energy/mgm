@@ -7,7 +7,7 @@
  *
  *   - Synthetic invoice number `${invoice_prefix || 'PREVIEW'}-{year}-PREVIEW`.
  *   - Synthetic line item with usage spread across tiers.
- *   - Synthetic household + meter device with stable display names.
+ *   - Synthetic tenant + meter device with stable display names.
  *   - Real `ratesSchedule` from the community's first microgrid; if no
  *     microgrid exists yet, a fake 1-tier schedule.
  *
@@ -27,7 +27,7 @@ import type {
   BillingLineItem,
   Community,
   Device,
-  Household,
+  Tenant,
   Organization,
   RateSchedule,
 } from "@/lib/types/domain";
@@ -174,9 +174,9 @@ export function assembleSyntheticPreviewInput({
     entered_at: now.toISOString(),
   } as unknown as BillingLineItem;
 
-  const household = {
+  const tenant = {
     id: "00000000-0000-0000-0000-000000000001",
-    display_name: "Sample Household",
+    display_name: "Sample Tenant",
     account_number: "ACC-0001",
     customer_type: "residential",
     meter_serial: "SM-PREVIEW-0001",
@@ -186,7 +186,7 @@ export function assembleSyntheticPreviewInput({
     address_line2: null,
     address_city: "Kampala",
     address_country: "Uganda",
-  } as unknown as Household;
+  } as unknown as Tenant;
 
   const meterDevice = {
     id: "00000000-0000-0000-0000-000000000002",
@@ -205,7 +205,7 @@ export function assembleSyntheticPreviewInput({
 
   return {
     lineItem,
-    household,
+    tenant,
     community: {
       id: community.id,
       name: community.name,

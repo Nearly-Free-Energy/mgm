@@ -69,7 +69,7 @@ describe("POST /api/metering/readings", () => {
     const rows = [
       {
         deviceId: "dev-1",
-        householdId: null,
+        tenantId: null,
         usageKwh: 12.5,
         source: "openems",
         readAt: "2026-10-01T00:00:00Z",
@@ -84,7 +84,7 @@ describe("POST /api/metering/readings", () => {
     expect(mocks.getConsumption).toHaveBeenCalledWith({
       microgrid_id: MG_ID,
       device_ids: undefined,
-      household_ids: undefined,
+      tenant_ids: undefined,
       start_date: "2026-09-01",
       end_date: "2026-09-30",
       timezone: undefined,

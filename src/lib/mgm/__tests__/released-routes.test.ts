@@ -21,20 +21,20 @@ describe("isReleasedRoute", () => {
     "/communities",
     "/microgrids",
     "/microgrids/abc",
-    "/microgrids/abc/setup/households",
+    "/microgrids/abc/setup/tenants",
     "/settings/plugins",
     "/api/mgm/bootstrap",
     "/api/communities",
     "/api/microgrids/abc",
-    "/api/households/with-meter",
-    "/api/households/abc",
+    "/api/tenants/with-meter",
+    "/api/tenants/abc",
     // Release 2 pages.
     "/microgrids/abc/setup",
     "/microgrids/abc/setup/openems-backend",
     "/microgrids/abc/setup/edges",
     "/microgrids/abc/setup/edges/edge-1",
     "/microgrids/abc/setup/edges/shared",
-    "/microgrids/abc/setup/households/hh-1",
+    "/microgrids/abc/setup/tenants/hh-1",
     // Release 2 APIs.
     "/api/microgrids/abc/openems-backend",
     "/api/microgrids/abc/openems-backend/discover",
@@ -47,7 +47,7 @@ describe("isReleasedRoute", () => {
     "/api/devices",
     "/api/devices/dev-1",
     "/api/metering/readings",
-    "/api/households/hh-1/assignments",
+    "/api/tenants/hh-1/assignments",
     "/api/meter-readings/opening",
     // Release 3 pages.
     "/microgrids/abc/billing",
@@ -117,7 +117,8 @@ describe("isReleasedRoute", () => {
     "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",
     "/icons/manifest.webmanifest",
-    // The old tenants URL has no page and no released route; it stays a 404.
+    // The pre-#50 tenants URL has no page and no released route; it stays a
+    // 404. Tenants live under setup/tenants.
     "/microgrids/abc/tenants",
     // The GUI host releases one route at a time.
     "/api/gui",

@@ -16,10 +16,10 @@ import {
   updateMicrogridOperation,
 } from "./operations/microgrids";
 import {
-  createHouseholdOperation,
-  deleteHouseholdOperation,
-  updateHouseholdOperation,
-} from "./operations/households";
+  createTenantOperation,
+  deleteTenantOperation,
+  updateTenantOperation,
+} from "./operations/tenants";
 import {
   communityFailure,
   type CommunityManagementCapabilityContract,
@@ -30,7 +30,7 @@ import {
   type HierarchyScope,
   type OrganizationScope,
 } from "./types";
-import type { Community, Household, Microgrid } from "@/lib/types/domain";
+import type { Community, Tenant, Microgrid } from "@/lib/types/domain";
 
 export class CommunityManagementCapability
   implements CommunityManagementCapabilityContract
@@ -88,31 +88,31 @@ export class CommunityManagementCapability
     );
   }
 
-  async createHousehold(
+  async createTenant(
     input: unknown
-  ): Promise<CommunityManagementResult<{ household_id: string }>> {
+  ): Promise<CommunityManagementResult<{ tenant_id: string }>> {
     return (
       this.ensureActive() ??
-      createHouseholdOperation(this.repo, this.scope, input)
+      createTenantOperation(this.repo, this.scope, input)
     );
   }
 
-  async updateHousehold(
+  async updateTenant(
     id: string,
     input: unknown
-  ): Promise<CommunityManagementResult<Household>> {
+  ): Promise<CommunityManagementResult<Tenant>> {
     return (
       this.ensureActive() ??
-      updateHouseholdOperation(this.repo, this.scope, id, input)
+      updateTenantOperation(this.repo, this.scope, id, input)
     );
   }
 
-  async deleteHousehold(
+  async deleteTenant(
     id: string
   ): Promise<CommunityManagementResult<{ id: string }>> {
     return (
       this.ensureActive() ??
-      deleteHouseholdOperation(this.repo, this.scope, id)
+      deleteTenantOperation(this.repo, this.scope, id)
     );
   }
 
@@ -158,13 +158,13 @@ export class CommunityManagementCapability
       }
     }
 
-    if ("householdId" in hierarchyScope && hierarchyScope.householdId) {
-      const { data: household } = await this.repo.findHousehold(
-        hierarchyScope.householdId
+    if ("tenantId" in hierarchyScope && hierarchyScope.tenantId) {
+      const { data: tenant } = await this.repo.findTenant(
+        hierarchyScope.tenantId
       );
-      if (!household) return mismatch;
+      if (!tenant) return mismatch;
       const resolved = await this.repo.getMicrogridOrganization(
-        household.microgrid_id
+        tenant.microgrid_id
       );
       if (!resolved || resolved.orgId !== this.scope.organizationId) {
         return mismatch;

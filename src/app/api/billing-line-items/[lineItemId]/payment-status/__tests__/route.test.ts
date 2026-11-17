@@ -78,7 +78,7 @@ function makeScopeRow(paymentStatus: string) {
       start_date: "2026-03-01",
       end_date: "2026-03-31",
     },
-    households: { display_name: "Alice Mukasa" },
+    tenants: { display_name: "Alice Mukasa" },
   };
 }
 
@@ -89,7 +89,7 @@ function makeUpdatedRow(
   return {
     id: LINE_ITEM_ID,
     billing_period_id: "bp-1",
-    household_id: "hh-1",
+    tenant_id: "hh-1",
     total_amount: 12500,
     usage_kwh: 45.5,
     payment_status: paymentStatus,

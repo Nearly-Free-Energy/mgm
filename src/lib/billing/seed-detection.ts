@@ -1,5 +1,5 @@
 /**
- * seed-detection.ts — which households need a starting meter reading (#339).
+ * seed-detection.ts — which tenants need a starting meter reading (#339).
  *
  * Extracted from the billing-period page so it can be tested directly. It was
  * inline, and the first-ever-period case — the one both PM and Designer
@@ -16,24 +16,24 @@
  */
 
 export type SeedDetectionInput = {
-  /** Household id → its primary consumption meter's device id. */
-  deviceIdByHouseholdId: Record<string, string>;
-  /** Household id → whether an OpenEMS-backed reading is possible. */
-  edgeAvailableByHouseholdId: Record<string, boolean>;
+  /** Tenant id → its primary consumption meter's device id. */
+  deviceIdByTenantId: Record<string, string>;
+  /** Tenant id → whether an OpenEMS-backed reading is possible. */
+  edgeAvailableByTenantId: Record<string, boolean>;
   /** Device ids that already have a prior MGM-recorded `end_kwh`. */
   devicesWithPriorEnd: ReadonlySet<string>;
 };
 
 /**
- * Returns household id → needs a starting reading.
+ * Returns tenant id → needs a starting reading.
  *
- * A household needs one when its meter can be read by OpenEMS but MGM has no
+ * A tenant needs one when its meter can be read by OpenEMS but MGM has no
  * previous reading of that meter to continue from.
  *
  * ── First-ever period ────────────────────────────────────────────────────
  *
  * On a microgrid's first period `devicesWithPriorEnd` is empty, so EVERY
- * edge-available household is flagged. That is correct and deliberate: MGM
+ * edge-available tenant is flagged. That is correct and deliberate: MGM
  * cannot distinguish a new meter sitting at zero from an existing meter
  * sitting at 4,182, and guessing is precisely what produced #339. The cost is
  * one reading per meter, once, at setup, entered by someone standing where
@@ -47,11 +47,11 @@ export function computeSeedNeeded(
   input: SeedDetectionInput
 ): Record<string, boolean> {
   const out: Record<string, boolean> = {};
-  for (const [householdId, deviceId] of Object.entries(
-    input.deviceIdByHouseholdId
+  for (const [tenantId, deviceId] of Object.entries(
+    input.deviceIdByTenantId
   )) {
-    out[householdId] =
-      input.edgeAvailableByHouseholdId[householdId] === true &&
+    out[tenantId] =
+      input.edgeAvailableByTenantId[tenantId] === true &&
       !input.devicesWithPriorEnd.has(deviceId);
   }
   return out;

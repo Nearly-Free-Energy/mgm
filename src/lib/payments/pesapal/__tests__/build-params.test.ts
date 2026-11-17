@@ -2,9 +2,9 @@
  * Tests for buildOrderParamsFromLineItem — the "one bill, one payment link"
  * invariant. The Supabase client is mocked as a chain-builder so we can assert
  * that the function queries by line-item id (not by period) and that the
- * resulting amount/household/date range come from the single targeted row.
+ * resulting amount/tenant/date range come from the single targeted row.
  *
- * Adapted from PR #58. Schema change: joins `households` instead of `tenants`;
+ * Adapted from PR #58. Schema change: joins `tenants` instead of `tenants`;
  * `display_name` + `primary_email` + `primary_phone` replace `name`+`email`+`phone`.
  */
 
@@ -66,7 +66,7 @@ describe("buildOrderParamsFromLineItem", () => {
 
   const BASE_LINE_ITEM = {
     id: "li-A",
-    household_id: "household-A",
+    tenant_id: "tenant-A",
     total_amount: 12500,
     billing_period_id: "period-1",
     // The join returns the period as an object (PostgREST single-row join
@@ -74,8 +74,8 @@ describe("buildOrderParamsFromLineItem", () => {
     billing_periods: BASE_PERIOD,
   };
 
-  const HOUSEHOLD_A = {
-    id: "household-A",
+  const TENANT_A = {
+    id: "tenant-A",
     display_name: "Alice Mukasa",
     primary_email: "alice@example.com",
     primary_phone: "+256700000001",
@@ -87,9 +87,9 @@ describe("buildOrderParamsFromLineItem", () => {
     scripts = {};
   });
 
-  it("builds params from exactly one line item (amount = line item total, household = line item's household)", async () => {
+  it("builds params from exactly one line item (amount = line item total, tenant = line item's tenant)", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [{ data: HOUSEHOLD_A, error: null }];
+    scripts.tenants = [{ data: TENANT_A, error: null }];
 
     const { client, calls } = makeSupabaseMock(scripts);
     const result = await buildOrderParamsFromLineItem(client, "li-A");
@@ -101,8 +101,8 @@ describe("buildOrderParamsFromLineItem", () => {
       filters: { id: "li-A" },
     });
     expect(calls[1]).toEqual({
-      table: "households",
-      filters: { id: "household-A" },
+      table: "tenants",
+      filters: { id: "tenant-A" },
     });
 
     expect(result.amount).toBe(12500);
@@ -114,12 +114,12 @@ describe("buildOrderParamsFromLineItem", () => {
       last_name: "Mukasa",
     });
     expect(result.debug.lineItem).toEqual({ id: "li-A", total_amount: 12500 });
-    expect(result.debug.household).toEqual(HOUSEHOLD_A);
+    expect(result.debug.tenant).toEqual(TENANT_A);
   });
 
-  it("does NOT sum across siblings — a different line item with its own household is ignored", async () => {
+  it("does NOT sum across siblings — a different line item with its own tenant is ignored", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [{ data: HOUSEHOLD_A, error: null }];
+    scripts.tenants = [{ data: TENANT_A, error: null }];
 
     const { client } = makeSupabaseMock(scripts);
     const result = await buildOrderParamsFromLineItem(client, "li-A");
@@ -136,7 +136,7 @@ describe("buildOrderParamsFromLineItem", () => {
         error: null,
       },
     ];
-    scripts.households = [{ data: HOUSEHOLD_A, error: null }];
+    scripts.tenants = [{ data: TENANT_A, error: null }];
 
     const { client } = makeSupabaseMock(scripts);
     const result = await buildOrderParamsFromLineItem(client, "li-A");
@@ -156,7 +156,7 @@ describe("buildOrderParamsFromLineItem", () => {
         error: null,
       },
     ];
-    scripts.households = [{ data: HOUSEHOLD_A, error: null }];
+    scripts.tenants = [{ data: TENANT_A, error: null }];
 
     const { client } = makeSupabaseMock(scripts);
     const result = await buildOrderParamsFromLineItem(client, "li-A");
@@ -181,23 +181,23 @@ describe("buildOrderParamsFromLineItem", () => {
     });
   });
 
-  it("throws PESAPAL_HOUSEHOLD_NOT_FOUND when the household lookup fails", async () => {
+  it("throws PESAPAL_TENANT_NOT_FOUND when the tenant lookup fails", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [{ data: null, error: { message: "Not found" } }];
+    scripts.tenants = [{ data: null, error: { message: "Not found" } }];
 
     const { client } = makeSupabaseMock(scripts);
     await expect(
       buildOrderParamsFromLineItem(client, "li-A"),
     ).rejects.toMatchObject({
-      code: "PESAPAL_HOUSEHOLD_NOT_FOUND",
+      code: "PESAPAL_TENANT_NOT_FOUND",
     });
   });
 
-  it("throws PESAPAL_MISSING_CONTACT when the household has neither primary_email nor primary_phone", async () => {
+  it("throws PESAPAL_MISSING_CONTACT when the tenant has neither primary_email nor primary_phone", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [
+    scripts.tenants = [
       {
-        data: { ...HOUSEHOLD_A, primary_email: null, primary_phone: null },
+        data: { ...TENANT_A, primary_email: null, primary_phone: null },
         error: null,
       },
     ];
@@ -215,7 +215,7 @@ describe("buildOrderParamsFromLineItem", () => {
     scripts.billing_line_items = [
       { data: { ...BASE_LINE_ITEM, total_amount: 0 }, error: null },
     ];
-    scripts.households = [{ data: HOUSEHOLD_A, error: null }];
+    scripts.tenants = [{ data: TENANT_A, error: null }];
 
     const { client } = makeSupabaseMock(scripts);
     await expect(
@@ -223,10 +223,10 @@ describe("buildOrderParamsFromLineItem", () => {
     ).rejects.toBeInstanceOf(PesapalError);
   });
 
-  it("accepts a household with only a primary_phone (no primary_email)", async () => {
+  it("accepts a tenant with only a primary_phone (no primary_email)", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [
-      { data: { ...HOUSEHOLD_A, primary_email: null }, error: null },
+    scripts.tenants = [
+      { data: { ...TENANT_A, primary_email: null }, error: null },
     ];
 
     const { client } = makeSupabaseMock(scripts);
@@ -238,8 +238,8 @@ describe("buildOrderParamsFromLineItem", () => {
 
   it("splits a single-word display_name into firstName only", async () => {
     scripts.billing_line_items = [{ data: BASE_LINE_ITEM, error: null }];
-    scripts.households = [
-      { data: { ...HOUSEHOLD_A, display_name: "Madonna" }, error: null },
+    scripts.tenants = [
+      { data: { ...TENANT_A, display_name: "Madonna" }, error: null },
     ];
 
     const { client } = makeSupabaseMock(scripts);

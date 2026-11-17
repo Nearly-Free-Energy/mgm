@@ -78,12 +78,12 @@ const ROWS: Record<CoreEntityKind, RowSpec> = {
     href: (r) => `/microgrids/${r.microgrid_id}/setup/edges/${r.id}`,
   },
   device: { table: "devices", columns: "id, name, edge_id", parent: { kind: "edge", column: "edge_id" }, label: name },
-  household: {
-    table: "households",
+  tenant: {
+    table: "tenants",
     columns: "id, display_name, microgrid_id",
     parent: { kind: "microgrid", column: "microgrid_id" },
     label: (r) => r.display_name ?? "",
-    href: (r) => `/microgrids/${r.microgrid_id}/setup/households/${r.id}`,
+    href: (r) => `/microgrids/${r.microgrid_id}/setup/tenants/${r.id}`,
   },
   billingPeriod: {
     table: "billing_periods",

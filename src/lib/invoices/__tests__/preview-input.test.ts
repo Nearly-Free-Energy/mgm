@@ -95,7 +95,7 @@ describe("preview-input", () => {
     expect(out.billingPeriodEnd).toBe("2026-04-27T12:00:00.000Z");
     // Each entity exists.
     expect(out.lineItem).toBeDefined();
-    expect(out.household).toBeDefined();
+    expect(out.tenant).toBeDefined();
     expect(out.community).toBeDefined();
     expect(out.organization).toBeDefined();
     expect(out.ratesSchedule).toBeDefined();

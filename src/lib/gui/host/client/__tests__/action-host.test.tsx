@@ -1026,7 +1026,7 @@ describe("ActionHost with the kit's form", () => {
   });
 
   it.each([
-    ["warnings", { warnings: ["Households will see the new name."] }, "Households will see the new name."],
+    ["warnings", { warnings: ["Tenants will see the new name."] }, "Tenants will see the new name."],
     ["facts", { facts: [{ label: "Site", value: { t: "text" as const, text: "Old" } }] }, "Old"],
   ])("keeps the separate step when a confirm-level ceremony has %s", async (_, over, shownText) => {
     const ceremony = { type: "ceremony" as const, statement: "Rename?", facts: [], warnings: [], acknowledgements: [], ...over };

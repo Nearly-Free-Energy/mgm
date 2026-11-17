@@ -267,7 +267,7 @@ export function BillingPeriodList({
               A billing period defines the start and end dates you&apos;re
               invoicing for — typically one calendar month. When you close it,
               MGM snapshots meter readings and generates line items for every
-              household.
+              tenant.
             </>
           }
           cta={

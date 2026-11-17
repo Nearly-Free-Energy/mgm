@@ -274,7 +274,7 @@ export async function createTestUser(opts: {
 
 /**
  * Removes all test data inserted during the test run.
- * Deletes auth users by email (cascades to user_roles + household_users).
+ * Deletes auth users by email (cascades to user_roles + tenant_users).
  * Deletes orgs by ID (cascades to communities → microgrids → ... → billing_line_items).
  */
 export async function cleanupTestData(opts: {

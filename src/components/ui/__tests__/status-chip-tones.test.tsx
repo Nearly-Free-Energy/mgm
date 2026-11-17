@@ -13,11 +13,11 @@ const EXPECTED: Record<StatusKind, string> = {
   billingPeriod: "draft=warn* closed=success*",
   edge: "online=success* degraded=warn* offline=alert* stale=success* unknown=neutral*",
   edgeSource: "openems=brand modbus_direct=neutral mqtt=neutral rest_api=neutral",
-  household: "active=success* inactive=neutral* disputed=alert*",
-  householdCustomerType: "residential=neutral commercial=brand",
+  tenant: "active=success* inactive=neutral* disputed=alert*",
+  tenantCustomerType: "residential=neutral commercial=brand",
   deviceType:
     "consumption_meter=warn grid_meter=brand pv_meter=success battery=success inverter=brand ev_charger=brand other=neutral",
-  householdDeviceRole:
+  tenantDeviceRole:
     "primary_consumption_meter=warn secondary_meter=neutral battery=success solar=success ev_charger=brand other=neutral",
   meter: "linked=success* not_configured=warn*",
   meterType:

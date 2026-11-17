@@ -20,12 +20,12 @@ function action(plugin: MgmPluginName, id: Id, over: Partial<ActionDef> = {}): R
   const def = {
     id,
     title: id,
-    target: "household",
+    target: "tenant",
     input: z.object({}),
     inputVersion: 1,
-    path: "/api/households/[id]/assignments",
+    path: "/api/tenants/[id]/assignments",
     method: "POST",
-    bind: { path: { id: "household" } },
+    bind: { path: { id: "tenant" } },
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
@@ -48,7 +48,7 @@ const close = action("billing", "billing.close", {
 
 const VIEW = { plugin: "billing", def: { id: "billing.periods", kind: "collection" } } as unknown as RegisteredView;
 
-function loaded(rows: { id: string; household?: string; actions?: ActionLink[] }[], actions: ActionLink[] = []) {
+function loaded(rows: { id: string; tenant?: string; actions?: ActionLink[] }[], actions: ActionLink[] = []) {
   return {
     title: "Periods",
     entity: MG,
@@ -58,7 +58,7 @@ function loaded(rows: { id: string; household?: string; actions?: ActionLink[] }
       rows: rows.map((r) => ({
         id: r.id,
         entity: { kind: "billingPeriod", id: P1, label: "March" },
-        ...(r.household ? { related: [{ kind: "household", id: r.household, label: r.id }] } : {}),
+        ...(r.tenant ? { related: [{ kind: "tenant", id: r.tenant, label: r.id }] } : {}),
         cells: {},
         actions: r.actions ?? [],
       })),
@@ -166,12 +166,12 @@ describe("resolveActions: the view's own links", () => {
     const note = action("billing", "billing.note", {
       target: "billingPeriod",
       path: "/api/billing-periods/[id]",
-      bind: { path: { id: "billingPeriod" }, body: { household_id: "household" } },
-      input: z.object({ note: z.string(), household_id: z.string(), confirmation: z.unknown().optional() }),
+      bind: { path: { id: "billingPeriod" }, body: { tenant_id: "tenant" } },
+      input: z.object({ note: z.string(), tenant_id: z.string(), confirmation: z.unknown().optional() }),
     });
     const { m } = context([note]);
-    const prefill = { note: "n", confirmation: "CLOSE", household_id: "other", extra: 1 };
-    const link: ActionLink = { action: "billing.note", params: { id: P1, household_id: H1 }, prefill };
+    const prefill = { note: "n", confirmation: "CLOSE", tenant_id: "other", extra: 1 };
+    const link: ActionLink = { action: "billing.note", params: { id: P1, tenant_id: H1 }, prefill };
     const out = await resolveActions(loaded([], [link]), m);
     expect(out.actions[0].prefill).toEqual({ note: "n" });
   });
@@ -239,7 +239,7 @@ describe("resolveActions: the view's own links", () => {
     states.set("metering", { ok: false, status: 409, code: "metering_disabled", message: "Metering is disabled." });
     const out = await resolveActions(
       loaded(
-        [{ id: "r1", household: H1 }],
+        [{ id: "r1", tenant: H1 }],
         [
           { action: "billing.close", params: { id: P1 } },
           { action: "metering.assign", params: { id: H1 } },
@@ -258,7 +258,7 @@ describe("resolveActions: the view's own links", () => {
   it("disables an action whose plugin state cannot be read", async () => {
     const { m, gate } = context([action("metering", "metering.assign")]);
     gate.mockRejectedValueOnce(new Error("db down"));
-    const out = await resolveActions(loaded([{ id: "r1", household: H1 }]), m);
+    const out = await resolveActions(loaded([{ id: "r1", tenant: H1 }]), m);
     const rows = out.kind === "collection" ? out.body.rows : [];
     expect(rows[0].actions).toEqual([
       {
@@ -275,7 +275,7 @@ describe("resolveActions: the view's own links", () => {
   it("does not change the loader's model", async () => {
     const { m } = context([close, action("metering", "metering.assign")]);
     const links: ActionLink[] = [{ action: "billing.close", params: { id: P1 }, prefill: { note: "n" } }];
-    const model = loaded([{ id: "r1", household: H1 }], links);
+    const model = loaded([{ id: "r1", tenant: H1 }], links);
     const copy = structuredClone(model);
     const out = await resolveActions(model, m);
     expect(model).toEqual(copy);
@@ -294,8 +294,8 @@ describe("resolveActions: availability", () => {
     ]);
     const out = await resolveActions(
       loaded([
-        { id: "r1", household: H1 },
-        { id: "r2", household: H2 },
+        { id: "r1", tenant: H1 },
+        { id: "r2", tenant: H2 },
       ]),
       m,
     );
@@ -322,7 +322,7 @@ describe("resolveActions: availability", () => {
       throw new Error("secret detail");
     });
     const { m } = context([action("metering", "metering.assign", { available })]);
-    const out = await resolveActions(loaded([{ id: "r1", household: H1 }]), m);
+    const out = await resolveActions(loaded([{ id: "r1", tenant: H1 }]), m);
     const rows = out.kind === "collection" ? out.body.rows : [];
     expect(rows[0].actions[0]).toMatchObject({ enabled: false, reason: UNCHECKED_REASON });
     expect(JSON.stringify(out)).not.toContain("secret detail");
@@ -334,8 +334,8 @@ describe("resolveActions: availability", () => {
     const { m } = context([action("metering", "metering.assign", { available })]);
     const out = await resolveActions(
       loaded([
-        { id: "r1", household: H1 },
-        { id: "r2", household: H2 },
+        { id: "r1", tenant: H1 },
+        { id: "r2", tenant: H2 },
       ]),
       m,
     );
@@ -347,14 +347,14 @@ describe("resolveActions: availability", () => {
     const available = vi.fn<Available>(async () => ({ [H1]: true }));
     const assign = action("metering", "metering.assign", {
       path: "/api/microgrids/[mg]/edges/register",
-      bind: { path: { mg: "microgrid" }, body: { household_id: "household" } },
+      bind: { path: { mg: "microgrid" }, body: { tenant_id: "tenant" } },
       available,
     });
     const { m } = context([assign]);
-    const out = await resolveActions(loaded([{ id: "r1", household: H1 }]), m);
+    const out = await resolveActions(loaded([{ id: "r1", tenant: H1 }]), m);
     expect(available.mock.calls[0][1]).toEqual([H1]);
     const rows = out.kind === "collection" ? out.body.rows : [];
-    expect(rows[0].actions[0]).toMatchObject({ params: { mg: MG.id, household_id: H1 }, enabled: true });
+    expect(rows[0].actions[0]).toMatchObject({ params: { mg: MG.id, tenant_id: H1 }, enabled: true });
   });
 
   it("gives every call one shared budget of 1,000 ms, and shows the late ones unchecked", async () => {
@@ -370,7 +370,7 @@ describe("resolveActions: availability", () => {
     ]);
     let done = false;
     const pending = resolveActions(
-      loaded([{ id: "r1", household: H1 }], [{ action: "billing.close", params: { id: P1 } }]),
+      loaded([{ id: "r1", tenant: H1 }], [{ action: "billing.close", params: { id: P1 } }]),
       m,
     ).then((value) => {
       done = true;
@@ -394,7 +394,7 @@ describe("resolveActions: availability", () => {
     const assign = action("metering", "metering.assign", { available });
     const off = context([assign]);
     off.states.set("metering", { ok: false, status: 503, code: "metering_gate_unavailable", message: "unreadable" });
-    const offOut = await resolveActions(loaded([{ id: "r1", household: H1 }]), off.m);
+    const offOut = await resolveActions(loaded([{ id: "r1", tenant: H1 }]), off.m);
     expect(available).not.toHaveBeenCalled();
     const offRows = offOut.kind === "collection" ? offOut.body.rows : [];
     expect(offRows[0].actions[0]).toMatchObject({
@@ -408,7 +408,7 @@ describe("resolveActions: availability", () => {
       vi.fn(async () => ({}) as SupabaseClient),
     );
     const installation = context([assign], { organizationId: null, gate: null, ctx });
-    const out = await resolveActions(loaded([{ id: "r1", household: H1 }]), installation.m);
+    const out = await resolveActions(loaded([{ id: "r1", tenant: H1 }]), installation.m);
     expect(available).not.toHaveBeenCalled();
     const rows = out.kind === "collection" ? out.body.rows : [];
     expect(rows[0].actions[0]).toMatchObject({ enabled: false, reason: UNCHECKED_REASON });

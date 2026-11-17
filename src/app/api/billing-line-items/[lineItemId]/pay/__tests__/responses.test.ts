@@ -2,7 +2,7 @@
  * What a bill's payment link answers, response by response: status,
  * Location, Retry-After, Cache-Control, Content-Type, the order of the id
  * check, the rate limit and the first database read, and the audit lines.
- * Bills already sent to households embed this URL, so none of these may
+ * Bills already sent to tenants embed this URL, so none of these may
  * change without a ticket (the route's header). The pages' wording and
  * headers are pinned in the second half.
  */

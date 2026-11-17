@@ -36,7 +36,7 @@ let mockPeriodResult: { data: { id: string } | null; error: unknown } = {
 
 type AuditRow = Record<string, unknown>;
 type PERow = Record<string, unknown>;
-type LineItemHHRow = { id: string; households: { display_name: string } | null };
+type LineItemHHRow = { id: string; tenants: { display_name: string } | null };
 type DirectoryRow = {
   user_id: string;
   email: string | null;
@@ -189,7 +189,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         event_type: "line_item_regenerated",
         actor_user_id: "11111111-1111-4111-8111-111111111111",
         created_at: "2026-04-25T12:00:00Z",
-        details: { household_name: "HH-A", new_total_amount: 5000 },
+        details: { tenant_name: "HH-A", new_total_amount: 5000 },
       },
     ];
     mockPeRows = [
@@ -205,14 +205,14 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         billing_line_items: {
           billing_period_id: PERIOD_ID,
           payment_notes: "M-Pesa #123",
-          households: { display_name: "HH-A" },
+          tenants: { display_name: "HH-A" },
         },
       },
     ];
     mockLineItemHHRows = [
       {
         id: "bbbbbbbb-1111-4111-8111-111111111111",
-        households: { display_name: "HH-A" },
+        tenants: { display_name: "HH-A" },
       },
     ];
     mockDirectoryRows = [
@@ -246,7 +246,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
       "audit:aaaaaaaa-1111-4111-8111-111111111111"
     );
     expect(json.entries[1].eventType).toBe("line_item_regenerated");
-    expect(json.entries[1].householdName).toBe("HH-A");
+    expect(json.entries[1].tenantName).toBe("HH-A");
   });
 
   it("payment_events source='generate_link' maps to 'payment_link_generated'", async () => {
@@ -263,7 +263,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         billing_line_items: {
           billing_period_id: PERIOD_ID,
           payment_notes: null,
-          households: { display_name: "HH-A" },
+          tenants: { display_name: "HH-A" },
         },
       },
     ];
@@ -285,7 +285,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         event_type: "line_item_generated",
         actor_user_id: "22222222-2222-4222-8222-222222222222",
         created_at: "2026-04-25T10:00:00Z",
-        details: { household_name: "HH-X" },
+        details: { tenant_name: "HH-X" },
       },
     ];
     mockDirectoryRows = [
@@ -313,7 +313,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         event_type: "line_item_generated",
         actor_user_id: "33333333-3333-4333-8333-333333333333",
         created_at: "2026-04-25T10:00:00Z",
-        details: { household_name: "HH-X" },
+        details: { tenant_name: "HH-X" },
       },
     ];
     // user_directory returns no row for the super_admin actor (RLS hides them
@@ -330,7 +330,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
     );
   });
 
-  it("audit row with deleted line item falls back to details.household_name snapshot", async () => {
+  it("audit row with deleted line item falls back to details.tenant_name snapshot", async () => {
     mockAuditRows = [
       {
         id: "aaaaaaaa-5555-4111-8111-111111111111",
@@ -339,7 +339,7 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
         event_type: "line_item_regenerated",
         actor_user_id: null,
         created_at: "2026-04-25T10:00:00Z",
-        details: { household_name: "HH-Snapshot", new_total_amount: 0 },
+        details: { tenant_name: "HH-Snapshot", new_total_amount: 0 },
       },
     ];
     const { GET } = await import("../route");
@@ -347,6 +347,26 @@ describe("GET /api/billing-periods/[periodId]/audit-log (#173 BC1)", () => {
       params: Promise.resolve({ periodId: PERIOD_ID }),
     });
     const json = await res.json();
-    expect(json.entries[0].householdName).toBe("HH-Snapshot");
+    expect(json.entries[0].tenantName).toBe("HH-Snapshot");
+  });
+
+  it("reads the household_name snapshot of a row written before the tenants rename", async () => {
+    mockAuditRows = [
+      {
+        id: "aaaaaaaa-6666-4111-8111-111111111111",
+        billing_period_id: PERIOD_ID,
+        billing_line_item_id: null,
+        event_type: "line_item_regenerated",
+        actor_user_id: null,
+        created_at: "2026-04-25T10:00:00Z",
+        details: { household_name: "HH-Before-Rename", new_total_amount: 0 },
+      },
+    ];
+    const { GET } = await import("../route");
+    const res = await GET(makeGetRequest(), {
+      params: Promise.resolve({ periodId: PERIOD_ID }),
+    });
+    const json = await res.json();
+    expect(json.entries[0].tenantName).toBe("HH-Before-Rename");
   });
 });

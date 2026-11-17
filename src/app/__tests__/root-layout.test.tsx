@@ -82,7 +82,7 @@ describe("RootLayout", () => {
 
   it("describes what the app does", () => {
     expect(metadata.description).toBe(
-      "Run community microgrids: households, meters, tariffs, bills and payments.",
+      "Run community microgrids: tenants, meters, tariffs, bills and payments.",
     );
   });
 

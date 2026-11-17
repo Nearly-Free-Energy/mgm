@@ -103,7 +103,7 @@ describe("runSearch", () => {
   it.each<[string, unknown]>([
     ["a search that throws", new Error(CANARY)],
     ["a hit extra", [hit(1, { phone: CANARY })]],
-    ["a hit of another kind than the search declares", [hit(1, { kind: "household", label: CANARY })]],
+    ["a hit of another kind than the search declares", [hit(1, { kind: "tenant", label: CANARY })]],
     ["a hit without an href", [{ kind: "microgrid", id: mg(1), label: CANARY }]],
     ["a label over its cap", [hit(1, { label: `${CANARY}${"x".repeat(300)}` })]],
     ["an id over its cap", [hit(1, { id: `${CANARY}${"x".repeat(200)}` })]],

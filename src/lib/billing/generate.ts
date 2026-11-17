@@ -3,33 +3,33 @@ import "server-only";
 /**
  * generate.ts — shared billing-line-item generation engine (#173, BC1).
  *
- * This module owns the per-household compute + (optionally) write loop that
+ * This module owns the per-tenant compute + (optionally) write loop that
  * used to live inline in `src/app/api/billing/generate/route.ts`. After BC1
  * three callers share it:
  *
  *   1. `POST /api/billing/generate` — bulk OR selective (mode='write').
- *      `householdIds`: undefined → all metered/un-metered households on the
+ *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
- *      `manualReadings`: per-household `{ startKwh, endKwh, reason? }`
+ *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
  *      overrides — implicit add to the processed set; the OpenEMS call is
- *      skipped for these households.
+ *      skipped for these tenants.
  *
- *      `revertToEdgeHouseholdIds`: households whose current manual row may
+ *      `revertToEdgeTenantIds`: tenants whose current manual row may
  *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
- *      that guard only; it does not add a household to the processed set.
+ *      that guard only; it does not add a tenant to the processed set.
  *
  *   2. `POST /api/billing/regenerate-preview` — same body, mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
  *   3. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
- *      edit. Internally resolves `householdIds: [<resolved>]` +
+ *      edit. Internally resolves `tenantIds: [<resolved>]` +
  *      `manualReadings: [<resolved>]` and calls with mode='write'.
  *
  * ── Write semantics (mode='write') ──────────────────────────────────────────
  *
- * Every household processed goes through `fn_record_line_item_with_audit`
- * (00029), which UPSERTs by (billing_period_id, household_id) — preserving
+ * Every tenant processed goes through `fn_record_line_item_with_audit`
+ * (00029), which UPSERTs by (billing_period_id, tenant_id) — preserving
  * payment_status / paid_at / paid_by_user_id / pesapal_order_id / payment_*
  * columns on UPDATE, so a regenerate doesn't clobber a paid row's audit
  * fields and doesn't cascade away its payment_events history. The function
@@ -40,27 +40,27 @@ import "server-only";
  *
  * ── Manual rows (Q5) ───────────────────────────────────────────────────────
  *
- * A household whose line item in this period already has
+ * A tenant whose line item in this period already has
  * `reading_source='manual'` is left untouched unless the request either
  * supplies a `manualReadings` entry for it (a new manual reading) or names
- * it in `revertToEdgeHouseholdIds` (switch back to OpenEMS). Otherwise:
+ * it in `revertToEdgeTenantIds` (switch back to OpenEMS). Otherwise:
  *
- *   - bulk run (`householdIds` undefined): the household is reported as
- *     `kind: 'kept'`. Refresh Readings re-reads every metered household, and
+ *   - bulk run (`tenantIds` undefined): the tenant is reported as
+ *     `kind: 'kept'`. Refresh Readings re-reads every metered tenant, and
  *     a saved manual reading is not a stale one — keeping it is the expected
  *     outcome, not a failure.
- *   - explicit `householdIds` naming it: reported as an error with
+ *   - explicit `tenantIds` naming it: reported as an error with
  *     `code: 'currently_manual'`, because the caller asked for that
- *     household specifically and did not get what it asked for.
+ *     tenant specifically and did not get what it asked for.
  *
- * Kept and refused households are not read from the metering provider.
+ * Kept and refused tenants are not read from the metering provider.
  * BC3's per-row "Switch back to edge data" is the path that sends
- * `revertToEdgeHouseholdIds`.
+ * `revertToEdgeTenantIds`.
  *
  * ── Cross-microgrid attack defense ─────────────────────────────────────────
  *
- * `manualReadings[].householdId` that resolves to a household NOT in the
- * period's microgrid is surfaced in `errors[]` with `code: 'unknown_household'`
+ * `manualReadings[].tenantId` that resolves to a tenant NOT in the
+ * period's microgrid is surfaced in `errors[]` with `code: 'unknown_tenant'`
  * and dropped before any RPC call. RLS would also reject the write, but
  * failing fast at the route is clearer + saves a round-trip.
  *
@@ -68,7 +68,7 @@ import "server-only";
  *
  * With service-role callers (via `/api/v1/*`), RLS does NOT backstop
  * the cross-microgrid check above — it is the SOLE defense against
- * cross-microgrid household submission. Do NOT delete on the assumption
+ * cross-microgrid tenant submission. Do NOT delete on the assumption
  * that RLS will catch it; RLS only fires for user-bound clients. See PR
  * #246 review + #250 ticket body for the original reasoning.
  */
@@ -95,7 +95,7 @@ import type { LineItemRegeneratedDetails } from "@/lib/types/billing-audit";
 export type GenerationMode = "write" | "preview";
 
 export type ManualReadingInput = {
-  householdId: string;
+  tenantId: string;
   startKwh: number;
   endKwh: number;
   reason?: string;
@@ -139,7 +139,7 @@ export type GenerationErrorCode =
   | "invalid_manual_reading"
   | "unmetered_no_manual"
   | "meter_assignment_continuity"
-  | "unknown_household"
+  | "unknown_tenant"
   /**
    * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
@@ -151,20 +151,20 @@ export type GenerationErrorCode =
    */
   | "needs_seed_reading";
 
-export type WrittenHouseholdResult = {
+export type WrittenTenantResult = {
   kind: "written";
-  householdId: string;
-  householdName: string;
+  tenantId: string;
+  tenantName: string;
   lineItem: BillingLineItem;
   previousTotalAmount: number | null;
   previousPaymentStatus: BillingLineItemPaymentStatus | null;
   previousReadingSource: ReadingSource | null;
 };
 
-export type PreviewHouseholdResult = {
+export type PreviewTenantResult = {
   kind: "preview";
-  householdId: string;
-  householdName: string;
+  tenantId: string;
+  tenantName: string;
   startKwh: number | null;
   endKwh: number | null;
   usageKwh: number;
@@ -175,44 +175,44 @@ export type PreviewHouseholdResult = {
   previousPaymentStatus: BillingLineItemPaymentStatus | null;
 };
 
-/** A currently-manual household that a bulk run left as it was (Q5). */
-export type KeptHouseholdResult = {
+/** A currently-manual tenant that a bulk run left as it was (Q5). */
+export type KeptTenantResult = {
   kind: "kept";
-  householdId: string;
-  householdName: string;
+  tenantId: string;
+  tenantName: string;
   readingSource: "manual";
 };
 
-export type ErrorHouseholdResult = {
+export type ErrorTenantResult = {
   kind: "error";
-  householdId: string;
-  householdName: string;
+  tenantId: string;
+  tenantName: string;
   error: string;
   code: GenerationErrorCode;
 };
 
-export type HouseholdResult =
-  | WrittenHouseholdResult
-  | PreviewHouseholdResult
-  | KeptHouseholdResult
-  | ErrorHouseholdResult;
+export type TenantResult =
+  | WrittenTenantResult
+  | PreviewTenantResult
+  | KeptTenantResult
+  | ErrorTenantResult;
 
 export type GenerationResult = {
-  results: HouseholdResult[];
+  results: TenantResult[];
 };
 
 export type RunGenerationParams = {
   supabase: SupabaseClient;
   periodId: string;
-  /** undefined = all households on the microgrid; `[]` = explicit no-op. */
-  householdIds?: string[];
-  /** Per-household reading overrides. Households here are implicitly added
+  /** undefined = all tenants on the microgrid; `[]` = explicit no-op. */
+  tenantIds?: string[];
+  /** Per-tenant reading overrides. Tenants here are implicitly added
    *  to the processed set. */
   manualReadings?: ManualReadingInput[];
-  /** Households whose current manual row may be replaced by an OpenEMS
-   *  reading. Lifts the manual-row guard only; does NOT add a household to
+  /** Tenants whose current manual row may be replaced by an OpenEMS
+   *  reading. Lifts the manual-row guard only; does NOT add a tenant to
    *  the processed set. */
-  revertToEdgeHouseholdIds?: string[];
+  revertToEdgeTenantIds?: string[];
   /** Operator-supplied starting readings, keyed by device (#339). */
   seedReadings?: SeedReadingInput[];
   mode: GenerationMode;
@@ -260,10 +260,10 @@ export function isRunGenerationFatal(
 
 // ── Internal types (kept private) ───────────────────────────────────────────
 
-type HouseholdRow = {
+type TenantRow = {
   id: string;
   display_name: string;
-  household_devices: {
+  tenant_devices: {
     role: string;
     effective_from?: string;
     effective_to?: string | null;
@@ -278,7 +278,7 @@ type HouseholdRow = {
 };
 
 type PriorItem = {
-  household_id: string;
+  tenant_id: string;
   total_amount: number;
   payment_status: BillingLineItemPaymentStatus;
   reading_source: ReadingSource;
@@ -308,7 +308,7 @@ type PriorItem = {
  *
  * Returns a `RunGenerationFatal` for whole-request errors (bad period, bad
  * status, RLS-hidden, OpenEMS misconfig). Returns a `GenerationResult` whose
- * `results` array is one entry per household (kind: 'written' | 'preview' |
+ * `results` array is one entry per tenant (kind: 'written' | 'preview' |
  * 'error').
  */
 export async function runGenerationFor(
@@ -317,19 +317,19 @@ export async function runGenerationFor(
   const { supabase, periodId, mode, actorUserId } = params;
   const actorKind = params.actorKind ?? "human";
   const actorRef = params.actorRef ?? null;
-  const householdIdsParam = params.householdIds;
+  const tenantIdsParam = params.tenantIds;
   const manualReadingsParam = params.manualReadings ?? [];
-  const revertToEdgeSet = new Set(params.revertToEdgeHouseholdIds ?? []);
-  // #339. Keyed by device, not household: a seed is a reading of a specific
-  // physical meter, and the same household can change meters.
+  const revertToEdgeSet = new Set(params.revertToEdgeTenantIds ?? []);
+  // #339. Keyed by device, not tenant: a seed is a reading of a specific
+  // physical meter, and the same tenant can change meters.
   const seedByDevice = new Map<string, SeedReadingInput>();
   for (const s of params.seedReadings ?? []) seedByDevice.set(s.deviceId, s);
 
   // ── 0. Empty-array short-circuit (AC3 explicit no-op) ─────────────────────
-  // `householdIds: []` AND `manualReadings: []` is a well-defined no-op.
+  // `tenantIds: []` AND `manualReadings: []` is a well-defined no-op.
   if (
-    householdIdsParam !== undefined &&
-    householdIdsParam.length === 0 &&
+    tenantIdsParam !== undefined &&
+    tenantIdsParam.length === 0 &&
     manualReadingsParam.length === 0
   ) {
     return { results: [] };
@@ -398,14 +398,14 @@ export async function runGenerationFor(
   }
   const rateSchedule = schedule as RateSchedule;
 
-  // ── 4. Fetch households on the period's microgrid (LEFT join) ─────────────
-  const { data: householdsRaw, error: householdsError } = await supabase
-    .from("households")
+  // ── 4. Fetch tenants on the period's microgrid (LEFT join) ─────────────
+  const { data: tenantsRaw, error: tenantsError } = await supabase
+    .from("tenants")
     .select(
       `
       id,
       display_name,
-      household_devices(
+      tenant_devices(
         role,
         ${params.requireEffectiveDatedAssignments ? "effective_from, effective_to," : ""}
         devices(
@@ -419,21 +419,21 @@ export async function runGenerationFor(
     `
     )
     .eq("microgrid_id", billingPeriod.microgrid_id)
-    .eq("household_devices.role", "primary_consumption_meter");
+    .eq("tenant_devices.role", "primary_consumption_meter");
 
-  if (householdsError) {
+  if (tenantsError) {
     return {
       kind: "fatal",
       status: 500,
       body: {
-        error: `Error fetching households: ${householdsError.message}`,
+        error: `Error fetching tenants: ${tenantsError.message}`,
       },
     };
   }
 
-  const householdsAll = (householdsRaw ?? []) as unknown as HouseholdRow[];
-  const householdNames = new Map<string, string>(
-    householdsAll.map((h) => [h.id, h.display_name])
+  const tenantsAll = (tenantsRaw ?? []) as unknown as TenantRow[];
+  const tenantNames = new Map<string, string>(
+    tenantsAll.map((h) => [h.id, h.display_name])
   );
 
   // The legacy path uses only its original relation columns. MGM review opts
@@ -443,15 +443,15 @@ export async function runGenerationFor(
     edgeOpenemsId: string;
     componentId: string;
   };
-  const householdToDevice = new Map<string, ResolvedDevice | null>();
-  const householdEndDevice = new Map<string, string>();
-  const householdAssignmentErrors = new Map<string, string>();
+  const tenantToDevice = new Map<string, ResolvedDevice | null>();
+  const tenantEndDevice = new Map<string, string>();
+  const tenantAssignmentErrors = new Map<string, string>();
 
-  for (const h of householdsAll) {
-    const primaryAssignments = h.household_devices.filter(
+  for (const h of tenantsAll) {
+    const primaryAssignments = h.tenant_devices.filter(
       (hd) => hd.role === "primary_consumption_meter"
     );
-    let primaryHD: HouseholdRow["household_devices"][number] | undefined =
+    let primaryHD: TenantRow["tenant_devices"][number] | undefined =
       primaryAssignments[0];
     if (params.requireEffectiveDatedAssignments && primaryAssignments.length > 0) {
       // A manually reconciled replacement period still belongs to the meter
@@ -464,7 +464,7 @@ export async function runGenerationFor(
             assignment.effective_to > billingPeriod.end_date)
       );
       if (endAssignment?.devices?.id) {
-        householdEndDevice.set(h.id, endAssignment.devices.id);
+        tenantEndDevice.set(h.id, endAssignment.devices.id);
       }
       // Assignments are half-open DATE ranges [effective_from, effective_to),
       // while billing_periods stores inclusive end dates. Historical links
@@ -491,14 +491,14 @@ export async function runGenerationFor(
         // evidence that it covered that period.
         primaryHD = undefined;
         if (params.allowUsageOnlyReadings) {
-          householdAssignmentErrors.set(
+          tenantAssignmentErrors.set(
             h.id,
             "No meter assignment covers this billing period; verify the historical meter and its effective dates or enter a manual reading."
           );
         }
       } else if (coveringAssignments.length !== 1) {
-        householdToDevice.set(h.id, null);
-        householdAssignmentErrors.set(
+        tenantToDevice.set(h.id, null);
+        tenantAssignmentErrors.set(
           h.id,
           "No single meter assignment covers the complete billing period; verify replacement boundaries and readings."
         );
@@ -508,7 +508,7 @@ export async function runGenerationFor(
       }
     }
     if (!primaryHD || !primaryHD.devices) {
-      householdToDevice.set(h.id, null);
+      tenantToDevice.set(h.id, null);
       continue;
     }
     const device = primaryHD.devices;
@@ -516,52 +516,52 @@ export async function runGenerationFor(
     if (!edge?.openems_edge_id || !device.openems_component_id) {
       // Metered link exists but config is incomplete — treat as misconfig
       // for the OpenEMS path. A `manualReadings` override still wins and
-      // routes the household through the manual path.
-      householdToDevice.set(h.id, null);
+      // routes the tenant through the manual path.
+      tenantToDevice.set(h.id, null);
       continue;
     }
-    householdToDevice.set(h.id, {
+    tenantToDevice.set(h.id, {
       deviceId: device.id,
       edgeOpenemsId: edge.openems_edge_id,
       componentId: device.openems_component_id,
     });
   }
 
-  // ── 4. Compute the processed household set ───────────────────────────────
-  // - undefined → all microgrid households
+  // ── 4. Compute the processed tenant set ───────────────────────────────
+  // - undefined → all microgrid tenants
   // - explicit list → use it, plus implicit add from manualReadings
   // - empty list (with no manualReadings) was caught above
-  const manualByHousehold = new Map<string, ManualReadingInput>();
+  const manualByTenant = new Map<string, ManualReadingInput>();
   for (const m of manualReadingsParam) {
-    manualByHousehold.set(m.householdId, m);
+    manualByTenant.set(m.tenantId, m);
   }
 
-  const microgridHouseholdIdSet = new Set(householdsAll.map((h) => h.id));
+  const microgridTenantIdSet = new Set(tenantsAll.map((h) => h.id));
 
   const baseSet =
-    householdIdsParam === undefined
-      ? new Set<string>(householdsAll.map((h) => h.id))
-      : new Set<string>(householdIdsParam);
+    tenantIdsParam === undefined
+      ? new Set<string>(tenantsAll.map((h) => h.id))
+      : new Set<string>(tenantIdsParam);
 
   // Implicit add from manualReadings.
-  for (const id of manualByHousehold.keys()) {
+  for (const id of manualByTenant.keys()) {
     baseSet.add(id);
   }
 
   // ── 4b. Cross-microgrid attack defense ────────────────────────────────────
-  // Any household id (from caller-supplied householdIds OR manualReadings)
-  // that is NOT in the period's microgrid → surface as 'unknown_household'
+  // Any tenant id (from caller-supplied tenantIds OR manualReadings)
+  // that is NOT in the period's microgrid → surface as 'unknown_tenant'
   // and drop. This closes the cross-org smuggling attack at the route.
-  const unknownHouseholdErrors: ErrorHouseholdResult[] = [];
+  const unknownTenantErrors: ErrorTenantResult[] = [];
   const processedSet = new Set<string>();
   for (const hid of baseSet) {
-    if (!microgridHouseholdIdSet.has(hid)) {
-      unknownHouseholdErrors.push({
+    if (!microgridTenantIdSet.has(hid)) {
+      unknownTenantErrors.push({
         kind: "error",
-        householdId: hid,
-        householdName: hid,
-        error: `Household ${hid} is not in this microgrid.`,
-        code: "unknown_household",
+        tenantId: hid,
+        tenantName: hid,
+        error: `Tenant ${hid} is not in this microgrid.`,
+        code: "unknown_tenant",
       });
       continue;
     }
@@ -580,28 +580,28 @@ export async function runGenerationFor(
       // entered_by_user_id, entered_at, manual_reason) are read for #218's
       // `previous_snapshot` audit-details capture — the RPC overwrites them
       // on UPSERT-UPDATE, so we must read them BEFORE calling the RPC.
-      "household_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason"
+      "tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason"
     )
     .eq("billing_period_id", periodId);
-  const existingByHousehold = new Map<string, PriorItem>();
+  const existingByTenant = new Map<string, PriorItem>();
   for (const r of (existingItemsRaw ?? []) as unknown as PriorItem[]) {
-    existingByHousehold.set(r.household_id, r);
+    existingByTenant.set(r.tenant_id, r);
   }
 
   // Q5: a currently-manual row the request neither re-enters nor reverts
-  // stays as it is. Decided here so those households are also left out of
+  // stays as it is. Decided here so those tenants are also left out of
   // the prior-reading and metering lookups below.
   const isGuardedManual = (hid: string): boolean =>
-    !manualByHousehold.has(hid) &&
-    existingByHousehold.get(hid)?.reading_source === "manual" &&
+    !manualByTenant.has(hid) &&
+    existingByTenant.get(hid)?.reading_source === "manual" &&
     !revertToEdgeSet.has(hid);
 
   // Prior-period device → last end_kwh (start_kwh derivation).
   const deviceIdsForLookup: string[] = [];
   for (const hid of processedSet) {
-    if (manualByHousehold.has(hid)) continue; // start/end come from override
+    if (manualByTenant.has(hid)) continue; // start/end come from override
     if (isGuardedManual(hid)) continue;
-    const dev = householdToDevice.get(hid);
+    const dev = tenantToDevice.get(hid);
     if (dev) deviceIdsForLookup.push(dev.deviceId);
   }
   const priorEndKwhMap = new Map<string, number>();
@@ -637,17 +637,17 @@ export async function runGenerationFor(
     }
   }
 
-  // ── 6. Resolve metering readings — only when at least one household needs them
-  const householdsNeedingMetering: string[] = [];
+  // ── 6. Resolve metering readings — only when at least one tenant needs them
+  const tenantsNeedingMetering: string[] = [];
   for (const hid of processedSet) {
-    if (manualByHousehold.has(hid)) continue;
+    if (manualByTenant.has(hid)) continue;
     if (isGuardedManual(hid)) continue;
-    const dev = householdToDevice.get(hid);
-    if (dev) householdsNeedingMetering.push(hid);
+    const dev = tenantToDevice.get(hid);
+    if (dev) tenantsNeedingMetering.push(hid);
   }
 
   let usageMap = new Map<string, number | null>();
-  if (householdsNeedingMetering.length > 0) {
+  if (tenantsNeedingMetering.length > 0) {
     if (!params.meteringProvider) {
       return {
         kind: "fatal",
@@ -659,8 +659,8 @@ export async function runGenerationFor(
       };
     }
 
-    const deviceConfigs: DeviceConfig[] = householdsNeedingMetering
-      .map((hid) => householdToDevice.get(hid))
+    const deviceConfigs: DeviceConfig[] = tenantsNeedingMetering
+      .map((hid) => tenantToDevice.get(hid))
       .filter((d): d is ResolvedDevice => Boolean(d))
       .map((d) => ({
         id: d.deviceId,
@@ -696,33 +696,33 @@ export async function runGenerationFor(
     }
   }
 
-  // ── 7. Per-household processing loop ──────────────────────────────────────
-  const results: HouseholdResult[] = [...unknownHouseholdErrors];
+  // ── 7. Per-tenant processing loop ──────────────────────────────────────
+  const results: TenantResult[] = [...unknownTenantErrors];
 
   for (const hid of processedSet) {
-    const householdName = householdNames.get(hid) ?? hid;
-    const prior = existingByHousehold.get(hid) ?? null;
-    const dev = householdToDevice.get(hid);
-    const manual = manualByHousehold.get(hid);
-    const assignmentError = householdAssignmentErrors.get(hid);
+    const tenantName = tenantNames.get(hid) ?? hid;
+    const prior = existingByTenant.get(hid) ?? null;
+    const dev = tenantToDevice.get(hid);
+    const manual = manualByTenant.get(hid);
+    const assignmentError = tenantAssignmentErrors.get(hid);
 
     // Q5: a manual row with no new manual reading and no explicit revert.
-    // `processedSet` only holds ids from `householdIds` or `manualReadings`
-    // when `householdIds` is given, so a guarded household there was named.
+    // `processedSet` only holds ids from `tenantIds` or `manualReadings`
+    // when `tenantIds` is given, so a guarded tenant there was named.
     if (isGuardedManual(hid)) {
-      if (householdIdsParam === undefined) {
+      if (tenantIdsParam === undefined) {
         results.push({
           kind: "kept",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           readingSource: "manual",
         });
         continue;
       }
       results.push({
         kind: "error",
-        householdId: hid,
-        householdName,
+        tenantId: hid,
+        tenantName,
         error:
           "Currently set to manual entry — use per-row regenerate to change.",
         code: "currently_manual",
@@ -744,8 +744,8 @@ export async function runGenerationFor(
       if (!Number.isFinite(manual.startKwh) || manual.startKwh < 0) {
         results.push({
           kind: "error",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           error: "startKwh must be a non-negative finite number.",
           code: "invalid_manual_reading",
         });
@@ -754,8 +754,8 @@ export async function runGenerationFor(
       if (!Number.isFinite(manual.endKwh) || manual.endKwh < 0) {
         results.push({
           kind: "error",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           error: "endKwh must be a non-negative finite number.",
           code: "invalid_manual_reading",
         });
@@ -764,8 +764,8 @@ export async function runGenerationFor(
       if (manual.endKwh < manual.startKwh) {
         results.push({
           kind: "error",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           error: "endKwh must be greater than or equal to startKwh.",
           code: "invalid_manual_reading",
         });
@@ -776,15 +776,15 @@ export async function runGenerationFor(
       usageKwh = endKwh - startKwh;
       readingSource = "manual";
       // Manual rows can have a device_id (BC2/BC3 toggle metered → manual)
-      // OR none (un-metered household). Preserve the metered link if there
+      // OR none (un-metered tenant). Preserve the metered link if there
       // is one — informational only; the manual reading is authoritative.
-      deviceId = dev?.deviceId ?? householdEndDevice.get(hid) ?? null;
+      deviceId = dev?.deviceId ?? tenantEndDevice.get(hid) ?? null;
       manualReason = manual.reason ?? null;
     } else if (assignmentError) {
       results.push({
         kind: "error",
-        householdId: hid,
-        householdName,
+        tenantId: hid,
+        tenantName,
         error: assignmentError,
         code: "meter_assignment_continuity",
       });
@@ -795,8 +795,8 @@ export async function runGenerationFor(
       if (u === null || u === undefined) {
         results.push({
           kind: "error",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           error: "No meter reading data available",
           code: "no_meter_reading",
         });
@@ -814,7 +814,7 @@ export async function runGenerationFor(
       // zero". Those are different claims and the second one gets printed on
       // an invoice the customer can check against the dial.
       //
-      // A household-keyed fallback (the household's last end_kwh from rows
+      // A tenant-keyed fallback (the tenant's last end_kwh from rows
       // written before the device existed) is deliberately NOT a fourth
       // source. It is correct when a meter was connected and silently wrong
       // when a meter was replaced, and the two are indistinguishable in the
@@ -833,8 +833,8 @@ export async function runGenerationFor(
       } else {
         results.push({
           kind: "error",
-          householdId: hid,
-          householdName,
+          tenantId: hid,
+          tenantName,
           error:
             "A trusted starting register is unavailable for this meter and billing period.",
           code: "needs_seed_reading",
@@ -846,23 +846,23 @@ export async function runGenerationFor(
       readingSource = "edge";
       deviceId = dev.deviceId;
     } else {
-      // Un-metered household with no manual override: skip and report with
+      // Un-metered tenant with no manual override: skip and report with
       // 'unmetered_no_manual'. This holds for BOTH the explicit dashboard
-      // path (householdIds includes this id) AND the implicit pull-mode path
-      // (householdIds === undefined) — #293.
+      // path (tenantIds includes this id) AND the implicit pull-mode path
+      // (tenantIds === undefined) — #293.
       //
       // Pull-mode is an unattended cron. Writing a silent zeroed placeholder
       // row (start_kwh=0, end_kwh=0, usage_kwh=0) there mis-bills an un-metered
-      // household as service-charge-only with no human in the loop; the only
+      // tenant as service-charge-only with no human in the loop; the only
       // signal is the response payload. Per Alejandro's decision (2026-07-01,
       // #293): no manual reading AND no OpenEMS data → do NOT bill; skip the
       // tenant and report it so the cron/caller sees it. The dashboard path
       // already emitted this same error; the two paths now agree.
       results.push({
         kind: "error",
-        householdId: hid,
-        householdName,
-        error: "Household has no meter and no manual reading was supplied.",
+        tenantId: hid,
+        tenantName,
+        error: "Tenant has no meter and no manual reading was supplied.",
         code: "unmetered_no_manual",
       });
       continue;
@@ -890,8 +890,8 @@ export async function runGenerationFor(
     if (mode === "preview") {
       results.push({
         kind: "preview",
-        householdId: hid,
-        householdName,
+        tenantId: hid,
+        tenantName,
         startKwh: startKwhRounded,
         endKwh: endKwhRounded,
         usageKwh: usageKwhRounded,
@@ -909,7 +909,7 @@ export async function runGenerationFor(
 
     // mode === 'write' — call the audit-aware RPC.
     const auditDetails: LineItemRegeneratedDetails = {
-      household_name: householdName,
+      tenant_name: tenantName,
       previous_total_amount: previousTotalAmount,
       new_total_amount: calc.totalAmount,
       previous_reading_source: prior?.reading_source ?? null,
@@ -950,7 +950,7 @@ export async function runGenerationFor(
       "fn_record_line_item_with_audit",
       {
         _billing_period_id: periodId,
-        _household_id: hid,
+        _tenant_id: hid,
         _device_id: deviceId,
         _usage_kwh: usageKwhRounded,
         _start_kwh: startKwhRounded,
@@ -971,8 +971,8 @@ export async function runGenerationFor(
     if (rpcErr || !rpcRow) {
       results.push({
         kind: "error",
-        householdId: hid,
-        householdName,
+        tenantId: hid,
+        tenantName,
         error: `Failed to write line item: ${rpcErr?.message ?? "unknown"}`,
         code: rpcErr?.code === "23514" && rpcErr.message.includes("tariff changed")
           ? "tariff_changed"
@@ -989,8 +989,8 @@ export async function runGenerationFor(
 
     results.push({
       kind: "written",
-      householdId: hid,
-      householdName,
+      tenantId: hid,
+      tenantName,
       lineItem: writtenRow,
       previousTotalAmount,
       previousPaymentStatus: prior?.payment_status ?? null,

@@ -17,7 +17,7 @@ import type {
   PeriodSummary,
   RateScheduleRow,
   RepositoryError,
-  UnresolvedHousehold,
+  UnresolvedTenant,
 } from "../repository";
 
 function toError(error: { code?: string; message?: string }): RepositoryError {
@@ -157,29 +157,29 @@ export function createSupabaseBillingRepository(
       if (periodError) throw new Error("Could not load billing period summary.");
       if (!period) return null;
 
-      const { data: households, error: householdsError } = await supabase
-        .from("households")
+      const { data: tenants, error: tenantsError } = await supabase
+        .from("tenants")
         .select("id, display_name")
         .eq("microgrid_id", period.microgrid_id);
       const { data: items, error: itemsError } = await supabase
         .from("billing_line_items")
-        .select("id, household_id, total_amount")
+        .select("id, tenant_id, total_amount")
         .eq("billing_period_id", periodId);
       // A failed read is not evidence of an empty, complete period.
-      if (householdsError || itemsError || !households || !items) {
+      if (tenantsError || itemsError || !tenants || !items) {
         throw new Error("Could not verify billing period completeness.");
       }
 
-      const billedIds = new Set((items ?? []).map((i) => i.household_id as string));
-      const unresolved: UnresolvedHousehold[] = ((households ?? []) as {
+      const billedIds = new Set((items ?? []).map((i) => i.tenant_id as string));
+      const unresolved: UnresolvedTenant[] = ((tenants ?? []) as {
         id: string;
         display_name: string;
       }[])
         .filter((h) => !billedIds.has(h.id))
         .map((h) => ({
-          householdId: h.id,
-          householdName: h.display_name,
-          reason: "No bill generated for this household in this period.",
+          tenantId: h.id,
+          tenantName: h.display_name,
+          reason: "No bill generated for this tenant in this period.",
         }));
       const totalAmount = (items ?? []).reduce(
         (sum, i) => sum + Number(i.total_amount ?? 0),

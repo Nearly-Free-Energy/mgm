@@ -11,7 +11,7 @@
  *     auth fetch + row read. RLS is the access gate.
  *   - Permission ordering: row read → 404 if RLS-hidden → defense-in-depth
  *     `currentUserCanAccessMicrogrid` → 403.
- *   - Service-role client used ONLY for the joins (households, devices,
+ *   - Service-role client used ONLY for the joins (tenants, devices,
  *     rate schedule) so the export does not depend on RLS visibility for
  *     joined rows; the access gate above already authorized the period.
  *   - The period's pinned rate schedule, preserving historical charges.
@@ -44,7 +44,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type DeviceJoinRow = {
-  household_id: string;
+  tenant_id: string;
   // PostgREST !inner returns the join as either `T` or `T[]` depending
   // on cardinality + rest version; the unwrap helper below normalizes.
   devices:
@@ -194,8 +194,8 @@ export async function GET(
   const rateScheduleServiceCharge = (rsRow.service_charge as number) ?? 0;
   const rateScheduleTaxRate = (rsRow.tax_rate as number) ?? 0;
 
-  // 4c. Line items + joined household. LEFT-join devices via
-  //     household_devices on role='primary_consumption_meter'.
+  // 4c. Line items + joined tenant. LEFT-join devices via
+  //     tenant_devices on role='primary_consumption_meter'.
   const { data: lineItemRows, error: liErr } = await svc
     .from("billing_line_items")
     .select(
@@ -210,8 +210,8 @@ export async function GET(
       total_amount,
       payment_status,
       paid_at,
-      household_id,
-      households!inner (
+      tenant_id,
+      tenants!inner (
         id,
         display_name,
         account_number,
@@ -241,39 +241,39 @@ export async function GET(
 
   const liRows = (lineItemRows ?? []) as Array<Record<string, unknown>>;
 
-  // 4d. Resolve a primary_consumption_meter device per household
-  //     (separate query — simpler than nesting through household_devices
+  // 4d. Resolve a primary_consumption_meter device per tenant
+  //     (separate query — simpler than nesting through tenant_devices
   //     in the line-items select).
-  const householdIds = Array.from(
+  const tenantIds = Array.from(
     new Set(
       liRows
-        .map((r) => r.household_id as string | null)
+        .map((r) => r.tenant_id as string | null)
         .filter((id): id is string => typeof id === "string"),
     ),
   );
 
-  const deviceByHouseholdId = new Map<
+  const deviceByTenantId = new Map<
     string,
     { openems_component_id: string | null }
   >();
-  if (householdIds.length > 0) {
+  if (tenantIds.length > 0) {
     const { data: devRows } = await svc
-      .from("household_devices")
+      .from("tenant_devices")
       .select(
         `
-        household_id,
+        tenant_id,
         devices!inner (
           openems_component_id
         )
       `,
       )
-      .in("household_id", householdIds)
+      .in("tenant_id", tenantIds)
       .eq("role", "primary_consumption_meter");
 
     for (const row of (devRows ?? []) as DeviceJoinRow[]) {
       const dev = unwrap(row.devices as unknown);
-      if (dev && row.household_id && !deviceByHouseholdId.has(row.household_id)) {
-        deviceByHouseholdId.set(row.household_id, {
+      if (dev && row.tenant_id && !deviceByTenantId.has(row.tenant_id)) {
+        deviceByTenantId.set(row.tenant_id, {
           openems_component_id:
             (dev.openems_component_id as string | null) ?? null,
         });
@@ -283,13 +283,13 @@ export async function GET(
 
   // 5. Assemble helper input.
   const rows: CsvExportRow[] = liRows.map((row) => {
-    const hh = unwrap(row.households) ?? {};
-    const householdId = (row.household_id as string | null) ?? null;
-    const device = householdId
-      ? deviceByHouseholdId.get(householdId) ?? null
+    const hh = unwrap(row.tenants) ?? {};
+    const tenantId = (row.tenant_id as string | null) ?? null;
+    const device = tenantId
+      ? deviceByTenantId.get(tenantId) ?? null
       : null;
     return {
-      household: {
+      tenant: {
         display_name: (hh.display_name as string | null) ?? "",
         account_number: (hh.account_number as string | null) ?? null,
         meter_serial: (hh.meter_serial as string | null) ?? null,
@@ -353,7 +353,7 @@ export async function GET(
     endDate: periodRow.end_date as string,
   });
 
-  // 6. Forensic log — NO PII (no household names, addresses, phones, or
+  // 6. Forensic log — NO PII (no tenant names, addresses, phones, or
   //    line-item amounts).
   console.info(
     JSON.stringify(
@@ -362,7 +362,7 @@ export async function GET(
           event: "billing.csv.exported",
           period_id: periodId,
           microgrid_id: microgridId,
-          household_count: rows.length,
+          tenant_count: rows.length,
           byte_size: csvBytes.byteLength,
           duration_ms: Date.now() - startedAt,
           actor_user_id: user.id,

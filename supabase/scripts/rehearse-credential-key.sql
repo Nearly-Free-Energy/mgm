@@ -4,7 +4,7 @@ BEGIN;
 \ir rotate-credential-key.sql
 DO $$
 DECLARE org uuid:=gen_random_uuid(); manager uuid:=gen_random_uuid(); community uuid;
- grid uuid; tariff uuid; period uuid; household uuid; bill uuid; account uuid;
+ grid uuid; tariff uuid; period uuid; tenant uuid; bill uuid; account uuid;
  attempt payment_attempts; old_configuration jsonb; old_key text; before_versions integer;
 BEGIN
  INSERT INTO organizations(id,name) VALUES(org,'Credential rotation rehearsal');
@@ -21,8 +21,8 @@ BEGIN
  VALUES(grid,'[{"min_kwh":1,"max_kwh":null,"rate_per_kwh":100}]',0,0) RETURNING id INTO tariff;
  PERFORM set_config('request.jwt.claims',jsonb_build_object('role','authenticated','sub',manager)::text,true);
  SELECT id INTO period FROM fn_create_billing_period(grid,'2026-09-01','2026-09-30');
- INSERT INTO households(microgrid_id,display_name,primary_phone) VALUES(grid,'Rotation customer','+256700000098') RETURNING id INTO household;
- INSERT INTO billing_line_items(billing_period_id,household_id,total_amount) VALUES(period,household,5000) RETURNING id INTO bill;
+ INSERT INTO tenants(microgrid_id,display_name,primary_phone) VALUES(grid,'Rotation customer','+256700000098') RETURNING id INTO tenant;
+ INSERT INTO billing_line_items(billing_period_id,tenant_id,total_amount) VALUES(period,tenant,5000) RETURNING id INTO bill;
  INSERT INTO payment_merchant_accounts(org_id,consumer_key,secret_encrypted,base_url,ipn_id,is_default,last_test_status)
  VALUES(org,'key-v1',fn_ems_encrypt_secret('merchant-v1'),'https://pay.example.test','ipn-v1',true,'success') RETURNING id INTO account;
  SELECT * INTO attempt FROM fn_payment_reserve_checkout(org,bill,community,account,1,5000,'UGX',

@@ -64,9 +64,9 @@ export const BillingPlugin = {
         const out = await runGenerationFor({
           supabase: request.supabase,
           periodId: input.periodId,
-          householdIds: input.householdIds,
+          tenantIds: input.tenantIds,
           manualReadings: input.manualReadings,
-          revertToEdgeHouseholdIds: input.revertToEdgeHouseholdIds,
+          revertToEdgeTenantIds: input.revertToEdgeTenantIds,
           seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,

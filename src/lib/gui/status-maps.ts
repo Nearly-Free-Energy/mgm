@@ -59,17 +59,17 @@ export const STATUS_MAPS = {
     mqtt:          { label: "MQTT",          tone: "neutral" },
     rest_api:      { label: "REST API",      tone: "neutral" },
   },
-  household: {
+  tenant: {
     active:   { label: "Active",   tone: "success", dot: true },
     inactive: { label: "Inactive", tone: "neutral", dot: true },
     disputed: { label: "Disputed", tone: "danger",  dot: true },
   },
-  // PDF3 (#205) — household customer-type chip surfaced inside the
-  // HouseholdTable's Household cell. Mirrors the `customer_type` column
+  // PDF3 (#205) — tenant customer-type chip surfaced inside the
+  // TenantTable's Tenant cell. Mirrors the `customer_type` column
   // (residential | commercial; PDF1a / 00033). `neutral` (resting; the
   // majority class) and `accent` (visually distinct; commercial) carry the
   // contrast.
-  householdCustomerType: {
+  tenantCustomerType: {
     residential: { label: "Residential", tone: "neutral" },
     commercial:  { label: "Commercial",  tone: "accent"  },
   },
@@ -91,7 +91,7 @@ export const STATUS_MAPS = {
     ev_charger:        { label: "EV charger",        tone: "accent" },
     other:             { label: "Other",             tone: "neutral" },
   },
-  // Household device role — mirrors `household_device_role` enum in AB schema.
+  // Tenant device role — mirrors `tenant_device_role` enum in AB schema.
   // Tone rationale:
   //   primary_consumption_meter → warning (the billable metering device; draws attention)
   //   secondary_meter           → neutral (supplementary measurement, non-primary)
@@ -99,7 +99,7 @@ export const STATUS_MAPS = {
   //   solar                     → success (generation asset)
   //   ev_charger                → accent (controllable load)
   //   other                     → neutral (catchall)
-  householdDeviceRole: {
+  tenantDeviceRole: {
     primary_consumption_meter: { label: "Primary meter", tone: "warning" },
     secondary_meter:           { label: "Secondary meter", tone: "neutral" },
     battery:                   { label: "Battery",         tone: "success" },
@@ -107,8 +107,8 @@ export const STATUS_MAPS = {
     ev_charger:                { label: "EV charger",      tone: "accent" },
     other:                     { label: "Other",           tone: "neutral" },
   },
-  // #158: per-household meter assignment status. The HouseholdTable cell
-  // surfaces this so an entrepreneur can tell at a glance which households
+  // #158: per-tenant meter assignment status. The TenantTable cell
+  // surfaces this so an entrepreneur can tell at a glance which tenants
   // require a manual usage entry each period vs. the metered/automated flow.
   //
   // Tone rationale:

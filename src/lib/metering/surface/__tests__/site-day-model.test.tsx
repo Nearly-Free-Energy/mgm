@@ -146,10 +146,10 @@ describe("buildSiteDayModel", () => {
     expect(hint(none, "houses-evening")).toBe("Battery supplied 4.6 kWh · 3 meters without data");
   });
 
-  it("says household meters are needed when there are none", () => {
+  it("says tenant meters are needed when there are none", () => {
     const day = makeDay({ sources: { ...makeDay().sources, houses: false }, housesEveningKwh: null });
     expect(text(day, "houses-evening")).toBe("—");
-    expect(hint(day, "houses-evening")).toBe("Needs household meters · Battery supplied 4.6 kWh");
+    expect(hint(day, "houses-evening")).toBe("Needs tenant meters · Battery supplied 4.6 kWh");
   });
 
   it("at 18:00 exactly, still says when the window starts", () => {
@@ -164,7 +164,7 @@ describe("buildSiteDayModel", () => {
     expect(hint(day, "houses-evening")).toBe("From 18:00");
     expect(tile(day, "battery-evening")).toMatchObject({ value: { t: "empty" }, hint: "From 18:00" });
     const noMeters = makeDay({ ...day, sources: { ...makeDay().sources, houses: false } });
-    expect(hint(noMeters, "houses-evening")).toBe("Needs household meters · From 18:00");
+    expect(hint(noMeters, "houses-evening")).toBe("Needs tenant meters · From 18:00");
   });
 
   it("says no battery is registered, or that it gave no readings, rather than a zero", () => {
@@ -250,7 +250,7 @@ describe("buildSiteDayModel", () => {
     }
     expect(hint(day, "solar")).toBe("Needs a solar meter, or an inverter output meter with the battery and grid meter");
     expect(hint(day, "cuts")).toBe("Needs a grid meter");
-    expect(hint(day, "houses-evening")).toBe("Needs household meters · No battery registered");
+    expect(hint(day, "houses-evening")).toBe("Needs tenant meters · No battery registered");
     expect(hint(day, "lowest-soc")).toBe("Needs a battery");
     expect(hint(day, "soc-17")).toBe("No reading at 17:00");
   });

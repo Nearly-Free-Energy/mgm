@@ -4,7 +4,7 @@
  * DeviceEditDialog — reclassify a discovered device (#151).
  *
  * Surface contract:
- *   - 640px width, mirroring HouseholdEditDialog (#145).
+ *   - 640px width, mirroring TenantEditDialog (#145).
  *   - Header shows the CURRENT device_type via <StatusChip
  *     kind="deviceType">. Per CLAUDE.md Design System rule 1, never hand-roll
  *     a status chip.
@@ -18,8 +18,8 @@
  *     Disabled when (a) submitting, (b) name is empty after trim, (c) no
  *     field is dirty vs initial state.
  *   - 409 device_type_role_conflict — surface a destructive ConfirmDialog
- *     ("Unlink household and reclassify") that, on confirm, runs:
- *        1. PATCH /api/households/[id] { device_id: null }  — unlink
+ *     ("Unlink tenant and reclassify") that, on confirm, runs:
+ *        1. PATCH /api/tenants/[id] { device_id: null }  — unlink
  *        2. PATCH /api/devices/[id] { ...same diff }        — reclassify
  *     Two sequential server calls (no transactional combiner) — matches
  *     AC-CASCADE.
@@ -110,7 +110,7 @@ export function DeviceEditDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [topError, setTopError] = React.useState<string | null>(null);
   const [confirmCancelOpen, setConfirmCancelOpen] = React.useState(false);
-  const [conflictHousehold, setConflictHousehold] = React.useState<{
+  const [conflictTenant, setConflictTenant] = React.useState<{
     id: string;
     display_name: string | null;
   } | null>(null);
@@ -121,7 +121,7 @@ export function DeviceEditDialog({
       setState(init);
       setSubmitting(false);
       setTopError(null);
-      setConflictHousehold(null);
+      setConflictTenant(null);
     }
   }, [open, init]);
 
@@ -148,7 +148,7 @@ export function DeviceEditDialog({
     if (!canSave) return;
     setSubmitting(true);
     setTopError(null);
-    setConflictHousehold(null);
+    setConflictTenant(null);
     try {
       const res = await postPatch(buildDiff(state, init));
       if (res.ok) {
@@ -159,11 +159,11 @@ export function DeviceEditDialog({
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         reason?: string;
-        household?: { id: string; display_name: string | null };
+        tenant?: { id: string; display_name: string | null };
       };
       if (res.status === 409 && body.reason === "device_type_role_conflict") {
-        setConflictHousehold(
-          body.household ?? { id: "", display_name: null }
+        setConflictTenant(
+          body.tenant ?? { id: "", display_name: null }
         );
         setSubmitting(false);
         return;
@@ -179,10 +179,10 @@ export function DeviceEditDialog({
   // Unlink-and-reclassify: two sequential server calls (no transactional
   // combiner). On any failure, surface inline; the dialog stays open.
   async function handleUnlinkAndReclassify(): Promise<void> {
-    if (!conflictHousehold) return;
+    if (!conflictTenant) return;
     // Step 1 — unlink
     const unlinkRes = await fetch(
-      `/api/households/${conflictHousehold.id}`,
+      `/api/tenants/${conflictTenant.id}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -208,7 +208,7 @@ export function DeviceEditDialog({
       );
     }
     router.refresh();
-    setConflictHousehold(null);
+    setConflictTenant(null);
     onOpenChange(false);
   }
 
@@ -375,17 +375,17 @@ export function DeviceEditDialog({
       {/* AC-CASCADE confirm — destructive. Two sequential server calls
           (unlink, then reclassify). */}
       <ConfirmDialog
-        open={Boolean(conflictHousehold)}
+        open={Boolean(conflictTenant)}
         onOpenChange={(o) => {
-          if (!o) setConflictHousehold(null);
+          if (!o) setConflictTenant(null);
         }}
         tone="destructive"
-        title="Unlink household and reclassify?"
+        title="Unlink tenant and reclassify?"
         description={
-          conflictHousehold
+          conflictTenant
             ? `This device is currently the primary consumption meter for "${
-                conflictHousehold.display_name ?? "a household"
-              }". Reclassifying will unlink the household — you'll need to assign a new meter before billing the next period.`
+                conflictTenant.display_name ?? "a tenant"
+              }". Reclassifying will unlink the tenant — you'll need to assign a new meter before billing the next period.`
             : undefined
         }
         confirmLabel="Unlink and reclassify"

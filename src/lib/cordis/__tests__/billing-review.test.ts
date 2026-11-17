@@ -21,7 +21,7 @@ describe("Cordis billing-review composition", () => {
     await expect(
       composition.billingReview.preview({
         periodId: "period-1",
-        householdIds: [],
+        tenantIds: [],
         provider: "fixture",
       })
     ).resolves.toEqual({ results: [] });
@@ -31,7 +31,7 @@ describe("Cordis billing-review composition", () => {
     await expect(
       composition.billingReview.preview({
         periodId: "period-1",
-        householdIds: [],
+        tenantIds: [],
         provider: "fixture",
       })
     ).resolves.toEqual({
@@ -47,7 +47,7 @@ describe("Cordis billing-review composition", () => {
       await expect(
         composition.billingReview.preview({
           periodId: "period-1",
-          householdIds: [],
+          tenantIds: [],
           provider: "fixture",
         })
       ).resolves.toEqual({

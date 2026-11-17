@@ -45,7 +45,7 @@ import {
 import type {
   BillingLineItem,
   BillingPeriod,
-  Household,
+  Tenant,
   TierConfig,
 } from "@/lib/types/domain";
 
@@ -55,23 +55,23 @@ export function BillingTable({
   microgridId,
   period,
   lineItems,
-  households,
+  tenants,
   tiers,
   currency,
   isPaymentConfigured = true,
   isSuperAdmin = false,
   communityId,
-  edgeAvailableByHouseholdId,
-  seedNeededByHouseholdId,
+  edgeAvailableByTenantId,
+  seedNeededByTenantId,
   allowUsageOnlyReadings = false,
-  priorHintByHouseholdId,
-  deviceIdByHouseholdId,
+  priorHintByTenantId,
+  deviceIdByTenantId,
   actorByLineItemId,
 }: {
   microgridId: string;
   period: BillingPeriod;
   lineItems: BillingLineItem[];
-  households: Household[];
+  tenants: Tenant[];
   tiers: TierConfig[];
   currency: string;
   /** Whether the community has a payment provider configured. Default: true (no gate banner). */
@@ -81,20 +81,20 @@ export function BillingTable({
   /** Community id — used for the super_admin "Go to Payment tab" link. */
   communityId?: string;
   /**
-   * Whether each household has a primary_consumption_meter device on a
+   * Whether each tenant has a primary_consumption_meter device on a
    * configured edge. Drives visibility of "Switch back to edge data" /
    * "Regenerate from edge data" in the row kebab menu (BC2 #174).
-   * Defaults to `true` when a household id is missing from the map.
+   * Defaults to `true` when a tenant id is missing from the map.
    */
-  edgeAvailableByHouseholdId?: Record<string, boolean>;
-  /** #339 — households whose meter has no prior MGM reading. */
-  seedNeededByHouseholdId?: Record<string, boolean>;
+  edgeAvailableByTenantId?: Record<string, boolean>;
+  /** #339 — tenants whose meter has no prior MGM reading. */
+  seedNeededByTenantId?: Record<string, boolean>;
   /** OpenEMS period usage can be billed without an absolute dial anchor. */
   allowUsageOnlyReadings?: boolean;
-  /** #339 — the household's last recorded end_kwh, shown as a hint only. */
-  priorHintByHouseholdId?: Record<string, number | null>;
-  /** #339 — primary consumption meter per household, for the seed payload. */
-  deviceIdByHouseholdId?: Record<string, string>;
+  /** #339 — the tenant's last recorded end_kwh, shown as a hint only. */
+  priorHintByTenantId?: Record<string, number | null>;
+  /** #339 — primary consumption meter per tenant, for the seed payload. */
+  deviceIdByTenantId?: Record<string, string>;
   /**
    * Map of `billing_line_items.id → actor display name` resolved via the
    * `user_directory!entered_by_user_id` join in the page loader. Drives
@@ -116,7 +116,7 @@ export function BillingTable({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generateErrors, setGenerateErrors] = useState<
-    { householdName: string; error: string }[]
+    { tenantName: string; error: string }[]
   >([]);
 
   // Dialog state
@@ -124,18 +124,18 @@ export function BillingTable({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Release 3 (issue #5, review P1): the server is the source of truth for
-  // unresolved households. The first confirm goes out unconfirmed; a 409
-  // `billing_unresolved_households` escalates the dialog's Retry into an
+  // unresolved tenants. The first confirm goes out unconfirmed; a 409
+  // `billing_unresolved_tenants` escalates the dialog's Retry into an
   // explicit close-anyway. Reset whenever the dialog closes.
   const closeConfirmedRef = useRef(false);
 
   // Phase B (#157) — toast queue for IPN-driven paid transitions. Pollable
   // because Supabase Realtime is not yet wired into this repo; polling every
   // 30s is well under the pilot's traffic profile (Aaron + a handful of
-  // households). Toast clears on dismiss or after 30s. Tracking by line-item
+  // tenants). Toast clears on dismiss or after 30s. Tracking by line-item
   // id avoids re-toasting for the same transition between polls.
   const [paidToasts, setPaidToasts] = useState<
-    { lineItemId: string; householdName: string; total: number }[]
+    { lineItemId: string; tenantName: string; total: number }[]
   >([]);
   const seenPaidRef = useRef<Set<string>>(new Set());
 
@@ -161,10 +161,10 @@ export function BillingTable({
     a.remove();
   }
 
-  // Build householdId -> lineItem map
+  // Build tenantId -> lineItem map
   const lineItemMap = new Map<string, BillingLineItem>();
   for (const item of lineItems) {
-    lineItemMap.set(item.household_id, item);
+    lineItemMap.set(item.tenant_id, item);
   }
 
   // BC2 (#174) — per-row transient banner queue. Pushed by <RowActionsMenu>
@@ -178,13 +178,13 @@ export function BillingTable({
   const dismissRowBanner = React.useCallback((id: string) => {
     setRowBanners((prev) => prev.filter((e) => e.id !== id));
   }, []);
-  const getHouseholdNameForLineItem = React.useCallback(
+  const getTenantNameForLineItem = React.useCallback(
     (lineItemId: string) => {
       const li = lineItems.find((x) => x.id === lineItemId);
       if (!li) return undefined;
-      return households.find((h) => h.id === li.household_id)?.display_name;
+      return tenants.find((h) => h.id === li.tenant_id)?.display_name;
     },
-    [lineItems, households],
+    [lineItems, tenants],
   );
 
   // BC3 (#175 AC1) — per-line-item flag for "Switch to manual entry…" on
@@ -205,11 +205,11 @@ export function BillingTable({
     });
   }, []);
 
-  // BC3 (#175 AC3) — multi-select state. Keyed by household id so the
+  // BC3 (#175 AC3) — multi-select state. Keyed by tenant id so the
   // selection survives a server round-trip even if line item ids change.
   // Cleared on successful regenerate (any path), Esc inside the table,
   // and "Clear selection" in the sticky bar.
-  const [selectedHouseholdIds, setSelectedHouseholdIds] = useState<Set<string>>(
+  const [selectedTenantIds, setSelectedTenantIds] = useState<Set<string>>(
     () => new Set(),
   );
 
@@ -222,7 +222,7 @@ export function BillingTable({
     | {
         open: true;
         lineItemId: string;
-        householdId: string;
+        tenantId: string;
         mode: RegenerateRowMode;
       }
   >({ open: false });
@@ -301,14 +301,14 @@ export function BillingTable({
         // applies). Cheap query — same shape we already render.
         const { data, error } = await supabase
           .from("billing_line_items")
-          .select("id, household_id, payment_status, total_amount")
+          .select("id, tenant_id, payment_status, total_amount")
           .eq("billing_period_id", period.id);
         if (cancelled || error || !data) return;
 
         const newlyPaid: typeof paidToasts = [];
         for (const row of data as Array<{
           id: string;
-          household_id: string;
+          tenant_id: string;
           payment_status: string;
           total_amount: number;
         }>) {
@@ -317,10 +317,10 @@ export function BillingTable({
             !seenPaidRef.current.has(row.id)
           ) {
             seenPaidRef.current.add(row.id);
-            const hh = households.find((h) => h.id === row.household_id);
+            const hh = tenants.find((h) => h.id === row.tenant_id);
             newlyPaid.push({
               lineItemId: row.id,
-              householdName: hh?.display_name ?? "Household",
+              tenantName: hh?.display_name ?? "Tenant",
               total: Number(row.total_amount),
             });
           }
@@ -344,7 +344,7 @@ export function BillingTable({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [period?.id, period?.status, lineItems.length, supabase, router, households]);
+  }, [period?.id, period?.status, lineItems.length, supabase, router, tenants]);
 
   function dismissToast(lineItemId: string): void {
     setPaidToasts((prev) => prev.filter((t) => t.lineItemId !== lineItemId));
@@ -399,15 +399,15 @@ export function BillingTable({
 
   // BC3 (#175 AC3 / AC7) — Esc inside the table clears the selection.
   useEffect(() => {
-    if (selectedHouseholdIds.size === 0) return;
+    if (selectedTenantIds.size === 0) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        setSelectedHouseholdIds(new Set());
+        setSelectedTenantIds(new Set());
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedHouseholdIds.size]);
+  }, [selectedTenantIds.size]);
 
   // BC3 (#175 AC4 / AC7) — auto-dismiss parent banners.
   useEffect(() => {
@@ -443,10 +443,10 @@ export function BillingTable({
 
     // Release 3 (issue #5, review P1): closing runs through the billing
     // capability (POST /api/billing-periods/[id]/close) — org-scoped,
-    // plugin-gated, with the unresolved-household safeguard — never a
+    // plugin-gated, with the unresolved-tenant safeguard — never a
     // direct table update, so disabling Billing stops closure with a 409.
     // The client warning is informational only. Confirmation is sent only
-    // after the server reports its authoritative unresolved-household list.
+    // after the server reports its authoritative unresolved-tenant list.
     try {
       const res = await fetch(`/api/billing-periods/${period.id}/close`, {
         method: "POST",
@@ -457,13 +457,13 @@ export function BillingTable({
         code?: string;
         message?: string;
         error?: string;
-        unresolved?: { householdName: string; reason: string }[];
+        unresolved?: { tenantName: string; reason: string }[];
       };
-      if (res.status === 409 && body.code === "billing_unresolved_households") {
+      if (res.status === 409 && body.code === "billing_unresolved_tenants") {
         closeConfirmedRef.current = true;
         throw new Error(
-          [body.message ?? "Period has unresolved households. Retry to close anyway.",
-            ...(body.unresolved ?? []).map((household) => `${household.householdName}: ${household.reason}`)
+          [body.message ?? "Period has unresolved tenants. Retry to close anyway.",
+            ...(body.unresolved ?? []).map((tenant) => `${tenant.tenantName}: ${tenant.reason}`)
           ].join("\n")
         );
       }
@@ -493,12 +493,12 @@ export function BillingTable({
       ? period.start_date
       : `${period.start_date} – ${period.end_date}`;
 
-  // #167 — derive the list of un-metered households whose `usage_kwh` is
+  // #167 — derive the list of un-metered tenants whose `usage_kwh` is
   // still NULL. These are the rows that would silently lock in zero kWh /
   // zero amount on close. Surfaced to <ClosePeriodDialog> as a warning
   // banner; closing is still permitted (operator may genuinely intend to
   // bill nothing) but the gesture becomes more deliberate.
-  const unfilledHouseholdNames = lineItems
+  const unfilledTenantNames = lineItems
     .filter(
       (item) =>
         item.device_id === null &&
@@ -506,25 +506,25 @@ export function BillingTable({
     )
     .map(
       (item) =>
-        households.find((h) => h.id === item.household_id)?.display_name ??
-        "Unknown household"
+        tenants.find((h) => h.id === item.tenant_id)?.display_name ??
+        "Unknown tenant"
     );
 
   // #293 — persistent "not billed — no meter data" indicator. Reads from
-  // PERSISTED state (households ∖ line items), not from a transient generate
+  // PERSISTED state (tenants ∖ line items), not from a transient generate
   // response, so it also reflects the unattended pull-mode cron: that path
-  // now SKIPS un-metered households with no manual reading (no zeroed
-  // placeholder row is written), so an un-metered household simply has no
-  // line item afterwards. A household counts here iff its edge is unavailable
+  // now SKIPS un-metered tenants with no manual reading (no zeroed
+  // placeholder row is written), so an un-metered tenant simply has no
+  // line item afterwards. A tenant counts here iff its edge is unavailable
   // (no metered device / incomplete OpenEMS config — mirrors
   // `runGenerationFor`'s un-metered branch) AND it has no line item in this
   // period. Only meaningful once generation has run (some line items exist);
-  // before the first run every household is unbilled and the count would be
+  // before the first run every tenant is unbilled and the count would be
   // noise, so the banner is gated on `lineItems.length > 0`.
-  const unbilledNoMeterNames = households
+  const unbilledNoMeterNames = tenants
     .filter(
       (h) =>
-        (edgeAvailableByHouseholdId?.[h.id] ?? true) === false &&
+        (edgeAvailableByTenantId?.[h.id] ?? true) === false &&
         !lineItemMap.has(h.id)
     )
     .map((h) => h.display_name);
@@ -532,7 +532,7 @@ export function BillingTable({
   // Build summary rows for ClosePeriodDialog
   const closePeriodSummaryRows: ClosePeriodSummaryRow[] = [
     {
-      label: "Households",
+      label: "Tenants",
       value: String(lineItems.length),
     },
     {
@@ -552,40 +552,40 @@ export function BillingTable({
   const amountFormat = (v: number | string | null) =>
     formatCurrency(v == null ? null : Number(v), locale, localeCurrency, { bareNumber: true });
 
-  // Households with line items for the CopyTable (only households that have data)
-  const householdsWithItems = households.filter((h) => lineItemMap.has(h.id));
+  // Tenants with line items for the CopyTable (only tenants that have data)
+  const tenantsWithItems = tenants.filter((h) => lineItemMap.has(h.id));
 
   // BC3 (#175 AC3) — leading checkbox column. Hidden while pre-flight is
   // open (the operator is generating, not regenerating).
-  const visibleHouseholdIds = householdsWithItems.map((h) => h.id);
-  const multiSelectColumn = buildMultiSelectColumn<Household>({
+  const visibleTenantIds = tenantsWithItems.map((h) => h.id);
+  const multiSelectColumn = buildMultiSelectColumn<Tenant>({
     getRowId: (h) => h.id,
     getRowName: (h) => h.display_name,
-    selectedIds: selectedHouseholdIds,
-    visibleIds: visibleHouseholdIds,
+    selectedIds: selectedTenantIds,
+    visibleIds: visibleTenantIds,
     onToggleRow: (id) =>
-      setSelectedHouseholdIds((prev) => {
+      setSelectedTenantIds((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
         else next.add(id);
         return next;
       }),
-    onSetAll: (ids) => setSelectedHouseholdIds(new Set(ids)),
+    onSetAll: (ids) => setSelectedTenantIds(new Set(ids)),
     hidden: preflightOpen,
   });
   const headerSelectionState: "checked" | "unchecked" | "indeterminate" =
-    selectedHouseholdIds.size === 0
+    selectedTenantIds.size === 0
       ? "unchecked"
-      : selectedHouseholdIds.size === visibleHouseholdIds.length &&
-          visibleHouseholdIds.length > 0
+      : selectedTenantIds.size === visibleTenantIds.length &&
+          visibleTenantIds.length > 0
         ? "checked"
         : "indeterminate";
 
-  const columns: ColumnDef<Household>[] = [
+  const columns: ColumnDef<Tenant>[] = [
     ...(multiSelectColumn ? [multiSelectColumn] : []),
     {
       kind: "row-header",
-      header: "Household",
+      header: "Tenant",
       accessor: (h) => h.display_name,
     },
     {
@@ -648,7 +648,7 @@ export function BillingTable({
         );
       },
     },
-    ...tiers.flatMap((tier, i): ColumnDef<Household>[] => [
+    ...tiers.flatMap((tier, i): ColumnDef<Tenant>[] => [
       {
         kind: "value",
         header: `${tier.label} kWh`,
@@ -682,7 +682,7 @@ export function BillingTable({
         if (!item) return null;
 
         const edgeAvailable =
-          edgeAvailableByHouseholdId?.[h.id] ?? true;
+          edgeAvailableByTenantId?.[h.id] ?? true;
         const actorDisplayName =
           actorByLineItemId?.[item.id] ?? null;
 
@@ -704,7 +704,7 @@ export function BillingTable({
                 // #221 — drives the Generate vs Regenerate menu signal.
                 pesapal_redirect_url: item.pesapal_redirect_url,
               }}
-              household={{ id: h.id, display_name: h.display_name }}
+              tenant={{ id: h.id, display_name: h.display_name }}
               period={{
                 id: period.id,
                 status: period.status,
@@ -718,7 +718,7 @@ export function BillingTable({
                 setRegenerateRowDialog({
                   open: true,
                   lineItemId: item.id,
-                  householdId: h.id,
+                  tenantId: h.id,
                   mode,
                 })
               }
@@ -731,7 +731,7 @@ export function BillingTable({
                   setRegenerateRowDialog({
                     open: true,
                     lineItemId: item.id,
-                    householdId: h.id,
+                    tenantId: h.id,
                     mode: "manual",
                   });
                 } else {
@@ -777,7 +777,7 @@ export function BillingTable({
         grandTotal={grandTotal}
         onConfirm={handleClose}
         onExportCsv={() => triggerCsvDownload(period.id)}
-        unfilledHouseholdNames={unfilledHouseholdNames}
+        unfilledTenantNames={unfilledTenantNames}
       />
 
       {/* BC3 (#175 AC2) — per-row regenerate dialog. Mounts only when
@@ -785,7 +785,7 @@ export function BillingTable({
           mount of the parent. */}
       {regenerateRowDialog.open && (() => {
         const li = lineItems.find((x) => x.id === regenerateRowDialog.lineItemId);
-        const hh = households.find((h) => h.id === regenerateRowDialog.householdId);
+        const hh = tenants.find((h) => h.id === regenerateRowDialog.tenantId);
         if (!li || !hh) return null;
         return (
           <RegenerateRowDialog
@@ -794,7 +794,7 @@ export function BillingTable({
               if (!o) setRegenerateRowDialog({ open: false });
             }}
             mode={regenerateRowDialog.mode}
-            household={{ id: hh.id, display_name: hh.display_name }}
+            tenant={{ id: hh.id, display_name: hh.display_name }}
             period={{
               id: period.id,
               status: period.status,
@@ -820,13 +820,13 @@ export function BillingTable({
         open={regenerateMultiOpen}
         onOpenChange={setRegenerateMultiOpen}
         billingPeriodId={period.id}
-        selectedHouseholdIds={Array.from(selectedHouseholdIds)}
-        households={households}
-        lineItemsByHouseholdId={lineItemMap}
+        selectedTenantIds={Array.from(selectedTenantIds)}
+        tenants={tenants}
+        lineItemsByTenantId={lineItemMap}
         pushParentBanner={pushParentBanner}
         pushRowBanner={pushRowBanner}
         onSuccess={() => {
-          setSelectedHouseholdIds(new Set());
+          setSelectedTenantIds(new Set());
         }}
       />
 
@@ -881,10 +881,10 @@ export function BillingTable({
                 tooltip when there is no data to export. */}
             {(() => {
               const exportDisabled =
-                households.length === 0 || lineItems.length === 0;
+                tenants.length === 0 || lineItems.length === 0;
               const exportTooltip =
-                households.length === 0
-                  ? "No households to export"
+                tenants.length === 0
+                  ? "No tenants to export"
                   : lineItems.length === 0
                     ? "Generate readings before exporting"
                     : undefined;
@@ -963,7 +963,7 @@ export function BillingTable({
               className="flex items-start justify-between gap-3 rounded-md border border-border bg-success-muted p-3 text-sm text-success-fg"
             >
               <span>
-                Payment received: <strong>{t.householdName}</strong>,{" "}
+                Payment received: <strong>{t.tenantName}</strong>,{" "}
                 <Currency value={t.total} />
               </span>
               <button
@@ -983,12 +983,12 @@ export function BillingTable({
       {generateErrors.length > 0 && (
         <div className="rounded-md bg-warning-muted p-3 text-sm text-warning-fg">
           <p className="font-medium">
-            Some households could not be billed:
+            Some tenants could not be billed:
           </p>
           <ul className="mt-1 list-inside list-disc">
             {generateErrors.map((e, i) => (
               <li key={i}>
-                {e.householdName}: {e.error}
+                {e.tenantName}: {e.error}
               </li>
             ))}
           </ul>
@@ -998,18 +998,18 @@ export function BillingTable({
       {/* #293 — persistent "not billed — no meter data" indicator. Unlike the
           transient generate-warnings block above (which only appears right
           after an interactive Generate), this reads from persisted state, so
-          it surfaces households the unattended pull-mode cron skipped for
+          it surfaces tenants the unattended pull-mode cron skipped for
           having no meter data and no manual reading. Gated on
           `lineItems.length > 0` so it doesn't fire on a never-generated
-          period where every household is trivially unbilled. */}
+          period where every tenant is trivially unbilled. */}
       {lineItems.length > 0 && unbilledNoMeterNames.length > 0 && (
         <div data-testid="unbilled-no-meter-banner">
           <Banner
             tone="warn"
-            title={`${unbilledNoMeterNames.length} household${unbilledNoMeterNames.length === 1 ? "" : "s"} not billed — no meter data`}
+            title={`${unbilledNoMeterNames.length} tenant${unbilledNoMeterNames.length === 1 ? "" : "s"} not billed — no meter data`}
           >
             <p>
-              These households have no meter and no manual reading, so no bill
+              These tenants have no meter and no manual reading, so no bill
               was generated. Add a reading to bill them.
             </p>
             <ul className="mt-1 list-inside list-disc">
@@ -1071,17 +1071,17 @@ export function BillingTable({
           open={preflightOpen}
           onClose={() => setPreflightOpen(false)}
           billingPeriodId={period.id}
-          households={households}
-          edgeAvailableByHouseholdId={edgeAvailableByHouseholdId ?? {}}
-          seedNeededByHouseholdId={seedNeededByHouseholdId ?? {}}
-          currentlyManualByHouseholdId={Object.fromEntries(
+          tenants={tenants}
+          edgeAvailableByTenantId={edgeAvailableByTenantId ?? {}}
+          seedNeededByTenantId={seedNeededByTenantId ?? {}}
+          currentlyManualByTenantId={Object.fromEntries(
             lineItems
               .filter((item) => item.reading_source === "manual")
-              .map((item) => [item.household_id, true]),
+              .map((item) => [item.tenant_id, true]),
           )}
           allowUsageOnlyReadings={allowUsageOnlyReadings}
-          priorHintByHouseholdId={priorHintByHouseholdId ?? {}}
-          deviceIdByHouseholdId={deviceIdByHouseholdId ?? {}}
+          priorHintByTenantId={priorHintByTenantId ?? {}}
+          deviceIdByTenantId={deviceIdByTenantId ?? {}}
           periodStartDate={period.start_date}
           periodTimezone={period.timezone}
         />
@@ -1089,18 +1089,18 @@ export function BillingTable({
 
       {/* Billing Table */}
       <div className="rounded-lg border border-border bg-card p-6">
-        {lineItems.length === 0 && households.length > 0 ? (
+        {lineItems.length === 0 && tenants.length > 0 ? (
           <p className="text-sm text-muted-foreground">
             No billing data yet.{" "}
             {isDraft
               ? 'Click "Generate" to fetch meter readings and calculate costs.'
               : ""}
           </p>
-        ) : households.length === 0 ? (
+        ) : tenants.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No households configured for this microgrid.
+            No tenants configured for this microgrid.
           </p>
-        ) : householdsWithItems.length === 0 ? (
+        ) : tenantsWithItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No billing data yet.{" "}
             {isDraft
@@ -1143,22 +1143,22 @@ export function BillingTable({
                 <HeaderCheckbox
                   state={headerSelectionState}
                   onToggle={() =>
-                    setSelectedHouseholdIds((prev) =>
-                      prev.size === visibleHouseholdIds.length &&
-                      visibleHouseholdIds.length > 0
+                    setSelectedTenantIds((prev) =>
+                      prev.size === visibleTenantIds.length &&
+                      visibleTenantIds.length > 0
                         ? new Set()
-                        : new Set(visibleHouseholdIds),
+                        : new Set(visibleTenantIds),
                     )
                   }
-                  visibleCount={visibleHouseholdIds.length}
+                  visibleCount={visibleTenantIds.length}
                 />
               </div>
             )}
 
             <CopyTable
-              rows={householdsWithItems}
+              rows={tenantsWithItems}
               columns={columns}
-              caption={`Billing table for period ${periodLabel} — ${householdsWithItems.length} household${householdsWithItems.length !== 1 ? "s" : ""}`}
+              caption={`Billing table for period ${periodLabel} — ${tenantsWithItems.length} tenant${tenantsWithItems.length !== 1 ? "s" : ""}`}
               ariaLabel={`Billing data for ${periodLabel}`}
             />
 
@@ -1167,7 +1167,7 @@ export function BillingTable({
             <RowBannerStack
               entries={rowBanners}
               onDismiss={dismissRowBanner}
-              getHouseholdName={getHouseholdNameForLineItem}
+              getTenantName={getTenantNameForLineItem}
             />
 
             {/* #158: surface per-row inline-edit errors below the grid so
@@ -1178,13 +1178,13 @@ export function BillingTable({
               <ul className="space-y-1 rounded-md border border-destructive bg-destructive-muted p-3 text-xs text-destructive-fg">
                 {Object.entries(rowErrors).map(([lineItemId, message]) => {
                   const item = lineItems.find((li) => li.id === lineItemId);
-                  const householdName = households.find(
-                    (h) => h.id === item?.household_id
+                  const tenantName = tenants.find(
+                    (h) => h.id === item?.tenant_id
                   )?.display_name;
                   return (
                     <li key={lineItemId} className="flex items-center justify-between gap-2">
                       <span>
-                        {householdName ? `${householdName}: ` : ""}
+                        {tenantName ? `${tenantName}: ` : ""}
                         Could not save: {message}
                       </span>
                       <button
@@ -1240,10 +1240,10 @@ export function BillingTable({
           is allowed) but the regenerate button is disabled with the
           gating tooltip. */}
       <StickySelectionBar
-        visibleCount={visibleHouseholdIds.length}
-        selectedCount={selectedHouseholdIds.size}
+        visibleCount={visibleTenantIds.length}
+        selectedCount={selectedTenantIds.size}
         onRegenerate={() => setRegenerateMultiOpen(true)}
-        onClear={() => setSelectedHouseholdIds(new Set())}
+        onClear={() => setSelectedTenantIds(new Set())}
         disabled={!isDraft}
         disabledTooltip={
           !isDraft

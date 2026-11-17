@@ -86,8 +86,8 @@ let mockGenerationOutput: unknown = {
   results: [
     {
       kind: "written",
-      householdId: "hh-1",
-      householdName: "Alice",
+      tenantId: "hh-1",
+      tenantName: "Alice",
       lineItem: { id: "li-1", total_amount: 1234, usage_kwh: 50 },
     },
   ],
@@ -140,7 +140,7 @@ vi.mock("@/lib/billing/generate", () => ({
 
 const MICROGRID_ID = "550e8400-e29b-41d4-a716-446655440000";
 const PERIOD_ID = "550e8400-e29b-41d4-a716-446655440100";
-const HOUSEHOLD_ID = "550e8400-e29b-41d4-a716-446655440200";
+const TENANT_ID = "550e8400-e29b-41d4-a716-446655440200";
 
 function makePostRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/v1/billing/generate", {
@@ -155,7 +155,7 @@ function validBody(overrides: Record<string, unknown> = {}) {
     billingPeriodId: PERIOD_ID,
     microgrid_id: MICROGRID_ID,
     manualReadings: [
-      { householdId: HOUSEHOLD_ID, startKwh: 0, endKwh: 50 },
+      { tenantId: TENANT_ID, startKwh: 0, endKwh: 50 },
     ],
     ...overrides,
   };
@@ -181,8 +181,8 @@ describe("POST /api/v1/billing/generate (#254)", () => {
       results: [
         {
           kind: "written",
-          householdId: "hh-1",
-          householdName: "Alice",
+          tenantId: "hh-1",
+          tenantName: "Alice",
           lineItem: { id: "li-1", total_amount: 1234, usage_kwh: 50 },
         },
       ],
@@ -310,8 +310,8 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     expect(json.lineItems).toEqual([
       {
         id: "li-1",
-        householdId: "hh-1",
-        householdName: "Alice",
+        tenantId: "hh-1",
+        tenantName: "Alice",
         totalAmount: 1234,
         usageKwh: 50,
       },
@@ -326,7 +326,7 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     });
   });
 
-  it("200 + OpenEMS-pull mode: no manualReadings delegates with manualReadings:[] and householdIds undefined (every household resolved from OpenEMS)", async () => {
+  it("200 + OpenEMS-pull mode: no manualReadings delegates with manualReadings:[] and tenantIds undefined (every tenant resolved from OpenEMS)", async () => {
     const { POST } = await import("../route");
     const body = validBody();
     delete (body as Record<string, unknown>).manualReadings;
@@ -339,21 +339,21 @@ describe("POST /api/v1/billing/generate (#254)", () => {
       mode: "write",
     });
     expect(
-      (runGenerationCalls[0] as Record<string, unknown>).householdIds
+      (runGenerationCalls[0] as Record<string, unknown>).tenantIds
     ).toBeUndefined();
   });
 
-  it("lists households kept on their manual reading in kept[], not errors[]", async () => {
+  it("lists tenants kept on their manual reading in kept[], not errors[]", async () => {
     mockGenerationOutput = {
       results: [
-        { kind: "kept", householdId: "hh-2", householdName: "Bob", readingSource: "manual" },
+        { kind: "kept", tenantId: "hh-2", tenantName: "Bob", readingSource: "manual" },
       ],
     };
     const { POST } = await import("../route");
     const res = await POST(makePostRequest(validBody()));
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.kept).toEqual([{ householdId: "hh-2", householdName: "Bob" }]);
+    expect(json.kept).toEqual([{ tenantId: "hh-2", tenantName: "Bob" }]);
     expect(json.errors).toEqual([]);
     expect(json.lineItems).toEqual([]);
   });

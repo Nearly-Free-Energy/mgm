@@ -14,14 +14,14 @@ import { ConsumptionCalendar } from "@/components/ui/consumption-calendar";
 
 // ─── CopyTable sample data ───────────────────────────────────────────────────
 
-type HouseholdRow = {
+type TenantRow = {
   name: string;
   tier1Kwh: number;
   tier2Kwh: number;
   totalAmount: number;
 };
 
-const COPY_TABLE_ROWS: HouseholdRow[] = [
+const COPY_TABLE_ROWS: TenantRow[] = [
   { name: "Aisha M.",   tier1Kwh: 47.3, tier2Kwh: 12.1, totalAmount: 58400 },
   { name: "Bernard K.", tier1Kwh: 31.0, tier2Kwh:  0.0, totalAmount: 31000 },
   { name: "Cynthia O.", tier1Kwh: 52.8, tier2Kwh: 24.9, totalAmount: 77700 },
@@ -29,8 +29,8 @@ const COPY_TABLE_ROWS: HouseholdRow[] = [
   { name: "Esther W.",  tier1Kwh: 44.2, tier2Kwh:  8.3, totalAmount: 52500 },
 ];
 
-const COPY_TABLE_COLS: ColumnDef<HouseholdRow>[] = [
-  { header: "Household", kind: "row-header", accessor: (r) => r.name },
+const COPY_TABLE_COLS: ColumnDef<TenantRow>[] = [
+  { header: "Tenant", kind: "row-header", accessor: (r) => r.name },
   { header: "Tier 1 kWh", kind: "value", accessor: (r) => r.tier1Kwh },
   { header: "Tier 2 kWh", kind: "value", accessor: (r) => r.tier2Kwh },
   {
@@ -127,9 +127,9 @@ export default function ComponentsDevPage() {
             <StatusChip kind="edge" status="degraded" />
             <StatusChip kind="edge" status="offline" />
             <StatusChip kind="edge" status="stale" state="stale" />
-            <StatusChip kind="household" status="active" />
-            <StatusChip kind="household" status="inactive" />
-            <StatusChip kind="household" status="disputed" />
+            <StatusChip kind="tenant" status="active" />
+            <StatusChip kind="tenant" status="inactive" />
+            <StatusChip kind="tenant" status="disputed" />
             <StatusChip kind="meterType" status="grid" />
             <StatusChip kind="meterType" status="consumption" />
             <StatusChip kind="meterType" status="production" />
@@ -147,7 +147,7 @@ export default function ComponentsDevPage() {
           <CopyTable
             rows={COPY_TABLE_ROWS}
             columns={COPY_TABLE_COLS}
-            caption="April 2026 billing summary, 5 households"
+            caption="April 2026 billing summary, 5 tenants"
             ariaLabel="Billing summary table"
           />
           <p className="mt-2 text-caption text-muted-foreground">
@@ -168,7 +168,7 @@ export default function ComponentsDevPage() {
             onOpenChange={setClosePeriodOpen}
             periodLabel="April 2026"
             summaryRows={[
-              { label: "Households", value: "12" },
+              { label: "Tenants", value: "12" },
               { label: "Total kWh", value: "487.3" },
               { label: "Tier 1 kWh", value: "392.1" },
               { label: "Tier 2 kWh", value: "95.2" },
@@ -214,7 +214,7 @@ export default function ComponentsDevPage() {
               <ul className="my-2 list-disc space-y-0.5 pl-5">
                 <li>1 edge</li>
                 <li>10 devices</li>
-                <li>10 households</li>
+                <li>10 tenants</li>
                 <li>1 draft billing period (in progress — unfinalized readings will be lost)</li>
                 <li>2 closed billing periods</li>
                 <li>47 billing line items</li>

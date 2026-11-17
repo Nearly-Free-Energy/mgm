@@ -7,7 +7,7 @@
  * Renders a kebab affordance ("⋮") that opens a dropdown with a single
  * "Edit device" item. Selecting it opens <DeviceEditDialog>. Permission gate
  * is already applied at the parent (the kebab is only rendered when
- * canManage). Pattern mirrors HouseholdRowActions in HouseholdTable.tsx.
+ * canManage). Pattern mirrors TenantRowActions in TenantTable.tsx.
  */
 
 import * as React from "react";

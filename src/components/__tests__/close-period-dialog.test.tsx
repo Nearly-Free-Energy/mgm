@@ -21,7 +21,7 @@ import { ClosePeriodDialog, type ClosePeriodSummaryRow } from "../ui/close-perio
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const SUMMARY_ROWS: ClosePeriodSummaryRow[] = [
-  { label: "Households", value: "12" },
+  { label: "Tenants", value: "12" },
   { label: "Total kWh", value: "487.3" },
   { label: "Tier 1 kWh", value: "392.1" },
   { label: "Tier 2 kWh", value: "95.2" },
@@ -46,7 +46,7 @@ function ControlledHarness(props: {
   initialOpen?: boolean;
   onConfirm: () => Promise<void>;
   onExportCsv?: () => void;
-  unfilledHouseholdNames?: string[];
+  unfilledTenantNames?: string[];
 }) {
   const [open, setOpen] = React.useState(props.initialOpen ?? true);
   return (
@@ -65,7 +65,7 @@ function ControlledHarness(props: {
         grandTotal={GRAND_TOTAL}
         onConfirm={props.onConfirm}
         onExportCsv={props.onExportCsv}
-        unfilledHouseholdNames={props.unfilledHouseholdNames}
+        unfilledTenantNames={props.unfilledTenantNames}
       />
     </Wrapper>
   );
@@ -299,7 +299,7 @@ describe("ClosePeriodDialog — a11y", () => {
 //     checkbox copy is unchanged.
 //   - With one unfilled, the banner appears with singular copy, lists the name,
 //     button label flips to "Close anyway", checkbox copy gets the
-//     " (including 1 un-billed household)" addendum.
+//     " (including 1 un-billed tenant)" addendum.
 //   - With six unfilled, the banner shows plural copy and truncates the
 //     name list to the first five followed by "+ 1 more".
 //   - The banner uses warning tokens (bg-warning-muted + text-warning-fg),
@@ -312,7 +312,7 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
     render(
       <ControlledHarness
         onConfirm={() => Promise.resolve()}
-        unfilledHouseholdNames={[]}
+        unfilledTenantNames={[]}
       />
     );
 
@@ -333,16 +333,16 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
     render(
       <ControlledHarness
         onConfirm={() => Promise.resolve()}
-        unfilledHouseholdNames={["House A"]}
+        unfilledTenantNames={["House A"]}
       />
     );
 
     // Banner present with singular heading.
     const banner = screen.getByTestId("close-period-unfilled-banner");
     expect(banner).toBeTruthy();
-    expect(screen.getByText("1 household still un-billed")).toBeTruthy();
+    expect(screen.getByText("1 tenant still un-billed")).toBeTruthy();
     // Plural form must NOT render in the singular case.
-    expect(screen.queryByText(/^1 households still un-billed$/)).toBeNull();
+    expect(screen.queryByText(/^1 tenants still un-billed$/)).toBeNull();
 
     // Name listed in the body.
     expect(screen.getByText("House A")).toBeTruthy();
@@ -355,7 +355,7 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
 
     // Checkbox copy has the singular addendum.
     expect(
-      screen.getByText(/including 1 un-billed household\)/)
+      screen.getByText(/including 1 un-billed tenant\)/)
     ).toBeTruthy();
   });
 
@@ -371,12 +371,12 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
     render(
       <ControlledHarness
         onConfirm={() => Promise.resolve()}
-        unfilledHouseholdNames={names}
+        unfilledTenantNames={names}
       />
     );
 
     // Plural heading.
-    expect(screen.getByText("6 households still un-billed")).toBeTruthy();
+    expect(screen.getByText("6 tenants still un-billed")).toBeTruthy();
 
     // First five listed in a comma-separated preview, followed by "+ 1 more".
     const banner = screen.getByTestId("close-period-unfilled-banner");
@@ -388,7 +388,7 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
 
     // Plural addendum in checkbox copy.
     expect(
-      screen.getByText(/including 6 un-billed households\)/)
+      screen.getByText(/including 6 un-billed tenants\)/)
     ).toBeTruthy();
   });
 
@@ -396,7 +396,7 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
     render(
       <ControlledHarness
         onConfirm={() => Promise.resolve()}
-        unfilledHouseholdNames={["House A", "House B"]}
+        unfilledTenantNames={["House A", "House B"]}
       />
     );
 
@@ -413,7 +413,7 @@ describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
     render(
       <ControlledHarness
         onConfirm={onConfirm}
-        unfilledHouseholdNames={["House A"]}
+        unfilledTenantNames={["House A"]}
       />
     );
 

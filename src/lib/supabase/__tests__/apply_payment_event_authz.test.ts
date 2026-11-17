@@ -67,9 +67,9 @@ const FIXTURE = {
   microgrid: "dddddddd-dddd-4000-8002-000000000001",
   edge: "dddddddd-dddd-4000-8003-000000000001",
   device: "dddddddd-dddd-4000-8004-000000000001",
-  householdA: "dddddddd-dddd-4000-8005-000000000001",
-  householdB: "dddddddd-dddd-4000-8005-000000000002",
-  householdC: "dddddddd-dddd-4000-8005-000000000003",
+  tenantA: "dddddddd-dddd-4000-8005-000000000001",
+  tenantB: "dddddddd-dddd-4000-8005-000000000002",
+  tenantC: "dddddddd-dddd-4000-8005-000000000003",
   billingPeriod: "dddddddd-dddd-4000-8006-000000000001",
   lineItemDenied: "dddddddd-dddd-4000-8007-000000000001",
   lineItemService: "dddddddd-dddd-4000-8007-000000000002",
@@ -124,23 +124,23 @@ desc("00050_apply_payment_event_authz.sql — body-side gate + derived actor", (
       device_type: "consumption_meter",
       openems_component_id: "ape-authz-meter",
     });
-    await insertOrThrow(svc, "households", [
+    await insertOrThrow(svc, "tenants", [
       {
-        id: FIXTURE.householdA,
+        id: FIXTURE.tenantA,
         microgrid_id: FIXTURE.microgrid,
-        display_name: "APE Authz Household A",
+        display_name: "APE Authz Tenant A",
         primary_phone: "+256710000001",
       },
       {
-        id: FIXTURE.householdB,
+        id: FIXTURE.tenantB,
         microgrid_id: FIXTURE.microgrid,
-        display_name: "APE Authz Household B",
+        display_name: "APE Authz Tenant B",
         primary_phone: "+256710000002",
       },
       {
-        id: FIXTURE.householdC,
+        id: FIXTURE.tenantC,
         microgrid_id: FIXTURE.microgrid,
-        display_name: "APE Authz Household C",
+        display_name: "APE Authz Tenant C",
         primary_phone: "+256710000003",
       },
     ]);
@@ -151,13 +151,13 @@ desc("00050_apply_payment_event_authz.sql — body-side gate + derived actor", (
       end_date: "2026-05-31",
       status: "draft",
     });
-    // One line item per test — (billing_period_id, household_id) is UNIQUE
-    // (migration 00029), so each needs its own household.
+    // One line item per test — (billing_period_id, tenant_id) is UNIQUE
+    // (migration 00029), so each needs its own tenant.
     await insertOrThrow(svc, "billing_line_items", [
       {
         id: FIXTURE.lineItemDenied,
         billing_period_id: FIXTURE.billingPeriod,
-        household_id: FIXTURE.householdA,
+        tenant_id: FIXTURE.tenantA,
         device_id: FIXTURE.device,
         usage_kwh: 10,
         total_amount: 1000,
@@ -165,7 +165,7 @@ desc("00050_apply_payment_event_authz.sql — body-side gate + derived actor", (
       {
         id: FIXTURE.lineItemService,
         billing_period_id: FIXTURE.billingPeriod,
-        household_id: FIXTURE.householdB,
+        tenant_id: FIXTURE.tenantB,
         device_id: FIXTURE.device,
         usage_kwh: 20,
         total_amount: 2000,
@@ -173,7 +173,7 @@ desc("00050_apply_payment_event_authz.sql — body-side gate + derived actor", (
       {
         id: FIXTURE.lineItemHuman,
         billing_period_id: FIXTURE.billingPeriod,
-        household_id: FIXTURE.householdC,
+        tenant_id: FIXTURE.tenantC,
         device_id: FIXTURE.device,
         usage_kwh: 30,
         total_amount: 3000,

@@ -11,7 +11,7 @@
  *  4. Ess* | Battery*  → 'battery'
  *  5. Evcs*            → 'ev_charger'
  *  6. Inverter*        → 'inverter'
- *  7. alias fallback (consum* | load | household | house) → 'consumption_meter'
+ *  7. alias fallback (consum* | load | tenant | house) → 'consumption_meter'
  *  8. else             → 'other'
  *
  * Returns lowercase device_type enum values matching the AB #50 schema.
@@ -57,16 +57,16 @@ export function classifyDeviceType(
   if (/Inverter/i.test(haystack)) return "inverter";
 
   // Rule 7: alias fallback for generic AC meters (e.g. Meter.Socomec.AcUniversal)
-  // Matches consum*, load, household, house bounded by start/end of string or any
+  // Matches consum*, load, tenant, house bounded by start/end of string or any
   // non-letter character. Boundary = `[^A-Za-z]` (NOT `\W`) so `_` and `-` count
   // as boundaries — real-world component aliases include both (e.g. `main_load`,
   // `meter-consumption`). For multi-keyword aliases like `"PV + Consumption Total"`,
   // the first matching keyword wins → consumption_meter.
-  // Regex: /(^|[^A-Za-z])(consum\w*|load|household|house)([^A-Za-z]|$)/i
+  // Regex: /(^|[^A-Za-z])(consum\w*|load|tenant|house)([^A-Za-z]|$)/i
   const trimmedAlias = alias?.trim();
   if (
     trimmedAlias &&
-    /(^|[^A-Za-z])(consum\w*|load|household|house)([^A-Za-z]|$)/i.test(
+    /(^|[^A-Za-z])(consum\w*|load|tenant|house)([^A-Za-z]|$)/i.test(
       trimmedAlias
     )
   ) {

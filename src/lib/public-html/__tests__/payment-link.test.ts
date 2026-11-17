@@ -23,7 +23,7 @@ describe("the pages a payment link shows instead of checkout", () => {
     expect(Buffer.byteLength(html, "utf8")).toBeLessThanOrEqual(4096);
   });
 
-  it("tells a household with online payment off to pay the operator the usual way", () => {
+  it("tells a tenant with online payment off to pay the operator the usual way", () => {
     const html = renderPaymentLinkPage("en", { notice: "onlinePaymentOff" });
     expect(html).toContain("<h1>Online payment isn&#39;t available</h1>");
     expect(html).toContain("Pay your operator the usual way, or contact them.");

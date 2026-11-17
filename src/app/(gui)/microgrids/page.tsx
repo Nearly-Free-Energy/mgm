@@ -8,8 +8,8 @@ import { microgridHref } from "@/lib/microgrid-links";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { CommunityOption } from "@/components/forms/AddEntityButton";
 
-type MicrogridWithHouseholdCount = MicrogridPublic & {
-  household_count: number;
+type MicrogridWithTenantCount = MicrogridPublic & {
+  tenant_count: number;
 };
 
 type CommunityWithOrgRow = {
@@ -268,16 +268,16 @@ export default async function MicrogridsPage({
     );
   }
 
-  const microgridsWithCounts: MicrogridWithHouseholdCount[] = [];
+  const microgridsWithCounts: MicrogridWithTenantCount[] = [];
   for (const mg of microgrids) {
     const { count } = await supabase
-      .from("households")
+      .from("tenants")
       .select("*", { count: "exact", head: true })
       .eq("microgrid_id", mg.id);
 
     microgridsWithCounts.push({
       ...mg,
-      household_count: count ?? 0,
+      tenant_count: count ?? 0,
     });
   }
 
@@ -307,7 +307,7 @@ export default async function MicrogridsPage({
               )}
               <div className="mt-3 flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">
-                  {mg.household_count} household{mg.household_count !== 1 ? "s" : ""}
+                  {mg.tenant_count} tenant{mg.tenant_count !== 1 ? "s" : ""}
                 </span>
                 <span className="text-muted-foreground">{mg.currency}</span>
               </div>
