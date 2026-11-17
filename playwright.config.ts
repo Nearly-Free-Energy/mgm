@@ -6,6 +6,7 @@ import { defineConfig, type PlaywrightTestOptions } from "@playwright/test";
 // first) and a local Supabase. docs/setup.md, "Browser smoke test".
 // Chromium only; CI installs it in its own step.
 const PORT = 3100;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
 
 // A phone: 360 px wide, touch as the primary pointer, so the
 // `(pointer: coarse)` rules in globals.css apply.
@@ -25,7 +26,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     browserName: "chromium",
-    baseURL: `http://127.0.0.1:${PORT}`,
+    baseURL: ORIGIN,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -42,7 +43,18 @@ export default defineConfig({
   webServer: {
     // Warns that standalone output prefers its own server; it serves normally.
     command: `npm run start -- -H 127.0.0.1 -p ${PORT}`,
-    url: `http://127.0.0.1:${PORT}/login`,
+    // Sign-in links go to the local Supabase's mail catcher, where
+    // e2e/fixtures.ts reads them (RFC #186). Playwright gives the server
+    // exactly this environment, so the rest of process.env is spread in.
+    // The link is built from MGM_APP_URL, so it is always this server:
+    // a value from the shell would send the browser to another origin.
+    env: {
+      ...(process.env as Record<string, string>),
+      MGM_APP_URL: ORIGIN,
+      MGM_SMTP_URL: process.env.MGM_SMTP_URL ?? "smtp://127.0.0.1:54325",
+      MGM_MAIL_FROM: process.env.MGM_MAIL_FROM ?? "MGM <no-reply@smoke.test>",
+    },
+    url: `${ORIGIN}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

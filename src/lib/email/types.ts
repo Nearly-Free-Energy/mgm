@@ -11,7 +11,7 @@
  */
 export type SmtpSenderSettings = {
   kind: "smtp";
-  /** Lowercase DNS name, never an address literal (smtp/address.ts), unless `loopback`. */
+  /** Lowercase DNS name, never an address literal (smtp/address.ts), unless `plaintextLocal`. */
   host: string;
   /**
    * 465: TLS from the first byte. Any other port: STARTTLS, required.
@@ -25,11 +25,12 @@ export type SmtpSenderSettings = {
   replyTo: string | null;
   /**
    * Local development only: the deployment sender pointing at the local
-   * mail catcher (src/lib/config/mail-sender.ts). The host is a loopback address,
-   * the connection is plaintext, and the username may be empty. Never set
-   * for an organization's sender.
+   * mail catcher (src/lib/config/mail-sender.ts). The host is on this
+   * machine (a loopback name or address) or in its container network (a
+   * name with no dot, such as `mailpit`), the connection is plaintext, and
+   * the username may be empty. Never set for an organization's sender.
    */
-  loopback?: boolean;
+  plaintextLocal?: boolean;
 };
 
 export type MailSenderSettings = SmtpSenderSettings;

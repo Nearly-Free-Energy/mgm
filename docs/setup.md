@@ -25,9 +25,10 @@ cd mgm
 ./setup.sh --docker
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and log in:
-- **Email:** `admin@eiot.energy`
-- **Password:** `admin123`
+Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
+passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+link**, then open the email in Mailpit at
+[http://localhost:8025](http://localhost:8025) and follow its link.
 
 ### Data persistence
 
@@ -73,9 +74,12 @@ cd mgm
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and log in:
-- **Email:** `admin@eiot.energy`
-- **Password:** `admin123`
+Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
+passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+link**, then open the email in the local mail catcher at
+[http://127.0.0.1:54324](http://127.0.0.1:54324) and follow its link. This
+needs `MGM_SMTP_URL` and `MGM_MAIL_FROM` in `.env.local`, which
+`.env.local.example` sets for the catcher.
 
 `npm run dev` builds the interface's stylesheet once before it starts. While
 you change classes under `src/gui/` or the tokens in `src/styles/tokens.css`,
@@ -174,9 +178,10 @@ browser bundle or the image. The decision is recorded in
 | `MGM_PUBLIC_SUPABASE_ANON_KEY` | yes | yes | Supabase public key: an `sb_publishable_…` key or a JWT whose role is `anon`. Anything else (secret or service-role keys included) is refused |
 | `MGM_PUBLIC_SUPABASE_COOKIE_NAME` | when `SUPABASE_INTERNAL_URL` is on another host | yes | Fixed auth cookie name, so server, middleware and browser find the same session. Without it, Supabase derives the cookie name from the URL each side uses; MGM refuses to start a request when the internal and public hosts differ and this is unset |
 | `SUPABASE_INTERNAL_URL` | no | no | Server-only Supabase URL override, e.g. `http://kong:8000` inside a container network |
-| `MGM_APP_URL` | for payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
-| `MGM_SMTP_URL` | for sign-in by email | no | The deployment's own mail server (RFC #186): the only sender of sign-in links, and the fallback for organizations' notices. `smtps://user:password@smtp.example.com:465` (TLS) or `smtp://user:password@smtp.example.com:587` (STARTTLS required); percent-encode `@`, `/` and `:` in the user or password. Plaintext `smtp://` is accepted only for `localhost`, `127.0.0.1` and `[::1]`, for the local mail catcher: `smtp://127.0.0.1:54325`, then read the mail at http://127.0.0.1:54324. Errors name the variable, never its value. Without it the "Email me a sign-in link" button sends nothing and the server logs why |
+| `MGM_APP_URL` | for sign-in and payments | no | Public origin of this installation (`https://mgm.example.org`, no path). Must be `https`, except for `localhost`, `127.0.0.1` and `[::1]`. Builds sign-in links (`/auth/confirm`), payment links, the provider return URL `/payment/callback`, and the notification URL `/api/payments/ipn` registered with the payment provider |
+| `MGM_SMTP_URL` | for sign-in by email | no | The deployment's own mail server (RFC #186): the only sender of sign-in links, and the fallback for organizations' notices. `smtps://user:password@smtp.example.com:465` (TLS) or `smtp://user:password@smtp.example.com:587` (STARTTLS required); percent-encode `@`, `/` and `:` in the user or password. Plaintext `smtp://` is accepted only for `localhost`, `127.0.0.1` and `[::1]`, for the local mail catcher: `smtp://127.0.0.1:54325`, then read the mail at http://127.0.0.1:54324; or for a container-network name with no dot when `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1`. Errors name the variable, never its value. Without it the "Email me a sign-in link" button sends nothing and the server logs why |
 | `MGM_MAIL_FROM` | with `MGM_SMTP_URL` | no | The From of the deployment's emails: `MGM <no-reply@example.org>` or a bare address |
+| `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
 | `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
@@ -197,8 +202,9 @@ restart policy does not fire). Look for "Failed to prepare server" or "An
 error occurred while loading instrumentation hook" in the logs. An invalid `MGM_APP_URL` is logged
 as an error naming the variable and does not stop anything else; payment
 links and notification registration fail with the same message on first use.
-A missing `MGM_APP_URL` only logs a warning, because payments are the only
-feature that needs it. An `MGM_GUI` that names no compiled-in GUI is also
+A missing `MGM_APP_URL` only logs a warning, because the features that need
+it, sign-in links and payments, fail clearly on first use: the server logs
+`send_failed` naming the variable. An `MGM_GUI` that names no compiled-in GUI is also
 logged as an error naming the variable; its value is printed only when it
 looks like a GUI name. It does not stop payment pages or webhooks, which render no
 interface. An `MGM_METERING_FIXTURES` value other than on or off is logged
@@ -419,7 +425,8 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 ## Browser smoke test (local Supabase only)
 
 `e2e/` holds a Playwright smoke test that `Test` runs after `npm test`. In
-Chromium at 360 × 800 with touch as the pointer, it signs in, opens the home
+Chromium at 360 × 800 with touch as the pointer, it signs in by email link
+(RFC #186), reading the link from the local Supabase's mail catcher, opens the home
 page and a microgrid's tenants list, and checks that no page scrolls
 sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
@@ -443,7 +450,13 @@ MGM_PUBLIC_SUPABASE_URL="$API_URL" MGM_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" \
 ```
 
 It starts the app on port 3100, or reuses one already listening there. It
-refuses to run unless `MGM_PUBLIC_SUPABASE_URL` is the local Supabase.
+refuses to run unless `MGM_PUBLIC_SUPABASE_URL` is the local Supabase. The
+app sends its sign-in link to the mail catcher on the default local ports
+(`MGM_SMTP_URL=smtp://127.0.0.1:54325`, read through
+`MGM_MAIL_CATCHER_URL=http://127.0.0.1:54324`); set both if your Supabase
+uses other ports. The smoke sets `MGM_APP_URL` to the app on port 3100
+itself, because the link is built from it, and checks that the link lands
+there.
 
 ## Full-Stack Setup (with OpenEMS)
 
@@ -473,7 +486,7 @@ If using local/dev mode, run `npm run dev` after setup.
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
 | `[mgm] NEXT_PUBLIC_… is set but no longer read` at `npm run dev` | Rename the variable in `.env.local` ([Upgrading from v0.0.1 or v0.0.2](#upgrading-from-v001-or-v002)), or rerun `./setup.sh --force` (in local mode this also resets the local database) |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
-| Login fails with "Invalid credentials" | Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` (local mode) or `./setup.sh --docker --force` (docker mode) to re-seed the admin user |
+| No sign-in email arrives | Check the server log for `auth.sign_in_link`: `no_access` means the address has no MGM role (run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset`, or `./setup.sh --docker --force` in docker mode, to re-seed the admin user); `send_failed` with a setting name means `MGM_SMTP_URL` or `MGM_MAIL_FROM` is missing; `limited` means wait a minute (1 a minute, 5 an hour per address). In production, if a super admin must get in before the mail server is fixed, follow `docs/runbooks/emergency-sign-in.md` |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |
 | Billing generation shows "No meter reading data" | Ensure OpenEMS edge simulations are running and meters are assigned to tenants |
 | Docker mode: app not starting | Check `docker compose logs mgm-app` for errors |

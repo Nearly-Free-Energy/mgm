@@ -8,7 +8,15 @@ import "server-only";
  *                  smtp://user:password@smtp.example.com:587   (STARTTLS required)
  *                  smtp://127.0.0.1:54325   local mail catcher, plaintext;
  *                                           allowed only on a loopback host
+ *                  smtp://mailpit:1025      the same, by a container-network
+ *                                           name with no dot (docker compose),
+ *                                           only with the opt-in below
  *   MGM_MAIL_FROM  MGM <no-reply@example.com>, or a bare address
+ *   MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1
+ *                  allows plaintext to a container-network name. Without it
+ *                  such a name is refused: sign-in links are credentials,
+ *                  and in production a dotless name may be a cluster service
+ *                  or a search-domain expansion on another machine.
  *
  * Read per call, like MGM_APP_URL (app-url.ts), and errors name the variable
  * without echoing it: the URL holds the mail password. The URL's user and
@@ -16,7 +24,7 @@ import "server-only";
  * percent-encoded.
  */
 import type { SmtpSenderSettings } from "@/lib/email/types";
-import { normalizeMailHost } from "@/lib/email/smtp/address";
+import { CONTAINER_HOST_RE, normalizeMailHost } from "@/lib/email/smtp/address";
 import { RuntimeConfigError, type RuntimeEnv } from "./public-runtime-config";
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -58,7 +66,11 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
     throw new RuntimeConfigError("MGM_SMTP_URL must not have a path, query or fragment.");
   }
 
-  const loopback = LOOPBACK_HOSTS.has(url.hostname);
+  // smtp: is not a special scheme, so URL keeps the host's case.
+  const hostname = url.hostname.toLowerCase();
+  const loopback = LOOPBACK_HOSTS.has(hostname);
+  const container = !loopback && CONTAINER_HOST_RE.test(hostname);
+  const local = loopback || container;
   let port: number;
   if (url.protocol === "smtps:") {
     port = Number(url.port || 465);
@@ -72,25 +84,31 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
   const password = decodeURIComponent(url.password);
   const { fromAddress, fromName } = parseFrom(from);
 
-  if (loopback && url.protocol === "smtp:") {
-    // The local mail catcher: plaintext, on this machine only.
+  if (local && url.protocol === "smtp:") {
+    if (container && env.MGM_SMTP_ALLOW_PLAINTEXT_LOCAL !== "1") {
+      throw new RuntimeConfigError(
+        "MGM_SMTP_URL names a plaintext mail server by a name with no dot; set MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1 only where that is a local mail catcher in this container network (docker compose)."
+      );
+    }
+    // The local mail catcher: plaintext, on this machine or in its
+    // container network only.
     return {
       kind: "smtp",
-      host: url.hostname === "[::1]" ? "::1" : url.hostname,
+      host: hostname === "[::1]" ? "::1" : hostname,
       port,
       username,
       password,
       fromAddress,
       fromName,
       replyTo: null,
-      loopback: true,
+      plaintextLocal: true,
     };
   }
 
-  const host = normalizeMailHost(url.hostname);
+  const host = normalizeMailHost(hostname);
   if (!host) {
     throw new RuntimeConfigError(
-      "MGM_SMTP_URL must name its mail server by a public DNS name (plaintext smtp:// is allowed only for localhost)."
+      "MGM_SMTP_URL must name its mail server by a public DNS name (plaintext smtp:// is allowed only for localhost, or with MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1 for a container-network name with no dot)."
     );
   }
   if (url.protocol === "smtps:" && port !== 465) {
@@ -103,7 +121,11 @@ export function parseDeploymentSender(env: RuntimeEnv): SmtpSenderSettings {
 }
 
 function readEnv(): RuntimeEnv {
-  return { MGM_SMTP_URL: process.env.MGM_SMTP_URL, MGM_MAIL_FROM: process.env.MGM_MAIL_FROM };
+  return {
+    MGM_SMTP_URL: process.env.MGM_SMTP_URL,
+    MGM_MAIL_FROM: process.env.MGM_MAIL_FROM,
+    MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: process.env.MGM_SMTP_ALLOW_PLAINTEXT_LOCAL,
+  };
 }
 
 /** The deployment sender for this request; throws RuntimeConfigError when unset or invalid. */

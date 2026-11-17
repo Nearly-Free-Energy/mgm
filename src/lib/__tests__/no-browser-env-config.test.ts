@@ -63,7 +63,6 @@ const CONFIG_MODULES = [
 /** Browser-side modules without a "use client" directive, and why each is one. */
 const BROWSER_MODULES: Record<string, string> = {
   "src/lib/supabase/client.ts": "browser Supabase client factory",
-  "src/lib/supabase/recovery-client.ts": "browser password-recovery client factory",
   "src/lib/config/browser-config-store.ts": "holds the provider's values for the browser factories",
   "src/lib/config/cookie-options.ts": "shared by the browser factory",
 };

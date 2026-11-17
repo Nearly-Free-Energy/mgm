@@ -32,6 +32,10 @@ services:
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_DISABLE_SIGNUP: "false"
+      # Sign-in links (RFC #186): a 10-digit OTP, good for 15 minutes, as
+      # supabase/config.toml and production set.
+      GOTRUE_MAILER_OTP_LENGTH: "10"
+      GOTRUE_MAILER_OTP_EXP: "900"
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9999/health"]
       interval: 5s
@@ -111,6 +115,7 @@ services:
     depends_on:
       kong: { condition: service_healthy }
       mgm-migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
     environment:
       MGM_PUBLIC_SUPABASE_URL: http://localhost:54321
       MGM_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
@@ -118,6 +123,12 @@ services:
       SUPABASE_INTERNAL_URL: http://kong:8000
       MGM_PUBLIC_SUPABASE_COOKIE_NAME: sb-mgm-auth-token
       MGM_APP_URL: http://localhost:3000
+      # MGM's own mail sender (RFC #186): sign-in links go to the mail
+      # catcher below; read them at http://localhost:8025. Plaintext to a
+      # name with no dot needs the opt-in, which belongs only here.
+      MGM_SMTP_URL: smtp://mailpit:1025
+      MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: "1"
+      MGM_MAIL_FROM: MGM <no-reply@localhost.test>
       OPENEMS_B2B_URL: http://host.docker.internal:8075
       OPENEMS_B2B_USERNAME: admin
       OPENEMS_B2B_PASSWORD: Icui4cyou
@@ -130,6 +141,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Catches the mail MGM sends (sign-in links, invitations); nothing leaves
+  # this machine. Web view on http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    ports:
+      - "8025:8025"
 
 volumes:
   pgdata:
