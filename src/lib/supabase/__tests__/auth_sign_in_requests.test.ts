@@ -1,5 +1,5 @@
 /**
- * auth_sign_in_requests.test.ts — RFC #186 PR 2, migration 20261116220000.
+ * auth_sign_in_requests.test.ts — RFC #186 PR 2, migration 20261117030000.
  *
  * 1. Link requests: 1 a minute and 5 an hour per address, 20 an hour per IP.
  * 2. fn_auth_sign_in_target finds only people with an MGM role.
