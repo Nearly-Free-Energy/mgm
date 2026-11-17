@@ -23,6 +23,11 @@
 -- docker-compose.yml (GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_*), and on a hosted
 -- project the dashboard's Authentication › Auth Hooks, or the Management
 -- API (docs/setup.md, "Supabase Auth settings").
+--
+-- The hook fails closed: while it is enabled, a missing or failing function
+-- stops every sign-in and refresh, the emergency link included. Turn the hook
+-- off, and check it is off, before a later migration replaces or drops this
+-- function (docs/setup.md, "Rolling back, or changing the function").
 CREATE OR REPLACE FUNCTION public.fn_auth_access_token_hook(event JSONB)
 RETURNS JSONB
 LANGUAGE plpgsql

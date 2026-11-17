@@ -112,7 +112,10 @@ describe.skipIf(skip)("access-token hook (RFC #186)", () => {
     expect(error?.message).toBe(REFUSAL);
   });
 
-  it("signs in by emailed link, and refreshes that session", async () => {
+  // The same link /api/auth/sign-in-link emails and
+  // scripts/emergency-sign-in-link.py hands over: generate_link type
+  // magiclink, then /auth/confirm's verifyOtp({ token_hash, type: "email" }).
+  it("signs in by emailed or emergency link, and refreshes that session", async () => {
     const svc = await serviceClient();
     const { data: link, error: linkError } = await svc.auth.admin.generateLink({ type: "magiclink", email: EMAILS[0] });
     expect(linkError).toBeNull();

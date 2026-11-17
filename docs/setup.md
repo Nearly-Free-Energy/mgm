@@ -259,8 +259,25 @@ The first line deletes every stored password hash. The second signs
 everyone out: their refresh tokens go with the sessions. Access tokens
 already issued stay valid until they expire, at most `jwt_expiry` (one
 hour). Everyone then signs in by email link. Make sure the mail sender
-works first (`MGM_SMTP_URL`), and keep `docs/runbooks/emergency-sign-in.md`
-at hand.
+works first (`MGM_SMTP_URL`), keep `docs/runbooks/emergency-sign-in.md`
+at hand, and have at least two super admins, so one can still help if the
+other's mailbox fails.
+
+**Rolling back, or changing the function.** While the hook is on, Supabase
+Auth calls the function for every sign-in and every refresh, the email link
+and the emergency link included. If the function is missing or fails,
+nobody can sign in. So, in this order:
+
+1. Turn the hook off (Authentication › Auth Hooks, or `PATCH
+   /v1/projects/<ref>/config/auth` with
+   `hook_custom_access_token_enabled: false`), and read the setting back
+   with `GET` to check it is `false`.
+2. Only then change, replace or drop `public.fn_auth_access_token_hook`.
+3. Turn the hook back on, if it should be, once the function is in place.
+
+Turning the hook off makes Supabase Auth issue tokens again; it does not
+bring passwords back. The cutover above deleted the hashes for good, so
+after it everyone still signs in by email link.
 
 ### Upgrading from v0.0.1 or v0.0.2
 
