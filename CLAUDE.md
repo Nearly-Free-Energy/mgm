@@ -64,6 +64,8 @@ Missing env vars without `SKIP_RLS_TESTS=1` fail loudly — this is intentional.
 
 See `docs/setup.md § "RLS Tests"` for full instructions.
 
+**Stop the local Supabase you started.** Each `supabase start` runs about ten containers and takes roughly a gigabyte of memory, and a stack started for one task under its own `project_id` (such as `mgm-email` or `mgm-tenant`) keeps running after the task ends until Docker runs out of memory. When you are done with a stack you started, run `supabase stop` from the directory you started it in, or `supabase stop --project-id <id>` from anywhere; both keep its database for the next `supabase start`. Leave the main `mgm` stack, and any stack another running session is using, alone.
+
 ## Stack
 
 - **Framework:** Next.js 16 (App Router)
