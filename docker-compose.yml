@@ -36,6 +36,10 @@ services:
       # supabase/config.toml and production set.
       GOTRUE_MAILER_OTP_LENGTH: "10"
       GOTRUE_MAILER_OTP_EXP: "900"
+      # Refuses a token for a password or recovery sign-in (RFC #186 § 6);
+      # migration 20261117210000 creates the function.
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/fn_auth_access_token_hook"
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9999/health"]
       interval: 5s
