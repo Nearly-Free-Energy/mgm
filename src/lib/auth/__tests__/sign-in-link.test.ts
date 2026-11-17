@@ -73,14 +73,14 @@ describe("issueSignInLink", () => {
     expect(mocks.update).toHaveBeenCalledWith({ outcome: "no_access" }, 41);
   });
 
-  it("sends the link and code through the deployment sender, with the link on MGM_APP_URL", async () => {
+  it("sends the link, and no code, through the deployment sender, with the link on MGM_APP_URL", async () => {
     await expect(issue()).resolves.toBe("sent");
     expect(mocks.generateLink).toHaveBeenCalledWith({ type: "magiclink", email: "manager@example.org" });
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ host: "smtp.example.com", port: 465 }));
     const message = mocks.send.mock.calls[0][0];
     expect(message.to).toBe("manager@example.org");
     expect(message.text).toContain("https://mgm.example.org/auth/confirm?token_hash=HASHED&next=%2Fmicrogrids%2Fabc");
-    expect(message.text).toContain("123456");
+    expect(message.text).not.toContain("123456");
     expect(mocks.update).toHaveBeenCalledWith({ outcome: "sent" }, 41);
   });
 
@@ -102,7 +102,7 @@ describe("issueSignInLink", () => {
     expect(mocks.update).toHaveBeenCalledWith({ outcome: "send_failed" }, 41);
   });
 
-  it("logs outcomes only, never the address, link or code", async () => {
+  it("logs outcomes only, never the address or link", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     await issue();
     const logged = JSON.stringify(info.mock.calls);
@@ -114,7 +114,7 @@ describe("issueSignInLink", () => {
 
 describe("signInEmail", () => {
   it("says how long the link lasts and that a new one cancels it", () => {
-    const { text, subject } = signInEmail({ to: "a@example.org", link: "https://x/y", code: "654321" });
+    const { text, subject } = signInEmail({ to: "a@example.org", link: "https://x/y" });
     expect(subject).toBe("Your MGM sign-in link");
     expect(text).toContain("15 minutes");
     expect(text).toContain("cancels");
@@ -122,9 +122,18 @@ describe("signInEmail", () => {
 });
 
 describe("requestIp", () => {
-  it("takes the first forwarded address", () => {
-    expect(requestIp(new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }))).toBe("203.0.113.9");
-    expect(requestIp(new Headers({ "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
+  it("prefers Vercel's own header, which the platform overwrites", () => {
+    expect(
+      requestIp(new Headers({ "x-vercel-forwarded-for": "203.0.113.9", "x-forwarded-for": "1.2.3.4, 203.0.113.9" }))
+    ).toBe("203.0.113.9");
+  });
+
+  it("otherwise takes the right-most forwarded address, never the client-supplied left-most", () => {
+    expect(requestIp(new Headers({ "x-forwarded-for": "1.2.3.4, 198.51.100.2" }))).toBe("198.51.100.2");
+  });
+
+  it("ignores a header the client could set alone", () => {
+    expect(requestIp(new Headers({ "x-real-ip": "198.51.100.2" }))).toBeNull();
     expect(requestIp(new Headers())).toBeNull();
   });
 });

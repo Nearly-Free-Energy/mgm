@@ -1,19 +1,15 @@
 import "server-only";
 /**
- * Sign-in by email link or code (RFC #186 § 4). Runs before any session
- * exists, on the service client:
- *
- *   issueSignInLink — claim the rate limit, look up a person with an MGM
- *   role, ask Supabase Auth for a one-time token (generateLink sends
- *   nothing), and email the link and its 6-digit code through the
- *   deployment's sender. Never an organization's sender: whoever runs that
- *   server could read the link (decision 5).
- *
- *   claimCodeAttempt / recordCodeOutcome — the 5-tries-per-code limit around
- *   verifyOtp, which the verify-code route calls on its own cookie client.
+ * Sign-in by email link (RFC #186 § 4). Runs before any session exists, on
+ * the service client: claim the rate limit, look up a person with an MGM
+ * role, ask Supabase Auth for a one-time token (generateLink sends nothing),
+ * and email the link through the deployment's sender. Never an
+ * organization's sender: whoever runs that server could read the link
+ * (decision 5). The email carries the link only, no code to type
+ * (decision 6).
  *
  * Supabase Auth still issues, expires and verifies the token, and owns the
- * session. Logs carry an outcome, never the address, link, code or token.
+ * session. Logs carry an outcome, never the address, link or token.
  */
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -23,7 +19,7 @@ import { RuntimeConfigError } from "@/lib/config/public-runtime-config";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import type { MailTransportRegistry } from "@/lib/runtime/services";
 
-/** How long a link and its code are good for; Supabase's email OTP expiry must match. */
+/** How long a link is good for; Supabase's email OTP expiry must match. */
 export const SIGN_IN_LINK_MINUTES = 15;
 
 export function hashForLimit(value: string): string {
@@ -32,7 +28,7 @@ export function hashForLimit(value: string): string {
 
 export type SignInLinkOutcome = "limited" | "no_access" | "sent" | "send_failed";
 
-export function signInEmail(input: { to: string; link: string; code: string }) {
+export function signInEmail(input: { to: string; link: string }) {
   return {
     to: input.to,
     subject: "Your MGM sign-in link",
@@ -41,9 +37,7 @@ export function signInEmail(input: { to: string; link: string; code: string }) {
       "",
       input.link,
       "",
-      `Or enter this code on the sign-in page: ${input.code}`,
-      "",
-      `The link and the code work once, for ${SIGN_IN_LINK_MINUTES} minutes. Asking for a new one cancels this one.`,
+      `The link works once, for ${SIGN_IN_LINK_MINUTES} minutes, on the device where you open it. Asking for a new one cancels this one.`,
       "",
       "If you did not ask to sign in, you can ignore this email: nobody can sign in without it.",
     ].join("\n"),
@@ -91,7 +85,7 @@ export async function issueSignInLink(input: {
     // Read first, so a deployment without a mail sender issues no token.
     settings = getDeploymentSender();
     const { data, error } = await service.auth.admin.generateLink({ type: "magiclink", email });
-    if (error || !data.properties?.hashed_token || !data.properties.email_otp) return record("send_failed");
+    if (error || !data.properties?.hashed_token) return record("send_failed");
     const query = new URLSearchParams({ token_hash: data.properties.hashed_token });
     const next = input.next ? safeReturnPath(input.next) : null;
     if (next && next !== "/") query.set("next", next);
@@ -100,7 +94,7 @@ export async function issueSignInLink(input: {
     link = appUrl(`/auth/confirm?${query.toString()}`);
     const sent = await transports
       .create(settings)
-      .send(signInEmail({ to: email, link, code: data.properties.email_otp }));
+      .send(signInEmail({ to: email, link }));
     return record(sent.ok ? "sent" : "send_failed");
   } catch (error) {
     // A RuntimeConfigError names the missing or invalid setting, never its
@@ -112,27 +106,16 @@ export async function issueSignInLink(input: {
   }
 }
 
-/** The attempt's id, or null when this address (or IP) has used up its tries. */
-export async function claimCodeAttempt(service: SupabaseClient, email: string, ip: string | null): Promise<number | null> {
-  const { data, error } = await service.rpc("fn_auth_claim_code_attempt", {
-    _email_hash: hashForLimit(email),
-    _ip_hash: ip ? hashForLimit(ip) : null,
-  });
-  if (error) throw new Error(`code claim failed: ${error.code ?? "unknown"}`);
-  return data ?? null;
-}
-
-export async function recordCodeOutcome(
-  service: SupabaseClient,
-  attemptId: number,
-  outcome: "verified" | "wrong_code"
-): Promise<void> {
-  await service.from("auth_sign_in_requests").update({ outcome }).eq("id", attemptId);
-  log("auth.sign_in_code", outcome);
-}
-
-/** The caller's IP as the platform reports it, for rate limits only. */
+/**
+ * The caller's IP for the rate limits, from a value the client cannot set:
+ * Vercel's own `x-vercel-forwarded-for`, which the platform overwrites; else
+ * the right-most `x-forwarded-for` entry, which the nearest proxy appended
+ * (the left-most is whatever the client sent). If MGM runs behind more than
+ * one proxy, the right-most entry is the inner proxy's view; revisit then.
+ */
 export function requestIp(headers: Headers): string | null {
-  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || headers.get("x-real-ip")?.trim() || null;
+  const vercel = headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim();
+  if (vercel) return vercel;
+  const forwarded = headers.get("x-forwarded-for")?.split(",").map((part) => part.trim()).filter(Boolean);
+  return forwarded?.at(-1) ?? null;
 }

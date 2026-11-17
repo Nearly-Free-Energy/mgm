@@ -7,7 +7,7 @@
 
 /**
  * A mail server, with its password decrypted: an organization's sender, or
- * the deployment's own (deployment-sender.ts).
+ * the deployment's own (src/lib/config/mail-sender.ts).
  */
 export type SmtpSenderSettings = {
   kind: "smtp";
@@ -25,7 +25,7 @@ export type SmtpSenderSettings = {
   replyTo: string | null;
   /**
    * Local development only: the deployment sender pointing at the local
-   * mail catcher (deployment-sender.ts). The host is a loopback address,
+   * mail catcher (src/lib/config/mail-sender.ts). The host is a loopback address,
    * the connection is plaintext, and the username may be empty. Never set
    * for an organization's sender.
    */

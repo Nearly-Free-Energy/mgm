@@ -13,9 +13,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // Sign-in by email (RFC #186): after the link is sent, the code form.
+  // Sign-in by email link (RFC #186).
   const [linkSent, setLinkSent] = useState(false);
-  const [code, setCode] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
@@ -45,34 +44,9 @@ export default function LoginPage() {
         return;
       }
       setLinkSent(true);
-      setCode("");
       setNotice(value.message ?? "If this address has access to MGM, a sign-in email is on its way.");
     } catch {
       setError("Could not send the sign-in email. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function verifyCode(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-    try {
-      const response = await fetch("/api/auth/verify-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), code, next: returnPath() }),
-      });
-      const value = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(value.error ?? "That code did not work. Try again.");
-        return;
-      }
-      router.replace(safeReturnPath(value.next));
-      router.refresh();
-    } catch {
-      setError("That code did not work. Try again.");
     } finally {
       setLoading(false);
     }
@@ -177,36 +151,12 @@ export default function LoginPage() {
               Email me a sign-in link
             </button>
           ) : (
-            <form onSubmit={verifyCode} className="space-y-3">
+            <div className="space-y-3">
               {notice && (
                 <p role="status" className="text-sm text-muted-foreground">
-                  {notice} Open the link in it, or enter its code here.
+                  {notice} Open the link in it on this device. It works once, for 15 minutes.
                 </p>
               )}
-              <div>
-                <label htmlFor="code" className="block text-sm font-medium text-muted-foreground">
-                  Code from the email
-                </label>
-                <input
-                  id="code"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  required
-                  className="mt-1 block w-full rounded-md border border-border px-3 py-2 text-foreground shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="123456"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="min-h-11 w-full rounded-md bg-primary px-4 py-2 text-primary-foreground hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-card disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? "Checking..." : "Sign in with code"}
-              </button>
               <button
                 type="button"
                 onClick={() => void sendLink()}
@@ -215,7 +165,7 @@ export default function LoginPage() {
               >
                 Send a new email
               </button>
-            </form>
+            </div>
           )}
         </div>
       </div>

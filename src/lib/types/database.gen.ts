@@ -40,7 +40,6 @@ export type Database = {
           email_hash: string
           id: number
           ip_hash: string | null
-          kind: string
           outcome: string
         }
         Insert: {
@@ -48,7 +47,6 @@ export type Database = {
           email_hash: string
           id?: never
           ip_hash?: string | null
-          kind: string
           outcome: string
         }
         Update: {
@@ -56,7 +54,6 @@ export type Database = {
           email_hash?: string
           id?: never
           ip_hash?: string | null
-          kind?: string
           outcome?: string
         }
         Relationships: []
@@ -1747,10 +1744,6 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
-      }
-      fn_auth_claim_code_attempt: {
-        Args: { _email_hash: string; _ip_hash: string }
-        Returns: number
       }
       fn_auth_claim_sign_in_request: {
         Args: { _email_hash: string; _ip_hash: string }

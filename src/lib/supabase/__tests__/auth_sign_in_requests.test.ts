@@ -2,11 +2,10 @@
  * auth_sign_in_requests.test.ts — RFC #186 PR 2, migration 20261116220000.
  *
  * 1. Link requests: 1 a minute and 5 an hour per address, 20 an hour per IP.
- * 2. Code attempts: 5 since the last link sent to the address.
- * 3. fn_auth_sign_in_target finds only people with an MGM role.
- * 4. Only the service role reaches any of it.
- * 5. End to end against the local Supabase: issueSignInLink sends a link and
- *    code, the code signs in once, and a second link cancels the first.
+ * 2. fn_auth_sign_in_target finds only people with an MGM role.
+ * 3. Only the service role reaches any of it.
+ * 4. End to end against the local Supabase: issueSignInLink sends a link
+ *    (no code), the link signs in once, and a second link cancels the first.
  *
  * Opt-out: SKIP_RLS_TESTS=1, for running without a local Supabase.
  */
@@ -84,7 +83,6 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
     const svc = await serviceClient();
     const emailHash = hashForLimit("limit-b@test.local");
     const earlier = Array.from({ length: 5 }, (_, i) => ({
-      kind: "link",
       email_hash: emailHash,
       outcome: "sent",
       created_at: new Date(Date.now() - (5 + i) * 60_000).toISOString(),
@@ -97,7 +95,6 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
   it("allows twenty links an hour per IP, across addresses", async () => {
     const svc = await serviceClient();
     const earlier = Array.from({ length: 20 }, (_, i) => ({
-      kind: "link",
       email_hash: hashForLimit(`spread-${i}@test.local`),
       ip_hash: IP,
       outcome: "no_access",
@@ -107,20 +104,6 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
     expect(await claim("fresh@test.local")).toBeNull();
     for (let i = 0; i < 20; i++) await rows(svc, hashForLimit(`spread-${i}@test.local`));
     await rows(svc, hashForLimit("fresh@test.local"));
-  });
-
-  it("allows five code attempts since the last link, then none until a new one is sent", async () => {
-    const svc = await serviceClient();
-    const emailHash = hashForLimit("codes@test.local");
-    const attempt = async () =>
-      (await svc.rpc("fn_auth_claim_code_attempt", { _email_hash: emailHash, _ip_hash: null })).data;
-    await svc.from("auth_sign_in_requests").insert({ kind: "link", email_hash: emailHash, outcome: "sent", created_at: new Date(Date.now() - 60_000).toISOString() });
-    for (let i = 0; i < 5; i++) expect(await attempt()).toEqual(expect.any(Number));
-    expect(await attempt()).toBeNull();
-
-    await svc.from("auth_sign_in_requests").insert({ kind: "link", email_hash: emailHash, outcome: "sent" });
-    expect(await attempt()).toEqual(expect.any(Number));
-    await rows(svc, emailHash);
   });
 
   it("finds only addresses that hold an MGM role, whatever their case", async () => {
@@ -138,7 +121,6 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
       expect(read.data === null || read.data.length === 0).toBe(true);
       for (const [fn, args] of [
         ["fn_auth_claim_sign_in_request", { _email_hash: hashForLimit("x@test.local"), _ip_hash: null }],
-        ["fn_auth_claim_code_attempt", { _email_hash: hashForLimit("x@test.local"), _ip_hash: null }],
         ["fn_auth_sign_in_target", { _email: EMAILS[0] }],
       ] as const) {
         const { data, error } = await client.rpc(fn, args);
@@ -148,7 +130,7 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
     }
   });
 
-  it("sends a link and code that sign in once, and a second link cancels the first", async () => {
+  it("sends a link, and no code, that signs in once, and a second link cancels the first", async () => {
     vi.stubEnv("MGM_APP_URL", "https://mgm.example.org");
     vi.stubEnv("MGM_SMTP_URL", "smtps://mgm:pw@smtp.example.com:465");
     vi.stubEnv("MGM_MAIL_FROM", "MGM <no-reply@example.org>");
@@ -162,18 +144,17 @@ describe.skipIf(skip)("sign-in requests (RFC #186)", () => {
       expect(await issue()).toBe("sent");
       await svc.from("auth_sign_in_requests").delete().eq("email_hash", hashForLimit(EMAILS[0]));
       expect(await issue()).toBe("sent");
-      const codeOf = (m: MailMessage) => /code on the sign-in page: (\d{6})/.exec(m.text)?.[1] ?? "";
       const hashOf = (m: MailMessage) => /token_hash=([^&\s]+)/.exec(m.text)?.[1] ?? "";
       expect(sent[1].text).toMatch(/^https:\/\/mgm\.example\.org\/auth\/confirm\?token_hash=/m);
+      expect(sent[1].text).not.toMatch(/\bcode\b/i);
 
       const anon = () => createClient(LOCAL_SUPABASE_URL, testAnonKey() ?? "", { auth: { persistSession: false } });
-      expect((await anon().auth.verifyOtp({ email: EMAILS[0], token: codeOf(sent[0]), type: "email" })).error).not.toBeNull();
       expect((await anon().auth.verifyOtp({ token_hash: hashOf(sent[0]), type: "email" })).error).not.toBeNull();
 
-      const first = await anon().auth.verifyOtp({ email: EMAILS[0], token: codeOf(sent[1]), type: "email" });
+      const first = await anon().auth.verifyOtp({ token_hash: hashOf(sent[1]), type: "email" });
       expect(first.error).toBeNull();
       expect(first.data.session?.user.id).toBe(MGR.userId);
-      expect((await anon().auth.verifyOtp({ email: EMAILS[0], token: codeOf(sent[1]), type: "email" })).error).not.toBeNull();
+      expect((await anon().auth.verifyOtp({ token_hash: hashOf(sent[1]), type: "email" })).error).not.toBeNull();
     } finally {
       vi.unstubAllEnvs();
     }

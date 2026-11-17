@@ -1,5 +1,5 @@
 /**
- * POST /api/auth/sign-in-link — email a sign-in link and code (RFC #186 § 4).
+ * POST /api/auth/sign-in-link — email a sign-in link (RFC #186 § 4).
  *
  * Body: { email, next? }. Answers 202 with the same body whether or not the
  * address has an MGM account. The lookup and the send run in after(), once
