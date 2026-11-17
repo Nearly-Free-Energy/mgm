@@ -39,11 +39,30 @@ describe("parseDeploymentSender", () => {
     });
   });
 
-  it("allows plaintext to a container-network name with no dot, for docker compose's mail catcher", () => {
-    expect(parseDeploymentSender({ MGM_SMTP_URL: "smtp://mailpit:1025", MGM_MAIL_FROM: FROM })).toMatchObject({
+  it("allows plaintext to a container-network name with no dot only when opted in, for docker compose's mail catcher", () => {
+    const env = { MGM_SMTP_URL: "smtp://MailPit:1025", MGM_MAIL_FROM: FROM };
+    expect(() => parseDeploymentSender(env)).toThrow("MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1");
+    expect(() => parseDeploymentSender({ ...env, MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: "true" })).toThrow("MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1");
+    expect(parseDeploymentSender({ ...env, MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: "1" })).toMatchObject({
       host: "mailpit",
       port: 1025,
       plaintextLocal: true,
+    });
+  });
+
+  it("refuses an all-digit name, which a resolver may read as an IPv4 address, even when opted in", () => {
+    expect(() =>
+      parseDeploymentSender({ MGM_SMTP_URL: "smtp://167772161:25", MGM_MAIL_FROM: FROM, MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: "1" })
+    ).toThrow("public DNS name");
+  });
+
+  it("lowercases the host, which smtp:// URLs keep as written", () => {
+    expect(parseDeploymentSender({ MGM_SMTP_URL: "smtp://LOCALHOST:54325", MGM_MAIL_FROM: FROM })).toMatchObject({
+      host: "localhost",
+      plaintextLocal: true,
+    });
+    expect(parseDeploymentSender({ MGM_SMTP_URL: "smtp://u:p@SMTP.Example.com", MGM_MAIL_FROM: FROM })).toMatchObject({
+      host: "smtp.example.com",
     });
   });
 

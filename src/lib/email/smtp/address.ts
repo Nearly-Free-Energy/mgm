@@ -18,6 +18,14 @@ import { Resolver } from "node:dns/promises";
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 /**
+ * A container-network name such as docker compose's `mailpit`, for the
+ * deployment's plaintext local mail catcher only: one lowercase label with at
+ * least one letter, so an all-digit label, which a resolver may read as an
+ * IPv4 address, does not pass.
+ */
+export const CONTAINER_HOST_RE = /^(?=[a-z0-9-]*[a-z])[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+/**
  * The host as it is stored: trimmed, lowercased, without a trailing dot.
  * Null when it is not a DNS name with at least one dot, or is an address
  * literal (TLS checks the certificate against the name, so a name is

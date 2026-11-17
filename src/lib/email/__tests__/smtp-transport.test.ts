@@ -137,9 +137,12 @@ describe("createSmtpTransport for the local mail catcher", () => {
     expect(fake.created[0]).toMatchObject({ host: "mailpit", port: 1025, secure: false, ignoreTLS: true });
   });
 
-  it("refuses a dotted name marked plaintextLocal", async () => {
+  it.each([
+    ["a dotted name", SETTINGS.host],
+    ["an all-digit name", "167772161"],
+  ])("refuses %s marked plaintextLocal", async (_name, host) => {
     const fake = fakeTransport(async () => ({}));
-    const result = await createSmtpTransport({ ...SETTINGS, plaintextLocal: true }, { createTransport: fake.createTransport }).send(MESSAGE);
+    const result = await createSmtpTransport({ ...SETTINGS, host, plaintextLocal: true }, { createTransport: fake.createTransport }).send(MESSAGE);
     expect(result).toMatchObject({ ok: false, reason: "refused_address" });
     expect(fake.created).toHaveLength(0);
   });

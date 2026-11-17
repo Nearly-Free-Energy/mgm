@@ -9,8 +9,8 @@
  * setting rejects register(): Next.js logs "Failed to prepare server", the
  * process keeps running and every request fails with 500. An invalid
  * MGM_APP_URL is logged here (variable named, never its value) and does not
- * throw, because only payments need it and they fail closed through
- * appUrl(). An MGM_GUI that names no compiled-in GUI is logged the same way
+ * throw, because only sign-in links and payments need it and both fail
+ * closed through appUrl(). An MGM_GUI that names no compiled-in GUI is logged the same way
  * and does not throw: the interface layout reads it through readGuiName() and
  * answers 500 for the same error, while payment pages and webhooks, which
  * render no interface, keep working (decision 3 on #115).

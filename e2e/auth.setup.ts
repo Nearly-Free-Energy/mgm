@@ -3,7 +3,7 @@ import { expect, test as setup } from "@playwright/test";
 import { checkNarrowPage, reportTiming, watchPage } from "./checks";
 import { AUTH_DIR, createSmokeFixtures, signInLinkFor } from "./fixtures";
 
-setup("sign-in works at 360 px", async ({ page }) => {
+setup("sign-in works at 360 px", async ({ page, baseURL }) => {
   const fixtures = await createSmokeFixtures();
   // Asking for a sign-in link writes one rate-limit row (RFC #186); it is
   // the only write sign-in makes.
@@ -22,7 +22,10 @@ setup("sign-in works at 360 px", async ({ page }) => {
   await email.fill(fixtures.email);
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
   await expect(page.getByRole("status")).toContainText("on its way");
-  await page.goto(await signInLinkFor(fixtures.email));
+  const link = new URL(await signInLinkFor(fixtures.email));
+  // The session cookie is set where the link lands, so it must be this app.
+  expect(link.origin).toBe(new URL(baseURL!).origin);
+  await page.goto(link.toString());
   await checkNarrowPage(page, { landmarks: false });
   await page.getByRole("button", { name: "Continue" }).click();
   await page.waitForURL((url) => url.pathname === "/");

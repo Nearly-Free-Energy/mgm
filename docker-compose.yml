@@ -124,8 +124,10 @@ services:
       MGM_PUBLIC_SUPABASE_COOKIE_NAME: sb-mgm-auth-token
       MGM_APP_URL: http://localhost:3000
       # MGM's own mail sender (RFC #186): sign-in links go to the mail
-      # catcher below; read them at http://localhost:8025.
+      # catcher below; read them at http://localhost:8025. Plaintext to a
+      # name with no dot needs the opt-in, which belongs only here.
       MGM_SMTP_URL: smtp://mailpit:1025
+      MGM_SMTP_ALLOW_PLAINTEXT_LOCAL: "1"
       MGM_MAIL_FROM: MGM <no-reply@localhost.test>
       OPENEMS_B2B_URL: http://host.docker.internal:8075
       OPENEMS_B2B_USERNAME: admin

@@ -27,9 +27,9 @@ const PAGE_FILE = /^page\.(?:tsx|ts|jsx|js)$/;
  */
 const HOST_PAGES: Record<string, string> = {
   "/login": "Sign-in, before any organization is known.",
-  "/forgot-password": "Password reset request, signed out.",
-  "/reset-password": "Password reset from the emailed link.",
-  "/accept-invite": "Invitation acceptance, before the user has a role.",
+  "/forgot-password": "Redirects old bookmarks to /login; MGM has no passwords (RFC #186).",
+  "/reset-password": "Redirects old reset links to /login, dropping their token (RFC #186).",
+  "/accept-invite": "Redirects old invitation links to /login (RFC #186).",
   "/auth/confirm": "Where the sign-in email's link lands, signed out (RFC #186).",
   "/no-access": "Shown to a signed-in user with no role.",
   "/setup": "First-run setup, before any organization exists.",

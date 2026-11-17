@@ -19,7 +19,7 @@ import "server-only";
 import { connect as netConnect } from "node:net";
 import nodemailer from "nodemailer";
 import type { MailMessage, MailSendResult, MailTransport, SmtpSenderSettings, MailFailureReason } from "../types";
-import { resolvePublicAddress, type Lookup } from "./address";
+import { CONTAINER_HOST_RE, resolvePublicAddress, type Lookup } from "./address";
 
 export const CONNECT_TIMEOUT_MS = 5_000;
 export const SEND_TIMEOUT_MS = 10_000;
@@ -76,15 +76,16 @@ function failure(reason: MailFailureReason, message = COPY[reason]): MailSendRes
 }
 
 const LOOPBACK: Record<string, string> = { localhost: "127.0.0.1", "127.0.0.1": "127.0.0.1", "::1": "::1" };
-const SINGLE_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
  * Where to connect for a local mail catcher: a loopback address, or a name
  * with no dot, which only a local or container network resolves (docker
- * compose's `mailpit`). Anything else is refused.
+ * compose's `mailpit`). Anything else is refused. The deployment sender's
+ * parser (src/lib/config/mail-sender.ts) sets plaintextLocal, and allows a
+ * container name only when MGM_SMTP_ALLOW_PLAINTEXT_LOCAL=1.
  */
 function localAddress(host: string): { ok: true; address: string } | { ok: false; reason: "refused_address"; message: string } {
-  const address = LOOPBACK[host] ?? (SINGLE_LABEL.test(host) ? host : undefined);
+  const address = LOOPBACK[host] ?? (CONTAINER_HOST_RE.test(host) ? host : undefined);
   if (!address) {
     return { ok: false, reason: "refused_address", message: "A plaintext mail server must be on this machine or in its container network." };
   }
