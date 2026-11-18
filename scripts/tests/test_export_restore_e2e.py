@@ -87,6 +87,7 @@ AUTH_TABLES_EXPORTED = {
     "auth.oauth_clients": "clients registered with Auth's OAuth server; secrets are stored hashed",
     "auth.oauth_consents": "what users granted to those clients",
     "auth.webauthn_credentials": "passkeys: public keys, no secrets",
+    "auth.scim_users": "users SSO providers provisioned through SCIM; no secrets",
 }
 
 
