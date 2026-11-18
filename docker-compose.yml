@@ -36,6 +36,10 @@ services:
       # supabase/config.toml and production set.
       GOTRUE_MAILER_OTP_LENGTH: "10"
       GOTRUE_MAILER_OTP_EXP: "900"
+      # Refuses a token for a password or recovery sign-in (RFC #186 § 6);
+      # migration 20261117210000 creates the function.
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/fn_auth_access_token_hook"
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:9999/health"]
       interval: 5s
@@ -92,7 +96,10 @@ services:
       until psql -c "SELECT 1 FROM auth.users LIMIT 0" 2>/dev/null; do sleep 1; done
 
       if psql -c "SELECT 1 FROM organizations LIMIT 0" 2>/dev/null; then
-        echo "Migrations already applied, skipping."
+        # gotrue above calls this function for every token, so a database
+        # made before it existed gets it too (it is safe to re-run).
+        echo "Migrations already applied, skipping; applying the access-token hook."
+        psql -v ON_ERROR_STOP=1 -f /migrations/20261117210000_auth_access_token_hook.sql
         exit 0
       fi
 

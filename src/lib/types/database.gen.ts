@@ -1745,6 +1745,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      fn_auth_access_token_hook: { Args: { event: Json }; Returns: Json }
       fn_auth_claim_sign_in_request: {
         Args: { _email_hash: string; _ip_hash: string }
         Returns: number

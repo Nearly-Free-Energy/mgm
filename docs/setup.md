@@ -220,6 +220,65 @@ environment (Vercel project settings, the container's `environment:`, or
 `.env.local` for `npm run dev`); for the container there are no build
 arguments.
 
+### Supabase Auth settings
+
+People sign in only by the link MGM emails (RFC #186). Three settings
+belong to the Supabase project rather than to MGM's environment.
+`supabase/config.toml` sets them for the local Supabase and CI, and
+`docker-compose.yml` for docker mode. On a hosted project, set them yourself:
+
+- **Email OTP length 10, and expiry 900 seconds** (Authentication › Sign In
+  / Providers › Email). The link says it works for 15 minutes.
+- **The Custom Access Token hook** (Authentication › Auth Hooks): a
+  Postgres function, `public.fn_auth_access_token_hook`, which migration
+  `20261117210000` creates. It refuses a token for a session that a
+  password or a recovery started, new or refreshed, so Supabase's own
+  password endpoints sign nobody in. Push the migration before you enable
+  the hook: while the function is missing, Supabase Auth issues no tokens
+  at all.
+- **Recommended: "Allow new users to sign up" off** (Authentication › Sign
+  In / Providers). MGM creates accounts only through the admin API, when
+  someone is invited, so this changes nothing in MGM. It stops strangers
+  making accounts with no MGM role through Supabase's public endpoints.
+
+A hosted project's settings can also be read and set with the Management
+API (`GET`/`PATCH /v1/projects/<ref>/config/auth`: `mailer_otp_length`,
+`mailer_otp_exp`, `disable_signup`, `hook_custom_access_token_enabled`,
+`hook_custom_access_token_uri` =
+`pg-functions://postgres/public/fn_auth_access_token_hook`).
+
+**An installation that had passwords** finishes the change once, after the
+hook is on, in the Supabase SQL editor:
+
+```sql
+UPDATE auth.users SET encrypted_password = '' WHERE encrypted_password <> '';
+DELETE FROM auth.sessions;
+```
+
+The first line deletes every stored password hash. The second signs
+everyone out: their refresh tokens go with the sessions. Access tokens
+already issued stay valid until they expire, at most `jwt_expiry` (one
+hour). Everyone then signs in by email link. Make sure the mail sender
+works first (`MGM_SMTP_URL`), keep `docs/runbooks/emergency-sign-in.md`
+at hand, and have at least two super admins, so one can still help if the
+other's mailbox fails.
+
+**Rolling back, or changing the function.** While the hook is on, Supabase
+Auth calls the function for every sign-in and every refresh, the email link
+and the emergency link included. If the function is missing or fails,
+nobody can sign in. So, in this order:
+
+1. Turn the hook off (Authentication › Auth Hooks, or `PATCH
+   /v1/projects/<ref>/config/auth` with
+   `hook_custom_access_token_enabled: false`), and read the setting back
+   with `GET` to check it is `false`.
+2. Only then change, replace or drop `public.fn_auth_access_token_hook`.
+3. Turn the hook back on, if it should be, once the function is in place.
+
+Turning the hook off makes Supabase Auth issue tokens again; it does not
+bring passwords back. The cutover above deleted the hashes for good, so
+after it everyone still signs in by email link.
+
 ### Upgrading from v0.0.1 or v0.0.2
 
 v0.0.1 and v0.0.2 still accepted the old Next.js build-time names when the
