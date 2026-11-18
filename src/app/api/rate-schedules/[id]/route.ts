@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
+import { ReviseRateScheduleBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 import type { TierConfig } from "@/lib/types/domain";
-import { validatePayload } from "../route";
 
 /**
  * PUT /api/rate-schedules/[id]
@@ -17,6 +18,11 @@ import { validatePayload } from "../route";
  *   tax_rate: number;        // [0, 1]
  * }
  *
+ * Parsed with `ReviseRateScheduleBody` (`@/lib/billing/schemas`); unknown
+ * top-level keys, a microgrid_id among them, are refused. The microgrid is the
+ * existing schedule's. The body is checked before the plugin gate and the
+ * lookup, so a malformed body answers 400 whatever the caller's access.
+ *
  * RLS: rate_schedules FOR ALL policy (00002_rls.sql:161) enforces microgrid access
  * via user_can_access_microgrid(). No additional handler-side check needed.
  *
@@ -28,23 +34,11 @@ export async function PUT(
 ): Promise<NextResponse> {
   const { id } = await params;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-  }
-
-  const { tiers, service_charge, tax_rate } = body as Record<string, unknown>;
-
-  const validationError = validatePayload(tiers, service_charge, tax_rate);
-  if (validationError) {
-    return NextResponse.json({ error: validationError }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, ReviseRateScheduleBody);
+  if (!parsed.ok) return parsed.response;
+  const { service_charge, tax_rate } = parsed.data;
+  // ReviseRateScheduleBody has checked each tier's numbers and contiguity.
+  const tiers = parsed.data.tiers as TierConfig[];
 
   const supabase = await createClient();
 
@@ -73,9 +67,9 @@ export async function PUT(
     .from("rate_schedules")
     .insert({
       microgrid_id: existing.microgrid_id,
-      tiers: tiers as TierConfig[],
-      service_charge: service_charge as number,
-      tax_rate: tax_rate as number,
+      tiers,
+      service_charge,
+      tax_rate,
     })
     .select("*")
     .single();

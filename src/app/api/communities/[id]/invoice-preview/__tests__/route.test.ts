@@ -5,7 +5,8 @@
  *   (1) Happy path → 200 PDF stream with `Content-Disposition: inline`
  *   (2) 403 for cross-org caller — no renderer call
  *   (3) 404 for RLS-hidden / missing community
- *   (4) 400 for malformed UUID / JSON / Zod validation
+ *   (4) 400 for malformed UUID / JSON / Zod validation; a malformed body is
+ *       answered before the community is read
  *   (5) Permission gate runs BEFORE rendering (renderer NOT invoked on 403/404)
  *   (6) Preview does NOT call fn_next_invoice_number (RPC count = 0)
  *   (7) Empty invoice_prefix yields PREVIEW-{year}-PREVIEW invoice number
@@ -233,6 +234,37 @@ describe("POST /api/communities/[id]/invoice-preview", () => {
       { params: Promise.resolve({ id: COMMUNITY_ID }) },
     );
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Invoice configuration is invalid. Save your changes to see the field errors.",
+      field: "invoice_config",
+      code: "invalid_body",
+    });
+  });
+
+  it.each([
+    ["a lowercase prefix", { ...VALID_BODY, invoice_prefix: "nfe" }, "invoice_prefix", "Invoice prefix must be 2-8 uppercase letters or digits (e.g. NFE, ACME01)."],
+    ["a missing prefix", { invoice_config: VALID_BODY.invoice_config }, "invoice_prefix", "invoice_prefix must be a string or null."],
+    ["an unknown top-level key", { ...VALID_BODY, extra: 1 }, undefined, "Unknown field: extra"],
+    ["an array body", [VALID_BODY], undefined, "Request body must be an object"],
+  ])("(4d) %s → 400 invalid_body, before the community is read", async (_label, payload, field, error) => {
+    const { POST } = await import("../route");
+    const res = await POST(makeRequest(payload), {
+      params: Promise.resolve({ id: COMMUNITY_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error, ...(field ? { field } : {}), code: "invalid_body" });
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it("(4e) an empty prefix is read as no prefix", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(makeRequest({ ...VALID_BODY, invoice_prefix: "" }), {
+      params: Promise.resolve({ id: COMMUNITY_ID }),
+    });
+    expect(res.status).toBe(200);
+    const passed = renderMock.mock.calls[0]![0] as { invoiceNumber: string };
+    expect(passed.invoiceNumber).toMatch(/^PREVIEW-\d{4}-PREVIEW$/);
   });
 
   it("(6) preview does NOT call fn_next_invoice_number", async () => {

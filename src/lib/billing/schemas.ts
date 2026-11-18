@@ -10,11 +10,16 @@
  * Client-safe: besides zod it imports site-savings.ts, which imports only
  * types, and day-key.ts, which imports nothing; if either gains a runtime
  * import, revisit. Its import from payments/state.ts is type-only.
+ * types, day-key.ts, which imports nothing, and invoices/config-schema.ts,
+ * which imports only zod and, in a browser, turns on zod's jitless mode for
+ * every schema (its header says why); if any of them gains a runtime import,
+ * revisit.
  */
 import { z } from "zod";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
 import { validateGridTariffBands } from "./site-savings";
 import type { PaymentStatus } from "@/lib/payments/state";
+import { INVOICE_PREFIX_RE, InvoiceConfigSchema } from "@/lib/invoices/config-schema";
 
 const bodyError = (issue: { code: string; keys?: string[] }) =>
   issue.code === "unrecognized_keys"
@@ -412,3 +417,162 @@ export const LineItemPaymentStatusBody = z.strictObject(
   { error: lineItemsPaymentBodyError }
 );
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 1;
+// ── Tariffs and invoice settings ──
+
+const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";
+const TARIFFS_SERVICE_CHARGE = "service_charge must be a number >= 0";
+const TARIFFS_TAX_RATE = "tax_rate must be a number between 0 and 1 (inclusive)";
+
+const tariffsNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+/**
+ * The first fault in a rate schedule's tiers, or null. The checks and their
+ * order are the ones the rate-schedule routes have always made, tier by tier:
+ * min_kwh, rate_per_kwh, a number max_kwh on every tier but the last, then
+ * contiguity with the tier before. A tier's label, the last tier's max_kwh and
+ * any other keys are not checked, and are stored as sent: TierEditor sends
+ * back what it loaded, including tiers saved without a label.
+ */
+function tariffsTierFault(tiers: unknown[]): string | null {
+  const at = (i: number): Record<string, unknown> => {
+    const tier = tiers[i];
+    return tier !== null && typeof tier === "object" ? (tier as Record<string, unknown>) : {};
+  };
+  for (let i = 0; i < tiers.length; i++) {
+    const tier = at(i);
+    if (!tariffsNumber(tier.min_kwh) || tier.min_kwh <= 0) {
+      return `Tier ${i + 1}: min_kwh must be greater than 0`;
+    }
+    if (!tariffsNumber(tier.rate_per_kwh) || tier.rate_per_kwh <= 0) {
+      return `Tier ${i + 1}: rate_per_kwh must be greater than 0`;
+    }
+    if (i < tiers.length - 1 && !tariffsNumber(tier.max_kwh)) {
+      return `Tier ${i + 1}: only the last tier may have max_kwh null`;
+    }
+    const previousMax = i > 0 ? at(i - 1).max_kwh : undefined;
+    if (typeof previousMax === "number" && tier.min_kwh !== previousMax + 1) {
+      return `Tier ${i + 1}: min_kwh must be ${previousMax + 1} (contiguous with tier ${i})`;
+    }
+  }
+  return null;
+}
+
+// A tier is z.unknown() and the whole list is checked by one refine, so that
+// the first fault reported, and its "Tier N:" message, are the ones above;
+// per-tier schemas would report a type fault in a later tier before a
+// contiguity fault in an earlier one.
+const tariffsScheduleShape = {
+  tiers: z
+    .array(z.unknown(), { error: TARIFFS_TIERS })
+    .min(1, { error: TARIFFS_TIERS })
+    .superRefine((tiers, ctx) => {
+      const fault = tariffsTierFault(tiers);
+      if (fault) ctx.addIssue({ code: "custom", message: fault });
+    })
+    .meta({
+      title: "Tiers",
+      description:
+        "In order, each { label, min_kwh, max_kwh, rate_per_kwh }: min_kwh and rate_per_kwh above 0, each min_kwh one more than the previous max_kwh, and max_kwh null only on the last tier.",
+    }),
+  service_charge: z
+    .number({ error: TARIFFS_SERVICE_CHARGE })
+    .min(0, { error: TARIFFS_SERVICE_CHARGE })
+    .meta({ title: "Service charge" }),
+  tax_rate: z
+    .number({ error: TARIFFS_TAX_RATE })
+    .min(0, { error: TARIFFS_TAX_RATE })
+    .max(1, { error: TARIFFS_TAX_RATE })
+    .meta({ title: "Tax rate", description: "A fraction: 0.18 is 18%." }),
+};
+
+/**
+ * POST /api/rate-schedules. Each tier is stored as sent, with whatever keys it
+ * has (see tariffsTierFault).
+ */
+export const CreateRateScheduleBody = z.strictObject(
+  {
+    microgrid_id: z.guid({ error: "microgrid_id must be a valid UUID" }),
+    ...tariffsScheduleShape,
+  },
+  { error: bodyError }
+);
+export const CREATE_RATE_SCHEDULE_BODY_VERSION = 1;
+
+/**
+ * PUT /api/rate-schedules/[id]: a new version of the schedule in the path, for
+ * the same microgrid. A microgrid_id in the body is refused as unknown.
+ */
+export const ReviseRateScheduleBody = z.strictObject(tariffsScheduleShape, { error: bodyError });
+export const REVISE_RATE_SCHEDULE_BODY_VERSION = 1;
+
+const TARIFFS_PREFIX_TYPE = "invoice_prefix must be a string or null.";
+const TARIFFS_PREFIX_FORMAT = "Invoice prefix must be 2-8 uppercase letters or digits (e.g. NFE, ACME01).";
+
+/**
+ * invoice_config, parsed by InvoiceConfigSchema (src/lib/invoices/config-schema.ts),
+ * whose output is what is stored: unknown keys at its top level are refused
+ * and unknown keys inside its sections are dropped. Any fault in it answers
+ * with `message` alone, as these routes always have, rather than the first
+ * zod message, which often does not name the setting. The transform only
+ * reports the fault; the pipe's InvoiceConfigSchema parses, and is what the
+ * JSON Schema describes.
+ */
+const tariffsInvoiceConfig = (message: string) =>
+  z
+    .transform((value: unknown, ctx) => {
+      if (!InvoiceConfigSchema.safeParse(value).success) {
+        ctx.issues.push({ code: "custom", message, input: value });
+      }
+      return value;
+    })
+    .pipe(InvoiceConfigSchema)
+    .meta({ title: "Invoice settings" });
+
+/**
+ * PATCH /api/communities/[id]/invoice-config. The community comes from the
+ * path. invoice_prefix is INVOICE_PREFIX_RE, the regex of the column's CHECK
+ * (migration 00033), or null to clear it.
+ */
+export const SaveInvoiceSettingsBody = z.strictObject(
+  {
+    invoice_prefix: z
+      .string({ error: TARIFFS_PREFIX_TYPE })
+      .regex(INVOICE_PREFIX_RE, { error: TARIFFS_PREFIX_FORMAT })
+      .nullable()
+      .meta({ title: "Invoice prefix" }),
+    invoice_config: tariffsInvoiceConfig("Invoice configuration is invalid. See the highlighted fields."),
+  },
+  { error: bodyError }
+);
+export const SAVE_INVOICE_SETTINGS_BODY_VERSION = 1;
+
+/**
+ * INVOICE_PREFIX_RE or the empty string, which the preview reads as no
+ * prefix. schemas-tariffs.test.ts checks the two agree; if INVOICE_PREFIX_RE
+ * changes, change this.
+ */
+const TARIFFS_PREVIEW_PREFIX_RE = /^(?:[A-Z0-9]{2,8})?$/;
+
+/**
+ * POST /api/communities/[id]/invoice-preview: the invoice settings form's
+ * unsaved state, rendered to a PDF and not stored. Unlike the PATCH body, an
+ * empty invoice_prefix is accepted and the route reads it as null.
+ */
+export const PreviewInvoiceBody = z.strictObject(
+  {
+    invoice_prefix: z
+      .string({ error: TARIFFS_PREFIX_TYPE })
+      .regex(TARIFFS_PREVIEW_PREFIX_RE, { error: TARIFFS_PREFIX_FORMAT })
+      .nullable()
+      .meta({ title: "Invoice prefix" }),
+    // This copy promises that saving shows which setting is wrong. Neither
+    // the PATCH route (one message, like this one) nor the settings form
+    // does; it is kept as it was. Reword it when one of them changes.
+    invoice_config: tariffsInvoiceConfig(
+      "Invoice configuration is invalid. Save your changes to see the field errors."
+    ),
+  },
+  { error: bodyError }
+);
+export const PREVIEW_INVOICE_BODY_VERSION = 1;

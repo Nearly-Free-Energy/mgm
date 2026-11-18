@@ -8,7 +8,8 @@
  *   (4) Invalid invoice_prefix regex → 400
  *   (5) Cross-org caller → 403
  *   (6) RLS-hidden / missing community → 404 (also covers no-session)
- *   (7) Malformed JSON body → 400
+ *   (7) Malformed JSON body → 400; other malformed bodies → 400 invalid_body,
+ *       before the community is read
  *   (8) Malformed UUID → 400
  *   (9) revalidatePath called on success
  */
@@ -135,7 +136,7 @@ describe("PATCH /api/communities/[id]/invoice-config", () => {
     expect(updatePayloadCapture!.invoice_prefix).toBeNull();
   });
 
-  it("(3) invalid hex color → 400 (Zod field error)", async () => {
+  it("(3) invalid hex color → 400 under invoice_config", async () => {
     const { PATCH } = await import("../route");
     const badBody = {
       ...VALID_BODY,
@@ -149,7 +150,11 @@ describe("PATCH /api/communities/[id]/invoice-config", () => {
     });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.fields).toBeDefined();
+    expect(body).toEqual({
+      error: "Invoice configuration is invalid. See the highlighted fields.",
+      field: "invoice_config",
+      code: "invalid_body",
+    });
     expect(updatePayloadCapture).toBeNull();
   });
 
@@ -161,7 +166,11 @@ describe("PATCH /api/communities/[id]/invoice-config", () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.fields).toMatchObject({ invoice_prefix: "invalid-format" });
+    expect(body).toEqual({
+      error: "Invoice prefix must be 2-8 uppercase letters or digits (e.g. NFE, ACME01).",
+      field: "invoice_prefix",
+      code: "invalid_body",
+    });
     expect(updatePayloadCapture).toBeNull();
   });
 
@@ -198,6 +207,48 @@ describe("PATCH /api/communities/[id]/invoice-config", () => {
       params: Promise.resolve({ id: COMMUNITY_ID }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ["an empty prefix", { ...VALID_BODY, invoice_prefix: "" }, "invoice_prefix", "Invoice prefix must be 2-8 uppercase letters or digits (e.g. NFE, ACME01)."],
+    ["a missing prefix", { invoice_config: VALID_BODY.invoice_config }, "invoice_prefix", "invoice_prefix must be a string or null."],
+    ["a missing invoice_config", { invoice_prefix: "NFE" }, "invoice_config", "Invoice configuration is invalid. See the highlighted fields."],
+    ["an unknown top-level key", { ...VALID_BODY, extra: 1 }, undefined, "Unknown field: extra"],
+    ["an array body", [VALID_BODY], undefined, "Request body must be an object"],
+  ])("(7b) %s → 400 invalid_body", async (_label, payload, field, error) => {
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makePatchRequest(payload), {
+      params: Promise.resolve({ id: COMMUNITY_ID }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error, ...(field ? { field } : {}), code: "invalid_body" });
+    expect(updatePayloadCapture).toBeNull();
+  });
+
+  it("(7c) a malformed body answers 400 before the community is read or access checked", async () => {
+    canAccessOrgReturn = false;
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest({ ...VALID_BODY, invoice_prefix: 7 }),
+      { params: Promise.resolve({ id: COMMUNITY_ID }) },
+    );
+    expect(res.status).toBe(400);
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("(7d) unknown keys inside an invoice_config section are dropped, not stored", async () => {
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest({
+        ...VALID_BODY,
+        invoice_config: { ...VALID_BODY.invoice_config, payment: { due_days_after_issue: 8, extra: 1 } },
+      }),
+      { params: Promise.resolve({ id: COMMUNITY_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(
+      (updatePayloadCapture!.invoice_config as Record<string, unknown>).payment,
+    ).toEqual({ due_days_after_issue: 8 });
   });
 
   it("(8) malformed UUID → 400", async () => {
