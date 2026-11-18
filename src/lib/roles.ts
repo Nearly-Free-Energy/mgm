@@ -7,14 +7,23 @@
  * that the two enum values this file deliberately does NOT declare stay
  * undeclared.
  *
- * Two roles are in use: `super_admin` and `org_manager`, both at
- * `scope_type = 'org'`. The `ems_operator` role value and the `microgrid`
- * scope type are inert residue from #316, removed from the permission model by
- * #321 (migration 00053) — an org manager configures OpenEMS on any microgrid
- * in their own org, which is `user_can_access_microgrid` and needs no role of
- * its own. The enum values themselves cannot be removed: `ALTER TYPE … ADD
- * VALUE` is not reversible. Do not add constants for them; nothing should
- * grant or read them.
+ * Three roles are in use. The two staff roles, `super_admin` and
+ * `org_manager`, are both at `scope_type = 'org'`. `tenant` (RFC mgm#197) is
+ * at `scope_type = 'tenant'`, one row per unit a person rents; it is granted
+ * from the tenant record (`fn_tenant_access_grant`), never from the Users
+ * page, and it is not staff. A person may hold a staff row and tenant rows at
+ * once, so "has a role row" does not mean "is staff": staff checks filter on
+ * the staff roles or the org scope. The CHECK
+ * `user_roles_role_scope_type_consistent` (migration 20261118100100) pins
+ * each role to its scope type; if it stops doing so, filtering on the scope
+ * type stops being enough.
+ *
+ * The `ems_operator` role value and the `microgrid` scope type are inert
+ * residue from #316, removed from the permission model by #321 (migration
+ * 00053) — an org manager configures OpenEMS on any microgrid in their own
+ * org, which is `user_can_access_microgrid` and needs no role of its own. The
+ * enum values themselves cannot be removed: `ALTER TYPE … ADD VALUE` is not
+ * reversible. Do not add constants for them; nothing should grant or read them.
  *
  * DO NOT add client-side canAccessX() helpers here — RLS owns access checks
  * server-side. Client-side checks invite drift and false confidence.
@@ -28,5 +37,7 @@ import type { UserRole, RoleScopeType } from "@/lib/types/domain";
 // break every time a role is added, which is noise rather than signal.
 export const SUPER_ADMIN = "super_admin" satisfies UserRole;
 export const ORG_MANAGER = "org_manager" satisfies UserRole;
+export const TENANT = "tenant" satisfies UserRole;
 
 export const SCOPE_ORG = "org" satisfies RoleScopeType;
+export const SCOPE_TENANT = "tenant" satisfies RoleScopeType;

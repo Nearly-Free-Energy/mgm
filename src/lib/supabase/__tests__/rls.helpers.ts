@@ -195,15 +195,16 @@ export interface TestUser {
  */
 export async function createTestUser(opts: {
   email: string;
-  role: "super_admin" | "org_manager" | null;
+  role: "super_admin" | "org_manager" | "tenant" | null;
   scopeId?: string | null;
   /**
-   * Defaults to 'org', which is the only scope type in use. `microgrid` is
-   * inert enum residue from #316, removed from the permission model by #321 —
-   * the role-aware CHECK on user_roles (migration 00052) pairs it only with
+   * Defaults to 'org' for the staff roles and 'tenant' for the tenant role;
+   * the role-aware CHECK on user_roles (migration 20261118100100) pairs each
+   * role with its scope type. `microgrid` is inert enum residue from #316,
+   * removed from the permission model by #321 — the CHECK pairs it only with
    * `ems_operator`, which nothing grants any more. Do not seed either.
    */
-  scopeType?: "org";
+  scopeType?: "org" | "tenant";
   /**
    * Additional role rows to seed for the same user. The one-row-per-user
    * invariant went away with #316 and has not come back: `user_roles` is
@@ -211,8 +212,8 @@ export async function createTestUser(opts: {
    * through EXISTS(...), which is multi-row-safe.
    */
   extraRoles?: {
-    role: "super_admin" | "org_manager";
-    scopeType: "org";
+    role: "super_admin" | "org_manager" | "tenant";
+    scopeType: "org" | "tenant";
     scopeId: string | null;
   }[];
 }): Promise<TestUser> {
@@ -244,7 +245,7 @@ export async function createTestUser(opts: {
     const { error: roleError } = await svc.from("user_roles").insert({
       user_id: userId,
       role: opts.role,
-      scope_type: opts.scopeType ?? "org",
+      scope_type: opts.scopeType ?? (opts.role === "tenant" ? "tenant" : "org"),
       scope_id: opts.role === "super_admin" ? null : (opts.scopeId ?? null),
     });
     if (roleError) {
@@ -274,7 +275,7 @@ export async function createTestUser(opts: {
 
 /**
  * Removes all test data inserted during the test run.
- * Deletes auth users by email (cascades to user_roles + tenant_users).
+ * Deletes auth users by email (cascades to user_roles).
  * Deletes orgs by ID (cascades to communities → microgrids → ... → billing_line_items).
  */
 export async function cleanupTestData(opts: {

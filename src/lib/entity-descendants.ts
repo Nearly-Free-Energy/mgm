@@ -51,6 +51,14 @@ import "server-only";
  *     00015_entity_deletion_safeguards.sql; we filter by `scope_type='org'
  *     AND scope_id=<org_id>` which matches exactly the rows that will be
  *     cascade-deleted.
+ *
+ *   * `tenant_access` counts the tenant role rows (RFC mgm#197) of the
+ *     tenants under the entity. They cascade with their tenant through
+ *     `user_roles.scope_tenant_id` (migration 20261118100100). The caller's
+ *     RLS shows an org manager only their own role rows, so this one count
+ *     goes through `fn_tenant_access_count` rather than the table; if
+ *     managers are ever given SELECT on tenant role rows, it can go back to
+ *     `countTable`.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -87,6 +95,18 @@ async function countTable(
     ? query.eq(filter.column, filter.values[0])
     : query.in(filter.column, filter.values));
   return n(count);
+}
+
+/** Tenant app access rows of the given tenants; see the module comment. */
+async function countTenantAccess(
+  supabase: SupabaseClient,
+  tenantIds: string[]
+): Promise<number> {
+  if (tenantIds.length === 0) return 0;
+  const { data } = await supabase.rpc("fn_tenant_access_count", {
+    _tenant_ids: tenantIds,
+  });
+  return typeof data === "number" ? data : 0;
 }
 
 async function countTableWith(
@@ -233,7 +253,7 @@ async function countForOrganization(
 
   const [
     tenantDevicesCount,
-    tenantUsersCount,
+    tenantAccessCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
@@ -247,12 +267,7 @@ async function countForOrganization(
           values: tenantIds,
         })
       : Promise.resolve(0),
-    tenantIds.length
-      ? countTable(supabase, "tenant_users", {
-          column: "tenant_id",
-          values: tenantIds,
-        })
-      : Promise.resolve(0),
+    countTenantAccess(supabase, tenantIds),
     billingPeriodIds.length
       ? countTable(supabase, "billing_line_items", {
           column: "billing_period_id",
@@ -288,7 +303,7 @@ async function countForOrganization(
     devices: deviceIds.length,
     tenants: tenantIds.length,
     tenant_devices: tenantDevicesCount,
-    tenant_users: tenantUsersCount,
+    tenant_access: tenantAccessCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,
@@ -340,7 +355,7 @@ async function countForCommunity(
 
   const [
     tenantDevicesCount,
-    tenantUsersCount,
+    tenantAccessCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
@@ -353,12 +368,7 @@ async function countForCommunity(
           values: tenantIds,
         })
       : Promise.resolve(0),
-    tenantIds.length
-      ? countTable(supabase, "tenant_users", {
-          column: "tenant_id",
-          values: tenantIds,
-        })
-      : Promise.resolve(0),
+    countTenantAccess(supabase, tenantIds),
     billingPeriodIds.length
       ? countTable(supabase, "billing_line_items", {
           column: "billing_period_id",
@@ -391,7 +401,7 @@ async function countForCommunity(
     devices: deviceIds.length,
     tenants: tenantIds.length,
     tenant_devices: tenantDevicesCount,
-    tenant_users: tenantUsersCount,
+    tenant_access: tenantAccessCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,
@@ -436,7 +446,7 @@ async function countForMicrogrid(
 
   const [
     tenantDevicesCount,
-    tenantUsersCount,
+    tenantAccessCount,
     billingLineItemsCount,
     rateSchedulesCount,
     gridTariffsCount,
@@ -449,12 +459,7 @@ async function countForMicrogrid(
           values: tenantIds,
         })
       : Promise.resolve(0),
-    tenantIds.length
-      ? countTable(supabase, "tenant_users", {
-          column: "tenant_id",
-          values: tenantIds,
-        })
-      : Promise.resolve(0),
+    countTenantAccess(supabase, tenantIds),
     billingPeriodIds.length
       ? countTable(supabase, "billing_line_items", {
           column: "billing_period_id",
@@ -482,7 +487,7 @@ async function countForMicrogrid(
     devices: deviceIds.length,
     tenants: tenantIds.length,
     tenant_devices: tenantDevicesCount,
-    tenant_users: tenantUsersCount,
+    tenant_access: tenantAccessCount,
     billing_periods_draft: bpDraft,
     billing_periods_closed: bpClosed,
     billing_periods_with_payments: bpWithPayments,

@@ -1,7 +1,8 @@
 // Tenant detail page — server component test (D3 / #54).
 //
 // Strategy:
-//   - Mock @/lib/supabase/server so all three queries return fixture rows.
+//   - Mock @/lib/supabase/server so all three queries return fixture rows, and
+//     the fn_tenant_access_list RPC behind the portal users count.
 //   - Call TenantDetailPage() directly (async server component) and serialize
 //     the returned JSX to HTML.
 //   - Cover scenarios: populated, empty devices, empty billing, query-error
@@ -53,8 +54,11 @@ vi.mock("@/lib/auth/access", () => ({
 // ── Supabase mock ────────────────────────────────────────────────────────────
 
 const mockFrom = vi.fn();
+// fn_tenant_access_list: one row per person who can sign in to the tenant's
+// data (tenant role rows, RFC mgm#197).
+const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ from: mockFrom }),
+  createClient: async () => ({ from: mockFrom, rpc: mockRpc }),
 }));
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -99,16 +103,14 @@ function buildTenantQuery(data: unknown, error: unknown = null) {
   return chain;
 }
 
-/**
- * Builds a mock Supabase query chain for tenant_users COUNT.
- * Supports `.select("*", { count, head }).eq()` pattern.
- */
-function buildCountQuery(count: number) {
-  const chain = {
-    select: () => chain,
-    eq: () => Promise.resolve({ count, error: null }),
-  };
-  return chain;
+/** fn_tenant_access_list's answer with `count` rows. */
+function accessList(count: number) {
+  const data = Array.from({ length: count }, (_, i) => ({
+    access_id: `access-${i}`,
+    email: `person-${i}@example.org`,
+    created_at: "2026-11-18T00:00:00Z",
+  }));
+  return Promise.resolve({ data, error: null });
 }
 
 /**
@@ -159,10 +161,12 @@ import TenantDetailPage from "./page";
 describe("TenantDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRpc.mockImplementation(() => accessList(0));
   });
 
   // (a) Populated: 1 primary_consumption_meter device + 1 closed billing period
   it("renders all sections for a populated tenant", async () => {
+    mockRpc.mockImplementation(() => accessList(2));
     mockFrom.mockImplementation((table: string) => {
       if (table === "tenants") {
         return buildTenantQuery({
@@ -171,9 +175,6 @@ describe("TenantDetailPage", () => {
             { role: "primary_consumption_meter", devices: DEVICE_ROW },
           ],
         });
-      }
-      if (table === "tenant_users") {
-        return buildCountQuery(2);
       }
       if (table === "billing_line_items") {
         return buildLineItemsQuery([
@@ -201,8 +202,10 @@ describe("TenantDetailPage", () => {
     expect(html).toContain("Block A");
     expect(html).toContain("Unit 1");
 
-    // Portal users
+    // Portal users: counted from the tenant role rows, not tenant_users
     expect(html).toContain("2 portal users linked");
+    expect(mockRpc).toHaveBeenCalledWith("fn_tenant_access_list", { _tenant_id: "hh-1" });
+    expect(mockFrom).not.toHaveBeenCalledWith("tenant_users");
 
     // Linked device name + edge link
     expect(html).toContain("Chint Meter 01");
@@ -229,9 +232,6 @@ describe("TenantDetailPage", () => {
           ...TENANT_BASE,
           tenant_devices: [],
         });
-      }
-      if (table === "tenant_users") {
-        return buildCountQuery(0);
       }
       if (table === "billing_line_items") {
         return buildLineItemsQuery([]);
@@ -261,9 +261,6 @@ describe("TenantDetailPage", () => {
             { role: "primary_consumption_meter", devices: DEVICE_ROW },
           ],
         });
-      }
-      if (table === "tenant_users") {
-        return buildCountQuery(1);
       }
       if (table === "billing_line_items") {
         return buildLineItemsQuery([]);
@@ -357,9 +354,6 @@ describe("TenantDetailPage", () => {
           ],
         });
       }
-      if (table === "tenant_users") {
-        return buildCountQuery(0);
-      }
       if (table === "billing_line_items") {
         return buildLineItemsQuery([]);
       }
@@ -391,9 +385,6 @@ describe("TenantDetailPage", () => {
             { role: "primary_consumption_meter", devices: DEVICE_ROW },
           ],
         });
-      }
-      if (table === "tenant_users") {
-        return buildCountQuery(0);
       }
       if (table === "billing_line_items") {
         return buildLineItemsQuery([]);

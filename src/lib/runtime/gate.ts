@@ -142,6 +142,12 @@ export async function resolveTargetOrganization(
       return one(one(row?.microgrids)?.communities)?.org_id ?? null;
     }
     case "device": {
+      // A tenant sees their own devices through "Tenants can read their own
+      // devices" (20261118100100) but not the edge, so the inner join drops
+      // the row and this returns null for them, as for a device they cannot
+      // see: the gate then decides nothing and the route's own access check
+      // refuses. That holds while no tenant policy exists on edges,
+      // microgrids or communities; if one is added, revisit.
       const row = await single<{ edges: Embedded<EdgeRow> }>(
         "devices",
         "id, edges!inner(microgrids!inner(communities!inner(org_id)))",
@@ -154,8 +160,17 @@ export async function resolveTargetOrganization(
       // tenant through user_can_access_microgrid(microgrid_id). The
       // microgrid policy (00057_mgm_pilot_schema_bridge.sql) and the
       // community policy (00002) decide on the same organization, so this
-      // join finds every tenant the caller can see. If any of the three
-      // policies stops deciding on that organization, revisit.
+      // join finds every tenant a member of staff can see. If any of the
+      // three policies stops deciding on that organization, revisit.
+      //
+      // A tenant also sees their own row, through "Tenants can read their own
+      // tenant" (20261118100100), which does not decide on the organization:
+      // they cannot see its microgrid, so the join drops the row and this
+      // returns null. A null here can therefore mean "the caller's own unit",
+      // and every route that targets a tenant must still refuse on the
+      // microgrid or organization check that follows. That holds while no
+      // tenant policy exists on microgrids or communities; if one is added,
+      // revisit.
       const row = await single<{ microgrids: Embedded<MicrogridRow> }>(
         "tenants",
         "id, microgrids!inner(communities!inner(org_id))",

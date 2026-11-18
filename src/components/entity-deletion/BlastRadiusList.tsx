@@ -100,11 +100,11 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.tenant_users > 0)
+      if (counts.tenant_access > 0)
         items.push(
-          <li key="hu">
-            {fmt(counts.tenant_users)} tenant user{" "}
-            {pluralize(counts.tenant_users, "link")}
+          <li key="ta">
+            {fmt(counts.tenant_access)} tenant app{" "}
+            {pluralize(counts.tenant_access, "access grant")}
           </li>
         );
       if (counts.billing_periods_draft > 0)
@@ -191,11 +191,11 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.tenant_users > 0)
+      if (counts.tenant_access > 0)
         items.push(
-          <li key="hu">
-            {fmt(counts.tenant_users)} tenant user{" "}
-            {pluralize(counts.tenant_users, "link")}
+          <li key="ta">
+            {fmt(counts.tenant_access)} tenant app{" "}
+            {pluralize(counts.tenant_access, "access grant")}
           </li>
         );
       if (counts.billing_periods_draft > 0)
@@ -269,11 +269,11 @@ function buildItems(counts: DescendantCounts): React.ReactNode[] {
             {pluralize(counts.tenant_devices, "link")}
           </li>
         );
-      if (counts.tenant_users > 0)
+      if (counts.tenant_access > 0)
         items.push(
-          <li key="hu">
-            {fmt(counts.tenant_users)} tenant user{" "}
-            {pluralize(counts.tenant_users, "link")}
+          <li key="ta">
+            {fmt(counts.tenant_access)} tenant app{" "}
+            {pluralize(counts.tenant_access, "access grant")}
           </li>
         );
       if (counts.billing_periods_draft > 0)

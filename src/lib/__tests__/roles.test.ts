@@ -18,12 +18,12 @@
  * below (for one that should not).
  */
 import { describe, it, expect } from "vitest";
-import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
+import { SUPER_ADMIN, ORG_MANAGER, TENANT, SCOPE_ORG, SCOPE_TENANT } from "@/lib/roles";
 
 // Import the Database type directly so we can extract the enum values at the
 // type level AND verify them at runtime via the generated const assertion below.
 // The generated file emits string-literal unions; we cross-check the constants.
-import type { Database } from "@/lib/types/database.gen";
+import { Constants, type Database } from "@/lib/types/database.gen";
 
 // Derive the union types from the generated schema (compile-time guard).
 type GeneratedUserRole = Database["public"]["Enums"]["user_role"];
@@ -34,11 +34,15 @@ type GeneratedScopeType = Database["public"]["Enums"]["role_scope_type"];
 // runtime.
 const _superAdmin: GeneratedUserRole = SUPER_ADMIN;
 const _orgManager: GeneratedUserRole = ORG_MANAGER;
+const _tenant: GeneratedUserRole = TENANT;
 const _scopeOrg: GeneratedScopeType = SCOPE_ORG;
+const _scopeTenant: GeneratedScopeType = SCOPE_TENANT;
 // Suppress "unused variable" lint without touching the values.
 void _superAdmin;
 void _orgManager;
+void _tenant;
 void _scopeOrg;
+void _scopeTenant;
 
 // Enum values that exist in the database but are deliberately NOT modelled in
 // roles.ts. Adding to this set is a decision; a value appearing in neither this
@@ -55,17 +59,23 @@ describe("roles — drift-prevention", () => {
     expect(ORG_MANAGER).toBe("org_manager");
   });
 
+  it("TENANT constant matches the database enum value", () => {
+    expect(TENANT).toBe("tenant");
+  });
+
+  it("SCOPE_TENANT constant matches the database enum value", () => {
+    expect(SCOPE_TENANT).toBe("tenant");
+  });
+
   it("every user_role value is either declared or explicitly unmodelled", () => {
     // If the schema adds a new role, add a constant to roles.ts (and here), or
-    // record it as unmodelled above with a reason.
-    const allRoles = new Set<GeneratedUserRole>([
-      "super_admin",
-      "org_manager",
-      "ems_operator",
-    ]);
+    // record it as unmodelled above with a reason. The values come from the
+    // generated enum, so a new one fails this test until it is classified.
+    const allRoles = new Set<GeneratedUserRole>(Constants.public.Enums.user_role);
     const declaredRoles = new Set<GeneratedUserRole>([
       SUPER_ADMIN,
       ORG_MANAGER,
+      TENANT,
     ]);
 
     for (const r of allRoles) {
@@ -75,8 +85,8 @@ describe("roles — drift-prevention", () => {
   });
 
   it("every role_scope_type value is either declared or explicitly unmodelled", () => {
-    const allScopes = new Set<GeneratedScopeType>(["org", "microgrid"]);
-    const declaredScopes = new Set<GeneratedScopeType>([SCOPE_ORG]);
+    const allScopes = new Set<GeneratedScopeType>(Constants.public.Enums.role_scope_type);
+    const declaredScopes = new Set<GeneratedScopeType>([SCOPE_ORG, SCOPE_TENANT]);
 
     for (const s of allScopes) {
       expect(declaredScopes.has(s) || UNMODELLED_SCOPES.has(s)).toBe(true);

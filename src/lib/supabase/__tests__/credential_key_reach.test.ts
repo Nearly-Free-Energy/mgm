@@ -30,7 +30,9 @@ interface CatalogFunction {
 }
 
 // fn_ems_encrypt_secret reads the key to encrypt and returns only
-// ciphertext; the settings routes encrypt as the caller. If it ever returns
+// ciphertext; the settings routes encrypt as the caller, who must hold a
+// staff row (20261118100100; tenant_access.test.ts asserts a tenant cannot).
+// If it ever returns
 // anything derived from plaintext or the key, or a second entry is needed,
 // that is a change to the credential model, not to this list.
 const ALLOWED = [{ signature: "fn_ems_encrypt_secret(text)", authenticated: true, anon: false }];

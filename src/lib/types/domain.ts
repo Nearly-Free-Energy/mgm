@@ -21,8 +21,6 @@ export type Device = Database["public"]["Tables"]["devices"]["Row"];
 export type Tenant = Database["public"]["Tables"]["tenants"]["Row"];
 export type TenantDevice =
   Database["public"]["Tables"]["tenant_devices"]["Row"];
-export type TenantUser =
-  Database["public"]["Tables"]["tenant_users"]["Row"];
 /** rate_schedules row with JSONB `tiers` narrowed to TierConfig[]. */
 export type RateSchedule = Omit<
   Database["public"]["Tables"]["rate_schedules"]["Row"],

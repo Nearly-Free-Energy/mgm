@@ -26,11 +26,12 @@ BEGIN
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'public'
-    AND p.proname IN ('is_super_admin', 'user_can_access_org', 'user_can_access_microgrid');
+    AND p.proname IN ('is_super_admin', 'user_can_access_org', 'user_can_access_microgrid',
+                      'user_can_access_tenant', 'user_is_tenant_of_device');
 
-  ASSERT fn_count = 3,
-    format('Expected 3 helper functions, found %s', fn_count);
-  RAISE NOTICE 'OK: all 3 SECURITY DEFINER helpers exist (is_super_admin, user_can_access_org, user_can_access_microgrid)';
+  ASSERT fn_count = 5,
+    format('Expected 5 helper functions, found %s', fn_count);
+  RAISE NOTICE 'OK: all 5 SECURITY DEFINER helpers exist (is_super_admin, user_can_access_org, user_can_access_microgrid, user_can_access_tenant, user_is_tenant_of_device)';
 END;
 $$;
 
@@ -49,12 +50,18 @@ BEGIN
 
   SELECT user_can_access_microgrid('b0000000-0000-0000-0000-000000000001'::uuid) INTO result;
   RAISE NOTICE 'OK: user_can_access_microgrid(uuid) callable (returned %)', result;
+
+  SELECT user_can_access_tenant('b0000000-0000-0000-0000-000000000001'::uuid) INTO result;
+  RAISE NOTICE 'OK: user_can_access_tenant(uuid) callable (returned %)', result;
+
+  SELECT user_is_tenant_of_device('b0000000-0000-0000-0000-000000000001'::uuid) INTO result;
+  RAISE NOTICE 'OK: user_is_tenant_of_device(uuid) callable (returned %)', result;
 END;
 $$;
 
--- ── Section 2: RLS enabled on all 13 tables ───────────────────────────────
+-- ── Section 2: RLS enabled on all 12 tables ───────────────────────────────
 \echo ''
-\echo '-- [2] RLS enabled on all 13 tables'
+\echo '-- [2] RLS enabled on all 12 tables'
 
 DO $$
 DECLARE
@@ -66,7 +73,6 @@ DECLARE
     'devices',
     'tenant_devices',
     'tenants',
-    'tenant_users',
     'user_roles',
     'billing_periods',
     'billing_line_items',
@@ -93,7 +99,18 @@ BEGIN
   ASSERT array_length(missing, 1) IS NULL,
     format('RLS check failed for: %s', array_to_string(missing, ', '));
 
-  RAISE NOTICE 'OK: RLS enabled on all 13 tables';
+  RAISE NOTICE 'OK: RLS enabled on all 12 tables';
+
+  -- Tenant access is carried by user_roles tenant rows (20261118100100),
+  -- which dropped tenant_users.
+  ASSERT to_regclass('public.tenant_users') IS NULL,
+    'tenant_users should not exist (dropped by 20261118100100)';
+  ASSERT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'user_roles'
+      AND column_name = 'scope_tenant_id'
+  ), 'user_roles.scope_tenant_id is missing';
+  RAISE NOTICE 'OK: tenant_users is gone and user_roles.scope_tenant_id exists';
 END;
 $$;
 

@@ -163,7 +163,8 @@ export async function PATCH(
  *
  * Cascade chain: organizations → communities → microgrids → edges → devices
  * → tenant_devices + billing_line_items (device_id SET NULL, survives);
- * microgrids → tenants → tenant_users + tenant_devices; microgrids
+ * microgrids → tenants → tenant_devices + user_roles (tenant role rows,
+ * through scope_tenant_id, migration 20261118100100); microgrids
  * → billing_periods → billing_line_items; microgrids → rate_schedules; and,
  * via 00015's new FK, organizations → user_roles (org-scoped).
  *

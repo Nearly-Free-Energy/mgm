@@ -111,11 +111,13 @@ export async function PATCH(
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
  * Cascade chain: communities → microgrids → (edges/devices/tenants/
- * billing_periods/billing_line_items/rate_schedules/tenant_devices/
- * tenant_users). No user_roles interaction (user_roles are org-scoped,
- * not community-scoped) — the cascade-bypass GUC is still set to stay
- * consistent with the other entity DELETE routes and to future-proof if
- * role scopes ever extend below org level.
+ * billing_periods/billing_line_items/rate_schedules/tenant_devices), and
+ * tenants → user_roles for the tenant role rows (scope_tenant_id, migration
+ * 20261118100100). No staff role rows are removed: staff rows are
+ * org-scoped. The delete guard on user_roles lets the tenant rows go as a
+ * cascade (fn_user_roles_before_delete_guard); if staff roles ever get a
+ * scope below the organization, revisit both. The cascade-bypass GUC is
+ * still set, to stay consistent with the other entity DELETE routes.
  *
  * Revalidation (AC-UI-6): both `/organizations/<org_id>` and `/communities`
  * layouts are busted so nested nav + top-level community list refresh.
