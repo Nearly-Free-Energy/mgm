@@ -49,16 +49,17 @@ MANAGED_SCHEMAS = (
 DATA_SCHEMAS = ["public", "auth", "storage", "supabase_functions"]
 # Platform ledgers and Storage's vector tables, then Auth's session state,
 # second factors and pending sign-in state, which must never reach an export,
-# and Auth's custom OAuth providers, which hold client secrets. Auth's OAuth
-# clients, OAuth consents and WebAuthn credentials are exported, so they are
-# not here.
+# Auth's custom OAuth providers, which hold client secrets, and its SCIM
+# tokens. Auth's OAuth clients, OAuth consents, WebAuthn credentials and SCIM
+# users are exported, so they are not here.
 DATA_EXCLUDED_TABLES = [
     "auth.schema_migrations", "storage.migrations", "supabase_functions.migrations",
     "storage.buckets_vectors", "storage.vector_indexes",
     "auth.sessions", "auth.refresh_tokens", "auth.mfa_factors", "auth.mfa_challenges", "auth.mfa_amr_claims",
+    "auth.mfa_recovery_code_sets", "auth.mfa_recovery_codes",
     "auth.flow_state", "auth.one_time_tokens", "auth.saml_relay_states",
     "auth.oauth_authorizations", "auth.oauth_client_states", "auth.webauthn_challenges",
-    "auth.custom_oauth_providers",
+    "auth.custom_oauth_providers", "auth.scim_tokens",
 ]
 
 # What the fake programs print. They follow pg_dump's and pg_dumpall's plain

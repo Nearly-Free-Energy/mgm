@@ -603,7 +603,8 @@ run_dump() {
 #   - Supabase's own migration ledgers, which the target project has, and the
 #     Storage vector tables Supabase's guide excludes.
 #   - Auth's session state and second factors: sessions, refresh tokens, MFA
-#     factors, challenges and claims, pending sign-in flows, one-time tokens,
+#     factors, challenges, claims and recovery codes, pending sign-in flows,
+#     one-time tokens,
 #     SAML relay states, pending OAuth authorizations and client states, and
 #     WebAuthn challenges. Refresh tokens are usable values that do not expire
 #     by default, MFA factors hold TOTP secrets and pending authorizations
@@ -613,9 +614,13 @@ run_dump() {
 #   - Auth's custom OAuth providers, which hold each provider's client
 #     secret. They are configuration, recorded and re-created with the
 #     project's other Auth settings.
+#   - Auth's SCIM bearer tokens. Auth stores them hashed, but a restore
+#     issues new ones to each SSO provider rather than carrying the old ones
+#     over.
 # Every other table in auth is exported, among them the clients registered
 # with Auth's OAuth server (whose secrets Auth stores only as hashes), the
-# consents users gave those clients, and WebAuthn credentials (public keys).
+# consents users gave those clients, WebAuthn credentials (public keys) and
+# the users SSO providers provisioned through SCIM.
 # When a Supabase upgrade adds a table to auth,
 # scripts/tests/test_export_restore_e2e.py fails until it is classified here
 # or in that test's list of knowingly exported tables.
@@ -632,6 +637,8 @@ readonly DATA_EXCLUDED_TABLES=(
   auth.mfa_factors
   auth.mfa_challenges
   auth.mfa_amr_claims
+  auth.mfa_recovery_code_sets
+  auth.mfa_recovery_codes
   auth.flow_state
   auth.one_time_tokens
   auth.saml_relay_states
@@ -639,6 +646,7 @@ readonly DATA_EXCLUDED_TABLES=(
   auth.oauth_client_states
   auth.webauthn_challenges
   auth.custom_oauth_providers
+  auth.scim_tokens
 )
 
 data_selection=()
