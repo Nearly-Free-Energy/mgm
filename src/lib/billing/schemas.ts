@@ -9,11 +9,12 @@
  *
  * Client-safe: besides zod it imports site-savings.ts, which imports only
  * types, and day-key.ts, which imports nothing; if either gains a runtime
- * import, revisit.
+ * import, revisit. Its import from payments/state.ts is type-only.
  */
 import { z } from "zod";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
 import { validateGridTariffBands } from "./site-savings";
+import type { PaymentStatus } from "@/lib/payments/state";
 
 const bodyError = (issue: { code: string; keys?: string[] }) =>
   issue.code === "unrecognized_keys"
@@ -344,3 +345,70 @@ export const PreviewBillingReviewBody = z.strictObject(
   }
 );
 export const PREVIEW_BILLING_REVIEW_BODY_VERSION = 1;
+// ── Bill line items ──
+
+/** A meter quantity in kWh: a finite number, 0 or more. */
+const lineItemsKwh = (key: string) =>
+  z
+    .number({ error: `${key} must be a finite number` })
+    .min(0, { error: `${key} must be a non-negative number` });
+
+/**
+ * PATCH /api/billing-line-items/[lineItemId]/usage. The line item comes from
+ * the path. At least one key is required; when both are given the route
+ * takes end_kwh and ignores usage_kwh, and with end_kwh alone it refuses a
+ * reading below the line item's start_kwh, which only the database knows.
+ */
+export const LineItemUsageBody = z
+  .strictObject(
+    {
+      usage_kwh: lineItemsKwh("usage_kwh").optional().meta({ title: "Usage (kWh)" }),
+      end_kwh: lineItemsKwh("end_kwh").optional().meta({ title: "Closing meter reading (kWh)" }),
+    },
+    { error: bodyError }
+  )
+  .refine((body) => body.usage_kwh !== undefined || body.end_kwh !== undefined, {
+    error: "At least one of usage_kwh or end_kwh is required",
+  });
+export const LINE_ITEM_USAGE_BODY_VERSION = 1;
+
+// The payment-status route has always said "a JSON object", with a full stop,
+// where bodyError says "an object"; row-actions-menu.tsx shows the text.
+const lineItemsPaymentBodyError = (issue: { code: string; keys?: string[] }) =>
+  issue.code === "unrecognized_keys"
+    ? `Unknown field: ${(issue.keys ?? []).join(", ")}`
+    : "Request body must be a JSON object.";
+
+// Every manual target of the payment state machine but 'link_generated'
+// (src/lib/payments/state.ts); the satisfies keeps the list inside it.
+const LINE_ITEMS_PAYMENT_STATUSES = ["unpaid", "paid", "failed", "refunded"] as const satisfies readonly PaymentStatus[];
+
+/**
+ * PATCH /api/billing-line-items/[lineItemId]/payment-status. The line item
+ * comes from the path. 'link_generated' is not a manual input: only the link
+ * route sets it. Whether the caller may set 'failed' or 'refunded' is the
+ * route's super-admin check, not the body's, so all four values parse.
+ * notes is trimmed before its length is checked, and a note that trims to
+ * nothing parses as null.
+ */
+export const LineItemPaymentStatusBody = z.strictObject(
+  {
+    status: z
+      .enum(LINE_ITEMS_PAYMENT_STATUSES, {
+        error: (issue) =>
+          issue.input === undefined
+            ? "Missing required field: status."
+            : `Invalid status '${String(issue.input)}'. Allowed: ${LINE_ITEMS_PAYMENT_STATUSES.join(", ")}.`,
+      })
+      .meta({ title: "Payment status" }),
+    notes: z
+      .string({ error: "notes must be a string." })
+      .trim()
+      .max(500, { error: "notes must be 500 characters or fewer." })
+      .nullish()
+      .transform((notes) => (notes ? notes : null))
+      .meta({ title: "Notes" }),
+  },
+  { error: lineItemsPaymentBodyError }
+);
+export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 1;

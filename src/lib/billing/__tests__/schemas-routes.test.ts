@@ -22,6 +22,8 @@ const PAIRS: [route: string, method: string, schema: string][] = [
   ["src/app/api/billing/generate/route.ts", "POST", "GenerateBillsBody"],
   ["src/app/api/billing/regenerate-preview/route.ts", "POST", "PreviewBillsBody"],
   ["src/app/api/billing-review/preview/route.ts", "POST", "PreviewBillingReviewBody"],
+  ["src/app/api/billing-line-items/[lineItemId]/usage/route.ts", "PATCH", "LineItemUsageBody"],
+  ["src/app/api/billing-line-items/[lineItemId]/payment-status/route.ts", "PATCH", "LineItemPaymentStatusBody"],
 ];
 
 /** Why `source` does not parse its `method` body with `schema`, or null when it does. */

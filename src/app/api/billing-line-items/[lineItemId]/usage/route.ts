@@ -7,6 +7,8 @@ import {
   isRunGenerationFatal,
   runGenerationFor,
 } from "@/lib/billing/generate";
+import { LineItemUsageBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * PATCH /api/billing-line-items/[lineItemId]/usage (#158, rewritten in #173)
@@ -15,8 +17,13 @@ import {
  * call surface is preserved exactly:
  *
  *   Body:  { usage_kwh?: number; end_kwh?: number }   (at least one)
+ *          Parsed with `LineItemUsageBody` (`@/lib/billing/schemas`);
+ *          unknown keys are refused.
  *   200:   { lineItem: <updated row> }
- *   400:   invalid body / negative / non-numeric / underflow
+ *   400:   invalid body / negative / non-numeric:
+ *          { error, field?, code: "invalid_body" }
+ *   400:   end_kwh below start_kwh: { error, reason: "invalid_body" }
+ *   401:   no session
  *   403:   caller cannot access microgrid
  *   404:   line item not found / RLS-hidden
  *   409:   device_linked  (line_item.device_id != NULL OR tenant has a
@@ -39,47 +46,6 @@ import {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type ParsedBody = {
-  usage_kwh: number | undefined;
-  end_kwh: number | undefined;
-};
-
-function parseBody(raw: unknown): ParsedBody | { error: string } {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "Request body must be an object" };
-  }
-  const rec = raw as Record<string, unknown>;
-
-  let usage_kwh: number | undefined;
-  let end_kwh: number | undefined;
-
-  if ("usage_kwh" in rec && rec.usage_kwh !== undefined) {
-    if (typeof rec.usage_kwh !== "number" || !Number.isFinite(rec.usage_kwh)) {
-      return { error: "usage_kwh must be a finite number" };
-    }
-    if (rec.usage_kwh < 0) {
-      return { error: "usage_kwh must be a non-negative number" };
-    }
-    usage_kwh = rec.usage_kwh;
-  }
-
-  if ("end_kwh" in rec && rec.end_kwh !== undefined) {
-    if (typeof rec.end_kwh !== "number" || !Number.isFinite(rec.end_kwh)) {
-      return { error: "end_kwh must be a finite number" };
-    }
-    if (rec.end_kwh < 0) {
-      return { error: "end_kwh must be a non-negative number" };
-    }
-    end_kwh = rec.end_kwh;
-  }
-
-  if (usage_kwh === undefined && end_kwh === undefined) {
-    return { error: "At least one of usage_kwh or end_kwh is required" };
-  }
-
-  return { usage_kwh, end_kwh };
-}
 
 type LineItemScope = {
   id: string;
@@ -111,24 +77,6 @@ export async function PATCH(
     );
   }
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body", reason: "bad_request" },
-      { status: 400 }
-    );
-  }
-
-  const parsed = parseBody(raw);
-  if ("error" in parsed) {
-    return NextResponse.json(
-      { error: parsed.error, reason: "invalid_body" },
-      { status: 400 }
-    );
-  }
-
   const supabase = await createClient();
 
   // Explicit auth gate (BC1 AC6) — anonymous calls return 401 instead of
@@ -142,6 +90,10 @@ export async function PATCH(
       { status: 401 }
     );
   }
+
+  const body = await parseJsonBody(request, LineItemUsageBody);
+  if (!body.ok) return body.response;
+  const parsed = body.data;
 
   // 1. Resolve line item → period → microgrid.
   const { data: scopedRaw, error: scopeErr } = await supabase

@@ -250,6 +250,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
       params: Promise.resolve({ lineItemId: LI_UUID }),
     });
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
   });
 
   it("400: missing both keys", async () => {
@@ -259,7 +260,21 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     });
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.reason).toBe("invalid_body");
+    expect(json).toEqual({
+      error: "At least one of usage_kwh or end_kwh is required",
+      code: "invalid_body",
+    });
+  });
+
+  it("400: unknown key rejected", async () => {
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makePatchRequest(LI_UUID, { usage_kwh: 10, note: "x" }),
+      { params: Promise.resolve({ lineItemId: LI_UUID }) }
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: note", code: "invalid_body" });
+    expect(capturedUpdatePayload).toBeNull();
   });
 
   it("400: negative number rejected", async () => {
@@ -269,6 +284,11 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
       { params: Promise.resolve({ lineItemId: LI_UUID }) }
     );
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "usage_kwh must be a non-negative number",
+      field: "usage_kwh",
+      code: "invalid_body",
+    });
   });
 
   it("400: non-numeric usage_kwh rejected", async () => {
@@ -278,6 +298,11 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
       { params: Promise.resolve({ lineItemId: LI_UUID }) }
     );
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "usage_kwh must be a finite number",
+      field: "usage_kwh",
+      code: "invalid_body",
+    });
   });
 
   it("403: caller cannot access microgrid", async () => {
@@ -457,6 +482,11 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
       { params: Promise.resolve({ lineItemId: LI_UUID }) }
     );
     expect(res.status).toBe(400);
+    // Checked after the database lookup, so it keeps the route's own shape.
+    expect(await res.json()).toEqual({
+      error: "end_kwh must be greater than or equal to start_kwh",
+      reason: "invalid_body",
+    });
   });
 
   it("409: missing start register never becomes zero consumption baseline", async () => {

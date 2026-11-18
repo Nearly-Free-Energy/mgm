@@ -275,7 +275,12 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.reason).toBe("invalid_body");
+    expect(body).toEqual({
+      error: "Invalid status 'weird'. Allowed: unpaid, paid, failed, refunded.",
+      field: "status",
+      code: "invalid_body",
+    });
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it("(e) 400: paid→paid → reason: no_op", async () => {
@@ -335,7 +340,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.reason).toBe("invalid_body");
+    expect(body).toEqual({ error: "Missing required field: status.", field: "status", code: "invalid_body" });
   });
 
   it("(i) 400: notes > 500 chars → invalid_body", async () => {
@@ -346,7 +351,31 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.reason).toBe("invalid_body");
+    expect(body).toEqual({ error: "notes must be 500 characters or fewer.", field: "notes", code: "invalid_body" });
+  });
+
+  it("(i) 400: unknown key, non-object and non-JSON bodies → invalid_body", async () => {
+    const { PATCH } = await import("../route");
+    const params = { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) };
+    const unknown = await PATCH(makeReq({ status: "paid", note: "typo" }), params);
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toEqual({ error: "Unknown field: note", code: "invalid_body" });
+
+    const notObject = await PATCH(makeReq(["paid"]), params);
+    expect(notObject.status).toBe(400);
+    expect(await notObject.json()).toEqual({ error: "Request body must be a JSON object.", code: "invalid_body" });
+
+    const notJson = await PATCH(
+      new NextRequest(`http://localhost/api/billing-line-items/${LINE_ITEM_ID}/payment-status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "{not json",
+      }),
+      params,
+    );
+    expect(notJson.status).toBe(400);
+    expect(await notJson.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it("(j) log record has notes_present: true and does NOT contain the raw notes", async () => {
