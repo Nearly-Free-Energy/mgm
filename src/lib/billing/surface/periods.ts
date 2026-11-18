@@ -47,6 +47,28 @@ export const DELETE_PERIOD_REFUSALS = {
  */
 const MAX_PERIODS = 500;
 
+/**
+ * Bills are read in pages. PostgREST answers at most max_rows rows
+ * (supabase/config.toml sets 1000) and says nothing when it stops, so a read
+ * that can return more pages by id until it has the exact count. A read
+ * that cannot be completed is a refusal, never a partial sum.
+ */
+const BILL_PAGE = 1000;
+
+type PageRead = { data: unknown; error: unknown; count?: number | null };
+
+async function readAllPages<T>(read: (from: number, to: number) => PromiseLike<PageRead>): Promise<T[] | null> {
+  const out: T[] = [];
+  for (let from = 0; ; from += BILL_PAGE) {
+    const { data, error, count } = await read(from, from + BILL_PAGE - 1);
+    if (error) return null;
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length === 0) return out;
+    if (typeof count === "number" ? out.length >= count : rows.length < BILL_PAGE) return out;
+  }
+}
+
 export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedModel<"collection">>> {
   const { data: microgrid, error } = await req.supabase
     .from("microgrids")
@@ -67,16 +89,18 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
 
   const totals = new Map<string, { kwh: number; amount: number }>();
   if (rows.length > 0) {
-    const itemsRes = await req.supabase
-      .from("billing_line_items")
-      .select("billing_period_id, usage_kwh, total_amount")
-      .in(
-        "billing_period_id",
-        rows.map((r) => r.id),
-      );
+    const ids = rows.map((r) => r.id);
+    const items = await readAllPages<{ billing_period_id: string; usage_kwh: unknown; total_amount: unknown }>((from, to) =>
+      req.supabase
+        .from("billing_line_items")
+        .select("billing_period_id, usage_kwh, total_amount", { count: "exact" })
+        .in("billing_period_id", ids)
+        .order("id")
+        .range(from, to),
+    );
     // Unlike the legacy page, which shows zeros: a failed read is not an empty period.
-    if (itemsRes.error) return PERIODS_REFUSALS.unavailable;
-    for (const item of (itemsRes.data ?? []) as { billing_period_id: string; usage_kwh: unknown; total_amount: unknown }[]) {
+    if (items === null) return PERIODS_REFUSALS.unavailable;
+    for (const item of items) {
       const t = totals.get(item.billing_period_id) ?? { kwh: 0, amount: 0 };
       t.kwh += Number(item.usage_kwh ?? 0);
       t.amount += Number(item.total_amount ?? 0);
@@ -114,12 +138,15 @@ export async function prepareDeletePeriod(
   if (!period) return DELETE_PERIOD_REFUSALS.notFound;
   if (period.status === "closed") return DELETE_PERIOD_REFUSALS.closed;
 
-  const itemsRes = await req.supabase
-    .from("billing_line_items")
-    .select("payment_status, paid_at")
-    .eq("billing_period_id", period.id);
-  if (itemsRes.error) return DELETE_PERIOD_REFUSALS.unavailable;
-  const items = (itemsRes.data ?? []) as { payment_status: string; paid_at: string | null }[];
+  const items = await readAllPages<{ payment_status: string; paid_at: string | null }>((from, to) =>
+    req.supabase
+      .from("billing_line_items")
+      .select("payment_status, paid_at", { count: "exact" })
+      .eq("billing_period_id", period.id)
+      .order("id")
+      .range(from, to),
+  );
+  if (items === null) return DELETE_PERIOD_REFUSALS.unavailable;
   if (items.some(lineItemHasRecordedPayment)) return DELETE_PERIOD_REFUSALS.payments;
 
   // The name the capability checks the typed one against: "October 2026", not a display label.

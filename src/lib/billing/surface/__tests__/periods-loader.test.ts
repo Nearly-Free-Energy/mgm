@@ -28,9 +28,17 @@ function client(): SupabaseClient {
   return {
     from(table: string) {
       reads.push(["from", table]);
-      const result = Promise.resolve(tables[table]);
+      let result = Promise.resolve(tables[table]);
       const chain: Record<string, unknown> = {
-        select: (columns: string) => (reads.push(["select", table, columns]), chain),
+        select: (columns: string, o?: unknown) => (reads.push(o === undefined ? ["select", table, columns] : ["select", table, columns, o]), chain),
+        // A page of the table's rows, with the exact count, as PostgREST answers { count: "exact" }.
+        range: (from: number, to: number) => {
+          reads.push(["range", table, from, to]);
+          const t = tables[table];
+          const rows = Array.isArray(t.data) ? t.data : [];
+          result = Promise.resolve(t.error ? t : { data: rows.slice(from, to + 1), error: null, count: rows.length });
+          return chain;
+        },
         eq: (column: string, value: string) => (reads.push(["eq", table, column, value]), chain),
         in: (column: string, values: string[]) => (reads.push(["in", table, column, values]), chain),
         order: (column: string, o: unknown) => (reads.push(["order", table, column, o]), chain),
@@ -91,10 +99,29 @@ describe("loadPeriods", () => {
       ["order", "billing_periods", "start_date", { ascending: false }],
       ["limit", "billing_periods", 500],
       ["from", "billing_line_items"],
-      ["select", "billing_line_items", "billing_period_id, usage_kwh, total_amount"],
+      ["select", "billing_line_items", "billing_period_id, usage_kwh, total_amount", { count: "exact" }],
       ["in", "billing_line_items", "billing_period_id", [P_NOV, P_OCT]],
+      ["order", "billing_line_items", "id", undefined],
+      ["range", "billing_line_items", 0, 999],
     ]);
     expect(composeBilling).not.toHaveBeenCalled();
+  });
+
+  it("reads every bill in pages, past PostgREST's row cap, before summing", async () => {
+    tables.billing_line_items = {
+      data: Array.from({ length: 2500 }, () => ({ billing_period_id: P_OCT, usage_kwh: 1, total_amount: 10 })),
+      error: null,
+    };
+    const out = await loadPeriods(request());
+    expect(reads.filter((r) => r[0] === "range")).toEqual([
+      ["range", "billing_line_items", 0, 999],
+      ["range", "billing_line_items", 1000, 1999],
+      ["range", "billing_line_items", 2000, 2999],
+    ]);
+    if (!out.ok) throw new Error("refused");
+    const october = out.model.body.rows.find((r) => r.id === P_OCT)!;
+    expect(october.cells.energy).toMatchObject({ v: 2500 });
+    expect(october.cells.total).toMatchObject({ v: 25000 });
   });
 
   it("sums each period's bills, and leaves a period with none at 0 kWh and an empty total", async () => {

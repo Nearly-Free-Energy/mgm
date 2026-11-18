@@ -61,7 +61,7 @@ export function tableClient(results: Record<string, TableResult>) {
         then: (resolve: (r: typeof result) => unknown, reject: (e: unknown) => unknown) =>
           Promise.resolve(result).then(resolve, reject),
       };
-      for (const op of ["select", "eq", "in", "order", "limit"]) {
+      for (const op of ["select", "eq", "in", "order", "limit", "range"]) {
         chain[op] = (...args: unknown[]) => {
           ops.push([op, args]);
           return chain;
