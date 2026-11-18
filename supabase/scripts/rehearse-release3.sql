@@ -208,15 +208,19 @@ BEGIN
   RAISE NOTICE 'OK: per-community invoice sequence advances';
 
   -- ── 7. Close period + post-close correction audit ──────────────────────
-  PERFORM fn_close_billing_period(v_period, false);
+  -- Closed against its own review, as the close route does (#201).
+  PERFORM fn_close_billing_period(v_period, r->>'digest',
+    ARRAY(SELECT jsonb_array_elements_text(r->'acknowledgements')))
+  FROM fn_billing_period_close_review(v_period) AS r;
   IF NOT EXISTS (
     SELECT 1 FROM billing_audit_log
     WHERE billing_period_id = v_period
       AND event_type = 'period_closed'
       AND actor_user_id = v_user
-      AND details->>'confirmed' = 'false'
+      AND details->>'digest' LIKE 'v1:%'
+      AND details->'acknowledged' ? 'totals_reviewed'
   ) THEN
-    RAISE EXCEPTION 'period close missing actor/confirmation audit';
+    RAISE EXCEPTION 'period close missing actor/digest/acknowledgement audit';
   END IF;
 
   SELECT * INTO v_item FROM fn_record_line_item_with_audit(

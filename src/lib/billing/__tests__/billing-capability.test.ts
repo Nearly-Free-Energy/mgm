@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BillingCapability } from "../capability";
+import { parseCloseReview, type CloseReview } from "../close";
 import type {
   BillingGeneration,
   BillingRepository,
@@ -15,6 +16,34 @@ const scope: BillingScope = {
   organizationId: ORG_ID,
   userId: "user-1",
   roles: [],
+};
+
+const REVIEW_ROW = {
+  periodId: PERIOD_ID,
+  microgridId: MG_ID,
+  status: "draft",
+  startDate: "2026-09-01",
+  endDate: "2026-09-30",
+  currency: "UGX",
+  billCount: 1,
+  totalAmount: 100,
+  usageKwh: 10,
+  unbilled: [] as { tenantId: string; tenantName: string }[],
+  unmetered: [] as { tenantId: string; tenantName: string }[],
+  fractionalTotals: [] as { tenantId: string; tenantName: string }[],
+  acknowledgements: ["totals_reviewed"],
+  digest: "v1:reviewed",
+};
+
+function review(overrides: Partial<typeof REVIEW_ROW> = {}): CloseReview {
+  const parsed = parseCloseReview({ ...REVIEW_ROW, ...overrides });
+  if (!parsed) throw new Error("review fixture does not parse");
+  return parsed;
+}
+
+/** A confirmation of REVIEW_ROW as the host sends it. */
+const CONFIRMED = {
+  confirmation: { digest: "v1:reviewed", acknowledged: ["totals_reviewed"], typed: "September 2026" },
 };
 
 const TARIFF = {
@@ -78,6 +107,7 @@ function stubRepo(overrides: Partial<BillingRepository> = {}): BillingRepository
       totalAmount: 0,
       unresolved: [],
     }),
+    getCloseReview: async () => review(),
     closeBillingPeriod: async () => ({
       row: {
         id: PERIOD_ID,
@@ -206,7 +236,60 @@ describe("BillingCapability", () => {
     expect(result).toMatchObject({ ok: false, status: 422, code: "billing_invalid_range" });
   });
 
-  it("requires explicit confirmation to close with unresolved tenants", async () => {
+  it("answers 428 with the review when no confirmation is sent, and writes nothing", async () => {
+    const close = vi.fn();
+    const { capability } = setup({ closeBillingPeriod: close });
+    for (const input of [undefined, {}]) {
+      const result = await capability.closePeriod(PERIOD_ID, input);
+      expect(result).toMatchObject({
+        ok: false,
+        status: 428,
+        code: "billing_close_confirmation_required",
+        review: {
+          digest: "v1:reviewed",
+          name: "September 2026",
+          billCount: 1,
+          totalAmount: 100,
+          acknowledgements: [{ id: "totals_reviewed" }],
+        },
+      });
+    }
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, CONFIRMED])("answers 409 to %j while a bill's total is not a whole number, and writes nothing", async (input) => {
+    const close = vi.fn();
+    const { capability } = setup({
+      getCloseReview: async () => review({ totalAmount: 100.5, fractionalTotals: [{ tenantId: "hh-1", tenantName: "House 1" }] }),
+      closeBillingPeriod: close,
+    });
+    expect(await capability.closePeriod(PERIOD_ID, input)).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "billing_close_fractional_totals",
+      message: "Regenerate the bills for House 1 before closing: their totals are not whole numbers.",
+      review: { fractionalTotals: [{ tenantName: "House 1" }] },
+    });
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 with the current review when the confirmed digest is not the current one", async () => {
+    const close = vi.fn();
+    const { capability } = setup({
+      getCloseReview: async () => review({ digest: "v1:current", totalAmount: 250 }),
+      closeBillingPeriod: close,
+    });
+    const result = await capability.closePeriod(PERIOD_ID, CONFIRMED);
+    expect(result).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "billing_period_totals_changed",
+      review: { digest: "v1:current", totalAmount: 250 },
+    });
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("requires every acknowledgement the review lists, then closes and reports the unbilled tenants", async () => {
     const close = vi.fn(async () => ({
       row: {
         id: PERIOD_ID,
@@ -218,84 +301,150 @@ describe("BillingCapability", () => {
       },
       error: null,
     }));
-    const { capability } = setup(
-      {
-        getPeriodSummary: async () => ({
-          period: {
-            id: PERIOD_ID,
-            microgrid_id: MG_ID,
-            start_date: "2026-09-01",
-            end_date: "2026-09-30",
-            status: "draft",
-            timezone: "Africa/Kampala",
-          },
-          lineItemCount: 1,
-          totalAmount: 100,
-          unresolved: [
-            { tenantId: "hh-1", tenantName: "No Bill", reason: "No bill generated." },
-          ],
+    const { capability } = setup({
+      getCloseReview: async () =>
+        review({
+          unbilled: [{ tenantId: "hh-1", tenantName: "No Bill" }],
+          acknowledgements: ["totals_reviewed", "tenants_without_bills"],
         }),
-        closeBillingPeriod: close,
-      }
-    );
-    const unconfirmed = await capability.closePeriod(PERIOD_ID);
-    expect(unconfirmed).toMatchObject({
+      closeBillingPeriod: close,
+    });
+    const partial = await capability.closePeriod(PERIOD_ID, CONFIRMED);
+    expect(partial).toMatchObject({
       ok: false,
-      status: 409,
-      code: "billing_unresolved_tenants",
-      unresolved: [{ tenantId: "hh-1", tenantName: "No Bill", reason: "No bill generated." }],
+      status: 428,
+      code: "billing_close_acknowledgement_missing",
+      field: "confirmation",
     });
     expect(close).not.toHaveBeenCalled();
 
-    const confirmed = await capability.closePeriod(PERIOD_ID, { confirmed: true });
-    expect(confirmed).toMatchObject({ ok: true });
-    expect(close).toHaveBeenCalledWith(PERIOD_ID, true);
+    const acknowledged = ["totals_reviewed", "tenants_without_bills"];
+    const confirmed = await capability.closePeriod(PERIOD_ID, {
+      confirmation: { ...CONFIRMED.confirmation, acknowledged },
+    });
+    expect(confirmed).toMatchObject({
+      ok: true,
+      data: {
+        period: { status: "closed" },
+        unresolved: [
+          { tenantId: "hh-1", tenantName: "No Bill", reason: "No bill generated for this tenant in this period." },
+        ],
+      },
+    });
+    expect(close).toHaveBeenCalledWith(PERIOD_ID, { digest: "v1:reviewed", acknowledged });
   });
 
-  it.each([undefined, { confirmed: true }])("blocks closure on summary failure even with confirmation %j", async (input) => {
+  it.each([undefined, "", "October 2026", "September"])(
+    "answers 428 when the typed name is %j rather than the period's name",
+    async (typed) => {
+      const close = vi.fn();
+      const { capability } = setup({ closeBillingPeriod: close });
+      const result = await capability.closePeriod(PERIOD_ID, {
+        confirmation: { digest: "v1:reviewed", acknowledged: ["totals_reviewed"], ...(typed === undefined ? {} : { typed }) },
+      });
+      expect(result).toMatchObject({ ok: false, status: 428, code: "billing_close_name_mismatch" });
+      expect(close).not.toHaveBeenCalled();
+    }
+  );
+
+  it("accepts the period's name typed in another case or with other spacing", async () => {
+    const { capability } = setup();
+    const result = await capability.closePeriod(PERIOD_ID, {
+      confirmation: { ...CONFIRMED.confirmation, typed: "  september   2026 " },
+    });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    [{ confirmed: true }, "Unknown field: confirmed"],
+    [{ confirmation: { acknowledged: [] } }, undefined],
+    [{ confirmation: { digest: "v1:reviewed", acknowledged: "totals_reviewed" } }, undefined],
+    [[], "Request body must be an object"],
+  ])("answers 400 to the body %j", async (input, message) => {
+    const close = vi.fn();
+    const { capability } = setup({ closeBillingPeriod: close });
+    const result = await capability.closePeriod(PERIOD_ID, input);
+    expect(result).toMatchObject({ ok: false, status: 400, code: "billing_invalid_body" });
+    if (message) expect(result).toMatchObject({ message });
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, CONFIRMED])("blocks closure when the review cannot be read, with input %j", async (input) => {
     const close = vi.fn();
     const { capability } = setup({
-      getPeriodSummary: async () => { throw new Error("query failed"); },
+      getCloseReview: async () => { throw new Error("query failed"); },
       closeBillingPeriod: close,
     });
     expect(await capability.closePeriod(PERIOD_ID, input)).toMatchObject({
-      ok: false, status: 503, code: "billing_summary_unavailable",
+      ok: false, status: 503, code: "billing_review_unavailable",
     });
     expect(close).not.toHaveBeenCalled();
-    expect(await capability.getPeriodSummary(PERIOD_ID)).toMatchObject({
-      ok: false, status: 503, code: "billing_summary_unavailable",
+    expect(await capability.getCloseReview(PERIOD_ID)).toMatchObject({
+      ok: false, status: 503, code: "billing_review_unavailable",
+    });
+  });
+
+  it("answers 404 when the review finds no period the caller can see", async () => {
+    const { capability } = setup({ getCloseReview: async () => null });
+    expect(await capability.closePeriod(PERIOD_ID, CONFIRMED)).toMatchObject({
+      ok: false, status: 404, code: "billing_period_not_found",
     });
   });
 
   it("refuses to close an already-closed period", async () => {
+    const close = vi.fn();
     const { capability } = setup({
-      getPeriodSummary: async () => ({
-        period: {
-          id: PERIOD_ID,
-          microgrid_id: MG_ID,
-          start_date: "2026-09-01",
-          end_date: "2026-09-30",
-          status: "closed",
-          timezone: "Africa/Kampala",
-        },
-        lineItemCount: 1,
-        totalAmount: 100,
-        unresolved: [],
-      }),
+      getCloseReview: async () => review({ status: "closed" }),
+      closeBillingPeriod: close,
     });
-    const result = await capability.closePeriod(PERIOD_ID, { confirmed: true });
+    const result = await capability.closePeriod(PERIOD_ID, CONFIRMED);
     expect(result).toMatchObject({ ok: false, status: 409, code: "billing_period_closed" });
+    expect(close).not.toHaveBeenCalled();
   });
 
-  it("maps a concurrent close to an already-closed conflict", async () => {
+  it.each([
+    [{ code: "23514", message: "billing_close_totals_changed: the period's totals changed" }, 409, "billing_period_totals_changed"],
+    [{ code: "23514", message: "billing_close_acknowledgement_missing: tenants_without_bills" }, 428, "billing_close_acknowledgement_missing"],
+    [{ code: "23514", message: "billing_close_fractional_total: 1 bill(s) have a total that is not a whole number" }, 409, "billing_close_fractional_totals"],
+    [{ code: "23514", message: "billing_period_closed: the billing period is already closed" }, 409, "billing_period_closed"],
+    [{ code: "P0002", message: "billing_period_not_found: no such period" }, 404, "billing_period_not_found"],
+    [{ code: "42501", message: "permission denied" }, 403, "billing_forbidden"],
+    [{ code: "XX000", message: "boom" }, 500, "billing_unavailable"],
+  ])("maps the database's refusal %j to %i %s", async (error, status, code) => {
     const { capability } = setup({
+      closeBillingPeriod: async () => ({ row: null, error }),
+    });
+    expect(await capability.closePeriod(PERIOD_ID, CONFIRMED)).toMatchObject({ ok: false, status, code });
+  });
+
+  it("returns the current review when the database finds the totals changed during the close", async () => {
+    let reads = 0;
+    const { capability } = setup({
+      getCloseReview: async () => (++reads === 1 ? review() : review({ digest: "v1:later", totalAmount: 300 })),
       closeBillingPeriod: async () => ({
         row: null,
-        error: { code: "P0002", message: "already closed" },
+        error: { code: "23514", message: "billing_close_totals_changed: the period's totals changed" },
       }),
     });
-    expect(await capability.closePeriod(PERIOD_ID, { confirmed: true })).toMatchObject({
-      ok: false, status: 409, code: "billing_period_closed",
+    expect(await capability.closePeriod(PERIOD_ID, CONFIRMED)).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "billing_period_totals_changed",
+      review: { digest: "v1:later", totalAmount: 300 },
+    });
+  });
+
+  it("reads the close review in scope, and refuses another organization's period", async () => {
+    const { capability } = setup();
+    expect(await capability.getCloseReview(PERIOD_ID)).toMatchObject({
+      ok: true,
+      data: { digest: "v1:reviewed", name: "September 2026" },
+    });
+    expect(await capability.getCloseReview("990e8400-e29b-41d4-a716-446655440000")).toMatchObject({
+      ok: false, status: 403, code: "billing_scope_mismatch",
+    });
+    expect(await capability.getCloseReview("not-a-uuid")).toMatchObject({
+      ok: false, status: 400, code: "billing_invalid_period",
     });
   });
 
@@ -391,7 +540,7 @@ const WRITES: { method: string; run: (capability: BillingCapability) => Promise<
     run: (c) =>
       c.createPeriod({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" }),
   },
-  { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, { confirmed: true }) },
+  { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, CONFIRMED) },
   { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
   { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },
 ];

@@ -22,7 +22,39 @@ import type {
   ManualPaymentStatus,
   PeriodSummary,
   TierInput,
+  UnresolvedTenant,
 } from "./repository";
+import { missingAcknowledgements, typedNameMatches, type CloseReview } from "./close";
+import { ClosePeriodBody } from "./schemas";
+
+/**
+ * 409: a bill's total is not a whole number, so the period cannot close until
+ * that bill is regenerated (fn_record_line_item_with_audit rounds it).
+ */
+function fractionalTotals(review: CloseReview | undefined) {
+  const names = review?.fractionalTotals.map((t) => t.tenantName) ?? [];
+  return {
+    ok: false as const,
+    status: 409 as const,
+    code: "billing_close_fractional_totals",
+    message:
+      names.length > 0
+        ? `Regenerate the bills for ${names.join(", ")} before closing: their totals are not whole numbers.`
+        : "Regenerate the bills whose totals are not whole numbers before closing.",
+    ...(review ? { review } : {}),
+  };
+}
+
+/** 409: the totals changed after the person reviewed them. Carries the current review when it could be read. */
+function totalsChanged(review: CloseReview | undefined) {
+  return {
+    ok: false as const,
+    status: 409 as const,
+    code: "billing_period_totals_changed",
+    message: "The period's totals changed after you reviewed them. Review the new totals and confirm again.",
+    ...(review ? { review } : {}),
+  };
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -519,6 +551,55 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: summary };
   }
 
+  /**
+   * The close review, or a refusal. A period the caller cannot see is 404,
+   * like getPeriodSummary; a review that cannot be read is 503, so a failed
+   * read is never taken for a period with nothing to confirm.
+   */
+  private async loadCloseReview(periodId: string): Promise<BillingResult<CloseReview>> {
+    try {
+      const review = await this.repo.getCloseReview(periodId);
+      if (!review) return {
+        ok: false, status: 404, code: "billing_period_not_found",
+        message: "Billing period not found.",
+      };
+      return { ok: true, data: review };
+    } catch {
+      return {
+        ok: false, status: 503, code: "billing_review_unavailable",
+        message: "Could not load the period's totals. Retry before closing the period.",
+      };
+    }
+  }
+
+  async getCloseReview(periodId: string) {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    if (!UUID_RE.test(periodId)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_period",
+        message: "Invalid billing period id — expected UUID.",
+      };
+    }
+    const resolved = await this.repo.getPeriodOrganization(periodId);
+    if (!resolved || resolved.orgId !== this.scope.organizationId) {
+      return this.scopeMismatch();
+    }
+    // Reads stay available while the plugin is disabled — only scope applies.
+    return this.loadCloseReview(periodId);
+  }
+
+  /**
+   * Closes a period against the totals the person reviewed (#201). The body
+   * is ClosePeriodBody: without `confirmation` the answer is 428 with the
+   * review to confirm; with a digest of other totals it is 409 with the
+   * current review. The database checks the digest and acknowledgements
+   * again inside the write (fn_close_billing_period), so a change between
+   * this check and the write is still refused there; the typed name is
+   * checked here only, as it guards attention rather than data.
+   */
   async closePeriod(periodId: string, input?: unknown) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
@@ -537,10 +618,22 @@ export class BillingCapability implements BillingCapabilityContract {
     const gated = await this.requirePlugin();
     if (gated) return gated;
 
-    const loaded = await this.loadPeriodSummary(periodId);
+    const body = ClosePeriodBody.safeParse(input ?? {});
+    if (!body.success) {
+      const issue = body.error.issues[0];
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_body",
+        message: issue.message,
+        ...(typeof issue.path[0] === "string" ? { field: issue.path[0] } : {}),
+      };
+    }
+
+    const loaded = await this.loadCloseReview(periodId);
     if (!loaded.ok) return loaded;
-    const summary = loaded.data;
-    if (summary.period.status === "closed") {
+    const review = loaded.data;
+    if (review.status === "closed") {
       return {
         ok: false as const,
         status: 409 as const,
@@ -548,35 +641,84 @@ export class BillingCapability implements BillingCapabilityContract {
         message: "Billing period is already closed.",
       };
     }
-    const confirmed =
-      !!input && typeof input === "object" && !Array.isArray(input)
-        ? (input as Record<string, unknown>).confirmed === true
-        : false;
-    if (summary.unresolved.length > 0 && !confirmed) {
+
+    if (review.fractionalTotals.length > 0) {
+      return fractionalTotals(review);
+    }
+
+    const confirmation = body.data.confirmation;
+    if (!confirmation) {
       return {
         ok: false as const,
-        status: 409 as const,
-        code: "billing_unresolved_tenants",
-        message: `Period has ${summary.unresolved.length} unresolved tenant(s). Confirm explicitly to close anyway.`,
-        unresolved: summary.unresolved,
+        status: 428 as const,
+        code: "billing_close_confirmation_required",
+        message: `Review the totals for ${review.name}, tick each acknowledgement and type the period's name to close it.`,
+        review,
       };
     }
-    const { row, error } = await this.repo.closeBillingPeriod(periodId, confirmed);
+    if (confirmation.digest !== review.digest) {
+      return totalsChanged(review);
+    }
+    const missing = missingAcknowledgements(review, confirmation.acknowledged);
+    if (missing.length > 0) {
+      return {
+        ok: false as const,
+        status: 428 as const,
+        code: "billing_close_acknowledgement_missing",
+        message: "Tick every acknowledgement to close the period.",
+        field: "confirmation",
+        review,
+      };
+    }
+    if (!typedNameMatches(confirmation.typed, review.name)) {
+      return {
+        ok: false as const,
+        status: 428 as const,
+        code: "billing_close_name_mismatch",
+        message: `Type the period's name, ${review.name}, to close it.`,
+        field: "confirmation",
+        review,
+      };
+    }
+
+    const { row, error } = await this.repo.closeBillingPeriod(periodId, {
+      digest: confirmation.digest,
+      acknowledged: confirmation.acknowledged,
+    });
     if (error || !row) {
-      if (error?.code === "23514") {
+      // The tokens are fn_close_billing_period's (migration 20261118130000).
+      const token = error?.message.split(":", 1)[0];
+      if (token === "billing_close_totals_changed") {
+        const current = await this.loadCloseReview(periodId);
+        return totalsChanged(current.ok ? current.data : undefined);
+      }
+      if (token === "billing_close_fractional_total") {
+        const current = await this.loadCloseReview(periodId);
+        return fractionalTotals(current.ok ? current.data : undefined);
+      }
+      if (token === "billing_close_acknowledgement_missing") {
         return {
           ok: false as const,
-          status: 409 as const,
-          code: "billing_unresolved_tenants",
-          message: "Period completeness changed while closing. Refresh the summary and confirm again.",
+          status: 428 as const,
+          code: "billing_close_acknowledgement_missing",
+          message: "Tick every acknowledgement to close the period.",
+          field: "confirmation",
         };
       }
-      if (error?.code === "P0002") {
+      if (token === "billing_period_closed") {
         return {
           ok: false as const,
           status: 409 as const,
           code: "billing_period_closed",
-          message: "Billing period is already closed or no longer exists.",
+          message: "Billing period is already closed.",
+        };
+      }
+      if (token === "billing_period_not_found" || error?.code === "P0002") {
+        return {
+          ok: false as const,
+          status: 404 as const,
+          code: "billing_period_not_found",
+          message: "Billing period not found.",
         };
       }
       if (error && (error.code === "42501" || error.message.includes("row-level security"))) {
@@ -594,7 +736,12 @@ export class BillingCapability implements BillingCapabilityContract {
         message: `Could not close billing period: ${error?.message ?? "unknown error"}.`,
       };
     }
-    return { ok: true as const, data: { period: row, unresolved: summary.unresolved } };
+    const unresolved: UnresolvedTenant[] = review.unbilled.map((t) => ({
+      tenantId: t.tenantId,
+      tenantName: t.tenantName,
+      reason: "No bill generated for this tenant in this period.",
+    }));
+    return { ok: true as const, data: { period: row, unresolved } };
   }
 
   private async runGeneration(input: unknown, mode: "write" | "preview") {

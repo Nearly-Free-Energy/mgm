@@ -522,7 +522,9 @@ describe("the GUI surface guard", () => {
     }
   };
 
-  it("runs every check over a registered contribution (the billing fixture)", () => {
+  it("runs every check over a registered contribution (the billing fixture)", async () => {
+    // The real schema modules, so check 2 can compare the close action's input with the schema its route parses.
+    const facts = repoFacts(await loadSchemaModules());
     const registry = new SurfaceRegistry({ plugins: MGM_BUNDLED_PLUGINS });
     // One view declares a secret-looking key, so the view checks are shown to run.
     const views = BILLING_SURFACE.views?.map((v) => (v === periods ? { ...v, declares: { ...v.declares, keys: [...v.declares.keys, "apiKey"] } } : v));
@@ -530,12 +532,13 @@ describe("the GUI surface guard", () => {
     const snapshot = registry.snapshot();
     // Check 2 compares by identity, so the registry must keep each action's schema object.
     expect(snapshot.actions.get(createPeriod.id)?.def.input).toBe(createPeriod.input);
-    // Today's routes read their bodies by hand, so each action fails check 2 alone.
+    // The create-period and generate-bills routes still read their bodies by
+    // hand, so each of those actions fails check 2 alone. The close route
+    // parses ClosePeriodBody, which the fixture's close action uses, so it passes.
     const unparsed = "does not parse its body with parseJsonBody(request, <schema>)";
     expect(surfaceProblems(snapshot, facts)).toEqual([
       `billing.create-period (POST /api/billing-periods): ${unparsed}`,
       `billing.generate-bills (POST /api/billing/generate): ${unparsed}`,
-      `billing.close-period (POST /api/billing-periods/[periodId]/close): ${unparsed}`,
       'billing.periods: declares "apiKey", which looks like a secret; rename it or exempt it with a reason',
     ]);
   });

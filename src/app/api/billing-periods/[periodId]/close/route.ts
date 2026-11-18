@@ -4,6 +4,8 @@ import {
   composeBilling,
   type BillingResult,
 } from "@/lib/billing/compose";
+import { ClosePeriodBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -12,16 +14,21 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 }
 
 /**
- * POST /api/billing-periods/[periodId]/close — operator Close Period action
- * (issue #5).
+ * POST /api/billing-periods/[periodId]/close — close a billing period against
+ * the totals the person reviewed (#201; first added for issue #5).
  *
- * Closing is an explicit operator gesture, never automatic. The response
- * carries the unresolved-tenant summary: when tenants have no bill in
- * the period, the first call returns 409 `billing_unresolved_tenants`
- * and the operator must confirm explicitly (`{ confirmed: true }`) to close
- * anyway. Corrections after closure stay controlled and audited: usage edits
- * reject closed periods (`period_closed`) while regeneration is preserved
- * with `period_was_closed` audit history.
+ * The body is ClosePeriodBody (src/lib/billing/schemas.ts):
+ *   - no `confirmation`: 428 `billing_close_confirmation_required`, with the
+ *     `review` to confirm (totals, warnings, acknowledgements, the name to
+ *     type, the digest). Nothing is written.
+ *   - a `confirmation` whose digest is not the current totals' digest:
+ *     409 `billing_period_totals_changed`, with the current `review`.
+ *   - an acknowledgement missing or the wrong name typed: 428, with the
+ *     `review`.
+ * fn_close_billing_period checks the digest and acknowledgements again in the
+ * same transaction as the status change. Corrections after closure stay
+ * controlled and audited: usage edits reject closed periods (`period_closed`)
+ * while regeneration is preserved with `period_was_closed` audit history.
  */
 export async function POST(
   request: NextRequest,
@@ -29,13 +36,8 @@ export async function POST(
 ): Promise<NextResponse> {
   const { periodId } = await params;
 
-  let body: unknown = {};
-  try {
-    const text = await request.text();
-    body = text ? (JSON.parse(text) as unknown) : {};
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, ClosePeriodBody);
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
   const { data: period } = await supabase
@@ -68,7 +70,7 @@ export async function POST(
   if (!composed.ok) return mapError(composed);
 
   try {
-    const result = await composed.data.billing.closePeriod(periodId, body);
+    const result = await composed.data.billing.closePeriod(periodId, parsed.data);
     if (!result.ok) return mapError(result);
     return NextResponse.json(
       { period: result.data.period, unresolved: result.data.unresolved },

@@ -1747,6 +1747,10 @@ export type Database = {
         Returns: number
       }
       fn_auth_sign_in_target: { Args: { _email: string }; Returns: string }
+      fn_billing_period_close_review: {
+        Args: { _period_id: string }
+        Returns: Json
+      }
       fn_change_user_role: {
         Args: {
           p_role: Database["public"]["Enums"]["user_role"]
@@ -1757,7 +1761,7 @@ export type Database = {
         Returns: undefined
       }
       fn_close_billing_period: {
-        Args: { _confirmed?: boolean; _period_id: string }
+        Args: { _acknowledged: string[]; _digest: string; _period_id: string }
         Returns: {
           closed_at: string | null
           created_at: string
