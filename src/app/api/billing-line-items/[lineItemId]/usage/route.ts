@@ -77,6 +77,12 @@ export async function PATCH(
     );
   }
 
+  // The body is checked before the session, as it was before it parsed
+  // with a schema: a malformed body answers 400 whoever sends it.
+  const body = await parseJsonBody(request, LineItemUsageBody);
+  if (!body.ok) return body.response;
+  const parsed = body.data;
+
   const supabase = await createClient();
 
   // Explicit auth gate (BC1 AC6) — anonymous calls return 401 instead of
@@ -90,10 +96,6 @@ export async function PATCH(
       { status: 401 }
     );
   }
-
-  const body = await parseJsonBody(request, LineItemUsageBody);
-  if (!body.ok) return body.response;
-  const parsed = body.data;
 
   // 1. Resolve line item → period → microgrid.
   const { data: scopedRaw, error: scopeErr } = await supabase

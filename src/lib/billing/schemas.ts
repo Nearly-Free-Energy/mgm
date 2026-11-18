@@ -7,13 +7,13 @@
  * A change to a schema's JSON Schema is a new input version: bump its
  * constant (schemas.test.ts pins each version's shape).
  *
- * Client-safe: besides zod it imports site-savings.ts, which imports only
- * types, and day-key.ts, which imports nothing; if either gains a runtime
- * import, revisit. Its import from payments/state.ts is type-only.
- * types, day-key.ts, which imports nothing, and invoices/config-schema.ts,
- * which imports only zod and, in a browser, turns on zod's jitless mode for
- * every schema (its header says why); if any of them gains a runtime import,
- * revisit.
+ * Client-safe: besides zod, its runtime imports are day-key.ts, which
+ * imports nothing; site-savings.ts, whose runtime imports reach only
+ * metering/site-operations.ts and the timezone helpers (day-key.ts,
+ * wall-clock.ts); and invoices/config-schema.ts, which imports only zod and,
+ * in a browser, turns on zod's jitless mode for every schema (its header
+ * says why). Its import from payments/state.ts is type-only. If any of these
+ * gains a server-only or side-effecting runtime import, revisit.
  */
 import { z } from "zod";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
@@ -658,7 +658,7 @@ export const V1ManualReadingBody = z
 /**
  * POST /api/v1/billing/generate. manualReadings omitted or empty bills every
  * tenant from the metering source; each reading overrides one tenant. null is
- * not "omitted" and is refused. The dashboard's GenerationBody is a separate
+ * not "omitted" and is refused. The dashboard's GenerateBillsBody is a separate
  * contract with other messages and fields (tenantIds and the rest are dropped
  * here); do not merge the two.
  */

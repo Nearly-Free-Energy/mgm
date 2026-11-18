@@ -145,6 +145,10 @@ vi.mock("@/lib/billing/generate", async () => {
   };
 });
 
+const session = vi.hoisted(() => ({
+  user: { id: "11111111-1111-4111-8111-111111111111" } as { id: string } | null,
+}));
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: mockFrom,
@@ -152,10 +156,7 @@ vi.mock("@/lib/supabase/server", () => ({
     // mock the session as a stable test user — RLS isn't exercised by the
     // unit suite (covered by RLS tests against live Supabase).
     auth: {
-      getUser: async () => ({
-        data: { user: { id: "11111111-1111-4111-8111-111111111111" } },
-        error: null,
-      }),
+      getUser: async () => ({ data: { user: session.user }, error: null }),
     },
     rpc: vi.fn(),
   }),
@@ -234,6 +235,24 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
       data: FIXTURE_RATE_SCHEDULE,
       error: null,
     });
+  });
+
+  it("checks the body before the session: a malformed body is 400 even signed out", async () => {
+    session.user = null;
+    try {
+      const { PATCH } = await import("../route");
+      const bad = await PATCH(makePatchRequest(LI_UUID, { usage_kwh: "a" as unknown as number }), {
+        params: Promise.resolve({ lineItemId: LI_UUID }),
+      });
+      expect(bad.status).toBe(400);
+      expect(((await bad.json()) as { code: string }).code).toBe("invalid_body");
+      const good = await PATCH(makePatchRequest(LI_UUID, { usage_kwh: 10 }), {
+        params: Promise.resolve({ lineItemId: LI_UUID }),
+      });
+      expect(good.status).toBe(401);
+    } finally {
+      session.user = { id: "11111111-1111-4111-8111-111111111111" };
+    }
   });
 
   it("400: invalid UUID", async () => {

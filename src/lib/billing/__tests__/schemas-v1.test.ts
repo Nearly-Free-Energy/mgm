@@ -57,8 +57,10 @@ describe("V1CreateBillingPeriodBody", () => {
     }
   );
 
+  // The years 0000 to 0099 are refused too, as the in-app route refuses them
+  // (calendarDay); before it parsed with a schema, v1 inserted 0050-03-01.
   it.each(["start_date", "end_date"])("refuses a bad or impossible %s with its message", (field) => {
-    for (const value of [undefined, null, 20260101, "not-a-date", "20260101", "2026-1-01", "2026-13-99", "2026-02-30", "2025-02-29", "0000-01-01", "2026-01-01T00:00:00Z"]) {
+    for (const value of [undefined, null, 20260101, "not-a-date", "20260101", "2026-1-01", "2026-13-99", "2026-02-30", "2025-02-29", "0000-01-01", "0050-03-01", "2026-01-01T00:00:00Z"]) {
       const body: Record<string, unknown> = { ...PERIOD, [field]: value };
       if (value === undefined) delete body[field];
       expect(firstIssue(V1CreateBillingPeriodBody, body), String(value)).toEqual({

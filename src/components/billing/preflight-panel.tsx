@@ -412,8 +412,9 @@ export function PreflightPanel(props: PreflightPanelProps) {
           billingPeriodId,
           ...(retryTenantIds ? { tenantIds: retryTenantIds } : {}),
           manualReadings,
-          // #339. Inputs travel with the derived value: the route recomputes
-          // and rejects a mismatch, and a wrong seed stays diagnosable.
+          // #339. Inputs travel with the derived value so a wrong seed stays
+          // diagnosable. The route checks startKwh <= dialReadingKwh
+          // (GenerateBillsBody) but does not recompute startKwh from them.
           ...(needsSeed.length > 0
             ? {
                 seedReadings: needsSeed.map((h) => {
