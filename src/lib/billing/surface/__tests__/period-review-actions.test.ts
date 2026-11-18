@@ -388,13 +388,16 @@ describe("preparing the period review's actions", () => {
     expect(LineItemUsageBody.parse(await sent(out.value, { usage_kwh: 12 }, "none"))).toEqual({ usage_kwh: 12 });
   });
 
+  // The step never names the new status: the form can change it after prepare.
+  const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen in the form.";
+
   it.each([
-    ["billing.mark-paid", "unpaid", "paid", "Mark this bill as paid", []],
-    ["billing.mark-paid", "failed", "paid", "Mark this bill as paid", []],
-    ["billing.mark-unpaid", "paid", "unpaid", "Mark this bill as unpaid", []],
-    ["billing.mark-refunded", "paid", "refunded", "Mark this bill as refunded", []],
-    ["billing.mark-failed", "link_generated", "failed", "Mark this bill as failed", []],
-    ["billing.cancel-payment-link", "link_generated", "unpaid", "Cancel pending payment link?", ["They'll need a new link to pay."]],
+    ["billing.mark-paid", "unpaid", "paid", PAYMENT_STATEMENT, []],
+    ["billing.mark-paid", "failed", "paid", PAYMENT_STATEMENT, []],
+    ["billing.mark-unpaid", "paid", "unpaid", PAYMENT_STATEMENT, []],
+    ["billing.mark-refunded", "paid", "refunded", PAYMENT_STATEMENT, []],
+    ["billing.mark-failed", "link_generated", "failed", PAYMENT_STATEMENT, []],
+    ["billing.cancel-payment-link", "link_generated", "unpaid", PAYMENT_STATEMENT, ["The pending payment link stops working; they'll need a new link to pay."]],
   ])("prepares %s on a %s bill for a super admin, and sends status %s", async (action, current, to, statement, warnings) => {
     const client = tables({ bill: [billRow({ payment_status: current })] }).client;
     const out = await prepare(onBill(action, { body: { status: to } }), client, [superAdmin()]);
@@ -402,7 +405,7 @@ describe("preparing the period review's actions", () => {
     expect(out.value).toMatchObject({ confirm: "confirm", method: "PATCH", path: `/api/billing-line-items/${BILL}/payment-status`, prefill: { status: to } });
     expect(out.value.ceremony).toMatchObject({
       statement,
-      facts: [{ label: "Tenant" }, { label: "Period" }, { label: "Total", value: { t: "money", v: 5000 } }],
+      facts: [{ label: "Tenant" }, { label: "Period" }, { label: "Total", value: { t: "money", v: 5000 } }, { label: "Status now" }],
       warnings,
       acknowledgements: [],
     });
@@ -415,8 +418,8 @@ describe("preparing the period review's actions", () => {
     if (!out.ok) throw new Error(out.message);
     expect(out.value.confirm).toBe("confirm");
     expect(out.value.ceremony).toMatchObject({
-      statement: "Mark this bill as unpaid",
-      facts: [{ label: "Tenant" }, { label: "Period" }, { label: "Total", value: { t: "money", v: 5000 } }],
+      statement: PAYMENT_STATEMENT,
+      facts: [{ label: "Tenant" }, { label: "Period" }, { label: "Total", value: { t: "money", v: 5000 } }, { label: "Status now" }],
       warnings: [],
     });
   });

@@ -380,13 +380,17 @@ export async function prepareRegenerateBill(
   };
 }
 
-/** What each payment-status action's confirmation says. */
-const PAYMENT_CEREMONY: Partial<Record<PaymentStatus, string>> = {
-  paid: "Mark this bill as paid",
-  unpaid: "Mark this bill as unpaid",
-  refunded: "Mark this bill as refunded",
-  failed: "Mark this bill as failed",
-};
+/**
+ * What a payment-status action's confirmation says. It does not name the new
+ * status: the five actions share LineItemPaymentStatusBody, whose status the
+ * form lets a person change after the host has prepared the action (prepare
+ * runs once, with the loader's prefill), so a step that named the prefilled
+ * status could confirm a different one. It shows the current status instead,
+ * next to the form where the new one is chosen; the route enforces which
+ * changes are allowed and who may make them. If the host comes to lock a
+ * prefilled field, or each status gets its own route, name it here.
+ */
+const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen in the form.";
 
 /**
  * The prepare of a payment-status action that sets `to` on a bill in one of
@@ -410,10 +414,15 @@ export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentSt
       ok: true,
       model: {
         type: "ceremony",
-        statement: o.cancel ? "Cancel pending payment link?" : (PAYMENT_CEREMONY[to] ?? "Change this bill's payment status"),
-        facts: [...facts, { label: "Total", value: req.fmt.money(Number(bill.total_amount), currency) }],
-        // The legacy dialog's copy (src/components/billing/row-actions-menu.tsx).
-        warnings: o.cancel ? ["They'll need a new link to pay."] : [],
+        statement: PAYMENT_STATEMENT,
+        facts: [
+          ...facts,
+          { label: "Total", value: req.fmt.money(Number(bill.total_amount), currency) },
+          { label: "Status now", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
+        ],
+        // The legacy dialog's copy (src/components/billing/row-actions-menu.tsx):
+        // any change away from a pending link stops that link working.
+        warnings: o.cancel ? ["The pending payment link stops working; they'll need a new link to pay."] : [],
         acknowledgements: [],
       },
     };
