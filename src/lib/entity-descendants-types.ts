@@ -22,7 +22,11 @@ export type DescendantCounts =
       devices: number;
       tenants: number;
       tenant_devices: number;
-      tenant_users: number;
+      /**
+       * Tenant app access rows (RFC mgm#197) of the tenants under the
+       * entity, which cascade with their tenant.
+       */
+      tenant_access: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       /**
@@ -49,7 +53,7 @@ export type DescendantCounts =
       devices: number;
       tenants: number;
       tenant_devices: number;
-      tenant_users: number;
+      tenant_access: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       billing_periods_with_payments: number;
@@ -64,7 +68,7 @@ export type DescendantCounts =
       devices: number;
       tenants: number;
       tenant_devices: number;
-      tenant_users: number;
+      tenant_access: number;
       billing_periods_draft: number;
       billing_periods_closed: number;
       billing_periods_with_payments: number;
@@ -108,7 +112,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.devices === 0 &&
         counts.tenants === 0 &&
         counts.tenant_devices === 0 &&
-        counts.tenant_users === 0 &&
+        counts.tenant_access === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
@@ -125,7 +129,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.devices === 0 &&
         counts.tenants === 0 &&
         counts.tenant_devices === 0 &&
-        counts.tenant_users === 0 &&
+        counts.tenant_access === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&
@@ -140,7 +144,7 @@ export function descendantCountsAreEmpty(counts: DescendantCounts): boolean {
         counts.devices === 0 &&
         counts.tenants === 0 &&
         counts.tenant_devices === 0 &&
-        counts.tenant_users === 0 &&
+        counts.tenant_access === 0 &&
         counts.billing_periods_draft === 0 &&
         counts.billing_periods_closed === 0 &&
         counts.billing_periods_with_payments === 0 &&

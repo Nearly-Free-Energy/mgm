@@ -165,17 +165,15 @@ is logged at server start (`docs/setup.md`, "Runtime configuration").
 
 Usually the running release keeps working on the migrated database until the
 new one is promoted. A release whose notes say it **needs a cutover** ships a
-migration the running release cannot use. The first is the release with
-migration `20261116230000` (the tenant rename): from the moment it is applied
-until the new release is promoted, the running release's tenant pages,
-billing, payment links and checkout fail. Keep that gap short:
+migration the running release cannot use. The first was v0.0.7, with
+migration `20261116230000` (the tenant rename): from the moment it was applied
+until the new release was promoted, the running release's tenant pages,
+billing, payment links and checkout failed. Keep that gap short:
 
 1. **Beforehand**, deploy the release without promoting it (staged, with no
    production domain), and run the migration's read-only preflight against
-   production. For `20261116230000` that is
-   `supabase/scripts/preflight-tenant-rename.sql`; it must print
-   `preflight passed`. Have the reverse script and the previous deployment's
-   URL ready.
+   production, if its notes name one; it must pass. Have the reverse script
+   and the previous deployment's URL ready.
 2. **At a quiet hour**, pause the payment worker, so it does not ask the old
    release to reconcile in the gap:
 
@@ -203,10 +201,15 @@ though it first waits for queries already running on those tables. A browser
 tab opened before the cutover calls the old API paths and gets "not
 available" until it is reloaded.
 
-To roll back after step 4, run the reverse script (for `20261116230000`,
-`supabase/scripts/reverse-tenant-rename.sql`) and promote the previous
+To roll back after step 4, run the reverse script and promote the previous
 deployment, with the worker paused as in step 2, then record the migration as
-reverted (`supabase migration repair --status reverted 20261116230000`).
+reverted (`supabase migration repair --status reverted <version>`).
+
+A reverse script holds only until a later migration changes an object it
+touches; by then a later release is the rollback target, and the script, its
+preflight and their CI rehearsal are deleted. The tenant rename's went with
+migration `20261118100100`, which drops `tenant_users`; git history keeps
+them as worked examples.
 
 ## Build an asset locally
 

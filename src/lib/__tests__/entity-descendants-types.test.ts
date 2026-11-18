@@ -16,7 +16,7 @@ const EMPTY_MICROGRID: Extract<DescendantCounts, { kind: "microgrid" }> = {
   devices: 0,
   tenants: 0,
   tenant_devices: 0,
-  tenant_users: 0,
+  tenant_access: 0,
   billing_periods_draft: 0,
   billing_periods_closed: 0,
   billing_periods_with_payments: 0,
@@ -47,7 +47,7 @@ describe("descendantCountsAreEmpty", () => {
     },
   );
 
-  it.each(["grid_tariffs", "microgrid_savings_settings", "rate_schedules"] as const)(
+  it.each(["grid_tariffs", "microgrid_savings_settings", "rate_schedules", "tenant_access"] as const)(
     "is false when only %s is non-zero",
     (field) => {
       for (const counts of [EMPTY_MICROGRID, EMPTY_COMMUNITY, EMPTY_ORGANIZATION]) {

@@ -10,7 +10,7 @@ import { TenantBillingTable, type BillingLineItemRow } from "./tenant-billing-ta
 
 // Setup > Tenants > [tenantId] — Tenant detail page (D3 / #54).
 //
-// Renders: tenant basics, portal users count, linked devices table,
+// Renders: tenant basics, portal users count (tenant role rows), linked devices table,
 // billing history (last 3 closed periods).
 //
 // Single stacked layout — no sub-tabs (confirmed design decision).
@@ -92,11 +92,14 @@ export default async function TenantDetailPage({
     notFound();
   }
 
-  // Query 2 — portal users count.
-  const { count: portalUserCount } = await supabase
-    .from("tenant_users")
-    .select("*", { count: "exact", head: true })
-    .eq("tenant_id", tenantId);
+  // Query 2 — portal users count: the people who can sign in to this
+  // tenant's data, one tenant role row each (RFC mgm#197). Read through
+  // fn_tenant_access_list because user_roles RLS shows a manager only their
+  // own rows; a caller the function refuses sees 0.
+  const { data: portalUsers } = await supabase.rpc("fn_tenant_access_list", {
+    _tenant_id: tenantId,
+  });
+  const portalUserCount = portalUsers?.length ?? 0;
 
   // Query 3 — last 3 closed billing periods' line items for this tenant.
   const { data: lineItems } = await supabase
@@ -246,7 +249,7 @@ export default async function TenantDetailPage({
           Portal users
         </h4>
         <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground">
-          {portalUserCount ?? 0} portal user{(portalUserCount ?? 0) === 1 ? "" : "s"} linked
+          {portalUserCount} portal user{portalUserCount === 1 ? "" : "s"} linked
         </div>
       </section>
 

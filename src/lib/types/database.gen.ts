@@ -1429,6 +1429,21 @@ export type Database = {
           },
         ]
       }
+      tenant_access_accounts: {
+        Row: {
+          first_granted_at: string
+          user_id: string
+        }
+        Insert: {
+          first_granted_at?: string
+          user_id: string
+        }
+        Update: {
+          first_granted_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       tenant_devices: {
         Row: {
           created_at: string
@@ -1474,35 +1489,6 @@ export type Database = {
           },
           {
             foreignKeyName: "tenant_devices_tenant_id_fkey"
-            columns: ["tenant_id"]
-            isOneToOne: false
-            referencedRelation: "tenants"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      tenant_users: {
-        Row: {
-          created_at: string
-          relationship: string | null
-          tenant_id: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          relationship?: string | null
-          tenant_id: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          relationship?: string | null
-          tenant_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "tenant_users_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -1616,6 +1602,7 @@ export type Database = {
           scope_id: string | null
           scope_microgrid_id: string | null
           scope_org_id: string | null
+          scope_tenant_id: string | null
           scope_type: Database["public"]["Enums"]["role_scope_type"]
           user_id: string
         }
@@ -1626,6 +1613,7 @@ export type Database = {
           scope_id?: string | null
           scope_microgrid_id?: string | null
           scope_org_id?: string | null
+          scope_tenant_id?: string | null
           scope_type: Database["public"]["Enums"]["role_scope_type"]
           user_id: string
         }
@@ -1636,6 +1624,7 @@ export type Database = {
           scope_id?: string | null
           scope_microgrid_id?: string | null
           scope_org_id?: string | null
+          scope_tenant_id?: string | null
           scope_type?: Database["public"]["Enums"]["role_scope_type"]
           user_id?: string
         }
@@ -1652,6 +1641,13 @@ export type Database = {
             columns: ["scope_org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_roles_scope_tenant_fkey"
+            columns: ["scope_tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -2145,6 +2141,39 @@ export type Database = {
         }
         Returns: string
       }
+      fn_tenant_access_count: {
+        Args: { _tenant_ids: string[] }
+        Returns: number
+      }
+      fn_tenant_access_grant: {
+        Args: { _actor: string; _tenant_id: string; _user_id: string }
+        Returns: string
+      }
+      fn_tenant_access_list: {
+        Args: { _tenant_id: string }
+        Returns: {
+          access_id: string
+          created_at: string
+          email: string
+        }[]
+      }
+      fn_tenant_access_revoke: {
+        Args: { _access_id: string; _tenant_id: string }
+        Returns: boolean
+      }
+      fn_tenant_home: {
+        Args: { _tenant_id: string }
+        Returns: {
+          currency: string
+          display_name: string
+          microgrid_id: string
+          microgrid_name: string
+          organization_id: string
+          tenant_id: string
+          timezone: string
+          unit_label: string
+        }[]
+      }
       is_super_admin: { Args: never; Returns: boolean }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }
@@ -2159,8 +2188,13 @@ export type Database = {
         Returns: boolean
       }
       user_can_access_org: { Args: { _org_id: string }; Returns: boolean }
+      user_can_access_tenant: { Args: { _tenant_id: string }; Returns: boolean }
       user_can_see_user_profile: {
         Args: { _target_user_id: string }
+        Returns: boolean
+      }
+      user_is_tenant_of_device: {
+        Args: { _device_id: string }
         Returns: boolean
       }
     }
@@ -2193,7 +2227,7 @@ export type Database = {
         | "other"
       microgrid_ems_type: "cloud_aws" | "direct_url"
       payment_provider_type: "pesapal"
-      role_scope_type: "org" | "microgrid"
+      role_scope_type: "org" | "microgrid" | "tenant"
       tenant_device_role:
         | "primary_consumption_meter"
         | "secondary_meter"
@@ -2201,7 +2235,7 @@ export type Database = {
         | "solar"
         | "ev_charger"
         | "other"
-      user_role: "super_admin" | "org_manager" | "ems_operator"
+      user_role: "super_admin" | "org_manager" | "ems_operator" | "tenant"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2363,7 +2397,7 @@ export const Constants = {
       ],
       microgrid_ems_type: ["cloud_aws", "direct_url"],
       payment_provider_type: ["pesapal"],
-      role_scope_type: ["org", "microgrid"],
+      role_scope_type: ["org", "microgrid", "tenant"],
       tenant_device_role: [
         "primary_consumption_meter",
         "secondary_meter",
@@ -2372,7 +2406,7 @@ export const Constants = {
         "ev_charger",
         "other",
       ],
-      user_role: ["super_admin", "org_manager", "ems_operator"],
+      user_role: ["super_admin", "org_manager", "ems_operator", "tenant"],
     },
   },
 } as const

@@ -18,6 +18,7 @@ function role(r: "super_admin" | "org_manager", scopeId: string | null): UserRol
     scope_id: scopeId,
     scope_org_id: scopeId,
     scope_microgrid_id: null,
+    scope_tenant_id: null,
     created_at: "2026-01-01T00:00:00Z",
   };
 }

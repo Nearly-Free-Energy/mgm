@@ -1,6 +1,6 @@
 # Tenant API — contract sketch
 
-**Status:** Pending — implementation deferred (Ticket C #51 sketches the contract only). No endpoints exist yet. See `docs/entity-model.md` § "Open decision: tenant access" for the A/B decision that must be resolved before implementation begins.
+**Status:** Superseded. Tenant access was decided by RFC mgm#197 (`docs/entity-model.md` § "Decision: tenant access"): tenants sign in to MGM itself, with a `user_roles` tenant row per unit, and read their data through the `tenant-app` plugin's pages, not through these endpoints. `tenant_users`, which this sketch relied on, was dropped by migration `20261118100100`. The RFC retires this file with the tenant app's documentation; nothing below is built or planned.
 
 ---
 

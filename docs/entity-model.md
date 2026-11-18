@@ -10,7 +10,7 @@ this page records the reasoning that the schema cannot.
 Organization ─▶ Community ─▶ Microgrid ─▶ Edge ─▶ Device
                               │
                               └▶ Tenant ─▶ tenant_devices (M:N to Device, effective-dated)
-                                     └▶ tenant_users (M:N to auth.users)
+                                     └▶ user_roles tenant rows (people who sign in to its data)
 ```
 
 - **Organization** — the operator business (a microgrid entrepreneur or
@@ -46,7 +46,10 @@ Tenants were called households until
 (`households`, `household_devices`, `household_users`), the `household_id`
 columns, and the functions and messages that used the word. Migrations
 applied before that file use the old name, and bills generated before it keep
-`household_name` in their audit details.
+`household_name` in their audit details. `tenant_users` (formerly
+`household_users`) was never written and was dropped by
+`20261118100100_tenant_role_access.sql`; tenant access is a role row (see
+"Roles").
 
 ## Why this shape
 
@@ -67,25 +70,49 @@ applied before that file use the old name, and bills generated before it keep
 
 ## Roles
 
-`user_roles` holds `(user_id, role, scope_type, scope_id)` rows. Two roles
-ship: `super_admin` (all organizations) and `org_manager` (one organization,
-`scope_type = 'org'`). A user may hold several rows. Further roles —
-`microgrid_manager`, `community_admin`, `region_admin`, `tenant` — are future
+`user_roles` holds `(user_id, role, scope_type, scope_id)` rows, and a user
+may hold several. Three roles ship:
+
+- `super_admin` — staff, all organizations (`scope_type = 'org'`,
+  `scope_id` NULL);
+- `org_manager` — staff, one organization (`scope_type = 'org'`);
+- `tenant` — someone who rents a unit, one row per unit
+  (`scope_type = 'tenant'`, `scope_id` = `tenants.id`). It is not staff: a
+  tenant reads their own tenant row, its meter assignments and those meters,
+  and nothing else (`CLAUDE.md` § "RLS helper functions").
+
+`user_roles_role_scope_type_consistent` pins each role to its scope type and
+rejects any role it does not list. A manager who also rents holds a staff row
+and a tenant row, so "has a role row" no longer means "is staff": a staff
+check filters on the staff roles or the org scope. Further roles —
+`microgrid_manager`, `community_admin`, `region_admin` — are future
 extensions by enum addition; before adding one, read `CLAUDE.md` on why a
 scoped configuration role was added and then removed.
 
-## Open decision: tenant access
+## Decision: tenant access
 
-`tenant_users` exists so the people on a tenant's account could sign in and
-see their own bills (`docs/tenant-api.md` sketches the endpoints). The
-original write-up of this decision is no longer available; these are the two
-realistic options, and neither is built:
+Decided 17 November 2026 (RFC mgm#197, decisions 1 and 2). The people on a
+tenant's account are **Supabase Auth users** who sign in by email link at the
+same deployment, as staff do. A signed, single-purpose link without a login
+(the other option considered, as the payment link `/p/<slug>` works) suits a
+receipt, but not a month of daily use someone returns to, and it cannot carry
+bills or payment later.
 
-- **A — the people on a tenant's account are Supabase Auth users**, linked
-  through `tenant_users`, with RLS letting them read their tenant's rows.
-- **B — no tenant login**; tenants reach their bill and payment link
-  through a signed, single-purpose link (as the payment link `/p/<slug>` does
-  today), and only operators have accounts.
+Their access is a `user_roles` row with `role = 'tenant'` and
+`scope_type = 'tenant'`, not a separate join table, so sign-in, the layout and
+the host read one table. `tenant_users`, which had been reserved for this,
+was dropped (`20261118100100_tenant_role_access.sql`).
 
-Choose one before implementing tenant-facing endpoints, and record the
-decision here.
+- Organization managers give and remove access from the tenant record
+  (`fn_tenant_access_grant`, `fn_tenant_access_revoke`,
+  `fn_tenant_access_list`); tenants never register themselves and never appear
+  on the Users page, also after their access ends (`tenant_access_accounts`
+  remembers who has been a tenant). Matching on `tenants.primary_email` would
+  turn a contact field into a credential, so access is always granted
+  explicitly. The grant is made by the access route with the service role, on
+  the manager's behalf, for the account of the address the manager typed; no
+  signed-in caller names an account by id.
+- A tenant role row is removed with its tenant: `user_roles.scope_tenant_id`
+  references `tenants` with `ON DELETE CASCADE`.
+- Tenants read no microgrid, edge, community or organization row. The few
+  microgrid fields their pages need come from `fn_tenant_home`.
