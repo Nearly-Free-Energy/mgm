@@ -19,6 +19,7 @@ const ROW = {
   usageKwh: 1840.5,
   unbilled: [{ tenantId: "t-1", tenantName: "House 1" }],
   unmetered: [],
+  fractionalTotals: [],
   acknowledgements: ["totals_reviewed", "tenants_without_bills"],
   digest: "v1:abc",
 };

@@ -37,8 +37,21 @@
 --                         period (the old _confirmed flag's case).
 --   bills_without_usage   when a bill has no usage recorded (#167).
 --
+-- fractionalTotals lists the bills whose total is not a whole number. A
+-- bill's total is a whole number of the currency's units:
+-- fn_record_line_item_with_audit writes ROUND(_total_amount, 0), and
+-- roundAmount (src/lib/billing/precision.ts) rounds to an integer before
+-- invoicing. A direct insert can still store a fraction, and the close
+-- refuses a period that has one (section 2). If totals ever carry minor
+-- units, this check and those two roundings change together.
+--
 -- SECURITY INVOKER: it reads through the caller's row-level security, so a
 -- person reviews only a period they can read, and returns NULL otherwise.
+-- The digest is only meaningful if the caller sees every bill of the period,
+-- which holds while billing_line_items is readable to exactly those who pass
+-- user_can_access_microgrid, the close's own rule. If a role is ever given
+-- access to some of a period's bills but not all, it must not reach this
+-- function or fn_close_billing_period; revisit both.
 
 CREATE OR REPLACE FUNCTION fn_billing_period_close_review(_period_id UUID)
 RETURNS JSONB
@@ -56,6 +69,7 @@ DECLARE
   v_usage     NUMERIC;
   v_unbilled  JSONB;
   v_unmetered JSONB;
+  v_fractional JSONB;
   v_acks      JSONB;
   v_digest    TEXT;
 BEGIN
@@ -97,6 +111,15 @@ BEGIN
   WHERE li.billing_period_id = _period_id
     AND li.usage_kwh IS NULL;
 
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'tenantId', t.id, 'tenantName', t.display_name
+  ) ORDER BY t.display_name, t.id), '[]'::jsonb)
+  INTO v_fractional
+  FROM billing_line_items li
+  JOIN tenants t ON t.id = li.tenant_id
+  WHERE li.billing_period_id = _period_id
+    AND li.total_amount <> trunc(li.total_amount);
+
   v_acks := '["totals_reviewed"]'::jsonb
     || CASE WHEN jsonb_array_length(v_unbilled) > 0
             THEN '["tenants_without_bills"]'::jsonb ELSE '[]'::jsonb END
@@ -127,6 +150,7 @@ BEGIN
     'usageKwh', v_usage,
     'unbilled', v_unbilled,
     'unmetered', v_unmetered,
+    'fractionalTotals', v_fractional,
     'acknowledgements', v_acks,
     'digest', v_digest
   );
@@ -162,6 +186,16 @@ GRANT EXECUTE ON FUNCTION fn_billing_period_close_review(UUID) TO authenticated,
 --   billing_period_closed                23514  already closed
 --   billing_close_totals_changed         23514  digest differs from the review
 --   billing_close_acknowledgement_missing 23514 a required acknowledgement is absent
+--   billing_close_fractional_total       23514  a bill's total is not a whole number
+--
+-- Who may close is user_can_access_microgrid: a super admin, or an org
+-- manager of the microgrid's organization. That helper's meaning is pinned
+-- (CLAUDE.md, "Do not change what user_can_access_org /
+-- user_can_access_microgrid mean"), and a role that may not close gets its
+-- own helper rather than widening it, so this function does not repeat the
+-- role list. close_billing_period.test.ts checks that a tenant, an
+-- ems_operator and a user with no role are refused; if the helper is ever
+-- widened, those tests fail.
 --
 -- The status is set under a transaction-local setting naming the period,
 -- which is how trg_billing_period_transitions_by_close (section 3) tells
@@ -183,6 +217,7 @@ DECLARE
   v_period  billing_periods%ROWTYPE;
   v_review  JSONB;
   v_missing TEXT[];
+  v_rows    INTEGER;
 BEGIN
   SELECT * INTO v_period
   FROM billing_periods
@@ -208,6 +243,12 @@ BEGIN
 
   v_review := fn_billing_period_close_review(_period_id);
 
+  IF jsonb_array_length(v_review->'fractionalTotals') > 0 THEN
+    RAISE EXCEPTION 'billing_close_fractional_total: % bill(s) have a total that is not a whole number',
+      jsonb_array_length(v_review->'fractionalTotals')
+      USING ERRCODE = '23514', DETAIL = 'fractional_total';
+  END IF;
+
   IF _digest IS NULL OR _digest IS DISTINCT FROM v_review->>'digest' THEN
     RAISE EXCEPTION 'billing_close_totals_changed: the period''s totals changed after they were reviewed'
       USING ERRCODE = '23514', DETAIL = 'totals_changed';
@@ -231,6 +272,14 @@ BEGIN
   SET status = 'closed', closed_at = now()
   WHERE bp.id = _period_id
   RETURNING bp.* INTO v_period;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+
+  -- Cannot happen under the row lock taken above; checked so that no audit
+  -- row is ever written for a close that changed nothing.
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION 'billing_period_not_found: the billing period does not exist or is not yours to close'
+      USING ERRCODE = 'P0002';
+  END IF;
 
   PERFORM set_config('mgm.billing_period_close', '', true);
 

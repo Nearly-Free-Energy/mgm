@@ -27,6 +27,24 @@ import type {
 import { missingAcknowledgements, typedNameMatches, type CloseReview } from "./close";
 import { ClosePeriodBody } from "./schemas";
 
+/**
+ * 409: a bill's total is not a whole number, so the period cannot close until
+ * that bill is regenerated (fn_record_line_item_with_audit rounds it).
+ */
+function fractionalTotals(review: CloseReview | undefined) {
+  const names = review?.fractionalTotals.map((t) => t.tenantName) ?? [];
+  return {
+    ok: false as const,
+    status: 409 as const,
+    code: "billing_close_fractional_totals",
+    message:
+      names.length > 0
+        ? `Regenerate the bills for ${names.join(", ")} before closing: their totals are not whole numbers.`
+        : "Regenerate the bills whose totals are not whole numbers before closing.",
+    ...(review ? { review } : {}),
+  };
+}
+
 /** 409: the totals changed after the person reviewed them. Carries the current review when it could be read. */
 function totalsChanged(review: CloseReview | undefined) {
   return {
@@ -624,6 +642,10 @@ export class BillingCapability implements BillingCapabilityContract {
       };
     }
 
+    if (review.fractionalTotals.length > 0) {
+      return fractionalTotals(review);
+    }
+
     const confirmation = body.data.confirmation;
     if (!confirmation) {
       return {
@@ -669,6 +691,10 @@ export class BillingCapability implements BillingCapabilityContract {
       if (token === "billing_close_totals_changed") {
         const current = await this.loadCloseReview(periodId);
         return totalsChanged(current.ok ? current.data : undefined);
+      }
+      if (token === "billing_close_fractional_total") {
+        const current = await this.loadCloseReview(periodId);
+        return fractionalTotals(current.ok ? current.data : undefined);
       }
       if (token === "billing_close_acknowledgement_missing") {
         return {

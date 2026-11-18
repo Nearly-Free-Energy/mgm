@@ -30,6 +30,7 @@ const REVIEW_ROW = {
   usageKwh: 10,
   unbilled: [] as { tenantId: string; tenantName: string }[],
   unmetered: [] as { tenantId: string; tenantName: string }[],
+  fractionalTotals: [] as { tenantId: string; tenantName: string }[],
   acknowledgements: ["totals_reviewed"],
   digest: "v1:reviewed",
 };
@@ -256,6 +257,22 @@ describe("BillingCapability", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, CONFIRMED])("answers 409 to %j while a bill's total is not a whole number, and writes nothing", async (input) => {
+    const close = vi.fn();
+    const { capability } = setup({
+      getCloseReview: async () => review({ totalAmount: 100.5, fractionalTotals: [{ tenantId: "hh-1", tenantName: "House 1" }] }),
+      closeBillingPeriod: close,
+    });
+    expect(await capability.closePeriod(PERIOD_ID, input)).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "billing_close_fractional_totals",
+      message: "Regenerate the bills for House 1 before closing: their totals are not whole numbers.",
+      review: { fractionalTotals: [{ tenantName: "House 1" }] },
+    });
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("answers 409 with the current review when the confirmed digest is not the current one", async () => {
     const close = vi.fn();
     const { capability } = setup({
@@ -388,6 +405,7 @@ describe("BillingCapability", () => {
   it.each([
     [{ code: "23514", message: "billing_close_totals_changed: the period's totals changed" }, 409, "billing_period_totals_changed"],
     [{ code: "23514", message: "billing_close_acknowledgement_missing: tenants_without_bills" }, 428, "billing_close_acknowledgement_missing"],
+    [{ code: "23514", message: "billing_close_fractional_total: 1 bill(s) have a total that is not a whole number" }, 409, "billing_close_fractional_totals"],
     [{ code: "23514", message: "billing_period_closed: the billing period is already closed" }, 409, "billing_period_closed"],
     [{ code: "P0002", message: "billing_period_not_found: no such period" }, 404, "billing_period_not_found"],
     [{ code: "42501", message: "permission denied" }, 403, "billing_forbidden"],

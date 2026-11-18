@@ -10,8 +10,9 @@
  *     not when a payment is recorded; another organization's manager gets
  *     nothing;
  *   - fn_close_billing_period refuses a stale digest, a missing
- *     acknowledgement, another organization's period and an already-closed
- *     period, leaving the period a draft; with the current digest and every
+ *     acknowledgement, a bill total that is not a whole number, another
+ *     organization's manager, a tenant of the microgrid, an ems_operator
+ *     scoped to it, a user with no role, and an already-closed period, leaving the period a draft; with the current digest and every
  *     acknowledgement it closes the period and records the digest and
  *     acknowledgements in the audit log;
  *   - a close waiting on a bill being inserted, updated or deleted
@@ -94,9 +95,15 @@ const FIXTURE = {
 
 const EMAIL_MANAGER = `cbp-orgmgr-${Date.now()}@test.local`;
 const EMAIL_OTHER = `cbp-other-${Date.now()}@test.local`;
+const EMAIL_TENANT = `cbp-tenant-${Date.now()}@test.local`;
+const EMAIL_EMS = `cbp-ems-${Date.now()}@test.local`;
+const EMAIL_NOROLE = `cbp-norole-${Date.now()}@test.local`;
 
 let manager: TestUser;
 let other: TestUser;
+let tenantUser: TestUser;
+let emsOperator: TestUser;
+let noRole: TestUser;
 
 type Review = {
   periodId: string;
@@ -109,6 +116,7 @@ type Review = {
   usageKwh: number;
   unbilled: { tenantId: string; tenantName: string }[];
   unmetered: { tenantId: string; tenantName: string }[];
+  fractionalTotals: { tenantId: string; tenantName: string }[];
   acknowledgements: string[];
   digest: string;
 };
@@ -159,7 +167,7 @@ function expectRefused(
 async function cleanupFixtures(): Promise<void> {
   await cleanupTestData({
     orgIds: [FIXTURE.org, FIXTURE.orgOther],
-    userEmails: [EMAIL_MANAGER, EMAIL_OTHER],
+    userEmails: [EMAIL_MANAGER, EMAIL_OTHER, EMAIL_TENANT, EMAIL_EMS, EMAIL_NOROLE],
   });
 }
 
@@ -231,6 +239,18 @@ desc("20261118130000_close_billing_period_against_reviewed_totals.sql", () => {
 
     manager = await createTestUser({ email: EMAIL_MANAGER, role: "org_manager", scopeId: FIXTURE.org });
     other = await createTestUser({ email: EMAIL_OTHER, role: "org_manager", scopeId: FIXTURE.orgOther });
+    tenantUser = await createTestUser({ email: EMAIL_TENANT, role: "tenant", scopeId: FIXTURE.tSimple });
+    noRole = await createTestUser({ email: EMAIL_NOROLE, role: null });
+    // ems_operator carries no model and nothing grants it (CLAUDE.md), so
+    // createTestUser does not offer it. The row is written here only to show
+    // that the residue role cannot close a period on the microgrid it names.
+    emsOperator = await createTestUser({ email: EMAIL_EMS, role: null });
+    await insertOrThrow(svc, "user_roles", {
+      user_id: emsOperator.userId,
+      role: "ems_operator",
+      scope_type: "microgrid",
+      scope_id: FIXTURE.mgSimple,
+    });
   }, 60_000);
 
   afterAll(async () => {
@@ -261,7 +281,14 @@ desc("20261118130000_close_billing_period_against_reviewed_totals.sql", () => {
 
   it("requires only totals_reviewed when every tenant has a bill with usage", async () => {
     const r = await review(manager.client, FIXTURE.periodSimple);
-    expect(r).toMatchObject({ billCount: 1, totalAmount: 2000, unbilled: [], unmetered: [], acknowledgements: ["totals_reviewed"] });
+    expect(r).toMatchObject({
+      billCount: 1,
+      totalAmount: 2000,
+      unbilled: [],
+      unmetered: [],
+      fractionalTotals: [],
+      acknowledgements: ["totals_reviewed"],
+    });
   });
 
   it("returns nothing for another organization's period", async () => {
@@ -321,6 +348,37 @@ desc("20261118130000_close_billing_period_against_reviewed_totals.sql", () => {
       expectRefused(error, "23514", "billing_close_acknowledgement_missing");
     }
     expect((await periodRow(FIXTURE.periodMixed)).status).toBe("draft");
+  });
+
+  it("refuses a period whose bill total is not a whole number, and lists the bill in the review", async () => {
+    const svc = await serviceClient();
+    await svc.from("billing_line_items").update({ total_amount: 2000.5 }).eq("id", FIXTURE.billSimple);
+    try {
+      const r = (await review(manager.client, FIXTURE.periodSimple))!;
+      expect(r.fractionalTotals).toEqual([{ tenantId: FIXTURE.tSimple, tenantName: "CB simple" }]);
+      const { error } = await close(manager.client, FIXTURE.periodSimple, r.digest, r.acknowledgements);
+      expectRefused(error, "23514", "billing_close_fractional_total");
+      expect((await periodRow(FIXTURE.periodSimple)).status).toBe("draft");
+    } finally {
+      await svc.from("billing_line_items").update({ total_amount: 2000 }).eq("id", FIXTURE.billSimple);
+    }
+  });
+
+  it("refuses a tenant, an ems_operator and a user with no role, who see no review", async () => {
+    const r = (await review(manager.client, FIXTURE.periodSimple))!;
+    for (const user of [tenantUser, emsOperator, noRole]) {
+      expect(await review(user.client, FIXTURE.periodSimple)).toBeNull();
+      const { error } = await close(user.client, FIXTURE.periodSimple, r.digest, r.acknowledgements);
+      expectRefused(error, "P0002", "billing_period_not_found");
+    }
+    expect((await periodRow(FIXTURE.periodSimple)).status).toBe("draft");
+    const svc = await serviceClient();
+    const { data } = await svc
+      .from("billing_audit_log")
+      .select("id")
+      .eq("billing_period_id", FIXTURE.periodSimple)
+      .eq("event_type", "period_closed");
+    expect(data).toEqual([]);
   });
 
   it("refuses another organization's manager as not found", async () => {

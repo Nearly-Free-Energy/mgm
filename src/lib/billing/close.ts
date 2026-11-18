@@ -48,6 +48,7 @@ const CloseReviewRow = z.object({
   usageKwh: z.number(),
   unbilled: z.array(tenantRef),
   unmetered: z.array(tenantRef),
+  fractionalTotals: z.array(tenantRef),
   acknowledgements: z.array(z.enum(ACKNOWLEDGEMENT_IDS)).min(1),
   digest: z.string().min(1),
 });
@@ -69,6 +70,11 @@ export type CloseReview = {
   unbilled: TenantRef[];
   /** Tenants whose bill has no usage recorded. */
   unmetered: TenantRef[];
+  /**
+   * Tenants whose bill total is not a whole number. A period with any cannot
+   * close: totals are whole units of the currency (fn_billing_period_close_review).
+   */
+  fractionalTotals: TenantRef[];
   /** The period's name, which the person types to confirm. */
   name: string;
   acknowledgements: { id: CloseAcknowledgementId; label: string }[];
