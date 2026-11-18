@@ -7,7 +7,9 @@
  *     that the 2026-04 PM Evolution Log already called out for the web UI.
  *   - start_date > end_date: rejected with 400.
  *   - start_date < end_date (normal multi-day): accepted (201).
- *   - Malformed dates (`"not-a-date"`, `"2026-13-99"`): rejected with 400.
+ *   - Malformed or impossible dates (`"not-a-date"`, `"2026-13-99"`): rejected
+ *     with 400 before the insert.
+ *   - 400s carry `code: "invalid_body"` and the field; messages are unchanged.
  *   - Missing required fields: rejected with 400.
  *   - Duplicate (microgrid_id, start_date, end_date): accepted (per Alejandro
  *     2026-05-26 — no 409-on-duplicate; matches UI behavior).
@@ -164,8 +166,11 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
       })
     );
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/end_date/);
+    expect(await res.json()).toEqual({
+      error: "end_date must be on or after start_date",
+      field: "end_date",
+      code: "invalid_body",
+    });
     expect(insertsByTable["billing_periods"]).toBeUndefined();
     expect(insertsByTable["billing_audit_log"]).toBeUndefined();
   });
@@ -211,12 +216,7 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
     expect(json.error).toMatch(/start_date/);
   });
 
-  it("rejects with 400 for syntactically-malformed date (2026-13-99)", async () => {
-    // The route validates by regex shape (YYYY-MM-DD); "2026-13-99" matches the
-    // shape but is semantically invalid. Postgres would reject this at insert
-    // time, so the route's contract here is to forward and let the DB error
-    // surface as 500 — OR for strings that don't match the shape at all, 400.
-    // This test pins the shape-mismatch case: a date string missing dashes.
+  it("rejects with 400 for a date with the wrong shape", async () => {
     const { POST } = await import("../route");
     const res = await POST(
       makePostRequest({
@@ -226,9 +226,65 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
       })
     );
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/start_date must be YYYY-MM-DD/);
+    expect(await res.json()).toEqual({
+      error: "start_date must be YYYY-MM-DD",
+      field: "start_date",
+      code: "invalid_body",
+    });
   });
+
+  it.each([
+    ["start_date", "2026-13-99"],
+    ["start_date", "2026-02-30"],
+    ["end_date", "2026-02-29"],
+    ["end_date", "0000-01-01"],
+  ])("rejects the impossible %s %s with 400 before the insert", async (field, value) => {
+    // Shape-valid but not a calendar day. Before V1CreateBillingPeriodBody
+    // these reached the insert and Postgres' error surfaced as a 500.
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        microgrid_id: MICROGRID_ID,
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        [field]: value,
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `${field} must be YYYY-MM-DD`,
+      field,
+      code: "invalid_body",
+    });
+    expect(insertsByTable["billing_periods"]).toBeUndefined();
+  });
+
+  it("drops unknown keys rather than refusing them, and still stores a draft", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        microgrid_id: MICROGRID_ID,
+        start_date: "2026-01-01",
+        end_date: "2026-01-31",
+        timezone: "Africa/Kampala",
+        status: "closed",
+      })
+    );
+    expect(res.status).toBe(201);
+    expect(insertsByTable["billing_periods"]).toEqual([
+      { microgrid_id: MICROGRID_ID, start_date: "2026-01-01", end_date: "2026-01-31", status: "draft" },
+    ]);
+  });
+
+  it.each([null, [], "text", 7])(
+    "answers a body that is not an object (%j) with 400 and the microgrid_id message",
+    async (body) => {
+      const { POST } = await import("../route");
+      const res = await POST(makePostRequest(JSON.stringify(body)));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "microgrid_id must be a UUID", code: "invalid_body" });
+    }
+  );
 
   it("rejects with 400 when start_date is missing", async () => {
     const { POST } = await import("../route");
@@ -265,16 +321,18 @@ describe("POST /api/v1/billing-periods (#253 + #255)", () => {
       })
     );
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/microgrid_id/);
+    expect(await res.json()).toEqual({
+      error: "microgrid_id must be a UUID",
+      field: "microgrid_id",
+      code: "invalid_body",
+    });
   });
 
   it("rejects with 400 for malformed JSON body", async () => {
     const { POST } = await import("../route");
     const res = await POST(makePostRequest("{not valid json"));
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toMatch(/Invalid JSON/);
+    expect(await res.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
   });
 
   it("allows multiple draft periods for same (microgrid_id, start_date, end_date) — no 409-on-duplicate per Alejandro 2026-05-26", async () => {

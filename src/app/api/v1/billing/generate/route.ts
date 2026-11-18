@@ -4,8 +4,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import { gateRoute } from "@/lib/runtime/gate";
 import { runGenerationFor, isRunGenerationFatal } from "@/lib/billing/generate";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { V1GenerateBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 export async function POST(request: NextRequest) {
   // #255 — per-org token auth replaces the dead-code INTERNAL_API_KEY
@@ -16,28 +16,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  // After the token check, so a missing token answers 401 before the body
+  // is read. Unknown keys, at the top level or in a reading, are dropped,
+  // not refused, and a reason that is not a string is dropped
+  // (V1GenerateBody).
+  const parsed = await parseJsonBody(request, V1GenerateBody);
+  if (!parsed.ok) return parsed.response;
+  const rec = parsed.data;
 
-  const rec = raw as Record<string, unknown>;
-
-  if (typeof rec.billingPeriodId !== "string" || !UUID_RE.test(rec.billingPeriodId)) {
-    return NextResponse.json({ error: "billingPeriodId must be a UUID" }, { status: 400 });
-  }
-
-  // #254 — payload MUST assert which microgrid the caller is operating
-  // against. This is the defense-in-depth signal: the customerapp should
-  // know its target microgrid up front, and the route cross-checks both
-  // the payload microgrid AND the resolved period's microgrid against the
-  // token's org. Format-validate here; org-membership is verified below
-  // after the service client is constructed.
-  if (typeof rec.microgrid_id !== "string" || !UUID_RE.test(rec.microgrid_id)) {
-    return NextResponse.json({ error: "microgrid_id must be a UUID" }, { status: 400 });
-  }
+  // #254 — the payload MUST assert which microgrid the caller is operating
+  // against: the customerapp should know its target microgrid up front, and
+  // the route cross-checks both the payload microgrid AND the resolved
+  // period's microgrid against the token's org below.
 
   // manualReadings is OPTIONAL. When omitted (or an empty array), every
   // tenant's usage is pulled from OpenEMS over the billing period — the
@@ -46,48 +36,12 @@ export async function POST(request: NextRequest) {
   // When present, each entry overrides that tenant's reading; all other
   // tenants still resolve from OpenEMS. tenantIds is left undefined so the
   // engine bills the period microgrid's full tenant set.
-  const manualReadings: Array<{
-    tenantId: string;
-    startKwh: number;
-    endKwh: number;
-    reason?: string;
-  }> = [];
-
-  if (rec.manualReadings !== undefined) {
-    if (!Array.isArray(rec.manualReadings)) {
-      return NextResponse.json(
-        { error: "manualReadings must be an array" },
-        { status: 400 }
-      );
-    }
-    for (let i = 0; i < rec.manualReadings.length; i++) {
-      const m = rec.manualReadings[i] as Record<string, unknown>;
-      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
-        return NextResponse.json(
-          { error: `manualReadings[${i}].tenantId must be a UUID` },
-          { status: 400 }
-        );
-      }
-      if (typeof m.startKwh !== "number" || !Number.isFinite(m.startKwh) || m.startKwh < 0) {
-        return NextResponse.json(
-          { error: `manualReadings[${i}].startKwh must be a non-negative finite number` },
-          { status: 400 }
-        );
-      }
-      if (typeof m.endKwh !== "number" || !Number.isFinite(m.endKwh) || m.endKwh < m.startKwh) {
-        return NextResponse.json(
-          { error: `manualReadings[${i}].endKwh must be a finite number >= startKwh` },
-          { status: 400 }
-        );
-      }
-      manualReadings.push({
-        tenantId: m.tenantId,
-        startKwh: m.startKwh,
-        endKwh: m.endKwh,
-        ...(typeof m.reason === "string" ? { reason: m.reason } : {}),
-      });
-    }
-  }
+  const manualReadings = (rec.manualReadings ?? []).map((m) => ({
+    tenantId: m.tenantId,
+    startKwh: m.startKwh,
+    endKwh: m.endKwh,
+    ...(typeof m.reason === "string" ? { reason: m.reason } : {}),
+  }));
 
   const supabase = createServiceClient();
 
@@ -101,11 +55,11 @@ export async function POST(request: NextRequest) {
   //   2. Period's microgrid_id → org (a stolen/replayed billingPeriodId from
   //      another org must not generate against the caller's session).
   //
-  // The engine's own `expected period.microgrid_id !== payload microgrid_id`
-  // check inside `runGenerationFor` is independent and still fires when
-  // both org checks pass but the IDs themselves disagree within the same
-  // org (e.g. payload references a stale period from a different microgrid
-  // owned by the same org).
+  // The two microgrid ids are not compared with each other: a payload
+  // microgrid_id for another microgrid of the same org passes, and
+  // generation runs on the period's microgrid, because `runGenerationFor`
+  // takes no microgrid id (src/lib/billing/generate.ts). If it starts
+  // taking one, revisit.
   const mg = await resolveMicrogridOrgId(supabase, rec.microgrid_id);
   if (!mg.ok) {
     return NextResponse.json({ error: mg.reason }, { status: mg.status });
