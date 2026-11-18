@@ -21,8 +21,8 @@ import type {
   UnresolvedTenant,
 } from "../repository";
 
-function toError(error: { code?: string; message?: string }): RepositoryError {
-  return { code: error.code, message: error.message ?? "Unknown database error" };
+function toError(error: { code?: string; message?: string; details?: string | null }): RepositoryError {
+  return { code: error.code, message: error.message ?? "Unknown database error", details: error.details ?? null };
 }
 
 export function createSupabaseBillingRepository(
@@ -239,6 +239,28 @@ export function createSupabaseBillingRepository(
       });
       if (error) return { updated: null, error: toError(error) };
       return { updated: data, error: null };
+    },
+
+    async getBillingPeriod(periodId: string) {
+      const { data, error } = await supabase
+        .from("billing_periods")
+        .select("id, microgrid_id, start_date, end_date, status, timezone")
+        .eq("id", periodId)
+        .maybeSingle<BillingPeriodRow>();
+      if (error) throw new Error("Could not load billing period.");
+      return data ?? null;
+    },
+
+    async deleteBillingPeriod(periodId: string) {
+      // A row that row-level security hides deletes nothing and raises no
+      // error, so the deleted ids are read back.
+      const { data, error } = await supabase
+        .from("billing_periods")
+        .delete()
+        .eq("id", periodId)
+        .select("id");
+      if (error) return { deleted: false, error: toError(error) };
+      return { deleted: (data ?? []).length > 0, error: null };
     },
   };
 }

@@ -133,12 +133,11 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       route: "/api/billing-periods/[periodId]",
       // A DELETE needs typed or ceremony confirmation (contribution-schema.ts).
       confirm: "typed",
-      form: null,
-      newRoute:
-        "Today the browser deletes the row through PostgREST with its own client, not through a route; the action needs a gated DELETE route.",
+      form: "DeletePeriodBody",
       view: "billing.periods",
     },
     pr: PERIODS,
+    note: "The legacy screens still delete through PostgREST with the browser's own client, with no typed name and no plugin gate, until they are deleted.",
   },
 
   // ── Period review ─────────────────────────────────────────────────────────

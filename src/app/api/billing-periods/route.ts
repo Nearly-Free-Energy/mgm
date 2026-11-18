@@ -62,7 +62,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       end_date: body.end_date,
     });
     if (!result.ok) return mapError(result);
-    return NextResponse.json({ period: result.data }, { status: 201 });
+    // `href`: the GUI kit opens the new period, as the legacy list does.
+    return NextResponse.json(
+      { period: result.data, href: `/microgrids/${microgridId}/billing/${result.data.id}` },
+      { status: 201 }
+    );
   } finally {
     await composed.data.dispose();
   }

@@ -3,19 +3,33 @@ import "server-only";
 /**
  * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation to
  * its pages, which are served outside the GUI contract (`legacy: true`), with
- * the labels the current chrome uses, and the savings as the
- * `billing.savings` view, shown under the Operations day, with the writes
- * that change what it counts. A page that moves to a view keeps its nav id.
+ * the labels the current chrome uses; a microgrid's billing periods as the
+ * `billing.periods` view, with creating a period and deleting a draft; and
+ * the savings as the `billing.savings` view, shown under the Operations day,
+ * with the writes that change what it counts. A page that moves to a view
+ * keeps its nav id.
+ *
+ * `billing.periods` has the Billing page's own path, which the legacy page
+ * still serves: the catalog gives that page no servedBy, so the view is
+ * reached through GET /api/gui/view until #201's "Serve the billing pages
+ * through the GUI host" moves the page and its nav entry to the view.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
   AddGridTariffBody,
+  CREATE_PERIOD_BODY_VERSION,
+  CreatePeriodBody,
+  DELETE_PERIOD_BODY_VERSION,
+  DeletePeriodBody,
   SAVE_SAVINGS_SETTINGS_BODY_VERSION,
   SaveSavingsSettingsBody,
 } from "./schemas";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
+import { deletePeriodAvailable, loadPeriods, prepareDeletePeriod } from "./surface/periods";
+import { PERIODS_EXAMPLES } from "./surface/periods-examples";
+import { CREATE_PERIOD_ACTION, DELETE_PERIOD_ACTION, PERIODS_KEYS } from "./surface/periods-model";
 import { loadSavings } from "./surface/savings";
 import { SavingsExt } from "./surface/savings-ext";
 import { GRID_TARIFF_ADD_ACTION, SAVINGS_EXT_SCHEMA, SAVINGS_KEYS, SAVINGS_SETTINGS_ACTION } from "./surface/savings-model";
@@ -56,6 +70,19 @@ export const BILLING_SURFACE: Contribution = {
   ],
   views: [
     {
+      id: "billing.periods",
+      kind: "collection",
+      path: "/microgrids/[id]/billing",
+      params: { id: "microgrid" },
+      entity: "id",
+      // Read through the person's own client; still loads while billing is
+      // off, with the gate's notice and create disabled.
+      cost: "db",
+      declares: { keys: PERIODS_KEYS },
+      examples: PERIODS_EXAMPLES,
+      load: loadPeriods,
+    },
+    {
       id: "billing.savings",
       kind: "metrics",
       path: "/microgrids/[id]/operations/savings",
@@ -85,6 +112,39 @@ export const BILLING_SURFACE: Contribution = {
   // the host's prepare comes to supply starting values, or the route stops
   // replacing the row, revisit.
   actions: [
+    // Human-only, as no assistant proposes a period yet (#201).
+    // `targeted: false`: offered only by billing.periods. Appended to another
+    // plugin's view of the microgrid (metering.site-day) it would open an
+    // empty date form there. Revisit when the billing pages are served
+    // through the GUI host.
+    {
+      ...CREATE_PERIOD_ACTION,
+      target: "microgrid",
+      input: CreatePeriodBody,
+      inputVersion: CREATE_PERIOD_BODY_VERSION,
+      method: "POST",
+      path: "/api/billing-periods",
+      bind: { body: { microgrid_id: "microgrid" } },
+      risk: "write",
+      confirm: "none",
+      humanOnly: true,
+      targeted: false,
+    },
+    // A DELETE: typed confirmation, the period's name, from prepare.
+    {
+      ...DELETE_PERIOD_ACTION,
+      target: "billingPeriod",
+      input: DeletePeriodBody,
+      inputVersion: DELETE_PERIOD_BODY_VERSION,
+      method: "DELETE",
+      path: "/api/billing-periods/[periodId]",
+      bind: { path: { periodId: "billingPeriod" } },
+      risk: "destructive",
+      confirm: "typed",
+      humanOnly: true,
+      prepare: prepareDeletePeriod,
+      available: deletePeriodAvailable,
+    },
     {
       ...SAVINGS_SETTINGS_ACTION,
       target: "microgrid",

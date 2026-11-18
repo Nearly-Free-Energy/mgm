@@ -24,8 +24,9 @@ import type {
   TierInput,
   UnresolvedTenant,
 } from "./repository";
-import { missingAcknowledgements, typedNameMatches, type CloseReview } from "./close";
-import { ClosePeriodBody, CreatePeriodBody, GenerateBillsBody } from "./schemas";
+import { missingAcknowledgements, periodName, typedNameMatches, type CloseReview } from "./close";
+import { isPeriodKeptError, PERIOD_KEPT_CLOSED_MESSAGE, periodDeleteErrorMessage } from "./period-delete";
+import { ClosePeriodBody, CreatePeriodBody, DeletePeriodBody, GenerateBillsBody } from "./schemas";
 
 /**
  * 409: a bill's total is not a whole number, so the period cannot close until
@@ -565,6 +566,146 @@ export class BillingCapability implements BillingCapabilityContract {
       reason: "No bill generated for this tenant in this period.",
     }));
     return { ok: true as const, data: { period: row, unresolved } };
+  }
+
+  /**
+   * Deletes a draft period against the name the person typed (#201). The
+   * body is DeletePeriodBody: without `confirmation` the answer is 428 with
+   * the name to type. A closed period is refused before any name is asked.
+   * The typed name is checked here only, as it guards attention rather than
+   * data: fn_billing_period_before_delete_guard stays the authority on closed
+   * periods and payment activity, and its refusal is mapped below.
+   */
+  async deletePeriod(periodId: string, input?: unknown) {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    if (!UUID_RE.test(periodId)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_period",
+        message: "Invalid billing period id — expected UUID.",
+      };
+    }
+    const resolved = await this.repo.getPeriodOrganization(periodId);
+    if (!resolved || resolved.orgId !== this.scope.organizationId) {
+      return this.scopeMismatch();
+    }
+    const gated = await this.requirePlugin();
+    if (gated) return gated;
+
+    const body = DeletePeriodBody.safeParse(input ?? {});
+    if (!body.success) {
+      const issue = body.error.issues[0];
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_body",
+        message: issue.message,
+        ...(typeof issue.path[0] === "string" ? { field: issue.path[0] } : {}),
+      };
+    }
+
+    let period;
+    try {
+      period = await this.repo.getBillingPeriod(periodId);
+    } catch {
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "billing_unavailable",
+        message: "Could not load the billing period. Try again shortly.",
+      };
+    }
+    if (!period) {
+      return {
+        ok: false as const,
+        status: 404 as const,
+        code: "billing_period_not_found",
+        message: "Billing period not found.",
+      };
+    }
+    if (period.status === "closed") {
+      return {
+        ok: false as const,
+        status: 409 as const,
+        code: "billing_period_kept",
+        message: PERIOD_KEPT_CLOSED_MESSAGE,
+      };
+    }
+    const name = periodName(period.start_date, period.end_date);
+    if (name === null) {
+      return {
+        ok: false as const,
+        status: 500 as const,
+        code: "billing_unavailable",
+        message: "Could not name the billing period.",
+      };
+    }
+
+    const confirmation = body.data.confirmation;
+    if (!confirmation) {
+      return {
+        ok: false as const,
+        status: 428 as const,
+        code: "billing_delete_confirmation_required",
+        message: `Type the period's name, ${name}, to delete it.`,
+      };
+    }
+    if (!typedNameMatches(confirmation.typed, name)) {
+      return {
+        ok: false as const,
+        status: 428 as const,
+        code: "billing_delete_name_mismatch",
+        message: `Type the period's name, ${name}, to delete it.`,
+        field: "confirmation",
+      };
+    }
+
+    const { deleted, error } = await this.repo.deleteBillingPeriod(periodId);
+    if (error) {
+      if (isPeriodKeptError(error)) {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_period_kept",
+          message: periodDeleteErrorMessage(error),
+        };
+      }
+      // pilot_import_batches.billing_period_id has no ON DELETE
+      // (migration 20261114222000): an imported period cannot be deleted.
+      if (error.code === "23503") {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_period_referenced",
+          message: "This period has imported pilot data and cannot be deleted.",
+        };
+      }
+      if (error.code === "42501" || error.message.includes("row-level security")) {
+        return {
+          ok: false as const,
+          status: 403 as const,
+          code: "billing_forbidden",
+          message: "Not authorized to delete this billing period.",
+        };
+      }
+      return {
+        ok: false as const,
+        status: 500 as const,
+        code: "billing_unavailable",
+        message: "Could not delete the billing period.",
+      };
+    }
+    if (!deleted) {
+      return {
+        ok: false as const,
+        status: 404 as const,
+        code: "billing_period_not_found",
+        message: "Billing period not found.",
+      };
+    }
+    return { ok: true as const, data: { periodId, microgridId: period.microgrid_id, name } };
   }
 
   private async runGeneration(input: unknown, mode: "write" | "preview") {

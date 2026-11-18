@@ -128,6 +128,7 @@ export default defineConfig({
             "src/lib/supabase/__tests__/tenant_access.test.ts",
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",
+            "src/app/api/gui/view/__tests__/periods.db.test.ts",
           ],
           environment: "node",
           fileParallelism: false,
@@ -144,6 +145,7 @@ export default defineConfig({
           exclude: [
             "src/app/api/users/[id]/resend-invite/__tests__/rls-route.test.ts",
             "src/app/api/gui/view/__tests__/site-day.db.test.ts",
+            "src/app/api/gui/view/__tests__/periods.db.test.ts",
           ],
           environment: "node",
         },
