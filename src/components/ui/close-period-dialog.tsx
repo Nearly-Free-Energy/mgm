@@ -201,9 +201,13 @@ export function ClosePeriodDialog({
     state.phase === "review" ? state.ceremony.typed : state.phase === "blocked" ? state.ceremony?.typed : undefined;
   const closed = state.phase === "closed";
   const title = closed ? `Closed: ${state.name}` : name ? `Close ${name}?` : "Close billing period?";
+  // The step's own statement says bills become final, so the review phase
+  // keeps only the URA note here rather than saying it twice.
   const description = closed
     ? "This period is now read-only. Export the CSV for your URA filing."
-    : "Bills become final. This period will be filed with URA, so the values you copy after this are the values you report.";
+    : state.phase === "review"
+      ? "This period will be filed with URA, so the values you copy after this are the values you report."
+      : "Bills become final. This period will be filed with URA, so the values you copy after this are the values you report.";
 
   return (
     <Dialog.Root open={open} onOpenChange={dismiss}>
