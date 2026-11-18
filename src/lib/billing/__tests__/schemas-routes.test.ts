@@ -25,6 +25,7 @@ const PAIRS: [route: string, method: string, schema: string][] = [
   ["src/app/api/billing-review/preview/route.ts", "POST", "PreviewBillingReviewBody"],
   ["src/app/api/billing-line-items/[lineItemId]/usage/route.ts", "PATCH", "LineItemUsageBody"],
   ["src/app/api/billing-line-items/[lineItemId]/payment-status/route.ts", "PATCH", "LineItemPaymentStatusBody"],
+  ["src/app/api/billing-line-items/[lineItemId]/regenerate/route.ts", "POST", "RegenerateBillBody"],
   ["src/app/api/rate-schedules/route.ts", "POST", "CreateRateScheduleBody"],
   ["src/app/api/rate-schedules/[id]/route.ts", "PUT", "ReviseRateScheduleBody"],
   ["src/app/api/communities/[id]/invoice-config/route.ts", "PATCH", "SaveInvoiceSettingsBody"],

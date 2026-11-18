@@ -447,6 +447,31 @@ export const LineItemPaymentStatusBody = z.strictObject(
   { error: lineItemsPaymentBodyError }
 );
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 1;
+
+/**
+ * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an
+ * object-level refinement, so the GUI host can check a prefill
+ * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit form can
+ * render it; the route checks which readings each mode takes. If a
+ * refinement is added, the period review's prefills are dropped: revisit.
+ */
+export const RegenerateBillBody = z.strictObject(
+  {
+    readings: z
+      .enum(["edge", "manual"], { error: "readings must be 'edge' or 'manual'" })
+      .meta({ title: "Readings" }),
+    start_kwh: lineItemsKwh("start_kwh").optional().meta({ title: "Start reading (kWh)" }),
+    end_kwh: lineItemsKwh("end_kwh").optional().meta({ title: "End reading (kWh)" }),
+    reason: z
+      .string({ error: "reason must be a string" })
+      .trim()
+      .max(500, { error: "reason must be 500 characters or fewer" })
+      .optional()
+      .meta({ title: "Reason" }),
+  },
+  { error: bodyError }
+);
+export const REGENERATE_BILL_BODY_VERSION = 1;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

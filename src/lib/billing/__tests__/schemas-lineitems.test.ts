@@ -5,6 +5,8 @@ import {
   LINE_ITEM_USAGE_BODY_VERSION,
   LineItemPaymentStatusBody,
   LineItemUsageBody,
+  REGENERATE_BILL_BODY_VERSION,
+  RegenerateBillBody,
 } from "../schemas";
 
 /** The first issue as the route answers it: its top-level key and message. */
@@ -163,6 +165,68 @@ describe("LineItemPaymentStatusBody", () => {
         notes: { title: "Notes", anyOf: [{ type: "string", maxLength: 500 }, { type: "null" }] },
       },
       required: ["status"],
+      additionalProperties: false,
+    });
+  });
+});
+
+describe("RegenerateBillBody", () => {
+  it.each([
+    ["edge", { readings: "edge" }],
+    ["manual with both readings", { readings: "manual", start_kwh: 10, end_kwh: 20 }],
+    ["manual with a reason", { readings: "manual", start_kwh: 0, end_kwh: 0, reason: "dial photo" }],
+    // Which readings a mode takes is the route's check, so the schema stays flat.
+    ["edge with readings", { readings: "edge", start_kwh: 10 }],
+    ["manual with none", { readings: "manual" }],
+  ])("parses %s", (_label, body) => {
+    expect(firstIssue(RegenerateBillBody, body)).toBe("ok");
+  });
+
+  it("trims the reason", () => {
+    expect(RegenerateBillBody.parse({ readings: "manual", start_kwh: 1, end_kwh: 2, reason: "  read on site " })).toEqual({
+      readings: "manual",
+      start_kwh: 1,
+      end_kwh: 2,
+      reason: "read on site",
+    });
+  });
+
+  it.each([
+    [{}, "readings", "readings must be 'edge' or 'manual'"],
+    [{ readings: "both" }, "readings", "readings must be 'edge' or 'manual'"],
+    [{ readings: "manual", start_kwh: -1 }, "start_kwh", "start_kwh must be a non-negative number"],
+    [{ readings: "manual", end_kwh: "12" }, "end_kwh", "end_kwh must be a finite number"],
+    [{ readings: "manual", reason: 5 }, "reason", "reason must be a string"],
+    [{ readings: "manual", reason: "x".repeat(501) }, "reason", "reason must be 500 characters or fewer"],
+  ])("refuses %j at its field", (body, field, message) => {
+    expect(firstIssue(RegenerateBillBody, body)).toEqual({ field, message });
+  });
+
+  it("refuses an unknown key, and a body that is not an object, with no field", () => {
+    expect(firstIssue(RegenerateBillBody, { readings: "edge", tenantIds: [] })).toEqual({ field: undefined, message: "Unknown field: tenantIds" });
+    for (const body of [null, [], "edge"]) {
+      expect(firstIssue(RegenerateBillBody, body)).toEqual({ field: undefined, message: "Request body must be an object" });
+    }
+  });
+
+  it("has no object-level refinement, so the GUI host can check a prefill against it", () => {
+    // .omit() throws on an object schema with refinements (cleanPrefill in src/lib/gui/host/server/merge.ts).
+    expect(() => RegenerateBillBody.omit({}).partial()).not.toThrow();
+    expect(RegenerateBillBody.omit({}).partial().safeParse({ readings: "manual", start_kwh: 12 }).success).toBe(true);
+  });
+
+  it("pins the JSON Schema of version 1", () => {
+    expect(REGENERATE_BILL_BODY_VERSION).toBe(1);
+    expect(z.toJSONSchema(RegenerateBillBody, { io: "input" })).toEqual({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {
+        readings: { type: "string", enum: ["edge", "manual"], title: "Readings" },
+        start_kwh: { title: "Start reading (kWh)", type: "number", minimum: 0 },
+        end_kwh: { title: "End reading (kWh)", type: "number", minimum: 0 },
+        reason: { title: "Reason", type: "string", maxLength: 500 },
+      },
+      required: ["readings"],
       additionalProperties: false,
     });
   });
