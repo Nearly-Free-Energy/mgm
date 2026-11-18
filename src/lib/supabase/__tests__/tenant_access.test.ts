@@ -944,6 +944,42 @@ desc("the staff role functions keep refusing the tenant role", () => {
     expect(data).toHaveLength(3);
   });
 
+  // 20261118180000: an invitation is for an account with no role row of any
+  // scope. A tenant row and a microgrid-scoped row each count.
+  it("fn_finalize_user_invitation refuses an account holding only a tenant row, or only a microgrid row", async () => {
+    const svc = await serviceClient();
+    const snapshot = async (userId: string) => {
+      const roles = await svc.from("user_roles").select("role, scope_type, scope_id").eq("user_id", userId).order("role");
+      const profile = await svc.from("user_profiles").select("first_name, last_name, phone").eq("user_id", userId).single();
+      return { roles: roles.data, profile: profile.data };
+    };
+    const invite = (client: typeof manager.client, userId: string) =>
+      client.rpc("fn_finalize_user_invitation", {
+        p_user_id: userId,
+        p_first_name: "Over",
+        p_last_name: "Written",
+        p_phone: "+256700000009",
+        p_role: "org_manager",
+        p_scope_id: F.org,
+      });
+
+    const { error: insErr } = await svc
+      .from("user_roles")
+      .insert({ user_id: noRole.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
+    expect(insErr).toBeNull();
+    try {
+      for (const target of [tenantOnly.userId, noRole.userId]) {
+        const before = await snapshot(target);
+        for (const caller of [manager.client, superAdmin.client]) {
+          expectCode((await invite(caller, target)).error, "42501");
+        }
+        expect(await snapshot(target)).toEqual(before);
+      }
+    } finally {
+      await svc.from("user_roles").delete().eq("user_id", noRole.userId);
+    }
+  });
+
   it("a tenant still gets a sign-in link: fn_auth_sign_in_target accepts any role row", async () => {
     const svc = await serviceClient();
     const { data } = await svc.rpc("fn_auth_sign_in_target", { _email: EMAIL.tenantOnly });

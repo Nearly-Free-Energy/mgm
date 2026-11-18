@@ -13,7 +13,11 @@
 -- 3. fn_user_roles_before_delete_guard bypasses its checks only for an
 --    administrator login that carries no API request.
 --
--- Signatures and grants are unchanged, so database.gen.ts does not change.
+-- Both functions lock the target's auth.users row first, so two calls for
+-- one person run one after the other and each checks what the other wrote.
+--
+-- Signatures and grants are unchanged, so this migration changes nothing in
+-- database.gen.ts.
 -- is_super_admin, user_can_access_org, user_can_access_microgrid and
 -- user_can_see_user_profile are called, not edited.
 
@@ -39,6 +43,12 @@ BEGIN
     RAISE EXCEPTION 'Only super admins can change roles.'
       USING ERRCODE = '42501';
   END IF;
+
+  -- Added (20261118180000): one change per person at a time.
+  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR NO KEY UPDATE;
+  -- The is_super_admin() checks in the super_admin and ems_operator branches
+  -- below can no longer fail. They stay on purpose, so each branch still
+  -- states its own rule if the check above is ever relaxed.
 
   -- Self-targeting guard, unchanged in intent but now limited to the org
   -- path. That path is destructive (it replaces the caller's own org role and
@@ -176,6 +186,9 @@ BEGIN
   -- Added (20261118180000): an invitation is for an account with no role.
   -- Any row counts, tenant rows included: the invite route refuses those
   -- accounts too, and a change to an existing role is fn_change_user_role.
+  -- The lock makes a second invitation for the same account wait, and then
+  -- see the row this one inserts.
+  PERFORM 1 FROM auth.users WHERE id = p_user_id FOR NO KEY UPDATE;
   IF EXISTS (SELECT 1 FROM user_roles WHERE user_id = p_user_id) THEN
     RAISE EXCEPTION 'This account already has access. A super admin can change it from the Users list.'
       USING ERRCODE = '42501';
@@ -186,9 +199,9 @@ BEGIN
   INSERT INTO user_profiles (user_id, first_name, last_name, phone)
     VALUES (p_user_id, p_first_name, p_last_name, p_phone)
     ON CONFLICT (user_id) DO UPDATE
-      SET first_name = COALESCE(NULLIF(user_profiles.first_name, ''), EXCLUDED.first_name),
-          last_name  = COALESCE(NULLIF(user_profiles.last_name, ''), EXCLUDED.last_name),
-          phone      = COALESCE(NULLIF(user_profiles.phone, ''), EXCLUDED.phone);
+      SET first_name = COALESCE(NULLIF(btrim(user_profiles.first_name), ''), EXCLUDED.first_name),
+          last_name  = COALESCE(NULLIF(btrim(user_profiles.last_name), ''), EXCLUDED.last_name),
+          phone      = COALESCE(NULLIF(btrim(user_profiles.phone), ''), EXCLUDED.phone);
 
   INSERT INTO user_roles (user_id, role, scope_type, scope_id)
     VALUES (p_user_id, p_role, 'org', p_scope_id);
@@ -245,14 +258,18 @@ BEGIN
   -- or supabase_admin (migrations, direct admin operations).
   --
   -- Changed (20261118180000): the login alone is not enough. A connection
-  -- that carries an API request (request.jwt.claims set, so auth.role() is
-  -- not NULL) is guarded whatever its login, because a PostgREST that logs
-  -- in as postgres (the Docker Compose stack) sends every request that way.
-  -- Migrations, `supabase db query` and the maintenance scripts set no
-  -- claims and keep the bypass. If PostgREST ever stops setting the claims,
-  -- revisit.
+  -- that carries an API request is guarded whatever its login, because a
+  -- PostgREST that logs in as postgres (the Docker Compose stack) sends
+  -- every request that way. PostgREST sets request.method on every request,
+  -- with or without a token, and request.jwt.claims when there is one;
+  -- auth.role() also reads the older request.jwt.claim.role. Migrations,
+  -- `supabase db query` and the maintenance scripts set none of them and
+  -- keep the bypass. If PostgREST stops setting request.method, revisit.
   v_session_role := session_user;
-  IF v_session_role IN ('postgres', 'supabase_admin') AND auth.role() IS NULL THEN
+  IF v_session_role IN ('postgres', 'supabase_admin')
+     AND auth.role() IS NULL
+     AND NULLIF(current_setting('request.jwt.claims', true), '') IS NULL
+     AND NULLIF(current_setting('request.method', true), '') IS NULL THEN
     RETURN OLD;
   END IF;
 

@@ -770,26 +770,34 @@ describe("an invitation finalizes only an account with no role (20261118180000)"
 describe("the delete guard and administrator logins (20261118180000)", () => {
   // runAsDatabaseOwner logs in as postgres, as a PostgREST configured with
   // the postgres login does. The guard skips its checks only when no API
-  // request is attached (no request.jwt.claims). Each attempt deletes every
-  // super_admin row and is rolled back whatever happens.
+  // request is attached: no request.jwt.claims, no request.jwt.claim.role and
+  // no request.method. Each attempt deletes every super_admin row and is
+  // rolled back whatever happens.
   it("guards a postgres login that carries a request, and not one that does not", () => {
     if (skipIfRequested()) return;
     // One statement (the CLI prepares it): a DO block that tries each case
     // in a subtransaction it always undoes, and raises unless the results
     // are the expected ones, so the failure message carries what happened.
+    // Each case is [request.jwt.claims, request.jwt.claim.role, request.method].
     const sql = `
       DO $do$
       DECLARE
-        claims text;
+        cases text[][] := ARRAY[
+          ARRAY['{"role":"service_role"}', '', ''],
+          ARRAY['{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000000"}', '', ''],
+          ARRAY['{}', '', ''],
+          ARRAY['{"sub":"00000000-0000-4000-8000-000000000000"}', '', ''],
+          ARRAY['', 'authenticated', ''],
+          ARRAY['', '', 'POST'],
+          ARRAY['', '', '']
+        ];
         got text[] := '{}';
         outcome text;
       BEGIN
-        FOREACH claims IN ARRAY ARRAY[
-          '{"role":"service_role"}',
-          '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000000"}',
-          ''
-        ] LOOP
-          PERFORM set_config('request.jwt.claims', claims, true);
+        FOR i IN 1 .. array_length(cases, 1) LOOP
+          PERFORM set_config('request.jwt.claims', cases[i][1], true);
+          PERFORM set_config('request.jwt.claim.role', cases[i][2], true);
+          PERFORM set_config('request.method', cases[i][3], true);
           BEGIN
             DELETE FROM public.user_roles WHERE role = 'super_admin';
             RAISE EXCEPTION 'undo' USING ERRCODE = 'P0001';
@@ -799,8 +807,8 @@ describe("the delete guard and administrator logins (20261118180000)", () => {
           END;
           got := got || outcome;
         END LOOP;
-        IF got <> ARRAY['40000', '40000', 'deleted'] THEN
-          RAISE EXCEPTION 'service_role, authenticated, no request: %', got;
+        IF got <> ARRAY['40000', '40000', '40000', '40000', '40000', '40000', 'deleted'] THEN
+          RAISE EXCEPTION 'service_role, authenticated, {}, sub only, legacy role, method only, none: %', got;
         END IF;
       END
       $do$;`;
