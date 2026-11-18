@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
   AddGridTariffBody,
+  CLOSE_PERIOD_BODY_VERSION,
+  ClosePeriodBody,
   SAVE_SAVINGS_SETTINGS_BODY_VERSION,
   SaveSavingsSettingsBody,
 } from "../schemas";
@@ -114,6 +116,36 @@ describe("SaveSavingsSettingsBody", () => {
       field: undefined,
       message: "Unknown field: microgrid_id, extra",
     });
+  });
+});
+
+describe("ClosePeriodBody", () => {
+  const confirmation = { digest: "v1:abc", acknowledged: ["totals_reviewed"], typed: "October 2026" };
+
+  it("accepts no confirmation, and a confirmation with or without the typed name", () => {
+    expect(firstIssue(ClosePeriodBody, {})).toBe("ok");
+    expect(firstIssue(ClosePeriodBody, { confirmation })).toBe("ok");
+    expect(firstIssue(ClosePeriodBody, { confirmation: { digest: "v1:abc", acknowledged: [] } })).toBe("ok");
+  });
+
+  it("refuses the legacy confirmed flag and unknown confirmation fields", () => {
+    expect(firstIssue(ClosePeriodBody, { confirmed: true })).toEqual({ field: undefined, message: "Unknown field: confirmed" });
+    expect(firstIssue(ClosePeriodBody, { confirmation: { ...confirmation, extra: 1 } })).toMatchObject({ field: "confirmation" });
+  });
+
+  it.each([
+    { acknowledged: [] },
+    { digest: "", acknowledged: [] },
+    { digest: "v1:abc" },
+    { digest: "v1:abc", acknowledged: "totals_reviewed" },
+    { digest: "v1:abc", acknowledged: [1] },
+    { digest: "x".repeat(201), acknowledged: [] },
+    { digest: "v1:abc", acknowledged: Array.from({ length: 21 }, (_, i) => `a${i}`) },
+    { digest: "v1:abc", acknowledged: [], typed: 7 },
+    null,
+    "confirm",
+  ])("refuses the confirmation %j under the confirmation field", (c) => {
+    expect(firstIssue(ClosePeriodBody, { confirmation: c })).toMatchObject({ field: "confirmation" });
   });
 });
 
@@ -280,10 +312,31 @@ const SAVE_SAVINGS_SETTINGS_SHAPES: Record<number, unknown> = {
   },
 };
 
+const CLOSE_PERIOD_SHAPES: Record<number, unknown> = {
+  1: {
+    $schema: SCHEMA,
+    type: "object",
+    properties: {
+      confirmation: {
+        type: "object",
+        properties: {
+          digest: { type: "string", minLength: 1, maxLength: 200 },
+          acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+          typed: { type: "string", maxLength: 200 },
+        },
+        required: ["digest", "acknowledged"],
+        additionalProperties: false,
+      },
+    },
+    additionalProperties: false,
+  },
+};
+
 describe("pinned input versions", () => {
   it.each([
     ["AddGridTariffBody", AddGridTariffBody, ADD_GRID_TARIFF_BODY_VERSION, ADD_GRID_TARIFF_SHAPES, "ADD_GRID_TARIFF_BODY_VERSION"],
     ["SaveSavingsSettingsBody", SaveSavingsSettingsBody, SAVE_SAVINGS_SETTINGS_BODY_VERSION, SAVE_SAVINGS_SETTINGS_SHAPES, "SAVE_SAVINGS_SETTINGS_BODY_VERSION"],
+    ["ClosePeriodBody", ClosePeriodBody, CLOSE_PERIOD_BODY_VERSION, CLOSE_PERIOD_SHAPES, "CLOSE_PERIOD_BODY_VERSION"],
   ] as const)("%s matches the shape pinned for its version", (_name, schema, version, shapes, constant) => {
     expect(
       z.toJSONSchema(schema, { io: "input" }),
@@ -291,8 +344,9 @@ describe("pinned input versions", () => {
     ).toEqual(shapes[version]);
   });
 
-  it("starts both versions at 1", () => {
+  it("starts every version at 1", () => {
     expect(ADD_GRID_TARIFF_BODY_VERSION).toBe(1);
     expect(SAVE_SAVINGS_SETTINGS_BODY_VERSION).toBe(1);
+    expect(CLOSE_PERIOD_BODY_VERSION).toBe(1);
   });
 });

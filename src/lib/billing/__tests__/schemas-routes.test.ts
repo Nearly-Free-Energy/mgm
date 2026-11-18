@@ -4,7 +4,7 @@
  * method calls parseJsonBody(<its request parameter>, <schema>).
  *
  * The pairs are listed by hand until a guard derives them from the GUI
- * surface's contributed actions; when that guard covers these two routes,
+ * surface's contributed actions; when that guard covers these routes,
  * delete this file.
  */
 import { describe, expect, it } from "vitest";
@@ -17,6 +17,7 @@ const ROOT = path.resolve(__dirname, "../../../..");
 const PAIRS: [route: string, method: string, schema: string][] = [
   ["src/app/api/microgrids/[id]/grid-tariffs/route.ts", "POST", "AddGridTariffBody"],
   ["src/app/api/microgrids/[id]/savings-settings/route.ts", "PUT", "SaveSavingsSettingsBody"],
+  ["src/app/api/billing-periods/[periodId]/close/route.ts", "POST", "ClosePeriodBody"],
 ];
 
 /** Why `source` does not parse its `method` body with `schema`, or null when it does. */

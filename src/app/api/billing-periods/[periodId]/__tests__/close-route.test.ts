@@ -59,7 +59,12 @@ function ctx() {
   return { params: Promise.resolve({ periodId: PERIOD_ID }) };
 }
 
-describe("POST /api/billing-periods/[periodId]/close (issue #5)", () => {
+const CONFIRMED = {
+  confirmation: { digest: "v1:reviewed", acknowledged: ["totals_reviewed"], typed: "September 2026" },
+};
+const REVIEW = { digest: "v1:current", name: "September 2026", totalAmount: 250 };
+
+describe("POST /api/billing-periods/[periodId]/close (issue #5, #201)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     periodRow = { id: PERIOD_ID, microgrid_id: MG_ID };
@@ -91,27 +96,74 @@ describe("POST /api/billing-periods/[periodId]/close (issue #5)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("200 closes the period and returns the unresolved summary", async () => {
+  it("200 closes the period with a confirmation and returns the unresolved summary", async () => {
+    let received: unknown;
+    closeImpl = async (_id, input) => {
+      received = input;
+      return {
+        ok: true,
+        data: {
+          period: { id: PERIOD_ID, microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30", status: "closed", timezone: "Africa/Kampala" },
+          unresolved: [],
+        },
+      };
+    };
     const { POST } = await import("../close/route");
-    const res = await POST(post({ confirmed: true }), ctx());
+    const res = await POST(post(CONFIRMED), ctx());
     expect(res.status).toBe(200);
     const json = (await res.json()) as { period: { status: string }; unresolved: unknown[] };
     expect(json.period.status).toBe("closed");
     expect(json.unresolved).toEqual([]);
+    expect(received).toEqual(CONFIRMED);
   });
 
-  it("409 surfaces unresolved tenants until confirmed", async () => {
+  it("428 with the review when no confirmation is sent", async () => {
     closeImpl = async () => ({
       ok: false,
-      status: 409,
-      code: "billing_unresolved_tenants",
-      message: "Period has 1 unresolved tenant(s).",
+      status: 428,
+      code: "billing_close_confirmation_required",
+      message: "Review the totals.",
+      review: REVIEW,
     });
     const { POST } = await import("../close/route");
     const res = await POST(post({}), ctx());
+    expect(res.status).toBe(428);
+    const json = (await res.json()) as { code: string; review: unknown; ok?: unknown; status?: unknown };
+    expect(json.code).toBe("billing_close_confirmation_required");
+    expect(json.review).toEqual(REVIEW);
+    expect(json).not.toHaveProperty("ok");
+    expect(json).not.toHaveProperty("status");
+  });
+
+  it("409 with the current review when the totals changed after review", async () => {
+    closeImpl = async () => ({
+      ok: false,
+      status: 409,
+      code: "billing_period_totals_changed",
+      message: "The period's totals changed after you reviewed them.",
+      review: REVIEW,
+    });
+    const { POST } = await import("../close/route");
+    const res = await POST(post(CONFIRMED), ctx());
     expect(res.status).toBe(409);
-    const json = (await res.json()) as { code: string };
-    expect(json.code).toBe("billing_unresolved_tenants");
+    const json = (await res.json()) as { code: string; review: unknown };
+    expect(json.code).toBe("billing_period_totals_changed");
+    expect(json.review).toEqual(REVIEW);
+  });
+
+  it.each([
+    ["the legacy confirmed flag", { confirmed: true }],
+    ["a confirmation without a digest", { confirmation: { acknowledged: [] } }],
+    ["a body that is not an object", [1]],
+    ["a body that is not JSON", "{"],
+  ])("400 for %s, before composing billing", async (_label, body) => {
+    const compose = vi.fn(composeImpl);
+    composeImpl = compose;
+    const { POST } = await import("../close/route");
+    const res = await POST(post(body), ctx());
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_body");
+    expect(compose).not.toHaveBeenCalled();
   });
 
   it("maps composition failures (e.g. billing disabled)", async () => {

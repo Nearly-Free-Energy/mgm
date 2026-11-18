@@ -12,6 +12,7 @@
  * vendor client or resolves provider configuration itself.
  */
 import type { UserRoleRecord } from "@/lib/types/domain";
+import type { CloseReview } from "./close";
 import type { GenerationResult, RunGenerationFatal } from "./generate";
 
 export type BillingScope = {
@@ -24,12 +25,14 @@ export type BillingResult<T> =
   | { ok: true; data: T }
   | {
       ok: false;
-      status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503;
+      status: 400 | 401 | 403 | 404 | 409 | 422 | 428 | 500 | 503;
       code: string;
       message: string;
       field?: string;
       reason?: string;
       unresolved?: PeriodSummary["unresolved"];
+      /** On a close that is not confirmed, or confirmed against other totals: what to review now. */
+      review?: CloseReview;
     };
 
 export function billingFailure(
@@ -145,9 +148,15 @@ export interface BillingRepository {
     timezone: string;
   }): Promise<{ row: BillingPeriodRow | null; error: RepositoryError | null }>;
   getPeriodSummary(periodId: string): Promise<PeriodSummary | null>;
+  /**
+   * fn_billing_period_close_review, parsed. Null when the period is not
+   * visible to the caller; rejects when it cannot be read or parsed.
+   */
+  getCloseReview(periodId: string): Promise<CloseReview | null>;
+  /** fn_close_billing_period: closes against the digest and acknowledgements the person confirmed. */
   closeBillingPeriod(
     periodId: string,
-    confirmed: boolean
+    confirmation: { digest: string; acknowledged: string[] }
   ): Promise<{ row: BillingPeriodRow | null; error: RepositoryError | null }>;
   recordManualPayment(input: {
     lineItemId: string;
@@ -162,6 +171,8 @@ export interface BillingCapabilityContract {
   listTariffs(microgridId: string): Promise<BillingResult<RateScheduleRow[]>>;
   createPeriod(input: unknown): Promise<BillingResult<BillingPeriodRow>>;
   getPeriodSummary(periodId: string): Promise<BillingResult<PeriodSummary>>;
+  /** What a person reviews and confirms before closing the period. A read. */
+  getCloseReview(periodId: string): Promise<BillingResult<CloseReview>>;
   closePeriod(
     periodId: string,
     input?: unknown

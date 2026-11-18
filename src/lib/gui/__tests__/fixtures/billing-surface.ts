@@ -6,6 +6,7 @@
  * release gives it a catalog of its own. All data is synthetic.
  */
 import { z } from "zod";
+import { ClosePeriodBody } from "@/lib/billing/schemas";
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import type { Contribution, Loaded } from "@/lib/gui/surface";
 
@@ -20,7 +21,6 @@ const CreatePeriodBody = z.strictObject({
   end_date: z.iso.date(),
 });
 const GenerateBody = z.strictObject({ billingPeriodId: z.uuid() });
-const CloseBody = z.strictObject({ confirmed: z.boolean().optional() });
 const PeriodReviewExt = z.strictObject({
   tariffVersion: z.number().int(),
   preflight: z.strictObject({ readings: z.number().int(), missing: z.number().int() }),
@@ -240,7 +240,7 @@ export const BILLING_SURFACE: Contribution = {
       id: "billing.close-period",
       title: "Close period",
       target: "billingPeriod",
-      input: CloseBody,
+      input: ClosePeriodBody,
       inputVersion: 1,
       method: "POST",
       path: "/api/billing-periods/[periodId]/close",

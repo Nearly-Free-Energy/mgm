@@ -98,3 +98,31 @@ export const SaveSavingsSettingsBody = z.strictObject(
   { error: bodyError }
 );
 export const SAVE_SAVINGS_SETTINGS_BODY_VERSION = 1;
+
+const CONFIRMATION = "confirmation needs the digest of the reviewed totals and the acknowledgements ticked";
+
+/**
+ * POST /api/billing-periods/[periodId]/close. The period comes from the path.
+ * `confirmation` is the host's Confirmation (src/lib/gui/contract.ts): the
+ * digest of the totals the person reviewed, the acknowledgements they ticked
+ * and the period name they typed. Without it the route answers 428 with the
+ * review to confirm (src/lib/billing/close.ts).
+ */
+export const ClosePeriodBody = z.strictObject(
+  {
+    confirmation: z
+      .strictObject(
+        {
+          digest: z.string({ error: CONFIRMATION }).min(1, { error: CONFIRMATION }).max(200, { error: CONFIRMATION }),
+          acknowledged: z
+            .array(z.string({ error: CONFIRMATION }).max(64, { error: CONFIRMATION }), { error: CONFIRMATION })
+            .max(20, { error: CONFIRMATION }),
+          typed: z.string({ error: CONFIRMATION }).max(200, { error: CONFIRMATION }).optional(),
+        },
+        { error: CONFIRMATION }
+      )
+      .optional(),
+  },
+  { error: bodyError }
+);
+export const CLOSE_PERIOD_BODY_VERSION = 1;

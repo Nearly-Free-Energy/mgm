@@ -349,7 +349,10 @@ BEGIN
   -- The bill is rendered, which numbers it as the application does.
   UPDATE billing_line_items SET invoice_number = '{prefix}-2026-' || lpad(fn_next_invoice_number(v_community, 2026)::text, 5, '0')
   WHERE id = v_item.id AND invoice_number IS NULL;
-  PERFORM fn_close_billing_period(v_closed, false);
+  -- Closed against its own review, as the close route does (#201).
+  PERFORM fn_close_billing_period(v_closed, r->>'digest',
+    ARRAY(SELECT jsonb_array_elements_text(r->'acknowledgements')))
+  FROM fn_billing_period_close_review(v_closed) AS r;
 
   SELECT id INTO v_open FROM fn_create_billing_period(v_microgrid, '2026-09-01', '2026-09-30');
   PERFORM fn_record_line_item_with_audit(v_open, v_tenant, NULL, 3, 112.5, 115.5,

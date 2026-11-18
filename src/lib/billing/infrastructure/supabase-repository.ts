@@ -11,6 +11,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurrentUserRoles } from "@/lib/auth/access";
 import { isPluginEnabledForOrg } from "@/lib/plugins/state";
+import { parseCloseReview } from "../close";
 import type {
   BillingPeriodRow,
   BillingRepository,
@@ -193,12 +194,24 @@ export function createSupabaseBillingRepository(
       };
     },
 
-    async closeBillingPeriod(periodId: string, confirmed: boolean) {
-      // The state transition and period_closed audit event commit or roll
-      // back together inside the RPC transaction.
+    async getCloseReview(periodId: string) {
+      const { data, error } = await supabase.rpc("fn_billing_period_close_review", {
+        _period_id: periodId,
+      });
+      if (error) throw new Error("Could not load the billing period's close review.");
+      if (data === null || data === undefined) return null;
+      const review = parseCloseReview(data);
+      if (!review) throw new Error("The billing period's close review is not in the expected shape.");
+      return review;
+    },
+
+    async closeBillingPeriod(periodId, confirmation) {
+      // The digest check, the state transition and the period_closed audit
+      // event commit or roll back together inside the RPC transaction.
       const { data, error } = await supabase.rpc("fn_close_billing_period", {
         _period_id: periodId,
-        _confirmed: confirmed,
+        _digest: confirmation.digest,
+        _acknowledged: confirmation.acknowledged,
       });
       if (error) return { row: null, error: toError(error) };
       const row = Array.isArray(data) ? data[0] : data;
