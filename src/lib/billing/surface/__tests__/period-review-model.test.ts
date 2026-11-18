@@ -324,6 +324,13 @@ describe("buildPeriodReviewModel: each bill's actions", () => {
     expect(has({ bills: [{ ...ok, start_kwh: null }] })).toBe(false);
   });
 
+  it.each([false, true])("offers only a usage correction on a refunded unmetered draft bill (super admin: %s), as the usage route accepts one", (superAdmin) => {
+    const unmetered = tenant(5, "Unmetered", { meterLinkInPeriod: false });
+    const refunded = bill(1, unmetered, { device_id: null, start_kwh: 100, payment_status: "refunded" });
+    const [row] = build({ tenants: [unmetered], bills: [refunded], superAdmin }).body.rows;
+    expect(row.actions).toEqual([{ action: RECORD_USAGE_ACTION.id, params: params(refunded) }]);
+  });
+
   it("offers each payment action with the status it sets", () => {
     const [row] = build({ bills: [bill(1, A, { payment_status: "link_generated" })], superAdmin: true }).body.rows;
     expect(row.actions.filter((a) => a.prefill && "status" in (a.prefill as object))).toEqual([

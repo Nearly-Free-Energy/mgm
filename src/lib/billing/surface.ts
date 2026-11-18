@@ -258,12 +258,13 @@ export const BILLING_SURFACE: Contribution = {
     // status. The kit form does not lock that prefill, so a person can
     // submit another status; the route's transition and super-admin checks
     // stay the authority. If Prepare comes to supply fixed values, revisit.
+    // Every one of them has a confirmation step, Mark as unpaid included.
     // No available(): the loader already offers each by the bill's status
     // and the person's role, and prepare checks both again.
     ...(
       [
         [MARK_PAID_ACTION, "confirm", prepareMarkPaid],
-        [MARK_UNPAID_ACTION, "none", prepareMarkUnpaid],
+        [MARK_UNPAID_ACTION, "confirm", prepareMarkUnpaid],
         [MARK_REFUNDED_ACTION, "confirm", prepareMarkRefunded],
         [MARK_FAILED_ACTION, "confirm", prepareMarkFailed],
         [CANCEL_PAYMENT_LINK_ACTION, "confirm", prepareCancelPaymentLink],

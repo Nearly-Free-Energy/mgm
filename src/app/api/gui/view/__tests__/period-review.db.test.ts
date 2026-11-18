@@ -237,8 +237,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     // An organization manager is not offered marking failed or refunded.
     expect(actionIds(rows)).not.toContain("billing.mark-refunded");
     expect(actionIds(rows)).not.toContain("billing.mark-failed");
-    // Nothing on the refunded bill but its links.
-    expect(rows[3].actions).toEqual([]);
+    // No regenerate and no payment change on the refunded bill; its usage can still be corrected, as legacy and the usage route allow.
+    expect(rows[3].actions.map((a) => a.action)).toEqual(["billing.record-usage"]);
     // The unmetered manual bill on a draft can have its usage corrected.
     expect(rows[4].actions.map((a) => a.action)).toContain("billing.record-usage");
   });

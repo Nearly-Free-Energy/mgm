@@ -232,7 +232,9 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
-      confirm: "none",
+      // One click in legacy; here a confirmation step like its siblings,
+      // since every action on the shared payment-status route confirms.
+      confirm: "confirm",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
     },

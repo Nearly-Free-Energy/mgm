@@ -177,7 +177,7 @@ describe("the period review's actions", () => {
 
   it.each([
     ["billing.mark-paid", "Mark as paid", "confirm"],
-    ["billing.mark-unpaid", "Mark as unpaid", "none"],
+    ["billing.mark-unpaid", "Mark as unpaid", "confirm"],
     ["billing.mark-refunded", "Mark as refunded", "confirm"],
     ["billing.mark-failed", "Mark as failed", "confirm"],
     ["billing.cancel-payment-link", "Cancel pending link", "confirm"],
@@ -391,6 +391,7 @@ describe("preparing the period review's actions", () => {
   it.each([
     ["billing.mark-paid", "unpaid", "paid", "Mark this bill as paid", []],
     ["billing.mark-paid", "failed", "paid", "Mark this bill as paid", []],
+    ["billing.mark-unpaid", "paid", "unpaid", "Mark this bill as unpaid", []],
     ["billing.mark-refunded", "paid", "refunded", "Mark this bill as refunded", []],
     ["billing.mark-failed", "link_generated", "failed", "Mark this bill as failed", []],
     ["billing.cancel-payment-link", "link_generated", "unpaid", "Cancel pending payment link?", ["They'll need a new link to pay."]],
@@ -409,11 +410,15 @@ describe("preparing the period review's actions", () => {
     expect(LineItemPaymentStatusBody.parse(body)).toEqual({ status: to, notes: "receipt 42" });
   });
 
-  it("prepares Mark as unpaid as one step, with no facts", async () => {
+  it("prepares Mark as unpaid for an organization manager with a confirmation step, like its siblings", async () => {
     const out = await prepare(onBill("billing.mark-unpaid", { body: { status: "unpaid" } }), tables({ bill: [billRow({ payment_status: "paid" })] }).client);
     if (!out.ok) throw new Error(out.message);
-    expect(out.value.confirm).toBe("none");
-    expect(out.value.ceremony).toMatchObject({ facts: [], warnings: [] });
+    expect(out.value.confirm).toBe("confirm");
+    expect(out.value.ceremony).toMatchObject({
+      statement: "Mark this bill as unpaid",
+      facts: [{ label: "Tenant" }, { label: "Period" }, { label: "Total", value: { t: "money", v: 5000 } }],
+      warnings: [],
+    });
   });
 
   it.each(["billing.mark-refunded", "billing.mark-failed"])("refuses %s to an organization manager, with the route's copy", async (action) => {

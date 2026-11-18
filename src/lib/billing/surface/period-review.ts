@@ -383,6 +383,7 @@ export async function prepareRegenerateBill(
 /** What each payment-status action's confirmation says. */
 const PAYMENT_CEREMONY: Partial<Record<PaymentStatus, string>> = {
   paid: "Mark this bill as paid",
+  unpaid: "Mark this bill as unpaid",
   refunded: "Mark this bill as refunded",
   failed: "Mark this bill as failed",
 };
@@ -405,10 +406,6 @@ export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentSt
     if (bill.payment_status === to) return BILL_REFUSALS.noOp;
     const allowed = ALLOWED_MANUAL_TRANSITIONS.some((t) => t.from === bill.payment_status && t.to === to);
     if (!from.includes(bill.payment_status) || !allowed) return BILL_REFUSALS.transition;
-    // Mark as unpaid is one step today: no facts, so the flow stays one form.
-    if (to === "unpaid" && !o.cancel) {
-      return { ok: true, model: { type: "ceremony", statement: "Mark this bill as unpaid", facts: [], warnings: [], acknowledgements: [] } };
-    }
     return {
       ok: true,
       model: {
