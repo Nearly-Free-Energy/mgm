@@ -5,12 +5,40 @@ import { LocaleProvider } from "@/components/format/locale-context";
 import { Chip } from "@/components/ui/chip";
 import { StatusChip } from "@/components/ui/status-chip";
 import { CopyTable, type ColumnDef } from "@/components/ui/copy-table";
-import { ClosePeriodDialog } from "@/components/ui/close-period-dialog";
+import { ClosePeriodDialog, type CloseAnswer } from "@/components/ui/close-period-dialog";
+import type { Ceremony } from "@/lib/gui/contract";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { ConsumptionCell } from "@/components/ui/consumption-cell";
 import { ConsumptionCalendar } from "@/components/ui/consumption-calendar";
+
+// The close route's answers for the gallery: the review first (428), then a
+// close after a short wait. The figures are made up.
+const GALLERY_CEREMONY: Ceremony = {
+  type: "ceremony",
+  statement: "Close April 2026. Bills become final, and corrections after this are recorded against the closed period.",
+  facts: [
+    { label: "Period", value: { t: "text", text: "April 2026" } },
+    { label: "Bills", value: { t: "number", v: 12, text: "12" } },
+    { label: "Energy", value: { t: "energy", v: 487.3, unit: "kWh", text: "487.3 kWh" } },
+    { label: "Total", value: { t: "money", v: 4216800, currency: "UGX", text: "UGX 4,216,800" } },
+  ],
+  warnings: ["1 bill has no usage recorded: House 7."],
+  acknowledgements: [
+    { id: "totals_reviewed", label: "I have reviewed these totals, and they are what I will file. Closing is final." },
+    { id: "bills_without_usage", label: "I am closing this period although some bills have no usage recorded." },
+  ],
+  typed: "April 2026",
+  digest: "v1:gallery",
+};
+
+async function galleryClose(_periodId: string, body: unknown): Promise<CloseAnswer> {
+  const confirmed = !!body && typeof body === "object" && "confirmation" in body;
+  if (!confirmed) return { ok: false, status: 428, code: "billing_close_confirmation_required", ceremony: GALLERY_CEREMONY };
+  await new Promise((res) => setTimeout(res, 1500));
+  return { ok: true, status: 200 };
+}
 
 // ─── CopyTable sample data ───────────────────────────────────────────────────
 
@@ -166,15 +194,10 @@ export default function ComponentsDevPage() {
           <ClosePeriodDialog
             open={closePeriodOpen}
             onOpenChange={setClosePeriodOpen}
-            periodLabel="April 2026"
-            summaryRows={[
-              { label: "Tenants", value: "12" },
-              { label: "Total kWh", value: "487.3" },
-              { label: "Tier 1 kWh", value: "392.1" },
-              { label: "Tier 2 kWh", value: "95.2" },
-            ]}
-            grandTotal={4216800}
-            onConfirm={() => new Promise((res) => setTimeout(res, 1500))}
+            periodId="demo-period"
+            onClosed={() => {}}
+            onExportCsv={() => {}}
+            post={galleryClose}
           />
         </Section>
 

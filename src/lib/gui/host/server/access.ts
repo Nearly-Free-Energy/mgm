@@ -15,7 +15,7 @@ import "server-only";
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { rolesCanAccessOrg, type CurrentUserAccess } from "@/lib/auth/access";
-import { detectLocale } from "@/lib/locale";
+import { formatLocale } from "@/lib/locale";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { Fmt, InstallationRequest, SurfaceRequest } from "../../surface";
 
@@ -49,14 +49,9 @@ export type HostRefusal = {
  */
 const ISSUED = Symbol("gui.hostContext");
 
-/** The request's locale from Accept-Language, or "en" when the tag is not one Intl accepts. */
+/** The request's locale from Accept-Language (formatLocale, @/lib/locale). */
 function localeOf(headers: Headers): string {
-  const tag = detectLocale(headers.get("accept-language"));
-  try {
-    return Intl.getCanonicalLocales(tag)[0] ?? "en";
-  } catch {
-    return "en";
-  }
+  return formatLocale(headers.get("accept-language"));
 }
 
 /**

@@ -19,10 +19,9 @@ export interface RegenerateConfirmProps {
  *    still using the old token will get 401 errors until you update its
  *    configuration. Are you sure you want to regenerate?"
  *
- * Confirm button label flips to "Regenerate and revoke old" — matches
- * the established explicit-destructive-verb pattern (ClosePeriodDialog
- * "Close anyway"). This is NOT a generic regenerate button; the explicit
- * destructive verb is the operator's acknowledgement of the cutover.
+ * Confirm button label flips to "Regenerate and revoke old" rather than a
+ * generic "Regenerate": the explicit destructive verb is the operator's
+ * acknowledgement of the hard cutover.
  */
 export function RegenerateConfirm(props: RegenerateConfirmProps) {
   return (
