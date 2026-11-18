@@ -13,9 +13,10 @@ const UUID_RE =
  * invoked via the user-bound server client so the helpers
  * (`is_super_admin()`, `user_can_access_org()`) see the caller's
  * `auth.uid()`. The RPC enforces:
- *   - super_admin-target → caller must be super_admin, scope_id NULL.
- *   - org_manager-target → caller must have access to the target org,
- *     scope_id required.
+ *   - the caller is a super_admin (20261118180000), as the Users page
+ *     offers role changes only to super admins;
+ *   - super_admin-target → scope_id NULL.
+ *   - org_manager-target → scope_id required.
  * Errors surface as Postgres ERRCODE 42501 / 22023; the BEFORE DELETE
  * trigger also fires during the RPC's internal DELETE → can raise
  * 40000 (last super_admin) or 42501 (self).

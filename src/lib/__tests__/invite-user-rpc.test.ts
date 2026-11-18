@@ -11,6 +11,9 @@
  *   - Same permission checks on fn_change_user_role.
  *   - BEFORE DELETE trigger blocks self-revocation.
  *   - BEFORE DELETE trigger blocks last-super_admin removal.
+ *   - Role changes are a super-admin action, and an invitation finalizes
+ *     only an account with no role, filling only its empty profile fields
+ *     (20261118180000).
  *   - Service-role call to fn_finalize_user_invitation fails with 42501
  *     (proves the RPC is auth-bound, not trust-based — a service-role
  *     caller with no user session cannot impersonate a super_admin).
@@ -31,6 +34,7 @@ import {
   serviceClient,
   createTestUser,
   cleanupTestData,
+  runAsDatabaseOwner,
   type TestUser,
 } from "../supabase/__tests__/rls.helpers";
 
@@ -553,4 +557,255 @@ describe("BEFORE DELETE trigger on user_roles", () => {
       scope_id: null,
     });
   }, 60_000);
+});
+
+/** The target's role rows, as (role, scope_id) pairs sorted for comparison. */
+async function rolesOf(userId: string): Promise<string[]> {
+  const svc = await serviceClient();
+  const { data, error } = await svc
+    .from("user_roles")
+    .select("role, scope_id")
+    .eq("user_id", userId);
+  if (error) throw new Error(`[rolesOf] ${error.message}`);
+  return (data ?? []).map((r) => `${r.role}:${r.scope_id ?? "-"}`).sort();
+}
+
+async function profileOf(userId: string) {
+  const svc = await serviceClient();
+  const { data, error } = await svc
+    .from("user_profiles")
+    .select("first_name, last_name, phone")
+    .eq("user_id", userId)
+    .single();
+  if (error) throw new Error(`[profileOf] ${error.message}`);
+  return data;
+}
+
+/** A fresh account holding the given org-scoped rows, with a filled profile. */
+async function makeStaffUser(
+  label: string,
+  rows: Array<{ role: "super_admin" | "org_manager"; scopeId: string | null }>
+): Promise<string> {
+  const id = await makeAuthUser(`ux5-${label}-${Date.now()}@test.local`);
+  const svc = await serviceClient();
+  for (const r of rows) {
+    const { error } = await svc.from("user_roles").insert({
+      user_id: id,
+      role: r.role,
+      scope_type: "org",
+      scope_id: r.scopeId,
+    });
+    if (error) throw new Error(`[makeStaffUser] ${error.message}`);
+  }
+  const { error: profErr } = await svc
+    .from("user_profiles")
+    .update({ first_name: "Kept", last_name: "Person", phone: "+256700000001" })
+    .eq("user_id", id);
+  if (profErr) throw new Error(`[makeStaffUser] profile: ${profErr.message}`);
+  return id;
+}
+
+describe("role changes are made by super admins (20261118180000)", () => {
+  it("an org manager cannot change the role of a manager of their own org", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("rc-own", [
+      { role: "org_manager", scopeId: FIXTURE.orgA },
+    ]);
+
+    const { error } = await userMgrA.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual([`org_manager:${FIXTURE.orgA}`]);
+  });
+
+  it("an org manager cannot assign their org to a manager of another org", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("rc-other", [
+      { role: "org_manager", scopeId: FIXTURE.orgB },
+    ]);
+
+    const { error } = await userMgrA.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual([`org_manager:${FIXTURE.orgB}`]);
+  });
+
+  it("an org manager cannot assign their org to a manager of two orgs", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("rc-two", [
+      { role: "org_manager", scopeId: FIXTURE.orgA },
+      { role: "org_manager", scopeId: FIXTURE.orgB },
+    ]);
+
+    const { error } = await userMgrA.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual(
+      [`org_manager:${FIXTURE.orgA}`, `org_manager:${FIXTURE.orgB}`].sort()
+    );
+  });
+
+  it("an org manager cannot assign their org to a super admin", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("rc-super", [
+      { role: "super_admin", scopeId: null },
+    ]);
+
+    const { error } = await userMgrA.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual(["super_admin:-"]);
+  });
+
+  it("an org manager cannot give a role to an account with none", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeAuthUser(`ux5-rc-none-${Date.now()}@test.local`);
+
+    const { error } = await userMgrA.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual([]);
+  });
+
+  it("a super admin can still move a manager from one org to another", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("rc-move", [
+      { role: "org_manager", scopeId: FIXTURE.orgA },
+    ]);
+
+    const { error } = await userSuper.client.rpc("fn_change_user_role", {
+      p_user_id: target,
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgB,
+    });
+
+    expect(error).toBeNull();
+    expect(await rolesOf(target)).toEqual([`org_manager:${FIXTURE.orgB}`]);
+  });
+});
+
+describe("an invitation finalizes only an account with no role (20261118180000)", () => {
+  const inviteAsMgrA = (target: string, client = userMgrA.client) =>
+    client.rpc("fn_finalize_user_invitation", {
+      p_user_id: target,
+      p_first_name: "New",
+      p_last_name: "Name",
+      p_phone: "+256700000009",
+      p_role: "org_manager",
+      p_scope_id: FIXTURE.orgA,
+    });
+
+  it("refuses an account that manages another org, and leaves its profile", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("inv-other", [
+      { role: "org_manager", scopeId: FIXTURE.orgB },
+    ]);
+
+    const { error } = await inviteAsMgrA(target);
+
+    expect((error as { code?: string } | null)?.code).toBe("42501");
+    expect(await rolesOf(target)).toEqual([`org_manager:${FIXTURE.orgB}`]);
+    expect(await profileOf(target)).toEqual({
+      first_name: "Kept",
+      last_name: "Person",
+      phone: "+256700000001",
+    });
+  });
+
+  it("refuses a super admin's account, whoever asks", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeStaffUser("inv-super", [
+      { role: "super_admin", scopeId: null },
+    ]);
+
+    for (const client of [userMgrA.client, userSuper.client]) {
+      const { error } = await inviteAsMgrA(target, client);
+      expect((error as { code?: string } | null)?.code).toBe("42501");
+    }
+    expect(await rolesOf(target)).toEqual(["super_admin:-"]);
+    expect((await profileOf(target)).first_name).toBe("Kept");
+  });
+
+  it("finalizes an account with no role, filling only the empty profile fields", async () => {
+    if (skipIfRequested()) return;
+    const target = await makeAuthUser(`ux5-inv-fill-${Date.now()}@test.local`);
+    const svc = await serviceClient();
+    await svc
+      .from("user_profiles")
+      .update({ first_name: "Kept", last_name: "", phone: null })
+      .eq("user_id", target);
+
+    const { error } = await inviteAsMgrA(target);
+
+    expect(error).toBeNull();
+    expect(await rolesOf(target)).toEqual([`org_manager:${FIXTURE.orgA}`]);
+    expect(await profileOf(target)).toEqual({
+      first_name: "Kept",
+      last_name: "Name",
+      phone: "+256700000009",
+    });
+  });
+});
+
+describe("the delete guard and administrator logins (20261118180000)", () => {
+  // runAsDatabaseOwner logs in as postgres, as a PostgREST configured with
+  // the postgres login does. The guard skips its checks only when no API
+  // request is attached (no request.jwt.claims). Each attempt deletes every
+  // super_admin row and is rolled back whatever happens.
+  it("guards a postgres login that carries a request, and not one that does not", () => {
+    if (skipIfRequested()) return;
+    // One statement (the CLI prepares it): a DO block that tries each case
+    // in a subtransaction it always undoes, and raises unless the results
+    // are the expected ones, so the failure message carries what happened.
+    const sql = `
+      DO $do$
+      DECLARE
+        claims text;
+        got text[] := '{}';
+        outcome text;
+      BEGIN
+        FOREACH claims IN ARRAY ARRAY[
+          '{"role":"service_role"}',
+          '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000000"}',
+          ''
+        ] LOOP
+          PERFORM set_config('request.jwt.claims', claims, true);
+          BEGIN
+            DELETE FROM public.user_roles WHERE role = 'super_admin';
+            RAISE EXCEPTION 'undo' USING ERRCODE = 'P0001';
+          EXCEPTION
+            WHEN SQLSTATE 'P0001' THEN outcome := 'deleted';
+            WHEN OTHERS THEN outcome := SQLSTATE;
+          END;
+          got := got || outcome;
+        END LOOP;
+        IF got <> ARRAY['40000', '40000', 'deleted'] THEN
+          RAISE EXCEPTION 'service_role, authenticated, no request: %', got;
+        END IF;
+      END
+      $do$;`;
+
+    const result = runAsDatabaseOwner(sql);
+    expect(result.ok, result.output).toBe(true);
+  });
 });
