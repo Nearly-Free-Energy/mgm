@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
 
 type PluginView = {
   name: string;
@@ -172,9 +173,9 @@ export function PluginsPageClient({ orgs }: { orgs: PluginsOrgView[] }) {
                       ) : null}
                       {!plugin.enabled ? (
                         <p className="mt-2 text-xs text-muted-foreground">
-                          Disabled plugins keep existing records; community,
-                          microgrid, and tenant writes fail closed until the
-                          plugin is re-enabled.
+                          {plugin.name === TENANT_APP_PLUGIN_NAME
+                            ? "While it is off, this organization's tenants cannot open the tenant app. The access they have been given is kept."
+                            : "Disabled plugins keep existing records; community, microgrid, and tenant writes fail closed until the plugin is re-enabled."}
                         </p>
                       ) : null}
                     </div>

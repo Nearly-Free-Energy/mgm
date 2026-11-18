@@ -49,8 +49,8 @@ let mockListUsers: {
   error: { message: string } | null;
 } = { data: { users: [] }, error: null };
 let mockTargetRoles: Array<{
-  role: "super_admin" | "org_manager";
-  scope_type: "org";
+  role: "super_admin" | "org_manager" | "tenant";
+  scope_type: "org" | "tenant";
   scope_id: string | null;
 }> = [];
 let mockTargetProfile: {
@@ -457,6 +457,60 @@ describe("POST /api/users/invite", () => {
         p_user_id: EXISTING_ID,
         p_first_name: "New",
         p_last_name: "Person",
+      });
+    });
+
+    // RFC mgm#197: a tenant row is a person's access to the unit they rent,
+    // not staff access, and the answer never says an address is a tenant's.
+    describe("that holds tenant rows", () => {
+      const UNIT = "cccccccc-cccc-4000-8000-000000000003";
+      const tenantRow = { role: "tenant" as const, scope_type: "tenant" as const, scope_id: UNIT };
+
+      async function invite() {
+        const { POST } = await import("../route");
+        const res = await POST(
+          makeRequest({ email: "member@example.com", first_name: "New", role: "org_manager", scope_id: ORG_A })
+        );
+        return { status: res.status, body: await res.json() };
+      }
+
+      it("makes a tenant-only account staff as it would an account with no roles, leaving its tenant rows", async () => {
+        existingAccount(true);
+        mockTargetProfile = { first_name: null, last_name: null, phone: null };
+        mockTargetRoles = [];
+        const noRoles = await invite();
+        const noRolesFinalize = rpcSpy.mock.calls[0];
+
+        rpcSpy.mockClear();
+        sendNoticeSpy.mockClear();
+        mockTargetRoles = [tenantRow];
+        const tenantOnly = await invite();
+
+        expect(tenantOnly).toEqual(noRoles);
+        expect(tenantOnly).toEqual({
+          status: 201,
+          body: { user_id: EXISTING_ID, existing_account: true, email_sent: true },
+        });
+        // The staff row is added; the service client this route holds reads
+        // user_roles only (svcFromImpl), so no tenant row can be removed.
+        expect(rpcSpy.mock.calls).toEqual([noRolesFinalize]);
+        expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
+        expect(createUserSpy).not.toHaveBeenCalled();
+        expect(deleteUserSpy).not.toHaveBeenCalled();
+      });
+
+      it("still refuses with the role-change hint when the account also holds other staff access", async () => {
+        existingAccount(true);
+        mockTargetRoles = [tenantRow, { role: "super_admin", scope_type: "org", scope_id: null }];
+        expect(await invite()).toMatchObject({ status: 409, body: { code: "other_access" } });
+        expect(rpcSpy).not.toHaveBeenCalled();
+      });
+
+      it("still says the person already has access when they also hold the requested role", async () => {
+        existingAccount(true);
+        mockTargetRoles = [tenantRow, { role: "org_manager", scope_type: "org", scope_id: ORG_A }];
+        expect(await invite()).toMatchObject({ status: 409, body: { code: "already_member" } });
+        expect(rpcSpy).not.toHaveBeenCalled();
       });
     });
 

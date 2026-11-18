@@ -10,6 +10,10 @@
  *   - 403: org_manager → cross-org org_manager target.
  *   - 403: org_manager → orphan target (no role row).
  *   - 404: target not found in auth.users (lookup AFTER permission has passed).
+ *   - 404 with no notice: super_admin → an account the RPC lists for no
+ *     one, such as a tenant's (RFC mgm#197); 403 for anyone else.
+ *   - 500: the visibility RPC failed; never read as no row (so never the
+ *     super admin's 404), for any caller.
  *   - 409: pre-check email_confirmed_at IS NOT NULL.
  *   - 429: more than 3 resends for one person in 10 minutes.
  *   - 502: the notice could not be sent.
@@ -39,10 +43,13 @@ let mockCaller: { id: string; email?: string } | null = null;
 // canonical visibility gate. A visible orphan surfaces as a row with
 // NULL role/scope columns (LEFT JOIN miss on user_roles).
 let mockTargetRoleRow: {
-  role: "super_admin" | "org_manager" | null;
-  scope_type: "org" | null;
+  role: "super_admin" | "org_manager" | "tenant" | null;
+  scope_type: "org" | "tenant" | null;
   scope_id: string | null;
 } | null = null;
+
+// When set, the RPC fails: supabase-js answers `{ data: null, error }`.
+let mockRpcError: { code?: string; message: string } | null = null;
 
 // Roles for the caller (used by access.ts helpers via the same mock from()).
 let mockCallerRoles: Array<{
@@ -65,6 +72,8 @@ let mockInviteResult: {
 
 // Spy capturing the inviteUserByEmail args for shape assertions.
 const inviteUserByEmailSpy = vi.fn();
+// Spy recording whether the route looked the target up (Step D).
+const getUserByIdSpy = vi.fn();
 
 // User-bound client `.from('user_profiles')` and `.from('organizations')`
 // chains used by buildInviteDataPayload — return permissive defaults.
@@ -118,6 +127,7 @@ vi.mock("@/lib/supabase/server", () => ({
     // takes `data?.[0]`. A null `mockTargetRoleRow` → empty array → no row.
     rpc: vi.fn(async (name: string) => {
       if (name === "fn_list_visible_users") {
+        if (mockRpcError) return { data: null, error: mockRpcError };
         return {
           data: mockTargetRoleRow
             ? [
@@ -153,7 +163,10 @@ vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => ({
     auth: {
       admin: {
-        getUserById: vi.fn(async () => mockGetUserByIdResult),
+        getUserById: vi.fn(async (...args: unknown[]) => {
+          getUserByIdSpy(...args);
+          return mockGetUserByIdResult;
+        }),
         inviteUserByEmail: vi.fn(async (...args: unknown[]) => {
           inviteUserByEmailSpy(...args);
           return mockInviteResult;
@@ -202,9 +215,11 @@ beforeEach(() => {
   rateLimitSpy.mockReset();
   rateLimitSpy.mockReturnValue({ ok: true });
   inviteUserByEmailSpy.mockReset();
+  getUserByIdSpy.mockReset();
   mockCaller = { id: CALLER_UUID, email: "caller@example.com" };
   mockCallerRoles = [];
   mockTargetRoleRow = null;
+  mockRpcError = null;
   mockGetUserByIdResult = {
     data: { user: null },
     error: { code: "user_not_found", message: "not found" },
@@ -282,9 +297,11 @@ describe("POST /api/users/[id]/resend-invite", () => {
   });
 
   // ── 404: missing auth user (only after permission has passed) ──
+  // A row with no role (an orphan) takes a super_admin to the lookup; no row
+  // at all is answered 404 before it (the tenant-only cases below).
   it("returns 404 when the target user does not exist in auth.users (super_admin caller)", async () => {
     mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
-    mockTargetRoleRow = null; // orphan path, super_admin allowed
+    mockTargetRoleRow = { role: null, scope_type: null, scope_id: null }; // orphan path, super_admin allowed
     mockGetUserByIdResult = {
       data: { user: null },
       error: { code: "user_not_found", message: "not found" },
@@ -297,12 +314,45 @@ describe("POST /api/users/[id]/resend-invite", () => {
 
   it("returns 404 when getUserById returns null user with no error code", async () => {
     mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
-    mockTargetRoleRow = null;
+    mockTargetRoleRow = { role: null, scope_type: null, scope_id: null };
     mockGetUserByIdResult = { data: { user: null }, error: null };
 
     const { POST } = await import("../route");
     const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
     expect(res.status).toBe(404);
+  });
+
+  // ── 500: the visibility RPC failed ─────────────────────────────
+  // A failed call is not an empty result: a super admin must not be told
+  // that a listed invitee does not exist, and nobody is told "no permission".
+  it.each([
+    ["a super admin", [{ role: "super_admin", scope_type: null, scope_id: null }]],
+    ["an org manager", [{ role: "org_manager", scope_type: "org", scope_id: ORG_A }]],
+  ] as const)("returns 500, not 404 or 403, to %s when fn_list_visible_users fails", async (_who, roles) => {
+    mockCallerRoles = roles.map((r) => ({ ...r }));
+    mockRpcError = { code: "57014", message: "canceling statement due to statement timeout" };
+    // Were the route to reach the lookup, the target would be a pending invitee.
+    mockGetUserByIdResult = {
+      data: { user: { id: TARGET_UUID, email: "target@example.com", email_confirmed_at: null } },
+      error: null,
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
+      expect(res.status).toBe(500);
+      const json = await res.json();
+      expect(json).toEqual({ error: "Could not check the user's access. Please retry." });
+      expect(json.error).not.toBe("User not found.");
+      expect(getUserByIdSpy).not.toHaveBeenCalled();
+      expect(sendNoticeSpy).not.toHaveBeenCalled();
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("resend_invite.visibility_error")
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   // ── 409: already accepted (pre-check) ──────────────────────────
@@ -429,5 +479,73 @@ describe("POST /api/users/[id]/resend-invite", () => {
     const { POST } = await import("../route");
     const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
     expect(res.status).toBe(200);
+  });
+
+  // ── Tenant access is not staff access (RFC mgm#197) ──────────────
+  // The RPC lists no one who holds or has held tenant access without ever
+  // holding staff access, for any caller (no row), and its role columns
+  // never hold a tenant role; were they to, the route reads that as no row.
+  // Either way the account is answered as one that does not exist, with no
+  // notice, so nothing tells the caller it is a tenant's and no tenant is
+  // sent a staff invitation.
+  describe("a tenant-only account", () => {
+    const UNIT = "cccccccc-cccc-4000-8000-000000000003";
+    const TENANT_ROWS = [
+      ["the RPC leaves it out", null],
+      ["a tenant role in the RPC's role columns", { role: "tenant", scope_type: "tenant", scope_id: UNIT }],
+    ] as const;
+
+    async function answer() {
+      const { POST } = await import("../route");
+      const res = await POST(makeRequest(TARGET_UUID), makeContext(TARGET_UUID));
+      return { status: res.status, body: await res.json() };
+    }
+
+    // An account that does not exist: no row, and no auth user.
+    async function unknown() {
+      mockTargetRoleRow = null;
+      mockGetUserByIdResult = { data: { user: null }, error: { code: "user_not_found", message: "not found" } };
+      return answer();
+    }
+
+    // The tenant's account exists and has not signed in yet, as PR 5's
+    // tenant accounts are until their first sign-in.
+    function tenantAccount(row: (typeof TENANT_ROWS)[number][1]) {
+      mockTargetRoleRow = row === null ? null : { ...row };
+      mockGetUserByIdResult = {
+        data: { user: { id: TARGET_UUID, email: "tenant@example.com", email_confirmed_at: null } },
+        error: null,
+      };
+    }
+
+    it.each(TENANT_ROWS)("refuses an org manager as for an unknown account (%s)", async (_, row) => {
+      mockCallerRoles = [{ role: "org_manager", scope_type: "org", scope_id: ORG_A }];
+      const none = await unknown();
+      tenantAccount(row);
+      expect(await answer()).toEqual(none);
+      expect(none.status).toBe(403);
+      expect(sendNoticeSpy).not.toHaveBeenCalled();
+    });
+
+    it.each(TENANT_ROWS)("answers a super admin as for an unknown account and sends no notice (%s)", async (_, row) => {
+      mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
+      const none = await unknown();
+      expect(none).toEqual({ status: 404, body: { error: "User not found." } });
+      tenantAccount(row);
+      expect(await answer()).toEqual(none);
+      expect(sendNoticeSpy).not.toHaveBeenCalled();
+      expect(inviteUserByEmailSpy).not.toHaveBeenCalled();
+    });
+
+    it("still resends to a staff orphan a super admin can see (a row with no role)", async () => {
+      mockCallerRoles = [{ role: "super_admin", scope_type: null, scope_id: null }];
+      mockTargetRoleRow = { role: null, scope_type: null, scope_id: null };
+      mockGetUserByIdResult = {
+        data: { user: { id: TARGET_UUID, email: "orphan@example.com", email_confirmed_at: null } },
+        error: null,
+      };
+      expect(await answer()).toEqual({ status: 200, body: { resent: true } });
+      expect(sendNoticeSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });

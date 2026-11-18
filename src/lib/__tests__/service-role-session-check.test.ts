@@ -123,6 +123,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
   },
+  "src/lib/tenant-app/surface-plugin.ts": {
+    privilegedExports: [],
+    reason:
+      "Registers the plugin's GUI contribution on mgmSurface; anything the contribution runs is called only through that registry, which is tracked by name.",
+  },
   "src/lib/metering/compose.ts": {
     privilegedExports: ["MeteringPlugin"],
     reason:
@@ -206,10 +211,13 @@ const SESSION_CHECKS = new Set([
   "currentUserCanAccessCommunity",
   "currentUserCanAccessMicrogrid",
   "authorizeOrganization",
+  // src/lib/runtime/scope.ts: getUser() before the caller's tenant row.
+  "authorizeTenant",
   "composeBilling",
   "composeCommunityManagement",
   "composeMetering",
   "composePayments",
+  "composeTenantApp",
   // src/lib/auth/access.ts: getUser() and the caller's role rows.
   "getCurrentUserAccess",
   // The request-scoped helpers in src/lib/auth/request-access.ts, added by

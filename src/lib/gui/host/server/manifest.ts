@@ -11,25 +11,33 @@ import "server-only";
  * run through the GUI surface registry (decision 8 on #115), read with
  * surfaceSnapshot (./snapshot.ts), each on its own request and within
  * STATUS_BUDGET_MS (./signals.ts).
+ *
+ * A person who holds tenant rows (RFC mgm#197 § 4) is shown the tenant
+ * entries of plugins live for their own units' organizations. One who sees
+ * no organization, since all their rows are tenant rows, gets the tenant
+ * manifest (buildTenantManifestModel): their units and those entries, and
+ * nothing of an organization.
  */
 import { cache } from "react";
 import { headers } from "next/headers";
-import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
+import { rolesIncludeStaff, rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import { createClient } from "@/lib/supabase/server";
 import type { Manifest } from "../../contract";
 import { createFmt } from "../../fmt";
-import { buildManifestModel, livePlugins, MAX_PLACES_PER_KIND } from "../shared/manifest-model";
+import { buildManifestModel, buildTenantManifestModel, livePlugins, MAX_PLACES_PER_KIND } from "../shared/manifest-model";
+import { chooseTenantUnit, unitsNamedBy } from "../shared/tenant-units";
 import { hostContext, requireIssued, type HostContext, type HostRefusal } from "./access";
 import { resolveSegments, type Scope } from "./entities";
-import { pluginGate } from "./gate-state";
+import { pluginGate, unitPluginGate } from "./gate-state";
 import { manifestSchema } from "./model-schema";
 import { pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
 import { parseOrFail } from "./parse";
 import { collectStatus } from "./signals";
 import { surfaceSnapshot } from "./snapshot";
 import type { SurfaceSnapshot } from "./surface-registry";
+import { readTenantUnits, type HostUnit } from "./units";
 
 export { STATUS_BUDGET_MS } from "./signals";
 
@@ -113,10 +121,79 @@ async function pathScope(ctx: HostContext, scope: Scope, rows: PlaceRows): Promi
   };
 }
 
+type Gate = ManifestInput["gate"];
+
+/**
+ * Plugins live for at least one of `units`' organizations, each asked once,
+ * through the gate of one unit there (unitPluginGate), with the person's own
+ * session. A plugin is live for an organization with its dependencies, as
+ * livePlugins decides, so the union holds each dependency too.
+ */
+async function unitsGate(ctx: HostContext, units: readonly HostUnit[]): Promise<Gate> {
+  const byOrganization = new Map<string, HostUnit>();
+  for (const unit of units) if (!byOrganization.has(unit.organizationId)) byOrganization.set(unit.organizationId, unit);
+  const lives = await Promise.all(
+    [...byOrganization.values()].map(async (unit) => {
+      const gate = unitPluginGate(ctx, unit);
+      const decisions = await Promise.all(MGM_BUNDLED_PLUGINS.map(async (p) => [p.name, (await gate(p.name)).ok] as const));
+      return livePlugins(Object.fromEntries(decisions));
+    }),
+  );
+  return Object.fromEntries(MGM_BUNDLED_PLUGINS.filter((p) => lives.some((live) => live.has(p.name))).map((p) => [p.name, true]));
+}
+
+/**
+ * The person's units. For a person with a staff row a unit that cannot be
+ * read costs only the tenant entries, so their manifest still builds; for
+ * anyone else the failure is the page's.
+ */
+function unitsOf(ctx: HostContext, staff: boolean): Promise<HostUnit[]> {
+  return readTenantUnits(ctx).catch((error: unknown) => {
+    if (!staff) throw error;
+    console.error("[gui] manifest: units could not be read");
+    return [];
+  });
+}
+
+/**
+ * The tenant manifest for a person who sees no organization. The current
+ * unit is the one the path's `unit` names among theirs, else the last one
+ * they used (the interface keeps `org.id`, here a unit's, in the cookie it
+ * keeps the last organization in: org-cookie.ts), else the first.
+ */
+async function buildTenantManifest(
+  ctx: HostContext,
+  snapshot: SurfaceSnapshot,
+  o: { gui: string; path?: string | null; preferred?: string | null },
+  name: string | null,
+  units: readonly HostUnit[],
+): Promise<Manifest> {
+  const held = units.map((u) => ({ role: "tenant" as const, scope_type: "tenant" as const, scope_id: u.tenantId }));
+  const fromPath = chooseTenantUnit(held, unitsNamedBy(o.path));
+  const preferred = chooseTenantUnit(held, o.preferred ? [o.preferred] : []);
+  const current = fromPath.ok ? fromPath.tenantId : preferred.ok && o.preferred ? preferred.tenantId : null;
+  const model = buildTenantManifestModel({
+    release: RELEASE,
+    locale: ctx.locale,
+    now: ctx.now,
+    gui: o.gui,
+    user: { name, email: ctx.access.user.email },
+    units: units.map((u) => ({ id: u.tenantId, label: u.label, timezone: u.timezone })),
+    current,
+    tenantGate: await unitsGate(ctx, units),
+    nav: snapshot.nav,
+    views: snapshot.views,
+  });
+  const parsed = parseOrFail(manifestSchema, model, "manifest");
+  if (!parsed.ok) throw new Error("GUI host: the manifest failed its schema");
+  return parsed.value;
+}
+
 /**
  * The manifest for `ctx`'s person, in the organization the hints select
- * (organization.ts), with the interface `gui`. Refuses with gui_no_access
- * when the person can see no organization.
+ * (organization.ts), with the interface `gui`. A person who sees no
+ * organization gets the tenant manifest when they hold a unit, and is
+ * refused with gui_no_access otherwise.
  */
 export async function buildManifest(
   ctx: HostContext,
@@ -124,19 +201,25 @@ export async function buildManifest(
 ): Promise<ManifestOutcome> {
   requireIssued(ctx);
   const snapshot = await surfaceSnapshot();
-  const [path, organizations, name] = await Promise.all([
-    resolvePath(ctx, snapshot, o.path),
+  const staff = rolesIncludeStaff(ctx.access.roles);
+  const [path, organizations, name, units] = await Promise.all([
+    staff ? resolvePath(ctx, snapshot, o.path) : null,
     visibleOrganizations(ctx),
     readName(ctx),
+    unitsOf(ctx, staff),
   ]);
   const organizationId = pickOrganization(organizations, { ...o, fromPath: path?.organizationId });
   const org = organizations.find((candidate) => candidate.id === organizationId);
-  if (!org) return { ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." };
+  if (!org) {
+    if (units.length === 0) return { ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." };
+    return { ok: true, manifest: await buildTenantManifest(ctx, snapshot, o, name, units) };
+  }
 
   const gate = pluginGate(ctx, org.id);
-  const [decisions, places] = await Promise.all([
+  const [decisions, places, tenantGate] = await Promise.all([
     Promise.all(MGM_BUNDLED_PLUGINS.map(async (p) => [p.name, (await gate(p.name)).ok] as const)),
     readPlaces(ctx, org.id),
+    units.length > 0 ? unitsGate(ctx, units) : undefined,
   ]);
   const enabled: Partial<Record<MgmPluginName, boolean>> = Object.fromEntries(decisions);
   const live = livePlugins(enabled);
@@ -154,9 +237,15 @@ export async function buildManifest(
     gui: o.gui,
     user: { name, email: ctx.access.user.email },
     superAdmin: rolesIncludeSuperAdmin([...ctx.access.roles]),
+    // `org` is one the person sees as staff (visibleOrganizations). Tenant
+    // entries follow the plugin state of their own units' organizations
+    // (tenantGate), not this one's.
+    staff: true,
+    tenant: units.length > 0,
     org,
     orgs: organizations,
     gate: enabled,
+    ...(tenantGate ? { tenantGate } : {}),
     nav: snapshot.nav,
     views: snapshot.views,
     status: statuses.flatMap((s, i) => (items[i] ? [{ plugin: s.plugin, item: items[i] }] : [])),

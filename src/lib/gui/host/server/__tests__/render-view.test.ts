@@ -36,7 +36,11 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-lang
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
+import { createClient } from "@/lib/supabase/server";
 import { pageHref, renderView, resolveInitialView } from "../render-view";
+import { UnitPicker } from "../unit-picker";
+import { NOT_RELEASED, UNIT_REQUIRED } from "../view";
+import { tableClient, tenantHomes, tenantOf } from "./host-fakes";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
 const COMMUNITY = "e7300000-0000-4000-8001-000000000001";
@@ -62,6 +66,8 @@ const MANIFEST: Manifest = buildManifestModel({
   gui: "gridtop",
   user: { name: null, email: "manager@example.test" },
   superAdmin: false,
+  staff: true,
+  tenant: false,
   org: { id: ORG, name: "Org One" },
   orgs: [{ id: ORG, name: "Org One" }],
   gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
@@ -172,6 +178,53 @@ describe("renderView", () => {
     const failed = (await renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })) as Node;
     expect(failed.type).toBe(ViewUnavailable);
     expect(((failed.props?.children as Node).props?.children as Node[])[1].props).toMatchObject({ tone: "destructive", title: "This view could not be loaded." });
+  });
+});
+
+describe("renderView for a tenant view (RFC mgm#197 § 4)", () => {
+  const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
+  const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
+  const TENANT: CurrentUserAccess = { user: { id: "user-2" } as User, roles: [tenantOf(UNIT_A), tenantOf(UNIT_B)] };
+
+  function homes(units: Parameters<typeof tenantHomes>[0]) {
+    const made = tableClient({}, tenantHomes(units));
+    vi.mocked(createClient).mockResolvedValue(made.client as Awaited<ReturnType<typeof createClient>>);
+    return made.calls;
+  }
+
+  it("offers a person with several units who named none each unit, on the same page", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    const calls = homes([
+      { id: UNIT_B, name: "Shop 9", orgId: ORG, microgrid: "Kasana West" },
+      { id: UNIT_A, name: "Grace Namata", unitLabel: "Unit 4", orgId: ORG },
+    ]);
+    const tree = (await renderView({ path: ["my"], search: { month: "2026-11" }, access: TENANT, gui: GUI })) as Node;
+    // Inside a ViewUnavailable, so the shell stops waiting for a model.
+    expect(tree.type).toBe(ViewUnavailable);
+    const picker = tree.props?.children as Node;
+    expect(picker.type).toBe(UnitPicker);
+    expect(picker.props?.choices).toEqual([
+      { label: "Grace Namata", detail: "Unit 4 · Kasana East", href: `/my?month=2026-11&unit=${UNIT_A}` },
+      { label: "Shop 9", detail: "Kasana West", href: `/my?month=2026-11&unit=${UNIT_B}` },
+    ]);
+    // Each unit through fn_tenant_home, on the person's own session.
+    expect(calls.map((c) => c.table)).toEqual(["rpc:fn_tenant_home", "rpc:fn_tenant_home"]);
+  });
+
+  it("answers not found when none of the person's units answers any more", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes([]);
+    await expect(renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })).rejects.toThrow("not-found");
+  });
+
+  it("shows a tenant whose tenant app is off the page an unreleased path shows, inside the shell", async () => {
+    mocks.dispatchView.mockResolvedValue(NOT_RELEASED);
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect(tree.type).toBe(ViewUnavailable);
+    const [heading, body] = (tree.props?.children as Node).props?.children as Node[];
+    expect(heading).toMatchObject({ type: "h1", props: { children: "Not available in this release" } });
+    expect(body).toMatchObject({ type: "p", props: { children: "This page is not part of the MGM release installed here." } });
+    expect(JSON.stringify(tree)).not.toContain("turned on");
   });
 });
 

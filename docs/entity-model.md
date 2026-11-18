@@ -82,9 +82,10 @@ may hold several. Three roles ship:
   and nothing else (`CLAUDE.md` § "RLS helper functions").
 
 `user_roles_role_scope_type_consistent` pins each role to its scope type and
-rejects any role it does not list. A manager who also rents holds a staff row
-and a tenant row, so "has a role row" no longer means "is staff": a staff
-check filters on the staff roles or the org scope. Further roles —
+rejects any role it does not list. A tenant who is later made staff holds a
+tenant row and a staff row (a manager who rents is given tenant access on
+another address, below), so "has a role row" no longer means "is staff": a
+staff check filters on the staff roles or the org scope. Further roles —
 `microgrid_manager`, `community_admin`, `region_admin` — are future
 extensions by enum addition; before adding one, read `CLAUDE.md` on why a
 scoped configuration role was added and then removed.
@@ -111,7 +112,16 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   turn a contact field into a credential, so access is always granted
   explicitly. The grant is made by the access route with the service role, on
   the manager's behalf, for the account of the address the manager typed; no
-  signed-in caller names an account by id.
+  signed-in caller names an account by id. An address whose account holds or
+  has held a staff role is refused (`staff_access_accounts` remembers who has
+  been staff, `20261118140000_tenant_app_plugin.sql`), so a manager who rents
+  gives the unit another address, and every staff account, current or
+  former, stays on the Users page.
+- The Users page never touches tenant rows. Removing someone's staff access
+  there leaves the units they rent, and inviting an address whose only rows
+  are tenant rows makes it staff and keeps them; no answer tells the
+  inviter that the address is a tenant's. Being staff from then on, that
+  address is given no further unit.
 - A tenant role row is removed with its tenant: `user_roles.scope_tenant_id`
   references `tenants` with `ON DELETE CASCADE`.
 - Tenants read no microgrid, edge, community or organization row. The few

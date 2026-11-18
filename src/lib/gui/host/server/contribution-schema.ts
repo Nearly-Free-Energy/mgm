@@ -14,7 +14,9 @@ import "server-only";
  * levels; path segments against params and bindings; referenced entity kinds;
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
  * describe; examples against the model schemas and the declared keys; no
- * assistant reading of views reached from configure or system navigation.
+ * assistant reading of views reached from configure or system navigation;
+ * tenant views without segments, attachments or assistant reading, reached
+ * only from tenant navigation.
  *
  * Not checked here, because one contribution cannot show them: one
  * contribution per plugin, ids unique across plugins, an attach target in
@@ -97,7 +99,7 @@ const navSchema = z
     icon: iconSchema,
     group: navGroupSchema,
     order: z.number(),
-    audience: z.literal("super-admin").optional(),
+    audience: z.enum(["staff", "super-admin", "tenant"]).optional(),
     view: idSchema.optional(),
     href: routePattern.optional(),
     needs: z.array(z.enum(CORE_ENTITY_KINDS)).optional(),
@@ -238,12 +240,22 @@ const viewSchema = z
     }),
     ext: z.strictObject({ schema: extSchemaName, zod: zodType }).optional(),
     examples: z.array(z.unknown()).min(1, "a view needs at least one example").readonly(),
-    scope: z.enum(["organization", "installation"]).optional(),
+    scope: z.enum(["organization", "installation", "tenant"]).optional(),
     load: fn,
   })
   .superRefine((v, ctx) => {
     checkSegments(ctx, v.path, Object.keys(v.params), ["params"], "params");
     if (v.entity !== undefined && !(v.entity in v.params)) add(ctx, ["entity"], "entity must name one of the params");
+    // A tenant view is about the caller's own unit, which the host picks from
+    // their tenant rows (RFC mgm#197 § 4): a path segment would go through
+    // the staff resolver, and an attachment would list it on staff views.
+    // It carries a tenant's name and unit, which #133's data boundary keeps
+    // from any assistant.
+    if (v.scope === "tenant") {
+      if (Object.keys(v.params).length > 0) add(ctx, ["params"], "a tenant view's path has no segments: its unit is the caller's");
+      if (v.attach !== undefined) add(ctx, ["attach"], "a tenant view is never attached to another view");
+      if (v.agent !== undefined) add(ctx, ["agent"], "a tenant view cannot be read by an assistant");
+    }
     for (const p of v.ext ? strictProblems(v.ext.zod) : []) add(ctx, ["ext", "zod", ...p.path], p.message);
     const declared = (key: string) =>
       v.declares.keys.includes(key) || (v.declares.prefixes ?? []).some((prefix) => key.startsWith(prefix));
@@ -377,6 +389,13 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
     const j = views.findIndex((v) =>
       n.view === undefined ? n.href !== undefined && routeKey(v.path) === routeKey(n.href) : v.id === n.view,
     );
+    // Tenant entries and tenant views go together, so no staff entry leads to
+    // a unit's page and no tenant entry to a staff page.
+    const tenantView = j >= 0 && views[j].scope === "tenant";
+    if (n.audience === "tenant" && (n.view === undefined || !tenantView))
+      add(ctx, ["nav", i, "audience"], "a tenant nav entry names a tenant view");
+    else if (n.audience !== "tenant" && tenantView)
+      add(ctx, ["nav", i, "audience"], "a nav entry that leads to a tenant view is for the tenant audience");
     if (j < 0) {
       if (n.view !== undefined) add(ctx, ["nav", i, "view"], `"${n.view}" is not a view in this contribution`);
       return;

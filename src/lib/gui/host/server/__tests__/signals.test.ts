@@ -14,7 +14,7 @@ vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
 
 import { UNCHECKED_REASON } from "../merge";
 import { MAX_TOP, collectSignals, collectStatus } from "../signals";
-import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient } from "./host-fakes";
+import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
 const CANARY = "CANARY-7f3a91";
@@ -291,6 +291,15 @@ describe("collectSignals", () => {
   it("refuses with 403 when the person can see no organization", async () => {
     roles = [managerOf("e7100000-0000-4000-8000-0000000000ff")];
     expect(await collect()).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+  });
+
+  it("refuses with 403 a person whose rows are all tenant rows, running no watcher and asking no gate", async () => {
+    roles = [tenantOf("e7400000-0000-4000-8000-00000000000a")];
+    const load = vi.fn(async () => []);
+    use([{ plugin: "metering", id: "metering.watch", load } as unknown as SurfaceSnapshot["signals"][number]]);
+    expect(await collect(ORG_A)).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+    expect(load).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
   });
 
   it("refuses a context hostContext did not issue", async () => {

@@ -14,7 +14,8 @@ import "server-only";
 import type { Context, Fiber, Plugin } from "cordis";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getCurrentUserRoles } from "@/lib/auth/access";
-import { ORG_MANAGER, SCOPE_ORG, SUPER_ADMIN } from "@/lib/roles";
+import { ORG_MANAGER, SCOPE_ORG, SCOPE_TENANT, SUPER_ADMIN, TENANT } from "@/lib/roles";
+import type { TenantUnit } from "@/lib/tenant-app/types";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import { getMgmRuntime, requireActive, type MgmRuntime } from "./root";
 import type { MgmRequest } from "./services";
@@ -41,6 +42,8 @@ export const REQUEST_SERVICES = [
   "paymentsScope",
   "paymentProviders",
   "payments",
+  "tenantAppScope",
+  "tenantApp",
 ] as const;
 
 export type OrganizationAccess =
@@ -72,6 +75,97 @@ export async function authorizeOrganization(
     );
   if (!canAccess) return { ok: false, reason: "forbidden" };
   return { ok: true, user, roles };
+}
+
+export type TenantAccess =
+  | { ok: true; user: User; roles: UserRoleRecord[]; unit: TenantUnit }
+  | { ok: false; reason: "invalid_tenant" | "unauthenticated" | "forbidden" | "unavailable" };
+
+/** A row of `fn_tenant_home` (20261118100100_tenant_role_access.sql). */
+type TenantHomeRow = {
+  tenant_id: string;
+  display_name: string;
+  unit_label: string | null;
+  microgrid_id: string;
+  microgrid_name: string;
+  timezone: string;
+  currency: string;
+  organization_id: string;
+};
+
+/**
+ * The authorization step of a tenant's request (RFC mgm#197 § 3): UUID
+ * check, authenticated user, the caller's own `tenant` row for this tenant,
+ * then the unit from `fn_tenant_home`, which names its organization. Staff
+ * rows do not count: a super admin or org manager reads a unit through the
+ * staff pages, never as its tenant, as `user_can_access_tenant` decides.
+ *
+ * Everything is read with the caller's own client. The role row comes
+ * through "Users can view their own roles" (00002_rls.sql), and the unit
+ * through `fn_tenant_home`, which answers only a caller who holds a tenant
+ * row for it; it is the tenant's only view of the microgrid, since no tenant
+ * policy exists on `microgrids`. If either stops answering the tenant, this
+ * refuses every tenant. A failed read of either answers "unavailable", so a
+ * transient error is never read as a unit the caller does not hold.
+ *
+ * The plugin gate is the composer's next step (composeTenantApp), as it is
+ * after authorizeOrganization, so its codes and copy stay the gate's own.
+ */
+export async function authorizeTenant(
+  supabase: SupabaseClient,
+  tenantId: string
+): Promise<TenantAccess> {
+  if (!UUID_RE.test(tenantId)) return { ok: false, reason: "invalid_tenant" };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, reason: "unauthenticated" };
+  // Read here, not through getCurrentUserRoles, which answers a failed read
+  // with no rows: a tenant must be asked to retry, not told the unit is gone.
+  let roles: UserRoleRecord[];
+  try {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("*")
+      .eq("user_id", user.id)
+      .returns<UserRoleRecord[]>();
+    if (error) return { ok: false, reason: "unavailable" };
+    roles = data ?? [];
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+  const holdsUnit = roles.some(
+    (role) =>
+      role.role === TENANT && role.scope_type === SCOPE_TENANT && role.scope_id === tenantId
+  );
+  if (!holdsUnit) return { ok: false, reason: "forbidden" };
+
+  let rows: unknown;
+  try {
+    const { data, error } = await supabase.rpc("fn_tenant_home", { _tenant_id: tenantId });
+    if (error) return { ok: false, reason: "unavailable" };
+    rows = data;
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+  const row = (Array.isArray(rows) ? rows[0] : null) as TenantHomeRow | null | undefined;
+  // No row: the access was removed, or the unit deleted, since the role read.
+  if (!row || row.tenant_id !== tenantId) return { ok: false, reason: "forbidden" };
+  return {
+    ok: true,
+    user,
+    roles,
+    unit: {
+      tenantId: row.tenant_id,
+      displayName: row.display_name,
+      unitLabel: row.unit_label,
+      microgridId: row.microgrid_id,
+      microgridName: row.microgrid_name,
+      timezone: row.timezone,
+      currency: row.currency,
+      organizationId: row.organization_id,
+    },
+  };
 }
 
 export const RequestScopePlugin = {

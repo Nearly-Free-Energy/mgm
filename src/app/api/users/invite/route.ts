@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import {
   currentUserIsSuperAdmin,
   currentUserCanAccessOrg,
+  staffRoles,
 } from "@/lib/auth/access";
 import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
 import { buildInviteDataPayload } from "@/lib/auth/invite-data-payload";
@@ -40,14 +41,18 @@ import type { UserRole } from "@/lib/types/domain";
  *
  * Steps:
  *   1. Validate body + defense-in-depth permission check.
- *   2. Look up an existing account for the email. Decided by role rows,
- *      not by the profile: every auth.users row has a profile (trigger,
- *      00017), so a profile says nothing about access.
+ *   2. Look up an existing account for the email. Decided by staff role
+ *      rows, not by the profile: every auth.users row has a profile
+ *      (trigger, 00017), so a profile says nothing about access.
  *        - Already holds the requested access → 409 `already_member`.
- *        - Holds other access → 409 `other_access` (a role change).
- *        - Holds none (access removed, or an unfinished invitation) →
- *          reuse the account. Profile fields the person already has are
- *          kept.
+ *        - Holds other staff access → 409 `other_access` (a role change).
+ *        - Holds none (access removed, an unfinished invitation, or only
+ *          tenant access to a unit they rent) → reuse the account. Profile
+ *          fields the person already has are kept, and so are tenant rows
+ *          (RFC mgm#197): a tenant made staff keeps their home. A tenant
+ *          row is not access here, so the answer for an address with only
+ *          tenant rows is the answer for one with no rows; it never says
+ *          that an address is a tenant's.
  *      No account: svc.auth.admin.createUser(email) creates one with no
  *      password and email_confirmed_at = NULL, and sends nothing.
  *   3. userClient.rpc('fn_finalize_user_invitation', ...) — inserts the
@@ -211,7 +216,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (lookup.user) {
     const existing = lookup.user;
-    const roles = await rolesOf(svc, existing.id);
+    const roles = await staffRolesOf(svc, existing.id);
     if (roles === null) {
       return NextResponse.json(
         { error: "Could not check the account's access. Please retry." },
@@ -234,8 +239,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     if (roles.length > 0) {
-      // A user may hold several role rows; any other access means this is
-      // a role change, which has its own flow and permission rules.
+      // A user may hold several role rows; any other staff access means
+      // this is a role change, which has its own flow and permission rules.
       return NextResponse.json(
         {
           error:
@@ -248,9 +253,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // An account with no access: someone whose access was removed (DELETE
-    // /api/users/[id] keeps the account and profile so they can be invited
-    // again) or one left behind by an invitation that did not finish.
+    // An account with no staff access: someone whose access was removed
+    // (DELETE /api/users/[id] keeps the account and profile so they can be
+    // invited again), one left behind by an invitation that did not finish,
+    // or a tenant (RFC mgm#197), whose tenant rows step 3 leaves in place.
     targetUserId = existing.id;
 
     // Keep what the person already has on their profile; the form only
@@ -413,7 +419,12 @@ interface RoleRow {
   scope_id: string | null;
 }
 
-async function rolesOf(
+/**
+ * The account's staff rows (staffRoles): a tenant row (RFC mgm#197) is not
+ * access to an organization, so it neither makes an invitation a role
+ * change nor stops one.
+ */
+async function staffRolesOf(
   svc: SupabaseClient,
   userId: string
 ): Promise<RoleRow[] | null> {
@@ -422,7 +433,7 @@ async function rolesOf(
     .select("role, scope_type, scope_id")
     .eq("user_id", userId);
   if (error) return null;
-  return (data ?? []) as RoleRow[];
+  return staffRoles((data ?? []) as RoleRow[]);
 }
 
 function grantsRequestedAccess(

@@ -44,6 +44,7 @@ const HOST_PAGES: Record<string, string> = {
  */
 const UNRELEASED_PAGES: Record<string, string> = {
   "/settings/api-tokens": "Organization API tokens are not released yet.",
+  "/my": "RFC #197: released by PR 5",
 };
 
 /**
@@ -89,6 +90,7 @@ const PAGE_OWNERS: Record<string, MgmPluginName> = {
   "/organizations/[id]/email": "organization-directory",
   "/organizations/[id]/payments": "payments",
   "/communities/[id]/payment": "payments",
+  "/my": "tenant-app",
 };
 
 /** URL paths of every page file under src/app, outside api and tests. */

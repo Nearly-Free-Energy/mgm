@@ -81,6 +81,7 @@ describe("MGM root runtime", () => {
       "metering-surface",
       "billing-surface",
       "payments-surface",
+      "tenant-app-surface",
       "metering-providers",
       "openems-metering",
       "fixture-metering",
@@ -97,6 +98,7 @@ describe("MGM root runtime", () => {
     expect(runtime.mgmSurface.snapshot().views.map((v) => `${v.plugin} ${v.def.id}`)).toEqual([
       "metering metering.site-day",
       "billing billing.savings",
+      "tenant-app tenant.home",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([
       "organization-directory",
@@ -104,6 +106,7 @@ describe("MGM root runtime", () => {
       "metering",
       "billing",
       "payments",
+      "tenant-app",
     ]);
     expect(runtime.mgmSurface.snapshot().guis).toEqual([GRIDTOP_META]);
   });

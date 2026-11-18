@@ -1,11 +1,15 @@
 /**
  * tenant_access.test.ts — the tenant role against a real database
- * (RFC mgm#197, PR 1; migrations 20261118100000 and 20261118100100).
+ * (RFC mgm#197, PR 1: migrations 20261118100000 and 20261118100100; PR 2:
+ * 20261118140000).
  *
  * A tenant is someone who rents a unit on a microgrid. Their access is a
  * user_roles row (user_id, 'tenant', 'tenant', tenants.id). This suite
  * proves what that row lets its holder read, that it lets them read nothing
- * staff-only, and how organization managers give and remove it.
+ * staff-only, and how organization managers give and remove it. From PR 2
+ * it also proves the tenant-app plugin's state (off for an organization
+ * until a row turns it on), the record of accounts that have held staff
+ * access, and that the tenant grant refuses those accounts.
  *
  * Fixture: one organization with one community and microgrid, an edge, four
  * devices, and three tenants on that microgrid:
@@ -29,6 +33,12 @@
  *   superAdmin   — super admin
  *   noRole       — an account with no role rows
  *   grantee      — no rows at first; given and then removed access to B
+ * and, created by the staff-record tests (after the access tests, so the
+ * counts above do not move):
+ *   formerStaff  — org manager of the organization, whose row is removed
+ *   emsTenant    — tenant of B who also gets an ems_operator row
+ *   madeStaff    — tenant of B who is made org manager, then loses it
+ *   fresh        — no rows; given access to B
  *
  * The audit tests (named "audit: …") are one assertion per database-side
  * hit of the RFC § 4 "has any role" audit fixed in PR 1.
@@ -41,6 +51,8 @@
  * Opt-out: SKIP_RLS_TESTS=1.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   assertEnvironmentReady,
@@ -54,7 +66,14 @@ import {
   type TestUser,
 } from "./rls.helpers";
 import { countEntityDescendants } from "@/lib/entity-descendants";
+import {
+  MGM_BUNDLED_PLUGINS,
+  TENANT_APP_PLUGIN_NAME,
+  TENANT_APP_PLUGIN_VERSION,
+  isEnabledByDefault,
+} from "@/lib/plugins/bundled";
 import { resolveTargetOrganization } from "@/lib/runtime/gate";
+import { createSupabaseTenantAppRepository } from "@/lib/tenant-app/infrastructure/supabase-repository";
 
 const F = {
   org: "7e4a0000-0000-4000-8000-000000000001",
@@ -92,6 +111,10 @@ const EMAIL = {
   superAdmin: "tenant-access-super-admin@test.local",
   noRole: "tenant-access-no-role@test.local",
   grantee: "tenant-access-grantee@test.local",
+  formerStaff: "tenant-access-former-staff@test.local",
+  emsTenant: "tenant-access-ems-tenant@test.local",
+  madeStaff: "tenant-access-made-staff@test.local",
+  fresh: "tenant-access-fresh@test.local",
 };
 const ALL_EMAILS = Object.values(EMAIL);
 const ORG_IDS = [F.org, F.otherOrg];
@@ -506,6 +529,7 @@ desc("a tenant reads nothing staff-only", () => {
     payment_receipts: `org_id = '${F.org}'`,
     pilot_import_batches: `billing_period_id = '${F.period}'`,
     rate_schedules: `microgrid_id = '${F.microgrid}'`,
+    staff_access_accounts: `user_id = '${manager.userId}'`,
     tenant_access_accounts: `user_id = '${tenantOfC.userId}'`,
     tenant_devices: `tenant_id = '${F.tenantB}'`,
     tenants: `id = '${F.tenantB}'`,
@@ -683,6 +707,26 @@ desc("columns readable by a tenant", () => {
     for (const r of rows) (actual[r.table_name] ??= []).push(r.column_name);
     expect(actual).toEqual(TENANT_READABLE);
   });
+
+  // user_is_tenant_of_device ignores effective dates on purpose
+  // (20261118140000 § 6): the tenant app shows the days a meter was a
+  // tenant's, including those before it moved away. So a former tenant reads
+  // every column above of that meter's device row, which is safe only while
+  // each of them is one a former tenant may read.
+  it("a former tenant of a meter that moved away reads exactly these devices columns of it", async () => {
+    const links = await tenantOnly.client
+      .from("tenant_devices")
+      .select("tenant_id, effective_to")
+      .eq("device_id", F.deviceMoved);
+    expect(links.error).toBeNull();
+    // Only their own, ended assignment: B's current one stays invisible.
+    expect(links.data).toEqual([{ tenant_id: F.tenantA, effective_to: "2026-04-01" }]);
+
+    const { data, error } = await tenantOnly.client.from("devices").select("*").eq("id", F.deviceMoved);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(Object.keys(data![0]).sort()).toEqual(TENANT_READABLE.devices);
+  });
 });
 
 // ── fn_tenant_home ────────────────────────────────────────────────────────
@@ -720,6 +764,125 @@ desc("fn_tenant_home", () => {
   it("serves a manager who also rents for their own unit", async () => {
     const { data } = await dual.client.rpc("fn_tenant_home", { _tenant_id: F.tenantA });
     expect((data as unknown[]).length).toBe(1);
+  });
+});
+
+// ── The tenant-app plugin (PR 2) ──────────────────────────────────────────
+
+desc("the tenant-app plugin's state", () => {
+  const enabledFor = async (client: SupabaseClient, orgId: string, plugin: string): Promise<boolean> => {
+    const { data, error } = await client.rpc("mgm_plugin_enabled_for_org", { _org_id: orgId, _plugin_name: plugin });
+    expect(error, plugin).toBeNull();
+    return data as boolean;
+  };
+  const setTenantApp = (client: SupabaseClient, enabled: boolean) =>
+    client.rpc("fn_mgm_set_plugin_enabled", {
+      _org_id: F.org,
+      _plugin_name: TENANT_APP_PLUGIN_NAME,
+      _plugin_version: TENANT_APP_PLUGIN_VERSION,
+      _enabled: enabled,
+    });
+
+  // default-off-plugins.test.ts compares the migration text with the
+  // catalog; this asks the database itself.
+  it("answers each bundled plugin's catalog default when the organization has no row: tenant-app off, the rest on", async () => {
+    const svc = await serviceClient();
+    const rows = await svc.from("mgm_plugins").select("plugin_name").eq("org_id", F.otherOrg);
+    expect(rows.data).toEqual([]);
+    const answers: Record<string, boolean> = {};
+    for (const plugin of MGM_BUNDLED_PLUGINS) answers[plugin.name] = await enabledFor(svc, F.otherOrg, plugin.name);
+    expect(answers).toEqual(
+      Object.fromEntries(MGM_BUNDLED_PLUGINS.map((plugin) => [plugin.name, isEnabledByDefault(plugin)])),
+    );
+    expect(answers[TENANT_APP_PLUGIN_NAME]).toBe(false);
+    expect(Object.values(answers).filter((on) => !on)).toHaveLength(1);
+  });
+
+  it("is off for the tenant's organization until its manager turns it on; the tenant cannot", async () => {
+    const svc = await serviceClient();
+    // The organization has a billing row and none for tenant-app.
+    for (const client of [svc, manager.client, tenantOnly.client]) {
+      expect(await enabledFor(client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(false);
+    }
+
+    expectCode((await setTenantApp(tenantOnly.client, true)).error, "42501");
+    expectCode((await setTenantApp(otherManager.client, true)).error, "42501");
+    expect(await enabledFor(tenantOnly.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(false);
+
+    const on = await setTenantApp(manager.client, true);
+    expect(on.error).toBeNull();
+    expect(on.data).toMatchObject({
+      org_id: F.org,
+      plugin_name: TENANT_APP_PLUGIN_NAME,
+      version: TENANT_APP_PLUGIN_VERSION,
+      enabled: true,
+    });
+    // The composer asks with the tenant's own token (composeTenantApp → checkGate).
+    expect(await enabledFor(tenantOnly.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(true);
+    expect(await enabledFor(manager.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(true);
+    // Per organization: the other one is still off.
+    expect(await enabledFor(tenantOnly.client, F.otherOrg, TENANT_APP_PLUGIN_NAME)).toBe(false);
+
+    const off = await setTenantApp(manager.client, false);
+    expect(off.error).toBeNull();
+    expect(await enabledFor(tenantOnly.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(false);
+
+    const audit = await svc
+      .from("mgm_plugin_audit_log")
+      .select("action, previous_enabled, new_enabled, actor_user_id")
+      .eq("org_id", F.org)
+      .eq("plugin_name", TENANT_APP_PLUGIN_NAME)
+      .order("created_at");
+    expect(audit.error).toBeNull();
+    expect(audit.data).toEqual([
+      { action: "enabled", previous_enabled: null, new_enabled: true, actor_user_id: manager.userId },
+      { action: "disabled", previous_enabled: true, new_enabled: false, actor_user_id: manager.userId },
+    ]);
+
+    // Left on for the rest of the suite, as an operator would.
+    expect((await setTenantApp(manager.client, true)).error).toBeNull();
+  });
+
+  it("the plugin-name CHECKs and fn_mgm_set_plugin_enabled still refuse a name that is not a plugin, the alias included", async () => {
+    const svc = await serviceClient();
+    const row = await svc
+      .from("mgm_plugins")
+      .insert({ org_id: F.otherOrg, plugin_name: "tenant", version: TENANT_APP_PLUGIN_VERSION, enabled: true });
+    expectCode(row.error, "23514");
+    const audit = await svc
+      .from("mgm_plugin_audit_log")
+      .insert({ org_id: F.otherOrg, plugin_name: "tenant", action: "enabled", new_enabled: true });
+    expectCode(audit.error, "23514");
+    const set = await manager.client.rpc("fn_mgm_set_plugin_enabled", {
+      _org_id: F.org,
+      _plugin_name: "tenant",
+      _plugin_version: TENANT_APP_PLUGIN_VERSION,
+      _enabled: true,
+    });
+    expectCode(set.error, "P0001");
+  });
+
+  it("the tenant app's meter read runs under the tenant's own token, clipped to the day", async () => {
+    const repository = createSupabaseTenantAppRepository(tenantOnly.client);
+    expect(await repository.listMetersInForce(F.tenantA, "2026-05-01")).toEqual([
+      {
+        deviceId: F.deviceA,
+        name: "Meter A",
+        deviceType: "consumption_meter",
+        role: "primary_consumption_meter",
+        effectiveFrom: "2026-04-01",
+        effectiveTo: null,
+      },
+    ]);
+    // Half-open periods: the moved meter was A's up to the day before the move.
+    expect((await repository.listMetersInForce(F.tenantA, "2026-03-31")).map((m) => m.deviceId)).toEqual([
+      F.deviceMoved,
+    ]);
+    expect((await repository.listMetersInForce(F.tenantA, "2026-04-01")).map((m) => m.deviceId)).toEqual([
+      F.deviceA,
+    ]);
+    // Another unit's meters are not the tenant's to list.
+    expect(await repository.listMetersInForce(F.tenantB, "2026-05-01")).toEqual([]);
   });
 });
 
@@ -1107,6 +1270,155 @@ desc("fn_tenant_access_grant, _list and _revoke", () => {
   });
 });
 
+// ── Staff accounts and the tenant grant (PR 2) ────────────────────────────
+
+/** The migration whose staff_access_accounts backfill the tests below replay. */
+const STAFF_RECORD_MIGRATION = "20261118140000_tenant_app_plugin.sql";
+
+desc("staff_access_accounts and the tenant grant", () => {
+  let formerStaff: TestUser;
+  let emsTenant: TestUser;
+  let madeStaff: TestUser;
+  let fresh: TestUser;
+
+  const grant = async (tenantId: string, userId: string, actor: string) => {
+    const svc = await serviceClient();
+    return svc.rpc("fn_tenant_access_grant", { _tenant_id: tenantId, _user_id: userId, _actor: actor });
+  };
+  const idList = (ids: string[]) => ids.map((id) => `'${id}'`).join(", ");
+  /** Which of these accounts staff_access_accounts holds, sorted. */
+  const recorded = (ids: string[]): string[] =>
+    ownerRows<{ user_id: string }>(
+      `SELECT user_id FROM public.staff_access_accounts WHERE user_id IN (${idList(ids)}) ORDER BY user_id`,
+    ).map((r) => r.user_id);
+
+  beforeAll(async () => {
+    [formerStaff, emsTenant, madeStaff, fresh] = await Promise.all([
+      createTestUser({ email: EMAIL.formerStaff, role: "org_manager", scopeId: F.org }),
+      createTestUser({ email: EMAIL.emsTenant, role: "tenant", scopeType: "tenant", scopeId: F.tenantB }),
+      createTestUser({ email: EMAIL.madeStaff, role: "tenant", scopeType: "tenant", scopeId: F.tenantB }),
+      createTestUser({ email: EMAIL.fresh, role: null }),
+    ]);
+  }, 60_000);
+
+  it("records every account holding a staff row, and no account that has only held tenant rows or none", () => {
+    const [unrecorded] = ownerRows<{ n: number }>(
+      `SELECT count(*)::int AS n FROM public.user_roles ur
+        WHERE ur.role <> 'tenant'
+          AND NOT EXISTS (SELECT 1 FROM public.staff_access_accounts s WHERE s.user_id = ur.user_id)`,
+    );
+    expect(unrecorded.n, "staff rows whose account the record misses").toBe(0);
+
+    const staff = [manager, otherManager, superAdmin, dual, formerStaff].map((u) => u.userId);
+    expect(recorded(staff)).toEqual([...staff].sort());
+    // noRole and fresh have no rows; the trigger records nothing for them.
+    const notStaff = [tenantOnly, tenantOfC, noRole, grantee, emsTenant, madeStaff, fresh].map((u) => u.userId);
+    expect(recorded(notStaff)).toEqual([]);
+  });
+
+  it("the trigger records an ems_operator row and a staff row given to a tenant, and the record outlives the rows", async () => {
+    const svc = await serviceClient();
+    // ems_operator is microgrid-scoped staff (the CHECK pairs them); none
+    // ship, but a row of one is staff, not a tenant.
+    const ems = await svc
+      .from("user_roles")
+      .insert({ user_id: emsTenant.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
+    expect(ems.error).toBeNull();
+    // A tenant made org manager, as an invitation of their address would.
+    const made = await svc
+      .from("user_roles")
+      .insert({ user_id: madeStaff.userId, role: "org_manager", scope_type: "org", scope_id: F.org });
+    expect(made.error).toBeNull();
+    expect(recorded([emsTenant.userId, madeStaff.userId])).toEqual([emsTenant.userId, madeStaff.userId].sort());
+
+    // Their staff access is removed, as DELETE /api/users/[id] would.
+    for (const user of [madeStaff, formerStaff]) {
+      const removed = await svc.from("user_roles").delete().eq("user_id", user.userId).neq("role", "tenant");
+      expect(removed.error).toBeNull();
+    }
+    const left = await svc.from("user_roles").select("user_id, role").in("user_id", [madeStaff.userId, formerStaff.userId]);
+    expect(left.data).toEqual([{ user_id: madeStaff.userId, role: "tenant" }]);
+    expect(recorded([madeStaff.userId, formerStaff.userId])).toEqual([madeStaff.userId, formerStaff.userId].sort());
+  });
+
+  it("the backfill records holders of a staff row and accounts with no row that never held a tenant row, and no one else", () => {
+    // The migration's own backfill statements, replayed in a transaction
+    // that is rolled back by the exception carrying the result, against a
+    // record emptied of these accounts first.
+    const sql = readFileSync(join(process.cwd(), "supabase", "migrations", STAFF_RECORD_MIGRATION), "utf8");
+    const backfill = sql.match(/INSERT INTO public\.staff_access_accounts \(user_id\)\s+SELECT[\s\S]*?;/g) ?? [];
+    expect(backfill, "the migration's two backfill statements").toHaveLength(2);
+
+    // manager and dual hold staff rows; noRole has no row and was never a
+    // tenant; tenantOnly holds a tenant row; grantee is a former tenant with
+    // no row (its access was revoked above).
+    const ids = [manager, dual, noRole, tenantOnly, grantee].map((u) => u.userId);
+    const result = runAsDatabaseOwner(
+      [
+        "DO $backfill$",
+        "DECLARE r text;",
+        "BEGIN",
+        `  DELETE FROM public.staff_access_accounts WHERE user_id IN (${idList(ids)});`,
+        ...backfill.map((statement) => `  ${statement}`),
+        `  SELECT string_agg(user_id::text, ',' ORDER BY user_id) INTO r FROM public.staff_access_accounts WHERE user_id IN (${idList(ids)});`,
+        "  RAISE EXCEPTION 'backfill-result:%:end', coalesce(r, '');",
+        "END",
+        "$backfill$",
+      ].join("\n"),
+    );
+    expect(result.ok).toBe(false);
+    const match = /backfill-result:([^:]*):end/.exec(result.output);
+    expect(match, result.output).not.toBeNull();
+    expect(match![1].split(",").filter(Boolean)).toEqual([manager.userId, dual.userId, noRole.userId].sort());
+    // Rolled back: noRole is still not recorded, manager still is.
+    expect(recorded([noRole.userId, manager.userId])).toEqual([manager.userId]);
+  });
+
+  it("the grant refuses an account that holds a staff row, or has held one (42501), and adds no row", async () => {
+    for (const user of [manager, superAdmin, dual, emsTenant, formerStaff, madeStaff]) {
+      const { data, error } = await grant(F.tenantA, user.userId, manager.userId);
+      expectCode(error, "42501");
+      expect(error?.message).toContain("staff account");
+      expect(data).toBeNull();
+    }
+    const svc = await serviceClient();
+    const rows = await svc
+      .from("user_roles")
+      .select("user_id")
+      .eq("scope_id", F.tenantA)
+      .in("user_id", [manager.userId, superAdmin.userId, emsTenant.userId, formerStaff.userId, madeStaff.userId]);
+    expect(rows.data).toEqual([]);
+  });
+
+  it("the grant gives an account that has never been staff access, without recording it as staff", async () => {
+    const first = await grant(F.tenantB, fresh.userId, manager.userId);
+    expect(first.error).toBeNull();
+    expect(typeof first.data).toBe("string");
+    const { data } = await fresh.client.from("tenants").select("id");
+    expect((data ?? []).map((r) => r.id)).toEqual([F.tenantB]);
+    expect(recorded([fresh.userId])).toEqual([]);
+  });
+
+  it("the Users page keeps every staff account, current or former, whatever tenant access it held", async () => {
+    const targets = [emsTenant, madeStaff, formerStaff, fresh, tenantOnly, grantee].map((u) => u.userId);
+    const { data, error } = await superAdmin.client.rpc("fn_list_visible_users", { _target_user_ids: targets });
+    expect(error).toBeNull();
+    const rows = (data as { user_id: string; role: string | null; ems_operator_count: number }[])
+      .map((r) => ({ user_id: r.user_id, role: r.role, ems_operator_count: r.ems_operator_count }))
+      .sort((a, b) => a.user_id.localeCompare(b.user_id));
+    expect(rows).toEqual(
+      [
+        // Holds an ems_operator row and a tenant row.
+        { user_id: emsTenant.userId, role: null, ems_operator_count: 1 },
+        // Was made staff while a tenant, and is a tenant again.
+        { user_id: madeStaff.userId, role: null, ems_operator_count: 0 },
+        // Staff access removed, never a tenant: listed as before.
+        { user_id: formerStaff.userId, role: null, ems_operator_count: 0 },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id)),
+    );
+  });
+});
+
 // ── Cascade ───────────────────────────────────────────────────────────────
 
 desc("audit: scope_tenant_id and the delete guard", () => {
@@ -1132,7 +1444,7 @@ desc("audit: scope_tenant_id and the delete guard", () => {
 
 // ── anon ──────────────────────────────────────────────────────────────────
 
-desc("anon is denied every new function", () => {
+desc("anon is denied every new or re-issued function", () => {
   const CALLS: [string, Record<string, unknown>][] = [
     ["user_can_access_tenant", { _tenant_id: F.tenantA }],
     ["user_is_tenant_of_device", { _device_id: F.deviceA }],
@@ -1141,6 +1453,13 @@ desc("anon is denied every new function", () => {
     ["fn_tenant_access_revoke", { _tenant_id: F.tenantA, _access_id: F.unknown }],
     ["fn_tenant_access_list", { _tenant_id: F.tenantA }],
     ["fn_tenant_access_count", { _tenant_ids: [F.tenantA] }],
+    // Re-issued by 20261118140000.
+    ["mgm_plugin_enabled_for_org", { _org_id: F.org, _plugin_name: TENANT_APP_PLUGIN_NAME }],
+    [
+      "fn_mgm_set_plugin_enabled",
+      { _org_id: F.org, _plugin_name: TENANT_APP_PLUGIN_NAME, _plugin_version: TENANT_APP_PLUGIN_VERSION, _enabled: true },
+    ],
+    ["fn_list_visible_users", {}],
   ];
 
   // Through PostgREST, the grant layer must be what refuses: the access
@@ -1152,7 +1471,7 @@ desc("anon is denied every new function", () => {
     expectGrantLayerDenied(error);
   });
 
-  it("the grants themselves: no EXECUTE for anon on any, and the grant and trigger function for the service role only", () => {
+  it("the grants themselves: no EXECUTE for anon on any, and the grant and trigger functions for the service role only", () => {
     const rows = ownerRows<{ signature: string; anon: boolean; authenticated: boolean; service_role: boolean }>(
       `SELECT s AS signature,
               has_function_privilege('anon', s, 'EXECUTE') AS anon,
@@ -1166,7 +1485,11 @@ desc("anon is denied every new function", () => {
            'public.fn_tenant_access_revoke(uuid, uuid)',
            'public.fn_tenant_access_list(uuid)',
            'public.fn_tenant_access_count(uuid[])',
-           'public.fn_user_roles_record_tenant_account()'
+           'public.fn_user_roles_record_tenant_account()',
+           'public.mgm_plugin_enabled_for_org(uuid, text)',
+           'public.fn_mgm_set_plugin_enabled(uuid, text, text, boolean)',
+           'public.fn_list_visible_users(uuid[])',
+           'public.fn_user_roles_record_staff_account()'
          ]) AS s`,
     );
     const both = { anon: false, authenticated: true, service_role: true };
@@ -1180,15 +1503,24 @@ desc("anon is denied every new function", () => {
       { signature: "public.fn_tenant_access_list(uuid)", ...both },
       { signature: "public.fn_tenant_access_count(uuid[])", ...both },
       { signature: "public.fn_user_roles_record_tenant_account()", ...serviceOnly },
+      { signature: "public.mgm_plugin_enabled_for_org(uuid, text)", ...both },
+      { signature: "public.fn_mgm_set_plugin_enabled(uuid, text, text, boolean)", ...both },
+      { signature: "public.fn_list_visible_users(uuid[])", ...both },
+      { signature: "public.fn_user_roles_record_staff_account()", ...serviceOnly },
     ]);
   });
 
-  it("tenant_access_accounts is closed to the API roles", () => {
-    const [row] = ownerRows<{ anon: boolean; authenticated: boolean; rls: boolean }>(
-      `SELECT has_table_privilege('anon', 'public.tenant_access_accounts', 'SELECT') AS anon,
-              has_table_privilege('authenticated', 'public.tenant_access_accounts', 'SELECT') AS authenticated,
-              (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.tenant_access_accounts'::regclass) AS rls`,
+  it("tenant_access_accounts and staff_access_accounts are closed to the API roles", () => {
+    const rows = ownerRows<{ name: string; anon: boolean; authenticated: boolean; rls: boolean }>(
+      `SELECT t AS name,
+              has_table_privilege('anon', t, 'SELECT') AS anon,
+              has_table_privilege('authenticated', t, 'SELECT') AS authenticated,
+              (SELECT relrowsecurity FROM pg_class WHERE oid = t::regclass) AS rls
+         FROM unnest(ARRAY['public.tenant_access_accounts', 'public.staff_access_accounts']) AS t`,
     );
-    expect(row).toEqual({ anon: false, authenticated: false, rls: true });
+    expect(rows).toEqual([
+      { name: "public.tenant_access_accounts", anon: false, authenticated: false, rls: true },
+      { name: "public.staff_access_accounts", anon: false, authenticated: false, rls: true },
+    ]);
   });
 });

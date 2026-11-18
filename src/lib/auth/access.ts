@@ -24,8 +24,8 @@ import "server-only";
  *     one RLS-scoped select, read alongside the role rows.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type { UserRoleRecord } from "@/lib/types/domain";
-import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
+import type { UserRole, UserRoleRecord } from "@/lib/types/domain";
+import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG, TENANT } from "@/lib/roles";
 
 /** The signed-in user (null when there is none) and their user_roles rows. */
 export type CurrentUserAccess = {
@@ -78,6 +78,34 @@ export async function getCurrentUserRoles(
   if (user === undefined) return (await getCurrentUserAccess(supabase)).roles;
   if (!user) return [];
   return readUserRoles(supabase, user.id);
+}
+
+/**
+ * The rows that make a person staff: every row whose role is not `tenant`
+ * (RFC mgm#197). A tenant row is a person's access to the unit they rent,
+ * not to an organization, so "has a role row" does not mean "is staff"; a
+ * check for staff reads these rows, never `roles.length`.
+ *
+ * "Not tenant" counts as staff, as `staff_access_accounts` and
+ * `fn_list_visible_users` count it (20261118140000), so an `ems_operator`
+ * row (inert, CLAUDE.md § Key Conventions) is staff here too. If a second
+ * role that is not staff is ever added, revisit this and those two.
+ */
+export function staffRoles<R extends { role: UserRole }>(roles: readonly R[]): R[] {
+  return roles.filter((r) => r.role !== TENANT);
+}
+
+/** True iff the rows include a staff row (staffRoles). */
+export function rolesIncludeStaff(roles: readonly { role: UserRole }[]): boolean {
+  return staffRoles(roles).length > 0;
+}
+
+/**
+ * True iff the person holds role rows and every one is a tenant row: signed
+ * in to their own units only (RFC mgm#197 § 4), with no organization.
+ */
+export function rolesAreTenantOnly(roles: readonly { role: UserRole }[]): boolean {
+  return roles.length > 0 && !rolesIncludeStaff(roles);
 }
 
 /** True iff the rows include a role = 'super_admin' row. */

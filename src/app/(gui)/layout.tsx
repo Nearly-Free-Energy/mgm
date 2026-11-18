@@ -2,6 +2,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import type { GuiName } from "@/gui/meta";
+import { rolesAreTenantOnly } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { HostKitProvider } from "@/lib/gui/host/client/host-kit-provider";
@@ -10,6 +11,7 @@ import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
 import { resolveInitialView } from "@/lib/gui/host/server/render-view";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
 import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
+import { TENANT_START_PAGE } from "@/lib/gui/host/shared/tenant-units";
 import { organizationExists } from "@/lib/mgm/organization-exists";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 
@@ -69,12 +71,17 @@ export default async function GuiLayout({
     redirect("/login");
   }
 
+  // A person whose rows are all tenant rows (RFC mgm#197 § 4) is signed in
+  // to the units they rent: neither a first operator for /setup nor revoked.
+  // A tenant row is not staff, so this reads the roles, never their count.
+  const tenantOnly = rolesAreTenantOnly(roles);
+
   // Release 1 (issue #3) — first-run bootstrap. When no organization exists
   // yet, the signed-in user is eligible to become the initial operator, so
   // send them to /setup instead of /no-access. Once the first organization
   // exists, unassigned users fall through to the revoked-user gate below
-  // and /no-access is retained for them.
-  if (!(await hasOrganization)) {
+  // and /no-access is retained for them. A tenant is never eligible.
+  if (!tenantOnly && !(await hasOrganization)) {
     redirect("/setup");
   }
 
@@ -88,10 +95,18 @@ export default async function GuiLayout({
     redirect("/no-access");
   }
 
+  // The start page is the staff dashboard. A tenant starts at their own
+  // home instead; staff, tenant rows or not, keep "/" (START_PAGE in
+  // @/lib/auth/return-path).
+  if (tenantOnly && (path ?? "/").split(/[?#]/, 1)[0] === "/") {
+    redirect(TENANT_START_PAGE);
+  }
+
   if (!gui) throw guiError;
 
   // Role rows whose organizations the caller cannot see leave no
-  // organization to show, which is no access for this layout.
+  // organization to show, which is no access for this layout, unless the
+  // person holds a unit: they get the manifest of their units instead.
   const outcome = await getManifest(gui, path, requested, preferred);
   if (!outcome.ok) redirect(outcome.status === 401 ? "/login" : "/no-access");
   const { manifest } = outcome;

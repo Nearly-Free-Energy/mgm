@@ -1,9 +1,11 @@
 /**
  * The (gui) layout: the redirects for signed-out, first-run and revoked
- * users, in their order; the manifest read started alongside them; and every
- * page rendered inside the shell of the GUI MGM_GUI selects, with the
- * manifest and the view the path names. A render the middleware did not
- * see answers 404 before any of that.
+ * users, in their order; a person whose rows are all tenant rows sent from
+ * the start page to their home, never to /setup, and to /no-access only when
+ * the manifest refuses (RFC mgm#197 § 4); the manifest read started alongside them; and every page
+ * rendered inside the shell of the GUI MGM_GUI selects, with the manifest
+ * and the view the path names. A render the middleware did not see answers
+ * 404 before any of that.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BILLING_SURFACE } from "@/lib/billing/surface";
@@ -81,6 +83,8 @@ const MANIFEST: Manifest = buildManifestModel({
   gui: "gridtop",
   user: { name: null, email: "manager@example.test" },
   superAdmin: false,
+  staff: true,
+  tenant: false,
   org: { id: ORG, name: "Org One" },
   orgs: [{ id: ORG, name: "Org One" }],
   gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
@@ -222,6 +226,54 @@ describe("GuiLayout first-run routing", () => {
     // The same arguments, so the render reuses the preloaded read.
     expect(mocks.preloadManifest.mock.calls[0]).toEqual(["gridtop", `/microgrids?org=${OTHER_ORG}`, OTHER_ORG, ORG]);
     expect(mocks.getManifest.mock.calls).toEqual([mocks.preloadManifest.mock.calls[0]]);
+  });
+});
+
+describe("GuiLayout for a person who holds units (RFC mgm#197 § 4)", () => {
+  const UNIT_A = "e7300000-0000-4000-8003-000000000001";
+  const UNIT_B = "e7300000-0000-4000-8003-000000000002";
+  const tenantRow = (unit: string) => ({ user_id: "user-1", role: "tenant", scope_type: "tenant", scope_id: unit });
+  const managerRow = { user_id: "user-1", role: "org_manager", scope_type: "org", scope_id: ORG };
+  function signIn(roles: unknown[], organizations = true) {
+    mocks.getRequestUserAccess.mockResolvedValue({ user: { id: "user-1" }, roles });
+    mocks.organizationExists.mockResolvedValue(organizations);
+  }
+
+  it.each(["/", "/?org=" + ORG, "/#top"])("sends a tenant-only person from the start page (%s) to their home, before the manifest", async (path) => {
+    signIn([tenantRow(UNIT_A), tenantRow(UNIT_B)]);
+    mocks.headers = new Headers({ "x-mgm-path": path });
+    await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/my");
+    expect(mocks.getManifest).not.toHaveBeenCalled();
+  });
+
+  it("never sends a tenant-only person to /setup or /no-access, and renders their pages in the shell", async () => {
+    // No organization is reported, as if the check had gone wrong: a tenant
+    // is never the first operator.
+    signIn([tenantRow(UNIT_A)], false);
+    mocks.headers = new Headers({ "x-mgm-path": "/my?unit=" + UNIT_A });
+    const tree = await GuiLayout({ children: "page" });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", "/my?unit=" + UNIT_A, null, null);
+    expect(byType(tree, HostKitProvider)).toHaveLength(1);
+  });
+
+  it("sends a tenant-only person the manifest refuses to /no-access, as anyone", async () => {
+    signIn([tenantRow(UNIT_A)]);
+    mocks.headers = new Headers({ "x-mgm-path": "/my" });
+    mocks.getManifest.mockResolvedValue(NO_ORGANIZATION);
+    await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/no-access");
+  });
+
+  it("keeps a person with staff and tenant rows on the start page, like any staff", async () => {
+    signIn([tenantRow(UNIT_A), managerRow]);
+    expect(await GuiLayout({ children: null })).toBeTruthy();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", "/", null, null);
+  });
+
+  it("still sends a person with staff rows and no organization to /setup", async () => {
+    signIn([tenantRow(UNIT_A), managerRow], false);
+    await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/setup");
   });
 });
 

@@ -6,7 +6,7 @@ import { ORGANIZATION_DIRECTORY_SURFACE } from "@/lib/organization-directory/sur
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { Id, Manifest } from "../../../contract";
-import { buildManifestModel, type ManifestInput } from "../manifest-model";
+import { buildManifestModel, buildTenantManifestModel, type ManifestInput } from "../manifest-model";
 import { contributedView, entityFromPath, legacyView, resolveLegacyView, unloadedView } from "../legacy-view";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
@@ -33,6 +33,8 @@ function manifest(superAdmin = true): Manifest {
     gui: "gridtop",
     user: { name: null },
     superAdmin,
+    staff: true,
+    tenant: false,
     org: { id: ORG, name: "Org One" },
     orgs: [],
     gate: Object.fromEntries(MGM_BUNDLED_PLUGINS.map((p) => [p.name, true])),
@@ -137,10 +139,12 @@ describe("legacyView on every catalog page", () => {
   }
 
   it("leaves each page a view serves to contributedView", () => {
-    /** The view that serves each page, and its current app. */
-    const SERVED: Record<string, [view: Id, nav: Id]> = {
+    /** The view that serves each page, and its current app in this staff manifest. */
+    const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+      // A tenant's page: a staff manifest has no tenant entry, and /my names no place.
+      "/my": ["tenant.home", null],
     };
     const served = ALL_PAGES.filter((p) => p.servedBy === "view");
     expect(served.map((p) => p.path).sort()).toEqual(Object.keys(SERVED).sort());
@@ -149,7 +153,7 @@ describe("legacyView on every catalog page", () => {
       expect(legacyView(filled(page), MANIFEST), page.path).toBeNull();
       const view = contributedView(filled(page), { view: id, title: "Title", trail: [] }, MANIFEST);
       expect(view, page.path).toMatchObject({ view: id, title: "Title", nav, unplaced: false });
-      expect(view.scope.microgrid?.label).toBe("Kasana East");
+      expect(view.scope.microgrid?.label).toBe(Object.values(page.params).includes("microgrid") ? "Kasana East" : undefined);
     }
   });
 
@@ -350,5 +354,68 @@ describe("contributedView", () => {
       nav: null,
       unplaced: false,
     });
+  });
+});
+
+describe("a tenant manifest (RFC mgm#197 § 4)", () => {
+  const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
+  const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
+  const home = { id: "tenant.home" as const, title: "My home", icon: "tenants" as const, group: "operate" as const, order: 80, href: "/my" as const, needs: [] };
+
+  /** A tenant manifest whose nav holds the tenant home, as it will once /my is released. */
+  function tenantManifest(units: { id: string; label: string }[], current: string | null = null): Manifest {
+    const m = buildTenantManifestModel({
+      release: null,
+      locale: "en",
+      now: new Date(0),
+      gui: "gridtop",
+      user: { name: null },
+      units: units.map((u) => ({ ...u, timezone: "Africa/Kampala" })),
+      current,
+      tenantGate: {},
+      nav: [],
+      views: [],
+    });
+    return { ...m, org: { ...m.org, nav: [home] } };
+  }
+
+  it("puts the unit's name where the organization, community and microgrid go", () => {
+    const m = tenantManifest([{ id: UNIT_A, label: "Grace Namata" }]);
+    const view = unloadedView("/my", "tenant.home", m);
+    expect(view).toEqual({
+      view: "tenant.home",
+      title: "My home",
+      trail: [{ label: "Grace Namata", href: "/my" }],
+      tabs: [],
+      scope: { organization: { kind: "organization", id: UNIT_A, label: "Grace Namata", href: "/my" } },
+      nav: "tenant.home",
+      unplaced: false,
+    });
+    expect(contributedView("/my", { view: "tenant.home", title: "Grace Namata", trail: [] }, m)).toMatchObject({
+      title: "Grace Namata",
+      trail: [{ label: "Grace Namata", href: "/my" }],
+    });
+  });
+
+  it("names the current unit, then the home that lets a person with two choose", () => {
+    const m = tenantManifest(
+      [
+        { id: UNIT_A, label: "Grace Namata" },
+        { id: UNIT_B, label: "Shop 9" },
+      ],
+      UNIT_B,
+    );
+    expect(unloadedView(`/my?unit=${UNIT_B}`, "tenant.home", m)?.trail).toEqual([
+      { label: "Shop 9", href: `/my?unit=${UNIT_B}` },
+      { label: "My home", href: "/my" },
+    ]);
+  });
+
+  it("shows the unit alone on any other path, and labels no staff place", () => {
+    const m = tenantManifest([{ id: UNIT_A, label: "Grace Namata" }]);
+    expect(resolveLegacyView("/no-such-page", m)).toMatchObject({ title: "Grace Namata", trail: [{ label: "Grace Namata", href: "/my" }] });
+    const staffPage = legacyView(`/microgrids/${MICROGRID}/billing`, m)!;
+    expect(staffPage).toMatchObject({ nav: null, unplaced: true });
+    expect(staffPage.scope.microgrid).toBeUndefined();
   });
 });

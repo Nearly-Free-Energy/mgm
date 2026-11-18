@@ -20,6 +20,7 @@ import { notFound, redirect } from "next/navigation";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { Banner } from "@/components/ui/banner";
 import { matchCatalogPage } from "@/lib/plugins/bundled";
+import { PUBLIC_COPY, pickPublicLanguage } from "@/lib/public-html/copy";
 import { createClient } from "@/lib/supabase/server";
 import type { GuiPlugin, InitialView, Manifest, ViewModel } from "../../contract";
 import { createFmt } from "../../fmt";
@@ -27,10 +28,13 @@ import { RawView } from "../../kit/raw-view";
 import { ViewBoundary, ViewUnavailable } from "../client/view-boundary";
 import { unloadedView } from "../shared/legacy-view";
 import { pickRenderer } from "../shared/pick-renderer";
-import { hostContext } from "./access";
+import { withUnit } from "../shared/tenant-units";
+import { hostContext, type HostContext } from "./access";
 import { parseHref } from "./hrefs";
 import { surfaceSnapshot } from "./snapshot";
-import { dispatchView, matchView, type HostOutcome } from "./view";
+import { UnitPicker } from "./unit-picker";
+import { readTenantUnits } from "./units";
+import { dispatchView, matchView, NOT_RELEASED, UNIT_REQUIRED, type HostOutcome } from "./view";
 
 export type PageSearch = Record<string, string | string[] | undefined>;
 
@@ -67,12 +71,48 @@ function hrefOfPath(pathWithQuery: string): string | null {
  * it asks Supabase Auth with getUser(), which hostContext relies on. If it
  * stops calling getUser(), revisit.
  */
-async function loadPageView(access: CurrentUserAccess, href: string): Promise<HostOutcome<ViewModel>> {
+async function loadPageView(
+  access: CurrentUserAccess,
+  href: string,
+): Promise<{ ctx: HostContext | null; out: HostOutcome<ViewModel> }> {
   const made = hostContext(access, await headers(), {
     newClient: createClient,
     makeFmt: (locale) => createFmt({ locale }),
   });
-  return made.ok ? dispatchView(made.ctx, href) : made;
+  return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href) } : { ctx: null, out: made };
+}
+
+/**
+ * The picker for a tenant view opened without a unit by a person with
+ * several (UNIT_REQUIRED): each of their units, linking to `href` for it.
+ * Not found when none can be read any more.
+ */
+async function unitPicker(ctx: HostContext, href: string): Promise<ReactNode> {
+  const units = await readTenantUnits(ctx);
+  if (units.length === 0) notFound();
+  const choices = units.map((unit) => ({
+    label: unit.label,
+    detail: [unit.unitLabel, unit.microgridName].filter(Boolean).join(" · ") || null,
+    href: withUnit(href, unit.tenantId),
+  }));
+  return (
+    <ViewUnavailable>
+      <UnitPicker choices={choices} />
+    </ViewUnavailable>
+  );
+}
+
+/** The page an unreleased path gets (src/lib/public-html/not-released.ts), inside the shell. */
+async function notReleased(): Promise<ReactNode> {
+  const copy = PUBLIC_COPY[pickPublicLanguage((await headers()).get("accept-language"))].notReleased;
+  return (
+    <ViewUnavailable>
+      <div className="flex flex-col gap-2">
+        <h1 className="text-headline font-semibold text-foreground">{copy.heading}</h1>
+        <p className="text-dense text-muted-foreground">{copy.body}</p>
+      </div>
+    </ViewUnavailable>
+  );
 }
 
 /**
@@ -113,7 +153,9 @@ export async function resolveInitialView(pathWithQuery: string | null, manifest:
  * ViewBoundary, so the shell shows its title, trail and actions. No view, or
  * one the caller cannot see, is not found; a refusal with its own copy (a
  * disabled plugin, a loader's refusal) is shown as a banner inside a
- * ViewUnavailable.
+ * ViewUnavailable. A tenant view (RFC mgm#197 § 4) opened without a unit by
+ * a person with several shows their units to choose from, and one whose
+ * plugin is off for the unit's organization the "not in this release" page.
  */
 export async function renderView(input: {
   path: readonly string[];
@@ -125,10 +167,13 @@ export async function renderView(input: {
   for (const [name, value] of Object.entries(input.search)) {
     for (const v of Array.isArray(value) ? value : value === undefined ? [] : [value]) search.append(name, v);
   }
-  const out = await loadPageView(input.access, pageHref(input.path, search));
+  const href = pageHref(input.path, search);
+  const { ctx, out } = await loadPageView(input.access, href);
   if (!out.ok) {
     if (out.status === 401) redirect("/login");
     if (out.code === "gui_no_access") redirect("/no-access");
+    if (ctx && out.code === UNIT_REQUIRED.code) return unitPicker(ctx, href);
+    if (out.code === NOT_RELEASED.code) return notReleased();
     // src/app/(gui)/not-found.tsx draws the ViewUnavailable for this one.
     if (out.status === 400 || out.status === 404) notFound();
     // ViewUnavailable tells the shell this page will publish no model, so it
