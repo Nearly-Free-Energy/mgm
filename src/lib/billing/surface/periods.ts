@@ -23,6 +23,7 @@ import {
   PERIOD_KEPT_CLOSED_MESSAGE,
   PERIOD_KEPT_PAYMENTS_MESSAGE,
 } from "../period-delete";
+import { readAllPages } from "./pages";
 import { buildPeriodsModel, type PeriodRowInput } from "./periods-model";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
@@ -46,28 +47,6 @@ export const DELETE_PERIOD_REFUSALS = {
  * more would lose its oldest; if that happens, page with `next` instead.
  */
 const MAX_PERIODS = 500;
-
-/**
- * Bills are read in pages. PostgREST answers at most max_rows rows
- * (supabase/config.toml sets 1000) and says nothing when it stops, so a read
- * that can return more pages by id until it has the exact count. A read
- * that cannot be completed is a refusal, never a partial sum.
- */
-const BILL_PAGE = 1000;
-
-type PageRead = { data: unknown; error: unknown; count?: number | null };
-
-async function readAllPages<T>(read: (from: number, to: number) => PromiseLike<PageRead>): Promise<T[] | null> {
-  const out: T[] = [];
-  for (let from = 0; ; from += BILL_PAGE) {
-    const { data, error, count } = await read(from, from + BILL_PAGE - 1);
-    if (error) return null;
-    const rows = (data ?? []) as T[];
-    out.push(...rows);
-    if (rows.length === 0) return out;
-    if (typeof count === "number" ? out.length >= count : rows.length < BILL_PAGE) return out;
-  }
-}
 
 export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedModel<"collection">>> {
   const { data: microgrid, error } = await req.supabase

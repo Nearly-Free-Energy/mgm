@@ -97,6 +97,7 @@ describe("MGM root runtime", () => {
     expect(runtime.mgmSurface.snapshot().views.map((v) => `${v.plugin} ${v.def.id}`)).toEqual([
       "metering metering.site-day",
       "billing billing.periods",
+      "billing billing.period-review",
       "billing billing.savings",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([

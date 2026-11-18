@@ -4,17 +4,19 @@ import "server-only";
  * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation to
  * its pages, which are served outside the GUI contract (`legacy: true`), with
  * the labels the current chrome uses; a microgrid's billing periods as the
- * `billing.periods` view, with creating a period and deleting a draft; and
- * the savings as the `billing.savings` view, shown under the Operations day,
- * with the writes that change what it counts. A page that moves to a view
- * keeps its nav id.
+ * `billing.periods` view, with creating a period and deleting a draft; one
+ * period's bills as the `billing.period-review` view, with generating them
+ * and the actions on each bill; and the savings as the `billing.savings`
+ * view, shown under the Operations day, with the writes that change what it
+ * counts. A page that moves to a view keeps its nav id.
  *
- * `billing.periods` has the Billing page's own path, which the legacy page
- * still serves: the catalog gives that page no servedBy, so the view is
- * reached through GET /api/gui/view until #201's "Serve the billing pages
- * through the GUI host" moves the page and its nav entry to the view.
+ * `billing.periods` and `billing.period-review` have the Billing pages' own
+ * paths, which the legacy pages still serve: the catalog gives those pages
+ * no servedBy, so the views are reached through GET /api/gui/view until
+ * #201's "Serve the billing pages through the GUI host" moves the pages and
+ * the nav entry to the views.
  */
-import type { Contribution } from "@/lib/gui/surface";
+import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
@@ -23,10 +25,43 @@ import {
   CreatePeriodBody,
   DELETE_PERIOD_BODY_VERSION,
   DeletePeriodBody,
+  GENERATE_BILLS_BODY_VERSION,
+  GenerateBillsBody,
+  LINE_ITEM_PAYMENT_STATUS_BODY_VERSION,
+  LINE_ITEM_USAGE_BODY_VERSION,
+  LineItemPaymentStatusBody,
+  LineItemUsageBody,
+  REGENERATE_BILL_BODY_VERSION,
+  RegenerateBillBody,
   SAVE_SAVINGS_SETTINGS_BODY_VERSION,
   SaveSavingsSettingsBody,
 } from "./schemas";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
+import {
+  generateBillsAvailable,
+  loadPeriodReview,
+  prepareCancelPaymentLink,
+  prepareMarkFailed,
+  prepareMarkPaid,
+  prepareMarkRefunded,
+  prepareMarkUnpaid,
+  prepareRegenerateBill,
+  recordUsageAvailable,
+  regenerateBillAvailable,
+} from "./surface/period-review";
+import { PERIOD_REVIEW_EXAMPLES } from "./surface/period-review-examples";
+import {
+  CANCEL_PAYMENT_LINK_ACTION,
+  GENERATE_BILLS_ACTION,
+  MARK_FAILED_ACTION,
+  MARK_PAID_ACTION,
+  MARK_REFUNDED_ACTION,
+  MARK_UNPAID_ACTION,
+  PERIOD_REVIEW_KEYS,
+  PERIOD_REVIEW_PREFIXES,
+  RECORD_USAGE_ACTION,
+  REGENERATE_BILL_ACTION,
+} from "./surface/period-review-model";
 import { deletePeriodAvailable, loadPeriods, prepareDeletePeriod } from "./surface/periods";
 import { PERIODS_EXAMPLES } from "./surface/periods-examples";
 import { CREATE_PERIOD_ACTION, DELETE_PERIOD_ACTION, PERIODS_KEYS } from "./surface/periods-model";
@@ -81,6 +116,21 @@ export const BILLING_SURFACE: Contribution = {
       declares: { keys: PERIODS_KEYS },
       examples: PERIODS_EXAMPLES,
       load: loadPeriods,
+    },
+    {
+      id: "billing.period-review",
+      kind: "collection",
+      path: "/microgrids/[id]/billing/[periodId]",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      entity: "periodId",
+      // Read through the person's own client; still loads while billing is
+      // off, with the gate's notice and every action disabled. The refresh
+      // replaces the legacy page's 30-second paid-bill poll (parity.ts).
+      cost: "db",
+      live: { refreshSeconds: 30, staleAfterSeconds: 120 },
+      declares: { keys: PERIOD_REVIEW_KEYS, prefixes: PERIOD_REVIEW_PREFIXES },
+      examples: PERIOD_REVIEW_EXAMPLES,
+      load: loadPeriodReview,
     },
     {
       id: "billing.savings",
@@ -145,6 +195,95 @@ export const BILLING_SURFACE: Contribution = {
       prepare: prepareDeletePeriod,
       available: deletePeriodAvailable,
     },
+    // ── The period review's actions ──
+    // All human-only (no assistant proposes a billing write yet) and money:
+    // each changes what a tenant is billed or what they owe.
+    //
+    // Generating a period's bills. `targeted: false`: the kit cannot render
+    // GenerateBillsBody's arrays (its form is NO_FORM until a GUI registers
+    // one), and it is refined, so a loader's prefill would be dropped. The
+    // legacy page's pre-flight panel still serves Generate; a GUI's own form
+    // for billing.generate-bills (GuiPlugin.forms) replaces it.
+    {
+      ...GENERATE_BILLS_ACTION,
+      target: "billingPeriod",
+      input: GenerateBillsBody,
+      inputVersion: GENERATE_BILLS_BODY_VERSION,
+      method: "POST",
+      path: "/api/billing/generate",
+      bind: { body: { billingPeriodId: "billingPeriod" } },
+      risk: "money",
+      confirm: "confirm",
+      humanOnly: true,
+      targeted: false,
+      available: generateBillsAvailable,
+    },
+    // One bill, from the meter or from readings entered, on its own route so
+    // it can never become a whole-period run. Targeted: its form needs only
+    // the readings choice, and available() and prepare check the bill, so it
+    // is sound on any view of a bill.
+    {
+      ...REGENERATE_BILL_ACTION,
+      target: "lineItem",
+      input: RegenerateBillBody,
+      inputVersion: REGENERATE_BILL_BODY_VERSION,
+      method: "POST",
+      path: "/api/billing-line-items/[lineItemId]/regenerate",
+      bind: { path: { lineItemId: "lineItem" } },
+      risk: "money",
+      confirm: "confirm",
+      humanOnly: true,
+      prepare: prepareRegenerateBill,
+      available: regenerateBillAvailable,
+    },
+    // A usage correction on an unmetered draft bill. `targeted: false`: the
+    // review offers it only on the bills the usage route accepts.
+    {
+      ...RECORD_USAGE_ACTION,
+      target: "lineItem",
+      input: LineItemUsageBody,
+      inputVersion: LINE_ITEM_USAGE_BODY_VERSION,
+      method: "PATCH",
+      path: "/api/billing-line-items/[lineItemId]/usage",
+      bind: { path: { lineItemId: "lineItem" } },
+      risk: "money",
+      confirm: "none",
+      humanOnly: true,
+      targeted: false,
+      available: recordUsageAvailable,
+    },
+    // The payment-status transitions, all on one route. Each is offered only
+    // where the loader links it, with the status it sets as its prefill, so
+    // each is `targeted: false`: appended elsewhere it would open with no
+    // status. The kit form does not lock that prefill, so a person can
+    // submit another status; the route's transition and super-admin checks
+    // stay the authority. If Prepare comes to supply fixed values, revisit.
+    // No available(): the loader already offers each by the bill's status
+    // and the person's role, and prepare checks both again.
+    ...(
+      [
+        [MARK_PAID_ACTION, "confirm", prepareMarkPaid],
+        [MARK_UNPAID_ACTION, "none", prepareMarkUnpaid],
+        [MARK_REFUNDED_ACTION, "confirm", prepareMarkRefunded],
+        [MARK_FAILED_ACTION, "confirm", prepareMarkFailed],
+        [CANCEL_PAYMENT_LINK_ACTION, "confirm", prepareCancelPaymentLink],
+      ] as const
+    ).map(
+      ([action, confirm, prepare]): ActionDef => ({
+        ...action,
+        target: "lineItem",
+        input: LineItemPaymentStatusBody,
+        inputVersion: LINE_ITEM_PAYMENT_STATUS_BODY_VERSION,
+        method: "PATCH",
+        path: "/api/billing-line-items/[lineItemId]/payment-status",
+        bind: { path: { lineItemId: "lineItem" } },
+        risk: "money",
+        confirm,
+        humanOnly: true,
+        targeted: false,
+        prepare,
+      }),
+    ),
     {
       ...SAVINGS_SETTINGS_ACTION,
       target: "microgrid",

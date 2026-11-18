@@ -158,6 +158,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
     },
     pr: REVIEW,
+    note: "Contributed with no prepare and no prefill (GenerateBillsBody is refined) and `targeted: false`. The kit cannot render its arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; the route answers 200 with per-tenant errors[], which only such a form can show.",
   },
   {
     id: "regenerate-bill",
@@ -171,13 +172,16 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       action: "billing.regenerate-bill",
       target: "lineItem",
       method: "POST",
-      route: "/api/billing/generate",
+      route: "/api/billing-line-items/[lineItemId]/regenerate",
       confirm: "confirm",
-      form: "GenerateBillsBody",
+      form: "RegenerateBillBody",
       view: "billing.period-review",
     },
     pr: REVIEW,
-    note: "A paid bill is previewed first (POST /api/billing/regenerate-preview, PreviewBillsBody); that preview becomes the action's prepare.",
+    note:
+      "On its own route: on /api/billing/generate a per-bill action could carry only { billingPeriodId }, since GenerateBillsBody is refined (a tenant prefill is dropped), the kit cannot render its arrays and available() cannot target a bill, so Regenerate would run the whole period. " +
+      "There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total and the legacy warnings; a read that recomputes without writing is a follow-up. " +
+      "Regenerate selected is one regenerate-bill per selected row, or generate-bills with tenantIds through a GUI's own form.",
   },
   {
     id: "record-usage",
@@ -196,6 +200,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
     },
     pr: REVIEW,
+    note: "Offered only where the usage route accepts it: a draft, an unmetered bill with no meter assigned in the period, and a starting reading. The legacy Switch to manual entry, which makes a metered draft row's cells editable and then gets 409 device_linked, maps to regenerate-bill in manual mode.",
   },
   {
     id: "mark-paid",
@@ -299,6 +304,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       download: true,
     },
     pr: REVIEW,
+    note: "The GET allocates an invoice number on a bill's first download (the pdf route), so this link writes once, as the legacy menu's download does.",
   },
   {
     id: "export-csv",
@@ -328,14 +334,16 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/billing/row-actions-menu.tsx",
     replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/setup/tenants/[tenantId]" },
     pr: REVIEW,
+    note: "Carried as each row's tenant EntityRef (the tenant cell and row.related), with the href the host gives a tenant, not as a LinkRef: the page is community management's, and a view may link only to its own plugin's pages (gui-surface.test.ts check 7).",
   },
   {
     id: "payment-setup",
     screen: "period-review",
     control: "Go to Payment tab, in the banner shown when online payments are not set up",
     legacy: "src/components/BillingTable.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/communities/[id]/payment" },
-    pr: REVIEW,
+    replacedBy: { kind: "link", view: "billing.send-queue", href: "/communities/[id]/payment" },
+    pr: SEND,
+    note: "Moved to the send queue, which contributes payment links: the banner explains why none can be made. A billing loader can neither set a notice (host-filled) nor link to payments' page (check 7), so it needs payments' own contribution, such as a super-admin nav entry or the reason payment-link's available() gives.",
   },
   {
     id: "close-period",

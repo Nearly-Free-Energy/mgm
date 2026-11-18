@@ -75,6 +75,14 @@ describe("billing's savings actions", () => {
     expect(actions.map((a) => a.id)).toEqual([
       "billing.create-period",
       "billing.delete-period",
+      "billing.generate-bills",
+      "billing.regenerate-bill",
+      "billing.record-usage",
+      "billing.mark-paid",
+      "billing.mark-unpaid",
+      "billing.mark-refunded",
+      "billing.mark-failed",
+      "billing.cancel-payment-link",
       "billing.savings-settings",
       "billing.grid-tariff-add",
     ]);

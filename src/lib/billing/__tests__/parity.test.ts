@@ -12,6 +12,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
+import { DATA_KEYS } from "@/lib/gui/host/server/parse";
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
 import * as schemas from "../schemas";
@@ -26,24 +27,11 @@ const APP = path.join(ROOT, "src/app");
  * left behind, and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Contribute period review, with targeted actions for each bill
-  "generate-bills",
-  "regenerate-bill",
-  "record-usage",
-  "mark-paid",
-  "mark-unpaid",
-  "mark-refunded",
-  "mark-failed",
-  "cancel-payment-link",
-  "download-bill",
-  "export-csv",
-  "view-history",
-  "view-tenant",
-  "payment-setup",
   // Contribute the close checklist on …/close
   "close-period",
   // Contribute the send queue on …/send
   "payment-link",
+  "payment-setup",
   // Contribute a period's history
   "back-to-period",
   "history-show-all",
@@ -100,12 +88,46 @@ function contributedAction(a: ParityAction): ActionDef | undefined {
   return SURFACES[a.plugin].actions?.find((d) => d.id === a.action);
 }
 
+/** Every href in a model outside data subtrees, and whether it sits on an object with a `download`. */
+function hrefsOf(value: unknown, out: { href: string; download: boolean }[] = []): { href: string; download: boolean }[] {
+  if (Array.isArray(value)) value.forEach((item) => hrefsOf(item, out));
+  else if (value !== null && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (typeof o.href === "string") out.push({ href: o.href, download: o.download !== undefined });
+    for (const [key, child] of Object.entries(o)) if (!DATA_KEYS.has(key)) hrefsOf(child, out);
+  }
+  return out;
+}
+
 function contributedView(id: string): boolean {
   return Object.values(SURFACES).some((s) => s.views?.some((v) => v.id === id));
 }
 
+/** A row's href as a pattern: each [segment] any one segment, any query or fragment allowed. */
+function hrefPattern(href: string): RegExp {
+  const body = href
+    .split("/")
+    .map((s) => (/^\[.+\]$/.test(s) ? "[^/?#]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    .join("/");
+  return new RegExp(`^${body}(?:[?#].*)?$`);
+}
+
+/**
+ * A link row is contributed only when an example of its view carries an
+ * href it fits (a LinkRef's, a row's or an EntityRef's), and for a download
+ * row only a LinkRef with `download`: a view existing is not enough.
+ */
+function contributedLink(l: ParityLink): boolean {
+  const pattern = hrefPattern(l.href);
+  return Object.values(SURFACES).some((s) =>
+    (s.views ?? [])
+      .filter((v) => v.id === l.view)
+      .some((v) => v.examples.some((example) => hrefsOf(example).some((h) => pattern.test(h.href) && (!l.download || h.download)))),
+  );
+}
+
 const isContributed = (r: ParityRow) =>
-  r.replacedBy.kind === "action" ? contributedAction(r.replacedBy) !== undefined : contributedView(r.replacedBy.view);
+  r.replacedBy.kind === "action" ? contributedAction(r.replacedBy) !== undefined : contributedLink(r.replacedBy);
 
 describe("the billing parity table", () => {
   it("gives every row a unique id and a legacy component that exists", () => {
@@ -173,6 +195,18 @@ describe("parity with the contributed actions and views", () => {
       target: a.target,
     });
     if (a.form) expect(def.input, `${id}'s input is ${a.form}`).toBe((schemas as Record<string, unknown>)[a.form]);
+  });
+
+  it("counts a link as contributed only when an example of its view carries its href", () => {
+    const row = (id: string) => BILLING_PARITY.find((r) => r.id === id)!;
+    // billing.period-review exists, but no example links to payments' attempts.
+    expect(contributedView("billing.period-review")).toBe(true);
+    expect(isContributed(row("payment-history"))).toBe(false);
+    // A download row needs a LinkRef with `download`, not just a matching href.
+    const csv = row("export-csv").replacedBy as ParityLink;
+    expect(contributedLink(csv)).toBe(true);
+    expect(contributedLink({ ...csv, href: "/microgrids/[id]/billing/[periodId]/history", download: true })).toBe(false);
+    expect(contributedLink({ ...csv, href: "/microgrids/[id]/billing/[periodId]/history", download: undefined })).toBe(true);
   });
 
   it("lists only rows of the table as pending", () => {

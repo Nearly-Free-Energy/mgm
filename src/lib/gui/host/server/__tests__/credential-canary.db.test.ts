@@ -82,6 +82,9 @@ const IDS: CanaryIds = {
   syntheticMicrogridId: "e7400000-0000-4000-8002-000000000005",
   mixedMicrogridId: "e7400000-0000-4000-8002-000000000006",
   billingPeriodId: "e7400000-0000-4000-8003-000000000001",
+  tenantId: "e7400000-0000-4000-8004-000000000001",
+  lineItemId: "e7400000-0000-4000-8005-000000000001",
+  rateScheduleId: "e7400000-0000-4000-8006-000000000001",
 };
 const MICROGRIDS = canaryMicrogrids(IDS);
 const EMAIL = "gui-canary-manager@test.local";
