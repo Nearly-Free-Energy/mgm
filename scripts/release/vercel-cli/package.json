@@ -3,6 +3,16 @@
   "private": true,
   "description": "The Vercel CLI that scripts/release/build-deploy-asset.sh builds the release asset with, installed with npm ci from package-lock.json. See docs/releasing.md.",
   "dependencies": {
-    "vercel": "65.1.0"
+    "vercel": "65.17.0"
+  },
+  "overrides": {
+    "ajv@8": "8.20.0",
+    "js-yaml@4": "4.3.2",
+    "minimatch@10": "10.2.6",
+    "path-to-regexp@6": "6.3.0",
+    "path-to-regexp@8": "8.4.2",
+    "smol-toml@1": "1.9.1",
+    "tar@7": "7.5.23",
+    "zod@4": "4.6.7"
   }
 }

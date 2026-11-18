@@ -249,6 +249,14 @@ artifact holds that Linux build for a day, for inspection.
   effect: in that directory, with Node.js from `.nvmrc`, run
   `npm install --package-lock-only --ignore-scripts --save-exact vercel@<version>`
   and commit both files.
+- The CLI pins some of its dependencies to exact versions that have security
+  advisories against them. `overrides` in that `package.json` moves each one
+  to a patched release in the same major version, keyed by major
+  (`"tar@7": "7.5.23"`) so it never crosses one. After a CLI upgrade, run
+  `npm audit` in that directory: drop an override the new CLI already
+  satisfies, and add one only where the patched release keeps the major
+  version. A fix that needs a new major version waits for the CLI to adopt
+  it, because the CLI was not built or tested against it.
 - Every action in `.github/workflows/release.yml` is pinned to a full commit
   SHA, with its version in a comment. Dependabot (`.github/dependabot.yml`)
   proposes updates weekly, and the dry run runs on each. Pin a new action the
