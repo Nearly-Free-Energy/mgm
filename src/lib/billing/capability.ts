@@ -25,7 +25,7 @@ import type {
   UnresolvedTenant,
 } from "./repository";
 import { missingAcknowledgements, typedNameMatches, type CloseReview } from "./close";
-import { ClosePeriodBody } from "./schemas";
+import { ClosePeriodBody, CreatePeriodBody, GenerateBillsBody } from "./schemas";
 
 /**
  * 409: a bill's total is not a whole number, so the period cannot close until
@@ -58,16 +58,6 @@ function totalsChanged(review: CloseReview | undefined) {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isRealDate(value: string): boolean {
-  if (!DATE_RE.test(value)) return false;
-  const [y, m, d] = value.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  return (
-    dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
-  );
-}
 
 function tariffError(
   message: string,
@@ -122,172 +112,6 @@ function validateTiers(tiers: unknown): { tiers?: TierInput[]; error?: string } 
     });
   }
   return { tiers: out };
-}
-
-type GenerationBody = {
-  billingPeriodId: string;
-  tenantIds?: string[];
-  manualReadings?: { tenantId: string; startKwh: number; endKwh: number; reason?: string }[];
-  revertToEdgeTenantIds?: string[];
-  seedReadings?: { deviceId: string; dialReadingKwh: number; readAt: string; startKwh: number }[];
-};
-
-function parseGenerationBody(raw: unknown):
-  | { parsed: GenerationBody }
-  | { error: string; field?: string } {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "Body must be an object" };
-  }
-  const rec = raw as Record<string, unknown>;
-  if (typeof rec.billingPeriodId !== "string" || !UUID_RE.test(rec.billingPeriodId)) {
-    return { error: "billingPeriodId must be a UUID string", field: "billingPeriodId" };
-  }
-  let tenantIds: string[] | undefined;
-  if (rec.tenantIds !== undefined) {
-    if (!Array.isArray(rec.tenantIds)) {
-      return { error: "tenantIds must be an array of UUIDs", field: "tenantIds" };
-    }
-    for (const h of rec.tenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "tenantIds entries must be UUID strings", field: "tenantIds" };
-      }
-    }
-    tenantIds = rec.tenantIds as string[];
-  }
-  let manualReadings: GenerationBody["manualReadings"];
-  if (rec.manualReadings !== undefined) {
-    if (!Array.isArray(rec.manualReadings)) {
-      return { error: "manualReadings must be an array", field: "manualReadings" };
-    }
-    const out: NonNullable<GenerationBody["manualReadings"]> = [];
-    for (let i = 0; i < rec.manualReadings.length; i++) {
-      const m = rec.manualReadings[i] as Record<string, unknown>;
-      if (!m || typeof m !== "object") {
-        return { error: `manualReadings[${i}] must be an object`, field: "manualReadings" };
-      }
-      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
-        return { error: `manualReadings[${i}].tenantId must be a UUID`, field: "manualReadings" };
-      }
-      if (typeof m.startKwh !== "number" || !Number.isFinite(m.startKwh) || m.startKwh < 0) {
-        return {
-          error: `manualReadings[${i}].startKwh must be a non-negative finite number`,
-          field: "manualReadings",
-        };
-      }
-      if (typeof m.endKwh !== "number" || !Number.isFinite(m.endKwh) || m.endKwh < 0) {
-        return {
-          error: `manualReadings[${i}].endKwh must be a non-negative finite number`,
-          field: "manualReadings",
-        };
-      }
-      if ((m.endKwh as number) < (m.startKwh as number)) {
-        return { error: `manualReadings[${i}].endKwh must be >= startKwh`, field: "manualReadings" };
-      }
-      let reason: string | undefined;
-      if (m.reason !== undefined) {
-        if (typeof m.reason !== "string") {
-          return { error: `manualReadings[${i}].reason must be a string`, field: "manualReadings" };
-        }
-        if (m.reason.length > 500) {
-          return { error: `manualReadings[${i}].reason must be <= 500 chars`, field: "manualReadings" };
-        }
-        reason = m.reason;
-      }
-      out.push({
-        tenantId: m.tenantId as string,
-        startKwh: m.startKwh as number,
-        endKwh: m.endKwh as number,
-        ...(reason !== undefined ? { reason } : {}),
-      });
-    }
-    manualReadings = out;
-  }
-  // Tenants whose manual row may switch back to an OpenEMS reading. A
-  // tenant cannot be both re-entered manually and reverted to OpenEMS in
-  // one request; which one would win is not something a caller should have
-  // to guess.
-  let revertToEdgeTenantIds: string[] | undefined;
-  if (rec.revertToEdgeTenantIds !== undefined) {
-    if (!Array.isArray(rec.revertToEdgeTenantIds)) {
-      return {
-        error: "revertToEdgeTenantIds must be an array of UUIDs",
-        field: "revertToEdgeTenantIds",
-      };
-    }
-    for (const h of rec.revertToEdgeTenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return {
-          error: "revertToEdgeTenantIds entries must be UUID strings",
-          field: "revertToEdgeTenantIds",
-        };
-      }
-      if (manualReadings?.some((m) => m.tenantId === h)) {
-        return {
-          error: `Tenant ${h} cannot be in both manualReadings and revertToEdgeTenantIds`,
-          field: "revertToEdgeTenantIds",
-        };
-      }
-    }
-    revertToEdgeTenantIds = rec.revertToEdgeTenantIds as string[];
-  }
-  let seedReadings: GenerationBody["seedReadings"];
-  if (rec.seedReadings !== undefined) {
-    if (!Array.isArray(rec.seedReadings)) {
-      return { error: "seedReadings must be an array", field: "seedReadings" };
-    }
-    const out: NonNullable<GenerationBody["seedReadings"]> = [];
-    const seen = new Set<string>();
-    for (let i = 0; i < rec.seedReadings.length; i++) {
-      const r = rec.seedReadings[i] as Record<string, unknown>;
-      if (!r || typeof r !== "object") {
-        return { error: `seedReadings[${i}] must be an object`, field: "seedReadings" };
-      }
-      if (typeof r.deviceId !== "string" || !UUID_RE.test(r.deviceId)) {
-        return { error: `seedReadings[${i}].deviceId must be a UUID`, field: "seedReadings" };
-      }
-      if (seen.has(r.deviceId)) {
-        return {
-          error: `seedReadings has more than one entry for device ${r.deviceId}`,
-          field: "seedReadings",
-        };
-      }
-      seen.add(r.deviceId);
-      for (const f of ["dialReadingKwh", "startKwh"] as const) {
-        const v = r[f];
-        if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-          return {
-            error: `seedReadings[${i}].${f} must be a non-negative finite number`,
-            field: "seedReadings",
-          };
-        }
-      }
-      if (typeof r.readAt !== "string" || Number.isNaN(Date.parse(r.readAt))) {
-        return { error: `seedReadings[${i}].readAt must be an ISO timestamp`, field: "seedReadings" };
-      }
-      if ((r.startKwh as number) > (r.dialReadingKwh as number)) {
-        return {
-          error: `seedReadings[${i}].startKwh cannot exceed dialReadingKwh`,
-          field: "seedReadings",
-        };
-      }
-      out.push({
-        deviceId: r.deviceId,
-        dialReadingKwh: r.dialReadingKwh as number,
-        readAt: r.readAt as string,
-        startKwh: r.startKwh as number,
-      });
-    }
-    seedReadings = out;
-  }
-  return {
-    parsed: {
-      billingPeriodId: rec.billingPeriodId as string,
-      ...(tenantIds !== undefined ? { tenantIds } : {}),
-      ...(manualReadings !== undefined ? { manualReadings } : {}),
-      ...(revertToEdgeTenantIds !== undefined ? { revertToEdgeTenantIds } : {}),
-      ...(seedReadings !== undefined ? { seedReadings } : {}),
-    },
-  };
 }
 
 export class BillingCapability implements BillingCapabilityContract {
@@ -439,25 +263,25 @@ export class BillingCapability implements BillingCapabilityContract {
   async createPeriod(input: unknown) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
+    // The route parses with the same schema first; this keeps a direct
+    // caller to the codes it has always had. A fault in the body itself or
+    // in microgrid_id answers before the scope check; a fault in the dates,
+    // which CreatePeriodBody checks after microgrid_id, only after the scope
+    // and plugin checks, as before.
+    const body = CreatePeriodBody.safeParse(input);
+    const issue = body.success ? undefined : body.error.issues[0];
+    const field = typeof issue?.path[0] === "string" ? issue.path[0] : undefined;
+    if (issue && field !== "start_date" && field !== "end_date") {
       return {
         ok: false as const,
         status: 400 as const,
-        code: "billing_invalid_period",
-        message: "Body must be an object.",
+        code: field === "microgrid_id" ? "billing_invalid_microgrid" : "billing_invalid_period",
+        message: issue.message,
+        ...(field ? { field } : {}),
       };
     }
-    const rec = input as Record<string, unknown>;
-    const microgridId = typeof rec.microgrid_id === "string" ? rec.microgrid_id : "";
-    if (!UUID_RE.test(microgridId)) {
-      return {
-        ok: false as const,
-        status: 400 as const,
-        code: "billing_invalid_microgrid",
-        message: "microgrid_id must be a valid UUID.",
-        field: "microgrid_id",
-      };
-    }
+    // Past the check above, microgrid_id parsed: zod reports the shape's keys in order.
+    const microgridId = (input as { microgrid_id: string }).microgrid_id;
     const resolved = await this.repo.getMicrogridOrganization(microgridId);
     if (!resolved || resolved.orgId !== this.scope.organizationId) {
       return this.scopeMismatch();
@@ -465,17 +289,16 @@ export class BillingCapability implements BillingCapabilityContract {
     const gated = await this.requirePlugin();
     if (gated) return gated;
 
-    const startDate = typeof rec.start_date === "string" ? rec.start_date : "";
-    const endDate = typeof rec.end_date === "string" ? rec.end_date : "";
-    if (!isRealDate(startDate) || !isRealDate(endDate) || startDate > endDate) {
+    if (!body.success) {
       return {
         ok: false as const,
         status: 422 as const,
         code: "billing_invalid_range",
-        message: "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.",
-        field: "start_date",
+        message: body.error.issues[0].message,
+        field: field ?? "start_date",
       };
     }
+    const { start_date: startDate, end_date: endDate } = body.data;
     // The period timezone is stamped once from the microgrid and never
     // re-derived, so regenerating after a microgrid timezone change
     // reproduces the identical window.
@@ -747,17 +570,23 @@ export class BillingCapability implements BillingCapabilityContract {
   private async runGeneration(input: unknown, mode: "write" | "preview") {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
-    const parsed = parseGenerationBody(input);
-    if ("error" in parsed) {
+    // The routes parse first (generate with this schema, regenerate-preview
+    // with PreviewBillsBody, which is this one without seedReadings); this
+    // keeps a direct caller to the same rules. Preview accepts seeds here
+    // as it always has.
+    const body = GenerateBillsBody.safeParse(input);
+    if (!body.success) {
+      const issue = body.error.issues[0];
       return {
         ok: false as const,
         status: 400 as const,
         code: "billing_invalid_body",
-        message: parsed.error,
-        ...(parsed.field ? { field: parsed.field } : {}),
+        message: issue.message,
+        ...(typeof issue.path[0] === "string" ? { field: issue.path[0] } : {}),
       };
     }
-    const resolved = await this.repo.getPeriodOrganization(parsed.parsed.billingPeriodId);
+    const parsed = body.data;
+    const resolved = await this.repo.getPeriodOrganization(parsed.billingPeriodId);
     if (!resolved || resolved.orgId !== this.scope.organizationId) {
       return this.scopeMismatch();
     }
@@ -765,11 +594,11 @@ export class BillingCapability implements BillingCapabilityContract {
     if (gated) return gated;
 
     const out = await this.generation.run({
-      periodId: parsed.parsed.billingPeriodId,
-      tenantIds: parsed.parsed.tenantIds,
-      manualReadings: parsed.parsed.manualReadings,
-      revertToEdgeTenantIds: parsed.parsed.revertToEdgeTenantIds,
-      seedReadings: parsed.parsed.seedReadings,
+      periodId: parsed.billingPeriodId,
+      tenantIds: parsed.tenantIds,
+      manualReadings: parsed.manualReadings,
+      revertToEdgeTenantIds: parsed.revertToEdgeTenantIds,
+      seedReadings: parsed.seedReadings,
       mode,
       actorUserId: this.scope.userId,
     });

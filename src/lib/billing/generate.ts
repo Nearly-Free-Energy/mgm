@@ -18,7 +18,8 @@ import "server-only";
  *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
  *      that guard only; it does not add a tenant to the processed set.
  *
- *   2. `POST /api/billing/regenerate-preview` — same body, mode='preview'.
+ *   2. `POST /api/billing/regenerate-preview` — same body without
+ *      `seedReadings` (`PreviewBillsBody`), mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *

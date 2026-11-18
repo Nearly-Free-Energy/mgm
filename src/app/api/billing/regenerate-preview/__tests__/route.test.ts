@@ -163,6 +163,11 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       })
     );
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "manualReadings[0].endKwh must be >= startKwh",
+      field: "manualReadings",
+      code: "invalid_body",
+    });
   });
 
   it("delegates to the billing capability for preview (mode owned by capability)", async () => {
@@ -409,12 +414,15 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
 
   it("400 invalid_body for a malformed revertToEdgeTenantIds", async () => {
     const { POST } = await import("../route");
-    for (const revertToEdgeTenantIds of [HH_A, ["not-a-uuid"]]) {
+    for (const [revertToEdgeTenantIds, error] of [
+      [HH_A, "revertToEdgeTenantIds must be an array of UUIDs"],
+      [["not-a-uuid"], "revertToEdgeTenantIds entries must be UUID strings"],
+    ] as const) {
       const res = await POST(
         makePostRequest({ billingPeriodId: PERIOD_ID, revertToEdgeTenantIds })
       );
       expect(res.status).toBe(400);
-      expect((await res.json()).error).toBe("invalid_body");
+      expect(await res.json()).toEqual({ error, field: "revertToEdgeTenantIds", code: "invalid_body" });
     }
     const both = await POST(
       makePostRequest({
@@ -424,6 +432,20 @@ describe("POST /api/billing/regenerate-preview (#173 BC1)", () => {
       })
     );
     expect(both.status).toBe(400);
+    expect(await both.json()).toEqual({
+      error: `Tenant ${HH_A} cannot be in both manualReadings and revertToEdgeTenantIds`,
+      field: "revertToEdgeTenantIds",
+      code: "invalid_body",
+    });
+    expect(previewBills).not.toHaveBeenCalled();
+  });
+
+  it("400 for seedReadings, which preview does not use, and other unknown keys, before the session check", async () => {
+    mockUserOverride = null;
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID, seedReadings: [] }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: seedReadings", code: "invalid_body" });
     expect(previewBills).not.toHaveBeenCalled();
   });
 

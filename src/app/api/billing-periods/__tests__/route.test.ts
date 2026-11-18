@@ -104,17 +104,65 @@ describe("POST /api/billing-periods (issue #5)", () => {
     expect(json.code).toBe("billing_disabled");
   });
 
-  it("maps capability validation errors", async () => {
+  it("maps capability errors", async () => {
     createPeriodImpl = async () => ({
       ok: false,
-      status: 422,
-      code: "billing_invalid_range",
-      message: "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.",
+      status: 409,
+      code: "billing_period_overlap",
+      message: "This billing period overlaps an existing period for the microgrid.",
     });
     const { POST } = await import("../route");
     const res = await POST(
-      post({ microgrid_id: MG_ID, start_date: "2026-09-30", end_date: "2026-09-01" })
+      post({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" })
     );
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "billing_period_overlap" });
+  });
+
+  it("passes the capability only the parsed fields", async () => {
+    const createPeriod = vi.fn(createPeriodImpl);
+    composeImpl = async () => ({ ok: true, data: { billing: { createPeriod }, dispose: async () => {} } });
+    const { POST } = await import("../route");
+    await POST(post({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-01" }));
+    expect(createPeriod).toHaveBeenCalledWith({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-01" });
+  });
+
+  it.each([
+    [
+      "an inverted range",
+      { microgrid_id: MG_ID, start_date: "2026-09-30", end_date: "2026-09-01" },
+      "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.",
+      "start_date",
+    ],
+    [
+      "a day that does not exist",
+      { microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-02-30" },
+      "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.",
+      "end_date",
+    ],
+    ["a missing microgrid", { start_date: "2026-09-01", end_date: "2026-09-30" }, "microgrid_id must be a valid UUID.", "microgrid_id"],
+    [
+      "an unknown key",
+      { microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30", timezone: "UTC" },
+      "Unknown field: timezone",
+      undefined,
+    ],
+    ["a null body", null, "Request body must be an object", undefined],
+  ])("400 invalid_body for %s, before the lookup and the composer", async (_label, body, error, field) => {
+    const compose = vi.fn(composeImpl);
+    composeImpl = compose;
+    microgridRow = null;
+    const { POST } = await import("../route");
+    const res = await POST(post(body));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error, ...(field ? { field } : {}), code: "invalid_body" });
+    expect(compose).not.toHaveBeenCalled();
+  });
+
+  it("400 invalid_body for a body that is not JSON", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(post("not json"));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
   });
 });
