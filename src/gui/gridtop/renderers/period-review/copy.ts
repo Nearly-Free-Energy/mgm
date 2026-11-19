@@ -5,8 +5,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** What a failed copy announces: which figure, and what to do instead. */
-export const copyFailed = (what: string) => `Could not copy ${what}: select the figure and copy it.`;
+/** What a failed copy announces: which figure, and the figure itself, since the text shown is grouped or rounded. */
+export const copyFailed = (what: string, figure: string) => `Could not copy ${what}: the clipboard is not available. The figure is ${figure}.`;
 /** How long a copied figure stays marked. */
 const PULSE_MS = 900;
 
@@ -48,7 +48,7 @@ export function useCopier(announce: (message: string) => void): Copier {
       if (timer.current) clearTimeout(timer.current);
       if (!ok) {
         setCopied(null);
-        announce(copyFailed(what));
+        announce(copyFailed(what, figure));
         return false;
       }
       setCopied(id);

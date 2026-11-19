@@ -130,7 +130,7 @@ beforeEach(() => {
   rpcResult = { data: [{ user_id: USER_1, first_name: "Okello", last_name: "Daniel", email: "okello@example.test" }], error: null };
   tables = {
     billing_periods: [{ id: PERIOD, microgrid_id: MG, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", rate_schedule_id: null }],
-    microgrids: [{ id: MG, currency: "UGX", timezone: "Africa/Kampala" }],
+    microgrids: [{ id: MG, currency: "UGX" }],
     tenants: [{ id: T1, microgrid_id: MG, display_name: "Unit 1" }],
     billing_line_items: [{ id: BILL_1, billing_period_id: PERIOD, tenant_id: T1 }],
     billing_audit_log: [
@@ -157,7 +157,7 @@ describe("loadPeriodHistory: reads", () => {
     const model = await ok(request());
     expect(composeBilling).not.toHaveBeenCalled();
     expect(selectsOf("payment_events").every((s) => !s.includes("raw_payload"))).toBe(true);
-    expect(selectsOf("microgrids")).toEqual(["id, currency, timezone"]);
+    expect(selectsOf("microgrids")).toEqual(["id, currency"]);
     expect(selectsOf("billing_audit_log")[0]).toContain("billing_line_items!billing_audit_log_billing_line_item_id_fkey(tenants(display_name))");
     expect(selectsOf("payment_events")[0]).toContain("billing_line_items!inner(billing_period_id, payment_notes, tenants(display_name))");
     expect(callsOf("eq", "billing_periods")).toEqual([
@@ -190,6 +190,15 @@ describe("loadPeriodHistory: reads", () => {
     ]);
     expect(model.body.rows[1].cells.note.text).toBe("Cash");
     expect(model.body.rows[0].cells.at).toMatchObject({ t: "datetime", tz: "Africa/Kampala" });
+  });
+
+  it("shows times in the period's time zone and money in the microgrid's currency", async () => {
+    tables.billing_periods[0].timezone = "Africa/Nairobi";
+    tables.microgrids[0].currency = "KES";
+    const model = await ok(request());
+    expect(new Set(model.body.rows.map((r) => (r.cells.at.t === "datetime" ? r.cells.at.tz : r.cells.at.t)))).toEqual(new Set(["Africa/Nairobi"]));
+    const generated = model.body.rows.find((r) => r.cells.change.text === "Bill generated for Unit 1")!;
+    expect(generated.cells.detail.text).toMatch(/^Total: KES/);
   });
 
   it("loads a period with no pinned tariff", async () => {
@@ -240,7 +249,7 @@ describe("loadPeriodHistory: refusals", () => {
 
   it("finds no period under another microgrid", async () => {
     const other = "e7c00000-0000-4000-8000-0000000000a2";
-    tables.microgrids.push({ id: other, currency: "UGX", timezone: "UTC" });
+    tables.microgrids.push({ id: other, currency: "UGX" });
     expect(await loadPeriodHistory(request({}, { id: other, periodId: PERIOD }))).toEqual(PERIOD_HISTORY_REFUSALS.notFound);
     expect(callsOf("eq", "billing_periods")).toContainEqual(["microgrid_id", other]);
   });
@@ -289,6 +298,48 @@ describe("loadPeriodHistory: the tenant filter", () => {
     expect(JSON.stringify(model)).not.toContain("drop");
     expect(model.body.rows).toEqual([]);
     expect(model.subtitle).toMatch(/Showing changes for unknown tenant$/);
+  });
+
+  it("answers a tenant id that is not a UUID, with a valid cursor, as its first page: Show all, and no Latest changes to the same place", async () => {
+    const before = encodeCursor({ source: "a", id: uuid(3), at: "2026-10-31T21:00:00+00:00" });
+    const model = await ok(request({ tenant_id: "not-a-uuid", before }));
+    expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+      ["billing.back-to-period", `/microgrids/${MG}/billing/${PERIOD}`],
+      ["billing.history-show-all", `/microgrids/${MG}/billing/${PERIOD}/history`],
+    ]);
+    expect(model.body.empty.title).toBe("No changes recorded for unknown tenant");
+    expect(JSON.stringify(model)).not.toContain("not-a-uuid");
+  });
+
+  it("answers a tenant of another microgrid, with a valid cursor, as its first page", async () => {
+    const elsewhere = "e7c00000-0000-4000-8000-0000000000c9";
+    tables.tenants.push({ id: elsewhere, microgrid_id: "e7c00000-0000-4000-8000-0000000000a9", display_name: "Unit 9" });
+    const before = encodeCursor({ source: "a", id: uuid(3), at: "2026-10-31T21:00:00+00:00" });
+    const model = await ok(request({ tenant_id: elsewhere, before }));
+    expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+      ["billing.back-to-period", `/microgrids/${MG}/billing/${PERIOD}`],
+      ["billing.history-show-all", `/microgrids/${MG}/billing/${PERIOD}/history`],
+    ]);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for unknown tenant", text: "Other tenants on this period may have entries." });
+    expect(reads.some((r) => r[1] === "billing_audit_log" || r[1] === "payment_events")).toBe(false);
+  });
+
+  it("answers a tenant with no bill on the period, with a valid cursor, as its first page", async () => {
+    tables.billing_line_items = [];
+    const before = encodeCursor({ source: "a", id: uuid(3), at: "2026-10-31T21:00:00+00:00" });
+    const model = await ok(request({ tenant_id: T1, before }));
+    expect(model.links!.map((l) => l.id)).toEqual(["billing.back-to-period", "billing.history-show-all"]);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for Unit 1", text: "Other tenants on this period may have entries." });
+    expect(reads.some((r) => r[1] === "billing_audit_log" || r[1] === "payment_events")).toBe(false);
+  });
+
+  it("says a filtered later page with nothing left has no earlier changes", async () => {
+    // Every entry of tenant 1's bill is newer than this cursor.
+    const before = encodeCursor({ source: "a", id: uuid(1), at: "2026-01-01T00:00:00+00:00" });
+    const model = await ok(request({ tenant_id: T1, before }));
+    expect(model.body.rows).toEqual([]);
+    expect(model.body.empty).toEqual({ title: "No earlier changes recorded for Unit 1" });
+    expect(model.links!.find((l) => l.id === "billing.history-latest")!.href).toBe(`/microgrids/${MG}/billing/${PERIOD}/history?tenant_id=${T1}`);
   });
 });
 

@@ -56,7 +56,7 @@ function totalsChanged(review: CloseReview | undefined) {
     ok: false as const,
     status: 409 as const,
     code: "billing_period_totals_changed",
-    message: "The period's totals changed after you reviewed them. Review the new totals and confirm again.",
+    message: CLOSE_REFUSAL_COPY.totalsChanged,
     ...(review ? { review } : {}),
   };
 }

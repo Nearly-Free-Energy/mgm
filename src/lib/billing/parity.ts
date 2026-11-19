@@ -82,6 +82,13 @@ export type ParityLink = {
   /** A page under src/app/(gui) or a GET route under src/app/api. */
   href: string;
   download?: true;
+  /**
+   * What in the view's model carries it: the LinkRef with this id (in the
+   * model's links or a row's), a row's own href ("row"), or an EntityRef's
+   * href ("entity"). Never the host's trail, which links every view's
+   * parents. Unset while nothing is decided: the row stays pending.
+   */
+  via?: { link: string } | "row" | "entity";
 };
 
 /**
@@ -154,7 +161,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "periods",
     control: "A period in the period picker; View on a period row",
     legacy: "src/components/BillingPeriodList.tsx, src/components/ui/period-picker.tsx",
-    replacedBy: { kind: "link", view: "billing.periods", href: "/microgrids/[id]/billing/[periodId]" },
+    replacedBy: { kind: "link", view: "billing.periods", href: "/microgrids/[id]/billing/[periodId]", via: "row" },
     pr: PERIODS,
   },
   {
@@ -362,6 +369,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
       href: "/api/billing-line-items/[lineItemId]/pdf",
       download: true,
+      via: { link: "billing.download-bill" },
     },
     pr: REVIEW,
     note: "The GET allocates an invoice number on a bill's first download (the pdf route), so this link writes once, as the legacy menu's download does.",
@@ -376,6 +384,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
       href: "/api/billing-periods/[periodId]/export-csv",
       download: true,
+      via: { link: "billing.export-csv" },
     },
     pr: REVIEW,
   },
@@ -384,7 +393,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "View history in the period header; row menu View history (filtered to the tenant)",
     legacy: "src/components/BillingTable.tsx, src/components/billing/row-actions-menu.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/billing/[periodId]/history" },
+    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.view-history" } },
     pr: REVIEW,
   },
   {
@@ -392,7 +401,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Row menu View tenant",
     legacy: "src/components/billing/row-actions-menu.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/setup/tenants/[tenantId]" },
+    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/setup/tenants/[tenantId]", via: "entity" },
     pr: REVIEW,
     note: "Carried as each row's tenant EntityRef (the tenant cell and row.related), with the href the host gives a tenant, not as a LinkRef: the page is community management's, and a view may link only to its own plugin's pages (gui-surface.test.ts check 7).",
   },
@@ -512,7 +521,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "copy", view: "billing.period-review", what: "each cell's bare figure, and each total" },
     pr: GRIDTOP,
-    note: "Copies the figures from the billing.period-review@1 ext: kWh to 3 dp as the CSV export writes it, and money in the currency's minor unit, which matches the CSV (csv-export.ts rounds every amount to a whole number) only for a currency with none, such as UGX; if the CSV's rounding changes, revisit. the shown kWh stays at 1 dp until the model's precision follow-up.",
+    note: "Copies the figures from the billing.period-review@1 ext: kWh to 3 dp as the CSV export writes it, and money in the currency's minor unit, which matches the CSV (csv-export.ts rounds every amount to a whole number) only for a currency with none, such as UGX; if the CSV's rounding changes, revisit. A bill's readings and usage are shown to 3 dp, as legacy shows them (`digits` on Fmt.energy); the totals to 1 dp, as legacy's grand total row.",
   },
   {
     id: "copy-payment-link",
@@ -530,17 +539,17 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-history",
     control: "Back to period",
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
-    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]" },
+    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]", via: { link: "billing.back-to-period" } },
     pr: HISTORY,
-    note: "LinkRef billing.back-to-period; the host's trail also links the period.",
+    note: "The host's trail also links the period; it does not count.",
   },
   {
     id: "history-show-all",
     screen: "period-history",
     control: "Show all, when the history is filtered to one tenant",
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
-    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history" },
+    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.history-show-all" } },
     pr: HISTORY,
-    note: "LinkRef billing.history-show-all, offered while the view is filtered by tenant_id.",
+    note: "Offered while the view is filtered by tenant_id. Latest changes (billing.history-latest), on a later page, has the same path and does not count.",
   },
 ];

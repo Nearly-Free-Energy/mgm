@@ -43,6 +43,19 @@ const ACKNOWLEDGEMENT_IDS = Object.keys(CLOSE_ACKNOWLEDGEMENTS) as [
 export const CLOSE_REFUSAL_COPY = {
   closed: "Billing period is already closed.",
   reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
+  /**
+   * The close route's 409 billing_period_totals_changed. After a refusal the
+   * GUI host shows the same confirmation step again, with the totals and the
+   * digest it prepared (src/lib/gui/host/client/action-host.tsx), so
+   * confirming there again is refused again: the sentence sends the person
+   * back to Close period, whose prepare reads the new totals. The legacy
+   * ClosePeriodDialog shows its own sentence over the new ceremony the 409
+   * carries, and this one only when the 409 carries none, when reopening is
+   * also the way on. If the host comes to prepare again on this code (a #201
+   * item), revisit this sentence.
+   */
+  totalsChanged:
+    "The period's totals changed after you reviewed them. Close this dialog and choose Close period again to review the new totals.",
 } as const;
 
 /** Names shown in a list of tenants before the rest are counted. */
