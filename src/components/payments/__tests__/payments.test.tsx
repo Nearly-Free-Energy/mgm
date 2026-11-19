@@ -41,6 +41,17 @@ it("shows reconciliation amounts and records only the entered external adjustmen
  const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
  expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager" });
 });
+it("accepts exact receipts with the action alone", async () => {
+ fetchMock.mockImplementation(async (_url, options) => response(options ? {} : history));
+ render(<PaymentHistory lineItemId="bill-1" />);
+ fireEvent.click(screen.getByText("Payment history"));
+ await screen.findByText(/Difference: 20 UGX/);
+ fireEvent.click(screen.getByText("Accept exact receipts"));
+ await waitFor(() => expect(refresh).toHaveBeenCalled());
+ const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
+ expect(call![0]).toBe("/api/payments/attempts/attempt-1/reconcile");
+ expect(JSON.parse(call![1].body)).toEqual({ action: "accept_exact" });
+});
 it("opens payment history as a dialog that keeps focus inside and closes on Escape", async () => {
  fetchMock.mockImplementation(async () => response(history));
  render(<PaymentHistory lineItemId="bill-1" />);
@@ -75,7 +86,10 @@ it("keeps focus on Payment history after Escape while a request runs, and ignore
  fireEvent.click(trigger);
  expect(screen.queryByRole("dialog")).toBeNull();
  expect(fetchMock.mock.calls.length).toBe(callsBefore);
- expect(fetchMock.mock.calls.filter(call => call[1]?.method === "POST")).toHaveLength(1);
+ const posts = fetchMock.mock.calls.filter(call => call[1]?.method === "POST");
+ expect(posts).toHaveLength(1);
+ expect(posts[0][0]).toBe("/api/payments/attempts/attempt-1/refresh");
+ expect(JSON.parse(posts[0][1].body)).toEqual({});
  finish();
  await waitFor(() => expect(refresh).toHaveBeenCalled());
  await waitFor(() => expect(trigger.hasAttribute("aria-disabled")).toBe(false));

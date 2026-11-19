@@ -30,7 +30,9 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
   setBusy(true); setError("");
   try {
    if (action === "record_external" && (externalAmount.trim() === "" || !Number.isFinite(Number(externalAmount)))) throw new Error("Enter the actual externally collected amount, or a negative refund amount.");
-   const response = await fetch(`/api/payments/attempts/${attempt.id}/${action === "refresh" ? "refresh" : "reconcile"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, externalAmount: Number(externalAmount), externalReference: reference, notes }) });
+   // Each route's body (src/lib/payments/schemas.ts): refresh takes none, accepting exact receipts no amount.
+   const body = action === "refresh" ? {} : action === "accept_exact" ? { action } : { action, externalAmount: Number(externalAmount), externalReference: reference, notes };
+   const response = await fetch(`/api/payments/attempts/${attempt.id}/${action === "refresh" ? "refresh" : "reconcile"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
    const value = await response.json(); if (!response.ok) throw new Error(value.error);
    await load(); router.refresh();
   } catch (error) { setError(error instanceof Error ? error.message : "Payment action failed"); }
