@@ -1,13 +1,17 @@
 /**
- * Every page under src/app/(gui), called as the server renders it for a
- * client-side navigation: the page alone, without the (gui) layout, which
- * App Router skips then (CLAUDE.md, "Session checks before privilege"). A
- * person whose rows are all tenant rows is redirected from every page that
- * is not a tenant page before the page opens a Supabase client or loads a
- * view (keepTenantOnlyToTenantPages, mgm#209). A new page.tsx is found here
- * by the glob below, so it fails until it makes that call first.
+ * Every page and nested layout under src/app/(gui), called as the server
+ * renders it for a client-side navigation: each on its own, without the
+ * (gui) layout, which App Router skips then, and a nested layout alongside
+ * the page rather than after its guard (CLAUDE.md, "Session checks before
+ * privilege"). A person whose rows are all tenant rows is redirected from
+ * every page that is not a tenant page before the page or layout opens a
+ * Supabase client or loads a view (keepTenantOnlyToTenantPages, mgm#209). A
+ * new page.tsx or layout.tsx is found here by the globs below, so it fails
+ * until it makes that call first.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { surfaceSnapshot } from "@/lib/gui/host/server/snapshot";
+import { matchView } from "@/lib/gui/host/server/view";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { resetMgmRuntimeForTests } from "@/lib/runtime/root";
 
@@ -58,8 +62,12 @@ vi.mock("@/lib/gui/host/server/render-view", async (importOriginal) => ({
 import { TENANT_START_PAGE } from "@/lib/gui/host/shared/tenant-units";
 
 type Page = (props: { params: Promise<Record<string, unknown>>; searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
+type Layout = (props: { children: unknown; params: Promise<Record<string, unknown>> }) => Promise<unknown>;
 
 const PAGE_FILES = import.meta.glob<{ default: Page }>("../**/page.tsx");
+// Every nested layout; the (gui) layout itself is tested in layout.test.tsx.
+const LAYOUT_FILES = import.meta.glob<{ default: Layout }>(["../**/layout.tsx", "!../layout.tsx"]);
+const LAYOUT_SOURCES = import.meta.glob<string>(["../**/layout.tsx", "!../layout.tsx"], { query: "?raw", import: "default", eager: true });
 
 const UNIT = "e7300000-0000-4000-8003-000000000001";
 const ID = "e7300000-0000-4000-8004-000000000001";
@@ -67,20 +75,40 @@ const ORG = "e7300000-0000-4000-8000-000000000001";
 const tenantRows = [{ user_id: "user-1", role: "tenant", scope_type: "tenant", scope_id: UNIT }];
 const staffAndTenantRows = [...tenantRows, { user_id: "user-1", role: "org_manager", scope_type: "org", scope_id: ORG }];
 
-/** A page file's URL pattern: "../microgrids/[id]/page.tsx" → "/microgrids/[id]". */
-const patternOf = (file: string) => `/${file.replace(/^\.\.\//, "").replace(/\/?page\.tsx$/, "")}`.replace(/\/\([^)]*\)/g, "");
+/** A page or layout file's URL pattern: "../microgrids/[id]/page.tsx" → "/microgrids/[id]". */
+const patternOf = (file: string) =>
+  `/${file.replace(/^\.\.\//, "").replace(/\/?(page|layout)\.tsx$/, "")}`.replace(/\/\([^)]*\)/g, "");
 
 const CATCH_ALL = "/[...path]";
 const HOST_PAGES = Object.keys(PAGE_FILES).map(patternOf).filter((p) => p !== CATCH_ALL).sort();
+const LAYOUTS = Object.keys(LAYOUT_FILES).map(patternOf).sort();
+
+const sample = (pattern: string) => pattern.replace(/\[([^\]]+)\]/g, (_, name: string) => (name === "nav" ? "billing.periods" : ID));
+
 // The catch-all serves every page the catalog has a view serve; it is
-// called once for each, as its own path.
+// called once for each, as its own path, and each is a staff or a tenant
+// page by the scope of the view that serves it, as dispatchView picks it.
 const VIEW_PAGES = MGM_BUNDLED_PLUGINS.flatMap((plugin) => plugin.pages)
   .filter((page) => page.servedBy === "view")
   .map((page) => page.path)
   .sort();
-const STAFF_VIEW_PAGES = VIEW_PAGES.filter((page) => page !== TENANT_START_PAGE);
+const snapshot = await surfaceSnapshot();
+const scopeOf = (page: string) => matchView(snapshot.views, sample(page))?.view.def.scope;
+const STAFF_VIEW_PAGES = VIEW_PAGES.filter((page) => scopeOf(page) !== "tenant");
+const TENANT_VIEW_PAGES = VIEW_PAGES.filter((page) => scopeOf(page) === "tenant");
 
-const sample = (pattern: string) => pattern.replace(/\[([^\]]+)\]/g, (_, name: string) => (name === "nav" ? "billing.periods" : ID));
+/**
+ * Pages that read nothing of their own and redirect, for anyone, to the page
+ * they stand for; every other host page opens a Supabase client.
+ */
+const OWN_REDIRECTS: Record<string, string> = {
+  // The Setup tab's own page only sends the person to its first tab.
+  "/microgrids/[id]/setup": "/microgrids/[id]/setup/edges",
+};
+
+/** The params a page or layout at `pattern` gets. */
+const paramsOf = (pattern: string) =>
+  Object.fromEntries([...pattern.matchAll(/\[([^\]]+)\]/g)].map(([, name]) => [name, name === "nav" ? "billing.periods" : ID]));
 
 /**
  * What the page answers for `roles` at `pattern`: "redirect:<to>",
@@ -93,11 +121,22 @@ async function answer(pattern: string, roles: unknown[], viaCatchAll = false): P
   mocks.headers = new Headers({ "x-mgm-path": path });
   const file = viaCatchAll ? "../[...path]/page.tsx" : Object.keys(PAGE_FILES).find((f) => patternOf(f) === pattern)!;
   const { default: Page } = await PAGE_FILES[file]();
-  const params: Record<string, unknown> = viaCatchAll
-    ? { path: path.split("/").filter(Boolean) }
-    : Object.fromEntries([...pattern.matchAll(/\[([^\]]+)\]/g)].map(([, name]) => [name, name === "nav" ? "billing.periods" : ID]));
+  const params: Record<string, unknown> = viaCatchAll ? { path: path.split("/").filter(Boolean) } : paramsOf(pattern);
+  return outcome(() => Page({ params: Promise.resolve(params), searchParams: Promise.resolve({}) }));
+}
+
+/** What the nested layout at `pattern` answers for `roles`, rendered for a request to a page under it; as answer. */
+async function layoutAnswer(pattern: string, roles: unknown[]): Promise<string> {
+  mocks.getRequestUserAccess.mockResolvedValue({ user: { id: "user-1" }, roles });
+  mocks.headers = new Headers({ "x-mgm-path": sample(pattern) });
+  const file = Object.keys(LAYOUT_FILES).find((f) => patternOf(f) === pattern)!;
+  const { default: Layout } = await LAYOUT_FILES[file]();
+  return outcome(() => Layout({ children: "page", params: Promise.resolve(paramsOf(pattern)) }));
+}
+
+async function outcome(render: () => Promise<unknown>): Promise<string> {
   try {
-    const out = await Page({ params: Promise.resolve(params), searchParams: Promise.resolve({}) });
+    const out = await render();
     return out === "view" ? "view" : "rendered";
   } catch (error) {
     const message = (error as Error).message;
@@ -105,6 +144,10 @@ async function answer(pattern: string, roles: unknown[], viaCatchAll = false): P
     throw error;
   }
 }
+
+/** Whether a layout opens a Supabase client of its own, read from its source. */
+const layoutReads = (pattern: string) =>
+  LAYOUT_SOURCES[Object.keys(LAYOUT_SOURCES).find((f) => patternOf(f) === pattern)!].includes("createClient(");
 
 beforeEach(() => {
   mocks.redirect.mockClear();
@@ -119,11 +162,14 @@ afterAll(async () => {
 });
 
 describe("Every page under (gui) keeps a person whose rows are all tenant rows to tenant pages (mgm#209)", () => {
-  it("finds the host's pages and the catalog's view pages", () => {
+  it("finds the host's pages, the nested layouts and the catalog's view pages, by scope", () => {
     expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing"]));
     expect(HOST_PAGES.length).toBeGreaterThan(20);
-    expect(VIEW_PAGES).toContain(TENANT_START_PAGE);
+    expect(LAYOUTS).toEqual(expect.arrayContaining(["/communities/[id]", "/microgrids/[id]", "/microgrids/[id]/setup", "/settings"]));
+    expect(LAYOUTS).not.toContain("");
+    expect(TENANT_VIEW_PAGES).toContain(TENANT_START_PAGE);
     expect(STAFF_VIEW_PAGES).not.toHaveLength(0);
+    expect([...STAFF_VIEW_PAGES, ...TENANT_VIEW_PAGES].sort()).toEqual(VIEW_PAGES);
   });
 
   it.each(HOST_PAGES)("%s sends them home before it opens a client", async (page) => {
@@ -137,8 +183,46 @@ describe("Every page under (gui) keeps a person whose rows are all tenant rows t
     expect(mocks.read).not.toHaveBeenCalled();
   });
 
-  it("the catch-all loads a tenant view's page for them", async () => {
-    expect(await answer(TENANT_START_PAGE, tenantRows, true)).toBe("view");
+  it.each(TENANT_VIEW_PAGES)("the catch-all loads the tenant page %s for them", async (page) => {
+    expect(await answer(page, tenantRows, true)).toBe("view");
+  });
+
+  it.each(LAYOUTS)("the layout of %s sends them home before it opens a client", async (layout) => {
+    expect(await layoutAnswer(layout, tenantRows)).toBe(`redirect:${TENANT_START_PAGE}`);
+    expect(mocks.read).not.toHaveBeenCalled();
+  });
+
+  it.each(LAYOUTS)("the layout of %s sends them to /no-access while their home is not released", async (layout) => {
+    mocks.isReleasedRoute.mockImplementation((path: string) => path !== TENANT_START_PAGE);
+    expect(await layoutAnswer(layout, tenantRows)).toBe("redirect:/no-access");
+    expect(mocks.read).not.toHaveBeenCalled();
+  });
+
+  it.each(LAYOUTS)("the layout of %s goes on to its own reads for a person with staff and tenant rows", async (layout) => {
+    expect(await layoutAnswer(layout, staffAndTenantRows)).toBe(layoutReads(layout) ? "read" : "rendered");
+  });
+
+  it.each(LAYOUTS)("the layout of %s answers 404 for a render the middleware did not see, before it reads the user", async (layout) => {
+    mocks.headers = new Headers();
+    const file = Object.keys(LAYOUT_FILES).find((f) => patternOf(f) === layout)!;
+    const { default: Layout } = await LAYOUT_FILES[file]();
+    await expect(Layout({ children: "page", params: Promise.resolve(paramsOf(layout)) })).rejects.toThrow("not-found");
+    expect(mocks.getRequestUserAccess).not.toHaveBeenCalled();
+    expect(mocks.read).not.toHaveBeenCalled();
+  });
+
+  it("the catch-all judges the path it dispatches, not a different one in the header", async () => {
+    // A staff view's page dispatched while the header names the tenant home:
+    // the guard follows the params, which name what is served.
+    const [staffPage] = STAFF_VIEW_PAGES;
+    mocks.getRequestUserAccess.mockResolvedValue({ user: { id: "user-1" }, roles: tenantRows });
+    mocks.headers = new Headers({ "x-mgm-path": TENANT_START_PAGE });
+    const { default: Page } = await PAGE_FILES["../[...path]/page.tsx"]();
+    const path = sample(staffPage).split("/").filter(Boolean);
+    expect(await outcome(() => Page({ params: Promise.resolve({ path }), searchParams: Promise.resolve({}) }))).toBe(
+      `redirect:${TENANT_START_PAGE}`,
+    );
+    expect(mocks.renderView).not.toHaveBeenCalled();
   });
 
   it.each(HOST_PAGES)("%s sends them to /no-access, which can sign them out, while their home is not released", async (page) => {
@@ -147,10 +231,9 @@ describe("Every page under (gui) keeps a person whose rows are all tenant rows t
     expect(mocks.read).not.toHaveBeenCalled();
   });
 
-  it.each(HOST_PAGES)("%s is left to its own checks for a person with staff and tenant rows", async (page) => {
+  it.each(HOST_PAGES)("%s goes on to its own read for a person with staff and tenant rows", async (page) => {
     const out = await answer(page, staffAndTenantRows);
-    expect(out).not.toBe(`redirect:${TENANT_START_PAGE}`);
-    expect(out).not.toBe("redirect:/no-access");
+    expect(out).toBe(OWN_REDIRECTS[page] ? `redirect:${sample(OWN_REDIRECTS[page])}` : "read");
   });
 
   it.each(STAFF_VIEW_PAGES)("the catch-all loads %s for a person with staff and tenant rows", async (page) => {

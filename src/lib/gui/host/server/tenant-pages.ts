@@ -4,10 +4,11 @@ import "server-only";
  * Which pages a person whose rows are all tenant rows may open (RFC mgm#197
  * § 4): the pages a contributed tenant view serves, and nothing else. Such a
  * person is sent home from any other page by keepTenantOnlyToTenantPages,
- * which every page under src/app/(gui) calls before it reads anything, and
- * by the (gui) layout. The page's call is the one that holds: the layout
- * does not render on a client-side navigation within the group, and a page
- * always does. It sends them away; it grants nothing, and what they may read
+ * which every page and nested layout under src/app/(gui) calls before it
+ * reads anything, and by the (gui) layout. The page's and nested layouts'
+ * calls are the ones that hold: the (gui) layout does not render on a
+ * client-side navigation within the group, and a page and the nested
+ * layouts from the first changed segment always do. It sends them away; it grants nothing, and what they may read
  * is still decided by RLS and dispatchView.
  *
  * The list is not kept here. A page is a tenant page when the catalog lists
@@ -61,23 +62,30 @@ export async function tenantOnlyRedirect(
 }
 
 /**
- * The first thing every page under src/app/(gui) does: a person whose rows
- * are all tenant rows is redirected from any page that is not a tenant page
- * (tenantOnlyRedirect), before the page reads anything. A page renders on
- * every request for it, a client-side navigation included, which the (gui)
- * layout does not (CLAUDE.md, "Session checks before privilege").
+ * The first thing every page and nested layout under src/app/(gui) does: a
+ * person whose rows are all tenant rows is redirected from any page that is
+ * not a tenant page (tenantOnlyRedirect), before the page or layout reads
+ * anything. A page renders on every request for it, a client-side
+ * navigation included, and a nested layout renders alongside it, before its
+ * guard can finish; the (gui) layout does not render then (CLAUDE.md,
+ * "Session checks before privilege").
+ *
+ * The path judged is the request's, as middleware set it, unless `served`
+ * is given: a page that works out the path it serves from its own params
+ * (the catch-all) passes that path, so the path judged and the path served
+ * come from one source.
  *
  * A render the middleware did not see answers 404 first, before the read of
  * the user and their rows (middleware-path.ts). That read is this render's
  * shared one (getRequestUserAccess), so a page that reads it too, and the
  * layout on a full load, pay for it once. Nothing happens for a person with
  * no session or no rows: the layout and the page's own checks answer them.
- * `src/app/(gui)/__tests__/tenant-only-pages.test.tsx` calls every page as
- * such a person and fails when one reads before this.
+ * `src/app/(gui)/__tests__/tenant-only-pages.test.tsx` calls every page and
+ * nested layout as such a person and fails when one reads before this.
  */
-export async function keepTenantOnlyToTenantPages(): Promise<void> {
-  const path = await requireMiddlewarePath();
+export async function keepTenantOnlyToTenantPages(served?: string): Promise<void> {
+  const requested = await requireMiddlewarePath();
   const { roles } = await getRequestUserAccess();
-  const to = await tenantOnlyRedirect(path, roles);
+  const to = await tenantOnlyRedirect(served ?? requested, roles);
   if (to) redirect(to);
 }

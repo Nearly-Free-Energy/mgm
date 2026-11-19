@@ -41,13 +41,15 @@ export default async function ContributedViewPage({
   // (requireMiddlewarePath above shows it ran). The check is repeated here
   // so a request that sent x-mgm-path itself still answers 404 before any
   // read for a path outside the release.
-  if (!isReleasedRoute(`/${path.map(encodeURIComponent).join("/")}`)) notFound();
+  const served = `/${path.map(encodeURIComponent).join("/")}`;
+  if (!isReleasedRoute(served)) notFound();
 
   // A person whose rows are all tenant rows is sent home from a staff view's
   // page, as from every page under (gui), before the view loads.
   // dispatchView would answer such a view 404 for them anyway; this keeps a
-  // client-side navigation's answer the same as a full load's.
-  await keepTenantOnlyToTenantPages();
+  // client-side navigation's answer the same as a full load's. It judges the
+  // path dispatched below, from these params, not the request header's.
+  await keepTenantOnlyToTenantPages(served);
 
   // Its own session check: App Router renders the layout alongside the page.
   const access = await getRequestUserAccess();
