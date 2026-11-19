@@ -6,7 +6,9 @@
  * component. Every row is either contributed, matching the contribution, or
  * listed in PENDING below. The contributing pull requests of #201 remove
  * their rows from PENDING as they land; the legacy billing screens may be
- * deleted only once PENDING is empty, which the last test enforces.
+ * deleted only once PENDING is empty, and a screen's URL may move to the GUI
+ * host (its page.tsx deleted, its catalog page served by a view) only once no
+ * row of that screen is pending, which the last two tests enforce.
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
@@ -40,7 +42,8 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
 import * as paymentSchemas from "@/lib/payments/schemas";
 import * as schemas from "../schemas";
-import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow } from "../parity";
+import { BILLING_PLUGIN } from "@/lib/plugins/bundled";
+import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow, type ParityScreen } from "../parity";
 
 const ROOT = path.resolve(__dirname, "../../../..");
 const APP = path.join(ROOT, "src/app");
@@ -66,7 +69,12 @@ const PENDING = new Set<string>([
   "billing-tab",
 ]);
 
-/** The legacy screens #201 deletes once nothing is pending. */
+/**
+ * The legacy screens #201 deletes once nothing is pending. A screen's
+ * page.tsx leaves this list in the change that moves its URL to the GUI host,
+ * which the last test allows only once no row of that screen is pending; the
+ * components stay until the Deletes pull request.
+ */
 const LEGACY_SCREENS = [
   "src/components/BillingTable.tsx",
   "src/components/BillingPeriodList.tsx",
@@ -74,6 +82,19 @@ const LEGACY_SCREENS = [
   "src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx",
   "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
 ];
+
+/**
+ * The catalog page (src/lib/plugins/bundled.ts) that serves each legacy
+ * screen's URL. A screen's URL moves to the GUI host only once no row of
+ * that screen is pending, so a person loses no control on the way; the last
+ * test of this file enforces it. If a screen comes to be served at another
+ * URL, revisit.
+ */
+const SCREEN_PAGES: Record<ParityScreen, string> = {
+  periods: "/microgrids/[id]/billing",
+  "period-review": "/microgrids/[id]/billing/[periodId]",
+  "period-history": "/microgrids/[id]/billing/[periodId]/history",
+};
 
 const SURFACES: Record<ParityAction["plugin"], Contribution> = {
   billing: BILLING_SURFACE,
@@ -334,5 +355,15 @@ describe("parity with the contributed actions and views", () => {
   it("deletes the legacy billing screens only once nothing is pending", () => {
     const gone = LEGACY_SCREENS.filter((file) => !existsSync(path.join(ROOT, file)));
     if (gone.length > 0) expect([...PENDING], `deleted ${gone.join(", ")} with rows still pending`).toEqual([]);
+  });
+
+  it("keeps a screen's URL on its legacy page while a row of that screen is pending", () => {
+    for (const row of BILLING_PARITY.filter((r) => PENDING.has(r.id))) {
+      const pagePath = SCREEN_PAGES[row.screen];
+      const page = BILLING_PLUGIN.pages.find((p) => p.path === pagePath);
+      expect(page, `${pagePath} is a billing catalog page`).toBeDefined();
+      expect(page!.servedBy, `${row.id} is pending: ${pagePath} stays a page.tsx, not a view`).toBeUndefined();
+      expect(pageExists(pagePath), `${row.id} is pending: a page at ${pagePath}`).toBe(true);
+    }
   });
 });
