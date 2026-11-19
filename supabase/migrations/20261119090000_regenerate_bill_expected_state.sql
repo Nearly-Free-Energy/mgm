@@ -14,8 +14,18 @@
 -- fn_regenerate_bill_with_audit takes fn_record_line_item_with_audit's
 -- arguments and, first, _expected: the bill as the route read it,
 --   { line_item_id, payment_status, total_amount, usage_kwh, start_kwh,
---     end_kwh, reading_source }
--- every key present (a value may be null). Under a FOR SHARE lock on the
+--     end_kwh, reading_source, device_id, tier_breakdown,
+--     entered_by_user_id, manual_reason }
+-- every key present (a value may be null). These are payment_status and
+-- every column fn_record_line_item_with_audit writes except entered_at, so
+-- any write since the read shows in one of them. That includes another
+-- regeneration that changed only the reason, who entered the reading, or the
+-- meter: two copies of one request sent at once both read the bill before
+-- either writes, and both find it needs writing (sameBill in
+-- src/lib/billing/generate.ts compares the same columns). The second then
+-- finds the bill changed and is refused, instead of adding a second audit
+-- row. If fn_record_line_item_with_audit comes to write another column, or
+-- sameBill to compare one, add it here too. Under a FOR SHARE lock on the
 -- period and a FOR UPDATE lock on the bill, both held to commit, it refuses
 -- with SQLSTATE 23514 and a message starting with a token, which
 -- src/lib/billing/generate.ts maps to a response:
@@ -84,7 +94,7 @@ DECLARE
 BEGIN
   IF _expected IS NULL
      OR jsonb_typeof(_expected) <> 'object'
-     OR NOT (_expected ?& ARRAY['line_item_id', 'payment_status', 'total_amount', 'usage_kwh', 'start_kwh', 'end_kwh', 'reading_source'])
+     OR NOT (_expected ?& ARRAY['line_item_id', 'payment_status', 'total_amount', 'usage_kwh', 'start_kwh', 'end_kwh', 'reading_source', 'device_id', 'tier_breakdown', 'entered_by_user_id', 'manual_reason'])
   THEN
     RAISE EXCEPTION 'billing_expected_bill_invalid: _expected names the bill and every value it was read with'
       USING ERRCODE = '22023';
@@ -132,6 +142,10 @@ BEGIN
      OR v_bill.start_kwh IS DISTINCT FROM (_expected->>'start_kwh')::numeric
      OR v_bill.end_kwh IS DISTINCT FROM (_expected->>'end_kwh')::numeric
      OR v_bill.reading_source::text IS DISTINCT FROM (_expected->>'reading_source')
+     OR v_bill.device_id IS DISTINCT FROM (_expected->>'device_id')::uuid
+     OR v_bill.tier_breakdown IS DISTINCT FROM (_expected->'tier_breakdown')
+     OR v_bill.entered_by_user_id IS DISTINCT FROM (_expected->>'entered_by_user_id')::uuid
+     OR v_bill.manual_reason IS DISTINCT FROM (_expected->>'manual_reason')
   THEN
     RAISE EXCEPTION 'billing_line_item_changed: the bill changed after it was read'
       USING ERRCODE = '23514';

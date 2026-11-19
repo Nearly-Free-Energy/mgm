@@ -285,7 +285,17 @@ export type RunGenerationParams = {
   expectedBill?: ExpectedBill;
 };
 
-/** The bill a per-bill regeneration read (RunGenerationParams.expectedBill). */
+/**
+ * The bill a per-bill regeneration read (RunGenerationParams.expectedBill):
+ * its payment status and every column fn_record_line_item_with_audit writes
+ * but entered_at, which are the columns sameBill below compares. Two copies of
+ * one regeneration sent at once both read the bill before either writes, so
+ * both find it needs writing; the second write then finds one of these
+ * changed and is refused. A column sameBill compares and this leaves out would
+ * let the second write too, adding a second audit row: if sameBill or that
+ * function gains a column, add it here and to fn_regenerate_bill_with_audit's
+ * comparison (20261119090000_regenerate_bill_expected_state.sql).
+ */
 export type ExpectedBill = {
   lineItemId: string;
   tenantId: string;
@@ -295,6 +305,11 @@ export type ExpectedBill = {
   startKwh: number | null;
   endKwh: number | null;
   readingSource: ReadingSource | null;
+  deviceId: string | null;
+  /** As read: the write compares it with the stored JSON as it is. */
+  tierBreakdown: unknown;
+  enteredByUserId: string | null;
+  manualReason: string | null;
 };
 
 export type RunGenerationFatal =
@@ -1074,6 +1089,10 @@ export async function runGenerationFor(
             start_kwh: expectedBill.startKwh,
             end_kwh: expectedBill.endKwh,
             reading_source: expectedBill.readingSource,
+            device_id: expectedBill.deviceId,
+            tier_breakdown: expectedBill.tierBreakdown,
+            entered_by_user_id: expectedBill.enteredByUserId,
+            manual_reason: expectedBill.manualReason,
           },
         })
       : await supabase.rpc("fn_record_line_item_with_audit", recordArgs);

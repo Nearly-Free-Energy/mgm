@@ -158,6 +158,10 @@ const EXPECTED: ExpectedBill = {
   startKwh: 100,
   endKwh: 160,
   readingSource: "manual",
+  deviceId: DEVICE,
+  tierBreakdown: [{ label: "T1", kwh: 60, amount: 6000 }],
+  enteredByUserId: USER,
+  manualReason: "dial photo",
 };
 
 function run(h: ReturnType<typeof harness>, o: Partial<RunGenerationParams> = {}) {
@@ -214,6 +218,10 @@ describe("runGenerationFor with expectedBill", () => {
         start_kwh: 100,
         end_kwh: 160,
         reading_source: "manual",
+        device_id: DEVICE,
+        tier_breakdown: [{ label: "T1", kwh: 60, amount: 6000 }],
+        entered_by_user_id: USER,
+        manual_reason: "dial photo",
       },
       _billing_period_id: PERIOD_ID,
       _tenant_id: TENANT,
@@ -223,6 +231,10 @@ describe("runGenerationFor with expectedBill", () => {
       _manual_reason: "dial photo",
       _rate_schedule_id: SCHEDULE_ID,
     });
+    // Every key fn_regenerate_bill_with_audit requires, and no other.
+    expect(Object.keys(write.args._expected as object).sort()).toEqual(
+      ["device_id", "end_kwh", "entered_by_user_id", "line_item_id", "manual_reason", "payment_status", "reading_source", "start_kwh", "tier_breakdown", "total_amount", "usage_kwh"],
+    );
     // Exactly fn_record_line_item_with_audit's arguments, and _expected.
     const recordArgs = { ...write.args };
     delete recordArgs._expected;

@@ -12,7 +12,8 @@
  * with nothing written. A payment or an invoice number landing between the
  * route's read and its write is refused by the write itself
  * (fn_regenerate_bill_with_audit), and the same regeneration sent twice,
- * one after the other or at once, is recorded once.
+ * one after the other or at once, is recorded once, also when the two
+ * copies change only the reason or who entered the reading.
  *
  * Manual readings throughout, so no metering provider is read.
  *
@@ -75,13 +76,16 @@ const MICROGRID = "e7900000-0000-4000-8002-000000000001";
 const SCHEDULE = "e7900000-0000-4000-8006-000000000001";
 const DRAFT = "e7900000-0000-4000-8003-000000000001";
 const CLOSED = "e7900000-0000-4000-8003-000000000002";
-const tenant = (n: number) => `e7900000-0000-4000-8004-00000000000${n}`;
-const bill = (n: number) => `e7900000-0000-4000-8005-00000000000${n}`;
+const tenant = (n: number) => `e7900000-0000-4000-8004-${String(n).padStart(12, "0")}`;
+const bill = (n: number) => `e7900000-0000-4000-8005-${String(n).padStart(12, "0")}`;
 const EMAIL = "regenerate-db-manager@test.local";
+const SECOND_EMAIL = "regenerate-db-second-manager@test.local";
 const OTHER_EMAIL = "regenerate-db-other@test.local";
 const TENANT_EMAIL = "regenerate-db-tenant@test.local";
 
 let manager: TestUser;
+/** Another manager of the same organization. */
+let secondManager: TestUser;
 let other: TestUser;
 let tenantUser: TestUser;
 
@@ -98,7 +102,7 @@ const regenerate = (id: string, body: unknown) =>
 async function cleanup() {
   const svc = await serviceClient();
   await svc.from("mgm_plugins").delete().in("org_id", [ORG, OTHER_ORG]);
-  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
+  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, SECOND_EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
 }
 
 /** A manual bill of 50 kWh totalling 30,000, as stored: regeneration recomputes it from the readings. */
@@ -121,13 +125,25 @@ const row = (n: number, o: Record<string, unknown> = {}) => ({
   ...o,
 });
 
-type BillRow = { id: string; start_kwh: number; end_kwh: number; usage_kwh: number; total_amount: number; payment_status: string; reading_source: string };
+type BillRow = {
+  id: string;
+  start_kwh: number;
+  end_kwh: number;
+  usage_kwh: number;
+  total_amount: number;
+  payment_status: string;
+  reading_source: string;
+  device_id: string | null;
+  tier_breakdown: unknown;
+  entered_by_user_id: string | null;
+  manual_reason: string | null;
+};
 
 async function bills(periodId = DRAFT): Promise<Map<string, BillRow>> {
   const svc = await serviceClient();
   const { data, error } = await svc
     .from("billing_line_items")
-    .select("id, start_kwh, end_kwh, usage_kwh, total_amount, payment_status, reading_source")
+    .select("id, start_kwh, end_kwh, usage_kwh, total_amount, payment_status, reading_source, device_id, tier_breakdown, entered_by_user_id, manual_reason")
     .eq("billing_period_id", periodId);
   if (error) throw new Error(`[regenerate.db] bills: ${error.message}`);
   return new Map(((data ?? []) as BillRow[]).map((b) => [b.id, { ...b, start_kwh: Number(b.start_kwh), end_kwh: Number(b.end_kwh), usage_kwh: Number(b.usage_kwh), total_amount: Number(b.total_amount) }]));
@@ -173,7 +189,7 @@ beforeAll(async () => {
         tax_rate: 0,
       },
     ],
-    ["tenants", [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
+    ["tenants", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
     [
       "billing_periods",
       [
@@ -204,6 +220,9 @@ beforeAll(async () => {
         row(7),
         row(8),
         row(9),
+        // For two copies of one regeneration that change only the reason, or who entered it.
+        row(10),
+        row(11),
       ],
     ],
   ];
@@ -212,6 +231,7 @@ beforeAll(async () => {
     if (error) throw new Error(`[regenerate.db] ${table}: ${error.message}`);
   }
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: ORG });
+  secondManager = await createTestUser({ email: SECOND_EMAIL, role: "org_manager", scopeId: ORG });
   other = await createTestUser({ email: OTHER_EMAIL, role: "org_manager", scopeId: OTHER_ORG });
   // A tenant-only account in the same organization: the tenant of unit 1, whose bill it is.
   tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: tenant(1) });
@@ -420,6 +440,56 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
   });
 });
 
+describe.skipIf(shouldSkip())("two copies of one regeneration that reach the write together (live database)", () => {
+  // Both copies read the bill before either writes: the second copy runs
+  // whole between the first one's reads and its write, so the first finds
+  // the bill needs writing and then reaches a bill the second has written.
+  async function bothReadBeforeEitherWrites(n: number, body: Record<string, unknown>) {
+    const second: { res?: Response } = {};
+    beforeWrite = async () => {
+      second.res = await regenerate(bill(n), body);
+    };
+    const first = await regenerate(bill(n), body);
+    expect(beforeWrite).toBeNull();
+    return { first, second: second.res! };
+  }
+
+  it("records it once when the copies change only the reason", async () => {
+    caller = manager;
+    const body = { readings: "manual", start_kwh: 100, end_kwh: 190, reason: "second visit" };
+    expect((await regenerate(bill(10), body)).status).toBe(200);
+    const auditBefore = await auditRows();
+
+    const { first, second } = await bothReadBeforeEitherWrites(10, { ...body, reason: "corrected" });
+    expect(second.status).toBe(200);
+    // 90 kWh: 15 at 250 (3,750) and 75 at 750 (56,250), as before.
+    expect(await second.json()).toMatchObject({ changed: true, totalAmount: 60000, previousTotalAmount: 60000 });
+    expect(first.status).toBe(409);
+    expect(await first.json()).toEqual({ error: REGENERATE_REFUSAL_COPY.changed, reason: "bill_changed" });
+
+    expect((await bills()).get(bill(10))).toMatchObject({ usage_kwh: 90, total_amount: 60000, manual_reason: "corrected", entered_by_user_id: manager.userId });
+    expect((await auditRows()).length - auditBefore.length).toBe(1);
+  });
+
+  it("records it once when the copies change only who entered the reading", async () => {
+    caller = manager;
+    const body = { readings: "manual", start_kwh: 100, end_kwh: 190, reason: "second visit" };
+    expect((await regenerate(bill(11), body)).status).toBe(200);
+    const auditBefore = await auditRows();
+
+    // Another manager sends the same readings and reason, twice.
+    caller = secondManager;
+    const { first, second } = await bothReadBeforeEitherWrites(11, body);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ changed: true, totalAmount: 60000, previousTotalAmount: 60000 });
+    expect(first.status).toBe(409);
+    expect(await first.json()).toEqual({ error: REGENERATE_REFUSAL_COPY.changed, reason: "bill_changed" });
+
+    expect((await bills()).get(bill(11))).toMatchObject({ manual_reason: "second visit", entered_by_user_id: secondManager.userId });
+    expect((await auditRows()).length - auditBefore.length).toBe(1);
+  });
+});
+
 describe.skipIf(shouldSkip())("fn_regenerate_bill_with_audit (live database)", () => {
   /** fn_record_line_item_with_audit's arguments for a manual reading on the draft. */
   const args = (n: number, expected: Record<string, unknown>, periodId = DRAFT) => ({
@@ -447,6 +517,10 @@ describe.skipIf(shouldSkip())("fn_regenerate_bill_with_audit (live database)", (
     start_kwh: 100,
     end_kwh: 150,
     reading_source: "manual",
+    device_id: null,
+    tier_breakdown: row(n).tier_breakdown,
+    entered_by_user_id: null,
+    manual_reason: null,
     ...o,
   });
 
@@ -457,6 +531,10 @@ describe.skipIf(shouldSkip())("fn_regenerate_bill_with_audit (live database)", (
     ["the total differs", 2, { total_amount: 29999 }, DRAFT, "billing_line_item_changed"],
     ["the reading source differs", 2, { reading_source: "edge" }, DRAFT, "billing_line_item_changed"],
     ["the start reading differs", 2, { start_kwh: null }, DRAFT, "billing_line_item_changed"],
+    ["the meter differs", 2, { device_id: "e7900000-0000-4000-8007-000000000001" }, DRAFT, "billing_line_item_changed"],
+    ["the tier breakdown differs", 2, { tier_breakdown: [{ label: "Lifeline", kwh: 50, amount: 12500 }] }, DRAFT, "billing_line_item_changed"],
+    ["who entered the reading differs", 2, { entered_by_user_id: "e7900000-0000-4000-8007-000000000002" }, DRAFT, "billing_line_item_changed"],
+    ["the reason differs", 2, { manual_reason: "dial photo" }, DRAFT, "billing_line_item_changed"],
     ["the bill is another tenant's", 2, { line_item_id: bill(3) }, DRAFT, "billing_line_item_changed"],
   ] as const)("refuses when %s, and writes nothing", async (_label, n, o, periodId, token) => {
     const before = await bills(periodId);
@@ -479,7 +557,20 @@ describe.skipIf(shouldSkip())("fn_regenerate_bill_with_audit (live database)", (
     const paid = (await bills()).get(bill(4))!;
     const { data, error } = await manager.client.rpc(
       "fn_regenerate_bill_with_audit",
-      args(4, asRead(4, { payment_status: "paid", total_amount: paid.total_amount, usage_kwh: paid.usage_kwh, start_kwh: paid.start_kwh, end_kwh: paid.end_kwh })),
+      args(
+        4,
+        asRead(4, {
+          payment_status: "paid",
+          total_amount: paid.total_amount,
+          usage_kwh: paid.usage_kwh,
+          start_kwh: paid.start_kwh,
+          end_kwh: paid.end_kwh,
+          device_id: paid.device_id,
+          tier_breakdown: paid.tier_breakdown,
+          entered_by_user_id: paid.entered_by_user_id,
+          manual_reason: paid.manual_reason,
+        }),
+      ),
     );
     expect(error).toBeNull();
     expect(data).toMatchObject({ id: bill(4), usage_kwh: 10, total_amount: 2500, payment_status: "paid" });

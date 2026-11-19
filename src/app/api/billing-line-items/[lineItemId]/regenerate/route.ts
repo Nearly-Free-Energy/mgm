@@ -95,6 +95,10 @@ type BillRow = {
   usage_kwh: number | string | null;
   start_kwh: number | string | null;
   end_kwh: number | string | null;
+  device_id: string | null;
+  tier_breakdown: unknown;
+  entered_by_user_id: string | null;
+  manual_reason: string | null;
 };
 
 const numOrNull = (v: number | string | null): number | null => (v === null ? null : Number(v));
@@ -133,7 +137,9 @@ export async function POST(
   // Read through the person's own client: a bill RLS hides is a 404.
   const { data: bill, error: billError } = await supabase
     .from("billing_line_items")
-    .select("id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh")
+    .select(
+      "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh, device_id, tier_breakdown, entered_by_user_id, manual_reason",
+    )
     .eq("id", lineItemId)
     .maybeSingle<BillRow>();
   if (billError) return readFailed("Failed to look up billing line item.");
@@ -186,7 +192,8 @@ export async function POST(
     // (fn_regenerate_bill_with_audit) refuses, under locks held to commit,
     // unless the period is still a draft and the bill still has no invoice
     // number and these values: a payment, refund, invoice number, close or
-    // other regeneration since this read answers 409 and writes nothing.
+    // other regeneration since this read answers 409 and writes nothing,
+    // one that changed only the reason, who entered it or the meter included.
     const expectedBill: ExpectedBill = {
       lineItemId: bill.id,
       tenantId,
@@ -196,6 +203,10 @@ export async function POST(
       startKwh: numOrNull(bill.start_kwh),
       endKwh: numOrNull(bill.end_kwh),
       readingSource: bill.reading_source,
+      deviceId: bill.device_id,
+      tierBreakdown: bill.tier_breakdown,
+      enteredByUserId: bill.entered_by_user_id,
+      manualReason: bill.manual_reason,
     };
     const result = await composed.data.billing.generateBills(
       parsed.readings === "edge"

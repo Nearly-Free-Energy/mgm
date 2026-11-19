@@ -14,6 +14,8 @@ const PERIOD = "660e8400-e29b-41d4-a716-446655441000";
 const MICROGRID = "660e8400-e29b-41d4-a716-446655440000";
 const ORG = "550e8400-e29b-41d4-a716-446655440000";
 const TENANT = "660e8400-e29b-41d4-a716-446655442001";
+const DEVICE = "660e8400-e29b-41d4-a716-446655444001";
+const TIERS = [{ label: "Tier 1", kwh: 50, amount: 5000 }];
 
 type Bill = {
   id: string;
@@ -26,6 +28,10 @@ type Bill = {
   usage_kwh: number | string | null;
   start_kwh: number | string | null;
   end_kwh: number | string | null;
+  device_id: string | null;
+  tier_breakdown: unknown;
+  entered_by_user_id: string | null;
+  manual_reason: string | null;
 };
 
 let user: { id: string } | null;
@@ -93,6 +99,10 @@ const expected = (o: Record<string, unknown> = {}) => ({
     startKwh: 100,
     endKwh: 150,
     readingSource: "edge",
+    deviceId: DEVICE,
+    tierBreakdown: TIERS,
+    enteredByUserId: null,
+    manualReason: null,
     ...o,
   },
 });
@@ -122,6 +132,10 @@ beforeEach(() => {
     usage_kwh: 50,
     start_kwh: "100.000",
     end_kwh: 150,
+    device_id: DEVICE,
+    tier_breakdown: TIERS,
+    entered_by_user_id: null,
+    manual_reason: null,
   };
   billError = null;
   periodError = null;
@@ -204,7 +218,10 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
   it("reads the bill through the person's client, with the columns it needs", async () => {
     await post({ readings: "edge" });
     expect(reads).toEqual([
-      ["billing_line_items", "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh"],
+      [
+        "billing_line_items",
+        "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh, device_id, tier_breakdown, entered_by_user_id, manual_reason",
+      ],
       ["billing_periods", "id, microgrid_id, status"],
       ["microgrids", "id, currency, communities!inner(org_id)"],
     ]);
@@ -344,6 +361,15 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
     expect(generateBills).toHaveBeenCalledWith(
       { billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: [TENANT] },
       expected({ readingSource: "manual" }),
+    );
+  });
+
+  it("sends who entered a manual bill's reading and why, as read, for the write to compare", async () => {
+    // A second request that changes only these must still find the bill as it read it.
+    bill = { ...bill!, reading_source: "manual", entered_by_user_id: "22222222-2222-4222-8222-222222222222", manual_reason: "second visit" };
+    await post({ readings: "manual", start_kwh: 100, end_kwh: 150, reason: "corrected" });
+    expect(generateBills.mock.calls[0][1]).toEqual(
+      expected({ readingSource: "manual", enteredByUserId: "22222222-2222-4222-8222-222222222222", manualReason: "second visit" }),
     );
   });
 
