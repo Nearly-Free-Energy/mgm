@@ -58,10 +58,9 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Waits for a form: contributed, but the kit cannot render
-  // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
-  // so no interface could submit it (see `submittable` below).
-  "generate-bills",
+  // Unscheduled: after generating from meter data, a tenant with no meter
+  // data has no bill, and no GUI action bills them from readings (parity.ts).
+  "bill-from-readings",
   // Unscheduled: the host hides a disabled plugin's tab and disables its
   // actions, which the routes accept while Payments is off (parity.ts).
   "payments-while-off",
@@ -372,15 +371,25 @@ describe("parity with the contributed actions and views", () => {
   });
 
   it("does not count an action as contributed while no interface can submit it", () => {
-    const generate = contributedAction({ ...BILLING_PARITY.find((r) => r.id === "generate-bills")!.replacedBy } as ParityAction);
-    expect(generate, "billing.generate-bills is contributed").toBeDefined();
-    // Its tenant arrays are arrays of strings, which the kit cannot render, and no GUI registers a form for it.
-    expect(fieldsOf(personInput(generate!))).toBeNull();
-    expect(submittable(generate!)).toBe(false);
-    expect(isContributed(BILLING_PARITY.find((r) => r.id === "generate-bills")!)).toBe(false);
-    // The same action with a flat input the kit renders could be submitted.
-    const flat = { ...generate!, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
+    // generate-bills is replaced by an action whose input has no field to
+    // fill, which the kit submits as a confirmation alone.
+    const fromMeters = contributedAction(BILLING_PARITY.find((r) => r.id === "generate-bills")!.replacedBy as ParityAction);
+    expect(fromMeters?.id).toBe("billing.generate-from-meters");
+    expect(fieldsOf(personInput(fromMeters!))).toEqual([]);
+    expect(submittable(fromMeters!)).toBe(true);
+    // The same action with GenerateBillsBody, the retired billing.generate-bills'
+    // input: its tenant arrays are arrays of strings, which the kit cannot
+    // render, and no GUI registers a form for it.
+    const fullBody = { ...fromMeters!, id: "billing.generate-bills", input: schemas.GenerateBillsBody, bind: { body: { billingPeriodId: "billingPeriod" } } } as ActionDef;
+    expect(fieldsOf(personInput(fullBody))).toBeNull();
+    expect(submittable(fullBody)).toBe(false);
+    // A flat input the kit renders could be submitted.
+    const flat = { ...fullBody, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
     expect(submittable(flat)).toBe(true);
+  });
+
+  it("no longer contributes the full-body billing.generate-bills", () => {
+    expect(BILLING_SURFACE.actions?.some((a) => a.id === "billing.generate-bills")).toBe(false);
   });
 
   it("clears no action row that no interface can submit", () => {

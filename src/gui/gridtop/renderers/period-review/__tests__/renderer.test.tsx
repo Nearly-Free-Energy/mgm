@@ -183,8 +183,8 @@ describe("Gridtop's period-review renderer: drawing", () => {
     const notices = screen.getAllByText(BILLING_OFF).filter((el) => !reasons.has(el.id));
     expect(notices).toHaveLength(1);
     expect(notices[0].className).toContain("gt:bg-warning-muted");
-    expect(notices[0].compareDocumentPosition(screen.getByRole("button", { name: "Refresh readings" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    for (const button of [screen.getByRole("button", { name: "Refresh readings" }), ...within(tableRow(0)).getAllByRole("button", { name: "Mark as paid" })]) {
+    expect(notices[0].compareDocumentPosition(screen.getByRole("button", { name: REFRESH.label })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const button of [screen.getByRole("button", { name: REFRESH.label }), ...within(tableRow(0)).getAllByRole("button", { name: "Mark as paid" })]) {
       expect((button as HTMLButtonElement).disabled).toBe(true);
       expect(document.getElementById(button.getAttribute("aria-describedby")!)?.textContent).toBe(BILLING_OFF);
       await act(async () => fireEvent.click(button));
@@ -530,7 +530,7 @@ describe("Gridtop's period-review renderer: the empty state", () => {
   it("owns Generate at zero rows, with no table, cards or totals", async () => {
     await draw(noBillsModel());
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("No billing data yet.");
-    expect(document.body.textContent).toContain("Generate bills to fetch meter readings and calculate costs.");
+    expect(document.body.textContent).toContain("Generate bills from meter data to read each tenant's meter for this period and calculate their bills.");
     expect(screen.getAllByRole("button", { name: GENERATE.label })).toHaveLength(1);
     expect(screen.queryByRole("region", { name: /^Bills, / })).toBeNull();
     expect(screen.queryByRole("list", { name: "Bills" })).toBeNull();

@@ -1,7 +1,8 @@
 /**
  * The `billing.period-review` model: the legacy period page's table as a
  * collection, one row per bill of a readable tenant, totals over every bill,
- * the period's links, and each bill's actions and links. Generate is not offered.
+ * the period's links and its Generate from meter data, and each bill's
+ * actions and links; and generateReadiness, what Generate would do.
  */
 import { describe, expect, it } from "vitest";
 import type { LinkRef } from "@/lib/gui/contract";
@@ -15,7 +16,8 @@ import { PERIOD_REVIEW_EXAMPLES, PERIOD_REVIEW_LOADED_EXAMPLES } from "../period
 import {
   buildPeriodReviewModel,
   CANCEL_PAYMENT_LINK_ACTION,
-  GENERATE_BILLS_ACTION,
+  GENERATE_FROM_METERS_ACTION,
+  generateReadiness,
   MARK_FAILED_ACTION,
   MARK_PAID_ACTION,
   MARK_REFUNDED_ACTION,
@@ -24,6 +26,7 @@ import {
   paymentActionsFor,
   PERIOD_REVIEW_KEYS,
   RECORD_USAGE_ACTION,
+  REFRESH_FROM_METERS_LABEL,
   REGENERATE_BILL_ACTION,
   type PeriodReviewInput,
   type ReviewBill,
@@ -374,12 +377,22 @@ describe("buildPeriodReviewModel: the period", () => {
     expect(oneDay).not.toHaveProperty("subtitle");
   });
 
-  it("does not offer Generate anywhere, since no interface can submit it until a form exists", () => {
-    for (const model of [build({ bills: [] }), build(), build({ period: { ...input().period, status: "closed" } })]) {
-      expect(model.actions).toEqual([]);
-      expect(model.body.empty).not.toHaveProperty("action");
-      expect(JSON.stringify(model)).not.toContain(GENERATE_BILLS_ACTION.id);
-    }
+  it("offers a draft with tenants Generate from meter data, labelled as the legacy header labels it", () => {
+    const generate = { action: GENERATE_FROM_METERS_ACTION.id, params: { periodId: PERIOD } };
+    expect(build({ bills: [] }).actions).toEqual([{ ...generate, label: "Generate bills from meter data" }]);
+    expect(build().actions).toEqual([{ ...generate, label: REFRESH_FROM_METERS_LABEL }]);
+    expect(REFRESH_FROM_METERS_LABEL).toBe("Refresh readings from meters");
+  });
+
+  it.each([
+    ["a closed period with bills", { period: { ...input().period, status: "closed" as const } }],
+    ["a closed period with no bills", { bills: [], period: { ...input().period, status: "closed" as const } }],
+    ["a draft with no tenants", { tenants: [], bills: [] }],
+  ])("offers Generate nowhere on %s", (_label, o) => {
+    const model = build(o);
+    expect(model.actions).toEqual([]);
+    expect(model.body.empty).not.toHaveProperty("action");
+    expect(JSON.stringify(model)).not.toContain(GENERATE_FROM_METERS_ACTION.id);
   });
 
   it("links the history always, a draft's close checklist, and the send queue and CSV export only when there are bills", () => {
@@ -410,8 +423,16 @@ describe("buildPeriodReviewModel: the period", () => {
   it.each([
     ["no tenants, a draft", { tenants: [], bills: [] }, { title: "No tenants configured for this microgrid." }],
     ["no tenants, closed", { tenants: [], bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No tenants configured for this microgrid." }],
-    // The legacy page adds Generate here; with no form for it, nothing asks for it.
-    ["tenants and no bills, a draft", { bills: [] }, { title: "No billing data yet." }],
+    // The legacy page's Generate, as the empty state's call to action.
+    [
+      "tenants and no bills, a draft",
+      { bills: [] },
+      {
+        title: "No billing data yet.",
+        text: "Generate bills from meter data to read each tenant's meter for this period and calculate their bills.",
+        action: { action: GENERATE_FROM_METERS_ACTION.id, params: { periodId: PERIOD }, label: "Generate bills from meter data" },
+      },
+    ],
     ["tenants and no bills, closed", { bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No billing data yet." }],
   ])("shows the legacy empty state for %s", (_label, o, empty) => {
     const model = build(o);
@@ -540,5 +561,59 @@ describe("the examples", () => {
     expect(closed).toEqual(expect.arrayContaining([MARK_REFUNDED_ACTION.id, MARK_FAILED_ACTION.id]));
     expect(closed).not.toContain(RECORD_USAGE_ACTION.id);
     expect(PERIOD_REVIEW_EXAMPLES[1].actions).toEqual([]);
+  });
+});
+
+describe("generateReadiness", () => {
+  const PERIOD_DATES = { start_date: "2026-10-01", end_date: "2026-10-31" };
+  const meter = { openems_component_id: "meter0", edges: { openems_edge_id: "edge0" } };
+  const covering = { effective_from: "2026-01-01", effective_to: null, devices: meter };
+  const t = (n: number, primaryLinks: unknown[]) => ({ id: `t${n}`, display_name: `Unit ${n}`, primaryLinks: primaryLinks as never[] });
+  const b = (n: number, o: Partial<{ reading_source: string | null; payment_status: string; invoice_number: string | null }> = {}) => ({
+    tenant_id: `t${n}`,
+    reading_source: "edge",
+    payment_status: "unpaid",
+    invoice_number: null,
+    ...o,
+  });
+
+  it("decides each tenant as the engine does with guardExistingBills: kept, left, read from its meter, or not read", () => {
+    const r = generateReadiness(
+      PERIOD_DATES,
+      [
+        t(1, [covering]),
+        t(2, [covering]),
+        t(3, [covering]),
+        t(4, [covering]),
+        t(5, [covering]),
+        t(6, [covering]),
+        t(7, []),
+        t(8, [{ ...covering, effective_from: "2026-10-15" }]),
+        t(9, [{ ...covering, devices: { ...meter, openems_component_id: null } }]),
+        // A manual bill is kept, whatever its meter or payment.
+        t(10, []),
+        t(11, [covering]),
+      ],
+      [
+        b(2),
+        b(3, { reading_source: "manual" }),
+        b(4, { payment_status: "paid" }),
+        b(5, { invoice_number: "EXS-1" }),
+        b(6, { payment_status: "refunded" }),
+        b(10, { reading_source: "manual", payment_status: "paid" }),
+        b(11, { reading_source: null, payment_status: "link_generated" }),
+      ],
+    );
+    expect(r).toEqual({
+      fromMeters: 3,
+      refresh: 2,
+      kept: 2,
+      left: 3,
+      notRead: [
+        { tenantName: "Unit 7", reason: "no_meter" },
+        { tenantName: "Unit 8", reason: "assignment_gap" },
+        { tenantName: "Unit 9", reason: "no_meter" },
+      ],
+    });
   });
 });

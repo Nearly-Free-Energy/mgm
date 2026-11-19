@@ -141,8 +141,9 @@ function row(i: number, actions: ActionRef[]): RowOf<ActionRef> {
   };
 }
 
-export const GENERATE: ActionRef = { action: "billing.generate-bills", params: { billingPeriodId: PERIOD }, label: "Generate bills", enabled: true };
-export const REFRESH: ActionRef = { ...GENERATE, label: "Refresh readings" };
+// As billing's period review offers them (GENERATE_FROM_METERS_ACTION in src/lib/billing/surface/period-review-model.ts).
+export const GENERATE: ActionRef = { action: "billing.generate-from-meters", params: { periodId: PERIOD }, label: "Generate bills from meter data", enabled: true };
+export const REFRESH: ActionRef = { ...GENERATE, label: "Refresh readings from meters" };
 
 type Ext = { columns: string[]; rows: { id: string; figures: (string | null)[] }[]; totals: (string | null)[] };
 
@@ -165,7 +166,7 @@ function model(o: { rows: RowOf<ActionRef>[]; totals?: Record<string, Value>; ex
       columns: COLUMNS,
       rows,
       ...(totals ? { totals } : {}),
-      empty: { title: "No billing data yet.", text: "Generate bills to fetch meter readings and calculate costs.", action: GENERATE },
+      empty: { title: "No billing data yet.", text: "Generate bills from meter data to read each tenant's meter for this period and calculate their bills.", action: GENERATE },
     },
     ext: { schema: "billing.period-review@1", data: ext as unknown as Json },
     ...rest,

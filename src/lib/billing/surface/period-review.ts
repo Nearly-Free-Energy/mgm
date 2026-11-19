@@ -22,10 +22,13 @@ import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
-import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "../schemas";
+import { tenantNames } from "../close";
+import type { PrimaryMeterLink } from "../meter-coverage";
+import { GENERATE_FROM_METERS_COPY, REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "../schemas";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
+  generateReadiness,
   PERIOD_REVIEW_MAX_ROWS,
   PERIOD_REVIEW_MAX_TIERS,
   periodLabel,
@@ -66,8 +69,16 @@ export const BILL_REFUSALS = {
   transition: { ok: false, status: 409, message: "That status change is not allowed for manual edits." },
 } as const satisfies Record<string, Refusal>;
 
-/** generate-bills' reason on a closed period. */
-export const GENERATE_CLOSED_REASON = "Bills cannot be generated in a closed period.";
+/**
+ * generate-from-meters' refusals: the route's own copy
+ * (GENERATE_FROM_METERS_COPY), and the review's for a period it cannot read.
+ */
+export const GENERATE_REFUSALS = {
+  notFound: PERIOD_REVIEW_REFUSALS.notFound,
+  unavailable: PERIOD_REVIEW_REFUSALS.unavailable,
+  closed: { ok: false, status: 409, message: GENERATE_FROM_METERS_COPY.closed },
+  nothingToRead: { ok: false, status: 409, message: GENERATE_FROM_METERS_COPY.nothingToRead },
+} as const satisfies Record<string, Refusal>;
 
 /**
  * record-usage's reasons: the usage route's own copy
@@ -236,16 +247,16 @@ export async function loadPeriodReview(req: SurfaceRequest): Promise<Loaded<Load
 // action on the view. Each throws on a failed read, so the host shows the
 // action as not checked.
 
-/** generate-bills: on a draft only. */
-export async function generateBillsAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
+/** generate-from-meters: on a draft only, as its route refuses a closed period. */
+export async function generateFromMetersAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
   const { data, error } = await req.supabase.from("billing_periods").select("id, status").in("id", ids);
-  if (error) throw new Error("billing.generate-bills: availability not read");
+  if (error) throw new Error("billing.generate-from-meters: availability not read");
   const status = new Map(((data ?? []) as { id: string; status: string }[]).map((p) => [p.id, p.status]));
   return Object.fromEntries(
     ids.map((id): [string, true | string] => {
       const s = status.get(id);
-      if (s === undefined) return [id, PERIOD_REVIEW_REFUSALS.notFound.message];
-      return [id, s === "closed" ? GENERATE_CLOSED_REASON : true];
+      if (s === undefined) return [id, GENERATE_REFUSALS.notFound.message];
+      return [id, s === "draft" ? true : GENERATE_REFUSALS.closed.message];
     }),
   );
 }
@@ -362,6 +373,88 @@ async function readBill(req: SurfaceRequest, lineItemId: string, columns: string
     { label: "Period", value: req.fmt.text(periodLabel(req.fmt, period.start_date, period.end_date)) },
   ];
   return { ok: true as const, bill: data, period, currency, facts, tenant };
+}
+
+/**
+ * billing.generate-from-meters' confirmation: what the run would do, from
+ * the period's tenants, their primary meter links and its bills, read
+ * through the person's own client as the review reads them, and decided as
+ * the engine decides (generateReadiness in ./period-review-model.ts). It
+ * pins no tariff and reads no meter, so it cannot say which meters have
+ * data; a warning says the result counts those. A closed period, and a
+ * period with no meter to read, are refused, the second because the run
+ * would bill no one.
+ */
+export async function prepareGenerateFromMeters(
+  req: SurfaceRequest,
+  input: { params: Record<string, string>; body?: unknown },
+): Promise<Loaded<Ceremony>> {
+  const { data: period, error } = await req.supabase
+    .from("billing_periods")
+    .select("id, microgrid_id, start_date, end_date, status")
+    .eq("id", input.params.periodId)
+    .maybeSingle<{ id: string; microgrid_id: string; start_date: string; end_date: string; status: string }>();
+  if (error) return GENERATE_REFUSALS.unavailable;
+  if (!period) return GENERATE_REFUSALS.notFound;
+  if (period.status !== "draft") return GENERATE_REFUSALS.closed;
+
+  const [bills, tenants] = await Promise.all([
+    readAllPages<{ id: string; tenant_id: string; reading_source: string | null; payment_status: string; invoice_number: string | null }>((after) =>
+      pageAfter(
+        req.supabase
+          .from("billing_line_items")
+          .select("id, tenant_id, reading_source, payment_status, invoice_number", { count: "exact" })
+          .eq("billing_period_id", period.id),
+        after,
+      ),
+    ),
+    // As the engine reads them: every tenant of the microgrid, with its primary links.
+    readAllPagesInOrder<{ id: string; display_name: string; tenant_devices: PrimaryMeterLink[] | null }>((from, to) =>
+      req.supabase
+        .from("tenants")
+        .select("id, display_name, tenant_devices(role, effective_from, effective_to, devices(openems_component_id, edges(openems_edge_id)))", {
+          count: "exact",
+        })
+        .eq("microgrid_id", period.microgrid_id)
+        .eq("tenant_devices.role", "primary_consumption_meter")
+        .order("display_name")
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+  if (bills === null || tenants === null) return GENERATE_REFUSALS.unavailable;
+
+  const r = generateReadiness(
+    period,
+    tenants.map((t) => ({ id: t.id, display_name: t.display_name, primaryLinks: t.tenant_devices ?? [] })),
+    bills,
+  );
+  if (r.fromMeters === 0) return GENERATE_REFUSALS.nothingToRead;
+
+  const count = (n: number) => req.fmt.number(n);
+  const facts = [
+    { label: "Period", value: req.fmt.text(periodLabel(req.fmt, period.start_date, period.end_date)) },
+    { label: "Read from meters", value: count(r.fromMeters) },
+    ...(r.refresh > 0 ? [{ label: "Of these, already billed", value: count(r.refresh) }] : []),
+    ...(r.kept > 0 ? [{ label: "Kept, entered by hand", value: count(r.kept) }] : []),
+    ...(r.left > 0 ? [{ label: "Left as they are: paid, invoiced or refunded", value: count(r.left) }] : []),
+    ...(r.notRead.length > 0 ? [{ label: "Not billed: no meter for the period", value: count(r.notRead.length) }] : []),
+  ];
+  return {
+    ok: true,
+    model: {
+      type: "ceremony",
+      statement:
+        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are.",
+      facts,
+      warnings: [
+        ...(r.notRead.length > 0 ? [`No meter for this period, so not billed: ${tenantNames(r.notRead)}.`] : []),
+        "A tenant whose meter has no data for the period is not billed; the result says how many.",
+        "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
+      ],
+      acknowledgements: [],
+    },
+  };
 }
 
 /** The paid bill's acknowledgement: the legacy dialog's warning (src/components/billing/regenerate-row-dialog.tsx). */

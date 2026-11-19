@@ -12,7 +12,7 @@
  * control cannot be lost on the way. Since "Serve the billing pages through
  * the GUI host" the host serves the periods list and the history (their
  * page.tsx files are gone); the review keeps its page.tsx until
- * generate-bills, payment-setup and payments-while-off are decided, and
+ * bill-from-readings and payments-while-off are decided, and
  * BillingPeriodList, AuditLogList and BillingTable stay until the Deletes
  * pull request.
  *
@@ -51,6 +51,12 @@ export type ParityPullRequest =
   | "Serve the billing pages through the GUI host"
   /** Added to #201 in review (#205): the payments plugin's view of a bill's attempts. */
   | "Contribute a bill's payment attempts"
+  /**
+   * Added to #201 by the maintainer's decision on generating bills through
+   * the GUI host: a narrow action on a route of its own whose body is only
+   * the bound period, with manual readings left to the per-bill actions.
+   */
+  | "Generate a period's bills from meter data"
   /**
    * Nothing in #201 contributes it yet: it needs a decision before the
    * deletes. parity.test.ts keeps such a row pending whatever is contributed.
@@ -143,6 +149,7 @@ const SEND = "Contribute the send queue on …/send";
 const GRIDTOP = "Draw period review as a copy table in Gridtop";
 const SERVE = "Serve the billing pages through the GUI host";
 const ATTEMPTS = "Contribute a bill's payment attempts";
+const FROM_METERS = "Generate a period's bills from meter data";
 
 export const BILLING_PARITY: readonly ParityRow[] = [
   // ── Periods list ──────────────────────────────────────────────────────────
@@ -209,23 +216,45 @@ export const BILLING_PARITY: readonly ParityRow[] = [
   {
     id: "generate-bills",
     screen: "period-review",
-    control: "Generate (N tenants) in the pre-flight panel (opened by Generate / Refresh Readings)",
+    control:
+      "Generate (N tenants) and Refresh Readings in the pre-flight panel, for the tenants read from meters (the panel's Ready rows, and kept manual bills)",
+    legacy: "src/components/billing/preflight-panel.tsx, src/components/BillingTable.tsx",
+    replacedBy: {
+      kind: "action",
+      plugin: "billing",
+      action: "billing.generate-from-meters",
+      target: "billingPeriod",
+      method: "POST",
+      route: "/api/billing-periods/[periodId]/generate-from-meters",
+      risk: "money",
+      confirm: "confirm",
+      form: "GenerateFromMetersBody",
+      view: "billing.period-review",
+    },
+    pr: FROM_METERS,
+    note: "Meter data only, on a route of its own whose body is only the bound period, so the kit submits it with no form; the period review offers it as its header action (Generate bills from meter data before the first bill, Refresh readings from meters after) and as a draft's empty-state call to action. Differences from the panel: a closed period is refused; manual bills are kept as there; paid, invoiced and refunded bills are left as they are and their meters not read, where Refresh Readings rewrote them (regenerate-bill, with its acknowledgement, regenerates a paid bill); an existing bill is rewritten only if it is unchanged since the run read it (fn_regenerate_bill_with_audit), and one whose figures are already the meter's is not written, so a second run adds no audit rows. Prepare says how many tenants will be read from meters, how many bills are kept or left, and names the tenants with no meter for the period; it cannot foresee a meter with no data. The result is counts in fixed copy (the host keeps only a message), never per-tenant errors. Readings typed by hand for a tenant that has a bill come from regenerate-bill in manual mode, or record-usage on an unmetered draft bill with a starting reading; the panel's Override available toggle maps to regenerate-bill's Switch to manual entry after generating. The panel's starting-reading rows stay unreachable, as before (header). A tenant with no meter data gets no bill: bill-from-readings. The full-body billing.generate-bills on POST /api/billing/generate is no longer contributed; the route stays for the legacy panel. A tenant's first bill is still inserted with no check of the period's status at the write, as on POST /api/billing/generate, so a close landing between the route's check and that insert is not caught there.",
+  },
+  {
+    id: "bill-from-readings",
+    screen: "period-review",
+    control:
+      "The pre-flight panel's Needs manual entry rows (start and end readings for a tenant the meters cannot bill), and its result view's manual fallback after no_meter_reading or meter_assignment_continuity",
     legacy: "src/components/billing/preflight-panel.tsx",
     replacedBy: {
       kind: "action",
       plugin: "billing",
-      action: "billing.generate-bills",
+      action: "billing.bill-from-readings",
       target: "billingPeriod",
       method: "POST",
-      route: "/api/billing/generate",
+      route: "/api/billing-periods/[periodId]/tenants/[tenantId]/readings",
       risk: "money",
       confirm: "confirm",
-      form: "GenerateBillsBody",
+      form: null,
+      newRoute: "Bill one tenant with no bill from readings typed by hand: generateBills with that tenant's manual reading, refused when the tenant already has a bill (regenerate-bill then).",
       view: "billing.period-review",
     },
-    // Waits for a GUI's form, which no #201 pull request names yet.
     pr: "unscheduled",
-    note: "Pending: contributed with no prepare and no prefill (GenerateBillsBody is refined) and `targeted: false`, but offered by no view, since no interface can submit it. The kit cannot render its tenant arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; parity.test.ts keeps an action without a form pending. The route answers 200 with per-tenant errors[], which only such a form can show. Once one exists, the period review offers it as its header action and its empty state's call to action.",
+    note: "Pending a decision. After generating from meter data, a tenant with no meter for the period, an assignment gap, or no meter data has no bill, and regenerate-bill and record-usage both need one, so no GUI action bills them from readings; the legacy panel does (with POST /api/billing/generate's manualReadings). Writing a zero bill for them instead is not an option (#293, #339). Options: this per-tenant action, offered from a billing section of the review that lists the tenants not billed and why (which could also replace the legacy page's banner of tenants not billed); or deciding that such tenants are billed outside the GUI.",
   },
   {
     id: "regenerate-bill",

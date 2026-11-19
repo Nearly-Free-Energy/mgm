@@ -20,6 +20,7 @@ import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentS
 import { buildCsvFilename } from "../csv-export";
 import { sumMoney } from "../money";
 import { roundKwh } from "../precision";
+import { meterCoverage, type PrimaryMeterLink } from "../meter-coverage";
 import { periodHistoryHref } from "./period-history-model";
 import type { PeriodReviewExtData } from "./period-review-ext";
 import { periodLabel } from "./period-label";
@@ -39,13 +40,14 @@ export const PERIOD_REVIEW_MAX_TIERS = 20;
 export const PERIOD_REVIEW_MAX_COPY_COLUMNS = 4 + 2 * PERIOD_REVIEW_MAX_TIERS;
 
 /**
- * The billing actions on bills; BILLING_SURFACE (../surface.ts) defines them.
- * The view offers every one but Generate, which no interface can submit yet:
- * GenerateBillsBody's tenant arrays have no kit form, and no GUI registers
- * one (parity.test.ts keeps generate-bills pending until one does). Offer it
- * in buildPeriodReviewModel once a form exists.
+ * The billing actions on the period and its bills; BILLING_SURFACE
+ * (../surface.ts) defines them. Generating a period's bills from meter data
+ * is the period's own action: the header's, and the empty state's call to
+ * action before the first bill.
  */
-export const GENERATE_BILLS_ACTION = { id: "billing.generate-bills", title: "Generate bills" } as const;
+export const GENERATE_FROM_METERS_ACTION = { id: "billing.generate-from-meters", title: "Generate bills from meter data" } as const;
+/** Its label once the period has bills: the legacy header's Refresh Readings. */
+export const REFRESH_FROM_METERS_LABEL = "Refresh readings from meters";
 export const REGENERATE_BILL_ACTION = { id: "billing.regenerate-bill", title: "Regenerate bill" } as const;
 export const RECORD_USAGE_ACTION = { id: "billing.record-usage", title: "Correct usage" } as const;
 export const MARK_PAID_ACTION = { id: "billing.mark-paid", title: "Mark as paid" } as const;
@@ -397,18 +399,37 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     });
   }
 
-  // The legacy titles. Without Generate (GENERATE_BILLS_ACTION above) a
-  // draft's empty state has no call to action, so it does not ask for one.
+  // Generating from meter data, on a draft with tenants: the header's action,
+  // and at zero rows the empty state's call to action (a GUI then draws it
+  // once, in the empty state). Labelled as the legacy header labels its
+  // button: Generate before the first bill, Refresh Readings after.
+  const generate: ActionLink | null =
+    period.status === "draft" && i.tenants.length > 0
+      ? {
+          action: GENERATE_FROM_METERS_ACTION.id,
+          params: { periodId: period.id },
+          label: i.bills.length === 0 ? GENERATE_FROM_METERS_ACTION.title : REFRESH_FROM_METERS_LABEL,
+        }
+      : null;
+
+  // The legacy titles.
   const empty: LoadedModel<"collection">["body"]["empty"] =
-    i.tenants.length === 0 ? { title: "No tenants configured for this microgrid." } : { title: "No billing data yet." };
+    i.tenants.length === 0
+      ? { title: "No tenants configured for this microgrid." }
+      : generate
+        ? {
+            title: "No billing data yet.",
+            text: "Generate bills from meter data to read each tenant's meter for this period and calculate their bills.",
+            action: generate,
+          }
+        : { title: "No billing data yet." };
 
   return {
     // A one-day period shows its one date, as the legacy list does.
     title: period.start_date === period.end_date ? fmt.date(period.start_date).text : label,
     ...(period.timezone ? { subtitle: period.timezone } : {}),
     entity: { kind: "billingPeriod", id: period.id, label },
-    // No period action: Generate is not offered until a form exists (GENERATE_BILLS_ACTION).
-    actions: [],
+    actions: generate ? [generate] : [],
     links,
     body: {
       columns,
@@ -418,4 +439,55 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     },
     ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, data: ext },
   };
+}
+
+/**
+ * What generating a period's bills from meter data would do, as
+ * billing.generate-from-meters' confirmation says it
+ * (prepareGenerateFromMeters in ./period-review.ts): the bill engine's
+ * choices with guardExistingBills (src/lib/billing/generate.ts), in its
+ * order. A manual bill is kept; an invoiced, paid or refunded one left; any
+ * other tenant is read from its meter if meterCoverage says so, and is not
+ * billed otherwise. It cannot foresee a meter with no data for the period.
+ * If the engine's choices change, change this with them.
+ */
+export type GenerateReadiness = {
+  /** Tenants whose meter is read. */
+  fromMeters: number;
+  /** Of those, the ones that have a bill, which is recalculated if its figures changed. */
+  refresh: number;
+  /** Manual bills, kept. */
+  kept: number;
+  /** Invoiced, paid or refunded bills, left as they are. */
+  left: number;
+  /** Tenants with no bill to keep and no meter to read for the period, in the order given. */
+  notRead: { tenantName: string; reason: "no_meter" | "assignment_gap" }[];
+};
+
+export function generateReadiness(
+  period: { start_date: string; end_date: string },
+  tenants: readonly { id: string; display_name: string; primaryLinks: readonly PrimaryMeterLink[] }[],
+  bills: readonly { tenant_id: string; reading_source: string | null; payment_status: string; invoice_number: string | null }[],
+): GenerateReadiness {
+  const billByTenant = new Map(bills.map((b) => [b.tenant_id, b]));
+  const out: GenerateReadiness = { fromMeters: 0, refresh: 0, kept: 0, left: 0, notRead: [] };
+  for (const t of tenants) {
+    const bill = billByTenant.get(t.id);
+    if (bill?.reading_source === "manual") {
+      out.kept++;
+      continue;
+    }
+    if (bill && (bill.invoice_number !== null || bill.payment_status === "paid" || bill.payment_status === "refunded")) {
+      out.left++;
+      continue;
+    }
+    const coverage = meterCoverage(t.primaryLinks, period);
+    if (coverage === "metered") {
+      out.fromMeters++;
+      if (bill) out.refresh++;
+    } else {
+      out.notRead.push({ tenantName: t.display_name, reason: coverage });
+    }
+  }
+  return out;
 }
