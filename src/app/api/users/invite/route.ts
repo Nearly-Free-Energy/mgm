@@ -198,13 +198,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // Who invited them, to what and as what, for the notice; also kept on
-  // auth.users.raw_user_meta_data as before.
-  const inviteData = await buildInviteDataPayload({
-    caller,
-    targetRole: role,
-    targetOrgId: scopeId,
-    supabase: userClient,
-  });
+  // auth.users.raw_user_meta_data as before. Alongside it, whether the
+  // caller is a super admin, which only an address whose rows are all
+  // tenant rows needs (step 2). It is read here, for every invitation, so
+  // the `other_access` answer for such an address follows the same reads
+  // as the one for an address with staff rows.
+  const [inviteData, callerRoles] = await Promise.all([
+    buildInviteDataPayload({
+      caller,
+      targetRole: role,
+      targetOrgId: scopeId,
+      supabase: userClient,
+    }),
+    getCurrentUserRoles(userClient, caller),
+  ]);
+  const callerIsSuperAdmin = rolesIncludeSuperAdmin(callerRoles);
 
   const svc = createServiceClient();
 
@@ -264,9 +272,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // kept none.
       // Making a tenant staff is a role change: a super admin's, through
       // fn_change_user_role, and anyone else gets the answer above.
-      if (!rolesIncludeSuperAdmin(await getCurrentUserRoles(userClient, caller))) {
-        return otherAccess(email);
-      }
+      if (!callerIsSuperAdmin) return otherAccess(email);
       return makeTenantStaff({ userClient, svc, userId: existing.id, email, role, scopeId, inviteData });
     }
 

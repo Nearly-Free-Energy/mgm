@@ -83,7 +83,11 @@ function svcFromImpl(table: string) {
   throw new Error(`Unexpected table in service client: ${table}`);
 }
 
+// The tables each request reads through the caller's own client, in order.
+const userClientTablesSpy = vi.fn();
+
 function userClientFromImpl(table: string) {
+  userClientTablesSpy(table);
   if (table === "user_profiles") {
     return {
       select: () => ({
@@ -540,12 +544,20 @@ describe("POST /api/users/invite", () => {
       it("answers an org manager exactly as for an account that holds other access, and writes nothing", async () => {
         existingAccount(true);
         mockTargetRoles = [{ role: "super_admin", scope_type: "org", scope_id: null }];
+        userClientTablesSpy.mockClear();
         const otherAccess = await invite();
+        const otherAccessReads = userClientTablesSpy.mock.calls.map((call) => call[0]);
 
         mockTargetRoles = [tenantRow];
+        userClientTablesSpy.mockClear();
         const tenantOnly = await invite();
+        const tenantOnlyReads = userClientTablesSpy.mock.calls.map((call) => call[0]);
 
         expect(tenantOnly).toEqual(otherAccess);
+        // The same reads on the caller's client, the caller's own roles
+        // among them, whichever rows the address holds.
+        expect(tenantOnlyReads).toEqual(otherAccessReads);
+        expect(tenantOnlyReads).toContain("user_roles");
         expect(tenantOnly).toEqual({
           status: 409,
           body: {
