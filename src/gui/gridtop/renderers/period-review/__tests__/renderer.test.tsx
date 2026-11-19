@@ -515,6 +515,44 @@ describe("Gridtop's period-review renderer: the controls", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("shows a success's message as a status line, and nothing for a success with none", async () => {
+    const ok = (message?: string): ActionResult => ({ type: "result", ok: true, ...(message ? { message } : {}) });
+    await draw(draftModel(), { ...kit, act: vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => ok("Marked as paid.")) });
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("button", { name: "Mark as paid" })));
+    expect(within(tableRow(0)).getByRole("status").textContent).toBe("Marked as paid.");
+    expect(within(tableRow(0)).queryByRole("alert")).toBeNull();
+    unmount?.();
+    await draw(draftModel(), { ...kit, act: vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => ok()) });
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("button", { name: "Mark as paid" })));
+    expect(within(tableRow(0)).queryByRole("status")).toBeNull();
+  });
+
+  it("shows the empty state's failure beside its action", async () => {
+    await draw(noBillsModel(), { ...kit, act: vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => FAILED) });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: GENERATE.label })));
+    const empty = screen.getByRole("heading", { level: 2, name: "No billing data yet." }).parentElement!;
+    expect(within(empty).getByRole("alert").textContent).toBe(FAILED.message);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("keeps the message of a generation pressed in the empty state once the refresh brings the bills", async () => {
+    let current: ViewModel = noBillsModel();
+    const useLive = vi.fn<(model: ViewModel) => LiveState>(() => ({ model: current, ageSeconds: () => null, stale: () => false, polling: "on" }));
+    const message = "Generated 3 bills from meter data.";
+    const generate = vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => {
+      // The host refreshes the view after a success.
+      current = draftModel();
+      return { type: "result", ok: true, message };
+    });
+    await draw(noBillsModel(), { ...kit, useLive, act: generate });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: GENERATE.label })));
+    expect(generate).toHaveBeenCalledWith(GENERATE);
+    expect(screen.queryByRole("heading", { level: 2, name: "No billing data yet." })).toBeNull();
+    const controls = screen.getByRole("list", { name: "Period actions" }).parentElement!;
+    expect(within(controls).getByRole("status").textContent).toBe(message);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
   it("opens a download through kit.open, and a page through a link", async () => {
     const log = await draw(draftModel());
     await act(async () => fireEvent.click(screen.getByRole("link", { name: "Export CSV" })));

@@ -469,7 +469,8 @@ export const REGENERATE_PAID_LABEL =
  * bill and a refunded one are refused, as the route refuses them. It shows
  * no new total: the read-only preview re-pins a draft period's tariff,
  * which a prepare must not do. The route answers with the previous and new
- * totals, which the host shows as the action's result.
+ * totals in its message, which the host passes on as the action's result
+ * (invoke.ts) and Gridtop's period review shows under the control.
  */
 export async function prepareRegenerateBill(
   req: SurfaceRequest,
