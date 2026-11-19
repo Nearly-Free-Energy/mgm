@@ -6,12 +6,11 @@
  * current periods are (RFC mgm#197 § 4).
  *
  * The hrefs here are data: the host's model parse checks no href under
- * `ext` (DATA_KEYS in @/lib/gui/host/server/parse), so they may name the
- * /my pages before they are released (RFC mgm#197: released by PR 5). If
- * that parse starts checking hrefs inside an ext, these are refused until
- * the pages are released. Each is a same-origin path the renderer still
- * checks before following it. The models carry no LinkRef or row href to
- * those pages until then.
+ * `ext` (DATA_KEYS in @/lib/gui/host/server/parse). They name only the /my
+ * pages, which are released routes; if that parse starts checking hrefs
+ * inside an ext, a /my page that stops being released is refused there.
+ * Each is a same-origin path the renderer still checks before following it.
+ * The models carry no LinkRef or row href to those pages.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in @/lib/gui/host/server/contribution-schema) passes

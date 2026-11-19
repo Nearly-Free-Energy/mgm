@@ -116,6 +116,8 @@ export async function authorizeTenant(
   tenantId: string
 ): Promise<TenantAccess> {
   if (!UUID_RE.test(tenantId)) return { ok: false, reason: "invalid_tenant" };
+  // Postgres returns uuids in lower case; an id from a URL may not be.
+  const unitId = tenantId.toLowerCase();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -136,13 +138,15 @@ export async function authorizeTenant(
   }
   const holdsUnit = roles.some(
     (role) =>
-      role.role === TENANT && role.scope_type === SCOPE_TENANT && role.scope_id === tenantId
+      role.role === TENANT &&
+      role.scope_type === SCOPE_TENANT &&
+      role.scope_id?.toLowerCase() === unitId
   );
   if (!holdsUnit) return { ok: false, reason: "forbidden" };
 
   let rows: unknown;
   try {
-    const { data, error } = await supabase.rpc("fn_tenant_home", { _tenant_id: tenantId });
+    const { data, error } = await supabase.rpc("fn_tenant_home", { _tenant_id: unitId });
     if (error) return { ok: false, reason: "unavailable" };
     rows = data;
   } catch {
@@ -150,7 +154,7 @@ export async function authorizeTenant(
   }
   const row = (Array.isArray(rows) ? rows[0] : null) as TenantHomeRow | null | undefined;
   // No row: the access was removed, or the unit deleted, since the role read.
-  if (!row || row.tenant_id !== tenantId) return { ok: false, reason: "forbidden" };
+  if (!row || row.tenant_id.toLowerCase() !== unitId) return { ok: false, reason: "forbidden" };
   return {
     ok: true,
     user,

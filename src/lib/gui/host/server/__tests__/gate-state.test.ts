@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const checkGate = vi.fn();
 vi.mock("@/lib/runtime/gate", () => ({ checkGate: (...args: unknown[]) => checkGate(...args) }));
 
-import { pluginGate, unitPluginGate } from "../gate-state";
+import { pluginGate, unitOrganizationPlugins, unitPluginGate } from "../gate-state";
 import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tenantOf } from "./host-fakes";
 
 const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
@@ -100,5 +100,47 @@ describe("unitPluginGate", () => {
   it("refuses a context hostContext did not issue", () => {
     const forged = { ...contextFor([tenantOf(UNIT_A)]) };
     expect(() => unitPluginGate(forged, { tenantId: UNIT_A, organizationId: ORG_A })).toThrow(/did not issue/);
+  });
+});
+
+describe("unitOrganizationPlugins", () => {
+  const UNIT_C = "e7400000-0000-4000-8000-00000000000c";
+  const units = [
+    { tenantId: UNIT_A, organizationId: ORG_A },
+    { tenantId: UNIT_B, organizationId: ORG_A },
+    { tenantId: UNIT_C, organizationId: ORG_B },
+  ];
+  const ctx = () => contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B), tenantOf(UNIT_C)]);
+
+  it("asks each organization once, through one of its units, and tells live from possibly live", async () => {
+    checkGate.mockImplementation(async (_supabase, { plugin, target }) => {
+      if (target.id === ORG_B && plugin === "tenant-app") return { ok: false, status: 503, code: "unavailable", message: "Retry." };
+      if (target.id === ORG_B && plugin === "billing") return { ok: false, status: 409, code: "billing_disabled", message: "Off." };
+      return { ok: true, organizationId: target.id };
+    });
+    const byOrganization = await unitOrganizationPlugins(ctx(), units);
+
+    expect([...byOrganization.keys()]).toEqual([ORG_A, ORG_B]);
+    const a = byOrganization.get(ORG_A);
+    const b = byOrganization.get(ORG_B);
+    if (a?.status !== "fulfilled" || b?.status !== "fulfilled") throw new Error("expected both organizations read");
+    expect(a.value.live.has("tenant-app")).toBe(true);
+    expect(b.value.live.has("tenant-app")).toBe(false);
+    expect(b.value.possiblyLive.has("tenant-app")).toBe(true);
+    expect(b.value.possiblyLive.has("billing")).toBe(false);
+    // One question per plugin per organization, never one per unit.
+    const perOrganization = (id: string) => checkGate.mock.calls.filter(([, r]) => r.target.id === id && r.plugin === "tenant-app");
+    expect(perOrganization(ORG_A)).toHaveLength(1);
+    expect(perOrganization(ORG_B)).toHaveLength(1);
+  });
+
+  it("rejects only the entry of an organization whose gate throws", async () => {
+    checkGate.mockImplementation(async (_supabase, { target }) => {
+      if (target.id === ORG_B) throw new Error("gate failed");
+      return { ok: true, organizationId: target.id };
+    });
+    const byOrganization = await unitOrganizationPlugins(ctx(), units);
+    expect(byOrganization.get(ORG_A)?.status).toBe("fulfilled");
+    expect(byOrganization.get(ORG_B)?.status).toBe("rejected");
   });
 });

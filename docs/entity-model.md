@@ -125,6 +125,28 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   unit and the account, so a manager who rents may be given the unit on the
   same address, and a person may rent several units, each with its own
   meters, in different organizations.
+- The tenant record's App access section lists the addresses that can sign
+  in to the unit. **Give access** is `POST /api/tenants/[id]/access` with
+  the address as its only field; it answers
+  `201 { access_id, email, email_sent }`, refuses an address already
+  listed for the unit (a second request for the same address made at the
+  same moment gets the same access and a second notice, since the check
+  comes before the grant), and gives no access while the tenant app is off
+  for the unit's organization. A new account is created with no password,
+  and Supabase Auth sends it nothing. MGM then sends a notice through the
+  organization's sender (`sendNotice`, falling back to the deployment's)
+  saying where to sign in; it carries no sign-in link or code and names no
+  unit. If it cannot be sent, the access stands and the section tells the
+  manager to send the person to the sign-in page.
+- **Remove** is `DELETE /api/tenants/[id]/access/[accessId]`, which calls
+  `fn_tenant_access_revoke` with the manager's own client and answers 204.
+  Reads of the unit are refused at once, because the RLS helpers read the
+  role rows on every query. When the person holds no other role row, their
+  sessions are deleted too, so the next token refresh fails; an access
+  token already issued stays valid until it expires (within an hour) but
+  reads nothing of the unit. When they keep another unit or a staff row,
+  their session stays. Their account is kept either way, and access can be
+  given again.
 - The Users page never touches tenant rows. Removing someone's staff access
   there leaves the units they rent. Inviting an address whose only rows
   are tenant rows is a role change, so only a super admin's invitation
@@ -152,4 +174,8 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   tenant app's usage source reads their meters' edges and the microgrid's
   OpenEMS connection on the service role
   (`src/lib/tenant-app/infrastructure/usage-source.ts`); the tenant's own
-  client still reads no such row.
+  client still reads no such row. Only consumption meters count as a unit's
+  use, and a secondary link does not count on the days its meter is
+  another unit's primary; for that, the same source reads the dates of
+  other units' primary links of the unit's secondary meters on the service
+  role, never whose they are.

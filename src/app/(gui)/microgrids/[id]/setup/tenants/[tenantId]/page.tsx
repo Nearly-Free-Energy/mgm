@@ -5,13 +5,18 @@ import { StatusChip } from "@/components/ui/status-chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { computeAssignmentGaps } from "@/lib/metering/assignment-gaps";
+import { isPluginEnabledForOrg } from "@/lib/plugins/state";
+import { TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
+import { appUrl } from "@/lib/config/app-url";
 import { TenantMeterSection } from "./tenant-meter-section";
+import { TenantAccessSection, type TenantAccessEntry } from "./tenant-access-section";
 import { TenantBillingTable, type BillingLineItemRow } from "./tenant-billing-table";
 
 // Setup > Tenants > [tenantId] — Tenant detail page (D3 / #54).
 //
-// Renders: tenant basics, portal users count (tenant role rows), linked devices table,
-// billing history (last 3 closed periods).
+// Renders: tenant basics, App access (who can sign in to this unit's tenant
+// pages, with Give access and Remove), linked devices table, billing history
+// (last 3 closed periods).
 //
 // Single stacked layout — no sub-tabs (confirmed design decision).
 // HierarchyNav is out-of-scope (D4 / #55 owns placement).
@@ -92,14 +97,22 @@ export default async function TenantDetailPage({
     notFound();
   }
 
-  // Query 2 — portal users count: the people who can sign in to this
-  // tenant's data, one tenant role row each (RFC mgm#197). Read through
+  // Query 2 — App access: the people who can sign in to this unit's tenant
+  // pages, one tenant role row each (RFC mgm#197). Read through
   // fn_tenant_access_list because user_roles RLS shows a manager only their
-  // own rows; a caller the function refuses sees 0.
-  const { data: portalUsers } = await supabase.rpc("fn_tenant_access_list", {
+  // own rows. An error, including a caller the function refuses, is
+  // passed on as null, so the section never says nobody has access when it
+  // could not tell.
+  const access = await supabase.rpc("fn_tenant_access_list", {
     _tenant_id: tenantId,
   });
-  const portalUserCount = portalUsers?.length ?? 0;
+  const accessEntries: TenantAccessEntry[] | null = access.error
+    ? null
+    : ((access.data ?? []) as { access_id: string; email: string; created_at: string }[]).map((row) => ({
+        accessId: row.access_id,
+        email: row.email,
+        createdAt: row.created_at,
+      }));
 
   // Query 3 — last 3 closed billing periods' line items for this tenant.
   const { data: lineItems } = await supabase
@@ -159,13 +172,30 @@ export default async function TenantDetailPage({
 
   // Microgrid timezone for the opening-register dialog (issue #4): the
   // operator's wall-clock input is resolved in this zone, never the
-  // browser's. Falls back to UTC when unreadable.
+  // browser's. Falls back to UTC when unreadable. The App access section
+  // dates its rows in the same zone, and reads the tenant app's state for
+  // the microgrid's organization.
   const { data: microgridRow } = await supabase
     .from("microgrids")
-    .select("timezone")
+    .select("timezone, communities!inner(org_id)")
     .eq("id", microgridId)
-    .maybeSingle<{ timezone: string }>();
+    .maybeSingle<{ timezone: string; communities: { org_id: string } | null }>();
   const microgridTimezone = microgridRow?.timezone ?? "UTC";
+  const orgId = microgridRow?.communities?.org_id ?? null;
+  // null when unreadable: the section then still offers Give access, and the
+  // route refuses it while the tenant app is off.
+  const tenantAppOn = orgId
+    ? await isPluginEnabledForOrg(supabase, orgId, TENANT_APP_PLUGIN_NAME).catch(() => null)
+    : null;
+  // Where a tenant signs in, for the manager to pass on when the notice was
+  // not sent. appUrl throws while MGM_APP_URL is unset; the page still renders.
+  const loginUrl = (() => {
+    try {
+      return appUrl("/login");
+    } catch {
+      return null;
+    }
+  })();
 
   // Resolve role + available unlinked consumption meters for P7 empty state (#139).
   const canManage = await currentUserCanAccessMicrogrid(supabase, microgridId);
@@ -240,18 +270,16 @@ export default async function TenantDetailPage({
         </div>
       </section>
 
-      {/* ── Section 2: Portal users ─────────────────────────────────────────── */}
-      <section aria-labelledby="portal-users-heading">
-        <h4
-          id="portal-users-heading"
-          className="mb-3 text-caption font-semibold uppercase tracking-wide text-muted-foreground"
-        >
-          Portal users
-        </h4>
-        <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground">
-          {portalUserCount} portal user{portalUserCount === 1 ? "" : "s"} linked
-        </div>
-      </section>
+      {/* ── Section 2: App access ───────────────────────────────────────────── */}
+      <TenantAccessSection
+        tenantId={tenantId}
+        entries={accessEntries}
+        suggestedEmail={tenant.primary_email}
+        canManage={canManage}
+        tenantAppOn={tenantAppOn}
+        timeZone={microgridTimezone}
+        loginUrl={loginUrl}
+      />
 
       {/* ── Section 3: Linked devices ───────────────────────────────────────── */}
       <section aria-labelledby="devices-heading">

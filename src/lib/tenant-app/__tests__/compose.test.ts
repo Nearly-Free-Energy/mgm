@@ -221,6 +221,14 @@ describe("composeTenantApp authorization", () => {
     expect(openOrganizationScope).not.toHaveBeenCalled();
   });
 
+  it("reads a unit id given in upper case as the same unit", async () => {
+    const supabase = client(tenantOfA());
+    const result = await composeTenantApp({ supabase, tenantId: UNIT_A.toUpperCase() });
+    if (!result.ok) throw new Error(result.code);
+    await result.data.dispose();
+    expect(supabase.rpc).toHaveBeenCalledWith("fn_tenant_home", { _tenant_id: UNIT_A });
+  });
+
   it("refuses a unit fn_tenant_home no longer answers for", async () => {
     const supabase = client(tenantOfA({ units: {} }));
     const result = await composeTenantApp({ supabase, tenantId: UNIT_A });

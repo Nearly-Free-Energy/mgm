@@ -1,5 +1,4 @@
 import { expect, test, type Page } from "@playwright/test";
-import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { checkMainTargets, checkNarrowPage, reportTiming, watchPage } from "./checks";
 
 // Signed in as the smoke's tenant (tenant.setup.ts), on a 360 px touch
@@ -8,14 +7,6 @@ import { checkMainTargets, checkNarrowPage, reportTiming, watchPage } from "./ch
 // (e2e/fixtures.ts). The views write nothing, so no write is expected, and
 // Try again is never pressed. Figures are synthetic and depend on the date,
 // so no kWh value is asserted.
-//
-// The usage pages are released by RFC mgm#197 PR 5; until then middleware
-// answers them with 404 and these tests skip themselves. They follow
-// src/lib/mgm/released-routes.ts, so they start running with no edit here.
-test.skip(
-  !["/my", "/my/usage", "/my/usage/day"].every(isReleasedRoute),
-  "RFC #197: the /my pages are released by PR 5"
-);
 
 /**
  * The month before the current UTC month, as YYYY-MM, and its number of

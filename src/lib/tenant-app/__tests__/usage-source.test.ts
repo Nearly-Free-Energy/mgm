@@ -59,7 +59,7 @@ function recordingClient(
         then: (resolve: (v: unknown) => unknown, reject: (r: unknown) => unknown) =>
           Promise.resolve(answer(table)).then(resolve, reject),
       };
-      for (const method of ["select", "in", "eq"]) {
+      for (const method of ["select", "in", "eq", "neq", "lt", "or"]) {
         chain[method] = (...args: unknown[]) => {
           entry.push([method, ...args]);
           return chain;
@@ -73,23 +73,36 @@ function recordingClient(
 type Device = { id: string; edge_id: string | null; openems_component_id: string | null };
 type Edge = { id: string; openems_edge_id: string };
 
+type ReadError = { code: string; message: string };
+
 function setup(options: {
   devices?: Device[];
-  devicesError?: { code: string; message: string };
+  devicesError?: ReadError;
   edges?: Edge[];
-  edgesError?: { code: string; message: string };
+  edgesError?: ReadError;
+  /** What the tenant's own `tenant_devices` read returns. */
+  ownLinks?: { device_id: string }[];
+  ownLinksError?: ReadError;
+  /** What the service role's `tenant_devices` read returns. */
+  primaryLinks?: Record<string, unknown>[];
+  primaryLinksError?: ReadError;
   provider?: Partial<MeteringProvider> & { getDeviceEnergySeries?: MeteringProvider["getDeviceEnergySeries"] };
   select?: () => Promise<string>;
 }) {
+  const answer = (rows: unknown, error: ReadError | undefined) => ({ data: error ? null : (rows ?? []), error: error ?? null });
   const tenant = recordingClient("tenant", (table) =>
     table === "devices"
-      ? { data: options.devicesError ? null : (options.devices ?? []), error: options.devicesError ?? null }
-      : { data: null, error: { message: `the tenant client read ${table}` } }
+      ? answer(options.devices, options.devicesError)
+      : table === "tenant_devices"
+        ? answer(options.ownLinks, options.ownLinksError)
+        : { data: null, error: { message: `the tenant client read ${table}` } }
   );
   const service = recordingClient("service", (table) =>
     table === "edges"
-      ? { data: options.edgesError ? null : (options.edges ?? []), error: options.edgesError ?? null }
-      : { data: null, error: { message: `the service client read ${table}` } }
+      ? answer(options.edges, options.edgesError)
+      : table === "tenant_devices"
+        ? answer(options.primaryLinks, options.primaryLinksError)
+        : { data: null, error: { message: `the service client read ${table}` } }
   );
   mocks.createServiceClient.mockImplementation(() => {
     log.push(["createServiceClient"]);
@@ -175,7 +188,14 @@ describe("createTenantUsageSource", () => {
     });
     expect(log).toEqual([
       ["checkGate"],
-      ["tenant", "devices", ["select", "id, edge_id, openems_component_id"], ["in", "id", ["d1", "d2"]]],
+      [
+        "tenant",
+        "devices",
+        ["select", "id, edge_id, openems_component_id"],
+        ["in", "id", ["d1", "d2"]],
+        // A device of another type has no row, so it reads as no data.
+        ["eq", "device_type", "consumption_meter"],
+      ],
       ["createServiceClient"],
       ["service", "edges", ["select", "id, openems_edge_id"], ["in", "id", ["e1", "e2"]], ["eq", "microgrid_id", MICROGRID]],
       ["select", "service", MICROGRID],
@@ -413,5 +433,102 @@ describe("createTenantUsageSource", () => {
       expect(await source.readSeries(request(["d1"]))).toEqual({ ok: false, reason: "unavailable" });
       expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { code: "Error" });
     });
+  });
+});
+
+describe("the primary links other units hold on the unit's secondary meters", () => {
+  const range = { fromDate: "2026-11-01", toDate: "2026-12-01" };
+
+  it("confirms the ids as the unit's secondary links on the tenant's client, then reads other units' primary links on the service role", async () => {
+    const { source } = setup({
+      ownLinks: [{ device_id: "s1" }, { device_id: "s2" }],
+      primaryLinks: [
+        { device_id: "s2", effective_from: "2026-10-15", effective_to: null },
+        { device_id: "s1", effective_from: "2026-11-03", effective_to: "2026-11-09" },
+      ],
+    });
+
+    const spans = await source.listPrimaryElsewhere({ deviceIds: ["s2", "s1"], ...range });
+
+    expect(log).toEqual([
+      [
+        "tenant",
+        "tenant_devices",
+        ["select", "device_id"],
+        ["eq", "tenant_id", unit.tenantId],
+        ["eq", "role", "secondary_meter"],
+        ["in", "device_id", ["s2", "s1"]],
+      ],
+      ["createServiceClient"],
+      [
+        "service",
+        "tenant_devices",
+        ["select", "device_id, effective_from, effective_to"],
+        ["in", "device_id", ["s1", "s2"]],
+        ["eq", "role", "primary_consumption_meter"],
+        ["neq", "tenant_id", unit.tenantId],
+        ["lt", "effective_from", "2026-12-01"],
+        ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
+      ],
+    ]);
+    // Dates only: whose link it is never leaves the source.
+    expect(spans).toEqual([
+      { deviceId: "s2", effectiveFrom: "2026-10-15", effectiveTo: null },
+      { deviceId: "s1", effectiveFrom: "2026-11-03", effectiveTo: "2026-11-09" },
+    ]);
+    expect(mocks.checkGate).not.toHaveBeenCalled();
+  });
+
+  it("never asks the service role about an id the tenant's client did not return as the unit's secondary link", async () => {
+    const { source } = setup({
+      ownLinks: [{ device_id: "s1" }, { device_id: "not-asked" }],
+      primaryLinks: [
+        { device_id: "s1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
+        { device_id: "p1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
+      ],
+    });
+
+    const spans = await source.listPrimaryElsewhere({ deviceIds: ["s1", "p1"], ...range });
+
+    const serviceRead = log.find((entry) => entry[0] === "service")!;
+    expect(serviceRead).toContainEqual(["in", "device_id", ["s1"]]);
+    expect(spans).toEqual([{ deviceId: "s1", effectiveFrom: "2026-11-01", effectiveTo: null }]);
+    expect(JSON.stringify(spans)).not.toContain("tenant");
+  });
+
+  it("creates no service client when the tenant's client confirms no secondary link, or for no ids", async () => {
+    const { source } = setup({ ownLinks: [] });
+
+    expect(await source.listPrimaryElsewhere({ deviceIds: ["s1"], ...range })).toEqual([]);
+    expect(await source.listPrimaryElsewhere({ deviceIds: [], ...range })).toEqual([]);
+    expect(mocks.createServiceClient).not.toHaveBeenCalled();
+    expect(log.filter((entry) => entry[0] === "tenant")).toHaveLength(1);
+  });
+
+  it.each([
+    ["2026-11-01,effective_to.gt.0", "2026-12-01"],
+    ["2026-11-01", "2026-12-01)"],
+    ["2026-02-30", "2026-03-01"],
+  ])("rejects %s .. %s before any read", async (fromDate, toDate) => {
+    const { source } = setup({ ownLinks: [{ device_id: "s1" }] });
+
+    await expect(source.listPrimaryElsewhere({ deviceIds: ["s1"], fromDate, toDate })).rejects.toThrow();
+    expect(log).toEqual([]);
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "primary-links", code: "invalid_date" });
+  });
+
+  it.each([
+    ["the tenant's read fails", { ownLinksError: { code: "57014", message: "statement timeout" } }, { step: "secondary-links", code: "57014" }],
+    [
+      "the service role's read fails",
+      { ownLinks: [{ device_id: "s1" }], primaryLinksError: { code: "PGRST301", message: "JWT rejected" } },
+      { step: "primary-links", code: "PGRST301" },
+    ],
+  ])("rejects when %s, logging a step and code only", async (_label, options, detail) => {
+    const { source } = setup(options);
+
+    await expect(source.listPrimaryElsewhere({ deviceIds: ["s1"], ...range })).rejects.toThrow();
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", detail);
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/timeout|JWT/);
   });
 });

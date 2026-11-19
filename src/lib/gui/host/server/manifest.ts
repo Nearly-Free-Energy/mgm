@@ -30,7 +30,7 @@ import { buildManifestModel, buildTenantManifestModel, livePlugins, MAX_PLACES_P
 import { chooseTenantUnit, tenantUnitIds, unitsNamedBy } from "../shared/tenant-units";
 import { hostContext, requireIssued, type HostContext, type HostRefusal } from "./access";
 import { resolveSegments, type Scope } from "./entities";
-import { pluginGate, unitPluginGate } from "./gate-state";
+import { pluginGate, unitOrganizationPlugins } from "./gate-state";
 import { manifestSchema } from "./model-schema";
 import { pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
 import { parseOrFail } from "./parse";
@@ -124,21 +124,17 @@ async function pathScope(ctx: HostContext, scope: Scope, rows: PlaceRows): Promi
 type Gate = ManifestInput["gate"];
 
 /**
- * Plugins live for at least one of `units`' organizations, each asked once,
- * through the gate of one unit there (unitPluginGate), with the person's own
- * session. A plugin is live for an organization with its dependencies, as
- * livePlugins decides, so the union holds each dependency too.
+ * Plugins live for at least one of `units`' organizations
+ * (unitOrganizationPlugins: each asked once, through the gate of one unit
+ * there, with the person's own session). A plugin is live for an
+ * organization with its dependencies, as livePlugins decides, so the union
+ * holds each dependency too. A gate that throws fails the manifest.
  */
 async function unitsGate(ctx: HostContext, units: readonly HostUnit[]): Promise<Gate> {
-  const byOrganization = new Map<string, HostUnit>();
-  for (const unit of units) if (!byOrganization.has(unit.organizationId)) byOrganization.set(unit.organizationId, unit);
-  const lives = await Promise.all(
-    [...byOrganization.values()].map(async (unit) => {
-      const gate = unitPluginGate(ctx, unit);
-      const decisions = await Promise.all(MGM_BUNDLED_PLUGINS.map(async (p) => [p.name, (await gate(p.name)).ok] as const));
-      return livePlugins(Object.fromEntries(decisions));
-    }),
-  );
+  const lives = [...(await unitOrganizationPlugins(ctx, units)).values()].map((entry) => {
+    if (entry.status === "rejected") throw entry.reason;
+    return entry.value.live;
+  });
   return Object.fromEntries(MGM_BUNDLED_PLUGINS.filter((p) => lives.some((live) => live.has(p.name))).map((p) => [p.name, true]));
 }
 

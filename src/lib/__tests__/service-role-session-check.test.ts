@@ -141,12 +141,12 @@ const MODULES: Record<string, Module> = {
   "src/lib/tenant-app/compose.ts": {
     privilegedExports: ["TenantAppPlugin"],
     reason:
-      "composeTenantApp runs authorizeTenant (getUser, the caller's tenant row, fn_tenant_home) before it opens a scope; TenantAppPlugin builds the usage source, which reads edges and builds the microgrid's metering provider on the service role, in whatever scope loads it. The tenant views' loaders (src/lib/tenant-app/surface/home.ts and usage.ts) import only composeTenantApp, so they inherit nothing here: their usage reads reach the service role only inside the scope it opened after that check, and the host calls them only through mgmSurface.",
+      "composeTenantApp runs authorizeTenant (getUser, the caller's tenant row, fn_tenant_home) before it opens a scope; TenantAppPlugin builds the usage source, which reads edges, other units' primary links of the unit's secondary meters, and builds the microgrid's metering provider on the service role, in whatever scope loads it. The tenant views' loaders (src/lib/tenant-app/surface/home.ts and usage.ts) import only composeTenantApp, so they inherit nothing here: their usage reads reach the service role only inside the scope it opened after that check, and the host calls them only through mgmSurface.",
   },
   "src/lib/tenant-app/infrastructure/usage-source.ts": {
     privilegedExports: "all",
     reason:
-      "Reads the unit's edges and builds the microgrid's metering provider, which decrypts its stored credential, on the service role, for the microgrid fn_tenant_home named and the device rows the tenant's own client returned; only TenantAppPlugin calls it, after composeTenantApp's authorizeTenant.",
+      "Reads the unit's edges, and the primary links other units hold on meters the tenant's own client returned as the unit's secondary links (date spans only), and builds the microgrid's metering provider, which decrypts its stored credential, on the service role, for the microgrid fn_tenant_home named and the device rows the tenant's own client returned; only TenantAppPlugin calls it, after composeTenantApp's authorizeTenant.",
   },
   "src/lib/cordis/billing-review.ts": {
     privilegedExports: ["composeBillingReview", "BillingReviewPlugin"],
@@ -304,6 +304,11 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "currentUserIsSuperAdmin or currentUserCanAccessOrg answers 403 before the Auth admin calls and the invitation notice, which decrypts the organization's mail sender.",
+  },
+  "src/app/api/tenants/[id]/access/route.ts": {
+    kind: "session",
+    reason:
+      "composeCommunityManagement (authorizeOrganization, getUser) answers 401 or 403, and the community-management gate 409 or 503, before the service client is created for the Auth admin calls, fn_tenant_access_grant with the getUser id as _actor, and the access notice, which decrypts the organization's mail sender.",
   },
   "src/app/api/users/[id]/resend-invite/route.ts": {
     kind: "session",

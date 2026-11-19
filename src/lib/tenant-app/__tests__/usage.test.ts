@@ -25,7 +25,7 @@ import type {
   TenantUsageSeriesResult,
   TenantUsageSource,
 } from "../types";
-import { datesOfMonth } from "../usage-calendar";
+import { datesOfMonth, withoutPrimaryElsewhere } from "../usage-calendar";
 import { _resetTenantUsageCacheForTests, USAGE_FRESH_MS } from "../usage-throttle";
 
 const ORG = "00000000-0000-4000-8000-0000000000a1";
@@ -40,6 +40,13 @@ const P = "meter-p";
 const D = "meter-d";
 
 const clock = { now: 0 };
+
+/**
+ * A usage source as a test writes it: the series, and, when the test is
+ * about another unit's primary links, the spans. Without them no meter is
+ * another unit's primary.
+ */
+type SeriesSource = Pick<TenantUsageSource, "readSeries"> & Partial<TenantUsageSource>;
 
 beforeEach(() => {
   _resetTenantUsageCacheForTests();
@@ -95,7 +102,7 @@ function syntheticSource() {
     energySeries: (request) => generateDeviceEnergySeries(request, { nowMs: clock.now }),
   });
   const requests: TenantUsageSeriesRequest[] = [];
-  const source: TenantUsageSource = {
+  const source: SeriesSource = {
     async readSeries(request) {
       requests.push(request);
       const series = await provider.getDeviceEnergySeries({
@@ -115,7 +122,7 @@ function syntheticSource() {
 /** A source that answers `value(deviceId, bucket start)` for every bucket of the request. */
 function fakeSource(value: (deviceId: string, start: number, date: string) => number | null) {
   const requests: TenantUsageSeriesRequest[] = [];
-  const source: TenantUsageSource = {
+  const source: SeriesSource = {
     async readSeries(request) {
       requests.push(request);
       const buckets: { start: number; date: string }[] = [];
@@ -137,7 +144,7 @@ function fakeSource(value: (deviceId: string, start: number, date: string) => nu
 function capabilityFor(
   tenantId: string,
   links: Parameters<typeof repositoryOf>[0],
-  source: TenantUsageSource,
+  source: SeriesSource,
   options: { timezone?: string; active?: () => boolean } = {}
 ) {
   const { repo, listMeterAssignments } = repositoryOf(links);
@@ -146,7 +153,7 @@ function capabilityFor(
     unitScope(tenantId, options.timezone),
     options.active ?? (() => true),
     () => clock.now,
-    source
+    { listPrimaryElsewhere: async () => [], ...source }
   );
   return { capability, listMeterAssignments };
 }
@@ -315,28 +322,74 @@ describe("the sum across a unit's meters", () => {
     expect(shown.total).toEqual({ kwh: 62, withoutData: 0 });
   });
 
-  it("counts a meter linked to two units for each, only on its own link's days", async () => {
-    clock.now = Date.parse("2026-12-05T09:00:00Z");
+  describe("a meter that is one unit's primary and another's secondary (decided on #210, 19 November)", () => {
     // D is A's primary from 1 October and B's secondary from 10 November; B's own primary is P.
-    const monthA = await month(capabilityFor(UNIT_A, [link(D, "2026-10-01", null)], syntheticSource().source).capability, { month: "2026-11" });
-    const monthB = await month(
-      capabilityFor(UNIT_B, [link(P, "2026-10-01", null), link(D, "2026-11-10", null, "secondary_meter")], syntheticSource().source).capability,
-      { month: "2026-11" }
-    );
-
+    const linksA = [link(D, "2026-10-01", null)];
+    const linksB = [link(P, "2026-10-01", null), link(D, "2026-11-10", null, "secondary_meter")];
     const expectBucket = (shown: TenantUsageMonth, date: string, kwh: number | null) =>
       expect(stateOf(shown, date)).toEqual({ date, state: kwh === null ? "no-data" : "data", kwh });
-    for (const date of datesOfMonth("2026-11")) {
-      expectBucket(monthA, date, generatedDay(D, date));
-      const p = generatedDay(P, date);
-      const d = generatedDay(D, date);
-      if (date < "2026-11-10") expectBucket(monthB, date, p);
-      else expectBucket(monthB, date, p === null || d === null ? null : round(p + d));
-    }
-    // A day on which D did not report is no data for both units from the 10th.
-    expect(generatedDay(D, "2026-11-19")).toBeNull();
-    expect(stateOf(monthA, "2026-11-19").state).toBe("no-data");
-    expect(stateOf(monthB, "2026-11-19").state).toBe("no-data");
+
+    beforeEach(() => {
+      clock.now = Date.parse("2026-12-05T09:00:00Z");
+    });
+
+    it("does not count a secondary meter on days it is another unit's primary", async () => {
+      const monthA = await month(capabilityFor(UNIT_A, linksA, syntheticSource().source).capability, { month: "2026-11" });
+      const b = syntheticSource();
+      const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+      const listPrimaryElsewhere = async (request: { deviceIds: string[]; fromDate: string; toDate: string }) => {
+        asked.push(request);
+        return [{ deviceId: D, effectiveFrom: "2026-10-01", effectiveTo: null }];
+      };
+      const monthB = await month(capabilityFor(UNIT_B, linksB, { ...b.source, listPrimaryElsewhere }).capability, {
+        month: "2026-11",
+      });
+
+      for (const date of datesOfMonth("2026-11")) {
+        expectBucket(monthA, date, generatedDay(D, date));
+        expectBucket(monthB, date, generatedDay(P, date));
+      }
+      expect(asked).toEqual([{ deviceIds: [D], fromDate: "2026-11-01", toDate: "2026-12-01" }]);
+      expect(b.requests.flatMap((r) => r.deviceIds)).toEqual([P]);
+      // D did not report on the 19th: no data for A, and B's day follows P alone.
+      expect(generatedDay(D, "2026-11-19")).toBeNull();
+      expect(stateOf(monthA, "2026-11-19").state).toBe("no-data");
+      expectBucket(monthB, "2026-11-19", generatedDay(P, "2026-11-19"));
+      expect(stateOf(monthB, "2026-11-19").state).toBe("data");
+    });
+
+    it("does not show a secondary meter's hours on a day it is another unit's primary", async () => {
+      const b = syntheticSource();
+      const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+      const listPrimaryElsewhere = async (request: { deviceIds: string[]; fromDate: string; toDate: string }) => {
+        asked.push(request);
+        return [{ deviceId: D, effectiveFrom: "2026-10-01", effectiveTo: null }];
+      };
+      const shown = await day(capabilityFor(UNIT_B, linksB, { ...b.source, listPrimaryElsewhere }).capability, {
+        date: "2026-11-20",
+      });
+
+      expect(asked.map((request) => request.deviceIds)).toEqual([[D]]);
+      expect(b.requests.flatMap((r) => r.deviceIds)).toEqual([P]);
+      expect(shown.meters).toBe(1);
+      expect(shown.hours.map((h) => h.kwh)).toEqual(generatedHours(P, "2026-11-20"));
+    });
+
+    it("counts a secondary meter on days it is nobody's primary", async () => {
+      const monthB = await month(
+        capabilityFor(UNIT_B, linksB, { ...syntheticSource().source, listPrimaryElsewhere: async () => [] }).capability,
+        { month: "2026-11" }
+      );
+
+      for (const date of datesOfMonth("2026-11")) {
+        const p = generatedDay(P, date);
+        const d = generatedDay(D, date);
+        if (date < "2026-11-10") expectBucket(monthB, date, p);
+        else expectBucket(monthB, date, p === null || d === null ? null : round(p + d));
+      }
+      // A day on which D did not report is no data from the 10th.
+      expect(stateOf(monthB, "2026-11-19").state).toBe("no-data");
+    });
   });
 });
 
@@ -437,7 +490,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   ] as const)(
     "shows every past day with a meter as no data when the source answers %s, as problem %s",
     async (reason, problem) => {
-      const source: TenantUsageSource = { readSeries: async () => ({ ok: false, reason }) };
+      const source: SeriesSource = { readSeries: async () => ({ ok: false, reason }) };
       const shown = await month(capabilityFor(UNIT_A, [link("p", "2026-11-10", null)], source).capability);
 
       expect(shown.read).toEqual({ readAt: null, stale: false, synthetic: false, problem });
@@ -467,7 +520,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
 
   it("shows an hour the source returned twice as no data, never either figure, and no total", async () => {
     const hours = localHourStarts("2026-11-17", KAMPALA);
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       async readSeries(): Promise<TenantUsageSeriesResult> {
         // 05:00 comes back twice, with two figures.
         const buckets = [...hours.slice(0, 6), hours[5], ...hours.slice(6)];
@@ -484,7 +537,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   });
 
   it("shows no data when the source throws", async () => {
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       readSeries: async () => {
         throw new Error("connect ECONNREFUSED https://openems.example.test");
       },
@@ -497,7 +550,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   });
 
   it("shows a source that returns fewer buckets as no data, never a figure on another day", async () => {
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       async readSeries(request): Promise<TenantUsageSeriesResult> {
         // Only the 2nd and 3rd of the month, at their own midnights.
         const buckets = ["2026-11-02", "2026-11-03"].map((date) => startOfDayInZone(date, request.timezone).getTime());
@@ -725,5 +778,67 @@ describe("the calls' own failures", () => {
     }
     expect(listMeterAssignments).not.toHaveBeenCalled();
     expect(requests).toEqual([]);
+  });
+});
+
+describe("withoutPrimaryElsewhere: a secondary link's days less another unit's primary spans", () => {
+  const secondary = (deviceId: string, from: string, to: string | null) => link(deviceId, from, to, "secondary_meter");
+  const span = (deviceId: string, effectiveFrom: string, effectiveTo: string | null) => ({ deviceId, effectiveFrom, effectiveTo });
+  const periods = (links: TenantMeter[]) => links.map((l) => `${l.deviceId} ${l.effectiveFrom}..${l.effectiveTo ?? ""}`);
+
+  it("keeps every link when there is no span", () => {
+    const links = [link("p", "2026-01-01", null), secondary("s", "2026-02-01", "2026-03-01")];
+    expect(withoutPrimaryElsewhere(links, [])).toEqual(links);
+  });
+
+  it("drops a secondary link a span covers entirely", () => {
+    expect(withoutPrimaryElsewhere([secondary("s", "2026-02-01", "2026-03-01")], [span("s", "2026-01-15", "2026-03-01")])).toEqual([]);
+  });
+
+  it("splits a secondary link around a span in its middle, keeping the link's other fields", () => {
+    const shown = withoutPrimaryElsewhere([secondary("s", "2026-02-01", "2026-03-01")], [span("s", "2026-02-10", "2026-02-20")]);
+    expect(periods(shown)).toEqual(["s 2026-02-01..2026-02-10", "s 2026-02-20..2026-03-01"]);
+    expect(shown.every((l) => l.role === "secondary_meter" && l.name === "s" && l.deviceType === "consumption_meter")).toBe(true);
+  });
+
+  it("ends an open-ended secondary link where an open-ended span starts", () => {
+    expect(periods(withoutPrimaryElsewhere([secondary("s", "2026-02-01", null)], [span("s", "2026-04-01", null)]))).toEqual([
+      "s 2026-02-01..2026-04-01",
+    ]);
+  });
+
+  it("starts it again the day a span ends, open-ended", () => {
+    expect(periods(withoutPrimaryElsewhere([secondary("s", "2026-02-01", null)], [span("s", "2026-01-01", "2026-03-01")]))).toEqual([
+      "s 2026-03-01..",
+    ]);
+  });
+
+  it("ignores a span of another device", () => {
+    const links = [secondary("s", "2026-02-01", null)];
+    expect(withoutPrimaryElsewhere(links, [span("t", "2026-01-01", null)])).toEqual(links);
+  });
+
+  it("never changes a primary link, even of a device in a span", () => {
+    const links = [link("s", "2026-02-01", null)];
+    expect(withoutPrimaryElsewhere(links, [span("s", "2026-01-01", null)])).toEqual(links);
+  });
+
+  it("removes nothing for spans that only touch the link at its half-open ends", () => {
+    const links = [secondary("s", "2026-02-01", "2026-03-01")];
+    expect(withoutPrimaryElsewhere(links, [span("s", "2026-01-01", "2026-02-01"), span("s", "2026-03-01", null)])).toEqual(links);
+  });
+
+  it("removes the union of overlapping spans, and keeps the order of the links", () => {
+    const shown = withoutPrimaryElsewhere(
+      [link("p", "2026-01-01", null), secondary("s", "2026-01-01", null), secondary("t", "2026-01-01", "2026-02-01")],
+      [span("s", "2026-03-01", "2026-05-01"), span("s", "2026-02-01", "2026-04-01"), span("s", "2026-06-01", "2026-07-01")]
+    );
+    expect(periods(shown)).toEqual([
+      "p 2026-01-01..",
+      "s 2026-01-01..2026-02-01",
+      "s 2026-05-01..2026-06-01",
+      "s 2026-07-01..",
+      "t 2026-01-01..2026-02-01",
+    ]);
   });
 });

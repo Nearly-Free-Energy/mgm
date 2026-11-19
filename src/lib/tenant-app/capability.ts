@@ -33,10 +33,12 @@ import {
   computeUsageDay,
   computeUsageMonth,
   datesOfMonth,
+  inForceOn,
   metersOn,
   resolveRequestedDate,
   resolveRequestedMonth,
   sumMeters,
+  withoutPrimaryElsewhere,
   type UsageFigures,
 } from "./usage-calendar";
 import { readThrottled, type UsageReadOutcome } from "./usage-throttle";
@@ -126,6 +128,22 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     return (this.now ?? Date.now)();
   }
 
+  /**
+   * The links whose use is the unit's over [fromDate, toDate): every
+   * secondary link loses the days its meter is another unit's primary
+   * (withoutPrimaryElsewhere). Asks the usage source only when there is a
+   * secondary link, so most units cause no read. Rejects when the spans
+   * cannot be read, so a caller fails closed rather than count them.
+   */
+  private async usageLinks(links: TenantMeter[], fromDate: string, toDate: string): Promise<TenantMeter[]> {
+    const secondary = [
+      ...new Set(links.filter((link) => link.role === "secondary_meter").map((link) => link.deviceId)),
+    ].sort();
+    if (secondary.length === 0) return links;
+    const spans = await this.usage.listPrimaryElsewhere({ deviceIds: secondary, fromDate, toDate });
+    return withoutPrimaryElsewhere(links, spans);
+  }
+
   private ensureActive(): TenantAppFailure | null {
     if (this.isActive()) return null;
     return tenantAppFailure({
@@ -136,9 +154,11 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
   }
 
   /**
-   * The unit, its microgrid and the meters assigned to it today. "Today" is
-   * the microgrid's day, as the tenant's calendar will be; a stored zone that
-   * is not a valid IANA id reads as UTC, as the metering capability does.
+   * The unit, its microgrid and its consumption meters in force today, less a
+   * secondary meter that is another unit's primary today, as the calendar
+   * counts them. "Today" is the microgrid's day, as the tenant's calendar
+   * is; a stored zone that is not a valid IANA id reads as UTC, as the
+   * metering capability does.
    */
   async getHome(): Promise<TenantAppResult<TenantHome>> {
     const inactive = this.ensureActive();
@@ -150,6 +170,11 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     let meters: TenantMeter[];
     try {
       meters = await this.repo.listMetersInForce(unit.tenantId, date);
+      // A link splits into at most one piece that covers today, so no meter
+      // is listed twice; the home shows no dates, only names and roles.
+      meters = (await this.usageLinks(meters, date, addDaysToDateKey(date, 1))).filter((meter) =>
+        inForceOn(meter, date)
+      );
     } catch {
       return meterLinksUnavailable();
     }
@@ -172,11 +197,12 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
 
   /**
    * A month of the unit's use per local day (RFC mgm#197 § 5), in the unit's
-   * zone. The meters of each day are the unit's links in force on it, read
-   * through the tenant's own client; the source is asked once, for every
-   * meter in force on some day up to today, from the unit's first such day
-   * of the month to its last, and each meter counts only on its own link's
-   * days. Future days are not read. A failed or refused read is not a
+   * zone. The meters of each day are the unit's consumption-meter links in
+   * force on it, read through the tenant's own client, less secondary days
+   * on which the meter is another unit's primary; the source is asked once,
+   * for every meter in force on some day up to today, from the unit's first
+   * such day of the month to its last, and each meter counts only on its
+   * own link's days. Future days are not read. A failed or refused read is not a
    * failure of the call: the month still loads, and every day with a meter
    * shows no data.
    */
@@ -193,7 +219,12 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
 
     let links: TenantMeter[];
     try {
-      links = await this.repo.listMeterAssignments(unit.tenantId, dates[0], addDaysToDateKey(last, 1));
+      const range = [dates[0], addDaysToDateKey(last, 1)] as const;
+      links = await this.repo.listMeterAssignments(unit.tenantId, ...range);
+      // Clipped before anything else reads them: the days in force, the
+      // cache key (so a figure kept from before another unit's primary link
+      // moved is not served under it), the devices asked for and the sums.
+      links = await this.usageLinks(links, ...range);
     } catch {
       return meterLinksUnavailable();
     }
@@ -246,7 +277,9 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
   /**
    * One local day of the unit's use per hour (RFC mgm#197 § 5), in the
    * unit's zone (23 or 25 hours on a daylight-saving day). The meters are
-   * the unit's links in force on that day; a day with none reads nothing.
+   * the unit's consumption-meter links in force on that day, less a
+   * secondary meter that is another unit's primary on it; a day with none
+   * reads nothing.
    * A failed or refused read still loads the day, with no data.
    */
   async getUsageDay(input: { date?: string } = {}): Promise<TenantAppResult<TenantUsageDay>> {
@@ -260,7 +293,9 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
 
     let links: TenantMeter[];
     try {
-      links = await this.repo.listMeterAssignments(unit.tenantId, date, addDaysToDateKey(date, 1));
+      const range = [date, addDaysToDateKey(date, 1)] as const;
+      links = await this.repo.listMeterAssignments(unit.tenantId, ...range);
+      links = await this.usageLinks(links, ...range);
     } catch {
       return meterLinksUnavailable();
     }

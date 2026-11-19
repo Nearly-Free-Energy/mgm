@@ -90,9 +90,9 @@ describe("Gridtop's shell for a tenant", () => {
   });
 
   it("offers Sign out in the account menu, as for staff", async () => {
-    // The shell's account menu is a tenant's way out once their home is
-    // released; until then the (gui) layout sends them from any page that
-    // is not a tenant page to /no-access, which has its own.
+    // The shell's account menu is a tenant's way out: the (gui) layout sends
+    // them from any page that is not a tenant page to their home, which is
+    // released, and to /no-access, which has its own, only if it is not.
     rendered = await renderShell(GridtopGui, tenantFixture([{ id: UNIT_A, label: "Shop 9" }]), <p>The page</p>);
     await act(async () =>
       fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "Account: Grace Namata" })),
@@ -145,7 +145,7 @@ describe("Gridtop's phone dock for a tenant", () => {
   });
 
   it("holds only Account while the tenant has no app", async () => {
-    // Before the tenant pages are released (RFC mgm#197 PR 5) the host offers a tenant no nav entry.
+    // The host offers a tenant no nav entry when the tenant pages are not released or the app is off.
     rendered = await renderShell(GridtopGui, tenantFixture(ONE, { nav: [] }));
     const dock = bottomDock();
     expect(items(dock)).toEqual(["Account"]);

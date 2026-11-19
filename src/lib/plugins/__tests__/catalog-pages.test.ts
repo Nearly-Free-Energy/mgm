@@ -44,9 +44,6 @@ const HOST_PAGES: Record<string, string> = {
  */
 const UNRELEASED_PAGES: Record<string, string> = {
   "/settings/api-tokens": "Organization API tokens are not released yet.",
-  "/my": "RFC #197: released by PR 5",
-  "/my/usage": "RFC #197: released by PR 5",
-  "/my/usage/day": "RFC #197: released by PR 5",
 };
 
 /**

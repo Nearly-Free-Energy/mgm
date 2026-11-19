@@ -662,7 +662,7 @@ desc("a tenant reads nothing staff-only", () => {
 });
 
 desc("a tenant writes nothing", () => {
-  it("cannot change their tenant row, its assignments, or their devices", async () => {
+  it("cannot change their tenant row, its assignments, their devices, or what a meter is", async () => {
     const svc = await serviceClient();
 
     const updated = await tenantOnly.client.from("tenants").update({ display_name: "Changed" }).eq("id", F.tenantA).select();
@@ -687,6 +687,25 @@ desc("a tenant writes nothing", () => {
 
     const renamed = await tenantOnly.client.from("devices").update({ name: "Mine" }).eq("id", F.deviceA).select();
     expect(renamed.data ?? []).toEqual([]);
+    // The tenant app counts a unit's use by the device type, the edge and
+    // component it reads, and the link's role and dates. The fixture tenant
+    // sees only consumption meters, so re-typing Meter A away from one shows
+    // the column cannot be written at all.
+    for (const patch of [
+      { openems_component_id: "meter99" },
+      { device_type: "grid_meter" as const },
+      { edge_id: F.otherEdge },
+    ]) {
+      const changed = await tenantOnly.client.from("devices").update(patch).eq("id", F.deviceA).select();
+      expect(changed.data ?? [], JSON.stringify(patch)).toEqual([]);
+    }
+    const relinked = await tenantOnly.client
+      .from("tenant_devices")
+      .update({ role: "secondary_meter", effective_from: "2026-01-01", effective_to: "2026-02-01" })
+      .eq("tenant_id", F.tenantA)
+      .eq("device_id", F.deviceA)
+      .select();
+    expect(relinked.data ?? []).toEqual([]);
     const created = await tenantOnly.client
       .from("devices")
       .insert({ edge_id: F.edge, name: "Rogue", device_type: "consumption_meter", openems_component_id: "meter99" });
@@ -696,8 +715,24 @@ desc("a tenant writes nothing", () => {
     expect(tenant.data?.display_name).toBe("Unit A");
     const links = await svc.from("tenant_devices").select("id").eq("tenant_id", F.tenantA);
     expect(links.data).toHaveLength(2);
-    const device = await svc.from("devices").select("name").eq("id", F.deviceA).single();
-    expect(device.data?.name).toBe("Meter A");
+    const device = await svc
+      .from("devices")
+      .select("name, device_type, edge_id, openems_component_id")
+      .eq("id", F.deviceA)
+      .single();
+    expect(device.data).toEqual({
+      name: "Meter A",
+      device_type: "consumption_meter",
+      edge_id: F.edge,
+      openems_component_id: "meter10",
+    });
+    const link = await svc
+      .from("tenant_devices")
+      .select("role, effective_from, effective_to")
+      .eq("tenant_id", F.tenantA)
+      .eq("device_id", F.deviceA)
+      .single();
+    expect(link.data).toEqual({ role: "primary_consumption_meter", effective_from: "2026-04-01", effective_to: null });
   });
 
   it("cannot write user_roles, not even their own row", async () => {

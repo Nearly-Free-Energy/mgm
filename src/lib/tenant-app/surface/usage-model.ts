@@ -16,9 +16,10 @@ import "server-only";
  * (@/lib/gui/host/server/view) relies on that, and if a model ever carries
  * one of those records, that function must check it.
  *
- * The models carry no LinkRef or row href while the /my pages are
- * unreleased (RFC mgm#197: released by PR 5): the host refuses a link to an
- * unreleased page. The navigation is in the ext, which is data.
+ * The models carry no LinkRef or row href yet: the navigation is in the ext,
+ * which is data. If they gain row links, Gridtop's renderers join them with
+ * the ext's links (Controls in src/gui/gridtop/renderers/tenant-usage/
+ * parts.tsx), which needs a place for them first.
  */
 import { formatLocalDate } from "@/components/format/local-date";
 import { withUnit } from "@/lib/gui/host/shared/tenant-units";

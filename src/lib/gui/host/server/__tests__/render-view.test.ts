@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error("not-found");
   }),
   snapshot: vi.fn(),
+  checkGate: vi.fn(),
 }));
 // The real matchView, so the first paint names the view dispatchView would load.
 vi.mock("../view", async (importOriginal) => ({
@@ -34,6 +35,10 @@ vi.mock("../snapshot", () => ({ surfaceSnapshot: mocks.snapshot }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en" }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/runtime/gate")>()),
+  checkGate: mocks.checkGate,
+}));
 
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { createClient } from "@/lib/supabase/server";
@@ -106,6 +111,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.dispatchView.mockResolvedValue({ ok: true, value: MODEL });
   mocks.snapshot.mockResolvedValue(REGISTERED);
+  mocks.checkGate.mockResolvedValue({ ok: true, organizationId: null });
 });
 
 describe("renderView", () => {
@@ -239,6 +245,76 @@ describe("renderView for a tenant view (RFC mgm#197 § 4)", () => {
     const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
     expect((tree.props?.children as Node).props?.choices).toEqual([
       { label: "Shop 9", detail: "Kasana West", href: `/my?unit=${UNIT_B}` },
+    ]);
+  });
+
+  /** The gate of each organization: the tenant app off in `off`, unreadable in `unread`, throwing in `throws`. */
+  function gate(o: { off?: string[]; unread?: string[]; throws?: string[] }) {
+    mocks.checkGate.mockImplementation(async (_client: unknown, request: { plugin: string; target: { id: string } }) => {
+      const org = request.target.id;
+      if (o.throws?.includes(org)) throw new Error("gate failed");
+      if (request.plugin !== "tenant-app") return { ok: true, organizationId: org };
+      if (o.off?.includes(org)) return { ok: false, status: 409, code: "tenant_app_disabled", message: "Off." };
+      if (o.unread?.includes(org)) return { ok: false, status: 503, code: "tenant_app_gate_unavailable", message: "Retry." };
+      return { ok: true, organizationId: org };
+    });
+  }
+
+  const TWO_ORGS = [
+    { id: UNIT_A, name: "Grace Namata", unitLabel: "Shop 9", orgId: ORG, microgrid: "Kasana East" },
+    { id: UNIT_B, name: "Grace Namata", unitLabel: "Flat 2", orgId: OTHER_ORG, microgrid: "Kiwumu" },
+  ];
+
+  it("leaves out of the picker a unit whose organization has the tenant app off", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes(TWO_ORGS);
+    gate({ off: [OTHER_ORG] });
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect((tree.props?.children as Node).props?.choices).toEqual([
+      { label: "Shop 9", detail: "Kasana East", href: `/my?unit=${UNIT_A}` },
+    ]);
+    // Each organization asked about the tenant app once.
+    const asked = mocks.checkGate.mock.calls
+      .filter(([, request]) => request.plugin === "tenant-app")
+      .map(([, request]) => request.target.id);
+    expect(asked.sort()).toEqual([ORG, OTHER_ORG].sort());
+  });
+
+  it("leaves out a unit whose organization has a plugin the tenant app needs off", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes(TWO_ORGS);
+    mocks.checkGate.mockImplementation(async (_client: unknown, request: { plugin: string; target: { id: string } }) =>
+      request.plugin === "metering" && request.target.id === OTHER_ORG
+        ? { ok: false, status: 409, code: "metering_disabled", message: "Off." }
+        : { ok: true, organizationId: request.target.id },
+    );
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect((tree.props?.children as Node).props?.choices).toEqual([
+      { label: "Shop 9", detail: "Kasana East", href: `/my?unit=${UNIT_A}` },
+    ]);
+  });
+
+  it("shows the page an unreleased path shows when every unit's organization has the tenant app off", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes(TWO_ORGS);
+    gate({ off: [ORG, OTHER_ORG] });
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect(tree.type).toBe(ViewUnavailable);
+    const [heading] = (tree.props?.children as Node).props?.children as Node[];
+    expect(heading).toMatchObject({ type: "h1", props: { children: "Not available in this release" } });
+  });
+
+  it.each([
+    ["could not be read", { unread: [OTHER_ORG] }],
+    ["threw", { throws: [OTHER_ORG] }],
+  ])("keeps a unit whose organization's gate %s", async (_name, o) => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes(TWO_ORGS);
+    gate(o);
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect((tree.props?.children as Node).props?.choices).toEqual([
+      { label: "Flat 2", detail: "Kiwumu", href: `/my?unit=${UNIT_B}` },
+      { label: "Shop 9", detail: "Kasana East", href: `/my?unit=${UNIT_A}` },
     ]);
   });
 

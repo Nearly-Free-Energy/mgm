@@ -19,14 +19,26 @@
  *   - `edges.openems_edge_id`: the service role, for the edge ids of those
  *     device rows only, and only on the microgrid `fn_tenant_home` named;
  *   - provider selection, the EMS configuration and its decrypt: the service
- *     role, for that microgrid only.
+ *     role, for that microgrid only;
+ *   - other units' primary links of this unit's secondary meters
+ *     (listPrimaryElsewhere): the service role, for the device ids the
+ *     tenant's own client returned as this unit's `secondary_meter` links,
+ *     returning date spans only, never which unit holds them.
  *
  * So no microgrid, edge or device id is ever taken from a request (query,
  * path or body): the microgrid is the unit's, which authorizeTenant read, and
- * the devices are those the tenant's own client returned. No service client
- * is created before the metering gate passes, or when no device is readable.
- * Nothing the backend says reaches the tenant: every failure is a reason,
- * and the server log gets a code and a status, never a message.
+ * the devices are those the tenant's own client returned. Only consumption
+ * meters are read (TENANT_USAGE_DEVICE_TYPE): a device of another type that
+ * reaches readSeries has no row, so it reads as no data, never as a figure.
+ * No service client is created for the metering provider before the
+ * metering gate passes, or when no device is readable. The primary-links
+ * read concerns MGM's own link rows, not the backend, so it runs without
+ * that gate; it runs only for a unit that has secondary links in the range.
+ * If it ever returns a tenant id, or takes ids the tenant's own client did
+ * not return as this unit's secondary links, revisit it with CLAUDE.md "The
+ * tenant app's usage reads". Nothing the backend says reaches the tenant:
+ * every failure is a reason, and the server log gets a code and a status,
+ * never a message.
  *
  * Only TenantAppPlugin builds this, after composeTenantApp's authorizeTenant
  * (getUser, the caller's tenant row, `fn_tenant_home`) and the tenant-app
@@ -43,15 +55,19 @@ import { MeteringError } from "@/lib/metering/errors";
 import { METERING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { checkGate, type GateDecision } from "@/lib/runtime/gate";
 import type { MeteringProviderFactories } from "@/lib/runtime/services";
-import type {
-  TenantUnit,
-  TenantUsageSeriesRequest,
-  TenantUsageSeriesResult,
-  TenantUsageSource,
+import { isCalendarDateKey } from "@/lib/timezone/day-key";
+import {
+  TENANT_USAGE_DEVICE_TYPE,
+  type PrimaryElsewhereSpan,
+  type TenantUnit,
+  type TenantUsageSeriesRequest,
+  type TenantUsageSeriesResult,
+  type TenantUsageSource,
 } from "../types";
 
 type DeviceRow = { id: string; edge_id: string | null; openems_component_id: string | null };
 type EdgeRow = { id: string; openems_edge_id: string | null };
+type PrimaryLinkRow = { device_id: string; effective_from: string; effective_to: string | null };
 
 /** A failed step, logged by name and code only. */
 class UsageReadError extends Error {
@@ -125,11 +141,13 @@ export function createTenantUsageSource(options: {
 
       try {
         // The device rows through the tenant's own row-level access: a device
-        // id the tenant holds no link to returns nothing.
+        // id the tenant holds no link to returns nothing, and neither does a
+        // device that is not a consumption meter.
         const devices = await supabase
           .from("devices")
           .select("id, edge_id, openems_component_id")
-          .in("id", request.deviceIds);
+          .in("id", request.deviceIds)
+          .eq("device_type", TENANT_USAGE_DEVICE_TYPE);
         if (devices.error) throw new UsageReadError("devices", devices.error.code);
         const deviceRows = ((devices.data ?? []) as DeviceRow[]).filter(
           (row) => request.deviceIds.includes(row.id) && row.edge_id && row.openems_component_id
@@ -193,6 +211,60 @@ export function createTenantUsageSource(options: {
       } catch (error) {
         logFailure(error);
         return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async listPrimaryElsewhere({ deviceIds, fromDate, toDate }): Promise<PrimaryElsewhereSpan[]> {
+      try {
+        if (!isCalendarDateKey(fromDate) || !isCalendarDateKey(toDate)) {
+          throw new UsageReadError("primary-links", "invalid_date");
+        }
+        if (deviceIds.length === 0) return [];
+
+        // The tenant's own client first ("Tenants can read their own meter
+        // assignments"): which of these ids are this unit's secondary links.
+        // Only those are asked about on the service role.
+        const own = await supabase
+          .from("tenant_devices")
+          .select("device_id")
+          .eq("tenant_id", unit.tenantId)
+          .eq("role", "secondary_meter")
+          .in("device_id", deviceIds);
+        if (own.error) throw new UsageReadError("secondary-links", own.error.code);
+        const confirmed = [
+          ...new Set(
+            ((own.data ?? []) as { device_id: string }[])
+              .map((row) => row.device_id)
+              .filter((id) => deviceIds.includes(id))
+          ),
+        ].sort();
+        if (confirmed.length === 0) return [];
+
+        // Other units' primary links of those devices, on the service role:
+        // a tenant reads no other unit's links. Every other unit counts, on
+        // any microgrid, since leaving out more days is the side that shows
+        // the tenant nothing that is not theirs. Dates only: the unit is
+        // never selected.
+        const { createServiceClient } = await import("@/lib/supabase/service");
+        const rows = await createServiceClient()
+          .from("tenant_devices")
+          .select("device_id, effective_from, effective_to")
+          .in("device_id", confirmed)
+          .eq("role", "primary_consumption_meter")
+          .neq("tenant_id", unit.tenantId)
+          .lt("effective_from", toDate)
+          .or(`effective_to.is.null,effective_to.gt.${fromDate}`);
+        if (rows.error) throw new UsageReadError("primary-links", rows.error.code);
+        return ((rows.data ?? []) as PrimaryLinkRow[])
+          .filter((row) => confirmed.includes(row.device_id))
+          .map((row) => ({
+            deviceId: row.device_id,
+            effectiveFrom: row.effective_from,
+            effectiveTo: row.effective_to,
+          }));
+      } catch (error) {
+        logFailure(error);
+        throw error;
       }
     },
   };

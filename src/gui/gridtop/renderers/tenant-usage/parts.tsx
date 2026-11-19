@@ -267,8 +267,8 @@ function LinkControl({ link, className, kit }: { link: LinkRef; className: strin
 
 /**
  * Every action, and each link whose page the view has not linked already.
- * PR 5 may add LinkRefs for these pages (RFC mgm#197); a link whose href the
- * ext already placed is not drawn twice.
+ * The usage models may add LinkRefs for these pages (RFC mgm#197); a link
+ * whose href the ext already placed is not drawn twice.
  */
 function Controls({ model, placed, kit }: { model: ModelOf<"collection">; placed: Set<string>; kit: GuiKit }) {
   const [error, setError] = useState<string | null>(null);

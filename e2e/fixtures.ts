@@ -12,7 +12,10 @@ import {
 // The smoke's own rows: one organization, one community with an invoice
 // configuration whose logo is an object in the invoice-logos bucket, three
 // microgrids, three tenants on the first, and an org_manager who signs in
-// by email link (RFC #186), read from the local mail catcher. Beside it, in
+// by email link (RFC #186), read from the local mail catcher. The tenant
+// app is on for that organization, and the first tenant's record lists one
+// address with app access, long enough to need wrapping at 360 px, so the
+// smoke opens Give access and the Remove confirmation. Beside it, in
 // an organization of its own (so the manager's pages and counts do not
 // change), one unit on a synthetic meter and the tenant who rents it
 // (RFC mgm#197). This file writes only the ids and the emails to disk, for
@@ -33,6 +36,8 @@ export type SmokeFixtures = {
   tenantOrgId?: string;
   unitId?: string;
   tenantEmail?: string;
+  /** The address with app access to the first smoke tenant. */
+  accessEmail?: string;
 };
 
 /**
@@ -87,10 +92,12 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   const communityId = randomUUID();
   const microgridIds = [randomUUID(), randomUUID(), randomUUID()];
   const email = `smoke-${tag}@test.local`; // the domain the database suites use
+  // No break opportunity in 50-odd characters: wider than a 360 px line at the dialog's title size.
+  const accessEmail = `smoke-access-${tag}-a-long-synthetic-renter-address@test.local`;
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
-  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], email };
+  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], email, accessEmail };
   writeFileSync(FIXTURES_FILE, JSON.stringify(fixtures));
 
   await must("organization", svc.from("organizations").insert({ id: orgId, name: `Smoke organization ${tag}` }));
@@ -115,10 +122,12 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
       microgridIds.map((id, i) => ({ id, community_id: communityId, name: `Smoke microgrid ${i + 1}` }))
     )
   );
+  const tenantIds = [randomUUID(), randomUUID(), randomUUID()];
   await must(
     "tenants",
     svc.from("tenants").insert(
       [1, 2, 3].map((n) => ({
+        id: tenantIds[n - 1],
         microgrid_id: microgridIds[0],
         display_name: `Smoke tenant ${n} with a long display name`,
         account_number: `SMOKE-${tag}-${n}`,
@@ -127,7 +136,20 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
       }))
     )
   );
+  // The tenant app is off for an organization with no row for it
+  // (defaultEnabled in src/lib/plugins/bundled.ts); on here, so the record
+  // offers Give access.
+  await must(
+    "smoke tenant app",
+    svc.from("mgm_plugins").insert({
+      org_id: orgId,
+      plugin_name: TENANT_APP_PLUGIN_NAME,
+      version: TENANT_APP_PLUGIN_VERSION,
+      enabled: true,
+    })
+  );
   await createTestUser({ email, role: "org_manager", scopeId: orgId });
+  await createTestUser({ email: accessEmail, role: "tenant", scopeId: tenantIds[0] });
   return createTenantFixtures(fixtures, tag);
 }
 
@@ -269,7 +291,7 @@ export function readSmokeFixtures(): SmokeFixtures {
 export async function deleteSmokeFixtures(): Promise<void> {
   if (!existsSync(FIXTURES_FILE)) return;
   assertLocalSupabase();
-  const { orgId, communityId, email, tenantOrgId, tenantEmail } = readSmokeFixtures();
+  const { orgId, communityId, email, tenantOrgId, tenantEmail, accessEmail } = readSmokeFixtures();
   // Storage objects are not rows under the organization, so deleting it
   // leaves them; remove everything under the community's prefix first.
   if (communityId) {
@@ -282,7 +304,7 @@ export async function deleteSmokeFixtures(): Promise<void> {
   }
   await cleanupTestData({
     orgIds: [orgId, tenantOrgId].filter((id): id is string => Boolean(id)),
-    userEmails: [email, tenantEmail].filter((address): address is string => Boolean(address)),
+    userEmails: [email, tenantEmail, accessEmail].filter((address): address is string => Boolean(address)),
   });
   rmSync(FIXTURES_FILE);
 }

@@ -510,8 +510,8 @@ describe("POST /api/users/[id]/resend-invite", () => {
       return answer();
     }
 
-    // The tenant's account exists and has not signed in yet, as PR 5's
-    // tenant accounts are until their first sign-in.
+    // The tenant's account exists and has not signed in yet, as tenant
+    // accounts the access route creates are until their first sign-in.
     function tenantAccount(row: (typeof TENANT_ROWS)[number][1]) {
       mockTargetRoleRow = row === null ? null : { ...row };
       mockGetUserByIdResult = {

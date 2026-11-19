@@ -306,6 +306,29 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(location.searchParams.get("next")).toBe("/go/billing.periods");
   });
 
+  // RFC mgm#197: the tenant pages and the access route are released, and
+  // each needs a session like any other private path.
+  it("sends a signed-out visit to a tenant page to /login, which returns to it", async () => {
+    signedOut();
+    const middleware = await loadMiddleware();
+
+    const res = await middleware(makeRequest("/my/usage?month=2026-11"));
+
+    const location = new URL(res.headers.get("location")!);
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/my/usage?month=2026-11");
+  });
+
+  it.each(["/my", "/my/usage", "/my/usage/day?date=2026-11-18", "/api/tenants/t-1/access", "/api/tenants/t-1/access/a-1"])(
+    "lets a verified token through to %s",
+    async (path) => {
+      signedIn();
+      const middleware = await loadMiddleware();
+      const res = await middleware(makeRequest(path));
+      expect(res.status).toBe(200);
+    },
+  );
+
   it("sends a signed-out visit to the start page to a plain /login", async () => {
     signedOut();
     const middleware = await loadMiddleware();

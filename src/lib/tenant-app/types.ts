@@ -54,21 +54,44 @@ export type TenantAppScope = {
  * metering capability's house meters count them.
  *
  * They are also the link roles whose meters count as the unit's use (RFC
- * mgm#197 § 5): a unit's use on a day is the sum of every meter linked to it
- * in one of these roles on that day. A device may be linked to several
- * tenants at once (00001_schema.sql chose the link table's key so that a
- * device can serve several units; the overlap trigger and exclusion
- * constraint guard only one tenant's primary links), so a meter that is one
- * unit's primary and another's secondary counts for both, each only on its
- * own link's days. Billing counts the primary meter alone (billing/generate.ts),
- * so the usage total can differ from the billed kWh. The link is the
- * boundary: a tenant is shown the meters a manager linked to their unit, as
- * RLS already shows them the device rows. If a meter may ever be linked to a
- * unit without its use being the unit's (a shared common-area meter, say),
- * give that link its own role and leave it out of this list.
+ * mgm#197 § 5, with the rules decided on #210 on 19 November):
+ *
+ *   - A unit's use on a day is the sum of its links in these roles in force
+ *     that day whose device is a `consumption_meter`
+ *     (TENANT_USAGE_DEVICE_TYPE). A grid meter, battery, PV meter or
+ *     inverter linked to the unit never counts, in either role.
+ *   - A `secondary_meter` link does not count on the days its device is
+ *     another unit's `primary_consumption_meter` (withoutPrimaryElsewhere in
+ *     usage-calendar.ts); on the other days it counts. usage.test.ts pins
+ *     both: "does not count a secondary meter on days it is another unit's
+ *     primary" and "counts a secondary meter on days it is nobody's primary".
+ *   - A device may be linked to several tenants at once (00001_schema.sql
+ *     chose the link table's key so that a device can serve several units;
+ *     the overlap trigger and exclusion constraint guard only one tenant's
+ *     primary links). A meter that is two units' primary on the same day, or
+ *     two units' secondary, still counts for each of them, each only on its
+ *     own link's days: the 19 November rules do not cover those cases. If a
+ *     rule for them is decided, it goes into withoutPrimaryElsewhere and
+ *     this comment.
+ *
+ * Billing counts the primary meter alone (billing/generate.ts), so the usage
+ * total can differ from the billed kWh. The link is the boundary: a tenant
+ * is shown the meters a manager linked to their unit, as RLS already shows
+ * them the device rows. If a meter may ever be linked to a unit without its
+ * use being the unit's (a shared common-area meter, say), give that link its
+ * own role and leave it out of this list.
  */
 export const TENANT_METER_ROLES = ["primary_consumption_meter", "secondary_meter"] as const;
 export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
+
+/**
+ * The only device type whose use is a tenant's (decided on #210, 19
+ * November): a grid meter, battery, PV meter or inverter linked to a unit is
+ * never shown as its use, whatever the link's role. If a second device type
+ * ever measures a unit's own consumption, add it here and to the DB test that
+ * pins this rule (__tests__/usage.db.test.ts).
+ */
+export const TENANT_USAGE_DEVICE_TYPE = "consumption_meter" as const satisfies DeviceType;
 
 /** A meter assigned to the tenant, with the assignment's half-open dates. */
 export type TenantMeter = {
@@ -86,7 +109,11 @@ export type TenantMeter = {
 export type TenantHome = {
   tenant: { id: string; displayName: string; unitLabel: string | null };
   microgrid: { name: string; timezone: string; currency: string };
-  /** Today in `microgrid.timezone`; `meters` are the ones in force on it. */
+  /**
+   * Today in `microgrid.timezone`; `meters` are the unit's consumption meters
+   * in force on it, less a secondary meter that is another unit's primary
+   * today (TENANT_METER_ROLES).
+   */
   date: string;
   meters: TenantMeter[];
 };
@@ -199,25 +226,48 @@ export type TenantUsageSeriesResult =
   | { ok: true; series: TenantUsageSeries }
   | { ok: false; reason: "unavailable" | "metering-off" | "unsupported" };
 
+/** A day span on which a device is another unit's primary meter: dates only, never whose. */
+export type PrimaryElsewhereSpan = {
+  deviceId: string;
+  /** The first day of the span, `YYYY-MM-DD`. */
+  effectiveFrom: string;
+  /** The first day after it, or null while it lasts. */
+  effectiveTo: string | null;
+};
+
 /**
  * The unit's meters' energy per local day or hour, from the metering
- * provider of the unit's microgrid. Built by TenantAppPlugin
+ * provider of the unit's microgrid, and the days on which the unit's
+ * secondary meters are another unit's primary. Built by TenantAppPlugin
  * (infrastructure/usage-source.ts); the capability never sees a client, a
- * provider or a vendor id.
+ * provider, a vendor id or another unit.
  */
 export interface TenantUsageSource {
   readSeries(request: TenantUsageSeriesRequest): Promise<TenantUsageSeriesResult>;
+  /**
+   * The spans overlapping [fromDate, toDate) (half-open) on which any of
+   * `deviceIds` is another unit's primary consumption meter. Asked only about
+   * this unit's own secondary links; an id that is not one is ignored.
+   * Rejects when the read fails, so the capability fails closed.
+   */
+  listPrimaryElsewhere(request: {
+    deviceIds: string[];
+    fromDate: string;
+    toDate: string;
+  }): Promise<PrimaryElsewhereSpan[]>;
 }
 
 /** The tenant app's reads, through the tenant's own client. */
 export interface TenantAppRepository {
   /**
-   * The tenant's consumption meters in force on `date`, read through the
-   * caller's own row-level access. Rejects when the read fails.
+   * The tenant's consumption meters (TENANT_USAGE_DEVICE_TYPE) in force on
+   * `date`, read through the caller's own row-level access. Rejects when the
+   * read fails.
    */
   listMetersInForce(tenantId: string, date: string): Promise<TenantMeter[]>;
   /**
-   * The tenant's consumption meter links that cover any day from `fromDate`
+   * The tenant's consumption meter links (TENANT_USAGE_DEVICE_TYPE devices
+   * only) that cover any day from `fromDate`
    * up to, not including, `toDate` (half-open, as billing reads them),
    * through the caller's own row-level access. Rejects when the read fails.
    */

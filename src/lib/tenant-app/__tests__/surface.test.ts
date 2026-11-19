@@ -101,15 +101,14 @@ describe("TENANT_APP_SURFACE", () => {
     for (const key of ["attach", "live", "agent", "entity"]) expect(viewById(id)).not.toHaveProperty(key);
   });
 
-  it("names the home and the month from tenant nav entries, on catalog pages served by their views and not yet released", () => {
+  it("names the home and the month from tenant nav entries, on released catalog pages served by their views", () => {
     expect(TENANT_APP_SURFACE.nav).toEqual([
       { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
       { id: "tenant.usage", title: "My usage", icon: "readings", group: "operate", order: 81, view: "tenant.usage-month", audience: "tenant" },
     ]);
     for (const path of ["/my", "/my/usage", "/my/usage/day"]) {
       expect(matchCatalogPage(path), path).toMatchObject({ plugin: { name: "tenant-app" }, page: { path, params: {}, servedBy: "view" } });
-      // RFC mgm#197: released by PR 5.
-      expect(isReleasedRoute(path), path).toBe(false);
+      expect(isReleasedRoute(path), path).toBe(true);
     }
   });
 

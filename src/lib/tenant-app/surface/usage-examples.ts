@@ -23,20 +23,26 @@ import "server-only";
  *
  * The meters are picked by what the generator gives them, as the
  * Operations day's examples pick their days, so the examples keep their
- * shape if the generator changes.
+ * shape if the generator changes. Both are consumption meters, the only
+ * device type that counts, and the shop meter is no other unit's primary,
+ * so none of its days drop out (withoutPrimaryElsewhere in
+ * ../usage-calendar.ts, which the links pass through as the capability's
+ * do). If an example ever needs a secondary meter that is another unit's
+ * primary, give those spans to withoutPrimaryElsewhere here.
  */
 import type { ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { LoadedModel } from "@/lib/gui/surface";
 import { generateDeviceEnergySeries, METER_FIXTURE_SEED, syntheticMeterDay } from "@/lib/metering/fixture/meter-energy";
 import { dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
-import type { TenantMeter, TenantUsageProblem } from "../types";
+import type { PrimaryElsewhereSpan, TenantMeter, TenantUsageProblem } from "../types";
 import {
   computeUsageDay,
   computeUsageMonth,
   datesOfMonth,
   metersOn,
   sumMeters,
+  withoutPrimaryElsewhere,
   type UsageFigures,
 } from "../usage-calendar";
 import { buildUsageDayModel, buildUsageMonthModel, type UsageLinkContext } from "./usage-model";
@@ -92,10 +98,15 @@ const link = (deviceId: string, name: string, role: TenantMeter["role"], effecti
   effectiveFrom,
   effectiveTo: null,
 });
-const LINKS: TenantMeter[] = [
-  link(HOUSE, "House meter", "primary_consumption_meter", "2026-03-01"),
-  link(SHOP, "Shop meter", "secondary_meter", "2026-11-10"),
-];
+/** No example meter is another unit's primary. */
+const NO_PRIMARY_ELSEWHERE: PrimaryElsewhereSpan[] = [];
+const LINKS: TenantMeter[] = withoutPrimaryElsewhere(
+  [
+    link(HOUSE, "House meter", "primary_consumption_meter", "2026-03-01"),
+    link(SHOP, "Shop meter", "secondary_meter", "2026-11-10"),
+  ],
+  NO_PRIMARY_ELSEWHERE,
+);
 
 const devicesOf = (ids: Iterable<string>) => [...ids].sort().map((id) => ({ id, edgeOpenemsId: "SYNTHETIC-EDGE-EXAMPLE", componentId: "meter1" }));
 

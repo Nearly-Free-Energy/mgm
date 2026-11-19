@@ -9,10 +9,11 @@ import "server-only";
  * renderers (src/gui/gridtop/renderers/tenant-usage), which read the exts;
  * other GUIs, and Gridtop on an ext it cannot read, draw them with the kit.
  *
- * Their pages, /my, /my/usage and /my/usage/day, are in the catalog but not
- * released (RFC mgm#197: released by PR 5), so neither the entries nor the
- * pages are offered yet: the manifest lists released pages only, and
- * middleware answers others with 404.
+ * Their pages, /my, /my/usage and /my/usage/day, are catalog pages and
+ * released routes (src/lib/mgm/released-routes.ts): the manifest offers the
+ * entries, which it does for released pages only, and middleware serves the
+ * pages. If a page stops being released, its entry leaves the manifest and
+ * middleware answers it with 404.
  *
  * Not readable by an assistant, and never will be: a tenant view carries the
  * tenant's own name and unit, which #133's data boundary keeps from any

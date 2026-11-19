@@ -47,14 +47,6 @@ vi.mock("../snapshot", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../snapshot")>();
   return { surfaceSnapshot: async () => served ?? actual.surfaceSnapshot() };
 });
-// The tenant app's pages are released by RFC mgm#197's PR 5. Until then
-// they are released here, so their views are scanned like every other; once
-// they are released, this mock changes nothing and can go.
-const TENANT_PAGES = ["/my", "/my/usage", "/my/usage/day"];
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...actual, isReleasedRoute: (path: string) => TENANT_PAGES.includes(path) || actual.isReleasedRoute(path) };
-});
 
 import { SITE_DAY_PROBLEMS } from "@/lib/metering/surface/site-day-model";
 import { getMgmRuntime } from "@/lib/runtime/root";

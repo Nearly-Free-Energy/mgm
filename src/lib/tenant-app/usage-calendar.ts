@@ -13,6 +13,7 @@ import {
   startOfDayInZone,
 } from "@/lib/timezone/day-key";
 import type {
+  PrimaryElsewhereSpan,
   TenantMeter,
   TenantUsageBucket,
   TenantUsageDay,
@@ -78,11 +79,55 @@ export function datesOfMonth(month: string): string[] {
 export function metersOn(assignments: readonly TenantMeter[], date: string): Set<string> {
   const ids = new Set<string>();
   for (const link of assignments) {
-    if (link.effectiveFrom <= date && (link.effectiveTo === null || date < link.effectiveTo)) {
-      ids.add(link.deviceId);
-    }
+    if (inForceOn(link, date)) ids.add(link.deviceId);
   }
   return ids;
+}
+
+/** The link covers `date`: from `effectiveFrom` up to, not including, `effectiveTo`. */
+export function inForceOn(link: TenantMeter, date: string): boolean {
+  return link.effectiveFrom <= date && (link.effectiveTo === null || date < link.effectiveTo);
+}
+
+/** `a` is before `b`, where null is a period's open end (after every day). */
+const endsBefore = (a: string | null, b: string | null) => a !== null && (b === null || a < b);
+
+/**
+ * The links with each secondary link's days removed where its device is
+ * another unit's primary (decided on #210, 19 November; TENANT_METER_ROLES).
+ * Half-open periods, as metersOn reads them, with null for an open end. A
+ * link may split into several pieces, oldest first, each in the link's
+ * place; a piece with no days is dropped. Primary links pass unchanged. If
+ * the rule ever covers a meter that is two units' primary, or two units'
+ * secondary, at once, it is decided here.
+ */
+export function withoutPrimaryElsewhere(
+  links: readonly TenantMeter[],
+  spans: readonly PrimaryElsewhereSpan[]
+): TenantMeter[] {
+  return links.flatMap((link) => {
+    if (link.role !== "secondary_meter") return [link];
+    let pieces: { from: string; to: string | null }[] = [{ from: link.effectiveFrom, to: link.effectiveTo }];
+    for (const span of spans) {
+      if (span.deviceId !== link.deviceId) continue;
+      pieces = pieces.flatMap((piece) => {
+        // No overlap: the span ends on or before the piece starts, or starts on or after it ends.
+        if (!endsBefore(piece.from, span.effectiveTo) || !endsBefore(span.effectiveFrom, piece.to)) {
+          return [piece];
+        }
+        const kept: { from: string; to: string | null }[] = [];
+        if (piece.from < span.effectiveFrom) kept.push({ from: piece.from, to: span.effectiveFrom });
+        if (endsBefore(span.effectiveTo, piece.to)) {
+          kept.push({ from: span.effectiveTo as string, to: piece.to });
+        }
+        return kept;
+      });
+    }
+    return pieces
+      .filter((piece) => endsBefore(piece.from, piece.to))
+      .sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))
+      .map((piece) => ({ ...link, effectiveFrom: piece.from, effectiveTo: piece.to }));
+  });
 }
 
 /**

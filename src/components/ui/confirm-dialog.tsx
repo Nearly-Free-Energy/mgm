@@ -76,6 +76,13 @@ export interface ConfirmDialogProps {
    *     should be the first thing the operator sees).
    */
   eyebrow?: string | null;
+  /**
+   * Where focus goes when the dialog closes (Radix `onCloseAutoFocus`).
+   * A dialog opened without a `Dialog.Trigger` has nowhere to return focus
+   * to, so a caller whose opener may be gone after the action passes a node
+   * that will still exist and calls `event.preventDefault()`.
+   */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 type State = "idle" | "loading" | "error";
@@ -96,6 +103,7 @@ export function ConfirmDialog({
   onConfirm,
   requireTypedConfirmation,
   eyebrow,
+  onCloseAutoFocus,
 }: ConfirmDialogProps) {
   const [state, setState] = React.useState<State>("idle");
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
@@ -148,6 +156,7 @@ export function ConfirmDialog({
         <DialogPanel
           role="alertdialog"
           aria-describedby={describedByIds || undefined}
+          onCloseAutoFocus={onCloseAutoFocus}
           onOpenAutoFocus={(e) => {
             e.preventDefault();
             // When a type-to-confirm input is present, it is the only
