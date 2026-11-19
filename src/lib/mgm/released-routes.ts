@@ -96,8 +96,8 @@ const RELEASE_3_API_ROUTES = [
   /^\/api\/billing-review\/preview$/,
   // Billing periods: manual create, draft delete + operator close; audit + CSV export.
   /^\/api\/billing-periods(?:\/[^/]+(?:\/(?:audit-log|export-csv|close))?)?$/,
-  // Line items: manual paid/unpaid, PDF invoice, usage corrections.
-  /^\/api\/billing-line-items\/[^/]+(?:\/(?:payment-status|pdf|usage))?$/,
+  // Line items: manual paid/unpaid, PDF invoice, usage corrections, one bill regenerated.
+  /^\/api\/billing-line-items\/[^/]+(?:\/(?:payment-status|pdf|usage|regenerate))?$/,
   // Invoice branding backing the PDF renderer.
   /^\/api\/communities\/[^/]+\/invoice-config$/,
   /^\/api\/communities\/[^/]+\/invoice-preview$/,

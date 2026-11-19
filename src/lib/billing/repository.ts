@@ -13,7 +13,9 @@
  */
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { CloseReview } from "./close";
-import type { GenerationResult, RunGenerationFatal } from "./generate";
+import type { ExpectedBill, GenerationResult, RunGenerationFatal } from "./generate";
+
+export type { ExpectedBill };
 
 export type BillingScope = {
   organizationId: string;
@@ -102,6 +104,8 @@ export interface BillingGeneration {
     seedReadings?: SeedReadingInput[];
     mode: "write" | "preview";
     actorUserId: string;
+    /** A per-bill regeneration's bill as read (RunGenerationParams.expectedBill). */
+    expectedBill?: ExpectedBill;
   }): Promise<GenerationOutput | GenerationFatal>;
 }
 
@@ -187,7 +191,12 @@ export interface BillingCapabilityContract {
     input?: unknown
   ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedTenant[] }>>;
   previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
-  generateBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
+  /**
+   * `options.expectedBill` makes the run a per-bill regeneration
+   * (RunGenerationParams.expectedBill). It is not part of the body, so POST
+   * /api/billing/generate cannot send it.
+   */
+  generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
   recordManualPayment(
     lineItemId: string,
     input: unknown

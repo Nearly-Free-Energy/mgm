@@ -5,6 +5,8 @@ import {
   LINE_ITEM_USAGE_BODY_VERSION,
   LineItemPaymentStatusBody,
   LineItemUsageBody,
+  REGENERATE_BILL_BODY_VERSION,
+  RegenerateBillBody,
 } from "../schemas";
 
 /** The first issue as the route answers it: its top-level key and message. */
@@ -151,8 +153,19 @@ describe("LineItemPaymentStatusBody", () => {
     }
   });
 
-  it("pins the JSON Schema of version 1", () => {
-    expect(LINE_ITEM_PAYMENT_STATUS_BODY_VERSION).toBe(1);
+  it("accepts the host's confirmation, which a typed action sends, and refuses a malformed one", () => {
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", notes: "n", confirmation: { acknowledged: [], typed: "Akello" } })).toBe("ok");
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", confirmation: { typed: "Akello" } })).toMatchObject({ field: "confirmation" });
+  });
+
+  it("takes a typed name of any length, as tenants.display_name has no limit", () => {
+    const long = "Akello ".repeat(100).trim();
+    expect(long.length).toBeGreaterThan(200);
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", confirmation: { acknowledged: [], typed: long } })).toBe("ok");
+  });
+
+  it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
+    expect(LINE_ITEM_PAYMENT_STATUS_BODY_VERSION).toBe(2);
     // maxLength applies to the untrimmed input here, so a form built from it
     // is slightly stricter than the route, which trims first.
     expect(z.toJSONSchema(LineItemPaymentStatusBody, { io: "input" })).toEqual({
@@ -161,8 +174,106 @@ describe("LineItemPaymentStatusBody", () => {
       properties: {
         status: { type: "string", enum: ["unpaid", "paid", "failed", "refunded"], title: "Payment status" },
         notes: { title: "Notes", anyOf: [{ type: "string", maxLength: 500 }, { type: "null" }] },
+        confirmation: {
+          type: "object",
+          properties: {
+            acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+            typed: { type: "string" },
+          },
+          required: ["acknowledged"],
+          additionalProperties: false,
+        },
       },
       required: ["status"],
+      additionalProperties: false,
+    });
+  });
+});
+
+describe("RegenerateBillBody", () => {
+  it.each([
+    ["edge", { readings: "edge" }],
+    ["manual with both readings", { readings: "manual", start_kwh: 10, end_kwh: 20 }],
+    ["manual with a reason", { readings: "manual", start_kwh: 0, end_kwh: 0, reason: "dial photo" }],
+    // Which readings a mode takes is the route's check, so the schema stays flat.
+    ["edge with readings", { readings: "edge", start_kwh: 10 }],
+    ["manual with none", { readings: "manual" }],
+  ])("parses %s", (_label, body) => {
+    expect(firstIssue(RegenerateBillBody, body)).toBe("ok");
+  });
+
+  it("trims the reason", () => {
+    expect(RegenerateBillBody.parse({ readings: "manual", start_kwh: 1, end_kwh: 2, reason: "  read on site " })).toEqual({
+      readings: "manual",
+      start_kwh: 1,
+      end_kwh: 2,
+      reason: "read on site",
+    });
+  });
+
+  it.each([
+    [{}, "readings", "readings must be 'edge' or 'manual'"],
+    [{ readings: "both" }, "readings", "readings must be 'edge' or 'manual'"],
+    [{ readings: "manual", start_kwh: -1 }, "start_kwh", "start_kwh must be a non-negative number"],
+    [{ readings: "manual", end_kwh: "12" }, "end_kwh", "end_kwh must be a finite number"],
+    [{ readings: "manual", reason: 5 }, "reason", "reason must be a string"],
+    [{ readings: "manual", reason: "x".repeat(501) }, "reason", "reason must be 500 characters or fewer"],
+  ])("refuses %j at its field", (body, field, message) => {
+    expect(firstIssue(RegenerateBillBody, body)).toEqual({ field, message });
+  });
+
+  it("refuses an unknown key, and a body that is not an object, with no field", () => {
+    expect(firstIssue(RegenerateBillBody, { readings: "edge", tenantIds: [] })).toEqual({ field: undefined, message: "Unknown field: tenantIds" });
+    for (const body of [null, [], "edge"]) {
+      expect(firstIssue(RegenerateBillBody, body)).toEqual({ field: undefined, message: "Request body must be an object" });
+    }
+  });
+
+  it("has no object-level refinement, so the GUI host can check a prefill against it", () => {
+    // .omit() throws on an object schema with refinements (cleanPrefill in src/lib/gui/host/server/merge.ts).
+    expect(() => RegenerateBillBody.omit({}).partial()).not.toThrow();
+    expect(RegenerateBillBody.omit({}).partial().safeParse({ readings: "manual", start_kwh: 12 }).success).toBe(true);
+  });
+
+  it("takes the host's confirmation, and refuses one of another shape", () => {
+    expect(RegenerateBillBody.parse({ readings: "edge", confirmation: { acknowledged: ["regenerate-paid-bill"] } })).toEqual({
+      readings: "edge",
+      confirmation: { acknowledged: ["regenerate-paid-bill"] },
+    });
+    for (const confirmation of [
+      true,
+      {},
+      { acknowledged: "regenerate-paid-bill" },
+      { acknowledged: [], extra: 1 },
+      // The ceremony asks for no name, so a typed one is not taken.
+      { acknowledged: [], typed: "Unit 1" },
+    ]) {
+      expect(firstIssue(RegenerateBillBody, { readings: "edge", confirmation })).toMatchObject({
+        message: "confirmation needs the acknowledgements ticked",
+      });
+    }
+  });
+
+  it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
+    expect(REGENERATE_BILL_BODY_VERSION).toBe(2);
+    expect(z.toJSONSchema(RegenerateBillBody, { io: "input" })).toEqual({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      properties: {
+        readings: { type: "string", enum: ["edge", "manual"], title: "Readings" },
+        start_kwh: { title: "Start reading (kWh)", type: "number", minimum: 0 },
+        end_kwh: { title: "End reading (kWh)", type: "number", minimum: 0 },
+        reason: { title: "Reason", type: "string", maxLength: 500 },
+        confirmation: {
+          type: "object",
+          properties: {
+            acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+          },
+          required: ["acknowledged"],
+          additionalProperties: false,
+        },
+      },
+      required: ["readings"],
       additionalProperties: false,
     });
   });

@@ -6,7 +6,7 @@
 // Extracted from the original `<PaymentStatusControl>` body (deleted in
 // BC2 #174). Wraps the shared `<ConfirmDialog tone="neutral">` and renders
 // a tenant / period / amount summary line plus an optional notes
-// textarea (max 500 chars).
+// textarea (max 500 chars), and, for a refund, the tenant's name to type.
 //
 // The caller owns the `onConfirm` PATCH; this component is presentational
 // + state for the textarea only.
@@ -32,6 +32,11 @@ export interface PaymentNotesConfirmDialogProps {
   /** Currency code; passed via locale context, but explicit here for completeness. */
   currency?: string;
   /**
+   * When set, the person types this text (the tenant's name, for a refund)
+   * before Confirm is enabled, as `<ConfirmDialog>` does it.
+   */
+  requireTypedConfirmation?: { label: string; expected: string };
+  /**
    * Receives the trimmed notes string when the user confirms. Caller fires
    * the PATCH and resolves; on error throws so `<ConfirmDialog>` shows the
    * inline retry surface.
@@ -47,6 +52,7 @@ export function PaymentNotesConfirmDialog({
   tenantName,
   periodLabel,
   totalAmount,
+  requireTypedConfirmation,
   onConfirm,
 }: PaymentNotesConfirmDialogProps) {
   const [notes, setNotes] = React.useState("");
@@ -72,6 +78,7 @@ export function PaymentNotesConfirmDialog({
       tone="neutral"
       confirmLabel={confirmLabel}
       onConfirm={handleConfirm}
+      requireTypedConfirmation={requireTypedConfirmation}
       body={
         <div className="mt-1 space-y-3">
           {/* Tenant + period + amount summary */}
