@@ -1,13 +1,12 @@
 /**
  * energy-series.ts — the bucket axis of a meter energy series
  * (`MeteringProvider.getDeviceEnergySeries`), shared by every provider so
- * they validate a request the same way and place a value in the same bucket.
+ * they validate a request the same way and return the same buckets.
  *
  * Pure: no clock, no I/O.
  */
 import {
   addDaysToDateKey,
-  dayKeyInZone,
   isCalendarDateKey,
   localHourStarts,
   startOfDayInZone,
@@ -22,8 +21,6 @@ export const ENERGY_SERIES_MAX_DAYS = { day: 62, hour: 7 } as const;
 export type EnergySeriesAxis = {
   /** Bucket starts, epoch ms, ascending: local midnights, or local hour starts. */
   buckets: number[];
-  /** The bucket index an instant belongs to, or undefined when it is outside the range. */
-  indexOf(epochMs: number): number | undefined;
 };
 
 function invalid(message: string, request: DeviceEnergySeriesRequest): MeteringError {
@@ -36,15 +33,15 @@ function invalid(message: string, request: DeviceEnergySeriesRequest): MeteringE
 }
 
 /**
- * The buckets a request asks for, and where an instant falls among them.
+ * The buckets a request asks for.
  *
- * - `"day"`: one bucket per local day, starting at its first instant; an
- *   instant belongs to the day it falls on in `timezone`, so a bucket stamped
- *   at local midnight and one stamped at any later instant of the day land
- *   on the same cell.
- * - `"hour"`: one bucket per local hour start (`localHourStarts`); an instant
- *   belongs to a bucket only when it is that bucket's start exactly, so a
- *   source that leaves a bucket out shifts no other value.
+ * - `"day"`: one bucket per local day, starting at its first instant.
+ * - `"hour"`: one bucket per local hour start (`localHourStarts`), so a day
+ *   with a daylight-saving change has 23 or 25.
+ *
+ * Where a source's value lands is the provider's to decide, since sources
+ * stamp their buckets differently (the OpenEMS backend stamps an hour at its
+ * end; `openems-provider.ts`).
  *
  * Throws MeteringError METERING_INVALID_DATA 400 for a malformed date, an
  * end before the start, an unknown resolution or zone, or a range over
@@ -76,14 +73,7 @@ export function energySeriesAxis(request: DeviceEnergySeriesRequest): EnergySeri
   }
 
   if (resolution === "day") {
-    const index = new Map(dates.map((date, i) => [date, i]));
-    return {
-      buckets: dates.map((date) => startOfDayInZone(date, timezone).getTime()),
-      indexOf: (epochMs) =>
-        Number.isFinite(epochMs) ? index.get(dayKeyInZone(epochMs, timezone)) : undefined,
-    };
+    return { buckets: dates.map((date) => startOfDayInZone(date, timezone).getTime()) };
   }
-  const buckets = dates.flatMap((date) => localHourStarts(date, timezone));
-  const index = new Map(buckets.map((start, i) => [start, i]));
-  return { buckets, indexOf: (epochMs) => index.get(epochMs) };
+  return { buckets: dates.flatMap((date) => localHourStarts(date, timezone)) };
 }

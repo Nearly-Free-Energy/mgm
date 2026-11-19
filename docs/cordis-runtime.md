@@ -60,11 +60,15 @@ substituted zero (`src/lib/metering/energy-series.ts` lays out the buckets
 and refuses a range it cannot read with 400). The OpenEMS provider reads it
 with `queryHistoricTimeseriesEnergyPerPeriod` in the microgrid's zone, with
 values keyed by edge and channel, since a component id such as `meter0`
-repeats on every edge. The backend returned the first two hourly buckets of
-any range empty in the RFC mgm#197 spike, so both resolutions read from the
-day before the requested start, and the provider drops that day before it
-returns. The synthetic provider generates each meter's figures from the
-meter, the day and a fixed seed (`src/lib/metering/fixture/meter-energy.ts`).
+repeats on every edge. It always asks for hours: NFE's backend stamps an
+hourly bucket with the end of its hour, and its daily buckets are UTC days
+(03:00 to 03:00 in Kampala), so a local day is the sum of its local hours,
+null when an hour that has ended has no value. The backend returned the
+first two hourly buckets of any range empty in the RFC mgm#197 spike, so the
+read runs from the day before the requested start to the day after its end,
+and the provider drops those days before it returns. The synthetic provider
+generates each meter's figures from the meter, the day and a fixed seed
+(`src/lib/metering/fixture/meter-energy.ts`).
 
 The `synthetic` provider serves a microgrid whose edges all have ids starting
 `SYNTHETIC-EDGE-`. It refuses a microgrid that mixes them with real edges
