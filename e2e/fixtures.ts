@@ -12,7 +12,9 @@ import {
 // configuration whose logo is an object in the invoice-logos bucket, three
 // microgrids, three tenants on the first, a tariff and a draft October 2026
 // billing period on the first with bills for two of its tenants (one with no
-// usage), and an org_manager who signs in by email link (RFC #186), read
+// usage), a default sandbox Pesapal account for the organization, so the
+// period's send queue shows a payment link, and an org_manager who signs in
+// by email link (RFC #186), read
 // from the local mail catcher. This file writes only the ids and the email
 // to disk, for the narrow project and the teardown.
 
@@ -168,6 +170,23 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
       },
     ])
   );
+  // The organization's default Pesapal account, as tested and registered, so
+  // payment readiness is "sandbox" and the send queue shows the first bill's
+  // link. Readiness reads only the database (getReadiness in
+  // src/lib/payments/capability.ts), so loading the queue calls no provider;
+  // no credential is stored, so nothing could. If readiness starts testing
+  // the account live, take this out.
+  await must(
+    "payment account",
+    svc.from("payment_merchant_accounts").insert({
+      org_id: orgId,
+      provider: "pesapal",
+      is_default: true,
+      sandbox: true,
+      last_test_status: "success",
+      ipn_id: `smoke-ipn-${tag}`,
+    })
+  );
   await createTestUser({ email, role: "org_manager", scopeId: orgId });
   return fixtures;
 }
@@ -217,6 +236,12 @@ export async function deleteSmokeFixtures(): Promise<void> {
       await must("invoice logos", bucket.remove(listed.map((object) => `${communityId}/${object.name}`)));
     }
   }
+  // payment_merchant_versions references organizations without ON DELETE
+  // CASCADE, so the payment account's versions go first, or the
+  // organization's delete fails and cleanupTestData leaves it; if that
+  // foreign key gains a cascade, this delete becomes a no-op.
+  const svc = await serviceClient();
+  await must("payment account versions", svc.from("payment_merchant_versions").delete().eq("org_id", orgId));
   await cleanupTestData({ orgIds: [orgId], userEmails: [email] });
   rmSync(FIXTURES_FILE);
 }

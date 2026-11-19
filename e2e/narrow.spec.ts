@@ -76,3 +76,21 @@ test("a period's close checklist and its confirmation render at 360 px", async (
   await expect(dialog).toBeHidden();
   watch.assertClean();
 });
+
+test("a period's send queue renders at 360 px", async ({ page }) => {
+  const { microgridId, periodId } = readSmokeFixtures();
+  // Loading the queue writes nothing and calls no provider; no link is
+  // opened or copied here (copying is covered by the renderer's unit test).
+  const watch = await watchPage(page);
+  await page.goto(`/microgrids/${microgridId}/billing/${periodId}/send`);
+  await expect(page.getByRole("heading", { name: "Send October 2026 bills" })).toBeVisible();
+  for (const n of [1, 2]) await expect(page.getByText(`Smoke tenant ${n} with a long display name`, { exact: true })).toBeVisible();
+  await expect(page.getByText("Payment links use a sandbox account: payments made through them are tests.")).toBeVisible();
+  // The bill with usage has a link to copy; the zero bill has nothing to collect.
+  await expect(page.getByRole("button", { name: "Copy payment link for Smoke tenant 1 with a long display name" })).toBeVisible();
+  await expect(page.getByText("Nothing to collect.")).toBeVisible();
+  await checkNarrowPage(page);
+  await checkTouchTargets(page, "[data-send-queue]");
+  await reportTiming(page, "Send queue");
+  watch.assertClean();
+});
