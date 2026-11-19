@@ -13,9 +13,9 @@ import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "../../..";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__/places-fixture";
 import { GRIDTOP_RENDERERS, drawnBespoke } from "../..";
-import { COPY_FAILED, copyFigure } from "../copy";
+import { copyFailed, copyFigure } from "../copy";
 import { readPeriodReviewExt } from "../ext";
-import PeriodReviewView from "../view";
+import PeriodReviewView, { REPEAT } from "../view";
 import {
   BILLING_OFF,
   COPY_KEYS,
@@ -52,7 +52,9 @@ async function draw(model: ViewModel, use: GuiKit = kit): Promise<Recorded> {
   unmount = rendered.unmount;
   return rendered.log;
 }
-const said = () => document.querySelector("[aria-live='polite']")?.textContent ?? "";
+/** The live region's text, which a repeated announcement ends with REPEAT. */
+const spoken = () => document.querySelector("[aria-live='polite']")?.textContent ?? "";
+const said = () => spoken().replace(new RegExp(`${REPEAT}$`), "");
 const region = () => screen.getByRole("region", { name: /^Bills, / });
 const cards = () => screen.getByRole("list", { name: "Bills" });
 const tableRow = (i: number) => within(region()).getAllByRole("row")[i + 1];
@@ -62,6 +64,17 @@ const clipboard = () => {
   return writeText;
 };
 const key = (k: string, o: Record<string, unknown> = {}) => fireEvent.keyDown(region(), { key: k, ...o });
+/**
+ * The box and what follows it in the tab order inside it, as a browser has
+ * it: what can take focus with Tab, leaving out the content of a closed
+ * disclosure, which a browser does not reach. jsdom does not move focus on
+ * Tab, so the tests read the order instead.
+ */
+const tabStops = () =>
+  [region(), ...region().querySelectorAll<HTMLElement>("a[href], button, summary, [tabindex]")].filter(
+    (el) => el.tabIndex >= 0 && !(el.tagName !== "SUMMARY" && el.closest("details:not([open])")),
+  );
+const DATA = draftModel().ext!.data as { rows: unknown[] };
 const FAILED: ActionResult = { type: "result", ok: false, status: 500, code: "failed", message: "Could not mark the bill paid." };
 const CANCELLED: ActionResult = { type: "result", ok: false, status: 0, code: "cancelled", message: "Cancelled" };
 
@@ -99,6 +112,10 @@ describe("Gridtop's period-review renderer: choosing it", () => {
     ["a grouped figure", { totals: [...TOTAL_FIGURES.slice(0, -1), "4,216,800"] }],
     ["no totals while the model has some", { totals: [] }],
     ["data that is not an object", [1, 2]],
+    ["a row more than the model has", { rows: [...DATA.rows, DATA.rows[0]] }],
+    ["a row fewer than the model has", { rows: DATA.rows.slice(0, 2) }],
+    ["columns that are not an array", { columns: "x" }],
+    ["rows that are not an array", { rows: { 0: DATA.rows[0] } }],
   ])("draws a model with %s with the kit's view", async (_, patch) => {
     const model = withFigures(patch as never);
     expect(readPeriodReviewExt(model)).toBeNull();
@@ -161,7 +178,12 @@ describe("Gridtop's period-review renderer: drawing", () => {
 
   it("shows the host's notice, and why each action is unavailable, tied to its button", async () => {
     const log = await draw(billingOffModel());
-    expect(screen.getAllByText(BILLING_OFF).length).toBeGreaterThan(1);
+    // The notice is its own element in the warning tone, not one of the reasons that share its text.
+    const reasons = new Set([...document.querySelectorAll("[aria-describedby]")].map((el) => el.getAttribute("aria-describedby")));
+    const notices = screen.getAllByText(BILLING_OFF).filter((el) => !reasons.has(el.id));
+    expect(notices).toHaveLength(1);
+    expect(notices[0].className).toContain("gt:bg-warning-muted");
+    expect(notices[0].compareDocumentPosition(screen.getByRole("button", { name: "Refresh readings" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const button of [screen.getByRole("button", { name: "Refresh readings" }), ...within(tableRow(0)).getAllByRole("button", { name: "Mark as paid" })]) {
       expect((button as HTMLButtonElement).disabled).toBe(true);
       expect(document.getElementById(button.getAttribute("aria-describedby")!)?.textContent).toBe(BILLING_OFF);
@@ -210,6 +232,26 @@ describe("Gridtop's period-review renderer: copying", () => {
     expect(said()).toBe("Total Total (UGX), copied 83626");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy total Usage (kWh), 126.5" })));
     expect(writeText).toHaveBeenLastCalledWith("126.512");
+    // A card's other figures copy the ext's figure too, not the text shown.
+    await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Standard (UGX), Aisha M., 52,125" })));
+    expect(writeText).toHaveBeenLastCalledWith("52125");
+    expect(said()).toBe("Standard (UGX), Aisha M., copied 52125");
+    await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Usage (kWh), Aisha M., 84.5" })));
+    expect(writeText).toHaveBeenLastCalledWith("84.512");
+  });
+
+  it("says a repeated copy again, though its message is the same", async () => {
+    const writeText = clipboard();
+    await draw(draftModel());
+    const total = screen.getByRole("button", { name: "Copy total Total (UGX), 83,626" });
+    await act(async () => fireEvent.click(total));
+    const first = spoken();
+    await act(async () => fireEvent.click(total));
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(spoken()).not.toBe(first);
+    expect(said()).toBe("Total Total (UGX), copied 83626");
+    await act(async () => fireEvent.click(total));
+    expect(spoken()).toBe(first);
   });
 
   it("offers no copy for an empty cell", async () => {
@@ -225,12 +267,17 @@ describe("Gridtop's period-review renderer: copying", () => {
     expect(within(cards()).queryByRole("button", { name: /^Copy Usage \(kWh\), Brian K\./ })).toBeNull();
   });
 
-  it("says so when there is no clipboard, and marks nothing copied", async () => {
+  it("says which figure it could not copy when there is no clipboard, and marks nothing copied", async () => {
     await draw(draftModel());
     const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
     await act(async () => fireEvent.click(cell));
-    expect(said()).toBe(COPY_FAILED);
+    expect(said()).toBe(copyFailed("Total (UGX), Aisha M."));
+    expect(said()).toBe("Could not copy Total (UGX), Aisha M.: select the figure and copy it.");
     expect(document.body.textContent).not.toContain("✓");
+    // A second failure is said again.
+    const first = spoken();
+    await act(async () => fireEvent.click(cell));
+    expect(spoken()).not.toBe(first);
     expect(await copyFigure("1")).toBe(false);
     Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => Promise.reject(new Error("denied")) }, configurable: true });
     const error = vi.spyOn(console, "error");
@@ -244,6 +291,7 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     clipboard();
     await draw(draftModel());
     act(() => region().focus());
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
     key("ArrowRight");
     expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
     key("ArrowDown");
@@ -257,6 +305,38 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     // The last figure is the total: past it are the statuses and the text.
     expect(said()).toBe("Total (UGX), Aisha M., 55,875");
     expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("55,875");
+    // Sideways on a row with empty cells: Brian K. has no end, usage or second tier.
+    key("Home", { ctrlKey: true });
+    key("ArrowDown");
+    key("ArrowRight");
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
+    key("ArrowLeft");
+    expect(said()).toBe("Begin (kWh), Brian K., 310.0");
+    key("ArrowRight");
+    key("ArrowRight");
+    expect(said()).toBe("Lifeline (UGX), Brian K., 3,751");
+    key("ArrowRight");
+    expect(said()).toBe("Total (UGX), Brian K., 3,751");
+    key("ArrowLeft");
+    expect(said()).toBe("Lifeline (UGX), Brian K., 3,751");
+  });
+
+  it("scrolls the cursor's cell into view as it moves", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true });
+    try {
+      await draw(draftModel());
+      act(() => region().focus());
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("1,200.0").closest("td"));
+      for (const k of ["ArrowRight", "PageDown", "Tab"]) key(k);
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest", inline: "nearest" });
+      // End, Carol N., then Tab down to the next column's top.
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("84.5").closest("td"));
+      key("End", { ctrlKey: true });
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(2)).getByText("24,000").closest("td"));
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   });
 
   it("goes to the ends with Home and End, ten rows with Page Up and Down, and down the columns with Tab", async () => {
@@ -302,9 +382,41 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     await act(async () => key("C"));
     expect(writeText).toHaveBeenLastCalledWith("24000");
     expect(said()).toBe("Total (UGX), Carol N., copied 24000. End of table");
+    // Copying the last figure again is said again.
+    const first = spoken();
+    await act(async () => key("C"));
+    expect(writeText).toHaveBeenCalledTimes(5);
+    expect(spoken()).not.toBe(first);
+    expect(said()).toBe("Total (UGX), Carol N., copied 24000. End of table");
     // A copy shortcut with a modifier is the browser's.
     await act(async () => key("c", { ctrlKey: true }));
-    expect(writeText).toHaveBeenCalledTimes(4);
+    expect(writeText).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps the cursor on a figure it could not copy, and says which", async () => {
+    await draw(draftModel());
+    act(() => region().focus());
+    await act(async () => key("c"));
+    expect(said()).toBe(copyFailed("Begin (kWh), Aisha M."));
+    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("1,200.0");
+    const writeText = clipboard();
+    await act(async () => key("c"));
+    expect(writeText).toHaveBeenLastCalledWith("1200");
+    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("310.0");
+  });
+
+  it("says where the cursor is on coming back to the table", async () => {
+    await draw(draftModel());
+    act(() => region().focus());
+    key("ArrowDown");
+    key("ArrowRight");
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
+    key("Escape");
+    act(() => tableRow(0).querySelector<HTMLElement>("summary")!.focus());
+    const before = spoken();
+    act(() => region().focus());
+    expect(spoken()).not.toBe(before);
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
   });
 
   it("lets Tab leave past the last figure and Shift+Tab before the first, and Escape leave at any time", async () => {
@@ -319,12 +431,39 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     expect(document.activeElement).not.toBe(region());
   });
 
+  it("is three stops in the tab order: the box, then the cursor row's tenant link and actions", async () => {
+    await draw(draftModel());
+    const stops = () => tabStops().map((el) => el.getAttribute("aria-label") ?? el.textContent);
+    expect(stops()).toEqual([region().getAttribute("aria-label"), "Aisha M.", "Actions for Aisha M."]);
+    act(() => region().focus());
+    key("End", { ctrlKey: true });
+    // Past the last figure, Tab goes on to Carol N.'s link and actions, and then out of the table.
+    expect(stops()).toEqual([region().getAttribute("aria-label"), "Carol N.", "Actions for Carol N."]);
+    // Every row's link and disclosure is still there for a mouse.
+    expect(within(region()).getAllByRole("link", { name: /^(Aisha|Brian|Carol)/ })).toHaveLength(3);
+    expect(region().querySelectorAll("summary")).toHaveLength(3);
+  });
+
+  it("goes to the cursor row's actions with A", async () => {
+    await draw(draftModel());
+    act(() => region().focus());
+    key("ArrowDown");
+    expect(key("a")).toBe(false);
+    expect(document.activeElement).toBe(within(tableRow(1)).getByText("Actions"));
+    expect(document.activeElement!.getAttribute("aria-label")).toBe("Actions for Brian K.");
+    // With a modifier it is the browser's.
+    act(() => region().focus());
+    expect(key("a", { ctrlKey: true })).toBe(true);
+    expect(document.activeElement).toBe(region());
+  });
+
   it("leaves a key pressed on a control inside the table to that control", async () => {
     await draw(draftModel());
     act(() => region().focus());
     const summary = within(tableRow(0)).getByText("Actions");
+    const before = spoken();
     expect(fireEvent.keyDown(summary, { key: "Enter" })).toBe(true);
-    expect(said()).toBe("");
+    expect(spoken()).toBe(before);
   });
 });
 

@@ -5,7 +5,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export const COPY_FAILED = "Could not copy. Select the figure and copy it.";
+/** What a failed copy announces: which figure, and what to do instead. */
+export const copyFailed = (what: string) => `Could not copy ${what}: select the figure and copy it.`;
 /** How long a copied figure stays marked. */
 const PULSE_MS = 900;
 
@@ -24,8 +25,12 @@ export async function copyFigure(figure: string): Promise<boolean> {
 export type Copier = {
   /** The control last copied from, while it is marked. */
   copied: string | null;
-  /** Copies `figure`, announces "<what>, copied <figure>", and marks `id`; announces the failure instead. */
-  copy(id: string, figure: string, what: string, after?: string): Promise<void>;
+  /**
+   * Copies `figure`, announces "<what>, copied <figure>", and marks `id`;
+   * announces the failure, naming `what`, instead. Resolves to whether the
+   * figure reached the clipboard.
+   */
+  copy(id: string, figure: string, what: string, after?: string): Promise<boolean>;
 };
 
 export function useCopier(announce: (message: string) => void): Copier {
@@ -43,12 +48,13 @@ export function useCopier(announce: (message: string) => void): Copier {
       if (timer.current) clearTimeout(timer.current);
       if (!ok) {
         setCopied(null);
-        announce(COPY_FAILED);
-        return;
+        announce(copyFailed(what));
+        return false;
       }
       setCopied(id);
       timer.current = setTimeout(() => setCopied(null), PULSE_MS);
       announce(`${what}, copied ${figure}${after ? `. ${after}` : ""}`);
+      return true;
     },
     [announce],
   );

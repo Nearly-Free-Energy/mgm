@@ -6,16 +6,22 @@
  * Pressing a figure copies it as a plain number (the ext's figure), not as
  * it is shown.
  *
- * The table's scroll box is one stop in the tab order. Inside it a cursor
- * moves over the figures a person copies, skipping empty cells: the arrow
- * keys move one cell; Home and End go to the top or bottom of the column, or
- * with Ctrl or Cmd to the first or last figure; Page Up and Page Down move
- * ten rows; Tab and Shift+Tab move down and up the columns, and leave the
- * table past its last or first figure; C, Enter or Space copies and moves to
- * the next figure; Escape leaves the table. Each move and each copy is
- * announced.
+ * In the tab order the table is its scroll box, then the tenant link and the
+ * Actions disclosure of the row the cursor is on. The other rows' links and
+ * disclosures are out of it, so a table of any length is three stops; a
+ * mouse still reaches them, and the keyboard through the cursor. Inside the
+ * box a cursor moves over the figures a person copies, skipping empty cells,
+ * and the box scrolls to keep it in view: the arrow keys move one cell; Home
+ * and End go to the top or bottom of the column, or with Ctrl or Cmd to the
+ * first or last figure; Page Up and Page Down move ten rows; Tab and
+ * Shift+Tab move down and up the columns, past the last figure go on to the
+ * cursor row's link and disclosure and then out of the table, and before the
+ * first figure leave it; C, Enter or Space copies and, once the copy has
+ * succeeded, moves to the next figure; A goes to the cursor row's
+ * disclosure; Escape leaves the box, after which Tab goes to the cursor
+ * row's link. Entering the box, each move and each copy is announced.
  */
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ActionRef, Column, GuiKit, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
 import { RowControls, ValueText } from "./controls";
 import type { Copier } from "./copy";
@@ -27,6 +33,7 @@ type At = { r: number; c: number };
 const NUMERIC = new Set(["number", "percent", "money", "energy", "power"]);
 const PAGE = 10;
 export const END_OF_TABLE = "End of table";
+const KEYS = "Arrow keys move; C, Enter or Space copies; A goes to the row's actions.";
 
 /** The tenant of a row, as the announcements and the controls name it. */
 export function tenantOf(row: RowOf<ActionRef>, tenantKey: string | undefined): string {
@@ -44,6 +51,8 @@ export function CopyTable(props: {
   const { model, figures, live, kit, copier, announce } = props;
   const { columns, rows } = model.body;
   const region = useRef<HTMLDivElement>(null);
+  // Set while a click focuses the box, which announces its copy instead of the cursor.
+  const clicking = useRef(false);
   const [at, setAt] = useState<At | null>(null);
   const [focused, setFocused] = useState(false);
   const tenantKey = columns.find((c) => c.type === "ref")?.key;
@@ -60,16 +69,34 @@ export function CopyTable(props: {
   // The cursor, kept on a figure after a refresh changes the rows.
   const current = at && figure(at) !== null ? at : (order[0] ?? null);
   const controls = rows.some((row) => row.actions.length + (row.links?.length ?? 0) > 0);
+  // The row whose link and disclosure are in the tab order.
+  const home = current?.r ?? 0;
+
+  // Keep the cursor's cell in view, in the box and in the page around it,
+  // since focus stays on the box and the browser scrolls to nothing.
+  const [cr, cc] = [current?.r, current?.c];
+  useEffect(() => {
+    if (!focused || cr === undefined) return;
+    region.current?.querySelector<HTMLElement>(`td[data-r="${cr}"][data-c="${cc}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [focused, cr, cc]);
+  // kit.Link takes no tabIndex (LinkProps in the GUI contract), so the
+  // tenant links leave the tab order here, after each render, but the home
+  // row's; the disclosures take theirs as a prop.
+  useEffect(() => {
+    for (const link of region.current?.querySelectorAll<HTMLElement>("tbody th[scope='row'] a") ?? []) {
+      link.tabIndex = link.closest("tr")?.dataset.row === String(home) ? 0 : -1;
+    }
+  });
 
   const move = (to: At | undefined) => {
     if (!to) return;
     setAt(to);
     announce(describe(to));
   };
-  const copyAt = (p: At, after?: string) => {
+  const copyAt = async (p: At, after?: string): Promise<boolean> => {
     const value = figure(p);
-    if (value === null) return;
-    void copier.copy(`cell:${p.r}:${p.c}`, value, `${label(p.c)}, ${tenantOf(rows[p.r], tenantKey)}`, after);
+    if (value === null) return false;
+    return copier.copy(`cell:${p.r}:${p.c}`, value, `${label(p.c)}, ${tenantOf(rows[p.r], tenantKey)}`, after);
   };
   const inColumn = (c: number) => order.filter((o) => o.c === c).map((o) => o.r);
 
@@ -115,7 +142,7 @@ export function CopyTable(props: {
         return move({ r: first ? rs[0] : rs[rs.length - 1], c });
       }
       case "Tab": {
-        // Past the last or first figure, Tab leaves the table as it would any other control.
+        // Past the last figure, Tab goes on to the home row's link and disclosure; before the first, out of the table.
         const next = order[event.shiftKey ? i - 1 : i + 1];
         if (!next) return;
         handled();
@@ -128,8 +155,22 @@ export function CopyTable(props: {
         if (modified || event.altKey) return;
         handled();
         const next = order[i + 1];
-        if (next) setAt(next);
-        return copyAt(current, next ? `Next: ${describe(next)}` : END_OF_TABLE);
+        const from = current;
+        void copyAt(from, next ? `Next: ${describe(next)}` : END_OF_TABLE).then((ok) => {
+          // A failed copy leaves the cursor on its figure, to be tried again;
+          // so does a cursor the person has moved since.
+          if (ok && next) setAt((now) => (now && (now.r !== from.r || now.c !== from.c) ? now : next));
+        });
+        return;
+      }
+      case "a":
+      case "A": {
+        if (modified || event.altKey) return;
+        handled();
+        const summary = region.current?.querySelector<HTMLElement>(`tr[data-row="${r}"] summary`);
+        if (summary) summary.focus();
+        else announce(`No actions for ${tenantOf(rows[r], tenantKey)}`);
+        return;
       }
       case "Escape":
         handled();
@@ -146,12 +187,14 @@ export function CopyTable(props: {
       ref={region}
       role="region"
       tabIndex={0}
-      aria-label={`Bills, ${model.title}. Arrow keys move; C, Enter or Space copies.`}
+      aria-label={`Bills, ${model.title}. ${KEYS}`}
       onKeyDown={onKeyDown}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
         setFocused(true);
         setAt((prev) => (prev && figure(prev) !== null ? prev : (order[0] ?? null)));
+        // Say where the cursor is, which on coming back may be mid-table.
+        if (current && !clicking.current) announce(describe(current));
       }}
       onBlur={(event) => {
         if (event.target === event.currentTarget) setFocused(false);
@@ -161,7 +204,7 @@ export function CopyTable(props: {
       <table className="gt:w-full gt:border-collapse gt:text-dense gt:tabular-nums">
         <caption className="gt:sr-only">
           <span>
-            Bills, {n} {n === 1 ? "tenant" : "tenants"}. Arrow keys move; C, Enter or Space copies.
+            Bills, {n} {n === 1 ? "tenant" : "tenants"}. {KEYS}
           </span>
         </caption>
         <thead>
@@ -180,7 +223,7 @@ export function CopyTable(props: {
         </thead>
         <tbody>
           {rows.map((row, r) => (
-            <tr key={row.id} className="gt:border-b gt:border-border gt:last:border-b-0">
+            <tr key={row.id} data-row={r} className="gt:border-b gt:border-border gt:last:border-b-0">
               {columns.map((col) => {
                 const value = row.cells[col.key];
                 if (col.key === tenantKey) {
@@ -205,10 +248,14 @@ export function CopyTable(props: {
                   <td
                     key={col.key}
                     data-copy=""
+                    data-r={r}
+                    data-c={p.c}
                     onClick={() => {
                       setAt(p);
+                      clicking.current = true;
                       region.current?.focus({ preventScroll: true });
-                      copyAt(p);
+                      clicking.current = false;
+                      void copyAt(p);
                     }}
                     className={cls(
                       "gt:h-8 gt:cursor-pointer gt:whitespace-nowrap gt:px-2 gt:text-right gt:align-middle gt:pointer-coarse:h-11 gt:hover:bg-muted",
@@ -227,7 +274,7 @@ export function CopyTable(props: {
               })}
               {controls && (
                 <td className="gt:px-2 gt:py-1 gt:align-top">
-                  <RowControls row={row} tenant={tenantOf(row, tenantKey)} kit={kit} />
+                  <RowControls row={row} tenant={tenantOf(row, tenantKey)} kit={kit} tabIndex={r === home ? undefined : -1} />
                 </td>
               )}
             </tr>

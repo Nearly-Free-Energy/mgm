@@ -28,6 +28,9 @@ import { Totals } from "./totals";
 
 type Props = ViewProps & { kit: GuiKit };
 
+/** Appended to an announcement that repeats the last one. */
+export const REPEAT = "\u00a0";
+
 /** The empty state, which owns the action it offers. */
 function Empty({ empty, kit }: { empty: ModelOf<"collection">["body"]["empty"]; kit: GuiKit }) {
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +53,10 @@ function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
   const live = kit.useLive(model);
   const m = live.model;
   const [said, setSaid] = useState("");
-  const announce = useCallback((message: string) => setSaid(message), []);
+  // A message equal to the last one would leave the live region unchanged,
+  // and a screen reader silent, so a repeat alternates a trailing no-break
+  // space, which changes the text without changing what is read.
+  const announce = useCallback((message: string) => setSaid((last) => (last === message ? `${message}${REPEAT}` : message)), []);
   const copier = useCopier(announce);
   const figures = readPeriodReviewExt(m);
   // A refresh that brings figures this renderer cannot read: the kit's view

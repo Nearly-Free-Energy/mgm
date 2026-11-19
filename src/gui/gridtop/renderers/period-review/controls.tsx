@@ -180,15 +180,17 @@ export function ControlList({ actions, links, kit, label }: { actions: ActionRef
  * A bill's actions and links behind a native disclosure, which needs no
  * script. Its content stays in the page while it is closed, so a disabled
  * action's reason is there from the first render, and it opens in the flow
- * of the row rather than over it.
+ * of the row rather than over it. `tabIndex` takes the disclosure out of
+ * the tab order where something else reaches it (the copy table's cursor).
  */
-export function RowControls({ row, tenant, kit }: { row: RowOf<ActionRef>; tenant: string; kit: GuiKit }) {
+export function RowControls({ row, tenant, kit, tabIndex }: { row: RowOf<ActionRef>; tenant: string; kit: GuiKit; tabIndex?: number }) {
   const links = row.links ?? [];
   if (row.actions.length + links.length === 0) return null;
   return (
     <details>
       <summary
         aria-label={`Actions for ${tenant}`}
+        tabIndex={tabIndex}
         className="gt:inline-flex gt:cursor-pointer gt:items-center gt:rounded-md gt:px-2 gt:text-dense gt:font-medium gt:text-primary gt:h-8 gt:pointer-coarse:min-h-11 gt:pointer-coarse:min-w-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring"
       >
         Actions
