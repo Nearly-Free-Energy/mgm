@@ -80,9 +80,19 @@ test("a period's history renders at 360 px", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Audit history" })).toBeVisible();
   // The fixtures write no audit entry of their own, so this checks the
   // frame and its way back, not the entries.
-  await expect(page.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}"]`).first()).toBeVisible();
   await checkNarrowPage(page);
   await reportTiming(page, "Period history");
+
+  // Below 600 px Gridtop's window bar keeps a view's links in its Actions
+  // sheet (src/gui/gridtop/shell/window-bar.tsx); if the bar ever shows them
+  // itself, look for the link on the page instead. Opening it writes nothing.
+  await page.getByRole("button", { name: "Actions" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}"]`)).toBeVisible();
+  await checkTouchTargets(page, '[role="dialog"]');
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
   watch.assertClean();
 });
 
