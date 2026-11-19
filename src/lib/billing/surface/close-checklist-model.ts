@@ -55,7 +55,12 @@ export type CloseChecklistInput = {
   };
   /** The close review of this period: what the close checks and asks about. */
   review: CloseReview;
-  /** How many of the period's bills were read from meters and entered by hand. */
+  /**
+   * Of the period's bills with usage recorded, how many were read from
+   * meters and how many entered by hand. A bill with no usage is in neither:
+   * its reading_source is still 'edge' by default (00029), so the loader
+   * counts only bills whose usage_kwh is set.
+   */
   sources: { edge: number; manual: number };
   fmt: Fmt;
 };
@@ -86,7 +91,9 @@ function draftSteps(i: CloseChecklistInput, reviewHref: `/${string}`): Step[] {
           }
         : { id: "bills", title: "Bills for every tenant", state: "done", detail: `${count(bills, "bill", "bills")}.` };
 
-  const sourcesSentence = bills > 0 ? `${sources.edge} read from meters, ${sources.manual} entered by hand.` : null;
+  const sourcesPhrase = `${sources.edge} read from meters, ${sources.manual} entered by hand.`;
+  // After the bills with no usage, the sources are of the rest; none when no bill has usage.
+  const sourcesSentence = sources.edge + sources.manual === 0 ? null : review.unmetered.length > 0 ? `Of the rest, ${sourcesPhrase}` : sourcesPhrase;
   const usageStep: Step =
     bills === 0
       ? { id: "usage", title: "Usage on every bill", state: "todo" }

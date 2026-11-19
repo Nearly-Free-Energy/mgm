@@ -78,7 +78,8 @@ export const CLOSE_CHECKLIST_LOADED_EXAMPLES: readonly LoadedModel<"flow">[] = [
   buildCloseChecklistModel(
     input({
       review: review({ billCount: 5, totalAmount: 1_204_000, usageKwh: 402.25, unbilled: UNBILLED, unmetered: tenants(["Atim Joy"]) }),
-      sources: { edge: 3, manual: 2 },
+      // Of the four bills with usage; Atim Joy's has none.
+      sources: { edge: 3, manual: 1 },
     }),
   ),
   // No bills yet: blocked.

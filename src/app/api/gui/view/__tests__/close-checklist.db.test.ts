@@ -262,7 +262,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's close checklist", (
     ]);
     expect(steps[0].detail).toContain("1 tenant has no bill in this period: Close unit 4.");
     expect(steps[1].detail).toContain("1 bill has no usage recorded: Close unit 3.");
-    expect(steps[1].detail).toContain("2 read from meters, 1 entered by hand.");
+    // Close unit 3's bill has no usage and is 'edge' by default; it is not counted as read.
+    expect(steps[1].detail).toContain("Of the rest, 1 read from meters, 1 entered by hand.");
     expect(steps[0].href).toBe(`/microgrids/${MICROGRID}/billing/${WARN}`);
     expect(steps[3].action).toEqual({ action: "billing.close-period", params: { periodId: WARN }, label: "Close period", enabled: true, tone: "danger" });
     expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.back-to-period", "billing.view-history"]);

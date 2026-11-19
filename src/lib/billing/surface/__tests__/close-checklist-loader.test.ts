@@ -41,19 +41,21 @@ const REVIEW = {
   startDate: "2026-10-01",
   endDate: "2026-10-31",
   currency: "UGX",
-  billCount: 3,
+  billCount: 4,
   totalAmount: 90000,
-  usageKwh: 42,
-  unbilled: [{ tenantId: "t-4", tenantName: "House 4" }],
-  unmetered: [],
+  usageKwh: 14.5,
+  unbilled: [{ tenantId: "t-5", tenantName: "House 5" }],
+  unmetered: [{ tenantId: "t-4", tenantName: "House 4" }],
   fractionalTotals: [],
-  acknowledgements: ["totals_reviewed", "tenants_without_bills"],
+  acknowledgements: ["totals_reviewed", "tenants_without_bills", "bills_without_usage"],
   digest: "v1:abc",
 };
 const BILLS = [
-  { id: "e7e00000-0000-4000-8000-0000000000d1", reading_source: "edge" },
-  { id: "e7e00000-0000-4000-8000-0000000000d2", reading_source: "edge" },
-  { id: "e7e00000-0000-4000-8000-0000000000d3", reading_source: "manual" },
+  { id: "e7e00000-0000-4000-8000-0000000000d1", reading_source: "edge", usage_kwh: 10 },
+  { id: "e7e00000-0000-4000-8000-0000000000d2", reading_source: "edge", usage_kwh: 0 },
+  { id: "e7e00000-0000-4000-8000-0000000000d3", reading_source: "manual", usage_kwh: 4.5 },
+  // No usage: 'edge' by the column's default, and counted as neither source.
+  { id: "e7e00000-0000-4000-8000-0000000000d4", reading_source: "edge", usage_kwh: null },
 ];
 
 type Fixture = {
@@ -107,7 +109,7 @@ describe("loadCloseChecklist", () => {
       { table: "rpc:fn_billing_period_close_review", ops: [["rpc", [{ _period_id: PERIOD }]]] },
       {
         table: "billing_line_items",
-        ops: [["select", ["id, reading_source", { count: "exact" }]], ["eq", ["billing_period_id", PERIOD]], ["order", ["id"]], ["limit", [1000]]],
+        ops: [["select", ["id, reading_source, usage_kwh", { count: "exact" }]], ["eq", ["billing_period_id", PERIOD]], ["order", ["id"]], ["limit", [1000]]],
       },
     ]);
     expect(composeBilling).not.toHaveBeenCalled();

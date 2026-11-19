@@ -97,12 +97,19 @@ describe("buildCloseChecklistModel: a draft's steps", () => {
     expect(stepOf(o, "close").state).toBe("current");
   });
 
-  it("asks to record or acknowledge bills with no usage, with the readings' sources", () => {
-    expect(stepOf({ review: review({ unmetered: houses(2) }) }, "usage")).toMatchObject({
+  it("asks to record or acknowledge bills with no usage, with the sources of the rest", () => {
+    // Four bills, two with no usage: the sources count only the two read.
+    expect(stepOf({ review: review({ unmetered: houses(2) }), sources: { edge: 1, manual: 1 } }, "usage")).toMatchObject({
       state: "todo",
       detail:
-        "2 bills have no usage recorded: House 1, House 2. Enter their readings on the period's page, or acknowledge it when you close. 3 read from meters, 1 entered by hand.",
+        "2 bills have no usage recorded: House 1, House 2. Enter their readings on the period's page, or acknowledge it when you close. Of the rest, 1 read from meters, 1 entered by hand.",
     });
+  });
+
+  it("gives no sources when no bill has usage recorded", () => {
+    expect(stepOf({ review: review({ unmetered: houses(4) }), sources: { edge: 0, manual: 0 } }, "usage").detail).toBe(
+      "4 bills have no usage recorded: House 1, House 2, House 3, House 4. Enter their readings on the period's page, or acknowledge it when you close.",
+    );
   });
 
   it("blocks the close with no bills, leaving usage and totals to do with no detail", () => {

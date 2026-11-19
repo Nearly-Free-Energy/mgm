@@ -112,15 +112,21 @@ export async function loadCloseChecklist(req: SurfaceRequest): Promise<Loaded<Lo
   const [review, bills] = await Promise.all([
     readReview(req, period.id),
     // Only to count where the readings came from; the review sums the rest.
-    readAllPages<{ id: string; reading_source: string | null }>((after) =>
+    // usage_kwh too: a bill with no usage still has reading_source 'edge',
+    // the column's default (00029), and is counted as neither.
+    readAllPages<{ id: string; reading_source: string | null; usage_kwh: number | null }>((after) =>
       pageAfter(
-        req.supabase.from("billing_line_items").select("id, reading_source", { count: "exact" }).eq("billing_period_id", period.id),
+        req.supabase
+          .from("billing_line_items")
+          .select("id, reading_source, usage_kwh", { count: "exact" })
+          .eq("billing_period_id", period.id),
         after,
       ),
     ),
   ]);
   if (review === "failed" || bills === null) return CLOSE_CHECKLIST_REFUSALS.unavailable;
   if (review === null) return CLOSE_CHECKLIST_REFUSALS.notFound;
+  const read = bills.filter((b) => b.usage_kwh !== null);
 
   return {
     ok: true,
@@ -129,8 +135,8 @@ export async function loadCloseChecklist(req: SurfaceRequest): Promise<Loaded<Lo
       period,
       review,
       sources: {
-        edge: bills.filter((b) => b.reading_source === "edge").length,
-        manual: bills.filter((b) => b.reading_source === "manual").length,
+        edge: read.filter((b) => b.reading_source === "edge").length,
+        manual: read.filter((b) => b.reading_source === "manual").length,
       },
       fmt: req.fmt,
     }),
