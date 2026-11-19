@@ -1,12 +1,12 @@
 /**
  * A billing contribution, written against the GUI contract for tests only.
  * Nothing registers it. Its loaders and its prepare step answer 503, and its
- * body schemas stand in for the routes' own. Its paths need not be pages MGM
- * serves (the close checklist is not one), so a test that checks ownership or
- * release gives it a catalog of its own. All data is synthetic.
+ * actions take the schemas their routes parse with. Its paths need not be
+ * pages MGM serves (the close checklist is not one), so a test that checks
+ * ownership or release gives it a catalog of its own. All data is synthetic.
  */
 import { z } from "zod";
-import { ClosePeriodBody } from "@/lib/billing/schemas";
+import { ClosePeriodBody, CreatePeriodBody, GenerateBillsBody } from "@/lib/billing/schemas";
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import type { Contribution, Loaded } from "@/lib/gui/surface";
 
@@ -15,12 +15,6 @@ const MICROGRID = "00000000-0000-4000-8000-0000000000b1";
 const PERIOD = "00000000-0000-4000-8000-0000000000c1";
 const TENANT = "00000000-0000-4000-8000-0000000000d1";
 
-const CreatePeriodBody = z.strictObject({
-  microgrid_id: z.uuid(),
-  start_date: z.iso.date(),
-  end_date: z.iso.date(),
-});
-const GenerateBody = z.strictObject({ billingPeriodId: z.uuid() });
 const PeriodReviewExt = z.strictObject({
   tariffVersion: z.number().int(),
   preflight: z.strictObject({ readings: z.number().int(), missing: z.number().int() }),
@@ -227,7 +221,7 @@ export const BILLING_SURFACE: Contribution = {
       id: "billing.generate-bills",
       title: "Generate bills",
       target: "billingPeriod",
-      input: GenerateBody,
+      input: GenerateBillsBody,
       inputVersion: 1,
       method: "POST",
       path: "/api/billing/generate",

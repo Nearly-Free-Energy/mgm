@@ -4,8 +4,9 @@ import {
   composeBilling,
   type BillingResult,
 } from "@/lib/billing/compose";
-import type { ManualReadingInput } from "@/lib/billing/generate";
+import { PreviewBillsBody } from "@/lib/billing/schemas";
 import { checkGate, gateResponse } from "@/lib/runtime/gate";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -16,8 +17,8 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 /**
  * POST /api/billing/regenerate-preview (#173, BC1)
  *
- * Same request body as /api/billing/generate. Writes no bills or line
- * items, but an empty draft period's tariff is re-pinned so preview and
+ * Takes /api/billing/generate's body without seedReadings. Writes no
+ * bills or line items, but an empty draft period's tariff is re-pinned so preview and
  * write price against the same schedule — which makes this a billing write
  * for the plugin gate. The OpenEMS read still happens (it's an HTTP call,
  * not a transaction). Returns the per-tenant preview that BC3's
@@ -34,6 +35,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *     }>;
  *     revertToEdgeTenantIds?: string[];
  *   }
+ *
+ * Parsed with `PreviewBillsBody` (`@/lib/billing/schemas`); unknown keys,
+ * seedReadings among them, are refused with 400
+ * { error: <message>, field?, code: "invalid_body" }.
  *
  * Response:
  *   { preview: Array<{
@@ -62,152 +67,10 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * organization gets 403, not a 409/503 that reveals whether billing is on
  * there. The capability runs only after every check has passed.
  */
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type RawManualReading = {
-  tenantId: unknown;
-  startKwh: unknown;
-  endKwh: unknown;
-  reason?: unknown;
-};
-
-type ParseError = { error: string };
-
-type ParsedBody = {
-  billingPeriodId: string;
-  tenantIds?: string[];
-  manualReadings?: ManualReadingInput[];
-  revertToEdgeTenantIds?: string[];
-};
-
-/** Same shape as the generate route's parser — kept inline because the
- * route surface is small and the validation matrix is identical. */
-function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "Body must be an object" };
-  }
-  const rec = raw as Record<string, unknown>;
-
-  if (
-    typeof rec.billingPeriodId !== "string" ||
-    !UUID_RE.test(rec.billingPeriodId)
-  ) {
-    return { error: "billingPeriodId must be a UUID string" };
-  }
-  const billingPeriodId = rec.billingPeriodId;
-
-  let tenantIds: string[] | undefined;
-  if (rec.tenantIds !== undefined) {
-    if (!Array.isArray(rec.tenantIds)) {
-      return { error: "tenantIds must be an array of UUIDs" };
-    }
-    for (const h of rec.tenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "tenantIds entries must be UUID strings" };
-      }
-    }
-    tenantIds = rec.tenantIds as string[];
-  }
-
-  let manualReadings: ManualReadingInput[] | undefined;
-  if (rec.manualReadings !== undefined) {
-    if (!Array.isArray(rec.manualReadings)) {
-      return { error: "manualReadings must be an array" };
-    }
-    const out: ManualReadingInput[] = [];
-    for (let i = 0; i < rec.manualReadings.length; i++) {
-      const m = rec.manualReadings[i] as RawManualReading;
-      if (!m || typeof m !== "object") {
-        return { error: `manualReadings[${i}] must be an object` };
-      }
-      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
-        return { error: `manualReadings[${i}].tenantId must be a UUID` };
-      }
-      if (
-        typeof m.startKwh !== "number" ||
-        !Number.isFinite(m.startKwh) ||
-        m.startKwh < 0
-      ) {
-        return {
-          error: `manualReadings[${i}].startKwh must be a non-negative finite number`,
-        };
-      }
-      if (
-        typeof m.endKwh !== "number" ||
-        !Number.isFinite(m.endKwh) ||
-        m.endKwh < 0
-      ) {
-        return {
-          error: `manualReadings[${i}].endKwh must be a non-negative finite number`,
-        };
-      }
-      if (m.endKwh < m.startKwh) {
-        return { error: `manualReadings[${i}].endKwh must be >= startKwh` };
-      }
-      let reason: string | undefined;
-      if (m.reason !== undefined) {
-        if (typeof m.reason !== "string") {
-          return { error: `manualReadings[${i}].reason must be a string` };
-        }
-        if (m.reason.length > 500) {
-          return { error: `manualReadings[${i}].reason must be <= 500 chars` };
-        }
-        reason = m.reason;
-      }
-      out.push({
-        tenantId: m.tenantId,
-        startKwh: m.startKwh,
-        endKwh: m.endKwh,
-        reason,
-      });
-    }
-    manualReadings = out;
-  }
-
-  // revertToEdgeTenantIds — optional UUID array. Lets a currently-manual
-  // row be replaced by an OpenEMS reading; without it such a row is kept.
-  // A tenant in manualReadings too is a contradiction and refused.
-  let revertToEdgeTenantIds: string[] | undefined;
-  if (rec.revertToEdgeTenantIds !== undefined) {
-    if (!Array.isArray(rec.revertToEdgeTenantIds)) {
-      return { error: "revertToEdgeTenantIds must be an array of UUIDs" };
-    }
-    for (const h of rec.revertToEdgeTenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "revertToEdgeTenantIds entries must be UUID strings" };
-      }
-      if (manualReadings?.some((m) => m.tenantId === h)) {
-        return {
-          error: `Tenant ${h} cannot be in both manualReadings and revertToEdgeTenantIds`,
-        };
-      }
-    }
-    revertToEdgeTenantIds = rec.revertToEdgeTenantIds as string[];
-  }
-
-  return {
-    parsed: { billingPeriodId, tenantIds, manualReadings, revertToEdgeTenantIds },
-  };
-}
-
 export async function POST(request: NextRequest) {
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parseResult = parseBody(raw);
-  if ("error" in parseResult) {
-    return NextResponse.json(
-      { error: "invalid_body", details: parseResult.error },
-      { status: 400 }
-    );
-  }
-  const { parsed } = parseResult;
+  const body = await parseJsonBody(request, PreviewBillsBody);
+  if (!body.ok) return body.response;
+  const parsed = body.data;
 
   const supabase = await createClient();
 

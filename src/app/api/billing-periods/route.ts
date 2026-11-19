@@ -4,6 +4,8 @@ import {
   composeBilling,
   type BillingResult,
 } from "@/lib/billing/compose";
+import { CreatePeriodBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -19,20 +21,21 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * re-derived, so regenerating after a microgrid timezone change reproduces
  * the identical window.
  *
+ * The body is parsed with `CreatePeriodBody` (`@/lib/billing/schemas`)
+ * before anything else, so a malformed body answers 400 even for a
+ * microgrid the caller cannot see or a disabled plugin. Unknown keys are
+ * refused.
+ *
  * Released billing mutations route through the billing Cordis capability:
  * the route resolves the organization, composes the request-scoped billing
- * context (auth + plugin gate), and delegates validation + writes.
+ * context (auth + plugin gate), and delegates the write.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, CreatePeriodBody);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const microgridId = body.microgrid_id;
 
-  const microgridId =
-    typeof body.microgrid_id === "string" ? body.microgrid_id : "";
   const supabase = await createClient();
   const { data: microgrid } = await supabase
     .from("microgrids")

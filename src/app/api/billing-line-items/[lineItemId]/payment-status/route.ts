@@ -21,13 +21,16 @@
  * Body:
  *   { status: 'unpaid' | 'paid' | 'failed' | 'refunded', notes?: string (≤500 chars) }
  *   Notes are trimmed server-side; empty string after trim → stored as NULL.
+ *   Parsed with `LineItemPaymentStatusBody` (`@/lib/billing/schemas`);
+ *   unknown keys are refused.
  *   'link_generated' is NOT a manual body input — that state is set by the
  *   link generation route only. Manual transitions OUT of 'link_generated'
  *   are still admitted (operator may cancel a pending link).
  *
  * Response:
  *   200 → { status: 'success', line_item: <updated row with all payment cols> }
- *   400 → { error, reason: 'invalid_body' | 'no_op' | 'invalid_transition' }
+ *   400 → { error, field?, code: 'invalid_body' } (body)
+ *         { error, reason: 'no_op' | 'invalid_transition' }
  *   401 → { error, reason: 'session_expired' }
  *   403 → { error, reason: 'forbidden' | 'super_admin_required' }
  *   404 → { error, reason: 'not_found' }
@@ -51,26 +54,14 @@ import {
   PaymentTransitionError,
   type PaymentStatus,
 } from "@/lib/payments/state";
+import { LineItemPaymentStatusBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const ALLOWED_BODY_STATUSES: readonly PaymentStatus[] = [
-  "unpaid",
-  "paid",
-  "failed",
-  "refunded",
-];
-
 /** Statuses gated to super_admin only (reconciliation-class). */
 const SUPER_ADMIN_ONLY_STATUSES: readonly PaymentStatus[] = ["failed", "refunded"];
-
-// ── Body type ─────────────────────────────────────────────────────────────────
-
-type ParsedBody = {
-  status: PaymentStatus;
-  notes: string | null; // trimmed; null when empty
-};
 
 // ── Scope type (query result) ─────────────────────────────────────────────────
 
@@ -105,17 +96,10 @@ export async function PATCH(
     );
   }
 
-  // 1. Parse + validate body.
-  let parsed: ParsedBody;
-  try {
-    parsed = await parseBody(request);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Invalid request body.";
-    return NextResponse.json(
-      { error: msg, reason: "invalid_body" },
-      { status: 400 },
-    );
-  }
+  // 1. Parse + validate body. notes comes back trimmed, or null when empty.
+  const body = await parseJsonBody(request, LineItemPaymentStatusBody);
+  if (!body.ok) return body.response;
+  const parsed = body.data;
 
   const supabase = await createClient();
 
@@ -371,47 +355,4 @@ export async function PATCH(
   );
 
   return NextResponse.json({ status: "success", line_item: updated });
-}
-
-// ── Body parser ───────────────────────────────────────────────────────────────
-
-async function parseBody(request: NextRequest): Promise<ParsedBody> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    throw new Error("Request body must be valid JSON.");
-  }
-
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new Error("Request body must be a JSON object.");
-  }
-
-  const raw = body as Record<string, unknown>;
-
-  // status — required; whitelist enforced. 'link_generated' is NOT admittable
-  // (set only by the link-generation route).
-  if (!("status" in raw)) {
-    throw new Error("Missing required field: status.");
-  }
-  if (!ALLOWED_BODY_STATUSES.includes(raw.status as PaymentStatus)) {
-    throw new Error(
-      `Invalid status '${String(raw.status)}'. Allowed: ${ALLOWED_BODY_STATUSES.join(", ")}.`,
-    );
-  }
-
-  // notes — optional; string, max 500 chars after trim.
-  let notes: string | null = null;
-  if ("notes" in raw && raw.notes !== undefined && raw.notes !== null) {
-    if (typeof raw.notes !== "string") {
-      throw new Error("notes must be a string.");
-    }
-    const trimmed = raw.notes.trim();
-    if (trimmed.length > 500) {
-      throw new Error("notes must be 500 characters or fewer.");
-    }
-    notes = trimmed.length > 0 ? trimmed : null;
-  }
-
-  return { status: raw.status as PaymentStatus, notes };
 }

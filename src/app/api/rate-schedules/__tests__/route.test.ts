@@ -11,7 +11,7 @@
  *
  *   POST /api/rate-schedules
  *     (d) POST 200 creation happy path
- *     (e) POST 400 missing microgrid_id
+ *     (e) POST 400 missing or malformed microgrid_id, unknown keys
  *
  *   Historical invariant
  *     (f) Closed billing_line_items.tier_breakdown is unchanged after a rate-schedule PUT
@@ -133,7 +133,11 @@ describe("PUT /api/rate-schedules/[id]", () => {
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/contiguous/i);
+    expect(json).toEqual({
+      error: "Tier 2: min_kwh must be 16 (contiguous with tier 1)",
+      field: "tiers",
+      code: "invalid_body",
+    });
   });
 
   // (c) PUT 400 tax_rate > 1
@@ -148,7 +152,40 @@ describe("PUT /api/rate-schedules/[id]", () => {
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/tax_rate/i);
+    expect(json).toEqual({
+      error: "tax_rate must be a number between 0 and 1 (inclusive)",
+      field: "tax_rate",
+      code: "invalid_body",
+    });
+  });
+
+  it("(c2) refuses a microgrid_id in the body, and a null tier, with 400 before any query", async () => {
+    const { PUT } = await import("../[id]/route");
+    const base = { tiers: CONTIGUOUS_TIERS, service_charge: 0, tax_rate: 0 };
+    for (const [body, expected] of [
+      [{ ...base, microgrid_id: MICROGRID_ID }, { error: "Unknown field: microgrid_id", code: "invalid_body" }],
+      [{ ...base, tiers: [null] }, { error: "Tier 1: min_kwh must be greater than 0", field: "tiers", code: "invalid_body" }],
+      [[base], { error: "Request body must be an object", code: "invalid_body" }],
+    ] as const) {
+      const res = await PUT(makePutRequest(VALID_ID, body), { params: Promise.resolve({ id: VALID_ID }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual(expected);
+    }
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
+  it("(c3) stores tiers as sent, without a label and with keys the editor carries", async () => {
+    mockSingle.mockResolvedValueOnce({ data: SAVED_SCHEDULE, error: null });
+    const { PUT } = await import("../[id]/route");
+    const tiers = [
+      { min_kwh: 1, max_kwh: 50, rate_per_kwh: 500, note: "kept" },
+      { label: "Rest", min_kwh: 51, max_kwh: null, rate_per_kwh: 800 },
+    ];
+    const res = await PUT(makePutRequest(VALID_ID, { tiers, service_charge: 0, tax_rate: 0 }), {
+      params: Promise.resolve({ id: VALID_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockInsert).toHaveBeenCalledWith({ microgrid_id: MICROGRID_ID, tiers, service_charge: 0, tax_rate: 0 });
   });
 });
 
@@ -204,7 +241,7 @@ describe("POST /api/rate-schedules", () => {
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/microgrid_id/i);
+    expect(json).toEqual({ error: "microgrid_id must be a valid UUID", field: "microgrid_id", code: "invalid_body" });
   });
 
   // (e2) POST 400 invalid microgrid_id format (not a UUID)
@@ -220,7 +257,32 @@ describe("POST /api/rate-schedules", () => {
 
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toMatch(/microgrid_id/i);
+    expect(json).toEqual({ error: "microgrid_id must be a valid UUID", field: "microgrid_id", code: "invalid_body" });
+  });
+
+  it("(e3) accepts a seed-style microgrid id without RFC version bits", async () => {
+    mockSingle.mockResolvedValueOnce({ data: SAVED_SCHEDULE, error: null });
+    const { POST } = await import("../route");
+    const microgrid_id = "00000000-0000-0000-0000-000000000001";
+    const res = await POST(makePostRequest({ microgrid_id, tiers: CONTIGUOUS_TIERS, service_charge: 0, tax_rate: 0 }));
+    expect(res.status).toBe(200);
+    expect(mockInsert).toHaveBeenCalledWith({ microgrid_id, tiers: CONTIGUOUS_TIERS, service_charge: 0, tax_rate: 0 });
+  });
+
+  it("(e4) refuses an unknown top-level key with 400 before any query", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest({
+        microgrid_id: MICROGRID_ID,
+        tiers: CONTIGUOUS_TIERS,
+        service_charge: 0,
+        service_charge_description: "Meter rental",
+        tax_rate: 0,
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: service_charge_description", code: "invalid_body" });
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 });
 

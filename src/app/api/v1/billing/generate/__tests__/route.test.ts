@@ -18,6 +18,9 @@
  *     - Period not found → 404.
  *     - Period belongs to a microgrid in another org → 403.
  *
+ *   Body (V1GenerateBody): 400s carry `code: "invalid_body"` and the
+ *   top-level field; messages are unchanged; unknown keys are dropped.
+ *
  *   Happy path:
  *     - Token org + payload microgrid org + period microgrid org all
  *       match → calls `runGenerationFor` with the resolved token name as
@@ -208,7 +211,11 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     delete (body as Record<string, unknown>).microgrid_id;
     const res = await POST(makePostRequest(body));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/microgrid_id/);
+    expect(await res.json()).toEqual({
+      error: "microgrid_id must be a UUID",
+      field: "microgrid_id",
+      code: "invalid_body",
+    });
     expect(runGenerationCalls).toHaveLength(0);
   });
 
@@ -228,7 +235,11 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     delete (body as Record<string, unknown>).billingPeriodId;
     const res = await POST(makePostRequest(body));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/billingPeriodId/);
+    expect(await res.json()).toEqual({
+      error: "billingPeriodId must be a UUID",
+      field: "billingPeriodId",
+      code: "invalid_body",
+    });
   });
 
   // ── Authorization — payload microgrid cross-check ─────────────────────────
@@ -393,7 +404,68 @@ describe("POST /api/v1/billing/generate (#254)", () => {
     const { POST } = await import("../route");
     const res = await POST(makePostRequest(validBody({ manualReadings: "nope" })));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("manualReadings must be an array");
+    expect(await res.json()).toEqual({
+      error: "manualReadings must be an array",
+      field: "manualReadings",
+      code: "invalid_body",
+    });
     expect(runGenerationCalls).toHaveLength(0);
+  });
+
+  it("400 when manualReadings is null: null is not omitted", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody({ manualReadings: null })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("manualReadings must be an array");
+  });
+
+  it.each([
+    [[{ tenantId: "x", startKwh: 0, endKwh: 1 }], "manualReadings[0].tenantId must be a UUID"],
+    [[null], "manualReadings[0].tenantId must be a UUID"],
+    [[{ tenantId: TENANT_ID, startKwh: -1, endKwh: 1 }], "manualReadings[0].startKwh must be a non-negative finite number"],
+    [
+      [{ tenantId: TENANT_ID, startKwh: 0, endKwh: 1 }, { tenantId: TENANT_ID, startKwh: 5, endKwh: 4 }],
+      "manualReadings[1].endKwh must be a finite number >= startKwh",
+    ],
+  ])("400 for the reading fault in %j, naming its index", async (manualReadings, error) => {
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest(validBody({ manualReadings })));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error, field: "manualReadings", code: "invalid_body" });
+    expect(runGenerationCalls).toHaveLength(0);
+  });
+
+  it("400 for invalid JSON, and for a body that is not an object with the billingPeriodId message", async () => {
+    const { POST } = await import("../route");
+    const bad = await POST(makePostRequest("{not valid json"));
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
+    for (const body of [null, [], "text"]) {
+      const res = await POST(makePostRequest(JSON.stringify(body)));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "billingPeriodId must be a UUID", code: "invalid_body" });
+    }
+    expect(runGenerationCalls).toHaveLength(0);
+  });
+
+  it("drops unknown keys, a reading's unknown keys and a reason that is not a string", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePostRequest(
+        validBody({
+          tenantIds: [TENANT_ID],
+          manualReadings: [
+            { tenantId: TENANT_ID, startKwh: 0, endKwh: 50, reason: 7, meter: "m1" },
+            { tenantId: TENANT_ID, startKwh: 1, endKwh: 2, reason: "meter swap" },
+          ],
+        })
+      )
+    );
+    expect(res.status).toBe(200);
+    expect(runGenerationCalls[0]?.manualReadings).toEqual([
+      { tenantId: TENANT_ID, startKwh: 0, endKwh: 50 },
+      { tenantId: TENANT_ID, startKwh: 1, endKwh: 2, reason: "meter swap" },
+    ]);
+    expect((runGenerationCalls[0] as Record<string, unknown>).tenantIds).toBeUndefined();
   });
 });
