@@ -265,7 +265,8 @@ export const BILLING_SURFACE: Contribution = {
       [
         [MARK_PAID_ACTION, "confirm", prepareMarkPaid],
         [MARK_UNPAID_ACTION, "confirm", prepareMarkUnpaid],
-        [MARK_REFUNDED_ACTION, "confirm", prepareMarkRefunded],
+        // Typed: a refund is final (review on #205).
+        [MARK_REFUNDED_ACTION, "typed", prepareMarkRefunded],
         [MARK_FAILED_ACTION, "confirm", prepareMarkFailed],
         [CANCEL_PAYMENT_LINK_ACTION, "confirm", prepareCancelPaymentLink],
       ] as const

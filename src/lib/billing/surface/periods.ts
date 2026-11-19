@@ -23,8 +23,8 @@ import {
   PERIOD_KEPT_CLOSED_MESSAGE,
   PERIOD_KEPT_PAYMENTS_MESSAGE,
 } from "../period-delete";
-import { readAllPages } from "./pages";
 import { buildPeriodsModel, type PeriodRowInput } from "./periods-model";
+import { pageAfter, readAllPages, sumMoney } from "./pages";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
@@ -66,25 +66,32 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
   if (periodsRes.error) return PERIODS_REFUSALS.unavailable;
   const rows = (periodsRes.data ?? []) as { id: string; start_date: string; end_date: string; status: "draft" | "closed" }[];
 
+  const currency = microgrid.currency ?? "UGX";
   const totals = new Map<string, { kwh: number; amount: number }>();
   if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-    const items = await readAllPages<{ billing_period_id: string; usage_kwh: unknown; total_amount: unknown }>((from, to) =>
-      req.supabase
-        .from("billing_line_items")
-        .select("billing_period_id, usage_kwh, total_amount", { count: "exact" })
-        .in("billing_period_id", ids)
-        .order("id")
-        .range(from, to),
+    // By the microgrid through the period, not by a list of period ids, which
+    // would make a URL as long as 500 ids.
+    const items = await readAllPages<{ id: string; billing_period_id: string; usage_kwh: unknown; total_amount: unknown }>((after) =>
+      pageAfter(
+        req.supabase
+          .from("billing_line_items")
+          .select("id, billing_period_id, usage_kwh, total_amount, billing_periods!inner(microgrid_id)", { count: "exact" })
+          .eq("billing_periods.microgrid_id", microgrid.id),
+        after,
+      ),
     );
     // Unlike the legacy page, which shows zeros: a failed read is not an empty period.
     if (items === null) return PERIODS_REFUSALS.unavailable;
+    const listed = new Set(rows.map((r) => r.id));
+    const byPeriod = new Map<string, { kwh: number; amounts: number[] }>();
     for (const item of items) {
-      const t = totals.get(item.billing_period_id) ?? { kwh: 0, amount: 0 };
+      if (!listed.has(item.billing_period_id)) continue;
+      const t = byPeriod.get(item.billing_period_id) ?? { kwh: 0, amounts: [] };
       t.kwh += Number(item.usage_kwh ?? 0);
-      t.amount += Number(item.total_amount ?? 0);
-      totals.set(item.billing_period_id, t);
+      t.amounts.push(Number(item.total_amount ?? 0));
+      byPeriod.set(item.billing_period_id, t);
     }
+    for (const [id, t] of byPeriod) totals.set(id, { kwh: t.kwh, amount: sumMoney(t.amounts, currency) });
   }
 
   const periods: PeriodRowInput[] = rows.map((r) => {
@@ -93,7 +100,7 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
   });
   return {
     ok: true,
-    model: buildPeriodsModel({ microgridId: microgrid.id, currency: microgrid.currency ?? "UGX", periods, fmt: req.fmt }),
+    model: buildPeriodsModel({ microgridId: microgrid.id, currency, periods, fmt: req.fmt }),
   };
 }
 
@@ -117,13 +124,14 @@ export async function prepareDeletePeriod(
   if (!period) return DELETE_PERIOD_REFUSALS.notFound;
   if (period.status === "closed") return DELETE_PERIOD_REFUSALS.closed;
 
-  const items = await readAllPages<{ payment_status: string; paid_at: string | null }>((from, to) =>
-    req.supabase
-      .from("billing_line_items")
-      .select("payment_status, paid_at", { count: "exact" })
-      .eq("billing_period_id", period.id)
-      .order("id")
-      .range(from, to),
+  const items = await readAllPages<{ id: string; payment_status: string; paid_at: string | null }>((after) =>
+    pageAfter(
+      req.supabase
+        .from("billing_line_items")
+        .select("id, payment_status, paid_at", { count: "exact" })
+        .eq("billing_period_id", period.id),
+      after,
+    ),
   );
   if (items === null) return DELETE_PERIOD_REFUSALS.unavailable;
   if (items.some(lineItemHasRecordedPayment)) return DELETE_PERIOD_REFUSALS.payments;

@@ -31,6 +31,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 import { GET } from "../route";
+import { DELETE } from "../../../billing-periods/[periodId]/route";
 
 const ORG = "e7700000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e7700000-0000-4000-8000-000000000002";
@@ -43,9 +44,11 @@ const OCTOBER = "e7700000-0000-4000-8003-000000000001";
 const NOVEMBER = "e7700000-0000-4000-8003-000000000002";
 const EMAIL = "gui-periods-manager@test.local";
 const OTHER_EMAIL = "gui-periods-other@test.local";
+const TENANT_EMAIL = "gui-periods-tenant@test.local";
 
 let manager: TestUser;
 let other: TestUser;
+let tenantUser: TestUser;
 
 const view = (href: string) => GET(new NextRequest(`http://localhost/api/gui/view?href=${encodeURIComponent(href)}`));
 
@@ -60,7 +63,7 @@ async function setBilling(enabled: boolean) {
 async function cleanup() {
   const svc = await serviceClient();
   await svc.from("mgm_plugins").delete().in("org_id", [ORG, OTHER_ORG]);
-  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL] });
+  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -90,6 +93,7 @@ beforeAll(async () => {
   }
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: ORG });
   other = await createTestUser({ email: OTHER_EMAIL, role: "org_manager", scopeId: OTHER_ORG });
+  tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: TENANT });
 }, 60_000);
 
 afterAll(async () => {
@@ -145,5 +149,26 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
     } finally {
       await setBilling(true);
     }
+  });
+
+  // Who may delete is composeBilling's authorizeOrganization: a super admin or
+  // the organization's own org manager. A tenant of the same microgrid is the
+  // one other role that reaches these rows' microgrid, and is refused.
+  it("refuses a tenant of the same microgrid the delete, by the route and directly", async () => {
+    caller = tenantUser;
+    const res = await DELETE(
+      new NextRequest(`http://localhost/api/billing-periods/${NOVEMBER}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: { acknowledged: [], typed: "November 2026" } }),
+      }),
+      { params: Promise.resolve({ periodId: NOVEMBER }) },
+    );
+    expect([403, 404]).toContain(res.status);
+    const { data: direct } = await tenantUser.client.from("billing_periods").delete().eq("id", NOVEMBER).select("id");
+    expect(direct ?? []).toEqual([]);
+    const svc = await serviceClient();
+    const { data } = await svc.from("billing_periods").select("id").eq("id", NOVEMBER);
+    expect(data).toEqual([{ id: NOVEMBER }]);
   });
 });

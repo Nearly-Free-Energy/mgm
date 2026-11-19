@@ -22,7 +22,7 @@ import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
-import { readAllPages } from "./pages";
+import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
   periodLabel,
@@ -144,18 +144,20 @@ export async function loadPeriodReview(req: SurfaceRequest): Promise<Loaded<Load
       .eq("id", period.rate_schedule_id)
       .eq("microgrid_id", microgrid.id)
       .maybeSingle<{ id: string; tiers: { label: string }[] | null }>(),
-    readAllPages<BillRow>((from, to) =>
-      req.supabase
-        .from("billing_line_items")
-        .select(
-          "id, tenant_id, device_id, start_kwh, end_kwh, usage_kwh, tier_breakdown, total_amount, reading_source, payment_status, invoice_number, entered_at, entered_by_user_id",
-          { count: "exact" },
-        )
-        .eq("billing_period_id", period.id)
-        .order("id")
-        .range(from, to),
+    readAllPages<BillRow>((after) =>
+      pageAfter(
+        req.supabase
+          .from("billing_line_items")
+          .select(
+            "id, tenant_id, device_id, start_kwh, end_kwh, usage_kwh, tier_breakdown, total_amount, reading_source, payment_status, invoice_number, entered_at, entered_by_user_id",
+            { count: "exact" },
+          )
+          .eq("billing_period_id", period.id),
+        after,
+      ),
     ),
-    readAllPages<TenantRow>((from, to) =>
+    // In name order, as the legacy table lists tenants; only listed, never summed.
+    readAllPagesInOrder<TenantRow>((from, to) =>
       req.supabase
         .from("tenants")
         .select("id, display_name, tenant_devices(role, effective_from, effective_to, devices(openems_component_id, edges(openems_edge_id)))", {
@@ -335,7 +337,7 @@ async function readBill(req: SurfaceRequest, lineItemId: string, columns: string
     { label: "Tenant", value: req.fmt.text(tenant) },
     { label: "Period", value: req.fmt.text(periodLabel(req.fmt, period.start_date, period.end_date)) },
   ];
-  return { ok: true as const, bill: data, period, currency, facts };
+  return { ok: true as const, bill: data, period, currency, facts, tenant };
 }
 
 /**
@@ -397,7 +399,11 @@ const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen i
  * `from`. It re-checks the current status and the role, since the view's
  * offer can be up to one refresh old; the route stays the authority.
  */
-export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentStatus[], o: { cancel?: true } = {}) {
+export function preparePaymentStatus(
+  to: PaymentStatus,
+  from: readonly PaymentStatus[],
+  o: { cancel?: true; typed?: true } = {},
+) {
   return async (req: SurfaceRequest, input: { params: Record<string, string>; body?: unknown }): Promise<Loaded<Ceremony>> => {
     const read = await readBill(
       req,
@@ -405,7 +411,9 @@ export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentSt
       "id, payment_status, total_amount, tenants(display_name), billing_periods(start_date, end_date, microgrids(currency))",
     );
     if (!read.ok) return read;
-    const { bill, currency, facts } = read;
+    const { bill, currency, facts, tenant } = read;
+    // A typed step asks for the tenant's name; a bill with no readable name cannot be confirmed that way.
+    if (o.typed && tenant === "") return BILL_REFUSALS.transition;
     if (SUPER_ADMIN_ONLY_STATUSES.includes(to) && !rolesIncludeSuperAdmin(req.roles)) return BILL_REFUSALS.superAdmin;
     if (bill.payment_status === to) return BILL_REFUSALS.noOp;
     const allowed = ALLOWED_MANUAL_TRANSITIONS.some((t) => t.from === bill.payment_status && t.to === to);
@@ -422,8 +430,13 @@ export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentSt
         ],
         // The legacy dialog's copy (src/components/billing/row-actions-menu.tsx):
         // any change away from a pending link stops that link working.
-        warnings: o.cancel ? ["The pending payment link stops working; they'll need a new link to pay."] : [],
+        warnings: o.cancel
+          ? ["The pending payment link stops working; they'll need a new link to pay."]
+          : o.typed
+            ? ["A refund is final: no change leads out of refunded."]
+            : [],
         acknowledgements: [],
+        ...(o.typed ? { typed: tenant } : {}),
       },
     };
   };
@@ -431,6 +444,7 @@ export function preparePaymentStatus(to: PaymentStatus, from: readonly PaymentSt
 
 export const prepareMarkPaid = preparePaymentStatus("paid", ["unpaid", "failed", "link_generated"]);
 export const prepareMarkUnpaid = preparePaymentStatus("unpaid", ["paid"]);
-export const prepareMarkRefunded = preparePaymentStatus("refunded", ["paid"]);
+// Typed (review on #205): a refund is final, so the person types the tenant's name.
+export const prepareMarkRefunded = preparePaymentStatus("refunded", ["paid"], { typed: true });
 export const prepareMarkFailed = preparePaymentStatus("failed", ["link_generated"]);
 export const prepareCancelPaymentLink = preparePaymentStatus("unpaid", ["link_generated"], { cancel: true });

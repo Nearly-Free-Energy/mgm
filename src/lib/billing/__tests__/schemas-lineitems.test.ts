@@ -153,8 +153,13 @@ describe("LineItemPaymentStatusBody", () => {
     }
   });
 
-  it("pins the JSON Schema of version 1", () => {
-    expect(LINE_ITEM_PAYMENT_STATUS_BODY_VERSION).toBe(1);
+  it("accepts the host's confirmation, which a typed action sends, and refuses a malformed one", () => {
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", notes: "n", confirmation: { acknowledged: [], typed: "Akello" } })).toBe("ok");
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", confirmation: { typed: "Akello" } })).toMatchObject({ field: "confirmation" });
+  });
+
+  it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
+    expect(LINE_ITEM_PAYMENT_STATUS_BODY_VERSION).toBe(2);
     // maxLength applies to the untrimmed input here, so a form built from it
     // is slightly stricter than the route, which trims first.
     expect(z.toJSONSchema(LineItemPaymentStatusBody, { io: "input" })).toEqual({
@@ -163,6 +168,15 @@ describe("LineItemPaymentStatusBody", () => {
       properties: {
         status: { type: "string", enum: ["unpaid", "paid", "failed", "refunded"], title: "Payment status" },
         notes: { title: "Notes", anyOf: [{ type: "string", maxLength: 500 }, { type: "null" }] },
+        confirmation: {
+          type: "object",
+          properties: {
+            acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+            typed: { type: "string", maxLength: 200 },
+          },
+          required: ["acknowledged"],
+          additionalProperties: false,
+        },
       },
       required: ["status"],
       additionalProperties: false,

@@ -80,8 +80,19 @@ describe("DELETE /api/billing-periods/[periodId] (#201)", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it.each([undefined, ""])("reads an empty body (%j) as {}, a request for the name to type", async (body) => {
+    let received: unknown = "unset";
+    deleteImpl = async (_id: string, input: unknown) => {
+      received = input;
+      return { ok: false, status: 428, code: "billing_delete_confirmation_required", message: "Type the period's name." };
+    };
+    const { DELETE } = await import("../route");
+    const res = await DELETE(del(body), ctx());
+    expect(res.status).toBe(428);
+    expect(received).toEqual({});
+  });
+
   it.each([
-    ["no body", undefined],
     ["a body that is not JSON", "{"],
     ["a body that is not an object", [1]],
     ["an unknown field", { confirmed: true }],

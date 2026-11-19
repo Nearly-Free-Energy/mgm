@@ -6,7 +6,9 @@
  * loads while billing is off.
  *
  * The client here is local rather than host-fakes' tableClient, which
- * ignores range() and gives no count, so paging could not be shown with it.
+ * ignores gt(), limit() and range() and gives no count, so paging could not
+ * be shown with it. Bills are read in pages by id (keyset), tenants by
+ * offset in name order (./pages.ts).
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,22 +41,41 @@ function client(): SupabaseClient {
   return {
     from(table: string) {
       reads.push(["from", table]);
-      let result = Promise.resolve(tables[table]);
+      // What the chain asked for, applied when it is awaited, as PostgREST applies it.
+      let after: string | null = null;
+      let limit: number | null = null;
+      let range: [number, number] | null = null;
+      let orderedById = false;
+      const answer = (): Promise<{ data: unknown; error: unknown; count?: number }> => {
+        const t = tables[table];
+        if (t.error) return Promise.resolve(t);
+        const rows = Array.isArray(t.data) ? (t.data as { id: string }[]) : [];
+        // A keyset page: ordered by id, after the last id read, at most `limit` rows,
+        // with the exact count of the rows left, as PostgREST answers { count: "exact" }.
+        if (after !== null || limit !== null) {
+          const sorted = orderedById ? [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) : rows;
+          const left = after === null ? sorted : sorted.filter((r) => r.id > (after as string));
+          return Promise.resolve({ data: left.slice(0, limit ?? left.length), error: null, count: left.length });
+        }
+        // An offset page of the table's rows, with the exact count.
+        if (range !== null) return Promise.resolve({ data: rows.slice(range[0], range[1] + 1), error: null, count: rows.length });
+        return Promise.resolve(t);
+      };
       const chain: Record<string, unknown> = {
         select: (columns: string, o?: unknown) => (reads.push(o === undefined ? ["select", table, columns] : ["select", table, columns, o]), chain),
-        // A page of the table's rows, with the exact count, as PostgREST answers { count: "exact" }.
-        range: (from: number, to: number) => {
-          reads.push(["range", table, from, to]);
-          const t = tables[table];
-          const rows = Array.isArray(t.data) ? t.data : [];
-          result = Promise.resolve(t.error ? t : { data: rows.slice(from, to + 1), error: null, count: rows.length });
+        range: (from: number, to: number) => (reads.push(["range", table, from, to]), (range = [from, to]), chain),
+        gt: (column: string, value: string) => {
+          reads.push(["gt", table, column, value]);
+          if (column !== "id") throw new Error(`unexpected gt on ${column}`);
+          after = value;
           return chain;
         },
+        limit: (n: number) => (reads.push(["limit", table, n]), (limit = n), chain),
         eq: (column: string, value: string) => (reads.push(["eq", table, column, value]), chain),
         in: (column: string, values: string[]) => (reads.push(["in", table, column, values]), chain),
-        order: (column: string) => (reads.push(["order", table, column]), chain),
-        maybeSingle: () => result.then((r) => ({ ...r, data: Array.isArray(r.data) ? (r.data[0] ?? null) : r.data })),
-        then: (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) => result.then(ok, no),
+        order: (column: string) => (reads.push(["order", table, column]), column === "id" && (orderedById = true), chain),
+        maybeSingle: () => answer().then((r) => ({ ...r, data: Array.isArray(r.data) ? (r.data[0] ?? null) : r.data })),
+        then: (ok: (v: unknown) => unknown, no?: (e: unknown) => unknown) => answer().then(ok, no),
       };
       return chain;
     },
@@ -157,14 +178,21 @@ describe("loadPeriodReview", () => {
           { count: "exact" },
         ],
         ["eq", "billing_line_items", "billing_period_id", PERIOD],
-        ["range", "billing_line_items", 0, 999],
+        ["order", "billing_line_items", "id"],
+        ["limit", "billing_line_items", 1000],
         ["eq", "tenants", "microgrid_id", MG],
         ["eq", "tenants", "tenant_devices.role", "primary_consumption_meter"],
         ["order", "tenants", "display_name"],
+        ["order", "tenants", "id"],
         ["range", "tenants", 0, 999],
         ["rpc", "fn_list_visible_users", { _target_user_ids: [USER_1] }],
       ]),
     );
+    // Both bills fit one page: the first page starts at no id, and no second page is read.
+    expect(reads.filter((r) => r[0] === "gt")).toEqual([]);
+    expect(reads.filter((r) => r[0] === "limit")).toHaveLength(1);
+    // Bills are paged by id, never by offset.
+    expect(reads.filter((r) => r[0] === "range" && r[1] === "billing_line_items")).toEqual([]);
     expect(composeBilling).not.toHaveBeenCalled();
   });
 
@@ -242,19 +270,25 @@ describe("loadPeriodReview", () => {
     expect(ids).toEqual(expect.arrayContaining(["billing.mark-unpaid", "billing.cancel-payment-link", "billing.mark-paid"]));
   });
 
-  it("reads every bill in pages, past PostgREST's row cap", async () => {
+  it("reads every bill in pages by id, past PostgREST's row cap", async () => {
+    const billId = (i: number) => `e7600000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+    // Stored out of id order, so only ordering by id gives whole, unrepeated pages.
     tables.billing_line_items.data = Array.from({ length: 2500 }, (_, i) =>
-      bill(`e7600000-0000-4000-8000-${String(i).padStart(12, "0")}`, i === 0 ? T1 : `e7600000-0000-4000-8001-${String(i).padStart(12, "0")}`, {
+      bill(billId(i), i === 0 ? T1 : `e7600000-0000-4000-8001-${String(i).padStart(12, "0")}`, {
         usage_kwh: 1,
         total_amount: 10,
       }),
-    );
+    ).reverse();
     const out = await loadPeriodReview(request());
-    expect(reads.filter((r) => r[0] === "range" && r[1] === "billing_line_items")).toEqual([
-      ["range", "billing_line_items", 0, 999],
-      ["range", "billing_line_items", 1000, 1999],
-      ["range", "billing_line_items", 2000, 2999],
+    // Each page starts after the last id of the one before.
+    expect(reads.filter((r) => ["gt", "limit"].includes(r[0] as string) && r[1] === "billing_line_items")).toEqual([
+      ["limit", "billing_line_items", 1000],
+      ["gt", "billing_line_items", "id", billId(999)],
+      ["limit", "billing_line_items", 1000],
+      ["gt", "billing_line_items", "id", billId(1999)],
+      ["limit", "billing_line_items", 1000],
     ]);
+    expect(reads.filter((r) => r[0] === "range" && r[1] === "billing_line_items")).toEqual([]);
     if (!out.ok) throw new Error(out.message);
     // One readable tenant's row; the totals count every bill.
     expect(out.model.body.rows).toHaveLength(1);

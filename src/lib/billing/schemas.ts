@@ -426,6 +426,8 @@ const LINE_ITEMS_PAYMENT_STATUSES = ["unpaid", "paid", "failed", "refunded"] as 
  * notes is trimmed before its length is checked, and a note that trims to
  * nothing parses as null.
  */
+const LINE_ITEMS_CONFIRMATION = "confirmation needs the acknowledgements ticked and the name typed";
+
 export const LineItemPaymentStatusBody = z.strictObject(
   {
     status: z
@@ -443,10 +445,28 @@ export const LineItemPaymentStatusBody = z.strictObject(
       .nullish()
       .transform((notes) => (notes ? notes : null))
       .meta({ title: "Notes" }),
+    // The host's Confirmation (src/lib/gui/contract.ts), sent with a typed
+    // action: billing.mark-refunded asks for the tenant's name. The route
+    // does not check it yet, because the legacy row menu refunds through this
+    // route without one; when that menu goes, check the name here as the
+    // delete route does. Version 2 added it.
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: LINE_ITEMS_CONFIRMATION }).max(64, { error: LINE_ITEMS_CONFIRMATION }), {
+              error: LINE_ITEMS_CONFIRMATION,
+            })
+            .max(20, { error: LINE_ITEMS_CONFIRMATION }),
+          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).max(200, { error: LINE_ITEMS_CONFIRMATION }).optional(),
+        },
+        { error: LINE_ITEMS_CONFIRMATION }
+      )
+      .optional(),
   },
   { error: lineItemsPaymentBodyError }
 );
-export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 1;
+export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
 
 /**
  * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an

@@ -9,7 +9,7 @@
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActionRef, Json } from "@/lib/gui/contract";
+import type { ActionRef, Confirm, Confirmation, Json } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { ActionDef, ActionLink, SurfaceRequest } from "@/lib/gui/surface";
 import type { RegisteredAction, SurfaceSnapshot } from "@/lib/gui/host/server/surface-registry";
@@ -178,7 +178,8 @@ describe("the period review's actions", () => {
   it.each([
     ["billing.mark-paid", "Mark as paid", "confirm"],
     ["billing.mark-unpaid", "Mark as unpaid", "confirm"],
-    ["billing.mark-refunded", "Mark as refunded", "confirm"],
+    // Typed: a refund is final, so the person types the tenant's name.
+    ["billing.mark-refunded", "Mark as refunded", "typed"],
     ["billing.mark-failed", "Mark as failed", "confirm"],
     ["billing.cancel-payment-link", "Cancel pending link", "confirm"],
   ])("%s on the payment-status route, prepared, with no available()", (id, title, confirm) => {
@@ -222,7 +223,10 @@ describe("the period review's actions in the view", () => {
       const given = loaded.body.rows.flatMap((r) => r.actions.map((a) => a.prefill));
       const kept = resolved.body.rows.flatMap((r) => r.actions.map((a) => a.prefill));
       expect(kept).toEqual(given);
-      expect(resolved.body.rows.flatMap((r) => r.actions).every((a) => a.enabled && a.tone === undefined)).toBe(true);
+      const refs = resolved.body.rows.flatMap((r) => r.actions);
+      expect(refs.every((a) => a.enabled)).toBe(true);
+      // A typed action is shown as dangerous (merge-actions.ts); the rest carry no tone.
+      for (const a of refs) expect([a.action, a.tone]).toEqual([a.action, a.action === "billing.mark-refunded" ? "danger" : undefined]);
     },
   );
 });
@@ -319,9 +323,9 @@ describe("availability", () => {
 // ── Prepare, end to end ─────────────────────────────────────────────────────
 
 /** The body the host sends for `prepared` with the form's values; the result must be ok. */
-async function sent(prepared: PreparedAction, form: Json | null, level: "none" | "confirm"): Promise<unknown> {
+async function sent(prepared: PreparedAction, form: Json | null, level: Confirm, confirmation?: Confirmation): Promise<unknown> {
   const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => new Response("{}", { status: 200 }));
-  expect(await invoke(prepared, form, { level }, fetch)).toMatchObject({ ok: true });
+  expect(await invoke(prepared, form, { level, ...(confirmation === undefined ? {} : { confirmation }) }, fetch)).toMatchObject({ ok: true });
   const [url, init] = fetch.mock.calls[0];
   expect([url, init.method]).toEqual([prepared.path, prepared.method]);
   return JSON.parse(init.body as string);
@@ -391,11 +395,12 @@ describe("preparing the period review's actions", () => {
   // The step never names the new status: the form can change it after prepare.
   const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen in the form.";
 
+  const REFUND_WARNING = "A refund is final: no change leads out of refunded.";
+
   it.each([
     ["billing.mark-paid", "unpaid", "paid", PAYMENT_STATEMENT, []],
     ["billing.mark-paid", "failed", "paid", PAYMENT_STATEMENT, []],
     ["billing.mark-unpaid", "paid", "unpaid", PAYMENT_STATEMENT, []],
-    ["billing.mark-refunded", "paid", "refunded", PAYMENT_STATEMENT, []],
     ["billing.mark-failed", "link_generated", "failed", PAYMENT_STATEMENT, []],
     ["billing.cancel-payment-link", "link_generated", "unpaid", PAYMENT_STATEMENT, ["The pending payment link stops working; they'll need a new link to pay."]],
   ])("prepares %s on a %s bill for a super admin, and sends status %s", async (action, current, to, statement, warnings) => {
@@ -409,8 +414,52 @@ describe("preparing the period review's actions", () => {
       warnings,
       acknowledgements: [],
     });
+    expect(out.value.ceremony).not.toHaveProperty("typed");
     const body = await sent(out.value, { status: to, notes: "receipt 42" }, "confirm");
     expect(LineItemPaymentStatusBody.parse(body)).toEqual({ status: to, notes: "receipt 42" });
+  });
+
+  it("prepares Mark as refunded on a paid bill for a super admin as a typed step: the tenant's name, and the refund's finality", async () => {
+    const client = tables({ bill: [billRow({ payment_status: "paid" })] }).client;
+    const out = await prepare(onBill("billing.mark-refunded", { body: { status: "refunded" } }), client, [superAdmin()]);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.value).toMatchObject({
+      confirm: "typed",
+      method: "PATCH",
+      path: `/api/billing-line-items/${BILL}/payment-status`,
+      prefill: { status: "refunded" },
+    });
+    expect(out.value.ceremony).toMatchObject({
+      statement: PAYMENT_STATEMENT,
+      facts: [
+        { label: "Tenant", value: { t: "text", text: "Akello" } },
+        { label: "Period" },
+        { label: "Total", value: { t: "money", v: 5000 } },
+        { label: "Status now" },
+      ],
+      warnings: [REFUND_WARNING],
+      acknowledgements: [],
+      typed: "Akello",
+    });
+    // The host sends the typed name as the confirmation, beside the form's status and notes.
+    const body = await sent(out.value, { status: "refunded", notes: "receipt 42" }, "typed", { acknowledged: [], typed: "Akello" });
+    expect(body).toEqual({ status: "refunded", notes: "receipt 42", confirmation: { acknowledged: [], typed: "Akello" } });
+    // The route parses exactly that body: the schema takes the host's confirmation (version 2).
+    expect(LineItemPaymentStatusBody.parse(body)).toEqual({ status: "refunded", notes: "receipt 42", confirmation: { acknowledged: [], typed: "Akello" } });
+  });
+
+  it("refuses Mark as refunded on a bill whose tenant's name cannot be read, since there is no name to type", async () => {
+    for (const tenants of [null, { display_name: "" }]) {
+      const client = tables({ bill: [billRow({ payment_status: "paid", tenants })] }).client;
+      expect(await prepare(onBill("billing.mark-refunded"), client, [superAdmin()])).toMatchObject({
+        ok: false,
+        status: 409,
+        message: BILL_REFUSALS.transition.message,
+      });
+    }
+    // The other transitions ask for no name, so they still prepare.
+    const client = tables({ bill: [billRow({ payment_status: "paid", tenants: null })] }).client;
+    expect(await prepare(onBill("billing.mark-unpaid"), client, [superAdmin()])).toMatchObject({ ok: true });
   });
 
   it("prepares Mark as unpaid for an organization manager with a confirmation step, like its siblings", async () => {
