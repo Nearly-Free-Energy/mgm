@@ -13,7 +13,7 @@
  *   - BEFORE DELETE trigger blocks last-super_admin removal.
  *   - Role changes are a super-admin action, and an invitation finalizes
  *     only an account with no role, filling only its empty profile fields
- *     (20261118180000).
+ *     (20261119150000).
  *   - Service-role call to fn_finalize_user_invitation fails with 42501
  *     (proves the RPC is auth-bound, not trust-based — a service-role
  *     caller with no user session cannot impersonate a super_admin).
@@ -605,7 +605,7 @@ async function makeStaffUser(
   return id;
 }
 
-describe("role changes are made by super admins (20261118180000)", () => {
+describe("role changes are made by super admins (20261119150000)", () => {
   it("an org manager cannot change the role of a manager of their own org", async () => {
     if (skipIfRequested()) return;
     const target = await makeStaffUser("rc-own", [
@@ -704,7 +704,7 @@ describe("role changes are made by super admins (20261118180000)", () => {
   });
 });
 
-describe("an invitation finalizes only an account with no role (20261118180000)", () => {
+describe("an invitation finalizes only an account with no role (20261119150000)", () => {
   const inviteAsMgrA = (target: string, client = userMgrA.client) =>
     client.rpc("fn_finalize_user_invitation", {
       p_user_id: target,
@@ -767,7 +767,7 @@ describe("an invitation finalizes only an account with no role (20261118180000)"
   });
 });
 
-describe("the delete guard and administrator logins (20261118180000)", () => {
+describe("the delete guard and administrator logins (20261119150000)", () => {
   // runAsDatabaseOwner logs in as postgres, as a PostgREST configured with
   // the postgres login does. The guard skips its checks only when no API
   // request is attached: no request.jwt.claims, no request.jwt.claim.role and

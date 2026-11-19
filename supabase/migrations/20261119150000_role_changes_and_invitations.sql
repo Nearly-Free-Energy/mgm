@@ -36,7 +36,7 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  -- Added (20261118180000): changing a role is a super-admin action, as the
+  -- Added (20261119150000): changing a role is a super-admin action, as the
   -- Users page offers it (users-page-client.tsx). An organization manager
   -- invites and revokes; a super admin changes roles.
   IF NOT is_super_admin() THEN
@@ -44,7 +44,7 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  -- Added (20261118180000): one change per person at a time.
+  -- Added (20261119150000): one change per person at a time.
   PERFORM 1 FROM auth.users WHERE id = p_user_id FOR NO KEY UPDATE;
   -- The is_super_admin() checks in the super_admin and ems_operator branches
   -- below can no longer fail. They stay on purpose, so each branch still
@@ -183,7 +183,7 @@ BEGIN
       USING ERRCODE = '22023';
   END IF;
 
-  -- Added (20261118180000): an invitation is for an account with no role.
+  -- Added (20261119150000): an invitation is for an account with no role.
   -- Any row counts, tenant rows included: the invite route refuses those
   -- accounts too, and a change to an existing role is fn_change_user_role.
   -- The lock makes a second invitation for the same account wait, and then
@@ -194,7 +194,7 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  -- Changed (20261118180000): fill only the fields the person has left
+  -- Changed (20261119150000): fill only the fields the person has left
   -- empty, as the invite route already does, instead of replacing them.
   INSERT INTO user_profiles (user_id, first_name, last_name, phone)
     VALUES (p_user_id, p_first_name, p_last_name, p_phone)
@@ -257,7 +257,7 @@ BEGIN
   -- DEFINER. The bypass is only triggered when literally connecting as postgres
   -- or supabase_admin (migrations, direct admin operations).
   --
-  -- Changed (20261118180000): the login alone is not enough. A connection
+  -- Changed (20261119150000): the login alone is not enough. A connection
   -- that carries an API request is guarded whatever its login, because a
   -- PostgREST that logs in as postgres (the Docker Compose stack) sends
   -- every request that way. PostgREST sets request.method on every request,

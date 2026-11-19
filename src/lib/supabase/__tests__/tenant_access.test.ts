@@ -1156,7 +1156,7 @@ desc("the staff role functions keep refusing the tenant role", () => {
     expect(data).toHaveLength(3);
   });
 
-  // 20261118180000: an invitation is for an account with no role row of any
+  // 20261119150000: an invitation is for an account with no role row of any
   // scope. A tenant row and a microgrid-scoped row each count.
   it("fn_finalize_user_invitation refuses an account holding only a tenant row, or only a microgrid row", async () => {
     const svc = await serviceClient();

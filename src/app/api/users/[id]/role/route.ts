@@ -13,7 +13,7 @@ const UUID_RE =
  * invoked via the user-bound server client so the helpers
  * (`is_super_admin()`, `user_can_access_org()`) see the caller's
  * `auth.uid()`. The RPC enforces:
- *   - the caller is a super_admin (20261118180000), as the Users page
+ *   - the caller is a super_admin (20261119150000), as the Users page
  *     offers role changes only to super admins;
  *   - super_admin-target → scope_id NULL.
  *   - org_manager-target → scope_id required.
