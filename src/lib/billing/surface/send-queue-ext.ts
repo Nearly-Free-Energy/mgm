@@ -6,7 +6,9 @@
  *
  * The link field is `url`, not `link`: "link" is one of the host's href keys
  * (HREF_KEYS in src/lib/gui/host/server/parse.ts), and an ext is data the
- * host never treats as an href, so a name that reads as one would mislead.
+ * host never treats as an href (`ext` is in DATA_KEYS there, so no href
+ * rule applies inside it), so a name that reads as one would mislead. If
+ * `ext` leaves DATA_KEYS, revisit this name and what the url must pass.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)

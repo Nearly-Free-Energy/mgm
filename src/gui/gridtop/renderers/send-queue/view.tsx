@@ -8,8 +8,11 @@
  * button, and the bill's own controls. It prints the text the server
  * formatted and copies the ext's link, which is the same as the link cell.
  *
- * The link is never an anchor: opening it starts a checkout for the bill,
- * and it is not an href the host hands out for navigation.
+ * The link is never an anchor: opening it starts a checkout for the bill
+ * (src/app/api/billing-line-items/[lineItemId]/pay/route.ts), and it is
+ * not an href the host hands out for navigation. If that route stops
+ * starting a checkout when opened, revisit the first reason; the second
+ * stands either way.
  *
  * The window bar places the period's own links (Back to period, View
  * history) on the page's own view, as it does for any renderer not in
@@ -104,7 +107,7 @@ function Bill(props: {
         <span className="gt:text-caption gt:font-semibold gt:uppercase gt:text-muted-foreground">{labelOf(LINK_KEY)}</span>
         {url !== null && link?.t === "text" ? (
           <>
-            {/* Text, never a link: opening it starts a checkout. */}
+            {/* Text, never a link: opening it starts a checkout (see the module comment). */}
             <span className="gt:min-w-0 gt:break-all gt:select-all gt:font-mono gt:text-dense gt:text-foreground">{link.text}</span>
             <span>
               <button

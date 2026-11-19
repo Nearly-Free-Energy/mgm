@@ -7,9 +7,10 @@ import "server-only";
  * The period, the microgrid, the tenants and the bills are read through the
  * person's own client (row-level security), as the period review reads
  * them: billing_periods and billing_line_items are FOR ALL on
- * user_can_access_microgrid, and tenants on its microgrid. A tenant's
- * primary email and phone are read only to tell whether they have one, and
- * never reach the model.
+ * user_can_access_microgrid, and tenants on its microgrid; if their
+ * policies change, revisit what this shows. A tenant's primary email and
+ * phone are read only to tell whether they have one, and never reach the
+ * model.
  *
  * Whether links can be handed out is the Payments capability's readiness
  * for the microgrid's community (getReadiness, a read listed in
@@ -19,7 +20,9 @@ import "server-only";
  * the same client. A readiness that cannot be read hides the links and says
  * so; it never refuses the view. Billing composing payments while payments
  * depends on billing in the catalog is what the legacy period page does too
- * (paymentLinkAvailable in src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx).
+ * (paymentLinkAvailable in src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx);
+ * if the catalog or gui-surface.test.ts comes to forbid a plugin composing
+ * one that depends on it, or getReadiness leaves LOADER_READS, revisit.
  *
  * The links themselves are built here from stablePaymentLinkPath and the
  * application's origin, as stablePaymentLink builds them

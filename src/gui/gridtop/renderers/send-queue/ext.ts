@@ -3,10 +3,14 @@
  * row's payment link and the readiness note. The host has already parsed
  * the ext strictly against its schema (SendQueueExt in
  * src/lib/billing/surface/send-queue-ext.ts, which a GUI package may not
- * import), so this only checks what the renderer relies on: one entry per
- * model row, with the row's id, and a link exactly where the row's link
- * cell shows one. A change to that schema is version 2, which this renderer
- * does not read.
+ * import; billing registers it as the view's ext.zod in
+ * src/lib/billing/surface.ts, and compile in src/lib/gui/host/server/parse.ts
+ * parses every model's ext against it), so this only checks what the
+ * renderer relies on: one entry per model row, with the row's id, and a link
+ * exactly where the row's link cell shows one. If the view stops declaring
+ * that schema, or the host stops parsing an ext before a GUI receives it,
+ * check the url's length and the note's size here too. A change to that
+ * schema is version 2, which this renderer does not read.
  */
 import type { Json, Tone, ViewModel } from "@/lib/gui/contract";
 
