@@ -219,6 +219,8 @@ describe("loadSendQueue", () => {
     ["composition is refused", () => composePayments.mockResolvedValue({ ok: false, status: 403, code: "payments_forbidden", message: "x" }), false],
     ["composition throws", () => composePayments.mockRejectedValue(new Error("SUPABASE_SERVICE_ROLE_KEY missing")), false],
     ["readiness is refused", () => payments(() => ({ ok: false, status: 500, code: "payments_unavailable", message: SECRET })), true],
+    // As getReadiness refuses when a plugin's state could not be read: not "turned off".
+    ["readiness could not read a plugin's state", () => payments(() => ({ ok: false, status: 503, code: "payments_unavailable", message: "Could not check whether online payments are turned on. Try again shortly." })), true],
     ["readiness throws", () => payments(() => Promise.reject(new Error(SECRET))), true],
     ["readiness answers an unknown state", () => payments("brand_new"), true],
   ])("shows no links, as not checked, when %s, and disposes what it composed", async (_label, arrange, composed) => {

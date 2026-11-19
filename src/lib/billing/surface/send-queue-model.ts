@@ -58,7 +58,10 @@ export const SEND_QUEUE_EXT_SCHEMA = "billing.send-queue@1" as const;
  * revisit SEND_QUEUE_COPY.
  *
  * The rest are the loader's. "unchecked" is a readiness that could not be
- * read; "not_needed" a period with no bills, where readiness is not read
+ * read, getReadiness's refusal when it cannot read a plugin's state
+ * included (never "disabled": nobody said payments are off); its copy says
+ * to try again rather than whom to ask, since nothing needs configuring.
+ * "not_needed" is a period with no bills, where readiness is not read
  * because there is nothing to send, so nothing is said about it; and
  * "no_address" an installation with no public address (MGM_APP_URL) to
  * build links from.
