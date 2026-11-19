@@ -205,6 +205,23 @@ describe("billing.close-period", () => {
     }
   });
 
+  // Availability and prepare read the review separately, so the period can
+  // close, lose its bills or gain a fractional total between the two reads;
+  // prepare then refuses on its own. No bills is this GUI's rule, not the
+  // route's, so prepare is its only guard there.
+  it.each([
+    ["a closed period", review({ status: "closed" }), CLOSE_PERIOD_REFUSALS.closed],
+    ["a period with no bills", review({ billCount: 0, totalAmount: 0, usageKwh: 0, unmetered: [] }), CLOSE_PERIOD_REFUSALS.noBills],
+    [
+      "a total that is not a whole number",
+      review({ fractionalTotals: [{ tenantId: "t-1", tenantName: "House 1" }] }),
+      { ok: false, status: 409, message: "Regenerate the bills for House 1 before closing: their totals are not whole numbers." },
+    ],
+  ])("refuses %s in prepare itself, past availability", async (_label, read, refusal) => {
+    const req = (client: SupabaseClient) => ({ supabase: client, fmt }) as unknown as SurfaceRequest;
+    expect(await prepareClosePeriod(req(tables({ review: read }).client), { params: { periodId: PERIOD } })).toEqual(refusal);
+  });
+
   it("refuses while billing is off, with the gate's copy", async () => {
     checkGate.mockResolvedValue({ ok: false, status: 409, code: "plugin_disabled", message: "Billing is disabled for this organization." });
     expect(await prepare()).toMatchObject({ ok: false, status: 409 });
