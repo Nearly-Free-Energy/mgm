@@ -250,6 +250,15 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.views.length);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
 
+    // One bill's payment attempts, the branch behind `?bill=` that composes
+    // Payments and reads the attempts through listHistory, was loaded and
+    // listed the seeded attempt, so it was scanned above.
+    const bills = results.filter((r) => r.id === "payments.bill-attempts" && r.href.includes("?bill="));
+    expect(bills.map((r) => [r.href, r.status])).toEqual([
+      [`/microgrids/${IDS.microgridIds.basic}/billing/${IDS.billingPeriodId}/payments?bill=${IDS.lineItemId}`, 200],
+    ]);
+    expect(bills[0].output).toContain(`MGM-${IDS.paymentAttemptId}`);
+
     // The tenant's home, read as the tenant through their own session, for each unit.
     const homes = results.filter((r) => r.id === "tenant.home");
     expect(homes.map((r) => [r.href, r.status])).toEqual(IDS.unitIds.map((unit) => [`/my?unit=${unit}`, 200]));

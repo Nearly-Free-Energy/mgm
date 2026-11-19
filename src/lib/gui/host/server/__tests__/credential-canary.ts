@@ -106,10 +106,11 @@ export type CanaryIds = {
   /**
    * An online payment attempt on the bill, through the canary merchant
    * account, held for reconciliation with a tracking id and a verified
-   * receipt of the whole bill, so the bill attempts view lists it and both
-   * reconciliations reach their own steps
-   * (bill-attempts.db.test.ts checks that its checkout URL and failure
-   * message reach no output).
+   * receipt of the whole bill, so the bill attempts view, dispatched with
+   * `?bill=` the bill (QUERY_KINDS), lists it, and both reconciliations
+   * reach their own steps. It has no checkout URL or failure message;
+   * bill-attempts.db.test.ts seeds its own attempt with those and checks
+   * that they reach no output.
    */
   paymentAttemptId: string;
   /**
@@ -387,8 +388,25 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
 }
 
 /**
+ * The query parameters views declare (ViewDef.query), by the entity kind
+ * their value names, or null for one that names no row (a day, a cursor).
+ * A staff view is also dispatched once per seeded row of each kind here,
+ * with that one parameter, so a loader's branch behind it is scanned too.
+ * A view declaring a parameter missing here throws: a new one that names a
+ * row gets its kind, so its branch does not go unscanned.
+ */
+const QUERY_KINDS: Readonly<Record<string, EntityKind | null>> = {
+  bill: "lineItem",
+  tenant_id: "tenant",
+  date: null,
+  before: null,
+};
+
+/**
  * Dispatches every view in `snapshot` once for each seeded row of the entity
- * kinds its path names (a view with no segments gets `?org=`), and returns
+ * kinds its path names (a view with no segments gets `?org=`), and again
+ * with each query parameter that names a row (QUERY_KINDS) set to each
+ * seeded row of its kind under the path's rows, and returns
  * each response body as the route sends it, with whatever was logged to the
  * console meanwhile. `serve` must make the host's surfaceSnapshot() return
  * the snapshot it is given (null: stop), so the loop can count loader runs:
@@ -419,13 +437,31 @@ export async function dispatchEveryView(
     for (const { def } of snapshot.views) {
       const asTenant = def.scope === "tenant";
       if (asTenant && !tenant) throw new Error(`[canary] view ${def.id} is a tenant view: pass a tenant's context`);
+      const filled = (params: Record<string, string>) => {
+        const path = fillPath(def.path, params);
+        if (path === null) throw new Error(`[canary] view ${def.id}: path ${def.path} could not be filled`);
+        return path;
+      };
+      const queried = asTenant
+        ? []
+        : (def.query ?? []).flatMap((name) => {
+            if (!(name in QUERY_KINDS)) throw new Error(`[canary] view ${def.id}: query parameter "${name}" is not in QUERY_KINDS; add it`);
+            const kind = QUERY_KINDS[name];
+            if (kind === null) return [];
+            if (name in def.params) throw new Error(`[canary] view ${def.id}: query parameter "${name}" is also a path segment`);
+            return seededParams(ids, { ...def.params, [name]: kind }, `view ${def.id}`).map((params) => {
+              const { [name]: value, ...path } = params;
+              return `${filled(path)}?${name}=${value}`;
+            });
+          });
       const hrefs = asTenant
         ? ids.unitIds.map((unit) => `${def.path}?unit=${unit}`)
-        : seededParams(ids, def.params, `view ${def.id}`).map((params) => {
-            const path = fillPath(def.path, params);
-            if (path === null) throw new Error(`[canary] view ${def.id}: path ${def.path} could not be filled`);
-            return Object.keys(def.params).length === 0 ? `${path}?org=${ids.orgId}` : path;
-          });
+        : [
+            ...seededParams(ids, def.params, `view ${def.id}`).map((params) =>
+              Object.keys(def.params).length === 0 ? `${filled(params)}?org=${ids.orgId}` : filled(params),
+            ),
+            ...queried,
+          ];
       for (const href of hrefs) {
         for (const spy of spies) spy.mockClear();
         const before = runs.get(def.id) ?? 0;
