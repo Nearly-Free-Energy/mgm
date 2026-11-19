@@ -30,7 +30,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   If generation comes to refuse paid bills itself, say so here.
  *
  * Responses:
- *   200 → { lineItemId, totalAmount, previousTotalAmount, message } —
+ *   200 → { lineItemId, totalAmount, previousTotalAmount, message } — both
+ *         totals numbers (previousTotalAmount null for a new bill);
  *         message names the previous and new totals, in the microgrid's
  *         currency and the request's locale; the GUI host shows it as the
  *         action's result
@@ -42,7 +43,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         when generation refused this tenant (GenerationErrorCode)
  *   428 → { error, reason: "paid_acknowledgement_required" } (a paid bill
  *         without the acknowledgement; nothing is written)
- *   500 → { error, reason: "unknown_error" }
+ *   500 → { error, reason: "unknown_error" } (the bill, its period or its
+ *         microgrid could not be read, or nothing was written)
  *   and the capability's own refusals (plugin gate, organization scope).
  *
  * The legacy dialogs still call POST /api/billing/generate, which checks no
@@ -60,6 +62,8 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 const invalid = (error: string, field: string) =>
   NextResponse.json({ error, field, code: "invalid_body" }, { status: 400 });
 const notFound = () => NextResponse.json({ error: "Billing line item not found.", reason: "not_found" }, { status: 404 });
+/** A read that failed, with fixed copy: never the database's message. */
+const readFailed = (error: string) => NextResponse.json({ error, reason: "unknown_error" }, { status: 500 });
 
 type BillRow = {
   id: string;
@@ -106,23 +110,24 @@ export async function POST(
     .select("id, tenant_id, billing_period_id, reading_source, payment_status")
     .eq("id", lineItemId)
     .maybeSingle<BillRow>();
-  if (billError) {
-    return NextResponse.json({ error: "Failed to look up billing line item.", reason: "unknown_error" }, { status: 500 });
-  }
+  if (billError) return readFailed("Failed to look up billing line item.");
   if (!bill) return notFound();
 
-  // The organization, as POST /api/billing/generate resolves it.
-  const { data: period } = await supabase
+  // The organization, as POST /api/billing/generate resolves it. A failed
+  // read is not a missing row: it answers 500, as the bill's own read does.
+  const { data: period, error: periodError } = await supabase
     .from("billing_periods")
     .select("id, microgrid_id")
     .eq("id", bill.billing_period_id)
     .maybeSingle<{ id: string; microgrid_id: string }>();
+  if (periodError) return readFailed("Failed to look up the bill's billing period.");
   if (!period) return notFound();
-  const { data: microgrid } = await supabase
+  const { data: microgrid, error: microgridError } = await supabase
     .from("microgrids")
     .select("id, currency, communities!inner(org_id)")
     .eq("id", period.microgrid_id)
     .maybeSingle<{ id: string; currency: string | null; communities: { org_id: string } | { org_id: string }[] }>();
+  if (microgridError) return readFailed("Failed to look up the bill's microgrid.");
   const communities = microgrid?.communities;
   const orgId = Array.isArray(communities) ? communities[0]?.org_id : communities?.org_id;
   if (!orgId) return notFound();
@@ -178,7 +183,8 @@ export async function POST(
           : `Regenerated the bill. Its total was ${fmt.money(Number(mine.previousTotalAmount), currency).text} and is now ${now}.`;
       return NextResponse.json({
         lineItemId: mine.lineItem.id,
-        totalAmount: mine.lineItem.total_amount,
+        // A NUMERIC column, which can arrive as a string: answered as a number.
+        totalAmount: Number(mine.lineItem.total_amount),
         previousTotalAmount: mine.previousTotalAmount,
         message,
       });

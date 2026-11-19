@@ -20,6 +20,8 @@ type Bill = { id: string; tenant_id: string; billing_period_id: string; reading_
 let user: { id: string } | null;
 let bill: Bill | null;
 let billError: { message: string } | null;
+let periodError: { message: string } | null;
+let microgridError: { message: string } | null;
 let period: { id: string; microgrid_id: string } | null;
 let microgrid: { id: string; currency?: string | null; communities: { org_id: string } } | null;
 let composeResult: { ok: false; status: number; code: string; message: string } | null;
@@ -36,7 +38,8 @@ vi.mock("@/lib/supabase/server", () => ({
           maybeSingle: async () => {
             reads.push([table, columns]);
             if (table === "billing_line_items") return { data: bill, error: billError };
-            return { data: table === "billing_periods" ? period : microgrid, error: null };
+            if (table === "billing_periods") return { data: periodError ? null : period, error: periodError };
+            return { data: microgridError ? null : microgrid, error: microgridError };
           },
         }),
       }),
@@ -84,6 +87,8 @@ beforeEach(() => {
   user = { id: "11111111-1111-4111-8111-111111111111" };
   bill = { id: LINE_ITEM, tenant_id: TENANT, billing_period_id: PERIOD, reading_source: "edge", payment_status: "unpaid" };
   billError = null;
+  periodError = null;
+  microgridError = null;
   period = { id: PERIOD, microgrid_id: MICROGRID };
   microgrid = { id: MICROGRID, communities: { org_id: ORG } };
   composeResult = null;
@@ -145,7 +150,18 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
     billError = { message: "permission denied for table billing_line_items" };
     const res = await post({ readings: "edge" });
     expect(res.status).toBe(500);
-    expect(await res.text()).not.toContain("permission denied");
+    expect(await res.json()).toEqual({ error: "Failed to look up billing line item.", reason: "unknown_error" });
+  });
+
+  it.each([
+    ["its period", () => (periodError = { message: "permission denied for table billing_periods" }), "Failed to look up the bill's billing period."],
+    ["its microgrid", () => (microgridError = { message: "permission denied for table microgrids" }), "Failed to look up the bill's microgrid."],
+  ])("500, not 404, when %s cannot be read, without the database's message", async (_label, fail, error) => {
+    fail();
+    const res = await post({ readings: "edge" });
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error, reason: "unknown_error" });
+    expect(generateBills).not.toHaveBeenCalled();
   });
 
   it("reads the bill through the person's client, with the columns it needs", async () => {
@@ -180,6 +196,13 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
       message: `Regenerated the bill. Its total was ${money(5000)} and is now ${money(5200)}.`,
     });
     expect(generateBills).toHaveBeenCalledWith({ billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: undefined });
+  });
+
+  it("answers the new total as a number when the database sends NUMERIC as a string", async () => {
+    generateResult = written("5200" as unknown as number, 5000);
+    const res = await post({ readings: "edge" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ totalAmount: 5200, previousTotalAmount: 5000 });
   });
 
   it("names the previous and new totals in the microgrid's currency and the request's locale", async () => {
