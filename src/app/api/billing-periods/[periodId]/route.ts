@@ -17,9 +17,8 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  * DELETE /api/billing-periods/[periodId] — delete a draft billing period
  * against the name the person typed (#201), as `billing.delete-period`.
  *
- * The body is DeletePeriodBody (src/lib/billing/schemas.ts), a JSON object
- * even on a DELETE: a request with no body answers 400 "Invalid JSON body",
- * so a caller other than the GUI host sends `{}` to be asked for the name.
+ * The body is DeletePeriodBody (src/lib/billing/schemas.ts). A DELETE often
+ * has no body, so an empty one is read as `{}`: a request for the name to type.
  *   - no `confirmation`: 428 `billing_delete_confirmation_required`, naming
  *     the period to type. Nothing is deleted.
  *   - the wrong name typed: 428 `billing_delete_name_mismatch`.
@@ -35,7 +34,10 @@ export async function DELETE(
 ): Promise<NextResponse> {
   const { periodId } = await params;
 
-  const parsed = await parseJsonBody(request, DeletePeriodBody);
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: DeletePeriodBody.parse({}) } as const)
+    : await parseJsonBody(request, DeletePeriodBody);
   if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();

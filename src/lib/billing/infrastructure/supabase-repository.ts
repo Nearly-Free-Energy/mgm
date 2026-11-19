@@ -21,8 +21,8 @@ import type {
   UnresolvedTenant,
 } from "../repository";
 
-function toError(error: { code?: string; message?: string; details?: string | null }): RepositoryError {
-  return { code: error.code, message: error.message ?? "Unknown database error", details: error.details ?? null };
+function toError(error: { code?: string; message?: string }): RepositoryError {
+  return { code: error.code, message: error.message ?? "Unknown database error" };
 }
 
 export function createSupabaseBillingRepository(
@@ -259,7 +259,9 @@ export function createSupabaseBillingRepository(
         .delete()
         .eq("id", periodId)
         .select("id");
-      if (error) return { deleted: false, error: toError(error) };
+      // Only this path carries PostgREST's DETAIL: the delete guard's `closed`
+      // or `payment_activity`. Elsewhere a DETAIL can hold key values.
+      if (error) return { deleted: false, error: { ...toError(error), details: error.details ?? null } };
       return { deleted: (data ?? []).length > 0, error: null };
     },
   };

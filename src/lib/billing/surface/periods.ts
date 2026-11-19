@@ -14,6 +14,7 @@ import "server-only";
  *
  * A refusal carries fixed copy, never a database message.
  */
+import { currencyFractionDigits } from "@/components/format/currency";
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { periodName } from "../close";
@@ -48,25 +49,41 @@ export const DELETE_PERIOD_REFUSALS = {
 const MAX_PERIODS = 500;
 
 /**
- * Bills are read in pages. PostgREST answers at most max_rows rows
- * (supabase/config.toml sets 1000) and says nothing when it stops, so a read
- * that can return more pages by id until it has the exact count. A read
- * that cannot be completed is a refusal, never a partial sum.
+ * Bills are read in pages by id (keyset), each asking for the exact count of
+ * what is left. PostgREST answers at most max_rows rows (supabase/config.toml
+ * sets 1000) and says nothing when it stops, and a page by offset can skip or
+ * repeat a bill written between pages; a page after the last id seen cannot.
+ * A read that cannot be completed is a refusal, never a partial sum.
  */
 const BILL_PAGE = 1000;
 
 type PageRead = { data: unknown; error: unknown; count?: number | null };
 
-async function readAllPages<T>(read: (from: number, to: number) => PromiseLike<PageRead>): Promise<T[] | null> {
+async function readAllPages<T extends { id: string }>(read: (afterId: string | null) => PromiseLike<PageRead>): Promise<T[] | null> {
   const out: T[] = [];
-  for (let from = 0; ; from += BILL_PAGE) {
-    const { data, error, count } = await read(from, from + BILL_PAGE - 1);
+  for (let after: string | null = null; ; ) {
+    const { data, error, count } = await read(after);
     if (error) return null;
     const rows = (data ?? []) as T[];
     out.push(...rows);
-    if (rows.length === 0) return out;
-    if (typeof count === "number" ? out.length >= count : rows.length < BILL_PAGE) return out;
+    // Done when this page held everything left, or nothing.
+    if (rows.length === 0 || (typeof count === "number" ? rows.length >= count : rows.length < BILL_PAGE)) return out;
+    after = rows[rows.length - 1].id;
   }
+}
+
+/** A page of a query ordered by id: the first, or the one after `afterId`. */
+function pageAfter<Q extends { gt(column: string, value: string): Q; order(column: string): Q; limit(n: number): Q }>(
+  query: Q,
+  afterId: string | null,
+): Q {
+  return (afterId === null ? query : query.gt("id", afterId)).order("id").limit(BILL_PAGE);
+}
+
+/** Sums amounts in the currency's minor units, so adding many bills cannot drift. */
+function sumMoney(amounts: number[], currency: string): number {
+  const scale = 10 ** currencyFractionDigits(currency);
+  return amounts.reduce((sum, a) => sum + Math.round(a * scale), 0) / scale;
 }
 
 export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedModel<"collection">>> {
@@ -87,25 +104,32 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
   if (periodsRes.error) return PERIODS_REFUSALS.unavailable;
   const rows = (periodsRes.data ?? []) as { id: string; start_date: string; end_date: string; status: "draft" | "closed" }[];
 
+  const currency = microgrid.currency ?? "UGX";
   const totals = new Map<string, { kwh: number; amount: number }>();
   if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-    const items = await readAllPages<{ billing_period_id: string; usage_kwh: unknown; total_amount: unknown }>((from, to) =>
-      req.supabase
-        .from("billing_line_items")
-        .select("billing_period_id, usage_kwh, total_amount", { count: "exact" })
-        .in("billing_period_id", ids)
-        .order("id")
-        .range(from, to),
+    // By the microgrid through the period, not by a list of period ids, which
+    // would make a URL as long as 500 ids.
+    const items = await readAllPages<{ id: string; billing_period_id: string; usage_kwh: unknown; total_amount: unknown }>((after) =>
+      pageAfter(
+        req.supabase
+          .from("billing_line_items")
+          .select("id, billing_period_id, usage_kwh, total_amount, billing_periods!inner(microgrid_id)", { count: "exact" })
+          .eq("billing_periods.microgrid_id", microgrid.id),
+        after,
+      ),
     );
     // Unlike the legacy page, which shows zeros: a failed read is not an empty period.
     if (items === null) return PERIODS_REFUSALS.unavailable;
+    const listed = new Set(rows.map((r) => r.id));
+    const byPeriod = new Map<string, { kwh: number; amounts: number[] }>();
     for (const item of items) {
-      const t = totals.get(item.billing_period_id) ?? { kwh: 0, amount: 0 };
+      if (!listed.has(item.billing_period_id)) continue;
+      const t = byPeriod.get(item.billing_period_id) ?? { kwh: 0, amounts: [] };
       t.kwh += Number(item.usage_kwh ?? 0);
-      t.amount += Number(item.total_amount ?? 0);
-      totals.set(item.billing_period_id, t);
+      t.amounts.push(Number(item.total_amount ?? 0));
+      byPeriod.set(item.billing_period_id, t);
     }
+    for (const [id, t] of byPeriod) totals.set(id, { kwh: t.kwh, amount: sumMoney(t.amounts, currency) });
   }
 
   const periods: PeriodRowInput[] = rows.map((r) => {
@@ -114,7 +138,7 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
   });
   return {
     ok: true,
-    model: buildPeriodsModel({ microgridId: microgrid.id, currency: microgrid.currency ?? "UGX", periods, fmt: req.fmt }),
+    model: buildPeriodsModel({ microgridId: microgrid.id, currency, periods, fmt: req.fmt }),
   };
 }
 
@@ -138,13 +162,14 @@ export async function prepareDeletePeriod(
   if (!period) return DELETE_PERIOD_REFUSALS.notFound;
   if (period.status === "closed") return DELETE_PERIOD_REFUSALS.closed;
 
-  const items = await readAllPages<{ payment_status: string; paid_at: string | null }>((from, to) =>
-    req.supabase
-      .from("billing_line_items")
-      .select("payment_status, paid_at", { count: "exact" })
-      .eq("billing_period_id", period.id)
-      .order("id")
-      .range(from, to),
+  const items = await readAllPages<{ id: string; payment_status: string; paid_at: string | null }>((after) =>
+    pageAfter(
+      req.supabase
+        .from("billing_line_items")
+        .select("id, payment_status, paid_at", { count: "exact" })
+        .eq("billing_period_id", period.id),
+      after,
+    ),
   );
   if (items === null) return DELETE_PERIOD_REFUSALS.unavailable;
   if (items.some(lineItemHasRecordedPayment)) return DELETE_PERIOD_REFUSALS.payments;
