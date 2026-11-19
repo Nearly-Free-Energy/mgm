@@ -52,10 +52,14 @@
  *                  Users page's own query, given A, then revoked from both
  *   twoUnits     — no rows; given A and OTHER, each by its organization's
  *                  manager, then loses OTHER
+ * Within that block the tests run in order and share these accounts, so
+ * each one's expectations depend on what the tests above it did. The lock
+ * tests at the end of the file each create their own account and stand
+ * alone:
  *   locked       — no rows; given B while its auth.users row is locked,
  *                  then revoked
- * Within that block the tests run in order and share these accounts, so
- * each one's expectations depend on what the tests above it did.
+ *   removed      — no rows; soft-deleted while a grant to B waits on its
+ *                  row, then restored for afterAll
  *
  * The audit tests (named "audit: …") are one assertion per database-side
  * hit of the RFC § 4 "has any role" audit fixed in PR 1.
@@ -139,6 +143,7 @@ const EMAIL = {
   rejoined: "tenant-access-rejoined@test.local",
   twoUnits: "tenant-access-two-units@test.local",
   locked: "tenant-access-locked@test.local",
+  removed: "tenant-access-removed@test.local",
 };
 const ALL_EMAILS = Object.values(EMAIL);
 const ORG_IDS = [F.org, F.otherOrg];
@@ -1762,5 +1767,29 @@ desc("fn_tenant_access_grant locks the account", () => {
       _access_id: race.contender.data,
     });
     expect(revoked.error).toBeNull();
+  }, 60_000);
+
+  it("checks the account again once it holds the lock: one removed while the grant waited is not found", async () => {
+    // The holder soft-deletes the account, an UPDATE that holds the row lock
+    // the grant asks for. Once it commits, the grant reads the row again and
+    // finds no live account, so it refuses rather than granting to it.
+    const removed = await createTestUser({ email: EMAIL.removed, role: null });
+    const svc = await serviceClient();
+    try {
+      const race = await raceAgainstHeldTransaction(
+        `  UPDATE auth.users SET deleted_at = now() WHERE id = '${removed.userId}';`,
+        () => svc.rpc("fn_tenant_access_grant", { _tenant_id: F.tenantB, _user_id: removed.userId, _actor: manager.userId }),
+      );
+      expect(race.holder.ok, race.holder.output).toBe(true);
+      expect(race.contender.error?.code).toBe("P0002");
+      expect(race.contender.error?.message).toBe("User not found.");
+      const rows = await svc.from("user_roles").select("id").eq("user_id", removed.userId);
+      expect(rows.error).toBeNull();
+      expect(rows.data).toEqual([]);
+    } finally {
+      // Live again, so afterAll removes it like every other account here.
+      const restored = runAsDatabaseOwner(`UPDATE auth.users SET deleted_at = NULL WHERE id = '${removed.userId}'`);
+      expect(restored.ok, restored.output).toBe(true);
+    }
   }, 60_000);
 });

@@ -305,16 +305,16 @@ INSERT INTO public.staff_access_accounts (user_id)
 
 -- ── 4. The tenant grant does not look at staff rows ─────────────────────
 --
--- Re-issued with the body of 20261118100100 and one addition, the row lock
--- marked below, so a database that ran an earlier draft of this file, which
--- refused staff accounts here, converges on it. Tenant access is a person's
--- access to the units they rent, and does not depend on organization roles:
--- the grant decides only whether the actor may manage access to the unit,
--- whether the unit exists and whether the account does. So a person may
--- hold both, a manager who rents may be given the unit on the same
--- address, and a person whose staff rows are removed (DELETE
--- /api/users/[id], an organization's deletion, the service role) is a
--- tenant like any other, given further units in the same way.
+-- Re-issued with the body of 20261118100100 and one change, marked below:
+-- the account check takes a row lock on the account. A database that ran an
+-- earlier draft of this file, which refused staff accounts here, converges
+-- on it. Tenant access is a person's access to the units they rent, and
+-- does not depend on organization roles: the grant decides only whether the
+-- actor may manage access to the unit, whether the unit exists and whether
+-- the account does. So a person may hold both, a manager who rents may be
+-- given the unit on the same address, and a person whose staff rows are
+-- removed (DELETE /api/users/[id], an organization's deletion, the service
+-- role) is a tenant like any other, given further units in the same way.
 --
 -- The PR 1 review's concern, that a staff account could vanish from the
 -- Users page as a former tenant, is met by section 5 rather than by
@@ -353,22 +353,24 @@ BEGIN
     RAISE EXCEPTION 'Tenant not found.'
       USING ERRCODE = 'P0002';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM auth.users WHERE id = _user_id AND deleted_at IS NULL) THEN
+
+  -- Added by this file: the account check takes a row lock on the
+  -- account's auth.users row, FOR NO KEY UPDATE, held until the transaction
+  -- ends. A change to the same account's user_roles rows that takes this
+  -- lock runs one after the grant rather than deciding from rows the grant
+  -- is about to change; a function that changes role rows and must
+  -- serialise with the grant takes this same lock, and if one locks the
+  -- account another way, take that lock here instead. A grant that waits on
+  -- the lock checks the account again once it holds it, so an account
+  -- removed meanwhile is 'User not found.'. The lock does not block a
+  -- foreign key check against auth.users (FOR KEY SHARE), so a row inserted
+  -- for the account without taking it does not wait on it.
+  -- tenant_access.test.ts checks that a grant waits on this lock.
+  PERFORM 1 FROM auth.users WHERE id = _user_id AND deleted_at IS NULL FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
     RAISE EXCEPTION 'User not found.'
       USING ERRCODE = 'P0002';
   END IF;
-
-  -- Added by this file: lock the account's auth.users row, FOR NO KEY
-  -- UPDATE, before adding its row, so this grant and any other change to
-  -- the same account's user_roles rows that takes the same lock first (a
-  -- role change, an invitation) run one after the other rather than each
-  -- deciding from rows the other is about to change. The lock is held until
-  -- the transaction ends. It does not block a foreign key check against
-  -- auth.users (FOR KEY SHARE), so a row inserted for the account without
-  -- taking the lock does not wait on it. If the functions that change role
-  -- rows lock the account another way, take their lock here instead.
-  -- tenant_access.test.ts checks that a grant waits on this lock.
-  PERFORM 1 FROM auth.users WHERE id = _user_id FOR NO KEY UPDATE;
 
   INSERT INTO user_roles (user_id, role, scope_type, scope_id)
     VALUES (_user_id, 'tenant', 'tenant', _tenant_id)
