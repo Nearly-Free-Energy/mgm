@@ -240,5 +240,29 @@ export function createSupabaseBillingRepository(
       if (error) return { updated: null, error: toError(error) };
       return { updated: data, error: null };
     },
+
+    async getBillingPeriod(periodId: string) {
+      const { data, error } = await supabase
+        .from("billing_periods")
+        .select("id, microgrid_id, start_date, end_date, status, timezone")
+        .eq("id", periodId)
+        .maybeSingle<BillingPeriodRow>();
+      if (error) throw new Error("Could not load billing period.");
+      return data ?? null;
+    },
+
+    async deleteBillingPeriod(periodId: string) {
+      // A row that row-level security hides deletes nothing and raises no
+      // error, so the deleted ids are read back.
+      const { data, error } = await supabase
+        .from("billing_periods")
+        .delete()
+        .eq("id", periodId)
+        .select("id");
+      // Only this path carries PostgREST's DETAIL: the delete guard's `closed`
+      // or `payment_activity`. Elsewhere a DETAIL can hold key values.
+      if (error) return { deleted: false, error: { ...toError(error), details: error.details ?? null } };
+      return { deleted: (data ?? []).length > 0, error: null };
+    },
   };
 }

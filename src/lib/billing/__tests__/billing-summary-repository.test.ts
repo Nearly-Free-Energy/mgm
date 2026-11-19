@@ -36,3 +36,37 @@ describe("manual payment notes RPC contract", () => {
     expect(rpc).toHaveBeenCalledWith("fn_apply_payment_event", expect.objectContaining({ _raw_payload: { ...payload, recorded_via: "mgm-billing" } }));
   });
 });
+
+describe("deleting a billing period (#201)", () => {
+  function deleting(result: { data: unknown; error: unknown }) {
+    const calls: [string, unknown[]][] = [];
+    const chain = {
+      delete: (...a: unknown[]) => (calls.push(["delete", a]), chain),
+      eq: (...a: unknown[]) => (calls.push(["eq", a]), chain),
+      select: async (...a: unknown[]) => (calls.push(["select", a]), result),
+    };
+    const client = { from: (table: string) => (calls.push(["from", [table]]), chain) };
+    return { repo: createSupabaseBillingRepository(client as unknown as SupabaseClient), calls };
+  }
+
+  it("reads back the deleted id, so a row hidden by row-level security reports nothing deleted", async () => {
+    const done = deleting({ data: [{ id: "period" }], error: null });
+    expect(await done.repo.deleteBillingPeriod("period")).toEqual({ deleted: true, error: null });
+    expect(done.calls).toEqual([["from", ["billing_periods"]], ["delete", []], ["eq", ["id", "period"]], ["select", ["id"]]]);
+    expect(await deleting({ data: [], error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
+  });
+
+  it("keeps the delete guard's DETAIL, which names why the period is kept", async () => {
+    const { repo } = deleting({ data: null, error: { code: "23514", message: "billing_period_kept", details: "payment_activity" } });
+    expect(await repo.deleteBillingPeriod("period")).toEqual({
+      deleted: false,
+      error: { code: "23514", message: "billing_period_kept", details: "payment_activity" },
+    });
+  });
+
+  it("reads the period, and rejects a failed read", async () => {
+    expect(await repository().getBillingPeriod("period")).toEqual(period);
+    expect(await repository(undefined, "billing_periods").getBillingPeriod("period")).toBeNull();
+    await expect(repository("billing_periods").getBillingPeriod("period")).rejects.toThrow();
+  });
+});

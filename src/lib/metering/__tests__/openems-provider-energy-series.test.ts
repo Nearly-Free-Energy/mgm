@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getMicrogridEmsConfig } = vi.hoisted(() => ({
   getMicrogridEmsConfig: vi.fn(async () => ({
@@ -78,9 +78,30 @@ const HOUR = 3_600_000;
 // 2026-11-05 00:00 in Africa/Kampala (UTC+3), and the lead day's midnight.
 const K0 = Date.UTC(2026, 10, 4, 21);
 const LEAD = K0 - 24 * HOUR;
+/**
+ * Where the backend stamps hour `hour` of 5 November: at the hour's END
+ * (observed on NFE's backend, 19 November 2026). S(0) is 01:00 Kampala, and
+ * S(23) is midnight of the 6th.
+ */
+const S = (hour: number) => K0 + (hour + 1) * HOUR;
+/**
+ * The 72 stamps a read of 5 November returns: its range runs from the lead
+ * day (4 November) to the day after (6 November), 00:00 to 23:00 local.
+ * Stamp i closes the hour that starts at LEAD + (i - 1) hours, so stamps 25
+ * to 48 are the requested day's hours.
+ */
+const RANGE = Array.from({ length: 72 }, (_, i) => LEAD + i * HOUR);
+const hourOfStamp = (i: number) => i - 25;
 
 /** Wh the fake meter counted in each hour of the requested day: distinct per hour. */
 const dayWh = (hour: number) => 10 * hour + 1;
+
+/** Each local hour of `dates` in `timezone`, stamped at its end as the backend does. */
+function stampedHours(dates: string[], timezone: string) {
+  return dates.flatMap((date) => localHourStarts(date, timezone).map((start, hour) => ({
+    date, start, hour, stamp: start + HOUR,
+  })));
+}
 
 describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
   afterEach(() => {
@@ -89,15 +110,17 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
     resetPilotEnv();
   });
 
-  it("reads from the day before, drops the lead day's buckets and keeps a null inside the range", async () => {
+  it("reads hours from the day before to the day after, and keeps a null inside the range", async () => {
     clearPilotEnv();
     // Spike, 17 Nov 2026: the first two hourly buckets of any range are null.
-    const timestamps = Array.from({ length: 48 }, (_, i) => LEAD + i * HOUR);
-    const values = timestamps.map((_, i) =>
-      i < 2 ? null : i < 24 ? 999 : i - 24 === 10 ? null : dayWh(i - 24)
-    );
+    const values = RANGE.map((_, i) => {
+      if (i < 2) return null;
+      const hour = hourOfStamp(i);
+      if (hour < 0 || hour > 23) return 999;
+      return hour === 10 ? null : dayWh(hour);
+    });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      response({ timestamps, data: { [METER0]: values } })
+      response({ timestamps: RANGE, data: { [METER0]: values } })
     );
 
     const series = await provider().getDeviceEnergySeries(seriesRequest());
@@ -110,7 +133,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
     expect(rpc.inner.method).toBe("queryHistoricTimeseriesEnergyPerPeriod");
     expect(rpc.inner.params).toEqual({
       fromDate: "2026-11-04",
-      toDate: "2026-11-05",
+      toDate: "2026-11-06",
       channels: [METER0],
       timezone: "Africa/Kampala",
       resolution: { value: 1, unit: "Hours" },
@@ -125,12 +148,29 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
     });
   });
 
-  it("returns no bucket of the lead day even when the backend fills it", async () => {
+  it("gives each hour the bucket stamped at its end: local midnight closes the day before, the next midnight closes 23:00", async () => {
     clearPilotEnv();
-    const timestamps = Array.from({ length: 48 }, (_, i) => LEAD + i * HOUR);
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      response({ timestamps, data: { [METER0]: timestamps.map((_, i) => (i < 24 ? 5_000 : 0)) } })
-    );
+    // The bucket stamped 00:00 on the 5th is 23:00 to 24:00 on the 4th, and
+    // the one stamped 00:00 on the 6th is 23:00 to 24:00 on the 5th.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: RANGE,
+      data: { [METER0]: RANGE.map((stamp) => (stamp === K0 ? 5_000 : stamp === S(23) ? 230 : stamp === S(0) ? 7 : 1)) },
+    }));
+
+    const series = await provider().getDeviceEnergySeries(seriesRequest());
+
+    expect(series.buckets[0]).toBe(K0);
+    expect(series.kwh["dev-1"][0]).toBe(0.007);
+    expect(series.kwh["dev-1"][23]).toBe(0.23);
+    expect(series.kwh["dev-1"].slice(1, 23)).toEqual(Array(22).fill(0.001));
+  });
+
+  it("returns no hour of the lead day or of the day after, even when the backend fills them", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: RANGE,
+      data: { [METER0]: RANGE.map((_, i) => (hourOfStamp(i) < 0 || hourOfStamp(i) > 23 ? 5_000 : 0)) },
+    }));
 
     const series = await provider().getDeviceEnergySeries(seriesRequest());
 
@@ -140,11 +180,10 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
 
   it("leaves a bucket the response left out null, and every later bucket keeps its own value", async () => {
     clearPilotEnv();
-    const timestamps = Array.from({ length: 48 }, (_, i) => LEAD + i * HOUR)
-      .filter((time) => time !== K0 + 12 * HOUR);
+    const timestamps = RANGE.filter((stamp) => stamp !== S(12));
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
       timestamps,
-      data: { [METER0]: timestamps.map((time) => (time < K0 ? 0 : dayWh((time - K0) / HOUR))) },
+      data: { [METER0]: timestamps.map((stamp) => dayWh((stamp - S(0)) / HOUR)) },
     }));
 
     const series = await provider().getDeviceEnergySeries(seriesRequest());
@@ -154,20 +193,28 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
     );
   });
 
+  it("drops a stamp that is not on the hour rather than move its value to a neighbour", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [S(0), S(1) + 30 * 60_000, S(2)],
+      data: { [METER0]: [7, 8, 9] },
+    }));
+
+    const series = await provider().getDeviceEnergySeries(seriesRequest());
+
+    expect(series.kwh["dev-1"].slice(0, 4)).toEqual([0.007, null, 0.009, null]);
+  });
+
   describe("matches buckets by instant, not by position, where days are not all 24 hours", () => {
     const NEW_YORK = "America/New_York";
 
-    function hoursOf(dates: string[]) {
-      return dates.flatMap((date) => localHourStarts(date, NEW_YORK).map((start, hour) => ({ date, start, hour })));
-    }
-
     it("gives the 25 hours of a fall-back day, the two 01:00 hours each with its own value", async () => {
       clearPilotEnv();
-      const hours = hoursOf(["2026-10-31", "2026-11-01"]);
-      expect(hours).toHaveLength(24 + 25);
+      const hours = stampedHours(["2026-10-31", "2026-11-01", "2026-11-02"], NEW_YORK);
+      expect(hours).toHaveLength(24 + 25 + 24);
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-        timestamps: hours.map(({ start }) => start),
-        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-10-31" ? 999 : 100 + hour)) },
+        timestamps: hours.map(({ stamp }) => stamp),
+        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-11-01" ? 100 + hour : 999)) },
       }));
 
       const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -175,7 +222,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
       }));
 
       expect(sent(fetchSpy.mock.calls[0][1]).inner.params).toMatchObject({
-        fromDate: "2026-10-31", toDate: "2026-11-01", timezone: NEW_YORK,
+        fromDate: "2026-10-31", toDate: "2026-11-02", timezone: NEW_YORK,
       });
       expect(series.buckets).toHaveLength(25);
       expect(iso(series.buckets[0])).toBe("2026-11-01T04:00:00.000Z");
@@ -187,10 +234,10 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
 
     it("gives the 24 hours of the day after a fall-back day, whose lead day had 25", async () => {
       clearPilotEnv();
-      const hours = hoursOf(["2026-11-01", "2026-11-02"]);
+      const hours = stampedHours(["2026-11-01", "2026-11-02", "2026-11-03"], NEW_YORK);
       vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-        timestamps: hours.map(({ start }) => start),
-        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-11-01" ? 999 : 100 + hour)) },
+        timestamps: hours.map(({ stamp }) => stamp),
+        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-11-02" ? 100 + hour : 999)) },
       }));
 
       const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -204,10 +251,10 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
 
     it("gives the 23 hours of a spring-forward day, with no 02:00", async () => {
       clearPilotEnv();
-      const hours = hoursOf(["2026-03-07", "2026-03-08"]);
+      const hours = stampedHours(["2026-03-07", "2026-03-08", "2026-03-09"], NEW_YORK);
       vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-        timestamps: hours.map(({ start }) => start),
-        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-03-07" ? 999 : 100 + hour)) },
+        timestamps: hours.map(({ stamp }) => stamp),
+        data: { [METER0]: hours.map(({ date, hour }) => (date === "2026-03-08" ? 100 + hour : 999)) },
       }));
 
       const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -227,69 +274,169 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: hours", () => {
 });
 
 describe("OpenEmsMeteringProvider.getDeviceEnergySeries: days", () => {
+  // Every day asked for below has ended, unless a test moves the clock.
+  const NOW = Date.parse("2026-11-10T12:00:00+03:00");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     getMicrogridEmsConfig.mockClear();
     resetPilotEnv();
   });
 
+  const KAMPALA = "Africa/Kampala";
   const dayRequest = (overrides: Partial<DeviceEnergySeriesRequest> = {}) => seriesRequest({
     resolution: "day", startDate: "2026-11-01", endDate: "2026-11-03", ...overrides,
   });
 
-  it("reads from the day before as well, and the lead day's value never appears", async () => {
+  /** A response of every hour of `dates`, stamped at its end, with `wh(date, hour)`. */
+  function hoursResponse(dates: string[], wh: (date: string, hour: number) => number | null, timezone = KAMPALA) {
+    const hours = stampedHours(dates, timezone);
+    return response({
+      timestamps: hours.map(({ stamp }) => stamp),
+      data: { [METER0]: hours.map(({ date, hour }) => wh(date, hour)) },
+    });
+  }
+  const RANGE_DATES = ["2026-10-31", "2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"];
+
+  it("reads hours from the day before to the day after, and sums each local day from its own hours", async () => {
     clearPilotEnv();
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [
-        "2026-10-31T00:00+03:00[Africa/Kampala]",
-        "2026-11-01T00:00+03:00[Africa/Kampala]",
-        "2026-11-02T00:00+03:00[Africa/Kampala]",
-        "2026-11-03T00:00+03:00[Africa/Kampala]",
-      ],
-      data: { [METER0]: [5_000, 1_200, null, 3_400] },
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) => {
+      if (date === "2026-11-01") return hour === 23 ? 5_000 : 100;
+      if (date === "2026-11-02") return hour === 0 ? 7_000 : dayWh(hour);
+      if (date === "2026-11-03") return 50;
+      return 999_999;
     }));
 
     const series = await provider().getDeviceEnergySeries(dayRequest());
 
+    // Never "Days": the backend fills a daily bucket with the UTC day.
     expect(sent(fetchSpy.mock.calls[0][1]).inner.params).toEqual({
       fromDate: "2026-10-31",
-      toDate: "2026-11-03",
+      toDate: "2026-11-04",
       channels: [METER0],
-      timezone: "Africa/Kampala",
-      resolution: { value: 1, unit: "Days" },
+      timezone: KAMPALA,
+      resolution: { value: 1, unit: "Hours" },
     });
     expect(series.buckets.map(iso)).toEqual([
       "2026-10-31T21:00:00.000Z",
       "2026-11-01T21:00:00.000Z",
       "2026-11-02T21:00:00.000Z",
     ]);
-    expect(series.kwh).toEqual({ "dev-1": [1.2, null, 3.4] });
+    // 1 November: 23 hours of 100 Wh and 23:00 to 24:00, stamped at midnight
+    // of the 2nd, with 5,000. 2 November: 00:00 to 01:00 with 7,000, then
+    // dayWh(1) to dayWh(23). Neither day takes the other's edge hour.
+    const second = 7_000 + Array.from({ length: 23 }, (_, i) => dayWh(i + 1)).reduce((sum, wh) => sum + wh, 0);
+    expect(series.kwh).toEqual({ "dev-1": [(23 * 100 + 5_000) / 1000, second / 1000, 1.2] });
+  });
+
+  it("makes a day null when one of its ended hours has no value, never a lower sum", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) =>
+      date === "2026-11-02" && hour === 10 ? null : 100
+    ));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest());
+
+    expect(series.kwh["dev-1"]).toEqual([2.4, null, 2.4]);
   });
 
   it("leaves a day the response left out null, without shifting the next day", async () => {
     clearPilotEnv();
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [
-        Date.parse("2026-10-31T00:00+03:00"),
-        Date.parse("2026-11-01T00:00+03:00"),
-        Date.parse("2026-11-03T00:00+03:00"),
-      ],
-      data: { [METER0]: [5_000, 1_200, 3_400] },
-    }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      hoursResponse(["2026-10-31", "2026-11-01", "2026-11-03", "2026-11-04"], () => 100)
+    );
 
     const series = await provider().getDeviceEnergySeries(dayRequest());
 
-    expect(series.kwh["dev-1"]).toEqual([1.2, null, 3.4]);
+    expect(series.kwh["dev-1"]).toEqual([2.4, null, 2.4]);
   });
 
-  it("refuses two values for one day of one edge's channel with 502 METERING_INVALID_DATA", async () => {
+  it("counts today up to now: later hours are not counted, and the hour now holds counts when it has a value", async () => {
+    clearPilotEnv();
+    // 14:20 on 3 November: hours 00:00 to 13:00 have ended, 14:00 holds now.
+    vi.setSystemTime(Date.parse("2026-11-03T14:20:00+03:00"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) => {
+      if (date !== "2026-11-03") return 100;
+      if (hour < 14) return 100;
+      // What was counted so far this hour; a later hour the backend filled
+      // anyway is still not counted.
+      if (hour === 14) return 30;
+      return hour === 16 ? 9_999 : null;
+    }));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest({ endDate: "2026-11-04" }));
+
+    // 4 November has not started: null, not zero.
+    expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, 1.43, null]);
+  });
+
+  it("counts today up to the caller's clock when the request carries one, not the provider's", async () => {
+    clearPilotEnv();
+    // The system clock says 14:20, but the view was asked for at 12:20, so
+    // only 00:00 to 11:00 have ended and 12:00 holds the caller's now.
+    vi.setSystemTime(Date.parse("2026-11-03T14:20:00+03:00"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) =>
+      date === "2026-11-03" && hour === 12 ? 30 : 100
+    ));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest({
+      nowMs: Date.parse("2026-11-03T12:20:00+03:00"),
+    }));
+
+    expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, 1.23]);
+  });
+
+  it("does not count the hour now holds as missing before its first value arrives", async () => {
+    clearPilotEnv();
+    vi.setSystemTime(Date.parse("2026-11-03T14:01:00+03:00"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) =>
+      date === "2026-11-03" && hour >= 14 ? null : 100
+    ));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest());
+
+    expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, 1.4]);
+  });
+
+  it("still makes today null when an hour that has ended has no value", async () => {
+    clearPilotEnv();
+    vi.setSystemTime(Date.parse("2026-11-03T14:20:00+03:00"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) =>
+      date === "2026-11-03" && (hour === 13 || hour > 14) ? null : 100
+    ));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest());
+
+    expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, null]);
+  });
+
+  it("sums the 25 hours of a fall-back day", async () => {
+    clearPilotEnv();
+    const NEW_YORK = "America/New_York";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      hoursResponse(["2026-10-31", "2026-11-01", "2026-11-02"], () => 100, NEW_YORK)
+    );
+
+    const series = await provider().getDeviceEnergySeries(dayRequest({
+      timezone: NEW_YORK, startDate: "2026-11-01", endDate: "2026-11-01",
+    }));
+
+    expect(series.buckets.map(iso)).toEqual(["2026-11-01T04:00:00.000Z"]);
+    expect(series.kwh["dev-1"]).toEqual([2.5]);
+  });
+
+  it("refuses two values for one hour of one edge's channel with 502 METERING_INVALID_DATA", async () => {
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const midday = Date.parse("2026-11-01T12:00+03:00");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [
-        "2026-11-01T00:00+03:00[Africa/Kampala]",
-        "2026-11-01T12:00+03:00[Africa/Kampala]",
-      ],
+      timestamps: [midday, "2026-11-01T12:00+03:00[Africa/Kampala]"],
       data: { [METER0]: [1_200, 1_300] },
     }));
 
@@ -316,11 +463,12 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
       timestamps: [
-        K0,
-        (K0 + HOUR) / 1000,
-        String((K0 + 2 * HOUR) / 1000),
-        "2026-11-05T03:00+03:00[Africa/Kampala]",
-        new Date(K0 + 4 * HOUR).toISOString(),
+        S(0),
+        S(1) / 1000,
+        String(S(2) / 1000),
+        // The end of 03:00 to 04:00.
+        "2026-11-05T04:00+03:00[Africa/Kampala]",
+        new Date(S(4)).toISOString(),
       ],
       data: { [METER0]: [1, 2, 3, 4, 5] },
     }));
@@ -330,42 +478,30 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     expect(series.kwh["dev-1"].slice(0, 6)).toEqual([0.001, 0.002, 0.003, 0.004, 0.005, null]);
   });
 
-  it("reads the UTC instants the stock OpenEMS backend sends, hours and days alike", async () => {
+  it("reads the UTC instants the stock OpenEMS backend sends, each closing the hour before it", async () => {
     clearPilotEnv();
-    // 00:00 Kampala is 21:00 UTC the day before.
-    const hourStamps = Array.from({ length: 48 }, (_, i) =>
-      new Date(LEAD + i * HOUR).toISOString().replace(".000Z", "Z")
-    );
+    // 00:00 Kampala is 21:00 UTC the day before; the bucket stamped 21:00Z
+    // on the 4th closes 23:00 to 24:00 on the 4th, and 21:00Z on the 5th
+    // closes 23:00 to 24:00 on the 5th.
+    const hourStamps = RANGE.map((stamp) => new Date(stamp).toISOString().replace(".000Z", "Z"));
     expect(hourStamps[24]).toBe("2026-11-04T21:00:00Z");
+    expect(hourStamps[48]).toBe("2026-11-05T21:00:00Z");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
       timestamps: hourStamps,
-      data: { [METER0]: hourStamps.map((_, i) => (i < 24 ? 999 : dayWh(i - 24))) },
-    })).mockResolvedValueOnce(response({
-      timestamps: ["2026-10-30T21:00:00Z", "2026-10-31T21:00:00Z", "2026-11-01T21:00:00Z"],
-      data: { [METER0]: [5_000, 1_200, 3_400] },
+      data: { [METER0]: hourStamps.map((_, i) => (hourOfStamp(i) < 0 || hourOfStamp(i) > 23 ? 999 : dayWh(hourOfStamp(i)))) },
     }));
 
     const hours = await provider().getDeviceEnergySeries(seriesRequest());
-    const days = await provider().getDeviceEnergySeries(seriesRequest({
-      resolution: "day", startDate: "2026-11-01", endDate: "2026-11-03",
-    }));
 
     expect(hours.buckets[0]).toBe(K0);
     expect(hours.kwh["dev-1"]).toEqual(Array.from({ length: 24 }, (_, hour) => dayWh(hour) / 1000));
-    expect(days.buckets.map(iso)).toEqual([
-      "2026-10-31T21:00:00.000Z",
-      "2026-11-01T21:00:00.000Z",
-      "2026-11-02T21:00:00.000Z",
-    ]);
-    // The lead day (31 October) is dropped; 3 November had no bucket.
-    expect(days.kwh["dev-1"]).toEqual([1.2, 3.4, null]);
   });
 
   it("refuses timestamps with no zone or offset rather than read them in the server's zone", async () => {
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: ["2026-11-05T00:00:00", "2026-11-05T01:00", "2026-11-05", K0 + 3 * HOUR],
+      timestamps: ["2026-11-05T01:00:00", "2026-11-05T02:00", "2026-11-05", S(3)],
       data: { [METER0]: [1, 2, 3, 4] },
     }));
 
@@ -381,7 +517,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
   it("leaves a single naive timestamp's bucket null instead of shifting its value", async () => {
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [K0, "2026-11-05T01:00:00", K0 + 2 * HOUR],
+      timestamps: [S(0), "2026-11-05T02:00:00", S(2)],
       data: { [METER0]: [7, 8, 9] },
     }));
 
@@ -394,7 +530,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: ["first hour", "second hour", K0 + 2 * HOUR],
+      timestamps: ["first hour", "second hour", S(2)],
       data: { [METER0]: [1, 2, 3] },
     }));
 
@@ -414,7 +550,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
   it("still reads a response when exactly half its timestamps are unreadable", async () => {
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [K0, "not-a-date"],
+      timestamps: [S(0), "not-a-date"],
       data: { [METER0]: [7, 8] },
     }));
 
@@ -427,7 +563,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
   it("keeps a negative value (a counter reset) and a non-numeric one as null, never zero", async () => {
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
-      timestamps: [K0, K0 + HOUR, K0 + 2 * HOUR, K0 + 3 * HOUR, K0 + 4 * HOUR],
+      timestamps: [S(0), S(1), S(2), S(3), S(4)],
       data: { [METER0]: [-5, "n/a", null, 0, 40] },
     }));
 
@@ -441,9 +577,9 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       const rpc = sent(init);
       if (rpc.edgeId === "edge-a") {
-        return response({ timestamps: [K0], data: { [METER0]: [100], [METER1]: [200] } });
+        return response({ timestamps: [S(0)], data: { [METER0]: [100], [METER1]: [200] } });
       }
-      return response({ timestamps: [K0 + HOUR], data: { "meter3/ActiveConsumptionEnergy": [300] } });
+      return response({ timestamps: [S(1)], data: { "meter3/ActiveConsumptionEnergy": [300] } });
     });
 
     const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -480,7 +616,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       const rpc = sent(init);
       return response({
-        timestamps: [K0, K0 + HOUR],
+        timestamps: [S(0), S(1)],
         data: { [METER0]: rpc.edgeId === "edge-1" ? [100, 110] : [500, 550] },
       });
     });
@@ -500,8 +636,8 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       const rpc = sent(init);
       return rpc.edgeId === "edge-1"
-        ? response({ timestamps: [K0, K0], data: { [METER0]: [100, 100] } })
-        : response({ timestamps: [K0], data: { [METER0]: [500] } });
+        ? response({ timestamps: [S(0), S(0)], data: { [METER0]: [100, 100] } })
+        : response({ timestamps: [S(0)], data: { [METER0]: [500] } });
     });
 
     await expect(provider().getDeviceEnergySeries(seriesRequest({
@@ -512,7 +648,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
   it("requests a channel two devices share once, and gives each device its own array", async () => {
     clearPilotEnv();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      response({ timestamps: [K0], data: { [METER0]: [250] } })
+      response({ timestamps: [S(0)], data: { [METER0]: [250] } })
     );
 
     const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -566,7 +702,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: errors", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       const { channels } = sent(init).inner.params;
       if (channels.length > 1 || channels[0] === METER1) return missing();
-      return response({ timestamps: [K0, K0 + HOUR], data: { [channels[0]]: [10, 20] } });
+      return response({ timestamps: [S(0), S(1)], data: { [channels[0]]: [10, 20] } });
     });
 
     const series = await provider().getDeviceEnergySeries(seriesRequest({
@@ -577,6 +713,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: errors", () => {
     for (const [, init] of fetchSpy.mock.calls.slice(1)) {
       expect(sent(init).inner.params).toMatchObject({
         fromDate: "2026-11-04",
+        toDate: "2026-11-06",
         resolution: { value: 1, unit: "Hours" },
       });
     }
@@ -590,7 +727,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: errors", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
       const { channels } = sent(init).inner.params;
       if (channels.length > 1) return missing();
-      return response({ timestamps: [K0], data: { [channels[0]]: [1] } });
+      return response({ timestamps: [S(0)], data: { [channels[0]]: [1] } });
     });
 
     await provider().getDeviceEnergySeries(seriesRequest({
@@ -739,7 +876,7 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: errors", () => {
     process.env.MGM_OPENEMS_USERNAME = "readonly-user";
     process.env.MGM_OPENEMS_PASSWORD = "readonly-password";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      response({ timestamps: [K0], data: { [METER0]: [42] } })
+      response({ timestamps: [S(0)], data: { [METER0]: [42] } })
     );
 
     const series = await provider().getDeviceEnergySeries(seriesRequest({ microgridId: "pilot-microgrid" }));

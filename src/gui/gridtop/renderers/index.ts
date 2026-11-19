@@ -8,11 +8,13 @@
  * wrappers.
  */
 import type { GuiPlugin, ViewModel } from "@/lib/gui/contract";
+import { PeriodReviewRenderer } from "./period-review";
 import { SavingsRenderer } from "./savings";
 import { SiteDayRenderer } from "./site-day";
 import { UsageDayRenderer, UsageMonthRenderer } from "./tenant-usage";
 
 export const GRIDTOP_RENDERERS = {
+  "billing.period-review": { reads: [1], Component: PeriodReviewRenderer },
   "billing.savings": { reads: [1], Component: SavingsRenderer },
   "metering.site-day": { reads: [1], Component: SiteDayRenderer },
   "tenant.usage-month": { reads: [1], Component: UsageMonthRenderer },
@@ -24,8 +26,16 @@ export const GRIDTOP_RENDERERS = {
  * they draw the page's own view. The savings renderer is not one: on its own
  * page it leaves them, and the setup link, to the window bar
  * (./savings/savings-view.tsx); if it starts placing them, list it here.
+ * The period-review renderer places the period's actions and links in its
+ * own toolbar (./period-review/view.tsx), so the empty state can own
+ * Generate, which the window bar would draw a second time.
  */
-const PLACE_PAGE_CONTROLS: readonly (keyof typeof GRIDTOP_RENDERERS)[] = ["metering.site-day", "tenant.usage-month", "tenant.usage-day"];
+const PLACE_PAGE_CONTROLS: readonly (keyof typeof GRIDTOP_RENDERERS)[] = [
+  "billing.period-review",
+  "metering.site-day",
+  "tenant.usage-month",
+  "tenant.usage-day",
+];
 
 /**
  * Whether Gridtop draws the page's `model` with a renderer that places its

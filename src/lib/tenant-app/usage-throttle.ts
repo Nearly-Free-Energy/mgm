@@ -24,7 +24,7 @@ import { createRateLimiter } from "@/lib/rate-limit/in-memory";
 
 /** A read is served from memory, without asking the backend, for this long. */
 export const USAGE_FRESH_MS = 60_000;
-/** A read is kept this long only to answer a unit that is over its limit. */
+/** A read is kept this long only to answer a unit that is over its limit, or whose read failed. */
 export const USAGE_KEEP_MS = 15 * 60_000;
 /** Uncached backend reads one unit may cause per window, in one process. */
 export const USAGE_READS_PER_WINDOW = 6;
@@ -44,8 +44,12 @@ export type UsageReadOutcome<T, F = never> =
   | { from: "backend" | "cache" | "stale"; value: T; readAt: number }
   /** Over the limit, with no read kept. */
   | { from: "limited" }
-  /** The read failed, with the failure it gave, or threw (`failure` undefined). */
-  | { from: "failed"; failure: F | undefined };
+  /**
+   * The read failed, with the failure it gave, or threw (`failure`
+   * undefined); `kept` is the key's last read while it is younger than
+   * USAGE_KEEP_MS, for the caller to serve marked stale if it chooses.
+   */
+  | { from: "failed"; failure: F | undefined; kept: { value: T; readAt: number } | null };
 
 /**
  * One usage read for a unit, at most once per USAGE_FRESH_MS per key, and at
@@ -60,11 +64,13 @@ export type UsageReadOutcome<T, F = never> =
  * figure read before then is still served, for up to USAGE_FRESH_MS, or up
  * to USAGE_KEEP_MS marked stale while the unit is over its limit. A failed
  * read is counted against the limit and never cached, whatever its failure;
- * the failure is passed back as it is.
+ * the failure is passed back as it is, with the kept entry, if any, which
+ * the caller may serve marked stale (the capability does so only for a
+ * failure another try may clear, never for metering turned off).
  *
  * Order: a fresh entry → "cache"; over the limit → a kept entry (younger
  * than USAGE_KEEP_MS) as "stale", else "limited"; otherwise read → "backend"
- * (stored) or "failed".
+ * (stored) or "failed" (with the kept entry).
  */
 export async function readThrottled<T, F = never>(
   tenantId: string,
@@ -93,7 +99,13 @@ export async function readThrottled<T, F = never>(
   } catch {
     result = { ok: false };
   }
-  if (!result.ok) return { from: "failed", failure: result.failure };
+  if (!result.ok) {
+    return {
+      from: "failed",
+      failure: result.failure,
+      kept: entry ? { value: entry.value as T, readAt: entry.readAt } : null,
+    };
+  }
 
   cache.delete(cacheKey);
   cache.set(cacheKey, { value: result.value, readAt: nowMs });

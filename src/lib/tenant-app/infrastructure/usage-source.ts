@@ -28,7 +28,7 @@
  * So no microgrid, edge or device id is ever taken from a request (query,
  * path or body): the microgrid is the unit's, which authorizeTenant read, and
  * the devices are those the tenant's own client returned. Only consumption
- * meters are read (TENANT_USAGE_DEVICE_TYPE): a device of another type that
+ * meters are read (USAGE_DEVICE_TYPE): a device of another type that
  * reaches readSeries has no row, so it reads as no data, never as a figure.
  * No service client is created for the metering provider before the
  * metering gate passes, or when no device is readable. The primary-links
@@ -57,7 +57,7 @@ import { checkGate, type GateDecision } from "@/lib/runtime/gate";
 import type { MeteringProviderFactories } from "@/lib/runtime/services";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
 import {
-  TENANT_USAGE_DEVICE_TYPE,
+  USAGE_DEVICE_TYPE,
   type PrimaryElsewhereSpan,
   type TenantUnit,
   type TenantUsageSeriesRequest,
@@ -125,6 +125,9 @@ export function createTenantUsageSource(options: {
           plugin: METERING_PLUGIN_NAME,
           target: { kind: "organization", id: unit.organizationId },
           method: "GET",
+          // A read, asked as a write: a call to the plugin's external
+          // integration is a write to the gate (GateRequest.access in
+          // @/lib/runtime/gate), which passes every read undecided.
           access: "write",
         });
       } catch (error) {
@@ -147,7 +150,7 @@ export function createTenantUsageSource(options: {
           .from("devices")
           .select("id, edge_id, openems_component_id")
           .in("id", request.deviceIds)
-          .eq("device_type", TENANT_USAGE_DEVICE_TYPE);
+          .eq("device_type", USAGE_DEVICE_TYPE);
         if (devices.error) throw new UsageReadError("devices", devices.error.code);
         const deviceRows = ((devices.data ?? []) as DeviceRow[]).filter(
           (row) => request.deviceIds.includes(row.id) && row.edge_id && row.openems_component_id
@@ -197,6 +200,7 @@ export function createTenantUsageSource(options: {
           endDate: request.endDate,
           resolution: request.resolution,
           timezone: request.timezone,
+          nowMs: request.nowMs,
         });
         for (const id of request.deviceIds) {
           const values = Object.hasOwn(series.kwh, id) && configs.some((config) => config.id === id)

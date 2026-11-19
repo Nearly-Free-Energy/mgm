@@ -170,6 +170,9 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   references `tenants` with `ON DELETE CASCADE`.
 - Tenants read no microgrid, edge, community or organization row. The few
   microgrid fields their pages need come from `fn_tenant_home`. Their use is
+  their unit's primary consumption meter alone, on its link's days, as billing
+  bills it: a secondary link, a grid meter or a battery never shows in it
+  (`USAGE_METER_ROLE` in `src/lib/tenant-app/types.ts`). It is
   read by the server: after `composeTenantApp` has authorized the unit, the
   tenant app's usage source reads their meters' edges and the microgrid's
   OpenEMS connection on the service role

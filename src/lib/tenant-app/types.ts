@@ -50,48 +50,30 @@ export type TenantAppScope = {
 };
 
 /**
- * The meter roles that measure what a tenant uses, as billing and the
- * metering capability's house meters count them.
- *
- * They are also the link roles whose meters count as the unit's use (RFC
- * mgm#197 § 5, with the rules decided on #210 on 19 November):
- *
- *   - A unit's use on a day is the sum of its links in these roles in force
- *     that day whose device is a `consumption_meter`
- *     (TENANT_USAGE_DEVICE_TYPE). A grid meter, battery, PV meter or
- *     inverter linked to the unit never counts, in either role.
- *   - A `secondary_meter` link does not count on the days its device is
- *     another unit's `primary_consumption_meter` (withoutPrimaryElsewhere in
- *     usage-calendar.ts); on the other days it counts. usage.test.ts pins
- *     both: "does not count a secondary meter on days it is another unit's
- *     primary" and "counts a secondary meter on days it is nobody's primary".
- *   - A device may be linked to several tenants at once (00001_schema.sql
- *     chose the link table's key so that a device can serve several units;
- *     the overlap trigger and exclusion constraint guard only one tenant's
- *     primary links). A meter that is two units' primary on the same day, or
- *     two units' secondary, still counts for each of them, each only on its
- *     own link's days: the 19 November rules do not cover those cases. If a
- *     rule for them is decided, it goes into withoutPrimaryElsewhere and
- *     this comment.
- *
- * Billing counts the primary meter alone (billing/generate.ts), so the usage
- * total can differ from the billed kWh. The link is the boundary: a tenant
- * is shown the meters a manager linked to their unit, as RLS already shows
- * them the device rows. If a meter may ever be linked to a unit without its
- * use being the unit's (a shared common-area meter, say), give that link its
- * own role and leave it out of this list.
+ * The meter roles the tenant home lists (listMetersInForce), for consumption
+ * meters only (USAGE_DEVICE_TYPE), as billing and the metering capability's
+ * house meters count them. Only the first is ever the unit's use: see
+ * USAGE_METER_ROLE.
  */
 export const TENANT_METER_ROLES = ["primary_consumption_meter", "secondary_meter"] as const;
 export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
 
 /**
- * The only device type whose use is a tenant's (decided on #210, 19
- * November): a grid meter, battery, PV meter or inverter linked to a unit is
- * never shown as its use, whatever the link's role. If a second device type
- * ever measures a unit's own consumption, add it here and to the DB test that
- * pins this rule (__tests__/usage.db.test.ts).
+ * The only link role and device type whose meter is the unit's use (RFC
+ * mgm#197 § 5, as decided on mgm#210 on 19 November 2026: a tenant sees
+ * only their own use). That is the unit's primary consumption meter, the
+ * meter billing bills the unit for (billing/generate.ts). So a secondary
+ * link, which may be to another unit's primary meter, never counts, and
+ * neither does a grid meter, a battery or any other device, whatever role
+ * links it. listMeterAssignments reads only these links, so the capability
+ * and the usage source never see another meter. The overlap trigger and
+ * exclusion constraint keep one unit to one primary link a day, but a device
+ * may still be two units' primary at once; each then sees its whole use, as
+ * billing bills each. If billing ever bills another role or device type,
+ * revisit this with it.
  */
-export const TENANT_USAGE_DEVICE_TYPE = "consumption_meter" as const satisfies DeviceType;
+export const USAGE_METER_ROLE = "primary_consumption_meter" satisfies TenantMeterRole;
+export const USAGE_DEVICE_TYPE = "consumption_meter" satisfies DeviceType;
 
 /** A meter assigned to the tenant, with the assignment's half-open dates. */
 export type TenantMeter = {
@@ -109,11 +91,7 @@ export type TenantMeter = {
 export type TenantHome = {
   tenant: { id: string; displayName: string; unitLabel: string | null };
   microgrid: { name: string; timezone: string; currency: string };
-  /**
-   * Today in `microgrid.timezone`; `meters` are the unit's consumption meters
-   * in force on it, less a secondary meter that is another unit's primary
-   * today (TENANT_METER_ROLES).
-   */
+  /** Today in `microgrid.timezone`; `meters` are the ones in force on it. */
   date: string;
   meters: TenantMeter[];
 };
@@ -150,7 +128,7 @@ export type TenantUsageProblem = "unavailable" | "limited" | "not-offered";
 export type TenantUsageReadInfo = {
   /** When the metering source was read, epoch ms; null when nothing was read. */
   readAt: number | null;
-  /** The figures are an earlier read, served because the unit is over its limit. */
+  /** The figures are an earlier read, served because the unit is over its limit or this read failed. */
   stale: boolean;
   /** Generated, not measured (the synthetic provider). */
   synthetic: boolean;
@@ -159,12 +137,14 @@ export type TenantUsageReadInfo = {
 
 export type TenantUsageTotal = {
   /**
-   * The sum of the `data` and `partial` figures. Null ("No data") when any
-   * bucket with a meter in force is `no-data`, when no bucket has a figure,
-   * or on a problem: never a lower number (RFC mgm#197 § 5).
+   * The sum of the `data` and `partial` figures. When some buckets with a
+   * meter in force are `no-data`, it is the sum of the others, shown with
+   * `withoutData` beside it ("312.4 kWh · 2 days missing", as decided on
+   * mgm#210), never as the whole period's use. Null ("No data") when no
+   * bucket has a figure, or on a problem.
    */
   kwh: number | null;
-  /** Buckets with a meter in force and no figure (`no-data`); the reason `kwh` is null. */
+  /** Buckets with a meter in force and no figure (`no-data`): what `kwh` leaves out. */
   withoutData: number;
 };
 
@@ -212,6 +192,12 @@ export type TenantUsageSeriesRequest = {
   endDate: string;
   resolution: "day" | "hour";
   timezone: string;
+  /**
+   * The capability's clock when the view was asked for, epoch ms. A day the
+   * source sums from hours counts only the hours ended by then, so the
+   * figure and the view's own "today" and partial day agree.
+   */
+  nowMs: number;
 };
 
 export type TenantUsageSeries = {
@@ -237,10 +223,9 @@ export type PrimaryElsewhereSpan = {
 
 /**
  * The unit's meters' energy per local day or hour, from the metering
- * provider of the unit's microgrid, and the days on which the unit's
- * secondary meters are another unit's primary. Built by TenantAppPlugin
+ * provider of the unit's microgrid. Built by TenantAppPlugin
  * (infrastructure/usage-source.ts); the capability never sees a client, a
- * provider, a vendor id or another unit.
+ * provider or a vendor id.
  */
 export interface TenantUsageSource {
   readSeries(request: TenantUsageSeriesRequest): Promise<TenantUsageSeriesResult>;
@@ -260,16 +245,15 @@ export interface TenantUsageSource {
 /** The tenant app's reads, through the tenant's own client. */
 export interface TenantAppRepository {
   /**
-   * The tenant's consumption meters (TENANT_USAGE_DEVICE_TYPE) in force on
-   * `date`, read through the caller's own row-level access. Rejects when the
-   * read fails.
+   * The tenant's consumption meters in force on `date`, read through the
+   * caller's own row-level access. Rejects when the read fails.
    */
   listMetersInForce(tenantId: string, date: string): Promise<TenantMeter[]>;
   /**
-   * The tenant's consumption meter links (TENANT_USAGE_DEVICE_TYPE devices
-   * only) that cover any day from `fromDate`
-   * up to, not including, `toDate` (half-open, as billing reads them),
-   * through the caller's own row-level access. Rejects when the read fails.
+   * The tenant's usage meter links (USAGE_METER_ROLE to a device of
+   * USAGE_DEVICE_TYPE) that cover any day from `fromDate` up to, not
+   * including, `toDate` (half-open, as billing reads them), through the
+   * caller's own row-level access. Rejects when the read fails.
    */
   listMeterAssignments(tenantId: string, fromDate: string, toDate: string): Promise<TenantMeter[]>;
 }

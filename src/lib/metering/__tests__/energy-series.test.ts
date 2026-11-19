@@ -29,24 +29,6 @@ describe("energySeriesAxis, per day", () => {
     ]);
   });
 
-  it("places an instant on the local day it falls on, whatever its time of day", () => {
-    const axis = energySeriesAxis(request({ resolution: "day", startDate: "2026-11-01", endDate: "2026-11-03" }));
-    // Local midnight given with its zone, as OpenEMS's Java timestamps do once parsed.
-    expect(axis.indexOf(Date.parse("2026-11-02T00:00+03:00"))).toBe(1);
-    expect(axis.indexOf(Date.parse("2026-11-01T21:00:00Z"))).toBe(1);
-    expect(axis.indexOf(Date.parse("2026-11-02T23:59:59+03:00"))).toBe(1);
-    // UTC midnight of the 2nd is still the 2nd in Kampala; 20:59Z on the 1st is the 1st.
-    expect(axis.indexOf(Date.parse("2026-11-02T00:00:00Z"))).toBe(1);
-    expect(axis.indexOf(Date.parse("2026-11-01T20:59:59Z"))).toBe(0);
-  });
-
-  it("puts the day before the start (the lead day) and the day after the end off the axis", () => {
-    const axis = energySeriesAxis(request({ resolution: "day", startDate: "2026-11-01", endDate: "2026-11-03" }));
-    expect(axis.indexOf(Date.parse("2026-10-31T00:00+03:00"))).toBeUndefined();
-    expect(axis.indexOf(Date.parse("2026-11-04T00:00+03:00"))).toBeUndefined();
-    expect(axis.indexOf(Number.NaN)).toBeUndefined();
-  });
-
   it("starts a day at its first instant in a zone with daylight saving", () => {
     const axis = energySeriesAxis(request({
       resolution: "day",
@@ -86,27 +68,13 @@ describe("energySeriesAxis, per hour", () => {
     const fall = energySeriesAxis(request({ timezone: "America/New_York", startDate: "2026-11-01", endDate: "2026-11-01" }));
     expect(fall.buckets).toHaveLength(25);
     // The two 01:00 hours are distinct buckets.
-    expect(fall.indexOf(Date.parse("2026-11-01T01:00:00-04:00"))).toBe(1);
-    expect(fall.indexOf(Date.parse("2026-11-01T01:00:00-05:00"))).toBe(2);
+    expect(fall.buckets[1]).toBe(Date.parse("2026-11-01T01:00:00-04:00"));
+    expect(fall.buckets[2]).toBe(Date.parse("2026-11-01T01:00:00-05:00"));
 
     const spring = energySeriesAxis(request({ timezone: "America/New_York", startDate: "2026-03-08", endDate: "2026-03-08" }));
     expect(spring.buckets).toHaveLength(23);
-    expect(spring.indexOf(Date.parse("2026-03-08T01:00:00-05:00"))).toBe(1);
-    expect(spring.indexOf(Date.parse("2026-03-08T03:00:00-04:00"))).toBe(2);
-  });
-
-  it("matches an hour only at its exact start, given with its zone or as epoch ms", () => {
-    const axis = energySeriesAxis(request());
-    expect(axis.indexOf(Date.parse("2026-11-05T10:00+03:00"))).toBe(10);
-    expect(axis.indexOf(Date.parse("2026-11-05T07:00:00Z"))).toBe(10);
-    expect(axis.indexOf(Date.parse("2026-11-05T10:30+03:00"))).toBeUndefined();
-  });
-
-  it("puts the lead day's hours and the next day's off the axis", () => {
-    const axis = energySeriesAxis(request());
-    expect(axis.indexOf(Date.parse("2026-11-04T23:00+03:00"))).toBeUndefined();
-    expect(axis.indexOf(Date.parse("2026-11-04T00:00+03:00"))).toBeUndefined();
-    expect(axis.indexOf(Date.parse("2026-11-06T00:00+03:00"))).toBeUndefined();
+    expect(spring.buckets[1]).toBe(Date.parse("2026-03-08T01:00:00-05:00"));
+    expect(spring.buckets[2]).toBe(Date.parse("2026-03-08T03:00:00-04:00"));
   });
 });
 

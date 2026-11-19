@@ -18,7 +18,8 @@
  *   (j) Log record has notes_present bool, NOT raw notes text
  *   (k) 401 session_expired when actor null on paid transition
  *   (l) 403 super_admin_required when org_manager attempts 'failed'
- *   (m) 200 paid → refunded (super_admin only)
+ *   (m) 200 paid → refunded (super_admin only), with the tenant's name typed
+ *   (n) 428 a refund without the tenant's name typed, or with another
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -462,13 +463,118 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     };
 
     const { PATCH } = await import("../route");
-    const res = await PATCH(makeReq({ status: "refunded" }), {
-      params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
-    });
+    // As the GUI host sends it for billing.mark-refunded: the prepared name, typed.
+    const res = await PATCH(
+      makeReq({ status: "refunded", confirmation: { acknowledged: [], typed: "Alice Mukasa" } }),
+      { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) },
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.line_item.payment_status).toBe("refunded");
     expect(mockRpc.mock.calls[0][1]._to_status).toBe("refunded");
+  });
+
+  it("(m2) 200 paid→refunded compares the typed name trimmed on both sides", async () => {
+    scopeResponse = {
+      data: { ...makeScopeRow("paid"), tenants: [{ display_name: " Alice Mukasa  " }] },
+      error: null,
+    };
+    rpcResponse = { data: makeUpdatedRow("refunded"), error: null };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(
+      makeReq({ status: "refunded", confirmation: { acknowledged: [], typed: "  Alice Mukasa " } }),
+      { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) },
+    );
+    expect(res.status).toBe(200);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("(m3) 200 paid→refunded for a tenant whose name is over 200 characters", async () => {
+    // tenants.display_name has no length limit, so neither has the typed name.
+    const name = "Alice Mukasa ".repeat(20).trim();
+    expect(name.length).toBeGreaterThan(200);
+    scopeResponse = { data: { ...makeScopeRow("paid"), tenants: [{ display_name: name }] }, error: null };
+    rpcResponse = { data: makeUpdatedRow("refunded"), error: null };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makeReq({ status: "refunded", confirmation: { acknowledged: [], typed: name } }), {
+      params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
+  describe("(n) 428: a refund needs the tenant's name typed", () => {
+    const REQUIRED = "A refund needs the tenant's name typed: use Mark as refunded.";
+    it.each([
+      ["no confirmation", {}, "refund_name_required", REQUIRED],
+      ["a confirmation with no name", { confirmation: { acknowledged: [] } }, "refund_name_required", REQUIRED],
+      ["a blank name", { confirmation: { acknowledged: [], typed: "   " } }, "refund_name_required", REQUIRED],
+      ["another name", { confirmation: { acknowledged: [], typed: "Bob Okello" } }, "refund_name_mismatch", "The name typed does not match this bill's tenant."],
+      ["the name in another case", { confirmation: { acknowledged: [], typed: "alice mukasa" } }, "refund_name_mismatch", "The name typed does not match this bill's tenant."],
+    ])("refuses %s, and writes nothing", async (_label, extra, reason, error) => {
+      scopeResponse = { data: makeScopeRow("paid"), error: null };
+
+      const { PATCH } = await import("../route");
+      const res = await PATCH(makeReq({ status: "refunded", notes: "receipt 42", ...extra }), {
+        params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
+      });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({ error, reason });
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+
+    it("refuses a refund of a bill whose tenant's name cannot be read", async () => {
+      scopeResponse = { data: { ...makeScopeRow("paid"), tenants: { display_name: "" } }, error: null };
+
+      const { PATCH } = await import("../route");
+      const res = await PATCH(makeReq({ status: "refunded", confirmation: { acknowledged: [], typed: "Alice Mukasa" } }), {
+        params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
+      });
+      expect(res.status).toBe(428);
+      expect((await res.json()).reason).toBe("refund_name_mismatch");
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+
+    it("refuses Mark as unpaid's form switched to refunded, which sends no confirmation", async () => {
+      // billing.mark-unpaid is a confirm-level action, so the host sends no
+      // confirmation (sendsConfirmation in src/lib/gui/host/client/invoke.ts).
+      scopeResponse = { data: makeScopeRow("paid"), error: null };
+
+      const { PATCH } = await import("../route");
+      const res = await PATCH(makeReq({ status: "refunded" }), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(428);
+      // That step had no name field, so the refusal points to the one that has.
+      expect(await res.json()).toEqual({ error: REQUIRED, reason: "refund_name_required" });
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+
+    it("answers an organization manager's refund 403 before asking for a name", async () => {
+      isSuperAdminReturn = false;
+      scopeResponse = { data: makeScopeRow("paid"), error: null };
+
+      const { PATCH } = await import("../route");
+      const res = await PATCH(makeReq({ status: "refunded" }), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+      expect(res.status).toBe(403);
+      expect((await res.json()).reason).toBe("super_admin_required");
+    });
+
+    it.each([
+      ["paid", "unpaid"],
+      ["unpaid", "paid"],
+      ["link_generated", "failed"],
+    ])("asks no name of %s → %s, with or without a confirmation", async (from, to) => {
+      for (const extra of [{}, { confirmation: { acknowledged: [], typed: "Bob Okello" } }]) {
+        vi.clearAllMocks();
+        scopeResponse = { data: makeScopeRow(from), error: null };
+        rpcResponse = { data: makeUpdatedRow(to), error: null };
+        const { PATCH } = await import("../route");
+        const res = await PATCH(makeReq({ status: to, ...extra }), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+        expect(res.status).toBe(200);
+        expect(mockRpc).toHaveBeenCalledTimes(1);
+      }
+    });
   });
 
   it("RPC error: surfaces invalid_transition from DB as 400", async () => {

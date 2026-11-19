@@ -1,5 +1,11 @@
 /**
- * period-delete.ts — client copy for deleting a billing period.
+ * period-delete.ts — the copy for deleting a billing period, shared by the
+ * legacy clients (which delete through PostgREST) and, on the server, by
+ * BillingCapability.deletePeriod behind DELETE /api/billing-periods/[periodId]
+ * and the `billing.delete-period` prepare step (./surface/periods.ts). The
+ * capability also refuses a period that imported pilot data
+ * (pilot_import_batches.billing_period_id, SQLSTATE 23503), which no message
+ * here covers.
  *
  * Only draft periods with no payment activity can be deleted. The database
  * enforces that with a BEFORE DELETE trigger on billing_periods

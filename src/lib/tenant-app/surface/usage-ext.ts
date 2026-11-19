@@ -42,9 +42,9 @@ const total = (buckets: number) =>
     kwh,
     /** The total as the rows' footer prints it, with the rows' decimals: "54.3 kWh", "1.24 kWh", or "No data". */
     text: label(32),
-    /** "So far", "No data for 2 days", or "". */
+    /** "So far", "2 days missing", "So far · 2 days missing", "No data for 2 days", or "". */
     note: label(40),
-    /** Buckets with a meter in force and no figure: why `kwh` is null. */
+    /** Buckets with a meter in force and no figure: what `kwh` leaves out, or all of them when it is null. */
     withoutData: z.number().int().min(0).max(buckets),
   });
 /** A bucket's note as the rows print it, or null; one cap for the day and hour notes. */

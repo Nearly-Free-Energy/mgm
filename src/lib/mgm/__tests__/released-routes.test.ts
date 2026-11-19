@@ -70,6 +70,7 @@ describe("isReleasedRoute", () => {
     "/api/billing-line-items/abc/payment-status",
     "/api/billing-line-items/abc/pdf",
     "/api/billing-line-items/abc/usage",
+    "/api/billing-line-items/abc/regenerate",
     "/api/communities/abc/invoice-config",
     "/api/communities/abc/invoice-preview",
     "/api/communities/abc/invoice-logo",

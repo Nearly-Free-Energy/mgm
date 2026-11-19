@@ -7,12 +7,13 @@
  * composeTenantApp and the usage source, which reads the edges and builds
  * the provider on the service role.
  *
- * One meter M moves from unit A to unit B on 15 September 2026. Unit A is
- * also linked (with the service role, which no app path would do:
- * fn_create_tenant refuses a meter of another microgrid) to a meter X on an
- * edge of another microgrid of the same organization. A's own client reads
- * X's device row, but the usage source reads edges only of A's microgrid,
- * so X is never sent to a provider and every day X is in force has no data.
+ * One meter M moves from unit A to unit B on 15 September 2026. From then,
+ * unit A's primary meter is a meter X on an edge of another microgrid of the
+ * same organization (linked with the service role, which no app path would
+ * do: fn_create_tenant refuses a meter of another microgrid). A's own client
+ * reads X's device row, but the usage source reads edges only of A's
+ * microgrid, so X is never sent to a provider and every day X is in force
+ * has no data.
  * The capability's own database test (src/lib/tenant-app/__tests__/usage.db.test.ts)
  * checks the same facts below the host; this one checks them as the page
  * receives them, and that staff and another unit's tenant get nothing.
@@ -119,7 +120,7 @@ beforeAll(async () => {
     ["tenants", { id: UNIT_B, microgrid_id: MICROGRID, display_name: "Unit B", primary_phone: "+256700000002" }],
     ["tenant_devices", { tenant_id: UNIT_A, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: "2026-09-15" }],
     ["tenant_devices", { tenant_id: UNIT_B, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
-    ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "secondary_meter", effective_from: "2026-09-01", effective_to: null }],
+    ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
     // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts).
     ["mgm_plugins", { org_id: ORG, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }],
   ];
@@ -208,9 +209,15 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a tenant's use", () => {
     const { status, body } = await view(tenantA, "/my/usage?month=2026-09");
     expect(status).toBe(200);
     const rows = body.body.rows as Row[];
-    // M has figures on the 1st to the 14th, but X is in force too and has none.
-    expect(rows.map((r) => [r.id, r.cells.usage.text, r.cells.note?.text ?? null])).toEqual(september.map((d) => [d, "No data", null]));
-    expect(body.body.totals).toEqual({ usage: { t: "text", text: "No data" }, note: { t: "text", text: "No data for 30 days" } });
+    // M's figures to the 14th, then X's days, which have none; the total
+    // is M's days, with X's left out and said so.
+    close(rows.slice(0, 14).map(shown), generated("2026-09-01", "2026-09-14", "day").map(expected));
+    expect(rows.slice(14).map((r) => [r.id, r.cells.usage.text, r.cells.note?.text ?? null])).toEqual(
+      september.slice(14).map((d) => [d, "No data", null])
+    );
+    const missing = 16 + generated("2026-09-01", "2026-09-14", "day").filter((v) => v === null).length;
+    expect(body.body.totals.note).toEqual({ t: "text", text: `${missing} days missing` });
+    expect(body.body.totals.usage).toMatchObject({ t: "energy", synthetic: true });
     expect(body.ext.data.problem).toBeNull();
     expect(energySeries).toHaveBeenCalledTimes(1);
     const [asked] = energySeries.mock.calls[0];
