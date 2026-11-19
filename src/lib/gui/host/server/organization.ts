@@ -7,7 +7,7 @@ import "server-only";
  * getUser()-backed check. The choice is for display: whichever organization
  * it names, pages and routes still check access themselves.
  */
-import { rolesCanAccessOrg } from "@/lib/auth/access";
+import { rolesCanAccessOrg, rolesIncludeStaff } from "@/lib/auth/access";
 import { UUID_RE } from "@/lib/plugins/state";
 import { requireIssued, type HostContext } from "./access";
 
@@ -22,9 +22,16 @@ export type OrganizationHints = {
   preferred?: string | null;
 };
 
-/** The organizations row-level security shows the caller and their roles reach, by name. */
+/**
+ * The organizations row-level security shows the caller and their roles
+ * reach, by name. None, with nothing read, for a person with no staff row:
+ * tenant rows (RFC mgm#197) reach a unit, never an organization, so a
+ * tenant-only person sees no organization and every caller that picks one
+ * (selectOrganization) gets none, which the host's routes answer with 403.
+ */
 export async function visibleOrganizations(ctx: HostContext): Promise<VisibleOrganization[]> {
   requireIssued(ctx);
+  if (!rolesIncludeStaff(ctx.access.roles)) return [];
   const supabase = await ctx.newClient();
   const { data, error } = await supabase.from("organizations").select("id, name").order("name");
   if (error) throw new Error("GUI host: organizations could not be read");

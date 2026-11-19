@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BILLING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
-import "@/lib/runtime/services";
+import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { BillingCapability } from "./capability";
 import { createSupabaseBillingRepository } from "./infrastructure/supabase-repository";
 import { isRunGenerationFatal, runGenerationFor } from "./generate";
@@ -48,6 +48,7 @@ export const BillingPlugin = {
   inject: ["mgmRequest", "meteringProviders"],
   apply(ctx: Context, config: BillingPluginConfig) {
     const request = ctx.mgmRequest;
+    requireOrganizationAudience(request, "Billing");
     if (!request.userId) throw new Error("Billing requires an authenticated user");
     const scope: BillingScope = {
       organizationId: request.organizationId,

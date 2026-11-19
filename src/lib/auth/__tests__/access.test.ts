@@ -23,9 +23,12 @@ import {
   currentUserCanAccessCommunity,
   currentUserCanAccessMicrogrid,
   readMicrogridOrgId,
+  rolesAreTenantOnly,
   rolesCanAccessMicrogrid,
   rolesCanAccessOrg,
+  rolesIncludeStaff,
   rolesIncludeSuperAdmin,
+  staffRoles,
 } from "../access";
 import type { UserRoleRecord } from "@/lib/types/domain";
 
@@ -465,6 +468,32 @@ describe("role-row predicates", () => {
     expect(rolesCanAccessOrg([row("org_manager", "org-a")], "org-a")).toBe(true);
     expect(rolesCanAccessOrg([row("org_manager", "org-a")], "org-b")).toBe(false);
     expect(rolesCanAccessOrg([], "org-a")).toBe(false);
+  });
+
+  // RFC mgm#197: a tenant row is a person's own unit, never staff access.
+  const tenant = (unit: string) => ({ user_id: "u1", role: "tenant", scope_type: "tenant", scope_id: unit }) as UserRoleRecord;
+
+  it("staffRoles keeps every row whose role is not tenant", () => {
+    const ems = { user_id: "u1", role: "ems_operator", scope_type: "microgrid", scope_id: "mg-1" } as UserRoleRecord;
+    const rows = [tenant("unit-1"), row("org_manager", "org-a"), tenant("unit-2"), row("super_admin", null), ems];
+    expect(staffRoles(rows)).toEqual([row("org_manager", "org-a"), row("super_admin", null), ems]);
+    expect(staffRoles([tenant("unit-1")])).toEqual([]);
+  });
+
+  it("rolesIncludeStaff and rolesAreTenantOnly", () => {
+    expect(rolesIncludeStaff([tenant("unit-1"), row("org_manager", "org-a")])).toBe(true);
+    expect(rolesIncludeStaff([tenant("unit-1"), tenant("unit-2")])).toBe(false);
+    expect(rolesIncludeStaff([])).toBe(false);
+    expect(rolesAreTenantOnly([tenant("unit-1"), tenant("unit-2")])).toBe(true);
+    expect(rolesAreTenantOnly([tenant("unit-1"), row("super_admin", null)])).toBe(false);
+    // No row at all is no access, not a tenant.
+    expect(rolesAreTenantOnly([])).toBe(false);
+  });
+
+  it("a tenant row reaches no organization or microgrid, even its own unit's", () => {
+    expect(rolesIncludeSuperAdmin([tenant("unit-1")])).toBe(false);
+    expect(rolesCanAccessOrg([tenant("org-a")], "org-a")).toBe(false);
+    expect(rolesCanAccessMicrogrid([tenant("unit-1")], "org-a")).toBe(false);
   });
 
   it("rolesCanAccessMicrogrid", () => {

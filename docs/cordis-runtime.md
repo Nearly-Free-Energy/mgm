@@ -15,7 +15,7 @@ loads the platform plugins into it:
 | `mgm-gate` | `mgmGate` — organization resolution + per-org plugin enablement | `mgmCatalog` |
 | `mgm-surface` | `mgmSurface` — capability GUI contributions and installed GUI metadata, checked when they register (`src/lib/gui/host/server/surface-registry.ts`) | `mgmCatalog` |
 | `<gui name>` | installs a compiled-in GUI's metadata (`src/gui/meta.ts`, `guiInstallPlugin`) | `mgmSurface` |
-| `<capability>-surface` | contributes a capability's GUI navigation, and later its views and actions (`src/lib/<capability>/surface-plugin.ts`, contributing `src/lib/<capability>/surface.ts`), one plugin each for `organization-directory`, `community-management`, `metering`, `billing` and `payments` | `mgmSurface` |
+| `<capability>-surface` | contributes a capability's GUI navigation, and later its views and actions (`src/lib/<capability>/surface-plugin.ts`, contributing `src/lib/<capability>/surface.ts`), one plugin each for `organization-directory`, `community-management`, `metering`, `billing`, `payments` and `tenant-app` | `mgmSurface` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
 | `fixture-metering` | registers the `synthetic` factory, only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |
@@ -23,7 +23,7 @@ loads the platform plugins into it:
 | `pesapal` | registers the `pesapal` factory | `paymentProviders` |
 | `mail-transports` | `mailTransports` — registry of mail transport factories, keyed by the settings' kind (RFC #186) | — |
 | `smtp` | registers the `smtp` factory (`src/lib/email/smtp/`) | `mailTransports` |
-| `community-management`, `metering`, `billing`, `billing-review`, `payments` | capability *plugins* (loaded per request, see below) | `mgmRequest` + the platform services they need |
+| `community-management`, `metering`, `billing`, `billing-review`, `payments`, `tenant-app` | capability *plugins* (loaded per request, see below) | `mgmRequest` + the platform services they need |
 
 Platform plugins hold no request data, credentials, or database clients.
 A mail transport is built for one send from settings its caller has already
@@ -53,10 +53,19 @@ route refuses those ids (400). Only that route refuses them, not the
 database (`docs/setup.md` § "Synthetic site data").
 
 **Request (one per API call).** Authenticated composers call
-`authorizeOrganization()` to authenticate and check organization access.
-`openOrganizationScope()` is a low-level constructor accepting an already
-authorized request; it does not authenticate or authorize. Public payment
-callers establish their separate bearer-token/notification verification boundary.
+`authorizeOrganization()` to authenticate and check organization access,
+except the tenant app's, which calls `authorizeTenant()` (see "The tenant
+app" below). `openOrganizationScope()` is a low-level constructor accepting
+an already authorized request; it does not authenticate or authorize. The
+capability plugins take its `organizationId` and `roles` as organization
+access their composer authorized, except billing-review, whose composer
+passes no roles and whose plugin reads only through RLS, and the tenant
+app's scope, which carries no organization access (below). The request's
+`audience` says which: `"organization"` unless the composer opens the scope
+with `{ audience: "tenant" }`, as only `composeTenantApp` does, and a request
+object already carrying another audience is refused rather than relabelled.
+Public payment callers establish their separate bearer-token/notification
+verification boundary.
 It creates an *isolated* child context of the root. Isolation gives the request its own `mgmRequest`, capability and
 registry slots, so concurrent requests on one warm instance never share a
 capability. The request scope plugin provides `mgmRequest`; capability plugins
@@ -76,21 +85,28 @@ its composer does not:
 | `composePayments` | yes | new checkouts only, in the Payments capability (see "Payments" below) |
 | `composePaymentsPublic` | no — no user session; see below | new checkouts only, in the Payments capability |
 | `composeBillingReview` | no | no |
+| `composeTenantApp` | yes, as the unit's tenant, not as staff (`authorizeTenant`) | yes, reads included: `409`, or `503` when plugin state cannot be read |
 
-The three composers that refuse a disabled plugin check access first, so a
-caller without it gets `401`/`403` and learns nothing about the plugin. They
-then read plugin state with `isPluginEnabledForOrg`, the read the gate makes,
+Staff, here and below, is not a role: it means holding a `user_roles` row
+whose role is not `tenant`, now (`src/lib/roles.ts`, `docs/entity-model.md`
+§ "Roles"). `staff_access_accounts` is the history of who ever did.
+
+The composers that refuse a disabled plugin check access first, so a caller
+without it gets `401`/`403` and learns nothing about the plugin. A code's
+prefix is the plugin's name with hyphens as underscores (`codePrefix` in
+`gate.ts`): `community_management_…`, `tenant_app_…`.
+`composeCommunityManagement`, `composeMetering` and `composeBilling` then
+read plugin state with `isPluginEnabledForOrg`, the read the gate makes,
 and refuse with the gate's codes and copy before opening any scope:
 `409 <plugin>_disabled` while the plugin is off, `503 <plugin>_gate_unavailable`
-when its state cannot be read (`community_management_…` for community
-management). The per-plugin helpers (`isBillingEnabled` and the rest) would
-not do: supabase-js answers a failed read with `{ error }` rather than
-rejecting, and they read that as disabled. `compose-fail-closed.test.ts`
+when its state cannot be read. The per-plugin helpers (`isBillingEnabled`
+and the rest) would not do: supabase-js answers a failed read with
+`{ error }` rather than rejecting, and they read that as disabled. `compose-fail-closed.test.ts`
 compares each refusal with the gate's for the same client and checks that no
 scope was opened.
 
 The plugin can be turned off between composition and a write, so the
-capabilities behind those three composers read its state again before they
+capabilities behind those composers read its state again before they
 act: `requirePlugin` in `src/lib/billing/capability.ts` before each billing
 write, `requirePlugin` in `src/lib/metering/capability.ts` before each
 metering write or provider call, and `requireCommunityPlugin` in
@@ -105,6 +121,56 @@ acts; the tables are kept by hand, so a new gated method is covered only once
 it has a row there. `compose-fail-closed.test.ts` also writes through each
 composed capability with the plugin turned off after composition, or its
 state unreadable at the re-check, and compares the refusal with the gate's.
+
+**The tenant app.** `composeTenantApp({ supabase, tenantId })` composes the
+tenant app for a signed-in tenant's request about one unit they rent (RFC
+mgm#197 § 3). `authorizeTenant` in `scope.ts`, beside
+`authorizeOrganization`, checks the id, settles the session with
+`getUser()`, finds the caller's own `tenant` row for the unit and reads the
+unit with `fn_tenant_home`, which names its microgrid and organization. It
+reads all of it with the caller's own client, and staff rows never reach a
+unit: a super admin or org manager reads a tenant through the staff pages,
+as `user_can_access_tenant` decides. The composer then asks the gate itself
+(`checkGate` on the unit's organization, asked as a write, the way the GUI
+host asks whether a plugin is live), so a disabled tenant app refuses reads
+too and its `409 tenant_app_disabled` and `503 tenant_app_gate_unavailable`
+are the gate's own. Only then does it open the scope for that organization with
+`openOrganizationScope` and load the `tenant-app` capability. That scope is
+opened for a person who may hold no access to the organization: its
+`organizationId` is only the unit's and its `roles` only the caller's tenant
+rows. So it is opened with `audience: "tenant"`, and nothing but the
+`tenant-app` capability loads into it: the community-management, metering,
+billing and payments plugins treat those fields as access their composer
+authorized with `authorizeOrganization`, and billing-review, which reads
+only through RLS, is a staff capability, so each calls
+`requireOrganizationAudience` (`src/lib/runtime/services.ts`) first in
+`apply` and refuses any audience but `"organization"`. The `tenant-app`
+plugin in turn refuses any audience but `"tenant"`.
+`src/lib/runtime/__tests__/request-audience.test.ts` loads each into the
+other's scope. A new capability plugin that trusts `organizationId` or
+`roles` calls `requireOrganizationAudience` too. The composition also hands
+out no context to load more. The `tenant-app` capability
+provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`). The
+capability is read-only, so it has no write to re-check, and
+`compose-fail-closed.test.ts` leaves it out:
+`src/lib/tenant-app/__tests__/compose.test.ts` compares its refusals with
+the gate's and covers its load failure. If the composer starts reading
+plugin state another way, it goes into `COMPOSERS` in
+`compose-fail-closed.test.ts`.
+
+The tenant asks `mgm_plugin_enabled_for_org` with their own token, about an
+organization whose `mgm_plugins` rows they cannot read. That works because
+the function answers any signed-in caller about any organization, tenant-only
+accounts included, so its answer is no access check: it discloses only an
+organization's plugin on/off state, for an id the caller already has. The gate
+returns an `organization` target's id unchecked (`resolveTargetOrganization`),
+so for a tenant the id is trusted only because it came from `fn_tenant_home`.
+If the function gains an access check, it must let a tenant through for their
+own unit's organization first, or every tenant is refused with `503`. Since
+`authorizeTenant` calls `getUser()` before any read,
+`service-role-session-check.test.ts` counts it and `composeTenantApp` as
+session checks, as it counts `authorizeOrganization` and the organization
+composers.
 
 `composeBillingReview` takes the `organizationId` the route resolved and
 trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
@@ -166,6 +232,69 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+A view is about an organization's records unless it says otherwise:
+`scope: "installation"` serves an installation-wide view (no organization),
+and `scope: "tenant"` a view about one unit the caller rents (RFC mgm#197 §
+4). A tenant view's path has no segments; the host picks the unit from the
+caller's own tenant rows (`?unit=<tenants.id>`, or their only unit,
+`chooseTenantUnit` in `src/lib/gui/host/shared/tenant-units.ts`), reads
+nothing of an organization, asks no gate, offers no action and never embeds
+it in another view. Its loader gets a `TenantRequest` and authorizes the unit
+itself through `composeTenantApp`, which also refuses while the tenant app is
+off for the unit's organization. Nav entries carry an audience, `staff` by
+default, `super-admin` or `tenant`; a tenant entry names a tenant view, and
+any entry that leads to a tenant view is a tenant entry. A tenant view is
+never attached to another view and never read by an assistant (#133's data
+boundary). `contribution-schema.ts` refuses a contribution that breaks any of
+these, and `credential-canary.db.test.ts` dispatches each tenant view as a
+tenant of every seeded unit.
+
+Tenant entries are shown by the plugin state of the caller's own units'
+organizations (`fn_tenant_home` gives each unit's organization, and the gate
+is asked with the tenant's own session), never by that of the organization
+the manifest is built for, so a manager who rents elsewhere sees both groups.
+A person whose rows are all tenant rows sees no organization, whatever
+staff rows they held before (the host reads the rows held now): the host
+gives them the tenant manifest (`buildTenantManifestModel` in
+`src/lib/gui/host/shared/manifest-model.ts`), whose `org` is their current
+unit, whose places are their units and whose nav is tenant entries only.
+The (gui) layout sends them to tenant pages, deny by default: a page is a
+tenant page when the catalog has a view serve it and the contributed view
+whose path fits it has scope `tenant` (`isTenantPage` in
+`src/lib/gui/host/server/tenant-pages.ts`, which reads the surface, so a new
+tenant view needs no list edited). From any other page under the layout,
+`/` and every staff page included, it sends them to `/my` before the
+manifest is awaited, and never to `/setup`. This is navigation, not an access
+check. The redirect runs only when the layout renders: on a full load the
+layout renders alongside the page, and a client-side navigation within the
+`(gui)` group skips it, rendering from the first segment that changes. So a
+staff page's server code can still run for such a person, and what they can
+read there is decided as for anyone, by the page's own checks and RLS (their
+own tenant, `tenant_devices` and device rows, which they could query
+directly), with `dispatchView` refusing them every view that is not a tenant
+view. While `/my` is not a released route (`src/lib/mgm/released-routes.ts`),
+it sends them to `/no-access` instead, which has Log out: middleware would
+answer `/my` with the static "not in this release" page, which has no script
+and links back to `/`. `/no-access` is outside the layout, and sign-out is a Supabase Auth call from the
+browser, so neither sends them round. Otherwise they reach `/no-access` only
+when the manifest refuses because none of their units can be read. The
+layout's test walks every catalog page and every page file under
+`src/app/(gui)` as such a person. Every staff entry point of the host also
+refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
+`visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
+view that is not a tenant view. A tenant view opened without `?unit=` by a
+person with several units shows a choice of them, and one whose plugin is
+off for the unit's organization shows the "not in this release" page.
+
+A person may rent any number of units, in any organizations, and nothing in
+the host holds them to one. Each unit is named by its unit label, else the
+tenant's display name (the tenant's own name, which their units share), with
+its microgrid added where two of their units would read alike
+(`src/lib/gui/host/server/units.ts`); a unit that cannot be read is left out
+rather than failing the others. Choosing another unit changes only `?unit=`,
+so `HostKitProvider` rebuilds the manifest for it, as it does for `?org=`,
+and the shell's context, clock and remembered unit follow.
+
 ## The gate
 
 Every released API route enters the runtime. Routes that use a capability go
@@ -183,12 +312,34 @@ if (gate) return gate; // 409 <plugin>_disabled or 503 <plugin>_gate_unavailable
 
 The gate resolves the target's organization with one RLS-scoped query and asks
 the database whether the plugin is enabled for that organization
-(`mgm_plugin_enabled_for_org`). Policy:
+(`mgm_plugin_enabled_for_org`). That function answers any signed-in caller,
+tenants included, about any organization; who may act there is the
+composer's check, not the gate's.
+
+A missing `mgm_plugins` row means enabled, so existing organizations need no
+backfill, except for a plugin the catalog marks `defaultEnabled: false`, as
+it marks the tenant app: that plugin is off for an organization until an
+operator turns it on there (RFC mgm#197 § 3), so no organization's tenants
+get an app nobody switched on. `mgm_plugin_enabled_for_org` names those
+plugins in SQL, while Settings → Plugins reads `defaultEnabled`
+(`resolvePluginStatuses`, and `validatePluginToggle` for a plugin's
+dependents). `src/lib/plugins/__tests__/default-off-plugins.test.ts` reads
+the list from the newest migration that defines the function and fails while
+it differs from the catalog's, so a plugin's default changes on both sides in
+one commit, the SQL side in a new migration. The same test fails while a
+bundled plugin is missing from `mgm_plugins_name_known`,
+`mgm_plugin_audit_log_plugin_known` or `fn_mgm_set_plugin_enabled`, so a new
+plugin ships with the migration that names it.
+
+Policy:
 
 - **Writes** (`POST`, `PUT`, `PATCH`, `DELETE`) on a non-core plugin return
   `409 <plugin>_disabled` while the plugin is off. Stored data is preserved.
 - **Reads** stay available, matching the "disabling preserves data" promise in
-  Settings → Plugins.
+  Settings → Plugins. The tenant app is the exception: `composeTenantApp`
+  asks the gate as a write, so its reads refuse too, and a tenant of an
+  organization that has it off is shown the "not in this release" page
+  (RFC mgm#197 § 3).
 - A target the caller cannot see resolves to no organization; the route's own
   404/403 handling applies (RLS remains the authority).
 - If organization or plugin state cannot be read, writes fail closed with
@@ -196,10 +347,10 @@ the database whether the plugin is enabled for that organization
 - Core plugins (organization directory) are never gated.
 
 The `409`/`503` part of this policy, with the gate's codes and copy, is also
-applied without calling the gate: by the three composers that refuse a
-disabled plugin (§ "Two lifetimes"), by the re-checks in their capabilities
-before a write, and by the Payments checkout (`requirePlugins` in
-`src/lib/payments/capability.ts`). A change to the policy or the copy in
+applied without calling the gate: by `composeCommunityManagement`,
+`composeMetering` and `composeBilling` (§ "Two lifetimes"), by the
+re-checks in their capabilities before a write, and by the Payments
+checkout (`requirePlugins` in `src/lib/payments/capability.ts`). A change to the policy or the copy in
 `gate.ts` must be made in each of them as well; `compose-fail-closed.test.ts`
 and `capability-gating.test.ts` compare their refusals with the gate's.
 
@@ -346,6 +497,11 @@ plugin (sign-in, password reset, first-run setup) in `HOST_PAGES`.
 against the local Supabase CI starts. It checks every target kind's
 organization lookup through real PostgREST and RLS for an org manager, a
 super admin and an outsider, and that disabled plugins refuse writes.
+`src/lib/supabase/__tests__/tenant_access.test.ts` asks
+`mgm_plugin_enabled_for_org` for each bundled plugin of an organization
+with no state rows and expects the catalog's defaults, and checks that a
+tenant reads the tenant app's state for their own organization with their
+own token but cannot change it.
 
 ## Lifetime notes
 

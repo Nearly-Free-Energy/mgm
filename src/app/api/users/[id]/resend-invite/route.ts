@@ -5,7 +5,7 @@ import {
   currentUserIsSuperAdmin,
   currentUserCanAccessOrg,
 } from "@/lib/auth/access";
-import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
+import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG, TENANT } from "@/lib/roles";
 import { buildInviteDataPayload } from "@/lib/auth/invite-data-payload";
 import { invitationNotice } from "@/lib/auth/invitation-notice";
 import { sendNotice } from "@/lib/email/notices";
@@ -47,7 +47,13 @@ import type { UserRole, RoleScopeType } from "@/lib/types/domain";
  *           super_admin. Caller-side we still require super_admin to
  *           proceed on a NULL-role row.
  *
+ *           A call that fails → 500 "Please retry", for every caller,
+ *           never read as no row.
+ *
  *   Step C — caller permission against TARGET's role row.
+ *           no row → 403, or for a super_admin caller the 404 of an
+ *             account that does not exist: the RPC lists every staff
+ *             account to a super_admin, and no tenant's (RFC mgm#197).
  *           super_admin target → caller must be super_admin.
  *           org_manager target → caller must pass currentUserCanAccessOrg.
  *
@@ -130,34 +136,71 @@ export async function POST(
   // auth.users to anon via PostgREST and ran with SECURITY DEFINER on the
   // view itself; the new RPC denies anon at the grant layer (REVOKE EXECUTE
   // FROM anon) and applies the visibility predicate body-side.
-  const { data: visibleRows } = await userClient.rpc("fn_list_visible_users", {
-    _target_user_ids: [targetId],
-  });
-  const targetRoleRow: CurrentRoleRow | null = visibleRows?.[0]
-    ? {
-        role: visibleRows[0].role,
-        scope_type: visibleRows[0].scope_type,
-        scope_id: visibleRows[0].scope_id,
-      }
-    : null;
+  //
+  // Only staff access counts here. The RPC's role columns come from the
+  // person's `scope_type = 'org'` row, and for any caller it leaves out
+  // anyone who holds tenant rows and no staff row now, whatever they held
+  // before, and a former tenant with no rows who was never staff (RFC
+  // mgm#197, 20261118140000). Such an account therefore gets the answers an
+  // account that does not exist gets (Step C), and nothing says it is a
+  // tenant's. A tenant role in those columns, which the RPC does not
+  // return today, is read as no listing at all, so that stays true if the RPC
+  // changes.
+  const { data: visibleRows, error: visibleError } = await userClient.rpc(
+    "fn_list_visible_users",
+    { _target_user_ids: [targetId] }
+  );
+  if (visibleError) {
+    // A failed call is not an empty result: answered 500 for every caller,
+    // before Step C, so it never reads as "not found" or "no permission".
+    console.error(
+      JSON.stringify({
+        event: "resend_invite.visibility_error",
+        code: visibleError.code,
+        message: visibleError.message,
+        at: new Date().toISOString(),
+      })
+    );
+    return NextResponse.json(
+      { error: "Could not check the user's access. Please retry." },
+      { status: 500 }
+    );
+  }
+  const visible = visibleRows?.[0];
+  const targetRoleRow: CurrentRoleRow | null =
+    visible && visible.role !== TENANT
+      ? {
+          role: visible.role,
+          scope_type: visible.scope_type,
+          scope_id: visible.scope_id,
+        }
+      : null;
 
   // ── Step C: caller permission against TARGET's role ────────────────
   const callerIsSuper = await currentUserIsSuperAdmin(userClient);
 
   if (!targetRoleRow) {
-    // Either the target doesn't exist OR is invisible to this caller.
-    // Uniform 403 (existence-leak hardening). Super_admin sees all
-    // rows via the view, so a NULL here for super_admin truly means
-    // "doesn't exist" — but we still 403 here to keep one branch;
-    // the canonical 404 surfaces at Step D via getUserById.
+    // The target doesn't exist, is invisible to this caller, or is an
+    // account the RPC lists for no one (one holding tenant rows and no
+    // staff row, or a former tenant with no rows who was never staff).
+    // Uniform 403 (existence-leak hardening).
     if (!callerIsSuper) {
       return NextResponse.json(
         { error: "You do not have permission to resend this invitation." },
         { status: 403 }
       );
     }
-    // super_admin proceeds; getUserById will produce the canonical 404
-    // if the auth user is genuinely absent.
+    // A super admin is listed every account the RPC keeps
+    // (user_can_see_user_profile is true for them), staff orphans
+    // included, so nothing left out of a call that succeeded (a failed one
+    // was answered 500 above) is a staff invitee: answer as for
+    // an account that does not exist, without looking it up or sending a
+    // notice, so the answer does not say which it is. This holds while
+    // fn_list_visible_users leaves out only accounts that hold no staff row
+    // now (staff as @/lib/roles defines it); if it ever leaves out an
+    // account holding one, a super admin gets 404 for it here too, so
+    // revisit this branch with it.
+    return NextResponse.json({ error: "User not found." }, { status: 404 });
   } else if (targetRoleRow.role == null) {
     // Visible row with NULL role = orphan (LEFT JOIN miss on user_roles).
     // Only a super_admin can recover an orphan — everyone else 403.

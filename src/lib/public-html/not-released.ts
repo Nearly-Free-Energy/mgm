@@ -15,8 +15,12 @@ export function renderNotReleasedPage(lang: PublicLanguage): string {
     heading: copy.heading,
     paragraphs: [copy.body],
     // `/` is the dashboard when signed in; src/middleware.ts sends a
-    // signed-out visitor from it to /login. If `/` stops being a page
-    // anyone can be sent to, change this link.
+    // signed-out visitor from it to /login, and the (gui) layout sends a
+    // person whose rows are all tenant rows to the tenant home, or to
+    // /no-access (which can sign them out) while that home is not a
+    // released route, so this link never leads back here. If `/` stops
+    // being a page anyone can be sent to, or the layout stops checking the
+    // tenant home's release, change this link.
     actions: [{ href: "/", label: copy.startPage }],
   });
 }

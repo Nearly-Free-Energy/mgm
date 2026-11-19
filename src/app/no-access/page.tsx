@@ -14,6 +14,12 @@ import { NoAccessLogout } from "./no-access-logout";
  *     see, for example after their organization was deleted. The (gui)
  *     layout sends them here when getManifest refuses; if that redirect
  *     changes, revisit.
+ *   - A person whose rows are all tenant rows, on any page that is not a
+ *     tenant page (`/` included), while the tenant home
+ *     (TENANT_START_PAGE) is not a released route: the (gui) layout sends
+ *     them here so they can log out. The copy below is written for
+ *     staff and is an interim message for them. Revisit when the tenant
+ *     home is released or that redirect changes.
  */
 export default async function NoAccessPage() {
   return (

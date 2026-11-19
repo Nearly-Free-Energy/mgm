@@ -10,7 +10,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DescendantCounts, EntityKind } from "@/lib/entity-descendants";
-import { SUPER_ADMIN } from "@/lib/roles";
+import { ORG_MANAGER, SUPER_ADMIN } from "@/lib/roles";
 import { getCurrentUserRoles } from "@/lib/auth/access";
 import { isPeriodKeptError } from "@/lib/billing/period-delete";
 
@@ -85,17 +85,19 @@ export interface EntityDeleteLogPayload {
 }
 
 /**
- * Returns the highest-privilege role the actor holds. `super_admin` wins
- * over `org_manager` per AC-LOG-1. Returns `null` only for unauthenticated
- * callers (in which case the route should already have 401/403'd).
+ * Returns the highest-privilege staff role the actor holds. `super_admin`
+ * wins over `org_manager` per AC-LOG-1. Returns `null` for a caller who
+ * holds neither: unauthenticated, no role row, or only tenant rows (RFC
+ * mgm#197), which are a person's own units and never a staff role. The
+ * routes answer `null` with 403, so a tenant-only caller deletes nothing.
  */
 export async function resolveActorRole(
   supabase: SupabaseClient
 ): Promise<"super_admin" | "org_manager" | null> {
   const roles = await getCurrentUserRoles(supabase);
-  if (roles.length === 0) return null;
   if (roles.some((r) => r.role === SUPER_ADMIN)) return "super_admin";
-  return "org_manager";
+  if (roles.some((r) => r.role === ORG_MANAGER)) return "org_manager";
+  return null;
 }
 
 /**

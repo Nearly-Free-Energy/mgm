@@ -10,6 +10,9 @@ import {
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
+  TENANT_APP_PLUGIN,
+  TENANT_APP_PLUGIN_NAME,
+  DEFAULT_OFF_PLUGIN_NAMES,
   getPluginByAlias,
   getRouteOwner,
   matchCatalogPage,
@@ -18,7 +21,7 @@ import {
 } from "../bundled";
 
 describe("MGM bundled plugins", () => {
-  it("defaults missing state rows to enabled", () => {
+  it("defaults missing state rows to enabled, except the tenant app's", () => {
     const statuses = resolvePluginStatuses();
     expect(
       statuses.map((status) => [status.plugin.name, status.enabled, status.ready])
@@ -29,7 +32,80 @@ describe("MGM bundled plugins", () => {
       [BILLING_PLUGIN_NAME, true, true],
       [PAYMENTS_PLUGIN_NAME, true, true],
       [PESAPAL_PLUGIN_NAME, true, true],
+      [TENANT_APP_PLUGIN_NAME, false, true],
     ]);
+  });
+
+  it("lists the tenant app as the one plugin off by default", () => {
+    expect(DEFAULT_OFF_PLUGIN_NAMES).toEqual([TENANT_APP_PLUGIN_NAME]);
+  });
+
+  it("turns the tenant app on only from a state row", () => {
+    const tenantApp = (states?: Parameters<typeof resolvePluginStatuses>[0]) =>
+      resolvePluginStatuses(states).find((s) => s.plugin.name === TENANT_APP_PLUGIN_NAME);
+    expect(tenantApp({ [TENANT_APP_PLUGIN_NAME]: { enabled: true } })?.enabled).toBe(true);
+    expect(tenantApp({ [TENANT_APP_PLUGIN_NAME]: { enabled: false } })?.enabled).toBe(false);
+    expect(tenantApp({ [TENANT_APP_PLUGIN_NAME]: { enabled: null } })?.enabled).toBe(false);
+  });
+
+  it("the tenant app depends on metering and community management", () => {
+    expect(TENANT_APP_PLUGIN).toMatchObject({
+      core: false,
+      dependencies: [METERING_PLUGIN_NAME, COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+      routes: [],
+    });
+    expect(
+      validatePluginToggle({
+        pluginName: TENANT_APP_PLUGIN_NAME,
+        enabled: true,
+        states: { [METERING_PLUGIN_NAME]: { enabled: false } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_disabled",
+      message: expect.stringContaining("Metering"),
+    });
+    expect(
+      validatePluginToggle({ pluginName: TENANT_APP_PLUGIN_NAME, enabled: true })
+    ).toEqual({ ok: true });
+  });
+
+  it("does not let a tenant app with no state row block its dependencies", () => {
+    const allOff = {
+      [BILLING_PLUGIN_NAME]: { enabled: false },
+      [PAYMENTS_PLUGIN_NAME]: { enabled: false },
+      [PESAPAL_PLUGIN_NAME]: { enabled: false },
+    };
+    expect(
+      validatePluginToggle({ pluginName: METERING_PLUGIN_NAME, enabled: false, states: allOff })
+    ).toEqual({ ok: true });
+    // Turned on, it blocks them like any dependent.
+    expect(
+      validatePluginToggle({
+        pluginName: METERING_PLUGIN_NAME,
+        enabled: false,
+        states: { ...allOff, [TENANT_APP_PLUGIN_NAME]: { enabled: true } },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Tenant app"),
+    });
+    expect(
+      validatePluginToggle({
+        pluginName: COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+        enabled: false,
+        states: {
+          ...allOff,
+          [METERING_PLUGIN_NAME]: { enabled: false },
+          [TENANT_APP_PLUGIN_NAME]: { enabled: true },
+        },
+      })
+    ).toEqual({
+      ok: false,
+      code: "plugin_dependency_required",
+      message: expect.stringContaining("Tenant app"),
+    });
   });
 
   it("metering depends on community management, not the reverse", () => {
@@ -302,6 +378,7 @@ describe("plugin aliases", () => {
       [BILLING_PLUGIN_NAME, "billing"],
       [PAYMENTS_PLUGIN_NAME, "payments"],
       [PESAPAL_PLUGIN_NAME, "pesapal"],
+      [TENANT_APP_PLUGIN_NAME, "tenant"],
     ]);
   });
 
