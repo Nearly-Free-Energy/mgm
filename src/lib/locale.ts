@@ -14,6 +14,20 @@ export function detectLocale(acceptLanguage: string | null): string {
   return tag || "en";
 }
 
+/**
+ * The locale to format in, from an Accept-Language header: detectLocale's
+ * tag in its canonical form, or "en" when the tag is not one Intl accepts.
+ * The GUI host formats its views in it, and so does the billing close route.
+ */
+export function formatLocale(acceptLanguage: string | null): string {
+  const tag = detectLocale(acceptLanguage);
+  try {
+    return Intl.getCanonicalLocales(tag)[0] ?? "en";
+  } catch {
+    return "en";
+  }
+}
+
 const LANGUAGE_TAG = /^[a-z]{1,8}(?:-[a-z0-9]{1,8})*$/i;
 const QUALITY = /^q=(0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/i;
 

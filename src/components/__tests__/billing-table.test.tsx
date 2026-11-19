@@ -14,6 +14,7 @@
 //     (f) Gate banner absent when isPaymentConfigured=true
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { Ceremony } from "@/lib/gui/contract";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { BillingTable } from "../BillingTable";
 import { LocaleProvider } from "../format/locale-context";
@@ -42,6 +43,25 @@ const deleteEqMock = vi.fn(
 // Phase B (#157): also stubs `select().eq()` for the IPN-paid poller
 // (which fires every 30s; we never flush the timer in the test, but the
 // setup must accept the call shape if it does).
+// jsdom creates only untrusted events; the close dialog's step (the host's
+// ConfirmStep) counts only real input, so these tests stand in for it.
+vi.mock("@/lib/gui/host/client/trusted", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/gui/host/client/trusted")>()),
+  isTrusted: () => true,
+  hasUserActivation: () => true,
+}));
+
+/** The close route's review step for the fixture period, as its 428 sends it. */
+const CLOSE_CEREMONY: Ceremony = {
+  type: "ceremony",
+  statement: "Close March 2026.",
+  facts: [],
+  warnings: [],
+  acknowledgements: [{ id: "totals_reviewed", label: "I have reviewed these totals." }],
+  typed: "March 2026",
+  digest: "v1:table",
+};
+
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     from: () => ({
@@ -700,15 +720,18 @@ describe("BillingTable", () => {
           a.click();
           a.remove();
         });
+        const answers = [
+          { ok: false, status: 428, ceremony: CLOSE_CEREMONY },
+          { ok: true, status: 200 },
+        ];
         render(
           <ClosePeriodDialog
             open
             onOpenChange={() => {}}
-            periodLabel="March 2026"
-            summaryRows={[]}
-            grandTotal={0}
-            onConfirm={async () => {}}
+            periodId={period.id}
+            onClosed={() => {}}
             onExportCsv={onExportCsv}
+            post={async () => answers.shift()!}
           />,
         );
         // Radix portals into document.body; query against document, not container.
@@ -716,20 +739,16 @@ describe("BillingTable", () => {
           Array.from(document.querySelectorAll("button")).find((b) =>
             text.test(b.textContent ?? ""),
           );
-        // The dialog opens at phase=2; tick the checkbox + click "Close
-        // period" to advance to phase=3 where the export CSV button is
-        // shown.
-        const checkbox = document.querySelector(
-          "input[type='checkbox']",
-        ) as HTMLInputElement;
-        expect(checkbox).toBeTruthy();
-        fireEvent.click(checkbox);
+        // The dialog shows the host's step: tick, type the name, close.
+        await screen.findByRole("heading", { name: "Close March 2026?" });
+        for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+        fireEvent.change(screen.getByRole("textbox"), { target: { value: "March 2026" } });
         const closeBtn = queryButtonByText(/^Close period$/) as
           | HTMLButtonElement
           | undefined;
         expect(closeBtn).toBeTruthy();
         await act(async () => {
-          closeBtn!.click();
+          fireEvent.click(closeBtn!);
         });
         await waitFor(() => {
           expect(queryButtonByText(/^Export CSV for URA$/)).toBeTruthy();
@@ -852,7 +871,7 @@ describe("BillingTable — per-period timezone label (#358)", () => {
   });
 });
 
-describe("BillingTable — close via capability API (issue #5, review P1)", () => {
+describe("BillingTable — close via capability API (issue #5, #201)", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
@@ -865,6 +884,8 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
     vi.unstubAllGlobals();
   });
 
+  const answer = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body });
+
   function renderTable() {
     return render(
       <Wrapper>
@@ -873,106 +894,39 @@ describe("BillingTable — close via capability API (issue #5, review P1)", () =
     );
   }
 
-  function renderTableWithUnfilledTenant() {
-    return render(
-      <Wrapper>
-        <BillingTable
-          {...baseProps}
-          lineItems={[{ ...lineItems[0], device_id: null, usage_kwh: null }]}
-        />
-      </Wrapper>
-    );
-  }
-
-  async function openDialogAndConfirm() {
-    // Header "Close Period" opens the ClosePeriodDialog.
-    fireEvent.click(screen.getByRole("button", { name: /^Close Period$/i }));
-    // The dialog requires ticking the URA-copy checkbox first.
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /Close period|Close anyway/i }));
-  }
-
-  it("POSTs to the close API unconfirmed and refreshes on 200", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
-    });
+  it("asks the close API for the review, closes with the confirmation it shows, and refreshes", async () => {
+    fetchMock
+      .mockResolvedValueOnce(answer(428, { code: "billing_close_confirmation_required", ceremony: CLOSE_CEREMONY }))
+      .mockResolvedValueOnce(answer(200, { period: { id: "period-1", status: "closed" }, unresolved: [] }));
     renderTable();
-    await openDialogAndConfirm();
+    fireEvent.click(screen.getByRole("button", { name: /^Close Period$/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await screen.findByRole("heading", { name: "Close March 2026?" });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/billing-periods/period-1/close");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({});
-    await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
-  });
 
-  it("does not treat the local unfilled-row warning as server confirmation", async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
-    });
-    renderTableWithUnfilledTenant();
-    await openDialogAndConfirm();
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "March 2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close period" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({});
-  });
-
-  it("409 unresolved → error banner → Retry escalates to confirmed:true", async () => {
-    fetchMock
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 409,
-        json: async () => ({
-          code: "billing_unresolved_tenants",
-          message: "Period has 1 unresolved tenant(s). Confirm explicitly to close anyway.",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ period: { id: "period-1", status: "closed" }, unresolved: [] }),
-      });
-    renderTable();
-    await openDialogAndConfirm();
-
-    // First attempt goes out unconfirmed (fixture has no unfilled rows).
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({});
-
-    // Dialog error state surfaces the server message with a Retry affordance.
-    await waitFor(() =>
-      expect(screen.getByText(/Couldn't close period\./i)).toBeTruthy()
-    );
-    fireEvent.click(screen.getByRole("button", { name: /Retry close/i }));
-
-    // Retry escalates to an explicit close-anyway and succeeds.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
-      confirmed: true,
+      confirmation: { digest: "v1:table", acknowledged: ["totals_reviewed"], typed: "March 2026" },
     });
     await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
   });
 
-  it("409 billing_disabled surfaces the disabled message", async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({
-        code: "billing_disabled",
-        error: "Billing is disabled for this organization.",
-      }),
-    });
-    renderTable();
-    await openDialogAndConfirm();
-
-    await waitFor(() =>
-      expect(screen.getByText(/Billing is disabled/i)).toBeTruthy()
+  it("409 billing_disabled surfaces the disabled message and closes nothing", async () => {
+    fetchMock.mockResolvedValue(
+      answer(409, { code: "billing_disabled", error: "Billing is disabled for this organization." })
     );
+    renderTable();
+    fireEvent.click(screen.getByRole("button", { name: /^Close Period$/i }));
+
+    await waitFor(() => expect(screen.getByText(/Billing is disabled/i)).toBeTruthy());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(refreshSpy).not.toHaveBeenCalled();
   });
 });

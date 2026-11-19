@@ -21,7 +21,7 @@ import { z } from "zod";
  * migration needs its label here in the same change.
  */
 export const CLOSE_ACKNOWLEDGEMENTS = {
-  totals_reviewed: "I have reviewed these totals. Closing is final.",
+  totals_reviewed: "I have reviewed these totals, and they are what I will file. Closing is final.",
   tenants_without_bills: "I am closing this period although some tenants have no bill in it.",
   bills_without_usage: "I am closing this period although some bills have no usage recorded.",
 } as const;

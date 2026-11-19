@@ -1,434 +1,259 @@
-// ClosePeriodDialog unit tests
-//
-// Pin the post-collapse contract:
-//   - Single open surface: totals + checkbox + "Close period" button visible
-//     immediately on open. Button starts disabled.
-//   - Checkbox tick toggles button enable.
-//   - Click confirm dispatches onConfirm exactly once with no preceding screen.
-//   - Pending state shows "Closing…" footer + disabled button.
-//   - Success state renders green "Closed: <periodLabel>" header + CSV CTA.
-//   - Error state renders destructive banner + "Retry close" that re-invokes.
-//   - Re-open after error resets state (checkbox unchecked, banner gone, button
-//     back to disabled "Close period").
-//   - Cancel-first focus order on open.
-
-import * as React from "react";
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { LocaleProvider } from "../format/locale-context";
-import { ClosePeriodDialog, type ClosePeriodSummaryRow } from "../ui/close-period-dialog";
-
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
-
-const SUMMARY_ROWS: ClosePeriodSummaryRow[] = [
-  { label: "Tenants", value: "12" },
-  { label: "Total kWh", value: "487.3" },
-  { label: "Tier 1 kWh", value: "392.1" },
-  { label: "Tier 2 kWh", value: "95.2" },
-];
-const GRAND_TOTAL = 4_216_800;
-const PERIOD_LABEL = "April 2026";
-
-function Wrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <LocaleProvider locale="en-UG" currency="UGX">
-      {children}
-    </LocaleProvider>
-  );
-}
-
 /**
- * A controlled wrapper around ClosePeriodDialog so tests can flip `open`
- * (closed → open) to exercise the reset-on-open useEffect, and so they can
- * provide an `onConfirm` whose resolution timing is controlled per-test.
+ * ClosePeriodDialog (#201): the legacy page's close, through the host's
+ * confirmation step. The dialog fetches the review (the close route's 428
+ * with its ceremony), renders ConfirmStep, and sends exactly the digest of
+ * that review with the acknowledgements ticked and the name typed.
  */
-function ControlledHarness(props: {
-  initialOpen?: boolean;
-  onConfirm: () => Promise<void>;
-  onExportCsv?: () => void;
-  unfilledTenantNames?: string[];
-}) {
-  const [open, setOpen] = React.useState(props.initialOpen ?? true);
-  return (
-    <Wrapper>
-      <button onClick={() => setOpen(true)} data-testid="harness-reopen">
-        reopen
-      </button>
-      <button onClick={() => setOpen(false)} data-testid="harness-close">
-        close
-      </button>
-      <ClosePeriodDialog
-        open={open}
-        onOpenChange={setOpen}
-        periodLabel={PERIOD_LABEL}
-        summaryRows={SUMMARY_ROWS}
-        grandTotal={GRAND_TOTAL}
-        onConfirm={props.onConfirm}
-        onExportCsv={props.onExportCsv}
-        unfilledTenantNames={props.unfilledTenantNames}
-      />
-    </Wrapper>
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Ceremony } from "@/lib/gui/contract";
+import { ClosePeriodDialog, type CloseAnswer } from "../ui/close-period-dialog";
+
+// jsdom creates only untrusted events, so the positive paths stand in for
+// real input, as in the ConfirmStep tests. A test that sets this false shows
+// script input refused.
+const input = vi.hoisted(() => ({ trusted: true }));
+vi.mock("@/lib/gui/host/client/trusted", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/gui/host/client/trusted")>()),
+  isTrusted: () => input.trusted,
+  hasUserActivation: () => true,
+}));
+
+beforeEach(() => {
+  input.trusted = true;
+});
+afterEach(() => vi.restoreAllMocks());
+
+const PERIOD = "770e8400-e29b-41d4-a716-446655440000";
+
+function ceremony(change: Partial<Ceremony> = {}): Ceremony {
+  return {
+    type: "ceremony",
+    statement: "Close October 2026. Bills become final, and corrections after this are recorded against the closed period.",
+    facts: [
+      { label: "Bills", value: { t: "number", v: 12, text: "12" } },
+      { label: "Total", value: { t: "money", v: 4216800, currency: "UGX", text: "UGX 4,216,800" } },
+    ],
+    warnings: ["1 bill has no usage recorded: House 7."],
+    acknowledgements: [
+      { id: "totals_reviewed", label: "I have reviewed these totals, and they are what I will file. Closing is final." },
+      { id: "bills_without_usage", label: "I am closing this period although some bills have no usage recorded." },
+    ],
+    typed: "October 2026",
+    digest: "v1:first",
+    ...change,
+  };
+}
+
+const review = (c: Ceremony = ceremony()): CloseAnswer => ({
+  ok: false,
+  status: 428,
+  code: "billing_close_confirmation_required",
+  ceremony: c,
+});
+const closed: CloseAnswer = { ok: true, status: 200 };
+
+function mount(answers: CloseAnswer[], props: { open?: boolean } = {}) {
+  const queue = [...answers];
+  const post = vi.fn<(periodId: string, body: unknown) => Promise<CloseAnswer>>(async () => {
+    const next = queue.shift();
+    if (!next) throw new Error("no answer queued");
+    return next;
+  });
+  const onOpenChange = vi.fn();
+  const onClosed = vi.fn();
+  const onExportCsv = vi.fn();
+  const view = render(
+    <ClosePeriodDialog
+      open={props.open ?? true}
+      onOpenChange={onOpenChange}
+      periodId={PERIOD}
+      onClosed={onClosed}
+      onExportCsv={onExportCsv}
+      post={post}
+    />
   );
+  return { post, onOpenChange, onClosed, onExportCsv, view, queue };
 }
 
-// Helper: a deferred promise — caller controls when it resolves/rejects.
-function defer<T = void>() {
-  let resolve!: (v: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+const confirmButton = () => screen.getByRole("button", { name: "Close period" }) as HTMLButtonElement;
+const typedBox = () => screen.getByRole("textbox") as HTMLInputElement;
+
+function confirmAll(name = "October 2026") {
+  for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+  fireEvent.change(typedBox(), { target: { value: name } });
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
-describe("ClosePeriodDialog — collapsed surface", () => {
-  it("on open, totals + grand total + checkbox + disabled 'Close period' are all visible", () => {
-    render(<ControlledHarness onConfirm={() => Promise.resolve()} />);
-
-    // Totals grid: every label and value renders.
-    for (const row of SUMMARY_ROWS) {
-      expect(screen.getByText(row.label)).toBeTruthy();
-      expect(screen.getByText(String(row.value))).toBeTruthy();
-    }
-    // Grand total label.
-    expect(screen.getByText("Grand total")).toBeTruthy();
-
-    // Checkbox visible.
-    const checkbox = screen.getByRole("checkbox");
-    expect(checkbox).toBeTruthy();
-    expect((checkbox as HTMLInputElement).checked).toBe(false);
-
-    // The confirm CTA renders as "Close period" (no ellipsis, no "Review &").
-    const closeBtn = screen.getByRole("button", { name: /^Close period$/ });
-    expect(closeBtn).toBeTruthy();
-    expect((closeBtn as HTMLButtonElement).disabled).toBe(true);
-
-    // No phase-1 ceremony: there is NO "Review & close…" trigger.
-    expect(screen.queryByRole("button", { name: /Review/i })).toBeNull();
-
-    // Eyebrow shows the new "Final review" copy in primary tone.
-    const eyebrow = screen.getByText("Final review");
-    expect(eyebrow).toBeTruthy();
-    expect(eyebrow.className).toContain("text-primary");
+describe("ClosePeriodDialog — the review", () => {
+  it("fetches the review on open and shows the host's step: totals, warnings, acknowledgements, the name to type", async () => {
+    const { post } = mount([review()]);
+    expect(screen.getByRole("status").textContent).toMatch(/Loading the period/);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    expect(post).toHaveBeenCalledWith(PERIOD, {});
+    expect(screen.getByText("UGX 4,216,800")).toBeTruthy();
+    expect(screen.getByText("1 bill has no usage recorded: House 7.")).toBeTruthy();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getByText(/to confirm/).textContent).toContain("October 2026");
+    expect(confirmButton().disabled).toBe(true);
   });
 
-  it("ticking the checkbox enables the button; unticking re-disables", () => {
-    render(<ControlledHarness onConfirm={() => Promise.resolve()} />);
-    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    const closeBtn = screen.getByRole("button", { name: /^Close period$/ }) as HTMLButtonElement;
-
-    expect(closeBtn.disabled).toBe(true);
-
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(true);
-    expect(closeBtn.disabled).toBe(false);
-
-    fireEvent.click(checkbox);
-    expect(checkbox.checked).toBe(false);
-    expect(closeBtn.disabled).toBe(true);
+  it("enables Close period only once every acknowledgement is ticked and the name is typed", async () => {
+    mount([review()]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    const [first, second] = screen.getAllByRole("checkbox");
+    fireEvent.click(first);
+    fireEvent.change(typedBox(), { target: { value: "October 2026" } });
+    expect(confirmButton().disabled).toBe(true);
+    fireEvent.click(second);
+    expect(confirmButton().disabled).toBe(false);
   });
 
-  it("clicking 'Close period' invokes onConfirm exactly once with no arguments", async () => {
-    const onConfirm = vi.fn(() => Promise.resolve());
-    render(<ControlledHarness onConfirm={onConfirm} />);
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /^Close period$/ }));
-
-    await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-    expect(onConfirm.mock.calls[0]).toEqual([]);
+  it("ignores ticks and typing that are not real input", async () => {
+    mount([review()]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    input.trusted = false;
+    confirmAll();
+    expect(confirmButton().disabled).toBe(true);
   });
 
-  it("rail and confirm button render in primary tone (token-class drift sanity)", () => {
-    const { container } = render(<ControlledHarness onConfirm={() => Promise.resolve()} />);
-
-    // Rail: aria-hidden div with bg-primary; not bg-destructive.
-    const rail = container.ownerDocument.querySelector('[aria-hidden="true"].bg-primary');
-    expect(rail).not.toBeNull();
-    expect(container.ownerDocument.querySelector('[aria-hidden="true"].bg-destructive')).toBeNull();
-
-    // Confirm button: bg-primary tokens (pre-click; not destructive).
-    const closeBtn = screen.getByRole("button", { name: /^Close period$/ });
-    expect(closeBtn.className).toContain("bg-primary");
-    expect(closeBtn.className).toContain("text-primary-foreground");
-    expect(closeBtn.className).not.toContain("bg-destructive");
-
-    // Checkbox accent uses --primary, not --destructive.
-    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(checkbox.className).toContain("accent-primary");
-    expect(checkbox.className).not.toContain("accent-destructive");
+  it("is neutral, not destructive, and puts Cancel first", async () => {
+    mount([review()]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    expect(confirmButton().className).toContain("bg-primary");
+    expect(confirmButton().className).not.toContain("bg-destructive");
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Cancel"));
   });
 });
 
-describe("ClosePeriodDialog — pending / success / error states", () => {
-  it("pending: while onConfirm is in-flight, shows 'Closing…' and disables the button", async () => {
-    const d = defer<void>();
-    const onConfirm = vi.fn(() => d.promise);
-    render(<ControlledHarness onConfirm={onConfirm} />);
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /^Close period$/ }));
-
-    // Pending state: footer copy + button label "Closing…"
-    await waitFor(() => {
-      // Multiple "Closing…" matches possible (footer + button) — both indicate pending.
-      expect(screen.getAllByText(/Closing…/).length).toBeGreaterThanOrEqual(1);
+describe("ClosePeriodDialog — closing", () => {
+  it("sends the review's digest with what was ticked and typed, then shows the closed state", async () => {
+    const { post, onClosed, onExportCsv } = mount([review(), closed]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll("October 2026");
+    fireEvent.click(confirmButton());
+    await screen.findByRole("heading", { name: "Closed: October 2026" });
+    expect(post).toHaveBeenLastCalledWith(PERIOD, {
+      confirmation: {
+        digest: "v1:first",
+        acknowledged: ["totals_reviewed", "bills_without_usage"],
+        typed: "October 2026",
+      },
     });
-    const closingBtn = screen.getByRole("button", { name: /^Closing…$/ }) as HTMLButtonElement;
-    expect(closingBtn.disabled).toBe(true);
-
-    // Resolve to clean up.
-    d.resolve();
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /^Closing…$/ })).toBeNull();
-    });
-  });
-
-  it("success: after onConfirm resolves, green 'Closed:' header + 'Export CSV for URA' CTA render and dispatch onExportCsv", async () => {
-    const onConfirm = vi.fn(() => Promise.resolve());
-    const onExportCsv = vi.fn();
-    render(<ControlledHarness onConfirm={onConfirm} onExportCsv={onExportCsv} />);
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /^Close period$/ }));
-
-    await waitFor(() => {
-      expect(screen.getByText(`Closed: ${PERIOD_LABEL}`)).toBeTruthy();
-    });
-    // Eyebrow flips to success tone.
-    const eyebrow = screen.getByText("Closed");
-    expect(eyebrow.className).toContain("text-success-fg");
-
-    const csvBtn = screen.getByRole("button", { name: /Export CSV for URA/i });
-    fireEvent.click(csvBtn);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV for URA" }));
     expect(onExportCsv).toHaveBeenCalledTimes(1);
   });
 
-  it("error: when onConfirm rejects, destructive banner + 'Retry close' render; retry re-invokes onConfirm", async () => {
-    let attempt = 0;
-    const onConfirm = vi.fn(() => {
-      attempt += 1;
-      return attempt === 1
-        ? Promise.reject(new Error("boom"))
-        : Promise.resolve();
-    });
-    render(<ControlledHarness onConfirm={onConfirm} />);
+  it("when the totals changed, shows the new review with nothing ticked, and sends its digest next", async () => {
+    const changed = ceremony({ digest: "v1:second", facts: [{ label: "Bills", value: { t: "number", v: 13, text: "13" } }] });
+    const { post } = mount([
+      review(),
+      { ok: false, status: 409, code: "billing_period_totals_changed", ceremony: changed },
+      closed,
+    ]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await screen.findByText(/The totals changed after you reviewed them/);
+    expect(screen.getByText("13")).toBeTruthy();
+    for (const box of screen.getAllByRole("checkbox")) expect((box as HTMLInputElement).checked).toBe(false);
+    expect(typedBox().value).toBe("");
+    expect(confirmButton().disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /^Close period$/ }));
-
-    // Banner shows the rejection message in destructive tone.
-    await waitFor(() => {
-      expect(screen.getByText(/Couldn't close period\./)).toBeTruthy();
-    });
-    expect(screen.getByText(/boom/)).toBeTruthy();
-
-    const retryBtn = screen.getByRole("button", { name: /Retry close/i });
-    // Retry button keeps destructive tone (genuine failure state).
-    expect(retryBtn.className).toContain("bg-destructive");
-
-    fireEvent.click(retryBtn);
-    await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(2);
-    });
-    // Second attempt resolves → success surface.
-    await waitFor(() => {
-      expect(screen.getByText(`Closed: ${PERIOD_LABEL}`)).toBeTruthy();
-    });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await screen.findByRole("heading", { name: "Closed: October 2026" });
+    expect((post.mock.calls[2][1] as { confirmation: { digest: string } }).confirmation.digest).toBe("v1:second");
   });
 
-  it("re-open after error resets state (checkbox unchecked, banner gone, button back to disabled 'Close period')", async () => {
-    const onConfirm = vi.fn(() => Promise.reject(new Error("boom")));
-    render(<ControlledHarness onConfirm={onConfirm} />);
+  it("stays open while the close is sending, and reports a close that went through", async () => {
+    let finish: (answer: CloseAnswer) => void = () => {};
+    const { post, onOpenChange, onClosed } = mount([review()]);
+    post.mockImplementationOnce(() => new Promise<CloseAnswer>((resolve) => (finish = resolve)));
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
 
-    // Tick + click → error surface.
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /^Close period$/ }));
-    await waitFor(() => {
-      expect(screen.getByText(/Couldn't close period\./)).toBeTruthy();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
 
-    // Close, then reopen via the harness controls.
-    fireEvent.click(screen.getByTestId("harness-close"));
-    await waitFor(() => {
-      expect(screen.queryByText(/Couldn't close period\./)).toBeNull();
-    });
-    fireEvent.click(screen.getByTestId("harness-reopen"));
+    await act(async () => finish({ ok: true, status: 200 }));
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    await screen.findByRole("heading", { name: "Closed: October 2026" });
+  });
 
-    // After reopen: error banner gone, checkbox unchecked, confirm button disabled
-    // and labelled "Close period" again.
-    await waitFor(() => {
-      const reopenedBtn = screen.queryByRole("button", { name: /^Close period$/ });
-      expect(reopenedBtn).not.toBeNull();
-    });
-    expect(screen.queryByText(/Couldn't close period\./)).toBeNull();
-    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
-    expect(checkbox.checked).toBe(false);
-    const closeBtn = screen.getByRole("button", { name: /^Close period$/ }) as HTMLButtonElement;
-    expect(closeBtn.disabled).toBe(true);
-    // No "Retry close" button — error state cleared.
-    expect(screen.queryByRole("button", { name: /Retry close/i })).toBeNull();
+  it("reports a close that went through even if the dialog was closed meanwhile", async () => {
+    let finish: (answer: CloseAnswer) => void = () => {};
+    const { post, onClosed, view } = mount([review()]);
+    post.mockImplementationOnce(() => new Promise<CloseAnswer>((resolve) => (finish = resolve)));
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    // The page closes it, for example by navigating away.
+    view.rerender(
+      <ClosePeriodDialog open={false} onOpenChange={vi.fn()} periodId={PERIOD} onClosed={onClosed} post={post} />
+    );
+    await act(async () => finish({ ok: true, status: 200 }));
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the server's refusal and stays on the step", async () => {
+    const { onClosed } = mount([
+      review(),
+      { ok: false, status: 428, code: "billing_close_name_mismatch", message: "Type the period's name, October 2026, to close it." },
+    ]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    expect((await screen.findByRole("alert")).textContent).toBe("Type the period's name, October 2026, to close it.");
+    expect(confirmButton()).toBeTruthy();
+    expect(onClosed).not.toHaveBeenCalled();
   });
 });
 
-describe("ClosePeriodDialog — a11y", () => {
-  it("on open, focus lands on the Cancel button (cancel-first), not the checkbox", async () => {
-    render(<ControlledHarness onConfirm={() => Promise.resolve()} />);
-
-    // Radix runs onOpenAutoFocus async-microtask-ish; wait until cancel is focused.
-    await waitFor(() => {
-      const cancelBtn = screen.getByRole("button", { name: /^Cancel$/ });
-      expect(document.activeElement).toBe(cancelBtn);
-    });
-
-    // And NOT the checkbox.
-    const checkbox = screen.getByRole("checkbox");
-    expect(document.activeElement).not.toBe(checkbox);
-  });
-});
-
-// ─── #167 — un-billed warning banner ──────────────────────────────────────────
-//
-// Pin the warn-but-allow contract:
-//   - With zero unfilled, no banner; button label is still "Close period";
-//     checkbox copy is unchanged.
-//   - With one unfilled, the banner appears with singular copy, lists the name,
-//     button label flips to "Close anyway", checkbox copy gets the
-//     " (including 1 un-billed tenant)" addendum.
-//   - With six unfilled, the banner shows plural copy and truncates the
-//     name list to the first five followed by "+ 1 more".
-//   - The banner uses warning tokens (bg-warning-muted + text-warning-fg),
-//     NOT destructive tokens.
-//   - The confirm flow still works end-to-end with the banner present:
-//     tick checkbox → button enables → click → onConfirm fires.
-
-describe("ClosePeriodDialog — un-billed warning banner (#167)", () => {
-  it("with zero unfilled: no banner, button reads 'Close period', checkbox copy has no addendum", () => {
-    render(
-      <ControlledHarness
-        onConfirm={() => Promise.resolve()}
-        unfilledTenantNames={[]}
-      />
-    );
-
-    // No banner rendered.
-    expect(screen.queryByTestId("close-period-unfilled-banner")).toBeNull();
-    expect(screen.queryByText(/un-billed/i)).toBeNull();
-
-    // Confirm button label unchanged.
-    const closeBtn = screen.getByRole("button", { name: /^Close period$/ });
-    expect(closeBtn).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Close anyway$/ })).toBeNull();
-
-    // Checkbox copy unchanged — no "(including ..." addendum.
-    expect(screen.queryByText(/including .* un-billed/i)).toBeNull();
+describe("ClosePeriodDialog — when the period cannot close", () => {
+  it("shows why when a bill total is not a whole number, with the totals and nothing to confirm", async () => {
+    mount([
+      {
+        ok: false,
+        status: 409,
+        code: "billing_close_fractional_totals",
+        message: "Regenerate the bills for House 2 before closing: their totals are not whole numbers.",
+        ceremony: ceremony(),
+      },
+    ]);
+    expect((await screen.findByRole("alert")).textContent).toContain("Regenerate the bills for House 2");
+    expect(screen.getByText("UGX 4,216,800")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close period" })).toBeNull();
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
   });
 
-  it("with one unfilled: singular banner copy, lists the name, button reads 'Close anyway', checkbox addendum is singular", () => {
-    render(
-      <ControlledHarness
-        onConfirm={() => Promise.resolve()}
-        unfilledTenantNames={["House A"]}
-      />
-    );
-
-    // Banner present with singular heading.
-    const banner = screen.getByTestId("close-period-unfilled-banner");
-    expect(banner).toBeTruthy();
-    expect(screen.getByText("1 tenant still un-billed")).toBeTruthy();
-    // Plural form must NOT render in the singular case.
-    expect(screen.queryByText(/^1 tenants still un-billed$/)).toBeNull();
-
-    // Name listed in the body.
-    expect(screen.getByText("House A")).toBeTruthy();
-
-    // Confirm button label flips to "Close anyway".
-    expect(
-      screen.getByRole("button", { name: /^Close anyway$/ })
-    ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Close period$/ })).toBeNull();
-
-    // Checkbox copy has the singular addendum.
-    expect(
-      screen.getByText(/including 1 un-billed tenant\)/)
-    ).toBeTruthy();
+  it("offers Retry when the review cannot be loaded, and loads it again", async () => {
+    const { post } = mount([{ ok: false, status: 503, code: "billing_review_unavailable", message: "Retry." }, review()]);
+    expect((await screen.findByRole("alert")).textContent).toContain("Couldn't load the period's totals.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    expect(post).toHaveBeenCalledTimes(2);
   });
 
-  it("with six unfilled: plural banner copy, lists first 5 + '+ 1 more'", () => {
-    const names = [
-      "House A",
-      "House B",
-      "House C",
-      "House D",
-      "House E",
-      "House F",
-    ];
-    render(
-      <ControlledHarness
-        onConfirm={() => Promise.resolve()}
-        unfilledTenantNames={names}
-      />
+  it("asks the server again each time it opens", async () => {
+    const { post, view } = mount([review(), review(ceremony({ digest: "v1:again" }))]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    view.rerender(
+      <ClosePeriodDialog open={false} onOpenChange={vi.fn()} periodId={PERIOD} onClosed={vi.fn()} post={post} />
     );
-
-    // Plural heading.
-    expect(screen.getByText("6 tenants still un-billed")).toBeTruthy();
-
-    // First five listed in a comma-separated preview, followed by "+ 1 more".
-    const banner = screen.getByTestId("close-period-unfilled-banner");
-    expect(banner.textContent).toContain(
-      "House A, House B, House C, House D, House E + 1 more"
-    );
-    // The 6th name must NOT appear in the truncated preview.
-    expect(banner.textContent).not.toContain("House F");
-
-    // Plural addendum in checkbox copy.
-    expect(
-      screen.getByText(/including 6 un-billed tenants\)/)
-    ).toBeTruthy();
+    view.rerender(<ClosePeriodDialog open onOpenChange={vi.fn()} periodId={PERIOD} onClosed={vi.fn()} post={post} />);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    await screen.findByRole("heading", { name: "Close October 2026?" });
   });
 
-  it("banner uses warning tokens, not destructive tokens (token-class drift sanity)", () => {
-    render(
-      <ControlledHarness
-        onConfirm={() => Promise.resolve()}
-        unfilledTenantNames={["House A", "House B"]}
-      />
-    );
-
-    const banner = screen.getByTestId("close-period-unfilled-banner");
-    expect(banner.className).toContain("bg-warning-muted");
-    expect(banner.className).toContain("text-warning-fg");
-    expect(banner.className).not.toContain("bg-destructive");
-    expect(banner.className).not.toContain("bg-destructive-muted");
-    expect(banner.className).not.toContain("text-destructive-fg");
-  });
-
-  it("confirm flow still works with the banner present: tick → enable → click → onConfirm", async () => {
-    const onConfirm = vi.fn(() => Promise.resolve());
-    render(
-      <ControlledHarness
-        onConfirm={onConfirm}
-        unfilledTenantNames={["House A"]}
-      />
-    );
-
-    const closeBtn = screen.getByRole("button", {
-      name: /^Close anyway$/,
-    }) as HTMLButtonElement;
-    expect(closeBtn.disabled).toBe(true);
-
-    fireEvent.click(screen.getByRole("checkbox"));
-    expect(closeBtn.disabled).toBe(false);
-
-    fireEvent.click(closeBtn);
-    await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1);
-    });
-    expect(onConfirm.mock.calls[0]).toEqual([]);
+  it("Cancel closes the dialog", async () => {
+    const { onOpenChange } = mount([review()]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
