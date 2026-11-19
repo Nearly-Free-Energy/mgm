@@ -525,8 +525,11 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
       const prev = optimisticStatus;
       setOptimisticStatus(newStatus);
 
+      // Only a request that never got an answer is a network error: the
+      // route's own refusals (403, 404, 428 …) show their message once.
+      let res: Response;
       try {
-        const res = await fetch(
+        res = await fetch(
           `/api/billing-line-items/${lineItem.id}/payment-status`,
           {
             method: "PATCH",
@@ -541,27 +544,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
             }),
           },
         );
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          setOptimisticStatus(prev);
-          onRowBanner({
-            id: `${lineItem.id}-status-err-${Date.now()}`,
-            lineItemId: lineItem.id,
-            tone: "destructive",
-            message: body.error ?? "Failed to update payment status.",
-            durationMs: ERROR_BANNER_DURATION_MS,
-          });
-          // Throw so the ConfirmDialog inline retry surface lights up.
-          throw new Error(body.error ?? "Failed to update payment status.");
-        }
       } catch (err) {
-        // Network error path — guard against re-throwing the same error
-        // we already pushed to the banner above.
-        if (err instanceof Error && err.message.includes("Failed to update")) {
-          throw err;
-        }
         setOptimisticStatus(prev);
         onRowBanner({
           id: `${lineItem.id}-status-net-${Date.now()}`,
@@ -571,6 +554,21 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
           durationMs: ERROR_BANNER_DURATION_MS,
         });
         throw err;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setOptimisticStatus(prev);
+        onRowBanner({
+          id: `${lineItem.id}-status-err-${Date.now()}`,
+          lineItemId: lineItem.id,
+          tone: "destructive",
+          message: body.error ?? "Failed to update payment status.",
+          durationMs: ERROR_BANNER_DURATION_MS,
+        });
+        // Throw so the ConfirmDialog inline retry surface lights up.
+        throw new Error(body.error ?? "Failed to update payment status.");
       }
     },
     [lineItem.id, onRowBanner, optimisticStatus],

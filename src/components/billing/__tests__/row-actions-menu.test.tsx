@@ -536,6 +536,61 @@ describe("RowActionsMenu — payment-status PATCH per ALLOWED_MANUAL_TRANSITIONS
     });
   });
 
+  describe("a refused or failed refund shows one banner", () => {
+    async function refund(fetchImpl: ReturnType<typeof vi.fn>) {
+      vi.stubGlobal("fetch", fetchImpl);
+      const onRowBanner = vi.fn();
+      renderMenu(
+        makeProps({
+          onRowBanner,
+          lineItem: {
+            id: "li-1",
+            payment_status: "paid",
+            reading_source: "edge",
+            total_amount: 100,
+            pesapal_redirect_url: null,
+          },
+        }),
+      );
+      await act(async () => {
+        openMenu(screen.getByRole("button", { name: /row actions for/i }));
+      });
+      await clickMenuItem(/mark as refunded/i);
+      const confirm = (await screen.findByRole("button", { name: "Mark as refunded" })) as HTMLButtonElement;
+      fireEvent.change(screen.getByLabelText("Type the tenant name to confirm"), { target: { value: "Alice Mukasa" } });
+      await act(async () => {
+        confirm.click();
+      });
+      await waitFor(() => expect(onRowBanner).toHaveBeenCalled());
+      // Let any second banner a misrouted error would push arrive.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      return onRowBanner.mock.calls.map((c) => (c[0] as RowBannerEntry).message);
+    }
+
+    it("the route's 428 refusal: its own message, and no network error", async () => {
+      const messages = await refund(
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 428,
+          json: () =>
+            Promise.resolve({
+              error: "The name typed does not match this bill's tenant.",
+              reason: "refund_name_mismatch",
+            }),
+        }),
+      );
+      expect(messages).toEqual(["The name typed does not match this bill's tenant."]);
+    });
+
+    it("a request that gets no answer: the network error alone", async () => {
+      const messages = await refund(vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      expect(messages).toEqual(["Network error. Please try again."]);
+    });
+  });
+
   it("link_generated row surfaces THREE menu items (paid + cancel + failed)", async () => {
     renderMenu(
       makeProps({
