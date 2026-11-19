@@ -533,6 +533,18 @@ export const GENERATE_FROM_METERS_COPY = {
   nothingToRead: "There is nothing to read from meters for this period.",
 } as const;
 
+/**
+ * POST /api/billing-periods/[periodId]/generate-from-meters. The period comes
+ * from the path, and the run takes nothing else: every tenant's bill is read
+ * from its meter (BillingCapability.generateFromMeters). The body is the empty
+ * object the GUI host sends for an action bound only through its path
+ * (invoke.ts); a confirm-level action is sent no confirmation, so any key is
+ * refused. If the action comes to take readings, a confirmation or a choice
+ * of tenants, add them here and bump the version.
+ */
+export const GenerateFromMetersBody = z.strictObject({}, { error: bodyError });
+export const GENERATE_FROM_METERS_BODY_VERSION = 1;
+
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 
 /**
