@@ -25,6 +25,7 @@ import type {
 import { ATTEMPT_NOT_OPEN } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
+import { stablePaymentLinkPath } from "./payment-link";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -211,7 +212,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     }
     // The stable MGM link resolves to the current bill revision at click
     // time; invoices embed this same link. Customers need no MGM account.
-    return { ok: true as const, data: { url: this.appUrl(`/api/billing-line-items/${lineItemId}/pay`) } };
+    return { ok: true as const, data: { url: this.appUrl(stablePaymentLinkPath(lineItemId)) } };
   }
 
   private billToDescription(bill: BillSnapshot): string {

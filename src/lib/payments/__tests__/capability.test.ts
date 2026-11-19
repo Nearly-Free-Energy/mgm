@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PaymentsCapability } from "../capability";
 import { PaymentError } from "../errors";
 import { ATTEMPT_NOT_OPEN, type ProviderFactory } from "../repository";
+import { stablePaymentLinkPath } from "../payment-link";
 import {
   ATTEMPT,
   COMMUNITY,
@@ -115,6 +116,27 @@ describe("PaymentsCapability access gates", () => {
     const checkout = await cap.ensureCheckout(LINE_ITEM);
     expect(checkout.ok).toBe(false);
     if (!checkout.ok) expect(checkout.code).toBe("payments_override_broken");
+  });
+});
+
+describe("PaymentsCapability stable payment link", () => {
+  it("is the application URL of stablePaymentLinkPath, the path a billing view builds the same link from", async () => {
+    const repo = baseRepo({});
+    const create = vi.spyOn(repo, "createAttempt");
+    const cap = new PaymentsCapability(repo, scope(), providers(), () => true, (p) => `https://mgm.example.org${p}`);
+    expect(await cap.stablePaymentLink(LINE_ITEM)).toEqual({
+      ok: true,
+      data: { url: `https://mgm.example.org${stablePaymentLinkPath(LINE_ITEM)}` },
+    });
+    expect(stablePaymentLinkPath(LINE_ITEM)).toBe(`/api/billing-line-items/${LINE_ITEM}/pay`);
+    // Handing out the link starts no checkout.
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bill of another organization", async () => {
+    const repo = baseRepo({ getLineItemOrganization: async () => ({ lineItemId: LINE_ITEM, orgId: "99999999-9999-4999-8999-999999999999" }) });
+    const cap = new PaymentsCapability(repo, scope(), providers(), () => true, (p) => p);
+    expect(await cap.stablePaymentLink(LINE_ITEM)).toMatchObject({ ok: false, status: 403, code: "payments_scope_mismatch" });
   });
 });
 
