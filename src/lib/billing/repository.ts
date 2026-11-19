@@ -13,7 +13,9 @@
  */
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { CloseReview } from "./close";
-import type { GenerationResult, RunGenerationFatal } from "./generate";
+import type { ExpectedBill, GenerationResult, RunGenerationFatal } from "./generate";
+
+export type { ExpectedBill };
 
 export type BillingScope = {
   organizationId: string;
@@ -41,7 +43,8 @@ export function billingFailure(
   return { ok: false, ...error };
 }
 
-export type RepositoryError = { code?: string; message: string };
+/** `details` is PostgREST's DETAIL, such as the delete guard's `closed` or `payment_activity` (./period-delete.ts). */
+export type RepositoryError = { code?: string; message: string; details?: string | null };
 
 export type TierInput = {
   label?: string;
@@ -101,6 +104,8 @@ export interface BillingGeneration {
     seedReadings?: SeedReadingInput[];
     mode: "write" | "preview";
     actorUserId: string;
+    /** A per-bill regeneration's bill as read (RunGenerationParams.expectedBill). */
+    expectedBill?: ExpectedBill;
   }): Promise<GenerationOutput | GenerationFatal>;
 }
 
@@ -164,6 +169,14 @@ export interface BillingRepository {
     notes: string | null;
     actorUserId: string;
   }): Promise<{ updated: unknown; error: RepositoryError | null }>;
+  /** Null when the period is not visible to the caller; rejects when it cannot be read. */
+  getBillingPeriod(periodId: string): Promise<BillingPeriodRow | null>;
+  /**
+   * Deletes the period. `deleted` is false when no row was removed, as when
+   * row-level security hides it; fn_billing_period_before_delete_guard
+   * refuses a closed period or one with payment activity with an error.
+   */
+  deleteBillingPeriod(periodId: string): Promise<{ deleted: boolean; error: RepositoryError | null }>;
 }
 
 export interface BillingCapabilityContract {
@@ -178,9 +191,19 @@ export interface BillingCapabilityContract {
     input?: unknown
   ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedTenant[] }>>;
   previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
-  generateBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
+  /**
+   * `options.expectedBill` makes the run a per-bill regeneration
+   * (RunGenerationParams.expectedBill). It is not part of the body, so POST
+   * /api/billing/generate cannot send it.
+   */
+  generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
   recordManualPayment(
     lineItemId: string,
     input: unknown
   ): Promise<BillingResult<unknown>>;
+  /** Deletes a draft period, against the name the person typed (DeletePeriodBody). */
+  deletePeriod(
+    periodId: string,
+    input?: unknown
+  ): Promise<BillingResult<{ periodId: string; microgridId: string; name: string }>>;
 }

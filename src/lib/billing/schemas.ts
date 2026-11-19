@@ -133,6 +133,36 @@ export const ClosePeriodBody = z.strictObject(
 );
 export const CLOSE_PERIOD_BODY_VERSION = 1;
 
+const DELETE_CONFIRMATION = "confirmation needs the period's name, typed";
+
+/**
+ * DELETE /api/billing-periods/[periodId]. The period comes from the path.
+ * `confirmation` is the host's Confirmation (src/lib/gui/contract.ts) for a
+ * typed action: the period name the person typed (periodName in ./close).
+ * Without it the route answers 428. No digest: billing.delete-period's
+ * prepare returns none (./surface/periods.ts). If it ever does, add `digest`
+ * here and bump the version.
+ */
+export const DeletePeriodBody = z.strictObject(
+  {
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: DELETE_CONFIRMATION }).max(64, { error: DELETE_CONFIRMATION }), {
+              error: DELETE_CONFIRMATION,
+            })
+            .max(20, { error: DELETE_CONFIRMATION }),
+          typed: z.string({ error: DELETE_CONFIRMATION }).max(200, { error: DELETE_CONFIRMATION }).optional(),
+        },
+        { error: DELETE_CONFIRMATION }
+      )
+      .optional(),
+  },
+  { error: bodyError }
+);
+export const DELETE_PERIOD_BODY_VERSION = 1;
+
 // ── Billing periods and bill generation ──
 
 const PERIODS_RANGE = "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.";
@@ -396,6 +426,8 @@ const LINE_ITEMS_PAYMENT_STATUSES = ["unpaid", "paid", "failed", "refunded"] as 
  * notes is trimmed before its length is checked, and a note that trims to
  * nothing parses as null.
  */
+const LINE_ITEMS_CONFIRMATION = "confirmation needs the acknowledgements ticked and the name typed";
+
 export const LineItemPaymentStatusBody = z.strictObject(
   {
     status: z
@@ -413,10 +445,114 @@ export const LineItemPaymentStatusBody = z.strictObject(
       .nullish()
       .transform((notes) => (notes ? notes : null))
       .meta({ title: "Notes" }),
+    // The host's Confirmation (src/lib/gui/contract.ts), sent with a typed
+    // action: billing.mark-refunded asks for the tenant's name, and the
+    // route refuses a refund without it (428), whoever sends it; the legacy
+    // row menu's refund dialog sends it too. Version 2 added it. typed has
+    // no length limit: the route compares it with tenants.display_name, which
+    // has none either (TEXT; createTenant and the tenant update only trim
+    // it), so any cap here would leave a longer-named tenant's bill with no
+    // way to be refunded. If display_name gets a length limit, cap typed at it.
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: LINE_ITEMS_CONFIRMATION }).max(64, { error: LINE_ITEMS_CONFIRMATION }), {
+              error: LINE_ITEMS_CONFIRMATION,
+            })
+            .max(20, { error: LINE_ITEMS_CONFIRMATION }),
+          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).optional(),
+        },
+        { error: LINE_ITEMS_CONFIRMATION }
+      )
+      .optional(),
   },
   { error: lineItemsPaymentBodyError }
 );
-export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 1;
+export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
+
+/**
+ * The acknowledgement regenerating a paid bill needs on the regenerate route:
+ * billing.regenerate-bill's prepare offers it
+ * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
+ * bill without it. POST /api/billing/generate asks for none and rewrites a
+ * paid bill as well; the legacy dialogs that call it warn on the client only.
+ */
+export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
+
+/**
+ * Why the regenerate route refuses a bill, as fixed copy: the route answers
+ * with it and billing.regenerate-bill's availability and prepare explain the
+ * same refusal before it happens (src/lib/billing/surface/period-review.ts).
+ *  - closed: the period's totals were reviewed and closed; regenerating
+ *    would change money a closed period was closed with.
+ *  - invoiced: the bill has an invoice number (allocated the first time its
+ *    PDF is downloaded, GET /api/billing-line-items/[lineItemId]/pdf), and a
+ *    regenerated bill would carry new figures under the number already
+ *    issued.
+ *  - refunded: refunding then re-billing reads as data corruption.
+ *  - changed: the bill changed after the route read it (a payment, a
+ *    refund, another regeneration); only the write itself finds this
+ *    (fn_regenerate_bill_with_audit).
+ * POST /api/billing/generate, which the legacy dialogs call, refuses none of
+ * these: if it comes to, say so here.
+ */
+export const REGENERATE_REFUSAL_COPY = {
+  closed: "Bills in a closed period cannot be regenerated.",
+  invoiced: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
+  refunded: "A refunded bill cannot be regenerated.",
+  // fn_regenerate_bill_with_audit found the bill changed between the route's
+  // read and the write: paid, refunded or regenerated meanwhile.
+  changed: "This bill changed while it was being regenerated. Refresh it and try again.",
+} as const;
+
+const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
+
+/**
+ * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an
+ * object-level refinement, so the GUI host can check a prefill
+ * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit form can
+ * render it; the route checks which readings each mode takes. If a
+ * refinement is added, the period review's prefills are dropped: revisit.
+ */
+export const RegenerateBillBody = z.strictObject(
+  {
+    readings: z
+      .enum(["edge", "manual"], { error: "readings must be 'edge' or 'manual'" })
+      .meta({ title: "Readings" }),
+    start_kwh: lineItemsKwh("start_kwh").optional().meta({ title: "Start reading (kWh)" }),
+    end_kwh: lineItemsKwh("end_kwh").optional().meta({ title: "End reading (kWh)" }),
+    reason: z
+      .string({ error: "reason must be a string" })
+      .trim()
+      .max(500, { error: "reason must be 500 characters or fewer" })
+      .optional()
+      .meta({ title: "Reason" }),
+    // The host's Confirmation (src/lib/gui/contract.ts), sent with a
+    // ceremony action: billing.regenerate-bill asks a paid bill's
+    // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
+    // this route refuses a paid bill without it (POST /api/billing/generate
+    // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
+    // the form. Version 2 added it. It takes no typed name: the ceremony
+    // asks for none (prepareRegenerateBill), so the host sends none, and a
+    // body carrying one is refused as an unknown key. If the ceremony comes
+    // to ask for a name, add typed here and check it in the route.
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: REGENERATE_CONFIRMATION }).max(64, { error: REGENERATE_CONFIRMATION }), {
+              error: REGENERATE_CONFIRMATION,
+            })
+            .max(20, { error: REGENERATE_CONFIRMATION }),
+        },
+        { error: REGENERATE_CONFIRMATION }
+      )
+      .optional(),
+  },
+  { error: bodyError }
+);
+export const REGENERATE_BILL_BODY_VERSION = 2;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

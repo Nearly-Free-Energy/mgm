@@ -485,6 +485,112 @@ describe("RowActionsMenu — payment-status PATCH per ALLOWED_MANUAL_TRANSITIONS
     });
   });
 
+  it("paid → refunded: the dialog asks for the tenant's name, and sends it as the confirmation the route checks", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ status: "success" }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderMenu(
+      makeProps({
+        lineItem: {
+          id: "li-1",
+          payment_status: "paid",
+          reading_source: "edge",
+          total_amount: 100,
+          pesapal_redirect_url: null,
+        },
+      }),
+    );
+
+    await act(async () => {
+      openMenu(screen.getByRole("button", { name: /row actions for/i }));
+    });
+    await clickMenuItem(/mark as refunded/i);
+
+    const confirm = (await screen.findByRole("button", { name: "Mark as refunded" })) as HTMLButtonElement;
+    const typed = screen.getByLabelText("Type the tenant name to confirm") as HTMLInputElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(typed, { target: { value: "alice mukasa" } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(typed, { target: { value: " Alice Mukasa " } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText(/payment notes/i), { target: { value: "receipt 42" } });
+
+    await act(async () => {
+      confirm.click();
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/billing-line-items/li-1/payment-status`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "refunded",
+            notes: "receipt 42",
+            confirmation: { acknowledged: [], typed: "Alice Mukasa" },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("a refused or failed refund shows one banner", () => {
+    async function refund(fetchImpl: ReturnType<typeof vi.fn>) {
+      vi.stubGlobal("fetch", fetchImpl);
+      const onRowBanner = vi.fn();
+      renderMenu(
+        makeProps({
+          onRowBanner,
+          lineItem: {
+            id: "li-1",
+            payment_status: "paid",
+            reading_source: "edge",
+            total_amount: 100,
+            pesapal_redirect_url: null,
+          },
+        }),
+      );
+      await act(async () => {
+        openMenu(screen.getByRole("button", { name: /row actions for/i }));
+      });
+      await clickMenuItem(/mark as refunded/i);
+      const confirm = (await screen.findByRole("button", { name: "Mark as refunded" })) as HTMLButtonElement;
+      fireEvent.change(screen.getByLabelText("Type the tenant name to confirm"), { target: { value: "Alice Mukasa" } });
+      await act(async () => {
+        confirm.click();
+      });
+      await waitFor(() => expect(onRowBanner).toHaveBeenCalled());
+      // Let any second banner a misrouted error would push arrive.
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      return onRowBanner.mock.calls.map((c) => (c[0] as RowBannerEntry).message);
+    }
+
+    it("the route's 428 refusal: its own message, and no network error", async () => {
+      const messages = await refund(
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 428,
+          json: () =>
+            Promise.resolve({
+              error: "The name typed does not match this bill's tenant.",
+              reason: "refund_name_mismatch",
+            }),
+        }),
+      );
+      expect(messages).toEqual(["The name typed does not match this bill's tenant."]);
+    });
+
+    it("a request that gets no answer: the network error alone", async () => {
+      const messages = await refund(vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      expect(messages).toEqual(["Network error. Please try again."]);
+    });
+  });
+
   it("link_generated row surfaces THREE menu items (paid + cancel + failed)", async () => {
     renderMenu(
       makeProps({

@@ -91,6 +91,19 @@ export type CanaryIds = {
   /** One synthetic edge and one real one, which the synthetic source refuses. */
   mixedMicrogridId: string;
   /**
+   * A draft billing period on the Basic path's microgrid, pinned to
+   * `rateScheduleId`: a draft with one unpaid bill and no recorded payment,
+   * so delete's available() and prepare run, and every bill action reaches
+   * its own steps.
+   */
+  billingPeriodId: string;
+  /** The period's pinned tariff. */
+  rateScheduleId: string;
+  /** A tenant of the Basic path's microgrid, with no meter. */
+  tenantId: string;
+  /** The period's one bill: the tenant's, unpaid, entered by hand, with a starting reading. */
+  lineItemId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. The units
    * have no meter assigned, so the microgrids' house meters, and with them
@@ -117,9 +130,14 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * Each microgrid has an edge with a battery and a grid meter, so a view that
  * reads the site reaches its metering source: the edges of the synthetic
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
- * one, and the mixed microgrid has one edge of each. The organization also
- * gets an email sender (RFC #186) whose password is a canary, a tenant unit
- * on each microgrid (`unitIds`) and the tenant app turned on.
+ * one, and the mixed microgrid has one edge of each. The Basic path's
+ * microgrid also gets a tariff, a tenant with no meter and a draft billing
+ * period pinned to that tariff: a draft with one unpaid bill and no recorded
+ * payment, so delete's available() and prepare run, and every bill action
+ * reaches its own steps. The organization's delete removes them with it.
+ * The organization also gets an email sender (RFC #186) whose password is a
+ * canary, a tenant unit on each microgrid (`unitIds`) and the tenant app
+ * turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -164,6 +182,43 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       }
     }
   }
+  // The tariff before the period, which pins one on insert; set explicitly anyway.
+  site.push([
+    "rate_schedules",
+    {
+      id: ids.rateScheduleId,
+      microgrid_id: ids.microgridIds.basic,
+      tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 500 }],
+      service_charge: 0,
+      tax_rate: 0,
+    },
+  ]);
+  site.push([
+    "billing_periods",
+    {
+      id: ids.billingPeriodId,
+      microgrid_id: ids.microgridIds.basic,
+      start_date: "2026-10-01",
+      end_date: "2026-10-31",
+      status: "draft",
+      timezone: "Africa/Kampala",
+      rate_schedule_id: ids.rateScheduleId,
+    },
+  ]);
+  site.push(["tenants", { id: ids.tenantId, microgrid_id: ids.microgridIds.basic, display_name: "GUI Canary Tenant", primary_phone: "+256700000999" }]);
+  site.push([
+    "billing_line_items",
+    {
+      id: ids.lineItemId,
+      billing_period_id: ids.billingPeriodId,
+      tenant_id: ids.tenantId,
+      start_kwh: 0,
+      end_kwh: 10,
+      usage_kwh: 10,
+      total_amount: 5000,
+      reading_source: "manual",
+    },
+  ]);
   rows.push([
     "payment_merchant_accounts",
     {
@@ -245,12 +300,28 @@ const LOGS = ["error", "warn", "log", "info"] as const;
 const show = (arg: unknown) =>
   typeof arg === "string" ? arg : inspect(arg, { depth: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity, breakLength: Infinity });
 
-/** Every assignment of seeded rows to `kinds` (name → entity kind), or a throw naming a kind with no seeded row. */
+/**
+ * Every assignment of seeded rows to `kinds` (name → entity kind), or a
+ * throw naming a kind with no seeded row. Only nested assignments are kept:
+ * where both a row's kind and its parent's kind are params (a period and its
+ * microgrid), the two must be the seeded row and its own parent, since a
+ * view answers 404 for a period under another microgrid before its loader
+ * runs.
+ */
 function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: string): Record<string, string>[] {
   const byKind: Partial<Record<EntityKind, string[]>> = {
     organization: [ids.orgId],
     community: [ids.communityId],
     microgrid: canaryMicrogrids(ids),
+    billingPeriod: [ids.billingPeriodId],
+    lineItem: [ids.lineItemId],
+    tenant: [ids.tenantId],
+  };
+  /** Each seeded row's parent, by the parent's kind. */
+  const parentOf: Record<string, { kind: EntityKind; id: string }> = {
+    [ids.billingPeriodId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.lineItemId]: { kind: "billingPeriod", id: ids.billingPeriodId },
+    [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {
@@ -258,7 +329,14 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     if (rows === undefined) throw new Error(`[canary] ${what}: no canary row for entity kind "${kind}"; seed one`);
     combos = combos.flatMap((c) => rows.map((id) => ({ ...c, [name]: id })));
   }
-  return combos;
+  const names = Object.entries(kinds);
+  return combos.filter((c) =>
+    names.every(([name]) => {
+      const parent = parentOf[c[name]];
+      if (!parent) return true;
+      return names.every(([other, kind]) => kind !== parent.kind || c[other] === parent.id);
+    }),
+  );
 }
 
 /**
