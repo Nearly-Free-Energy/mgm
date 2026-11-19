@@ -39,7 +39,7 @@ export const STATUS_MAPS = {
     manual: { label: "Manual", tone: "neutral" },
   },
   // A period's audit history (billing.period-history): a bill regenerated
-  // after its period closed, as the legacy history page's warn chip marks it
+  // after its period closed, as AuditLogList's warn chip marks it
   // (src/lib/billing/audit-humanize.tsx, PostCloseRevisionChip).
   billingAuditEntry: {
     post_close_revision: { label: "Post-close revision", tone: "warning" },

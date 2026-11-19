@@ -227,7 +227,7 @@ export type HumanizedHistoryEntry = {
   postClose: boolean;
 };
 
-/** One entry as the legacy history page words it, with money and statuses formatted on the server. */
+/** One entry as AuditLogList words it (src/lib/billing/audit-humanize.tsx), with money and statuses formatted on the server. */
 export function humanizeHistoryEntry(entry: BillingAuditLogEntry, fmt: Fmt, currency: string): HumanizedHistoryEntry {
   const d = entry.details ?? {};
   const postClose = d["period_was_closed"] === true;
