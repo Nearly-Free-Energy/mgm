@@ -64,15 +64,14 @@ export function SyntheticMark({ inherit = false }: { inherit?: boolean } = {}) {
  * A figure as the server formatted it, with its synthetic mark: caption
  * size in the calendar's cells, dense in the hour list and the footers.
  * At caption size the mark takes the cell's text colour, since the cell may
- * be shaded. `shown` false keeps it for screen readers only.
+ * be shaded.
  */
-export function Figure({ value, size, shown = true }: { value: Value; size: "caption" | "dense"; shown?: boolean }) {
+export function Figure({ value, size }: { value: Value; size: "caption" | "dense" }) {
   return (
     <span
       className={cls(
         size === "caption" ? "gt:text-caption" : "gt:text-dense",
         "gt:font-semibold gt:tabular-nums gt:break-words",
-        !shown && "gt:sr-only",
       )}
     >
       {value.text}
@@ -123,9 +122,12 @@ function ReadLine({ model, problem, stale }: { model: ModelOf<"collection">; pro
 }
 
 /**
- * Why there are no figures, in the warning tone. A read that failed is
- * never kept (src/lib/tenant-app/usage-throttle.ts), so Try again reads it
- * again through kit.refresh. A unit over its read limit would only be told
+ * Why there are no figures, in the warning tone. A failed read arrives as
+ * `unavailable` only when no earlier figures were kept; with kept figures it
+ * arrives stale, with no problem and no button, since the ext cannot tell
+ * that from a read over the limit (src/lib/tenant-app/usage-throttle.ts and
+ * figuresOf in capability.ts). Try again reads it again through
+ * kit.refresh. A unit over its read limit would only be told
  * the same again at once, and the message already says to wait a minute,
  * so that one gets no button; nor does a unit with nothing to read
  * (`not-offered`: metering off, or no usage series), which no retry

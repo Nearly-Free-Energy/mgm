@@ -110,6 +110,16 @@ describe("Gridtop's tenant day", () => {
     expect(list().querySelector("tbody")!.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("totals the hours read, and says how many are missing, when an hour was not read", async () => {
+    const model = dayModel({ gapHour: 3 });
+    await draw(model);
+    const total = model.body.totals!.usage.text;
+    expect(total).toMatch(/kWh$/);
+    expect(count(total)).toBe(2);
+    expect(count("So far · 1 hour missing")).toBe(2);
+    expect(list().querySelector("tfoot")!.textContent).toContain("So far · 1 hour missing");
+  });
+
   it("marks every synthetic figure, and shows the host's notice once", async () => {
     const model = dayModel({ synthetic: true });
     await draw(model);

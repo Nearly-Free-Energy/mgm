@@ -78,19 +78,37 @@ function DayCell({ day, row, kit }: { day: MonthDay; row: Row | undefined; kit: 
   }
   const shaded = (day.state === "data" || day.state === "partial") && day.tier !== null ? TIER[day.tier] : null;
   const { date, usage, note } = row.cells;
+  // What a screen reader hears: the date, the figure when there is one, and
+  // the note. A day with no meter, and today before its first value, have
+  // no figure to read: "No meter" and the dash are drawn for sight only, and
+  // the note says what they mean ("No meter on this day", "So far today").
+  const spoken = day.state === "no-meter" || (day.state === "partial" && day.tier === null) ? null : usage;
   return (
     <kit.Link href={day.href} className={cls(CELL, STATE[day.state], shaded)}>
       <span aria-hidden="true" className="gt:text-caption gt:tabular-nums">
         {day.day}
       </span>
-      <span className="gt:sr-only">{date.text},</span>{" "}
-      <Figure value={usage} size="caption" shown={day.state !== "no-meter"} />
-      {day.state === "no-meter" && (
+      <span className="gt:sr-only">
+        {date.text}
+        {spoken || note ? "," : ""}
+      </span>{" "}
+      {spoken ? (
+        <Figure value={spoken} size="caption" />
+      ) : day.state === "no-meter" ? (
         <span aria-hidden="true" className="gt:text-caption">
           No meter
         </span>
+      ) : (
+        <span aria-hidden="true">
+          <Figure value={usage} size="caption" />
+        </span>
       )}
-      {note && <span className="gt:sr-only">, {note.text}</span>}
+      {note && (
+        <span className="gt:sr-only">
+          {spoken ? ", " : ""}
+          {note.text}
+        </span>
+      )}
     </kit.Link>
   );
 }

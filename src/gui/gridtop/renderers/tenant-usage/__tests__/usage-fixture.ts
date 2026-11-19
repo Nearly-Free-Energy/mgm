@@ -9,8 +9,10 @@
  * The real builder's output (Kampala, the 23 and 25 hour New York days and a
  * several-unit month) is checked against this renderer's reader and join by
  * src/lib/tenant-app/__tests__/usage-gridtop.test.ts and drawn through
- * Gridtop by src/lib/gui/__tests__/view-examples.test.tsx, so a drift
- * between this fixture and the builder fails there.
+ * Gridtop by src/lib/gui/__tests__/view-examples.test.tsx. Neither compares
+ * this fixture's copy or totals with the builder's, so a change there
+ * (totalCells, dayNote and the problem messages in usage-model.ts) is copied
+ * here by hand.
  */
 import type { Href, Json, LinkRef, ModelOf, Value } from "@/lib/gui/contract";
 
@@ -72,13 +74,25 @@ function usageValue(b: Bucket, synthetic: boolean, digits: number): Value {
   return text("No data");
 }
 
-/** The footer as the builder writes it: the total, or "No data", and what it covers. */
+/**
+ * The footer as the builder writes it (totalOf and totalCells): the sum of
+ * the buckets that have a figure, to 2 decimals under 1 kWh, with what it
+ * leaves out ("So far · 1 day missing"); "No data" only when no bucket has a
+ * figure, or on a problem.
+ */
 function footer(buckets: Bucket[], o: { synthetic: boolean; current: boolean; problem: boolean; unit: [string, string]; digits: number }) {
-  const shown = buckets.filter((b) => b.state !== "future" && b.state !== "no-meter");
-  const withoutData = shown.filter((b) => !hasFigure(b) && b.state !== "partial").length;
-  const kwh = withoutData > 0 || shown.length === 0 ? null : shown.reduce((sum, b) => sum + (b.kwh ?? 0), 0);
-  const usage = kwh === null ? text("No data") : energy(kwh, 1, o.synthetic);
-  const note = o.problem ? "" : kwh !== null ? (o.current ? "So far" : "") : withoutData > 0 ? `No data for ${withoutData} ${withoutData === 1 ? o.unit[0] : o.unit[1]}` : "";
+  const withoutData = buckets.filter((b) => b.state === "no-data").length;
+  const figures = buckets.filter(hasFigure);
+  const kwh = o.problem || figures.length === 0 ? null : Math.round(figures.reduce((sum, b) => sum + b.kwh! * 1000, 0)) / 1000;
+  const usage = kwh === null ? text("No data") : energy(kwh, kwh < 1 ? 2 : o.digits, o.synthetic);
+  const count = (n: number) => `${n} ${n === 1 ? o.unit[0] : o.unit[1]}`;
+  const note = o.problem
+    ? ""
+    : kwh !== null
+      ? [o.current ? "So far" : "", withoutData > 0 ? `${count(withoutData)} missing` : ""].filter(Boolean).join(" · ")
+      : withoutData > 0
+        ? `No data for ${count(withoutData)}`
+        : "";
   return { cells: { usage, ...(note ? { note: text(note) } : {}) }, ext: { kwh, text: usage.text, note, withoutData } };
 }
 
@@ -131,7 +145,7 @@ const dailyKwh = (day: number) => 2 + ((day * 7) % 10) / 4;
 
 export type MonthOptions = Common & {
   month?: string;
-  /** Day 10 not read: the total becomes "No data". */
+  /** Day 10 not read: the total sums the other days and says one is missing. */
   gap?: boolean;
   /** The unit's first meter arrives on this day; earlier days have no meter. */
   meterFrom?: number;
@@ -243,6 +257,8 @@ export type DayOptions = Common & {
   zone?: "dst23" | "dst25";
   /** No meter in force: no rows. */
   meters?: 0;
+  /** This hour (0–13) not read: the total sums the others and says one is missing. */
+  gapHour?: number;
   next?: null;
 };
 
@@ -257,7 +273,7 @@ export function dayModel(o: DayOptions = {}): ModelOf<"collection"> {
   const buckets: (Bucket & { note: string | null })[] = hours.map((h, i) => {
     if (isToday && i > 15) return { key: h.start, state: "future", kwh: null, note: null };
     if (o.meters === 0) return { key: h.start, state: "no-meter", kwh: null, note: null };
-    if (o.problem) return { key: h.start, state: "no-data", kwh: null, note: null };
+    if (o.problem || i === o.gapHour) return { key: h.start, state: "no-data", kwh: null, note: null };
     if (isToday && i === 14) return { key: h.start, state: "partial", kwh: 0.05, note: "So far" };
     if (isToday && i === 15) return { key: h.start, state: "partial", kwh: null, note: "Not read yet" };
     return { key: h.start, state: "data", kwh: hourlyKwh(i), note: null };
