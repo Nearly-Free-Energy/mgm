@@ -133,8 +133,8 @@ export async function loadSendQueue(req: SurfaceRequest): Promise<Loaded<LoadedM
   const billed = new Set(bills.map((b) => b.tenant_id));
   if (tenants.filter((t) => billed.has(t.id)).length > PERIOD_REVIEW_MAX_ROWS) return SEND_QUEUE_REFUSALS.tooLarge;
 
-  // No bills, nothing to send: readiness is not read.
-  let readiness: SendReadiness = bills.length > 0 ? await readReadiness(req, microgrid.community_id) : "unchecked";
+  // No bills, nothing to send: readiness is not read, and the model says nothing about it.
+  let readiness: SendReadiness = bills.length > 0 ? await readReadiness(req, microgrid.community_id) : "not_needed";
   const urls = new Map<string, string>();
   if (linksOffered(readiness)) {
     try {

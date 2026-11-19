@@ -315,6 +315,28 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
     }
   });
 
+  // getReadiness answers "connection_error" for a disabled account and for one
+  // that failed its last connection test alike, so the note names both causes
+  // (and a dangling override, the third); if those become separate states, revisit.
+  it.each([
+    ["the account is disabled", { disabled: true }, { disabled: false }],
+    ["the account failed its last connection test", { last_test_status: "auth_failed" }, { last_test_status: "success" }],
+  ] as const)("shows no links when %s, with a note true of every cause", async (_label, patch, restore) => {
+    caller = manager;
+    await setMerchant(patch);
+    try {
+      const model = await loaded(href(DRAFT));
+      expect(model.subtitle).toBe("Payment account not connected");
+      expect(model.ext.data.note).toEqual({
+        tone: "warning",
+        text: "The community's payment account cannot take payments: it is disabled, missing, or failed its last connection test. There are no links to send. Ask a super admin to configure Payment for this community.",
+      });
+      expect(model.ext.data.rows.every((r) => r.url === null)).toBe(true);
+    } finally {
+      await setMerchant(restore);
+    }
+  });
+
   it("shows no links while online payments are turned off", async () => {
     caller = manager;
     await setPlugin("payments", false);
@@ -333,6 +355,9 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
     const model = await loaded(href(EMPTY));
     expect(model.body.rows).toEqual([]);
     expect(model.body.empty.title).toBe("No bills to send yet.");
+    // Readiness is not read with nothing to send, and the queue does not claim it could not be.
+    expect(model.subtitle).toBe("Africa/Kampala");
+    expect(model.ext.data.note).toBeNull();
   });
 
   it("finds no period under another microgrid", async () => {

@@ -20,7 +20,7 @@ vi.mock("@/lib/payments/compose", async () => {
 });
 
 import { loadSendQueue, SEND_QUEUE_REFUSALS } from "../send-queue";
-import { buildSendQueueModel, SEND_QUEUE_COPY, SEND_QUEUE_SUBTITLES, type SendReadiness } from "../send-queue-model";
+import { buildSendQueueModel, SEND_QUEUE_COPY, SEND_QUEUE_SUBTITLES } from "../send-queue-model";
 
 const ORG = "e8100000-0000-4000-8000-000000000001";
 const MG = "e8100000-0000-4000-8000-0000000000a1";
@@ -203,13 +203,16 @@ describe("loadSendQueue", () => {
     expect(await loadSendQueue(req(fixture({ tenants, bills }).client))).toEqual(SEND_QUEUE_REFUSALS.tooLarge);
   });
 
-  it("does not read readiness with no bills, and shows the empty state", async () => {
+  it("does not read readiness with no bills, shows the empty state, and says nothing about online payments", async () => {
     payments("ready");
     const out = await loadSendQueue(req(fixture({ bills: [] }).client));
     if (!out.ok) throw new Error(out.message);
     expect(composePayments).not.toHaveBeenCalled();
     expect(out.model.body.rows).toEqual([]);
     expect(out.model.body.empty.title).toBe("No bills to send yet.");
+    // Not the "could not check" warning: nothing failed, there is just nothing to send.
+    expect(out.model.subtitle).toBe("Africa/Kampala");
+    expect((out.model.ext!.data as { note: unknown }).note).toBeNull();
   });
 
   it.each([
@@ -244,7 +247,7 @@ describe("loadSendQueue", () => {
     const out = await loadSendQueue(req(fixture().client));
     if (!out.ok) throw new Error(out.message);
     expect(urls(out.model).every((r) => r.url === null)).toBe(true);
-    expect(out.model.subtitle).toBe(SEND_QUEUE_SUBTITLES[state as Exclude<SendReadiness, "ready">]);
+    expect(out.model.subtitle).toBe(SEND_QUEUE_SUBTITLES[state]);
   });
 
   it("shows links from a sandbox account, and tells a super admin how to connect a provider", async () => {

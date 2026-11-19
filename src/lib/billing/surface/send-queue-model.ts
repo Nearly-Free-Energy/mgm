@@ -43,11 +43,28 @@ export const SEND_QUEUE_EXT_SCHEMA = "billing.send-queue@1" as const;
  * capability's getReadiness (src/lib/payments/capability.ts) for the
  * microgrid's community: "ready", "sandbox", "disabled", "unconfigured" and
  * "connection_error" are its states, and if it gains or renames one, revisit
- * this type and readinessNote. "unchecked" is a readiness that could not be
- * read, and "no_address" an installation with no public address
- * (MGM_APP_URL) to build links from; both are the loader's.
+ * this type and readinessNote. One state may cover several causes:
+ * "connection_error" is an account that is disabled, an override pointing at
+ * an account that is missing or in another organization, or an account that
+ * failed its last connection test, so its note names all three; if
+ * getReadiness sorts those into separate states, or adds a cause to one,
+ * revisit SEND_QUEUE_COPY.
+ *
+ * The rest are the loader's. "unchecked" is a readiness that could not be
+ * read; "not_needed" a period with no bills, where readiness is not read
+ * because there is nothing to send, so nothing is said about it; and
+ * "no_address" an installation with no public address (MGM_APP_URL) to
+ * build links from.
  */
-export type SendReadiness = "ready" | "sandbox" | "disabled" | "unconfigured" | "connection_error" | "unchecked" | "no_address";
+export type SendReadiness =
+  | "ready"
+  | "sandbox"
+  | "disabled"
+  | "unconfigured"
+  | "connection_error"
+  | "unchecked"
+  | "not_needed"
+  | "no_address";
 
 /** The fixed notes, per bill and on readiness. */
 export const SEND_QUEUE_COPY = {
@@ -58,7 +75,8 @@ export const SEND_QUEUE_COPY = {
   sandbox: "Payment links use a sandbox account: payments made through them are tests.",
   disabled: "Online payments are turned off for this organization, so there are no links to send.",
   unconfigured: "No payment provider is configured.",
-  connectionError: "The payment account failed its last connection test, so there are no links to send.",
+  connectionError:
+    "The community's payment account cannot take payments: it is disabled, missing, or failed its last connection test. There are no links to send.",
   /** The legacy banner's advice to a super admin, who can connect a provider; its link is payments' page (parity.ts, payment-setup). */
   superAdminFix: "Connect a payment provider on the community's Payment page to send payment links.",
   /** The legacy banner's advice to anyone else. */
@@ -67,8 +85,13 @@ export const SEND_QUEUE_COPY = {
   noAddress: "Payment links cannot be made: this installation has no public address set. Ask your operator.",
 } as const;
 
-/** The subtitle beside each readiness: short, since a GUI may show a subtitle on one line. Ready shows the period's time zone. */
-export const SEND_QUEUE_SUBTITLES: Readonly<Record<Exclude<SendReadiness, "ready">, string>> = {
+/** Readiness states with nothing to say: the subtitle is the period's time zone, and there is no note. */
+const SILENT_READINESS = ["ready", "not_needed"] as const satisfies readonly SendReadiness[];
+type SilentReadiness = (typeof SILENT_READINESS)[number];
+const isSilent = (r: SendReadiness): r is SilentReadiness => (SILENT_READINESS as readonly SendReadiness[]).includes(r);
+
+/** The subtitle beside each readiness: short, since a GUI may show a subtitle on one line. Ready and not needed show the period's time zone. */
+export const SEND_QUEUE_SUBTITLES: Readonly<Record<Exclude<SendReadiness, SilentReadiness>, string>> = {
   sandbox: "Sandbox payment links",
   disabled: "Online payments are off",
   unconfigured: "No payment provider",
@@ -129,11 +152,12 @@ export function billNote(bill: SendBill, tenant: SendTenant): string | null {
   return null;
 }
 
-/** The note on readiness, in full: null when ready; the advice on a missing or broken provider depends on the role. */
+/** The note on readiness, in full: null when ready or not needed; the advice on a missing or broken provider depends on the role. */
 export function readinessNote(readiness: SendReadiness, superAdmin: boolean): SendQueueExtData["note"] {
   const fix = superAdmin ? SEND_QUEUE_COPY.superAdminFix : SEND_QUEUE_COPY.askSuperAdmin;
   switch (readiness) {
     case "ready":
+    case "not_needed":
       return null;
     case "sandbox":
       return { tone: "info", text: SEND_QUEUE_COPY.sandbox };
@@ -207,7 +231,7 @@ export function buildSendQueueModel(i: SendQueueInput): LoadedModel<"collection"
     note: readinessNote(i.readiness, i.superAdmin),
   };
 
-  const subtitle = i.readiness === "ready" ? period.timezone : SEND_QUEUE_SUBTITLES[i.readiness];
+  const subtitle = isSilent(i.readiness) ? period.timezone : SEND_QUEUE_SUBTITLES[i.readiness];
   return {
     title: `Send ${periodName(period.start_date, period.end_date) ?? label} bills`,
     ...(subtitle ? { subtitle } : {}),

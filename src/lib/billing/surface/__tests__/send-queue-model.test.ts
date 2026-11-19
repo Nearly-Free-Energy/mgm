@@ -56,7 +56,7 @@ const build = (o: Partial<SendQueueInput> = {}) => buildSendQueueModel(input(o))
 const extOf = (o: Partial<SendQueueInput> = {}) => SendQueueExt.parse(build(o).ext!.data);
 
 const STATUSES: PaymentStatus[] = ["unpaid", "link_generated", "paid", "failed", "refunded"];
-const READINESS: SendReadiness[] = ["ready", "sandbox", "disabled", "unconfigured", "connection_error", "unchecked", "no_address"];
+const READINESS: SendReadiness[] = ["ready", "sandbox", "disabled", "unconfigured", "connection_error", "unchecked", "not_needed", "no_address"];
 
 const view = BILLING_SURFACE.views!.find((v) => v.id === "billing.send-queue") as ViewDef;
 
@@ -173,7 +173,7 @@ describe("buildSendQueueModel: readiness", () => {
       const model = build({ readiness, superAdmin });
       const note = extOf({ readiness, superAdmin }).note;
       expect(note).toEqual(readinessNote(readiness, superAdmin));
-      if (readiness === "ready") {
+      if (readiness === "ready" || readiness === "not_needed") {
         expect(model.subtitle).toBe("Africa/Kampala");
         expect(note).toBeNull();
         return;
@@ -188,12 +188,14 @@ describe("buildSendQueueModel: readiness", () => {
       "No payment provider is configured. Connect a payment provider on the community's Payment page to send payment links.",
     );
     expect(readinessNote("unconfigured", false)?.text).toBe("No payment provider is configured. Ask a super admin to configure Payment for this community.");
+    // One state, three causes in getReadiness (a disabled account, an override to a missing account, a failed test): the note names all three.
     expect(readinessNote("connection_error", false)?.text).toBe(
-      "The payment account failed its last connection test, so there are no links to send. Ask a super admin to configure Payment for this community.",
+      "The community's payment account cannot take payments: it is disabled, missing, or failed its last connection test. There are no links to send. Ask a super admin to configure Payment for this community.",
     );
     expect(readinessNote("sandbox", false)?.text).toBe("Payment links use a sandbox account: payments made through them are tests.");
     expect(readinessNote("disabled", true)?.text).toBe("Online payments are turned off for this organization, so there are no links to send.");
     expect(readinessNote("unchecked", true)?.text).toBe(SEND_QUEUE_COPY.unchecked);
+    expect(readinessNote("not_needed", true)).toBeNull();
     expect(readinessNote("no_address", true)?.text).toBe(SEND_QUEUE_COPY.noAddress);
   });
 });

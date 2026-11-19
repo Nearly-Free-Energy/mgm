@@ -30,7 +30,7 @@ export const SendQueueExt = z.strictObject({
       }),
     )
     .max(PERIOD_REVIEW_MAX_ROWS),
-  /** Why links are made from a sandbox account, or why none can be made; null when the payment account is live and ready. */
+  /** Why links are made from a sandbox account, or why none can be made; null when the payment account is live and ready, or when the period has no bills to send. */
   note: z.strictObject({ tone: z.enum(["info", "warning"]), text: z.string().max(500) }).nullable(),
 });
 

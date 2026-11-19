@@ -97,8 +97,8 @@ export const SEND_QUEUE_LOADED_EXAMPLES: readonly LoadedModel<"collection">[] = 
   buildSendQueueModel(input({ readiness: "unconfigured", superAdmin: true, tenants: TENANTS.slice(0, 3), bills: DRAFT_BILLS.slice(0, 3) })),
   // Online payments turned off.
   buildSendQueueModel(input({ readiness: "disabled", tenants: TENANTS.slice(0, 3), bills: DRAFT_BILLS.slice(0, 3) })),
-  // A draft with no bills yet: readiness is not read.
-  buildSendQueueModel(input({ bills: [], readiness: "unchecked" })),
+  // A draft with no bills yet: readiness is not read, and nothing is said about it.
+  buildSendQueueModel(input({ bills: [], readiness: "not_needed" })),
 ];
 
 /** A loaded model with the fields the host fills, as a GUI receives it; `disabled` as while billing is off. */
