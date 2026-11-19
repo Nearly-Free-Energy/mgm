@@ -21,14 +21,24 @@ import type { UserRoleRecord } from "@/lib/types/domain";
 import type { MgmGate } from "./gate";
 
 /**
+ * Who a request acts for. "organization": `organizationId` and `roles` are
+ * what the composer authorized for the organization (or, for billing-review
+ * and the public payment surfaces, what that composer says they are).
+ * "tenant": a tenant-app request (composeTenantApp), where the organization
+ * is only the tenant's unit's and the roles only the tenant's rows, so
+ * neither is access to the organization. openOrganizationScope sets it.
+ */
+export type RequestAudience = "organization" | "tenant";
+
+/**
  * The caller and organization one request acts for. The community
  * management, metering, billing and payments capability plugins take
  * `organizationId` and `roles` as access their composer has already
  * authorized with authorizeOrganization; billing-review gets no roles and
- * reads only through RLS (composeBillingReview). In a tenant-app scope
- * (composeTenantApp) they are not organization access: the organization is
- * only the tenant's unit's, and the roles only the tenant's rows, so
- * nothing else is loaded there (openOrganizationScope).
+ * reads only through RLS (composeBillingReview). Each of them, and
+ * billing-review, refuses to load into a request whose audience is not
+ * "organization" (requireOrganizationAudience); the tenant app loads only
+ * into one whose audience is "tenant".
  */
 export type MgmRequest = {
   organizationId: string;
@@ -37,7 +47,22 @@ export type MgmRequest = {
   roles: UserRoleRecord[];
   /** The caller's RLS-scoped client (service-role only for public payments). */
   supabase: SupabaseClient;
+  /** Set by openOrganizationScope from its options; "organization" unless the composer says otherwise. */
+  audience: RequestAudience;
 };
+
+/**
+ * Throws unless `request` acts for an organization. A capability plugin
+ * that trusts `organizationId` or `roles` calls it first in `apply`, so it
+ * never loads into a tenant-app request, whose organization the caller need
+ * not be staff of. Anything but "organization" is refused, so a request
+ * built without openOrganizationScope fails closed.
+ */
+export function requireOrganizationAudience(request: MgmRequest, plugin: string): void {
+  if (request.audience !== "organization") {
+    throw new Error(`${plugin} loads only into an organization's request, not one for audience ${String(request.audience)}`);
+  }
+}
 
 export type MeteringProviderFactory = (supabase: SupabaseClient) => MeteringProvider;
 

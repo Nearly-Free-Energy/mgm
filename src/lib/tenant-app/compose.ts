@@ -52,15 +52,19 @@ export type TenantAppPluginConfig = {
  * the request's scope is disposed) deactivates the capability.
  *
  * It is the only capability plugin built for a scope whose
- * `mgmRequest.organizationId` is not organization access: it reads only the
- * request's user and the unit authorizeTenant read, and checks that the
- * unit is in that organization.
+ * `mgmRequest.organizationId` is not organization access, and it loads only
+ * into one: the request's audience must be "tenant" (composeTenantApp opens
+ * it so), and every other capability plugin refuses such a request
+ * (requireOrganizationAudience). It reads only the request's user and the
+ * unit authorizeTenant read, and checks that the unit is in that
+ * organization.
  */
 export const TenantAppPlugin = {
   name: TENANT_APP_PLUGIN_NAME,
   inject: ["mgmRequest"],
   apply(ctx: Context, config: TenantAppPluginConfig) {
     const request = ctx.mgmRequest;
+    if (request.audience !== "tenant") throw new Error("The tenant app acts only for a tenant's request");
     if (!request.userId) throw new Error("The tenant app requires an authenticated user");
     if (request.organizationId !== config.unit.organizationId) {
       throw new Error("The tenant app's unit is not in the request's organization");
@@ -160,21 +164,23 @@ export async function composeTenantApp(options: {
   // An organization scope for a person who may hold no access to that
   // organization: its id is only the unit's, and its roles are only the
   // caller's tenant rows, so a manager who rents carries no staff row into
-  // it. Nothing but TenantAppPlugin may be loaded into this scope. The
-  // community-management, metering, billing and payments plugins treat
-  // mgmRequest.organizationId and roles as access their composer authorized
-  // with authorizeOrganization, and would then rest on RLS alone, payments
-  // with its service-role writer too; billing-review reads only through RLS
-  // but is a staff capability. The composition hands out no ctx or load, so
-  // keep it that way.
+  // it. It is opened with the "tenant" audience, so the community-management,
+  // metering, billing, payments and billing-review plugins, which treat
+  // mgmRequest.organizationId and roles as organization access, refuse to
+  // load into it (requireOrganizationAudience), and TenantAppPlugin loads
+  // into nothing else. The composition also hands out no ctx or load; keep
+  // it that way.
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
-    requestScope = await openOrganizationScope({
-      organizationId: access.unit.organizationId,
-      userId: access.user.id,
-      roles: access.roles.filter((row) => row.role === TENANT && row.scope_type === SCOPE_TENANT),
-      supabase: options.supabase,
-    });
+    requestScope = await openOrganizationScope(
+      {
+        organizationId: access.unit.organizationId,
+        userId: access.user.id,
+        roles: access.roles.filter((row) => row.role === TENANT && row.scope_type === SCOPE_TENANT),
+        supabase: options.supabase,
+      },
+      { audience: "tenant" }
+    );
     await requestScope.load(TenantAppPlugin, {
       repository: createSupabaseTenantAppRepository(options.supabase),
       unit: access.unit,

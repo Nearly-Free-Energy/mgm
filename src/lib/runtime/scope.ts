@@ -18,7 +18,7 @@ import { ORG_MANAGER, SCOPE_ORG, SCOPE_TENANT, SUPER_ADMIN, TENANT } from "@/lib
 import type { TenantUnit } from "@/lib/tenant-app/types";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import { getMgmRuntime, requireActive, type MgmRuntime } from "./root";
-import type { MgmRequest } from "./services";
+import type { MgmRequest, RequestAudience } from "./services";
 
 export const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -196,17 +196,28 @@ export type OrganizationScope = {
  * id and no roles, and its plugin reads only through RLS.
  * composePaymentsPublic opens one with no user for the payment the request
  * names. composeTenantApp opens one for a tenant, who may hold no access to
- * the organization, with only their tenant rows, and loads nothing but
- * TenantAppPlugin into it; no other capability plugin may be loaded into
- * such a scope.
+ * the organization, with only their tenant rows and `audience: "tenant"`.
+ * Every capability plugin but the tenant app refuses to load into such a
+ * scope (requireOrganizationAudience), and the tenant app into any other.
+ *
+ * The audience comes from `options`, "organization" by default. A request
+ * object that already carries a different one is refused rather than
+ * relabelled, so a tenant's request never reopens as an organization's.
  */
 export async function openOrganizationScope(
-  request: MgmRequest,
+  request: Omit<MgmRequest, "audience"> & { audience?: RequestAudience },
   options: {
     /** Extra request-level service names to isolate (tests, new plugins). */
     isolate?: readonly string[];
+    /** Who the request acts for (MgmRequest.audience); "organization" when omitted. */
+    audience?: RequestAudience;
   } = {}
 ): Promise<OrganizationScope> {
+  const audience = options.audience ?? "organization";
+  if (request.audience !== undefined && request.audience !== audience) {
+    throw new Error(`A request for the ${request.audience} audience cannot open as one for the ${audience} audience`);
+  }
+  const scoped: MgmRequest = { ...request, audience };
   const runtime = await getMgmRuntime();
   let ctx = runtime.root;
   for (const name of [...REQUEST_SERVICES, ...(options.isolate ?? [])]) {
@@ -235,7 +246,7 @@ export async function openOrganizationScope(
   };
 
   try {
-    await load(RequestScopePlugin, request);
+    await load(RequestScopePlugin, scoped);
   } catch (error) {
     await dispose();
     throw error;
@@ -244,7 +255,7 @@ export async function openOrganizationScope(
   return {
     runtime,
     ctx,
-    request,
+    request: scoped,
     load: load as OrganizationScope["load"],
     dispose,
   };

@@ -60,7 +60,10 @@ an already authorized request; it does not authenticate or authorize. The
 capability plugins take its `organizationId` and `roles` as organization
 access their composer authorized, except billing-review, whose composer
 passes no roles and whose plugin reads only through RLS, and the tenant
-app's scope, which carries no organization access (below).
+app's scope, which carries no organization access (below). The request's
+`audience` says which: `"organization"` unless the composer opens the scope
+with `{ audience: "tenant" }`, as only `composeTenantApp` does, and a request
+object already carrying another audience is refused rather than relabelled.
 Public payment callers establish their separate bearer-token/notification
 verification boundary.
 It creates an *isolated* child context of the root. Isolation gives the request its own `mgmRequest`, capability and
@@ -135,11 +138,18 @@ are the gate's own. Only then does it open the scope for that organization with
 `openOrganizationScope` and load the `tenant-app` capability. That scope is
 opened for a person who may hold no access to the organization: its
 `organizationId` is only the unit's and its `roles` only the caller's tenant
-rows. So nothing but the `tenant-app` capability may be loaded into it:
-the community-management, metering, billing and payments plugins treat
-those fields as access their composer authorized with
-`authorizeOrganization`, and billing-review, which reads only through RLS,
-is a staff capability. The composition hands out no context to load more. The `tenant-app` capability
+rows. So it is opened with `audience: "tenant"`, and nothing but the
+`tenant-app` capability loads into it: the community-management, metering,
+billing and payments plugins treat those fields as access their composer
+authorized with `authorizeOrganization`, and billing-review, which reads
+only through RLS, is a staff capability, so each calls
+`requireOrganizationAudience` (`src/lib/runtime/services.ts`) first in
+`apply` and refuses any audience but `"organization"`. The `tenant-app`
+plugin in turn refuses any audience but `"tenant"`.
+`src/lib/runtime/__tests__/request-audience.test.ts` loads each into the
+other's scope. A new capability plugin that trusts `organizationId` or
+`roles` calls `requireOrganizationAudience` too. The composition also hands
+out no context to load more. The `tenant-app` capability
 provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`). The
 capability is read-only, so it has no write to re-check, and
 `compose-fail-closed.test.ts` leaves it out:

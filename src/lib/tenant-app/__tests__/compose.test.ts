@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // order no longer matters.
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import { openOrganizationScope } from "@/lib/runtime/scope";
+import { BillingPlugin } from "@/lib/billing/compose";
 import { composeTenantApp } from "../compose";
 
 const state = vi.hoisted(() => ({ failToConstruct: false }));
@@ -353,6 +354,24 @@ describe("composeTenantApp composition", () => {
       const [request] = vi.mocked(openOrganizationScope).mock.calls[0];
       expect(request).toMatchObject({ organizationId: ORG_A, userId: "tenant-a" });
       expect(request.roles).toEqual([tenantRow("tenant-a", UNIT_A), tenantRow("tenant-a", UNIT_B)]);
+    } finally {
+      await result.data.dispose();
+    }
+  });
+
+  it("opens the scope for a tenant, so no capability plugin that trusts its organization loads into it", async () => {
+    const result = await composeTenantApp({ supabase: client(tenantOfA()), tenantId: UNIT_A });
+    if (!result.ok) throw new Error(result.code);
+    try {
+      const [, options] = vi.mocked(openOrganizationScope).mock.calls[0];
+      expect(options).toEqual({ audience: "tenant" });
+      const opened = await vi.mocked(openOrganizationScope).mock.results[0].value;
+      expect(opened.request.audience).toBe("tenant");
+      expect(opened.ctx.get("mgmRequest")?.audience).toBe("tenant");
+      // request-audience.test.ts loads each such plugin into a scope like it.
+      await expect(opened.load(BillingPlugin, { repository: {} as never })).rejects.toThrow(
+        "not one for audience tenant"
+      );
     } finally {
       await result.data.dispose();
     }

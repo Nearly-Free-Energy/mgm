@@ -14,6 +14,8 @@ export { gateRoute, checkGate, gateResponse, MgmGate, resolveTargetOrganization,
 export {
   MeteringProviderFactories,
   PaymentProviderRegistry,
+  requireOrganizationAudience,
   type MgmRequest,
   type MgmCatalog,
+  type RequestAudience,
 } from "./services";

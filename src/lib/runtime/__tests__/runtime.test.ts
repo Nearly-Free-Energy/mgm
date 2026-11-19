@@ -324,13 +324,15 @@ describe("organization request scopes", () => {
 
     // Reads mgmRequest again after yielding. Fixed delays of 0–6 ms by position
     // make the reads resume in a different order from the loads, every run.
+    // Keyed by user: openOrganizationScope provides its own copy of each
+    // request, with its audience set.
     const mismatches: MgmRequest[] = [];
-    const delay = new Map<MgmRequest, number>(requests.map((r, i) => [r, (requests.length - i) % 7]));
+    const delay = new Map<string | null, number>(requests.map((r, i) => [r.userId, (requests.length - i) % 7]));
     const Reader = {
       name: "reader",
       inject: ["mgmRequest"],
       async apply(ctx: Context, expected: MgmRequest) {
-        await new Promise((resolve) => setTimeout(resolve, delay.get(expected)));
+        await new Promise((resolve) => setTimeout(resolve, delay.get(expected.userId)));
         if (ctx.mgmRequest !== expected) mismatches.push(expected);
       },
     } satisfies Plugin.Object<MgmRequest>;
