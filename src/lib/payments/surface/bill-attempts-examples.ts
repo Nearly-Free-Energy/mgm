@@ -4,11 +4,15 @@ import "server-only";
  * Examples of the `payments.bill-attempts` view, so every GUI can be tested
  * against it: a period's bills (whose title names the period review's tab);
  * one bill with an attempt that needs reconciliation, where the receipts
- * fall short, so Accept exact receipts is unavailable; one bill with a
- * verified payment, an attempt whose outcome is unknown and a superseded
- * checkout; a bill with no attempts; a period with no bills; and the
- * second again while Payments is off, with the gate's notice and every
- * action disabled. Built at import the way the loader builds them.
+ * fall short, so Accept exact receipts is unavailable; one bill paid
+ * online after a superseded checkout; an unpaid bill whose only checkout
+ * has an unknown outcome; a bill with no attempts; a period with no
+ * bills; and the second again while Payments is off, with the gate's
+ * notice and every action disabled. Built at import the way the loader
+ * builds them. Each history is one PaymentsCapability can produce: a new
+ * checkout is refused on a paid bill and beside any open, verified or held
+ * attempt (createCheckout, fn_payment_reserve_checkout), so a paid bill
+ * never has a later attempt. If those refusals change, so may these.
  */
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
@@ -50,6 +54,7 @@ const BILLS = [
   { id: id(0xd1), tenantName: "Akello Grace", total_amount: 5000, payment_status: "link_generated" as const },
   { id: id(0xd2), tenantName: "Byaruhanga Peter", total_amount: 24000, payment_status: "paid" as const },
   { id: id(0xd3), tenantName: "Kato Joseph", total_amount: 31250, payment_status: "unpaid" as const },
+  { id: id(0xd4), tenantName: "Nambi Ruth", total_amount: 12500, payment_status: "unpaid" as const },
 ];
 
 const attempt = (n: number, o: Partial<BillAttempt>): BillAttempt => ({
@@ -76,12 +81,11 @@ const SHORT: BillHistory = {
   difference: -2000,
 };
 
-/** Byaruhanga's bill: paid online, with a later attempt whose outcome is unknown and an earlier superseded one. */
+/** Byaruhanga's bill: paid online, after an earlier checkout that another superseded. */
 const PAID: BillHistory = {
   attempts: [
     attempt(2, { amount: 24000, status: "failed", failure_code: "checkout_superseded", hasTracking: false, created_at: "2026-11-02T08:00:00Z" }),
     attempt(3, { amount: 24000, status: "verified", created_at: "2026-11-02T10:30:00Z" }),
-    attempt(4, { amount: 24000, status: "confirmation_pending", failure_code: "confirmation_pending", hasTracking: false, created_at: "2026-11-04T16:45:00Z" }),
   ],
   receipts: [
     { id: id(0x102), attempt_id: id(0xe3), amount: 24000, currency: "UGX", provider_status: "completed", confirmation_code: "PX91M", created_at: "2026-11-02T10:32:00Z" },
@@ -92,7 +96,27 @@ const PAID: BillHistory = {
   difference: 0,
 };
 
+/** Nambi's bill: its only checkout's submission outcome is unknown, so nothing may be reconciled until it is investigated. */
+const UNKNOWN: BillHistory = {
+  attempts: [
+    attempt(4, { amount: 12500, status: "confirmation_pending", failure_code: "confirmation_pending", hasTracking: false, created_at: "2026-11-04T16:45:00Z" }),
+  ],
+  receipts: [],
+  currentTotal: 12500,
+  currency: "UGX",
+  received: 0,
+  difference: -12500,
+};
+
 const NONE: BillHistory = { attempts: [], receipts: [], currentTotal: 31250, currency: "UGX", received: 0, difference: -31250 };
+
+/** Each example bill with the history its model is built from, so a test can hold them to what the capability can produce. */
+export const BILL_ATTEMPTS_EXAMPLE_HISTORIES: readonly { bill: (typeof BILLS)[number]; history: BillHistory }[] = [
+  { bill: BILLS[0], history: SHORT },
+  { bill: BILLS[1], history: PAID },
+  { bill: BILLS[3], history: UNKNOWN },
+  { bill: BILLS[2], history: NONE },
+];
 
 const billModel = (bill: (typeof BILLS)[number], history: BillHistory) =>
   buildBillAttemptsModel({ microgrid: MICROGRID, period: PERIOD, bill, timezone: TZ, history, fmt });
@@ -103,8 +127,10 @@ export const BILL_ATTEMPTS_LOADED_EXAMPLES: readonly LoadedModel<"collection">[]
   buildBillsIndexModel({ microgrid: MICROGRID, period: PERIOD, bills: BILLS, fmt }),
   // A bill whose receipts fall short of it.
   billModel(BILLS[0], SHORT),
-  // A paid bill with an unknown outcome and a superseded checkout beside the payment.
+  // A bill paid online after a superseded checkout.
   billModel(BILLS[1], PAID),
+  // An unpaid bill whose only checkout has an unknown outcome.
+  billModel(BILLS[3], UNKNOWN),
   // A bill with no attempts.
   billModel(BILLS[2], NONE),
   // A period with no bills.
@@ -112,7 +138,7 @@ export const BILL_ATTEMPTS_LOADED_EXAMPLES: readonly LoadedModel<"collection">[]
 ];
 
 /** Each action's availability as reconcileAvailable answers it for the history the model was built from. */
-const HISTORIES = [undefined, SHORT, PAID, NONE, undefined] as const;
+const HISTORIES = [undefined, SHORT, PAID, UNKNOWN, NONE, undefined] as const;
 
 function resolve(history: BillHistory | undefined, disabled: boolean) {
   return (link: ActionLink): ActionRef => {
