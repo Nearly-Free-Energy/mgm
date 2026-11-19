@@ -50,6 +50,7 @@ import {
   regenerateBillAvailable,
 } from "./surface/period-review";
 import { PERIOD_REVIEW_EXAMPLES } from "./surface/period-review-examples";
+import { PeriodReviewExt } from "./surface/period-review-ext";
 import {
   CANCEL_PAYMENT_LINK_ACTION,
   GENERATE_BILLS_ACTION,
@@ -57,6 +58,7 @@ import {
   MARK_PAID_ACTION,
   MARK_REFUNDED_ACTION,
   MARK_UNPAID_ACTION,
+  PERIOD_REVIEW_EXT_SCHEMA,
   PERIOD_REVIEW_KEYS,
   PERIOD_REVIEW_PREFIXES,
   RECORD_USAGE_ACTION,
@@ -129,6 +131,10 @@ export const BILLING_SURFACE: Contribution = {
       cost: "db",
       live: { refreshSeconds: 30, staleAfterSeconds: 120 },
       declares: { keys: PERIOD_REVIEW_KEYS, prefixes: PERIOD_REVIEW_PREFIXES },
+      // The figures a person copies, as the CSV writes them, for a GUI that
+      // draws the bills as a copy table (Gridtop's, in
+      // src/gui/gridtop/renderers/period-review).
+      ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, zod: PeriodReviewExt },
       examples: PERIOD_REVIEW_EXAMPLES,
       load: loadPeriodReview,
     },

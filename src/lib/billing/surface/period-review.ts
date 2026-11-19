@@ -25,6 +25,8 @@ import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/s
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
+  PERIOD_REVIEW_MAX_ROWS,
+  PERIOD_REVIEW_MAX_TIERS,
   periodLabel,
   SUPER_ADMIN_ONLY_STATUSES,
   type ReviewBill,
@@ -33,10 +35,6 @@ import {
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
-/** Rows past the host's row cap (MODEL_CAPS.rows in src/lib/gui/host/server/parse.ts) are refused, never cut. */
-const MAX_ROWS = 500;
-/** 10 fixed columns and 2 per tier must stay within the host's 50 (MODEL_CAPS.columns). */
-const MAX_TIERS = 20;
 
 export const PERIOD_REVIEW_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This billing period could not be found." },
@@ -173,9 +171,9 @@ export async function loadPeriodReview(req: SurfaceRequest): Promise<Loaded<Load
   if (scheduleRes.error || bills === null || tenants === null) return PERIOD_REVIEW_REFUSALS.unavailable;
   if (!scheduleRes.data) return PERIOD_REVIEW_REFUSALS.noTariff;
   const tiers = (Array.isArray(scheduleRes.data.tiers) ? scheduleRes.data.tiers : []).map((t) => ({ label: String(t?.label ?? "") }));
-  if (tiers.length > MAX_TIERS) return PERIOD_REVIEW_REFUSALS.tooLarge;
+  if (tiers.length > PERIOD_REVIEW_MAX_TIERS) return PERIOD_REVIEW_REFUSALS.tooLarge;
   const billed = new Set(bills.map((b) => b.tenant_id));
-  if (tenants.filter((t) => billed.has(t.id)).length > MAX_ROWS) return PERIOD_REVIEW_REFUSALS.tooLarge;
+  if (tenants.filter((t) => billed.has(t.id)).length > PERIOD_REVIEW_MAX_ROWS) return PERIOD_REVIEW_REFUSALS.tooLarge;
 
   const reviewTenants: ReviewTenant[] = tenants.map((t) => {
     const links = t.tenant_devices ?? [];

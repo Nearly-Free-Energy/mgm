@@ -8,7 +8,9 @@ import "server-only";
  * bill failed or refunded; a draft with tenants and no bills, whose empty
  * state offers Generate; a microgrid with no tenants; and the first again
  * while billing is off, with every action disabled and the gate's notice.
- * Built at import the way the loader builds them.
+ * Built at import the way the loader builds them, so each carries the
+ * `billing.period-review@1` ext and a GUI with a renderer for it (Gridtop's)
+ * draws them with that renderer.
  */
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
