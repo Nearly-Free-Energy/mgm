@@ -209,8 +209,9 @@ export type GuardedAction = ActionBase & {
 export type ActionDef = ProposableAction | HumanAction | GuardedAction;
 
 /**
- * Who a nav entry is shown to. "staff", the default, is a person with an
- * organization role row; "super-admin" only super admins; "tenant" a person
+ * Who a nav entry is shown to. "staff", the default, is a person holding a
+ * role other than tenant (rolesIncludeStaff; staff is an audience here, not
+ * a role, as @/lib/roles defines it); "super-admin" only super admins; "tenant" a person
  * with a tenant row, and only for an entry naming a tenant view. A person
  * with both kinds of row sees both groups (RFC mgm#197 § 4). An audience
  * hides an entry; it authorizes nothing.

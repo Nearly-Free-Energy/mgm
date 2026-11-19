@@ -271,6 +271,17 @@ describe("GuiLayout for a person who holds units (RFC mgm#197 § 4)", () => {
     expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", "/", null, null);
   });
 
+  it("sends a person from the start page as a tenant once their staff row is gone, deciding from the rows held now", async () => {
+    // A manager who rents, before and after DELETE /api/users/[id] removes
+    // their org manager row: nothing remembers that they were staff.
+    signIn([tenantRow(UNIT_A), managerRow]);
+    expect(await GuiLayout({ children: null })).toBeTruthy();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+
+    signIn([tenantRow(UNIT_A)]);
+    await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/my");
+  });
+
   it("still sends a person with staff rows and no organization to /setup", async () => {
     signIn([tenantRow(UNIT_A), managerRow], false);
     await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/setup");

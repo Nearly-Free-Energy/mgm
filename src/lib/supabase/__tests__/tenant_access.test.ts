@@ -9,7 +9,12 @@
  * staff-only, and how organization managers give and remove it. From PR 2
  * it also proves the tenant-app plugin's state (off for an organization
  * until a row turns it on), the record of accounts that have held staff
- * access, and that the tenant grant refuses those accounts.
+ * access, and that tenant access does not depend on staff rows: the grant
+ * gives units to staff and former staff alike, a tenant whose staff row is
+ * removed is a tenant like any other (rows kept, given further units, off
+ * the Users page), and the record keeps an account left with no rows on
+ * the Users page once it has been staff. "Staff" means holding a role other
+ * than tenant now (src/lib/roles.ts).
  *
  * Fixture: one organization with one community and microgrid, an edge, four
  * devices, and three tenants on that microgrid:
@@ -35,10 +40,16 @@
  *   grantee      — no rows at first; given and then removed access to B
  * and, created by the staff-record tests (after the access tests, so the
  * counts above do not move):
- *   formerStaff  — org manager of the organization, whose row is removed
+ *   formerStaff  — org manager of the organization, whose row is removed;
+ *                  listed with no rows, then given B and left off
  *   emsTenant    — tenant of B who also gets an ems_operator row
- *   madeStaff    — tenant of B who is made org manager, then loses it
+ *   madeStaff    — tenant of B who is made org manager, loses it, and is
+ *                  then given A like any tenant
  *   fresh        — no rows; given access to B
+ *   rejoined     — tenant of B, made org manager and removed through the
+ *                  Users page's own query, given A, then revoked from both
+ * Within that block the tests run in order and share these accounts, so
+ * each one's expectations depend on what the tests above it did.
  *
  * The audit tests (named "audit: …") are one assertion per database-side
  * hit of the RFC § 4 "has any role" audit fixed in PR 1.
@@ -115,6 +126,7 @@ const EMAIL = {
   emsTenant: "tenant-access-ems-tenant@test.local",
   madeStaff: "tenant-access-made-staff@test.local",
   fresh: "tenant-access-fresh@test.local",
+  rejoined: "tenant-access-rejoined@test.local",
 };
 const ALL_EMAILS = Object.values(EMAIL);
 const ORG_IDS = [F.org, F.otherOrg];
@@ -1235,7 +1247,8 @@ desc("fn_tenant_access_grant, _list and _revoke", () => {
 
   it("a former tenant stays off the Users page once their last row is gone", async () => {
     // grantee now holds no row at all, like a person whose staff access was
-    // removed, but was a tenant: decision 5 keeps them off the list.
+    // removed, but was a tenant and never staff: decision 5 keeps them off
+    // the list (an account that has been staff is listed, below).
     const svc = await serviceClient();
     const { data: rows } = await svc.from("user_roles").select("id").eq("user_id", grantee.userId);
     expect(rows).toEqual([]);
@@ -1270,16 +1283,17 @@ desc("fn_tenant_access_grant, _list and _revoke", () => {
   });
 });
 
-// ── Staff accounts and the tenant grant (PR 2) ────────────────────────────
+// ── Staff accounts, the tenant grant and the Users page (PR 2) ────────────
 
 /** The migration whose staff_access_accounts backfill the tests below replay. */
 const STAFF_RECORD_MIGRATION = "20261118140000_tenant_app_plugin.sql";
 
-desc("staff_access_accounts and the tenant grant", () => {
+desc("staff_access_accounts, the tenant grant and the Users page", () => {
   let formerStaff: TestUser;
   let emsTenant: TestUser;
   let madeStaff: TestUser;
   let fresh: TestUser;
+  let rejoined: TestUser;
 
   const grant = async (tenantId: string, userId: string, actor: string) => {
     const svc = await serviceClient();
@@ -1291,13 +1305,36 @@ desc("staff_access_accounts and the tenant grant", () => {
     ownerRows<{ user_id: string }>(
       `SELECT user_id FROM public.staff_access_accounts WHERE user_id IN (${idList(ids)}) ORDER BY user_id`,
     ).map((r) => r.user_id);
+  /** The Users page's rows for these accounts, as a super admin sees them, sorted. */
+  const listed = async (ids: string[]) => {
+    const { data, error } = await superAdmin.client.rpc("fn_list_visible_users", { _target_user_ids: ids });
+    expect(error).toBeNull();
+    return (data as { user_id: string; role: string | null; ems_operator_count: number }[])
+      .map((r) => ({ user_id: r.user_id, role: r.role, ems_operator_count: r.ems_operator_count }))
+      .sort((a, b) => a.user_id.localeCompare(b.user_id));
+  };
+  /** Exactly DELETE /api/users/[id]'s query, with the caller's own client. */
+  const removeStaffAccess = (client: SupabaseClient, userId: string) =>
+    client.from("user_roles").delete({ count: "exact" }).eq("user_id", userId).neq("role", "tenant");
+  const tenantRowsOf = async (userId: string) => {
+    const svc = await serviceClient();
+    const { data, error } = await svc
+      .from("user_roles")
+      .select("id, scope_id")
+      .eq("user_id", userId)
+      .eq("role", "tenant")
+      .order("scope_id");
+    expect(error).toBeNull();
+    return data ?? [];
+  };
 
   beforeAll(async () => {
-    [formerStaff, emsTenant, madeStaff, fresh] = await Promise.all([
+    [formerStaff, emsTenant, madeStaff, fresh, rejoined] = await Promise.all([
       createTestUser({ email: EMAIL.formerStaff, role: "org_manager", scopeId: F.org }),
       createTestUser({ email: EMAIL.emsTenant, role: "tenant", scopeType: "tenant", scopeId: F.tenantB }),
       createTestUser({ email: EMAIL.madeStaff, role: "tenant", scopeType: "tenant", scopeId: F.tenantB }),
       createTestUser({ email: EMAIL.fresh, role: null }),
+      createTestUser({ email: EMAIL.rejoined, role: "tenant", scopeType: "tenant", scopeId: F.tenantB }),
     ]);
   }, 60_000);
 
@@ -1312,7 +1349,9 @@ desc("staff_access_accounts and the tenant grant", () => {
     const staff = [manager, otherManager, superAdmin, dual, formerStaff].map((u) => u.userId);
     expect(recorded(staff)).toEqual([...staff].sort());
     // noRole and fresh have no rows; the trigger records nothing for them.
-    const notStaff = [tenantOnly, tenantOfC, noRole, grantee, emsTenant, madeStaff, fresh].map((u) => u.userId);
+    const notStaff = [tenantOnly, tenantOfC, noRole, grantee, emsTenant, madeStaff, fresh, rejoined].map(
+      (u) => u.userId,
+    );
     expect(recorded(notStaff)).toEqual([]);
   });
 
@@ -1331,13 +1370,17 @@ desc("staff_access_accounts and the tenant grant", () => {
     expect(made.error).toBeNull();
     expect(recorded([emsTenant.userId, madeStaff.userId])).toEqual([emsTenant.userId, madeStaff.userId].sort());
 
-    // Their staff access is removed, as DELETE /api/users/[id] would.
+    // Their staff access is removed by a super admin, through DELETE
+    // /api/users/[id]'s own query, so the delete guard and RLS run as there.
+    const madeStaffTenantRows = await tenantRowsOf(madeStaff.userId);
     for (const user of [madeStaff, formerStaff]) {
-      const removed = await svc.from("user_roles").delete().eq("user_id", user.userId).neq("role", "tenant");
+      const removed = await removeStaffAccess(superAdmin.client, user.userId);
       expect(removed.error).toBeNull();
+      expect(removed.count).toBe(1);
     }
     const left = await svc.from("user_roles").select("user_id, role").in("user_id", [madeStaff.userId, formerStaff.userId]);
     expect(left.data).toEqual([{ user_id: madeStaff.userId, role: "tenant" }]);
+    expect(await tenantRowsOf(madeStaff.userId)).toEqual(madeStaffTenantRows);
     expect(recorded([madeStaff.userId, formerStaff.userId])).toEqual([madeStaff.userId, formerStaff.userId].sort());
   });
 
@@ -1374,20 +1417,36 @@ desc("staff_access_accounts and the tenant grant", () => {
     expect(recorded([noRole.userId, manager.userId])).toEqual([manager.userId]);
   });
 
-  it("the grant refuses an account that holds a staff row, or has held one (42501), and adds no row", async () => {
-    for (const user of [manager, superAdmin, dual, emsTenant, formerStaff, madeStaff]) {
-      const { data, error } = await grant(F.tenantA, user.userId, manager.userId);
-      expectCode(error, "42501");
-      expect(error?.message).toContain("staff account");
-      expect(data).toBeNull();
+  it("the grant gives a unit to current staff, who then hold both and stay listed as staff", async () => {
+    for (const user of [superAdmin, manager]) {
+      const { data, error } = await grant(F.tenantB, user.userId, manager.userId);
+      expect(error).toBeNull();
+      expect(typeof data).toBe("string");
+      const home = await user.client.rpc("fn_tenant_home", { _tenant_id: F.tenantB });
+      expect(home.error).toBeNull();
+      expect((home.data as { tenant_id: string }[]).map((r) => r.tenant_id)).toEqual([F.tenantB]);
     }
-    const svc = await serviceClient();
-    const rows = await svc
-      .from("user_roles")
-      .select("user_id")
-      .eq("scope_id", F.tenantA)
-      .in("user_id", [manager.userId, superAdmin.userId, emsTenant.userId, formerStaff.userId, madeStaff.userId]);
-    expect(rows.data).toEqual([]);
+    expect(await listed([superAdmin.userId, manager.userId])).toEqual(
+      [
+        { user_id: superAdmin.userId, role: "super_admin", ems_operator_count: 0 },
+        { user_id: manager.userId, role: "org_manager", ems_operator_count: 0 },
+      ].sort((a, b) => a.user_id.localeCompare(b.user_id)),
+    );
+  });
+
+  it("the grant gives a tenant whose org_manager row was removed another unit, like any tenant", async () => {
+    const before = await tenantRowsOf(madeStaff.userId);
+    expect(before.map((r) => r.scope_id)).toEqual([F.tenantB]);
+    const { data, error } = await grant(F.tenantA, madeStaff.userId, manager.userId);
+    expect(error).toBeNull();
+    expect(typeof data).toBe("string");
+
+    const reads = await madeStaff.client.from("tenants").select("id");
+    expect((reads.data ?? []).map((r) => r.id).sort()).toEqual([F.tenantA, F.tenantB].sort());
+    // Their first unit's row is the same row, not a new one.
+    expect(await tenantRowsOf(madeStaff.userId)).toEqual(expect.arrayContaining(before));
+    // The record is history and stays; it no longer counts while they hold rows.
+    expect(recorded([madeStaff.userId])).toEqual([madeStaff.userId]);
   });
 
   it("the grant gives an account that has never been staff access, without recording it as staff", async () => {
@@ -1399,23 +1458,76 @@ desc("staff_access_accounts and the tenant grant", () => {
     expect(recorded([fresh.userId])).toEqual([]);
   });
 
-  it("the Users page keeps every staff account, current or former, whatever tenant access it held", async () => {
-    const targets = [emsTenant, madeStaff, formerStaff, fresh, tenantOnly, grantee].map((u) => u.userId);
-    const { data, error } = await superAdmin.client.rpc("fn_list_visible_users", { _target_user_ids: targets });
-    expect(error).toBeNull();
-    const rows = (data as { user_id: string; role: string | null; ems_operator_count: number }[])
-      .map((r) => ({ user_id: r.user_id, role: r.role, ems_operator_count: r.ems_operator_count }))
-      .sort((a, b) => a.user_id.localeCompare(b.user_id));
-    expect(rows).toEqual(
+  it("the Users page lists staff now and accounts with no rows that were staff, and leaves out anyone holding tenant rows and no staff row", async () => {
+    expect(await listed([emsTenant, madeStaff, formerStaff, fresh, tenantOnly, grantee].map((u) => u.userId))).toEqual(
       [
         // Holds an ems_operator row and a tenant row.
         { user_id: emsTenant.userId, role: null, ems_operator_count: 1 },
-        // Was made staff while a tenant, and is a tenant again.
-        { user_id: madeStaff.userId, role: null, ems_operator_count: 0 },
-        // Staff access removed, never a tenant: listed as before.
+        // Staff access removed, never a tenant, no rows: listed as before.
         { user_id: formerStaff.userId, role: null, ems_operator_count: 0 },
       ].sort((a, b) => a.user_id.localeCompare(b.user_id)),
     );
+    // Left out: madeStaff, a tenant once made org manager and then removed,
+    // who now holds only tenant rows; fresh and tenantOnly, tenants never
+    // staff; grantee, a former tenant with no rows who was never staff.
+  });
+
+  it("the grant gives a former staff account with no rows a unit, and the Users page then leaves it out", async () => {
+    expect(await listed([formerStaff.userId])).toEqual([
+      { user_id: formerStaff.userId, role: null, ems_operator_count: 0 },
+    ]);
+    const { error } = await grant(F.tenantB, formerStaff.userId, manager.userId);
+    expect(error).toBeNull();
+    const { data } = await formerStaff.client.from("tenants").select("id");
+    expect((data ?? []).map((r) => r.id)).toEqual([F.tenantB]);
+    expect(await listed([formerStaff.userId])).toEqual([]);
+  });
+
+  it("a tenant made org manager and removed through the Users page is a tenant again, until their last unit goes", async () => {
+    const svc = await serviceClient();
+    const before = await tenantRowsOf(rejoined.userId);
+    expect(before.map((r) => r.scope_id)).toEqual([F.tenantB]);
+
+    // Made org manager, as an invitation of their address adds the row.
+    const made = await svc
+      .from("user_roles")
+      .insert({ user_id: rejoined.userId, role: "org_manager", scope_type: "org", scope_id: F.org });
+    expect(made.error).toBeNull();
+    expect(await listed([rejoined.userId])).toEqual([
+      { user_id: rejoined.userId, role: "org_manager", ems_operator_count: 0 },
+    ]);
+
+    // Removed by a super admin with exactly DELETE /api/users/[id]'s query.
+    const removed = await removeStaffAccess(superAdmin.client, rejoined.userId);
+    expect(removed.error).toBeNull();
+    expect(removed.count).toBe(1);
+    expect(await tenantRowsOf(rejoined.userId)).toEqual(before);
+    const target = await svc.rpc("fn_auth_sign_in_target", { _email: EMAIL.rejoined });
+    expect(target.data).toBe(rejoined.userId);
+
+    // Given another unit like any tenant, and left off the Users page whether
+    // it asks for everyone or names them.
+    const granted = await grant(F.tenantA, rejoined.userId, manager.userId);
+    expect(granted.error).toBeNull();
+    const after = await tenantRowsOf(rejoined.userId);
+    expect(after.map((r) => r.scope_id).sort()).toEqual([F.tenantA, F.tenantB].sort());
+    expect(after).toEqual(expect.arrayContaining(before));
+    expect(await listed([rejoined.userId])).toEqual([]);
+    const everyone = await superAdmin.client.rpc("fn_list_visible_users");
+    expect(everyone.error).toBeNull();
+    expect((everyone.data as { user_id: string }[]).map((r) => r.user_id)).not.toContain(rejoined.userId);
+
+    // Every unit revoked: no rows left, and listed again, with no role,
+    // because the account has been staff.
+    for (const unit of [F.tenantA, F.tenantB]) {
+      const access = await accessIdOf(unit, EMAIL.rejoined);
+      const revoked = await manager.client.rpc("fn_tenant_access_revoke", { _tenant_id: unit, _access_id: access });
+      expect(revoked.error).toBeNull();
+    }
+    expect(await tenantRowsOf(rejoined.userId)).toEqual([]);
+    expect(await listed([rejoined.userId])).toEqual([
+      { user_id: rejoined.userId, role: null, ems_operator_count: 0 },
+    ]);
   });
 });
 

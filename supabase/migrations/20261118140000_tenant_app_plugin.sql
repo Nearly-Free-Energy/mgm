@@ -1,6 +1,11 @@
 -- Tenant app (RFC mgm#197, PR 2): the tenant-app plugin in the database, a
--- record of the accounts that have held staff access, and what the tenant
--- grant and the Users page do with that record.
+-- record of the accounts that have held staff access, and what the Users
+-- page does with that record.
+--
+-- Staff, here and in staff_access_accounts, is not a role (user_role has no
+-- staff value): it means holding a user_roles row whose role is not tenant,
+-- now. staff_access_accounts records history: accounts that have ever held
+-- such a row. src/lib/roles.ts holds the definition.
 --
 --  1. 'tenant-app' (alias tenant) joins the plugin names: the CHECKs on
 --     mgm_plugins and mgm_plugin_audit_log, and fn_mgm_set_plugin_enabled,
@@ -15,15 +20,17 @@
 --  3. staff_access_accounts records every account that holds or has held a
 --     role row other than tenant (super_admin, org_manager, ems_operator),
 --     as tenant_access_accounts (20261118100100) does for tenant rows: a
---     trigger on user_roles writes it, and this file backfills it.
---  4. fn_tenant_access_grant refuses an account in that record or holding
---     such a row (PR 1 review), so a staff account is never counted among
---     the former tenants, whom the Users page leaves out. A manager who
---     rents gives the unit another address.
---  5. fn_list_visible_users also lists anyone holding an ems_operator row or
---     recorded in staff_access_accounts (PR 1 review), so no staff account,
---     current or former, drops off the Users page because it also held
---     tenant access.
+--     trigger on user_roles writes it, and this file backfills it. Only
+--     fn_list_visible_users reads it, and only for accounts with no rows.
+--  4. fn_tenant_access_grant keeps 20261118100100's body: tenant access does
+--     not depend on organization roles, so the grant decides only the
+--     actor's authority, the unit and the account. A person may hold both,
+--     and a person whose staff rows are removed is a tenant like any other.
+--  5. fn_list_visible_users also lists anyone holding an ems_operator row,
+--     and an account with no rows that has held a staff row (PR 1 review),
+--     so a staff account whose rows are all gone stays on the Users page
+--     even if it once held tenant access. Anyone holding tenant rows and no
+--     staff row is left out, whatever they held before.
 --  6. user_is_tenant_of_device keeps its behaviour (PR 1 review): a former
 --     tenant still reads the device row of a meter that moved away, which
 --     the tenant app needs to show the days before the move. A comment on
@@ -199,13 +206,20 @@ GRANT  EXECUTE ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) TO auth
 
 -- ── 3. The accounts that have held staff access ─────────────────────────
 --
--- One row per account that holds or has held a user_roles row whose role is
--- not tenant. A trigger on user_roles writes it, so every path that adds a
--- staff row is covered (first-run setup, fn_finalize_user_invitation,
--- fn_change_user_role, the service role, a fixture). It outlives the rows on
--- purpose, as tenant_access_accounts does: DELETE /api/users/[id] removes a
--- person's staff rows and keeps their account. The record goes with the
--- auth account.
+-- History, not who is staff now: one row per account that holds or has
+-- ever held a user_roles row whose role is not tenant. A trigger on
+-- user_roles writes it, so every path that adds a staff row is covered
+-- (first-run setup, fn_finalize_user_invitation, fn_change_user_role, the
+-- service role, a fixture). It outlives the rows on purpose, as
+-- tenant_access_accounts does: DELETE /api/users/[id] removes a person's
+-- staff rows and keeps their account. The record goes with the auth
+-- account.
+--
+-- Its one reader is fn_list_visible_users (section 5), and only for an
+-- account that holds no row at all: there it tells a former staff member,
+-- who stays listed, from a former tenant who was never staff, who does not.
+-- Whether someone is staff now is read from their rows, never from here; if
+-- anything starts reading this table as current staff, revisit.
 --
 -- "Not tenant" rather than a list of staff roles, so a staff role added
 -- later is counted without touching this file. If a second role that is not
@@ -213,8 +227,8 @@ GRANT  EXECUTE ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) TO auth
 -- counted as staff here.
 --
 -- Nothing reads it through the API: RLS is on with no policy, and anon and
--- authenticated hold no privilege on it. fn_tenant_access_grant and
--- fn_list_visible_users read it as the definer.
+-- authenticated hold no privilege on it. fn_list_visible_users reads it as
+-- the definer.
 
 CREATE TABLE IF NOT EXISTS public.staff_access_accounts (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -264,7 +278,10 @@ INSERT INTO public.staff_access_accounts (user_id)
 -- is not in it. On a re-run this part again records each account that then
 -- has no row and no tenant history, which, outside the moment between the
 -- access route creating an account and granting it access, is again a
--- former staff member.
+-- former staff member. Recording one of those by mistake changes nothing
+-- for them while they hold a row: the record counts only for an account
+-- with no rows (section 5), so it would list them again after their last
+-- unit is revoked.
 INSERT INTO public.staff_access_accounts (user_id)
   SELECT au.id
   FROM auth.users au
@@ -272,16 +289,23 @@ INSERT INTO public.staff_access_accounts (user_id)
     AND NOT EXISTS (SELECT 1 FROM public.tenant_access_accounts ta WHERE ta.user_id = au.id)
   ON CONFLICT (user_id) DO NOTHING;
 
--- ── 4. The tenant grant refuses staff accounts ──────────────────────────
+-- ── 4. The tenant grant does not look at staff rows ─────────────────────
 --
--- The body of 20261118100100 with one check added, marked below, after the
--- existing ones: an account that holds or has held a staff row is not given
--- tenant access, so an account the Users page lists as staff never becomes
--- a former tenant through a grant and a revoke. Both the live rows and the
--- record are read, so the check does not rest on the trigger alone.
+-- Re-issued with the body of 20261118100100, unchanged, so a database that
+-- ran an earlier draft of this file, which refused staff accounts here,
+-- converges on it. Tenant access is a person's access to the units they
+-- rent, and does not depend on organization roles: the grant decides only
+-- whether the actor may manage access to the unit, whether the unit exists
+-- and whether the account does. So a person may hold both, a manager who
+-- rents may be given the unit on the same address, and a person whose
+-- staff rows are removed (DELETE /api/users/[id], an organization's
+-- deletion, the service role) is a tenant like any other, given further
+-- units in the same way.
 --
--- The access route (RFC § 6, PR 5) decides what to tell the manager who
--- typed the address. The message names no role and no organization.
+-- The PR 1 review's concern, that a staff account could vanish from the
+-- Users page as a former tenant, is met by section 5 rather than by
+-- refusing grants: current staff are listed through their own rows, and an
+-- account left with no rows is listed if it has ever held a staff row.
 
 CREATE OR REPLACE FUNCTION public.fn_tenant_access_grant(_tenant_id UUID, _user_id UUID, _actor UUID)
 RETURNS UUID
@@ -320,20 +344,6 @@ BEGIN
       USING ERRCODE = 'P0002';
   END IF;
 
-  -- Added (RFC mgm#197, PR 2): staff accounts, current or former, are not
-  -- given tenant access.
-  IF EXISTS (
-    SELECT 1 FROM user_roles
-    WHERE user_id = _user_id
-      AND role <> 'tenant'
-  ) OR EXISTS (
-    SELECT 1 FROM staff_access_accounts
-    WHERE user_id = _user_id
-  ) THEN
-    RAISE EXCEPTION 'This address belongs to an MGM staff account, so it cannot be given tenant access. Use another address for the tenant.'
-      USING ERRCODE = '42501';
-  END IF;
-
   INSERT INTO user_roles (user_id, role, scope_type, scope_id)
     VALUES (_user_id, 'tenant', 'tenant', _tenant_id)
     ON CONFLICT (user_id, role, scope_type, scope_id) DO NOTHING
@@ -357,22 +367,42 @@ $$;
 REVOKE EXECUTE ON FUNCTION public.fn_tenant_access_grant(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.fn_tenant_access_grant(UUID, UUID, UUID) TO service_role;
 
--- ── 5. The Users page keeps every staff account ─────────────────────────
+-- ── 5. The Users page lists staff, and accounts left with no rows ───────
 --
 -- fn_list_visible_users: the body of 20261118100100 with the added
--- condition widened, marked below. A person is listed (where
+-- condition changed, marked below. A person is listed (where
 -- user_can_see_user_profile lets the caller see them at all) when they:
---  - hold an org-scoped row (super_admin, org_manager), as before;
+--  - hold an org-scoped row (super_admin, org_manager), as before, whatever
+--    tenant rows they also hold;
 --  - hold an ems_operator row, which is staff on the microgrid scope (none
---    ship today, #321, but a row of one must not read as a tenant);
---  - have held any staff row (staff_access_accounts), so a former staff
---    member who also held tenant access stays listed, with no role; or
---  - have never held a tenant row, as before (people whose staff access was
---    removed before section 3 existed, and new invitees).
--- Left out: people who hold or have held tenant rows and have never held a
--- staff row. That includes, unlike 20261118100100, no one who was ever
--- staff: someone who was both staff and a tenant and lost both is listed
--- again, with no role.
+--    ship today, #321, but a row of one must not read as a tenant); or
+--  - hold no row at all and either have held a staff row
+--    (staff_access_accounts) or have never held a tenant row. The first is
+--    the change from 20261118100100, which hid someone who was both staff
+--    and a tenant and lost both; they are listed again, with no role. The
+--    second is as before: people whose staff access was removed before
+--    section 3 existed, and new invitees.
+-- Left out: anyone holding tenant rows and no staff row, whatever they held
+-- before. A manager whose staff role is removed while they rent is then a
+-- tenant like any other, off the list until their last unit goes. Also
+-- left out, as before: former tenants with no rows who were never staff.
+--
+-- "Holds no tenant row" stands for "holds no row at all" in the third case
+-- only because the first two have already ruled out org and ems_operator
+-- rows, and user_roles_role_scope_type_consistent (20261118100100) pins
+-- super_admin and org_manager to 'org', ems_operator to 'microgrid' and
+-- tenant to 'tenant'. If that CHECK changes, or a staff role gains another
+-- scope type, revisit this condition.
+--
+-- Who sees the difference: super admins only. user_can_see_user_profile
+-- (00012) already hides from an org manager anyone without an org row in
+-- their organization, so nobody this condition adds or removes was ever on
+-- an org manager's list. The same function names actors elsewhere: the
+-- billing audit log, the "entered by" name on invoice PDFs, the
+-- billing-period page and the API tokens page's creators. So a former
+-- manager who now only rents is unnamed there for super admins too, as on
+-- main before this file, which listed no one holding a tenant row and no
+-- staff row either.
 --
 -- Same signature and columns, so callers and generated types do not change.
 
@@ -416,25 +446,28 @@ AS $function$
   ) ems ON TRUE
   WHERE user_can_see_user_profile(au.id)
     AND (_target_user_ids IS NULL OR au.id = ANY(_target_user_ids))
-    -- Tenants, current or former, are not staff (RFC mgm#197, PR 1); staff,
-    -- current or former, stay listed whatever tenant access they held
-    -- (changed in PR 2: the ems_operator and staff_access_accounts terms).
+    -- Staff now are listed; a tenant with no staff row is not (RFC mgm#197,
+    -- PR 1); an account with no rows is listed if it was ever staff or never
+    -- a tenant (changed in PR 2: the ems_operator and staff_access_accounts
+    -- terms).
     AND (
       org_role.role IS NOT NULL
       OR COALESCE(ems.cnt, 0) > 0
-      OR EXISTS (
-        SELECT 1 FROM public.staff_access_accounts sa
-        WHERE sa.user_id = au.id
-      )
       OR (
         NOT EXISTS (
           SELECT 1 FROM public.user_roles t
           WHERE t.user_id = au.id
             AND t.scope_type = 'tenant'
         )
-        AND NOT EXISTS (
-          SELECT 1 FROM public.tenant_access_accounts ta
-          WHERE ta.user_id = au.id
+        AND (
+          EXISTS (
+            SELECT 1 FROM public.staff_access_accounts sa
+            WHERE sa.user_id = au.id
+          )
+          OR NOT EXISTS (
+            SELECT 1 FROM public.tenant_access_accounts ta
+            WHERE ta.user_id = au.id
+          )
         )
       )
     );

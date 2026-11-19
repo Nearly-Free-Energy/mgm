@@ -482,9 +482,11 @@ describe("POST /api/users/[id]/resend-invite", () => {
   });
 
   // ── Tenant access is not staff access (RFC mgm#197) ──────────────
-  // The RPC lists no one who holds or has held tenant access without ever
-  // holding staff access, for any caller (no row), and its role columns
-  // never hold a tenant role; were they to, the route reads that as no row.
+  // The RPC leaves out, for any caller (no row), anyone who holds tenant
+  // rows and no staff row now, whatever they held before (a tenant once made
+  // org manager and then removed included), and a former tenant with no rows
+  // who was never staff. Its role columns never hold a tenant role; were
+  // they to, the route reads that as no row.
   // Either way the account is answered as one that does not exist, with no
   // notice, so nothing tells the caller it is a tenant's and no tenant is
   // sent a staff invitation.

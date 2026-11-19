@@ -80,6 +80,10 @@ its composer does not:
 | `composeBillingReview` | no | no |
 | `composeTenantApp` | yes, as the unit's tenant, not as staff (`authorizeTenant`) | yes, reads included: `409`, or `503` when plugin state cannot be read |
 
+Staff, here and below, is not a role: it means holding a `user_roles` row
+whose role is not `tenant`, now (`src/lib/roles.ts`, `docs/entity-model.md`
+§ "Roles"). `staff_access_accounts` is the history of who ever did.
+
 The composers that refuse a disabled plugin check access first, so a caller
 without it gets `401`/`403` and learns nothing about the plugin. A code's
 prefix is the plugin's name with hyphens as underscores (`codePrefix` in
@@ -224,7 +228,8 @@ Tenant entries are shown by the plugin state of the caller's own units'
 organizations (`fn_tenant_home` gives each unit's organization, and the gate
 is asked with the tenant's own session), never by that of the organization
 the manifest is built for, so a manager who rents elsewhere sees both groups.
-A person whose rows are all tenant rows sees no organization: the host
+A person whose rows are all tenant rows sees no organization, whatever
+staff rows they held before (the host reads the rows held now): the host
 gives them the tenant manifest (`buildTenantManifestModel` in
 `src/lib/gui/host/shared/manifest-model.ts`), whose `org` is their current
 unit, whose places are their units and whose nav is tenant entries only; the

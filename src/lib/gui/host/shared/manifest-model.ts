@@ -83,10 +83,11 @@ export function livePlugins(gate: ManifestInput["gate"]): Set<MgmPluginName> {
 }
 
 /**
- * Which nav audiences a person is shown: `staff` for a person with an
- * organization role row (staff rows, never tenant rows: a tenant row is not
- * staff), `superAdmin` for a super admin, `tenant` for a person with a tenant
- * row. Each is a display filter; none authorizes anything.
+ * Which nav audiences a person is shown: `staff` for a person holding a role
+ * other than tenant (rolesIncludeStaff; a tenant row is not staff, as
+ * @/lib/roles defines it), `superAdmin` for a super admin, `tenant` for a
+ * person with a tenant row. Each is a display filter; none authorizes
+ * anything.
  */
 export type NavViewer = Pick<ManifestInput, "staff" | "superAdmin" | "tenant">;
 

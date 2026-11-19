@@ -81,10 +81,15 @@ export async function getCurrentUserRoles(
 }
 
 /**
- * The rows that make a person staff: every row whose role is not `tenant`
- * (RFC mgm#197). A tenant row is a person's access to the unit they rent,
- * not to an organization, so "has a role row" does not mean "is staff"; a
- * check for staff reads these rows, never `roles.length`.
+ * The rows that make a person staff now: every row whose role is not
+ * `tenant` (RFC mgm#197). Staff is not a role; the definition is in
+ * @/lib/roles. A tenant row is a person's access to the unit they rent, not
+ * to an organization, so "has a role row" does not mean "is staff"; a check
+ * for staff reads these rows, never `roles.length`.
+ *
+ * Only the rows held now count. A person whose staff rows were removed is a
+ * tenant like any other if they hold tenant rows, whatever they held before;
+ * `staff_access_accounts` (20261118140000) is history and is not read here.
  *
  * "Not tenant" counts as staff, as `staff_access_accounts` and
  * `fn_list_visible_users` count it (20261118140000), so an `ems_operator`

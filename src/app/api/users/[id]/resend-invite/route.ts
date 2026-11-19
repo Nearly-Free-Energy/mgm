@@ -138,11 +138,12 @@ export async function POST(
   // FROM anon) and applies the visibility predicate body-side.
   //
   // Only staff access counts here. The RPC's role columns come from the
-  // person's `scope_type = 'org'` row, and it lists no one who holds or has
-  // held tenant access without ever holding staff access (RFC mgm#197,
-  // 20261118140000), for any caller. Such an account therefore gets the
-  // answers an account that does not exist gets (Step C), and nothing says it
-  // is a tenant's. A tenant role in those columns, which the RPC does not
+  // person's `scope_type = 'org'` row, and for any caller it leaves out
+  // anyone who holds tenant rows and no staff row now, whatever they held
+  // before, and a former tenant with no rows who was never staff (RFC
+  // mgm#197, 20261118140000). Such an account therefore gets the answers an
+  // account that does not exist gets (Step C), and nothing says it is a
+  // tenant's. A tenant role in those columns, which the RPC does not
   // return today, is read as no listing at all, so that stays true if the RPC
   // changes.
   const { data: visibleRows, error: visibleError } = await userClient.rpc(
@@ -180,8 +181,9 @@ export async function POST(
 
   if (!targetRoleRow) {
     // The target doesn't exist, is invisible to this caller, or is an
-    // account the RPC lists for no one (a tenant's, current or former,
-    // never staff). Uniform 403 (existence-leak hardening).
+    // account the RPC lists for no one (one holding tenant rows and no
+    // staff row, or a former tenant with no rows who was never staff).
+    // Uniform 403 (existence-leak hardening).
     if (!callerIsSuper) {
       return NextResponse.json(
         { error: "You do not have permission to resend this invitation." },
@@ -194,9 +196,10 @@ export async function POST(
     // was answered 500 above) is a staff invitee: answer as for
     // an account that does not exist, without looking it up or sending a
     // notice, so the answer does not say which it is. This holds while
-    // fn_list_visible_users leaves out only accounts that are not staff;
-    // if it ever leaves out a staff account, a super admin gets 404 for it
-    // here too, so revisit this branch with it.
+    // fn_list_visible_users leaves out only accounts that hold no staff row
+    // now (staff as @/lib/roles defines it); if it ever leaves out an
+    // account holding one, a super admin gets 404 for it here too, so
+    // revisit this branch with it.
     return NextResponse.json({ error: "User not found." }, { status: 404 });
   } else if (targetRoleRow.role == null) {
     // Visible row with NULL role = orphan (LEFT JOIN miss on user_roles).
