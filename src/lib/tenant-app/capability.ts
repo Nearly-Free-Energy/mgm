@@ -75,14 +75,26 @@ function figuresOf(outcome: UsageReadOutcome<SummedFigures, SourceRefusal>): Usa
       };
     case "limited":
       return { kind: "problem", problem: "limited" };
-    case "failed":
+    case "failed": {
       // Metering off, or a provider with no series: another try reads the
-      // same. Anything else, a throw included, may pass next time.
-      return {
-        kind: "problem",
-        problem:
-          outcome.failure === "metering-off" || outcome.failure === "unsupported" ? "not-offered" : "unavailable",
-      };
+      // same, and nothing kept from before is shown. Anything else, a throw
+      // included, may pass next time; until then the last read, while it is
+      // kept, is shown marked stale with its read time (as decided on
+      // mgm#210), as when the unit is over its limit.
+      if (outcome.failure === "metering-off" || outcome.failure === "unsupported") {
+        return { kind: "problem", problem: "not-offered" };
+      }
+      if (outcome.kept) {
+        return {
+          kind: "figures",
+          values: outcome.kept.value.values,
+          readAt: outcome.kept.readAt,
+          stale: true,
+          synthetic: outcome.kept.value.synthetic,
+        };
+      }
+      return { kind: "problem", problem: "unavailable" };
+    }
   }
 }
 
@@ -214,6 +226,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             endDate: inForce[inForce.length - 1],
             resolution: "day",
             timezone,
+            nowMs,
           });
           if (!result.ok) return { ok: false, failure: result.reason };
           // Built here, from the buckets' own days, so a source that returns
@@ -279,6 +292,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             endDate: date,
             resolution: "hour",
             timezone,
+            nowMs,
           });
           if (!result.ok) return { ok: false, failure: result.reason };
           // Matched by instant, not position, so a missing hour shifts none;

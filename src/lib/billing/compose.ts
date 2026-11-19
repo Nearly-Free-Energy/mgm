@@ -71,6 +71,7 @@ export const BillingPlugin = {
           seedReadings: input.seedReadings,
           mode: input.mode,
           actorUserId: input.actorUserId,
+          expectedBill: input.expectedBill,
           meteringProvider: meteringProviders.forRequest(request.supabase),
           requireEffectiveDatedAssignments: true,
           allowUsageOnlyReadings: true,

@@ -6,7 +6,7 @@ import type { OpenEmsClientConfig } from "@/lib/openems";
 import type { DeviceConfig, DeviceReading } from "@/lib/adapters/types";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
-import { addDaysToDateKey, dayKeyInZone } from "@/lib/timezone/day-key";
+import { addDaysToDateKey, dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
 import { energySeriesAxis } from "./energy-series";
 import { MeteringError } from "./errors";
 import type {
@@ -352,9 +352,20 @@ async function querySiteEdge(
 /** A meter's consumption counter, as OpenEMS names its channel. */
 const consumptionChannel = (componentId: string) => `${componentId}/ActiveConsumptionEnergy`;
 
+const HOUR_MS = 3_600_000;
+
 /**
  * Implements `MeteringProvider.getDeviceEnergySeries` for OpenEMS, with
- * queryHistoricTimeseriesEnergyPerPeriod per edge.
+ * queryHistoricTimeseriesEnergyPerPeriod per edge, always per hour.
+ *
+ * - `"hour"`: each local hour's Wh as the backend gives it, null where it has
+ *   none. The hour holding the read carries what was counted so far.
+ * - `"day"`: a local day is the sum of its local hours, as the synthetic
+ *   provider sums them (`fixture/meter-energy.ts`). An hour that starts at or
+ *   after now is not counted; an hour that has ended without a value makes
+ *   the day null, never a lower number; the hour holding now counts when it
+ *   has a value and is not missing when it has none yet (its first sample may
+ *   not have arrived). A day that starts at or after now is null.
  */
 async function getOpenEmsEnergySeries(
   supabase: SupabaseClient,
@@ -398,27 +409,37 @@ async function getOpenEmsEnergySeries(
   // takes: once it passes, the client starts no further request.
   const signal = AbortSignal.timeout(OpenEmsClient.PAGE_READ_TIMEOUT_MS);
 
-  // Lead day (spike on RFC mgm#197, 17 November 2026): the backend returns
-  // the first two hourly buckets of any range as null, and with the range
-  // started a day earlier the same two hours read 0.0. A daily read could
-  // therefore start with a short first day rather than a null one, and the
-  // spike could not tell the two apart. So both resolutions read from the
-  // day before the requested start; buckets before the start are not on
-  // the axis and are dropped below, so the lead day never leaves this
-  // function. A null inside the requested range is real missing data and
-  // stays null. If the backend stops leaving the first buckets empty, the
-  // extra day is merely wasted; if it ever leaves more than a day empty, the
-  // lead must grow. ENERGY_SERIES_MAX_DAYS applies to the request, not to
-  // the lead day.
-  const fromDate = addDaysToDateKey(request.startDate, -1);
-  const unit = request.resolution === "hour" ? "Hours" : "Days";
+  // The local hours of the requested days, whatever the resolution: a day
+  // is summed from its hours below.
+  const days: { date: string; first: number; count: number }[] = [];
+  const hourStarts: number[] = [];
+  for (let date = request.startDate; date <= request.endDate; date = addDaysToDateKey(date, 1)) {
+    const starts = localHourStarts(date, request.timezone);
+    days.push({ date, first: hourStarts.length, count: starts.length });
+    hourStarts.push(...starts);
+  }
+  const hourIndex = new Map(hourStarts.map((start, i) => [start, i]));
 
-  // Wh per bucket, keyed `${edgeId}|${channel}`: one value per bucket, or
-  // null; `seen` marks the buckets a response has already given a value for.
+  // Lead day (spike on RFC mgm#197, 17 November 2026): the backend returns
+  // the first two hourly buckets of any range as null, so the range starts
+  // a day before the requested start. Trailing day: the backend stamps each
+  // hour at its end (below), and a range ending on `endDate` stops at the
+  // bucket stamped 23:00, so the hour 23:00 to 24:00 of `endDate` comes back
+  // only when the range runs to the next day. Hours outside the requested
+  // days are dropped below and never leave this function. A null inside the
+  // requested range is real missing data and stays null. If the backend stops
+  // leaving the first buckets empty, the lead day is merely wasted; if it
+  // ever leaves more than a day empty, the lead must grow.
+  // ENERGY_SERIES_MAX_DAYS applies to the request, not to these two days.
+  const fromDate = addDaysToDateKey(request.startDate, -1);
+  const toDate = addDaysToDateKey(request.endDate, 1);
+
+  // Wh per local hour, keyed `${edgeId}|${channel}`: one value per hour, or
+  // null; `seen` marks the hours a response has already given a value for.
   const values = new Map<string, { wh: (number | null)[]; seen: boolean[] }>();
   await Promise.all([...channelsByEdge].map(async ([edgeId, channels]) => {
     const sets = await queryBatchOrEach(channels, (list) => client.queryEnergyPerPeriod(
-      edgeId, list, fromDate, request.endDate, request.timezone, unit, { signal }
+      edgeId, list, fromDate, toDate, request.timezone, "Hours", { signal }
     ));
     for (const { channels: asked, set } of sets) {
       const times = set.timestamps.map(toEpochMs);
@@ -449,19 +470,29 @@ async function getOpenEmsEnergySeries(
         if (!raw) continue;
         const key = `${edgeId}|${channel}`;
         const entry = values.get(key) ?? {
-          wh: axis.buckets.map(() => null),
-          seen: axis.buckets.map(() => false),
+          wh: hourStarts.map(() => null),
+          seen: hourStarts.map(() => false),
         };
         values.set(key, entry);
         for (let i = 0; i < times.length; i++) {
           const time = times[i];
-          const index = time === null ? undefined : axis.indexOf(time);
+          // The backend stamps an hourly bucket with the END of its hour: the
+          // bucket stamped 15:00 holds 14:00 to 15:00, and while that hour
+          // runs it already holds what was counted so far. Observed on NFE's
+          // backend (OpenEMS 2026.x with InfluxDB), 19 November 2026: 118
+          // hours of two meters matched their counters' rise over the hour
+          // before each stamp, not the hour after it. Matched exactly against
+          // the local hour starts, so a stamp off the hour, or a source that
+          // leaves an hour out, shifts no other value. If a backend stamps an
+          // hour at its start, every hour reads one hour late and this offset
+          // must go.
+          const index = time === null ? undefined : hourIndex.get(time - HOUR_MS);
           if (index === undefined) continue;
           if (entry.seen[index]) {
             console.error("MGM energy series: two OpenEMS values for one bucket", {
               edgeId,
               channel,
-              bucket: new Date(axis.buckets[index]).toISOString(),
+              bucket: new Date(hourStarts[index]).toISOString(),
             });
             throw new MeteringError(
               "OpenEMS returned this usage with ambiguous buckets. Try again shortly.",
@@ -480,6 +511,32 @@ async function getOpenEmsEnergySeries(
     }
   }));
 
+  // Days are summed from hours rather than read per day: the same backend
+  // stamps a daily bucket at local midnight but fills it with the UTC day,
+  // 03:00 to 03:00 in Kampala (observed alongside the hours above). If daily
+  // buckets ever follow the requested zone, days could be read directly
+  // again. A gap in telemetry leaves its hour null rather than carrying its
+  // energy into the next hour, which is why an ended hour without a value
+  // makes its day null.
+  const nowMs = request.nowMs ?? Date.now();
+  const toSeries = (wh: (number | null)[]): (number | null)[] => {
+    if (request.resolution === "hour") {
+      return wh.map((value) => (value === null ? null : value / 1000));
+    }
+    return days.map(({ first, count }) => {
+      if (hourStarts[first] >= nowMs) return null;
+      let dayWh = 0;
+      for (let i = first; i < first + count; i++) {
+        const start = hourStarts[i];
+        if (start >= nowMs) break;
+        const value = wh[i];
+        if (value !== null) dayWh += value;
+        else if (start + HOUR_MS <= nowMs) return null;
+      }
+      return dayWh / 1000;
+    });
+  };
+
   // Looked up by edge and channel, never by the channel alone; each device
   // gets its own array, so two devices on one channel never share one.
   return {
@@ -488,7 +545,7 @@ async function getOpenEmsEnergySeries(
       const wh = device.edgeOpenemsId && device.componentId
         ? values.get(`${device.edgeOpenemsId}|${consumptionChannel(device.componentId)}`)?.wh
         : undefined;
-      return [device.id, wh ? wh.map((value) => (value === null ? null : value / 1000)) : noValues()];
+      return [device.id, wh ? toSeries(wh) : noValues()];
     })),
   };
 }

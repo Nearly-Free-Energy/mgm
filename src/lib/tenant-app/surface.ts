@@ -3,11 +3,12 @@ import "server-only";
 /**
  * What the tenant app contributes to GUIs (src/lib/gui/surface.ts), RFC
  * mgm#197 § 3–5: tenant views about the caller's own unit, with nav entries
- * for the tenant audience. `tenant.home` is the unit and its meters;
- * `tenant.usage-month` and `tenant.usage-day` are its use per day of a month
- * and per hour of a day. Gridtop draws the usage views with its own
- * renderers (src/gui/gridtop/renderers/tenant-usage), which read the exts;
- * other GUIs, and Gridtop on an ext it cannot read, draw them with the kit.
+ * for the tenant audience. `tenant.home` is the unit, its meters and its
+ * month's use so far; `tenant.usage-month` and `tenant.usage-day` are its
+ * use per day of a month and per hour of a day. Gridtop draws the usage
+ * views with its own renderers (src/gui/gridtop/renderers/tenant-usage),
+ * which read the exts; other GUIs, and Gridtop on an ext it cannot read,
+ * draw them with the kit.
  *
  * Their pages, /my, /my/usage and /my/usage/day, are in the catalog but not
  * released (RFC mgm#197: released by PR 5), so neither the entries nor the
@@ -69,9 +70,10 @@ export const TENANT_APP_SURFACE: Contribution = {
       scope: "tenant",
       path: "/my",
       params: {},
-      // Reads the database only, through the tenant's own client; the usage
-      // views, which read OpenEMS, are "vendor".
-      cost: "db",
+      // Reads the database through the tenant's own client, and the month's
+      // use so far from the microgrid's metering source (OpenEMS), cached
+      // and limited with the month view's read.
+      cost: "vendor",
       declares: { keys: TENANT_HOME_KEYS, prefixes: [TENANT_METER_PREFIX] },
       examples: TENANT_HOME_EXAMPLES,
       load: loadTenantHome,

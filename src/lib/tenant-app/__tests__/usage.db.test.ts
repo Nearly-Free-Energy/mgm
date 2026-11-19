@@ -5,12 +5,18 @@
  * MGM_METERING_FIXTURES on so the synthetic provider answers for a microgrid
  * whose edges carry `SYNTHETIC-EDGE-` ids.
  *
- * One meter M moves from unit A to unit B on 15 September. Unit A is also
- * linked (with the service role, which no app path would do:
- * fn_create_tenant refuses a meter of another microgrid) to a meter X on an
- * edge of another microgrid of the same organization. A's own client reads
- * X's device row, but the edges read is filtered to A's microgrid, so X is
- * never sent to a provider and every day X is in force reads as no data.
+ * One meter M moves from unit A to unit B on 15 September. From then, unit
+ * A's primary meter is a meter X on an edge of another microgrid of the same
+ * organization (linked with the service role, which no app path would do:
+ * fn_create_tenant refuses a meter of another microgrid). A's own client
+ * reads X's device row, but the edges read is filtered to A's microgrid, so
+ * X is never sent to a provider and every day X is in force reads as no
+ * data.
+ *
+ * Unit C has every link that is not its use (USAGE_METER_ROLE, as decided
+ * on mgm#210): a grid meter and then a PV meter linked as its primary, a
+ * battery, and M, B's primary, linked to C as a secondary meter. Only C's
+ * own primary consumption meter, from 21 October, is ever read.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
@@ -43,13 +49,20 @@ const METER = "e7700000-0000-4000-8004-000000000001";
 const METER_X = "e7700000-0000-4000-8004-000000000002";
 const UNIT_A = "e7700000-0000-4000-8005-000000000001";
 const UNIT_B = "e7700000-0000-4000-8005-000000000002";
+const UNIT_C = "e7700000-0000-4000-8005-000000000003";
+const GRID_METER = "e7700000-0000-4000-8004-000000000003";
+const PV_METER = "e7700000-0000-4000-8004-000000000004";
+const BATTERY = "e7700000-0000-4000-8004-000000000005";
+const OWN_METER = "e7700000-0000-4000-8004-000000000006";
 const LINK_X = "e7700000-0000-4000-8006-000000000001";
 const EMAIL_A = "tenant-usage-a@test.local";
 const EMAIL_B = "tenant-usage-b@test.local";
+const EMAIL_C = "tenant-usage-c@test.local";
 const KAMPALA = "Africa/Kampala";
 
 let tenantA: TestUser;
 let tenantB: TestUser;
+let tenantC: TestUser;
 
 const energySeries = vi.spyOn(FixtureMeteringProvider.prototype, "getDeviceEnergySeries");
 
@@ -72,7 +85,7 @@ beforeAll(async () => {
     vi.stubEnv(name, "");
   }
   vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "");
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C] });
 
   const svc = await serviceClient();
   const rows: [string, Record<string, unknown>][] = [
@@ -84,11 +97,21 @@ beforeAll(async () => {
     ["edges", { id: OTHER_EDGE, microgrid_id: OTHER_MICROGRID, name: "Other edge", openems_edge_id: `SYNTHETIC-EDGE-${OTHER_MICROGRID}` }],
     ["devices", { id: METER, edge_id: EDGE, name: "Meter M", device_type: "consumption_meter", openems_component_id: "meter1" }],
     ["devices", { id: METER_X, edge_id: OTHER_EDGE, name: "Meter X", device_type: "consumption_meter", openems_component_id: "meter1" }],
+    ["devices", { id: GRID_METER, edge_id: EDGE, name: "Grid meter", device_type: "grid_meter", openems_component_id: "meter0" }],
+    ["devices", { id: PV_METER, edge_id: EDGE, name: "PV meter", device_type: "pv_meter", openems_component_id: "meter2" }],
+    ["devices", { id: BATTERY, edge_id: EDGE, name: "Battery", device_type: "battery", openems_component_id: "ess0" }],
+    ["devices", { id: OWN_METER, edge_id: EDGE, name: "Meter C", device_type: "consumption_meter", openems_component_id: "meter3" }],
     ["tenants", { id: UNIT_A, microgrid_id: MICROGRID, display_name: "Unit A", primary_phone: "+256700000001" }],
     ["tenants", { id: UNIT_B, microgrid_id: MICROGRID, display_name: "Unit B", primary_phone: "+256700000002" }],
+    ["tenants", { id: UNIT_C, microgrid_id: MICROGRID, display_name: "Unit C", primary_phone: "+256700000003" }],
     ["tenant_devices", { tenant_id: UNIT_A, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: "2026-09-15" }],
     ["tenant_devices", { tenant_id: UNIT_B, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
-    ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "secondary_meter", effective_from: "2026-09-01", effective_to: null }],
+    ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: GRID_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: "2026-10-11" }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: PV_METER, role: "primary_consumption_meter", effective_from: "2026-10-11", effective_to: "2026-10-21" }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: BATTERY, role: "battery", effective_from: "2026-10-01", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: METER, role: "secondary_meter", effective_from: "2026-10-01", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: OWN_METER, role: "primary_consumption_meter", effective_from: "2026-10-21", effective_to: null }],
     // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts).
     ["mgm_plugins", { org_id: ORG, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }],
   ];
@@ -98,13 +121,14 @@ beforeAll(async () => {
   }
   tenantA = await createTestUser({ email: EMAIL_A, role: "tenant", scopeId: UNIT_A });
   tenantB = await createTestUser({ email: EMAIL_B, role: "tenant", scopeId: UNIT_B });
+  tenantC = await createTestUser({ email: EMAIL_C, role: "tenant", scopeId: UNIT_C });
 }, 60_000);
 
 afterAll(async () => {
   if (shouldSkip()) return;
   vi.unstubAllEnvs();
   energySeries.mockRestore();
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C] });
 }, 60_000);
 
 beforeEach(() => {
@@ -136,19 +160,21 @@ async function usageDay(user: TestUser, tenantId: string, date: string): Promise
   }
 }
 
-/** Meter M's generated figures, as the synthetic provider makes them for MICROGRID. */
-function generated(startDate: string, endDate: string, resolution: "day" | "hour") {
+/** A meter's generated figures (M's by default), as the synthetic provider makes them for MICROGRID. */
+function generated(startDate: string, endDate: string, resolution: "day" | "hour", meter = { id: METER, componentId: "meter1" }) {
   return generateDeviceEnergySeries({
     microgridId: MICROGRID,
-    devices: [{ id: METER, edgeOpenemsId: `SYNTHETIC-EDGE-${MICROGRID}`, componentId: "meter1" }],
+    devices: [{ id: meter.id, edgeOpenemsId: `SYNTHETIC-EDGE-${MICROGRID}`, componentId: meter.componentId }],
     startDate,
     endDate,
     resolution,
     timezone: KAMPALA,
-  }).kwh[METER];
+  }).kwh[meter.id];
 }
 
 const september = Array.from({ length: 30 }, (_, i) => addDaysToDateKey("2026-09-01", i));
+const october = Array.from({ length: 31 }, (_, i) => addDaysToDateKey("2026-10-01", i));
+const kwhSum = (values: (number | null)[]) => Math.round(values.reduce((sum: number, v) => sum + (v ?? 0) * 1000, 0)) / 1000;
 const bucket = (kwh: number | null) => ({ state: kwh === null ? "no-data" : "data", kwh });
 
 describe.skipIf(shouldSkip())("a tenant's use, read through the database", () => {
@@ -193,10 +219,12 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
     expect(visible).toMatchObject({ error: null, data: [{ id: METER_X }] });
 
     const shown = await usageMonth(tenantA, UNIT_A, "2026-09");
+    const figures = generated("2026-09-01", "2026-09-14", "day");
 
-    // M has figures on the 1st to the 14th, but X is in force too and has none.
-    expect(shown.days).toEqual(september.map((date) => ({ date, state: "no-data", kwh: null })));
-    expect(shown.total).toEqual({ kwh: null, withoutData: 30 });
+    // M's days to the 14th, then X's, which have none.
+    expect(shown.days.slice(0, 14)).toEqual(september.slice(0, 14).map((date, i) => ({ date, ...bucket(figures[i]) })));
+    expect(shown.days.slice(14)).toEqual(september.slice(14).map((date) => ({ date, state: "no-data", kwh: null })));
+    expect(shown.total).toEqual({ kwh: kwhSum(figures), withoutData: 16 + figures.filter((v) => v === null).length });
     expect(shown.read.problem).toBeNull();
     expect(energySeries).toHaveBeenCalledTimes(1);
     const [asked] = energySeries.mock.calls[0];
@@ -229,6 +257,66 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       expect(shown.hours.every((h) => h.state === "no-meter" && h.kwh === null)).toBe(true);
       expect(shown.read).toEqual({ readAt: null, stale: false, synthetic: false, problem: null });
       expect(energySeries).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("only the unit's own primary consumption meter is its use (mgm#210)", () => {
+    const own = { id: OWN_METER, componentId: "meter3" };
+
+    it("never shows a grid meter, even linked as the unit's primary", async () => {
+      // The premise: C's own client reads the grid meter's row and its link.
+      const visible = await tenantC.client.from("devices").select("id").eq("id", GRID_METER);
+      expect(visible).toMatchObject({ error: null, data: [{ id: GRID_METER }] });
+
+      const shown = await usageMonth(tenantC, UNIT_C, "2026-10");
+
+      expect(shown.days.slice(0, 10)).toEqual(october.slice(0, 10).map((date) => ({ date, state: "no-meter", kwh: null })));
+      expect(energySeries).toHaveBeenCalledTimes(1);
+      expect(energySeries.mock.calls[0][0].devices.map((d) => d.id)).toEqual([OWN_METER]);
+      // A day with only the grid meter linked reads nothing at all.
+      const day = await usageDay(tenantC, UNIT_C, "2026-10-05");
+      expect(day.meters).toBe(0);
+      expect(energySeries).toHaveBeenCalledTimes(1);
+    });
+
+    it("never shows a meter that is not a consumption meter, such as a PV meter linked as the unit's primary", async () => {
+      const shown = await usageMonth(tenantC, UNIT_C, "2026-10");
+
+      expect(shown.days.slice(10, 20)).toEqual(october.slice(10, 20).map((date) => ({ date, state: "no-meter", kwh: null })));
+      expect(energySeries.mock.calls[0][0].devices.map((d) => d.id)).not.toContain(PV_METER);
+    });
+
+    it("never shows a battery linked to the unit", async () => {
+      const shown = await usageMonth(tenantC, UNIT_C, "2026-10");
+      const day = await usageDay(tenantC, UNIT_C, "2026-10-15");
+
+      expect(shown.days.slice(0, 20).every((d) => d.state === "no-meter")).toBe(true);
+      expect(day.meters).toBe(0);
+      expect(day.read).toEqual({ readAt: null, stale: false, synthetic: false, problem: null });
+      for (const [asked] of energySeries.mock.calls) expect(asked.devices.map((d) => d.id)).not.toContain(BATTERY);
+    });
+
+    it("never shows a secondary link to a meter that is another unit's primary on those days", async () => {
+      const shown = await usageMonth(tenantC, UNIT_C, "2026-10");
+      const figures = generated("2026-10-21", "2026-10-31", "day", own);
+
+      // Only C's own meter, from the 21st; M, B's primary, never.
+      expect(shown.days.slice(20)).toEqual(october.slice(20).map((date, i) => ({ date, ...bucket(figures[i]) })));
+      expect(energySeries).toHaveBeenCalledTimes(1);
+      expect(energySeries.mock.calls[0][0]).toEqual({
+        microgridId: MICROGRID,
+        devices: [{ id: OWN_METER, edgeOpenemsId: `SYNTHETIC-EDGE-${MICROGRID}`, componentId: "meter3" }],
+        startDate: "2026-10-21",
+        endDate: "2026-10-31",
+        resolution: "day",
+        timezone: KAMPALA,
+      });
+      // B still sees M as its own use on the same days.
+      const unitB = await usageMonth(tenantB, UNIT_B, "2026-10");
+      expect(unitB.days.find((d) => d.date === "2026-10-25")).toEqual({
+        date: "2026-10-25",
+        ...bucket(generated("2026-10-25", "2026-10-25", "day")[0]),
+      });
     });
   });
 

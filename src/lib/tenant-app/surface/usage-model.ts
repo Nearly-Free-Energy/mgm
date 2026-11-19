@@ -191,9 +191,17 @@ function bucketText(bucket: TenantUsageBucket, o: Options, synthetic: boolean, d
 }
 
 /**
- * The footer: the total, or "No data" (RFC mgm#197 § 5: never a lower
- * number), with what it covers. On a problem the note is empty: the
- * subtitle already says why.
+ * "2 days missing", "1 hour missing": what a total leaves out.
+ */
+function missingNote(count: number, unit: [one: string, many: string]): string {
+  return `${count} ${count === 1 ? unit[0] : unit[1]} missing`;
+}
+
+/**
+ * The footer: the total, or "No data", with what it covers. A total with
+ * gaps is the sum of the rest and its note says how many it leaves out
+ * ("So far · 2 days missing"), so it is never read as the whole period's
+ * use. On a problem the note is empty: the subtitle already says why.
  */
 function totalCells(
   total: TenantUsageTotal,
@@ -202,22 +210,62 @@ function totalCells(
     current: boolean;
     problem: boolean;
     unit: [one: string, many: string];
-    /** The rows' own decimals, so the total never rounds away what they show. */
+    /** The rows' own decimals, so the total never rounds away what they show; 2 under 1 kWh. */
     digits: 1 | 2;
   },
 ): { cells: Record<string, Value>; text: string; note: string } {
   const usage =
     total.kwh === null
       ? o.fmt.text(NO_DATA)
-      : o.fmt.energy(total.kwh * 1000, { digits: o.digits, ...(o.synthetic ? { synthetic: true } : {}) });
+      : o.fmt.energy(total.kwh * 1000, {
+          digits: totalDigits(total.kwh, o.digits),
+          ...(o.synthetic ? { synthetic: true } : {}),
+        });
   const note = o.problem
     ? ""
     : total.kwh !== null
-      ? o.current ? "So far" : ""
+      ? [o.current ? "So far" : "", total.withoutData > 0 ? missingNote(total.withoutData, o.unit) : ""]
+          .filter(Boolean)
+          .join(" · ")
       : total.withoutData > 0
         ? `No data for ${total.withoutData} ${total.withoutData === 1 ? o.unit[0] : o.unit[1]}`
         : "";
   return { cells: { usage, ...(note ? { note: o.fmt.text(note) } : {}) }, text: usage.text, note };
+}
+
+/**
+ * A total's decimals: its rows' own, or 2 under 1 kWh, as an hour's use is
+ * shown, so a small month's total never reads "0.0".
+ */
+function totalDigits(kwh: number, rows: 1 | 2): 1 | 2 {
+  return kwh < 1 ? 2 : rows;
+}
+
+/**
+ * The current month's use as the tenant home shows it (RFC mgm#197 § 3):
+ * the month's total so far, or why there is none, and a note with what the
+ * total leaves out and when a kept read was made. Built from the same
+ * `getUsageMonth` result and copy as the month view, so the two never
+ * disagree; `note` is null when there is nothing to add.
+ */
+export function monthSoFar(month: TenantUsageMonth, o: { fmt: Fmt; locale: string }): { value: Value; note: string | null } {
+  const { read, total, timezone } = month;
+  if (read.problem) return { value: o.fmt.text(NO_DATA), note: TENANT_USAGE_PROBLEMS[read.problem].message };
+  if (read.readAt === null) return { value: o.fmt.text("No meter in use this month"), note: null };
+  if (total.kwh === null) {
+    return {
+      value: o.fmt.text(NO_DATA),
+      note: total.withoutData > 0 ? `No data for ${total.withoutData} ${total.withoutData === 1 ? "day" : "days"}` : null,
+    };
+  }
+  const parts = [
+    total.withoutData > 0 ? missingNote(total.withoutData, ["day", "days"]) : "",
+    staleNote(read, timezone, o.locale) ?? "",
+  ].filter(Boolean);
+  return {
+    value: o.fmt.energy(total.kwh * 1000, { digits: totalDigits(total.kwh, 1), ...(read.synthetic ? { synthetic: true } : {}) }),
+    note: parts.length > 0 ? parts.join(" · ") : null,
+  };
 }
 
 /** Shade tiers 1–4 relative to the highest figure; null without a figure. */

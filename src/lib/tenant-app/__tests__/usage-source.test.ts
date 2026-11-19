@@ -35,12 +35,16 @@ const unit: TenantUnit = {
   organizationId: ORG,
 };
 
+/** The view's clock, passed through to the provider unchanged. */
+const NOW = Date.parse("2026-11-02T09:00:00Z");
+
 const request = (deviceIds: string[]): TenantUsageSeriesRequest => ({
   deviceIds,
   startDate: "2026-11-01",
   endDate: "2026-11-02",
   resolution: "day",
   timezone: "Africa/Kampala",
+  nowMs: NOW,
 });
 
 /** Everything the source does, in order, across both clients and the registry. */
@@ -193,6 +197,7 @@ describe("createTenantUsageSource", () => {
         endDate: "2026-11-02",
         resolution: "day",
         timezone: "Africa/Kampala",
+        nowMs: NOW,
       },
     ]);
     expect(result).toEqual({

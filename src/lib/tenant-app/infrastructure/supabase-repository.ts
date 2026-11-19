@@ -12,6 +12,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DeviceType } from "@/lib/types/domain";
 import {
   TENANT_METER_ROLES,
+  USAGE_DEVICE_TYPE,
+  USAGE_METER_ROLE,
   type TenantAppRepository,
   type TenantMeter,
   type TenantMeterRole,
@@ -88,12 +90,15 @@ export function createSupabaseTenantAppRepository(
       // Same columns and the same inner join as listMetersInForce, so the
       // same note applies: a link drops out if its device row stops being
       // visible to the tenant. The vendor columns are not read here; the
-      // usage source reads them.
+      // usage source reads them. Only the unit's primary consumption meter
+      // is its use (USAGE_METER_ROLE): the filter on the joined device
+      // drops a link to any other kind of device with the inner join.
       const { data, error } = await supabase
         .from("tenant_devices")
         .select("device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)")
         .eq("tenant_id", tenantId)
-        .in("role", [...TENANT_METER_ROLES])
+        .eq("role", USAGE_METER_ROLE)
+        .eq("devices.device_type", USAGE_DEVICE_TYPE)
         .lt("effective_from", toDate)
         .or(`effective_to.is.null,effective_to.gt.${fromDate}`)
         .order("effective_from");

@@ -51,8 +51,12 @@ export interface Fmt {
    * integer minor units. If money columns move to minor units, revisit.
    */
   money(amount: number, currency: string, o?: { bare?: true }): Value;
-  /** `digits`: decimals of the kWh figure, 1 by default; 2 for figures as small as one hour's use. */
-  energy(wh: number, o?: { bare?: true; digits?: 1 | 2; at?: string; derived?: true; synthetic?: true }): Value;
+  /**
+   * `digits`: decimals shown, 1 unless given; 2 for figures as small as one
+   * hour's use, and a meter reading is shown to 3, as the legacy billing
+   * table shows it.
+   */
+  energy(wh: number, o?: { bare?: true; digits?: number; at?: string; derived?: true; synthetic?: true }): Value;
   power(w: number, o?: { at?: string; derived?: true; synthetic?: true }): Value;
   percent(v: number, o?: { at?: string; synthetic?: true }): Value;
   date(isoDate: string): Value;

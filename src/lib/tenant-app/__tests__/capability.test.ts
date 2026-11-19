@@ -213,7 +213,7 @@ describe("the Supabase tenant app repository", () => {
 });
 
 describe("the Supabase tenant app repository's links over a range", () => {
-  it("reads the links that cover any day of [from, to), half-open on both sides, oldest first", async () => {
+  it("reads the primary consumption meter links that cover any day of [from, to), half-open on both sides, oldest first", async () => {
     const { client, calls } = recordingClient({
       data: [
         {
@@ -244,7 +244,10 @@ describe("the Supabase tenant app repository's links over a range", () => {
       ["from", "tenant_devices"],
       ["select", "device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)"],
       ["eq", "tenant_id", TENANT_ID],
-      ["in", "role", ["primary_consumption_meter", "secondary_meter"]],
+      // Only the unit's primary meter, and only a consumption meter, is its
+      // use (USAGE_METER_ROLE); the database filter is tested in usage.db.test.ts.
+      ["eq", "role", "primary_consumption_meter"],
+      ["eq", "devices.device_type", "consumption_meter"],
       // Starts before the range ends, and ends after it starts (or not at all).
       ["lt", "effective_from", "2026-12-01"],
       ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],

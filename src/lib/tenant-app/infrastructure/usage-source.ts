@@ -109,6 +109,9 @@ export function createTenantUsageSource(options: {
           plugin: METERING_PLUGIN_NAME,
           target: { kind: "organization", id: unit.organizationId },
           method: "GET",
+          // A read, asked as a write: a call to the plugin's external
+          // integration is a write to the gate (GateRequest.access in
+          // @/lib/runtime/gate), which passes every read undecided.
           access: "write",
         });
       } catch (error) {
@@ -179,6 +182,7 @@ export function createTenantUsageSource(options: {
           endDate: request.endDate,
           resolution: request.resolution,
           timezone: request.timezone,
+          nowMs: request.nowMs,
         });
         for (const id of request.deviceIds) {
           const values = Object.hasOwn(series.kwh, id) && configs.some((config) => config.id === id)

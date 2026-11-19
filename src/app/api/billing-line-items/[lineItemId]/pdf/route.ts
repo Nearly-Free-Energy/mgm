@@ -21,9 +21,14 @@
  *     Otherwise proceed with `paymentRedirectUrl = null` (renderer omits the
  *     card).
  *   - Generate `invoice_number` on first render via `fn_next_invoice_number`
- *     + `formatInvoiceNumber`; persist to `billing_line_items.invoice_number`.
- *     Concurrent first-render race: catch 23505 (UNIQUE violation) → reload
- *     and use the persisted value.
+ *     + `formatInvoiceNumber`; persist to `billing_line_items.invoice_number`
+ *     with an UPDATE that only matches while the bill has no number, and
+ *     render the bill as that UPDATE returns it, not as first read: a
+ *     regeneration that committed in between leaves its figures under the
+ *     number. When the UPDATE matches no row (another download numbered the
+ *     bill first) or fails with 23505 (UNIQUE violation), re-read the bill
+ *     and render it with the number it has; never a number that was not
+ *     stored.
  *   - Logo bytes via service-role `storage.from('invoice-logos').download(path)`
  *     (direct download, NOT signed URLs — service-role bypasses RLS).
  *   - Response: `application/pdf`, `Content-Disposition: attachment;
@@ -67,6 +72,38 @@ const UUID_RE =
 // both pass the IS NULL guard on `invoice_number`.
 const PG_UNIQUE_VIOLATION = "23505";
 
+/**
+ * The bill's own columns the renderer takes. Read with the joins below, and
+ * again with the invoice number stored, so the PDF shows the bill as it is
+ * under that number.
+ */
+const BILL_COLUMNS = `
+      id,
+      created_at,
+      device_id,
+      end_kwh,
+      entered_at,
+      entered_by_user_id,
+      tenant_id,
+      invoice_number,
+      manual_reason,
+      paid_at,
+      paid_by_user_id,
+      payment_failed_at,
+      payment_notes,
+      payment_refunded_at,
+      payment_status,
+      pesapal_order_id,
+      pesapal_redirect_url,
+      reading_source,
+      short_slug,
+      start_kwh,
+      tier_breakdown,
+      total_amount,
+      usage_kwh,
+      updated_at,
+      billing_period_id`;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ lineItemId: string }> },
@@ -101,32 +138,7 @@ export async function GET(
   const scopedRead = supabase
     .from("billing_line_items")
     .select(
-      `
-      id,
-      created_at,
-      device_id,
-      end_kwh,
-      entered_at,
-      entered_by_user_id,
-      tenant_id,
-      invoice_number,
-      manual_reason,
-      paid_at,
-      paid_by_user_id,
-      payment_failed_at,
-      payment_notes,
-      payment_refunded_at,
-      payment_status,
-      pesapal_order_id,
-      pesapal_redirect_url,
-      reading_source,
-      short_slug,
-      start_kwh,
-      tier_breakdown,
-      total_amount,
-      usage_kwh,
-      updated_at,
-      billing_period_id,
+      `${BILL_COLUMNS},
       billing_periods!inner (
         id,
         microgrid_id,
@@ -267,8 +279,6 @@ export async function GET(
   // Invoice rendering never creates a checkout. Embed only a stable MGM
   // link; provider submission happens when the customer follows that link.
   let paymentRedirectUrl: string | null = null;
-  const lineItemPesapalUrl = (scoped.pesapal_redirect_url as string | null) ?? null;
-  const shortSlug = (scoped.short_slug as string | null) ?? null;
   if (isReleasedRoute(`/api/billing-line-items/${lineItemId}/pay`)) {
     const composed = await composePayments({ supabase, organizationId: community.org_id as string, allowDisabled: true });
     if (composed.ok) {
@@ -282,7 +292,10 @@ export async function GET(
     }
   }
 
-  // 5. Resolve / generate invoice number.
+  // 5. Resolve / generate invoice number. `bill` is the bill the PDF shows:
+  //    the one read above when it already had a number, else the one stored
+  //    with the number this request or a concurrent one gave it.
+  let bill: Record<string, unknown> = scoped;
   let invoiceNumber = (scoped.invoice_number as string | null) ?? null;
   if (!invoiceNumber) {
     const prefix = community.invoice_prefix as string | null;
@@ -312,45 +325,58 @@ export async function GET(
         { status: 500 },
       );
     }
-    invoiceNumber = formatInvoiceNumber(prefix, year, counter as number);
+    const allocated = formatInvoiceNumber(prefix, year, counter as number);
 
-    const { error: updateErr } = await supabase
+    // The UPDATE takes the bill's row lock. A per-bill regeneration
+    // (fn_regenerate_bill_with_audit) refuses a bill that has a number, so
+    // one that commits first leaves its figures here, and this UPDATE, which
+    // waited for it, stores the number on them. The row it returns is that
+    // bill, which is the one the PDF shows; the bill read in step 2 can have
+    // another total (20261119090000_regenerate_bill_expected_state.sql).
+    const { data: stored, error: updateErr } = await supabase
       .from("billing_line_items")
-      .update({ invoice_number: invoiceNumber })
+      .update({ invoice_number: allocated })
       .eq("id", lineItemId)
-      .is("invoice_number", null);
+      .is("invoice_number", null)
+      .select(BILL_COLUMNS)
+      .maybeSingle();
 
-    if (updateErr) {
-      // 23505 indicates a concurrent first-render race won by the other
-      // caller — re-read the persisted value and use it. The orphaned
-      // counter increment is acceptable per AC4's race note.
-      if (updateErr.code === PG_UNIQUE_VIOLATION) {
-        const { data: refreshed } = await supabase
-          .from("billing_line_items")
-          .select("invoice_number")
-          .eq("id", lineItemId)
-          .maybeSingle();
-        if (refreshed && refreshed.invoice_number) {
-          invoiceNumber = refreshed.invoice_number;
-        } else {
-          return NextResponse.json(
-            {
-              error:
-                "Failed to persist invoice number after concurrent race.",
-              reason: "invoice_number_race_unresolved",
-            },
-            { status: 500 },
-          );
-        }
-      } else {
+    if (updateErr && updateErr.code !== PG_UNIQUE_VIOLATION) {
+      return NextResponse.json(
+        {
+          error: `Failed to persist invoice number: ${updateErr.message}`,
+          reason: "invoice_number_persist_failed",
+        },
+        { status: 500 },
+      );
+    }
+    if (!updateErr && stored) {
+      bill = stored as unknown as Record<string, unknown>;
+      invoiceNumber = allocated;
+    } else {
+      // Another download numbered the bill first: the UPDATE matched no row,
+      // or 23505 when both reached the same number. Show the bill as it is
+      // under the number it has. The orphaned counter increment is
+      // acceptable per AC4's race note.
+      const { data: refreshed, error: refreshErr } = await supabase
+        .from("billing_line_items")
+        .select(BILL_COLUMNS)
+        .eq("id", lineItemId)
+        .maybeSingle();
+      const refreshedRow = refreshed as unknown as Record<string, unknown> | null;
+      const refreshedNumber = (refreshedRow?.invoice_number as string | null | undefined) ?? null;
+      if (refreshErr || !refreshedRow || !refreshedNumber) {
         return NextResponse.json(
           {
-            error: `Failed to persist invoice number: ${updateErr.message}`,
-            reason: "invoice_number_persist_failed",
+            error:
+              "Failed to persist invoice number after concurrent race.",
+            reason: "invoice_number_race_unresolved",
           },
           { status: 500 },
         );
       }
+      bill = refreshedRow;
+      invoiceNumber = refreshedNumber;
     }
   }
 
@@ -376,8 +402,13 @@ export async function GET(
     );
   }
 
-  // 8. Resolve "entered by" display name (BC1 — manual readings).
-  const enteredByUserName = await enteredByUserNameRead;
+  // 8. Resolve "entered by" display name (BC1 — manual readings). Read
+  //    again when the bill shown is not the one read in step 2 and its
+  //    reading was entered by someone else, or is no longer manual.
+  const enteredByUserName =
+    bill.entered_by_user_id === scoped.entered_by_user_id && bill.reading_source === scoped.reading_source
+      ? await enteredByUserNameRead
+      : await readEnteredByUserName(supabase, bill);
 
   // 9. Logo download via SERVICE ROLE (RLS bypass; renderer takes a Buffer).
   let logoBytes: Buffer | null = null;
@@ -425,31 +456,31 @@ export async function GET(
 
   // 10. Build the renderer input bag and call the pure renderer.
   const lineItem: BillingLineItem = {
-    id: scoped.id as string,
-    billing_period_id: scoped.billing_period_id as string,
-    created_at: scoped.created_at as string,
-    updated_at: scoped.updated_at as string,
-    device_id: scoped.device_id as string | null,
-    end_kwh: scoped.end_kwh as number | null,
-    entered_at: scoped.entered_at as string | null,
-    entered_by_user_id: scoped.entered_by_user_id as string | null,
-    tenant_id: scoped.tenant_id as string,
+    id: bill.id as string,
+    billing_period_id: bill.billing_period_id as string,
+    created_at: bill.created_at as string,
+    updated_at: bill.updated_at as string,
+    device_id: bill.device_id as string | null,
+    end_kwh: bill.end_kwh as number | null,
+    entered_at: bill.entered_at as string | null,
+    entered_by_user_id: bill.entered_by_user_id as string | null,
+    tenant_id: bill.tenant_id as string,
     invoice_number: invoiceNumber,
-    manual_reason: scoped.manual_reason as string | null,
-    paid_at: scoped.paid_at as string | null,
-    paid_by_user_id: scoped.paid_by_user_id as string | null,
-    payment_failed_at: scoped.payment_failed_at as string | null,
-    payment_notes: scoped.payment_notes as string | null,
-    payment_refunded_at: scoped.payment_refunded_at as string | null,
-    payment_status: scoped.payment_status as BillingLineItem["payment_status"],
-    pesapal_order_id: scoped.pesapal_order_id as string | null,
-    pesapal_redirect_url: lineItemPesapalUrl,
-    reading_source: scoped.reading_source as BillingLineItem["reading_source"],
-    short_slug: shortSlug,
-    start_kwh: scoped.start_kwh as number | null,
-    tier_breakdown: (scoped.tier_breakdown as unknown as BillingLineItem["tier_breakdown"]) ?? [],
-    total_amount: scoped.total_amount as number,
-    usage_kwh: scoped.usage_kwh as number | null,
+    manual_reason: bill.manual_reason as string | null,
+    paid_at: bill.paid_at as string | null,
+    paid_by_user_id: bill.paid_by_user_id as string | null,
+    payment_failed_at: bill.payment_failed_at as string | null,
+    payment_notes: bill.payment_notes as string | null,
+    payment_refunded_at: bill.payment_refunded_at as string | null,
+    payment_status: bill.payment_status as BillingLineItem["payment_status"],
+    pesapal_order_id: bill.pesapal_order_id as string | null,
+    pesapal_redirect_url: (bill.pesapal_redirect_url as string | null) ?? null,
+    reading_source: bill.reading_source as BillingLineItem["reading_source"],
+    short_slug: (bill.short_slug as string | null) ?? null,
+    start_kwh: bill.start_kwh as number | null,
+    tier_breakdown: (bill.tier_breakdown as unknown as BillingLineItem["tier_breakdown"]) ?? [],
+    total_amount: bill.total_amount as number,
+    usage_kwh: bill.usage_kwh as number | null,
   };
 
   // By this point invoiceNumber is guaranteed non-null (we either read a

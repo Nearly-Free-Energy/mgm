@@ -60,7 +60,7 @@ describe("readThrottled", () => {
 
   it("never caches a failed read, and counts it against the limit", async () => {
     for (const value of ["fail", "throw"] as const) {
-      expect(await readThrottled("unit", value, T0, reader(value))).toEqual({ from: "failed" });
+      expect(await readThrottled("unit", value, T0, reader(value))).toEqual({ from: "failed", kept: null });
     }
     const read = reader("figures");
     expect(await readThrottled("unit", "fail", T0 + 1, read)).toMatchObject({ from: "backend" });
@@ -71,13 +71,35 @@ describe("readThrottled", () => {
 
   it("passes a failed read's failure back, still uncached and counted, and none for a throw", async () => {
     const refused = vi.fn(async () => ({ ok: false, failure: "metering-off" }) as const);
-    expect(await readThrottled("unit", "k", T0, refused)).toStrictEqual({ from: "failed", failure: "metering-off" });
-    expect(await readThrottled("unit", "k", T0 + 1, refused)).toStrictEqual({ from: "failed", failure: "metering-off" });
+    expect(await readThrottled("unit", "k", T0, refused)).toStrictEqual({ from: "failed", failure: "metering-off", kept: null });
+    expect(await readThrottled("unit", "k", T0 + 1, refused)).toStrictEqual({ from: "failed", failure: "metering-off", kept: null });
     expect(refused).toHaveBeenCalledTimes(2);
-    expect(await readThrottled("unit", "t", T0 + 2, reader("throw"))).toStrictEqual({ from: "failed", failure: undefined });
+    expect(await readThrottled("unit", "t", T0 + 2, reader("throw"))).toStrictEqual({ from: "failed", failure: undefined, kept: null });
     for (let i = 0; i < 3; i++) await readThrottled("unit", `other-${i}`, T0 + 3, reader("x"));
     expect(await readThrottled("unit", "k", T0 + 4, refused)).toEqual({ from: "limited" });
     expect(refused).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes back with a failed read the key's last read while it is kept, and never stores the failure", async () => {
+    await readThrottled("unit", "k", T0, reader("before"));
+    // Past the fresh minute, so the backend is asked again, and fails.
+    expect(await readThrottled("unit", "k", T0 + USAGE_FRESH_MS, reader("fail"))).toStrictEqual({
+      from: "failed",
+      failure: undefined,
+      kept: { value: "before", readAt: T0 },
+    });
+    expect(await readThrottled("unit", "k", T0 + USAGE_FRESH_MS + 1, reader("throw"))).toMatchObject({
+      from: "failed",
+      kept: { value: "before", readAt: T0 },
+    });
+    // Once it is no longer kept, a failure comes back alone.
+    expect(await readThrottled("unit", "k", T0 + USAGE_KEEP_MS, reader("fail"))).toStrictEqual({
+      from: "failed",
+      failure: undefined,
+      kept: null,
+    });
+    // Another key's read is never passed back.
+    expect(await readThrottled("unit", "other", T0 + USAGE_KEEP_MS + 1, reader("fail"))).toMatchObject({ kept: null });
   });
 
   it("keeps entries apart by unit and by key", async () => {

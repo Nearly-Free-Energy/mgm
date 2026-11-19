@@ -512,7 +512,13 @@ export class OpenEmsClient implements DeviceDataAdapter {
     return byDate;
   }
 
-  /** Per-channel daily coverage; absent dates are unavailable, never zero. */
+  /**
+   * Per-channel daily coverage; absent dates are unavailable, never zero.
+   * Each date holds the backend's daily bucket, which on NFE's backend is the
+   * UTC day stamped at local midnight (see queryEnergyPerPeriod), so in
+   * Kampala a date runs 03:00 to 03:00. If daily buckets ever follow the
+   * requested zone, this note goes.
+   */
   async queryDailyEnergyByChannel(
     edgeId: string,
     channels: string[],
@@ -543,9 +549,15 @@ export class OpenEmsClient implements DeviceDataAdapter {
   /**
    * Energy per period (Wh) for each channel, as OpenEMS's
    * queryHistoricTimeseriesEnergyPerPeriod returns it: one bucket per `unit`
-   * over whole local days `fromDate`..`toDate` (inclusive) in `timezone`, each
-   * timestamp a bucket start, null where the backend has no value. Raw: no
-   * keying, summing or null dropping. `options` as for queryHistoricSamples.
+   * over whole local days `fromDate`..`toDate` (inclusive) in `timezone`, null
+   * where the backend has no value. Raw: no keying, summing or null dropping.
+   * `options` as for queryHistoricSamples.
+   *
+   * What a stamp means is the backend's, not the zone's (NFE's backend,
+   * observed 19 November 2026): an hourly bucket is stamped at the END of its
+   * hour, and a daily bucket is stamped at local midnight but holds the UTC
+   * day. The tenant usage reads hours and handles this in
+   * `getDeviceEnergySeries` (`src/lib/metering/openems-provider.ts`).
    */
   async queryEnergyPerPeriod(
     edgeId: string,

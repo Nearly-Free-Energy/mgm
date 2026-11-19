@@ -57,6 +57,12 @@ export type DeviceEnergySeriesRequest = {
   resolution: EnergySeriesResolution;
   /** The microgrid's IANA zone; passed to the source as is (no offset arithmetic). */
   timezone: string;
+  /**
+   * The instant the caller counts as now, epoch ms; the provider's own clock
+   * when absent. A provider that sums days from hours leaves out the hours
+   * that have not ended by then.
+   */
+  nowMs?: number;
 };
 
 /**
