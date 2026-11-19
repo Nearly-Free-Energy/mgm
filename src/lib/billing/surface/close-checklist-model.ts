@@ -22,8 +22,8 @@
  */
 import type { LinkRef } from "@/lib/gui/contract";
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
-import { fractionalTotalsMessage, type CloseReview } from "../close";
-import { count, tenantNames } from "../close-ceremony";
+import { fractionalTotalsMessage, tenantNames, type CloseReview } from "../close";
+import { count } from "../close-ceremony";
 import { buildCsvFilename } from "../csv-export";
 import { BACK_TO_PERIOD_LINK, clipText, periodHistoryHref } from "./period-history-model";
 import { periodLabel } from "./period-label";
@@ -108,7 +108,7 @@ function draftSteps(i: CloseChecklistInput, reviewHref: `/${string}`): Step[] {
   const total = review.currency ? fmt.money(review.totalAmount, review.currency).text : fmt.number(review.totalAmount).text;
   const totalsStep: Step =
     review.fractionalTotals.length > 0
-      ? { id: "totals", title: "Totals to file", state: "blocked", detail: detail(fractionalTotalsMessage(tenantNames(review.fractionalTotals))) }
+      ? { id: "totals", title: "Totals to file", state: "blocked", detail: detail(fractionalTotalsMessage(review.fractionalTotals)) }
       : bills === 0
         ? { id: "totals", title: "Totals to file", state: "todo" }
         : {

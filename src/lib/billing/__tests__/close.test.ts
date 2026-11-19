@@ -108,10 +108,15 @@ describe("missingAcknowledgements", () => {
 
 describe("the close refusals' copy", () => {
   it("names the tenants whose totals are not whole numbers, or speaks of the bills when none is named", () => {
-    expect(fractionalTotalsMessage("House 1, House 2")).toBe(
+    const houses = (n: number) => Array.from({ length: n }, (_, i) => ({ tenantName: `House ${i + 1}` }));
+    expect(fractionalTotalsMessage(houses(2))).toBe(
       "Regenerate the bills for House 1, House 2 before closing: their totals are not whole numbers."
     );
-    expect(fractionalTotalsMessage("")).toBe("Regenerate the bills whose totals are not whole numbers before closing.");
+    // As the ceremony's warnings name them: the first five, then a count.
+    expect(fractionalTotalsMessage(houses(7))).toBe(
+      "Regenerate the bills for House 1, House 2, House 3, House 4, House 5 and 2 more before closing: their totals are not whole numbers."
+    );
+    expect(fractionalTotalsMessage([])).toBe("Regenerate the bills whose totals are not whole numbers before closing.");
   });
 
   it("is the route's copy for a closed period and an unreadable review", () => {

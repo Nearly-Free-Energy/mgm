@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BillingCapability } from "../capability";
-import { parseCloseReview, type CloseReview } from "../close";
+import { fractionalTotalsMessage, parseCloseReview, type CloseReview } from "../close";
 import { PERIOD_KEPT_CLOSED_MESSAGE, PERIOD_KEPT_PAYMENTS_MESSAGE } from "../period-delete";
 import type {
   BillingGeneration,
@@ -310,6 +310,21 @@ describe("BillingCapability", () => {
       review: { fractionalTotals: [{ tenantName: "House 1" }] },
     });
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("names fractional totals in its 409 as the close checklist does, five and then a count", async () => {
+    const fractional = Array.from({ length: 7 }, (_, i) => ({ tenantId: `hh-${i + 1}`, tenantName: `House ${i + 1}` }));
+    const current = review({ totalAmount: 100.5, fractionalTotals: fractional });
+    const { capability } = setup({ getCloseReview: async () => current });
+    const result = await capability.closePeriod(PERIOD_ID, CONFIRMED);
+    expect(result).toMatchObject({
+      status: 409,
+      code: "billing_close_fractional_totals",
+      message:
+        "Regenerate the bills for House 1, House 2, House 3, House 4, House 5 and 2 more before closing: their totals are not whole numbers.",
+    });
+    // The sentence the contributed close action's prepare and availability give (surface/close-checklist.ts).
+    expect(result).toMatchObject({ message: fractionalTotalsMessage(current.fractionalTotals) });
   });
 
   it("answers 409 with the current review when the confirmed digest is not the current one", async () => {

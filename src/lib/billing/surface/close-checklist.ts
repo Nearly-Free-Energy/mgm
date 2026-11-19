@@ -27,7 +27,7 @@ import "server-only";
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { CLOSE_REFUSAL_COPY, fractionalTotalsMessage, parseCloseReview, type CloseReview } from "../close";
-import { closeCeremony, tenantNames } from "../close-ceremony";
+import { closeCeremony } from "../close-ceremony";
 import { buildCloseChecklistModel } from "./close-checklist-model";
 import { pageAfter, readAllPages } from "./pages";
 import { PERIOD_REVIEW_REFUSALS } from "./period-review";
@@ -82,7 +82,7 @@ function closeRefusal(review: CloseReview): Refusal | null {
   if (review.status === "closed") return CLOSE_PERIOD_REFUSALS.closed;
   if (review.billCount === 0) return CLOSE_PERIOD_REFUSALS.noBills;
   if (review.fractionalTotals.length > 0) {
-    return { ok: false, status: 409, message: fractionalTotalsMessage(tenantNames(review.fractionalTotals)) };
+    return { ok: false, status: 409, message: fractionalTotalsMessage(review.fractionalTotals) };
   }
   return null;
 }

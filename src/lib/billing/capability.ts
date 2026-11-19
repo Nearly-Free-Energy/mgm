@@ -41,12 +41,11 @@ import { ClosePeriodBody, CreatePeriodBody, DeletePeriodBody, GenerateBillsBody 
  * that bill is regenerated (fn_record_line_item_with_audit rounds it).
  */
 function fractionalTotals(review: CloseReview | undefined) {
-  const names = review?.fractionalTotals.map((t) => t.tenantName) ?? [];
   return {
     ok: false as const,
     status: 409 as const,
     code: "billing_close_fractional_totals",
-    message: fractionalTotalsMessage(names.join(", ")),
+    message: fractionalTotalsMessage(review?.fractionalTotals ?? []),
     ...(review ? { review } : {}),
   };
 }

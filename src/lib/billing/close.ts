@@ -34,17 +34,40 @@ const ACKNOWLEDGEMENT_IDS = Object.keys(CLOSE_ACKNOWLEDGEMENTS) as [
 
 /**
  * The refusals of a close that the close route (./capability.ts
- * closePeriod) and the contributed close action's prepare
+ * closePeriod) and the contributed close action's prepare and availability
  * (./surface/close-checklist.ts) both give, so a person reads the same
- * sentence in every interface.
+ * sentence in every interface. fractionalTotalsMessage below is shared for
+ * the same reason, and takes the tenants rather than their joined names so
+ * that every caller names them the same way.
  */
 export const CLOSE_REFUSAL_COPY = {
   closed: "Billing period is already closed.",
   reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
 } as const;
 
-/** The refusal of a close while some bill totals are not whole numbers, naming those tenants. */
-export function fractionalTotalsMessage(names: string): string {
+/** Names shown in a list of tenants before the rest are counted. */
+const NAMES_SHOWN = 5;
+
+/**
+ * The tenants a warning or refusal names: the first five, then "and N
+ * more". The ceremony's warnings (./close-ceremony.ts), the close checklist
+ * (./surface/close-checklist-model.ts) and fractionalTotalsMessage name them
+ * with this, so every interface lists the same tenants.
+ */
+export function tenantNames(list: readonly { tenantName: string }[]): string {
+  const shown = list.slice(0, NAMES_SHOWN).map((t) => t.tenantName).join(", ");
+  const more = list.length - NAMES_SHOWN;
+  return more > 0 ? `${shown} and ${more} more` : shown;
+}
+
+/**
+ * The refusal of a close while some bill totals are not whole numbers,
+ * naming those tenants with tenantNames. The close route and the close
+ * checklist both pass the review's fractionalTotals, so the sentence is the
+ * same in both.
+ */
+export function fractionalTotalsMessage(tenants: readonly { tenantName: string }[]): string {
+  const names = tenantNames(tenants);
   return names.length > 0
     ? `Regenerate the bills for ${names} before closing: their totals are not whole numbers.`
     : "Regenerate the bills whose totals are not whole numbers before closing.";

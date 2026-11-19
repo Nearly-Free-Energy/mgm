@@ -14,7 +14,6 @@ import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { ActionLink, LoadedModel } from "@/lib/gui/surface";
 import { CLOSE_ACKNOWLEDGEMENTS, fractionalTotalsMessage, periodName, type CloseAcknowledgementId, type CloseReview } from "../close";
-import { tenantNames } from "../close-ceremony";
 import { buildCloseChecklistModel, CLOSE_PERIOD_ACTION, type CloseChecklistInput } from "./close-checklist-model";
 import { CLOSE_PERIOD_REFUSALS } from "./close-checklist";
 import { periodLabel } from "./period-label";
@@ -99,7 +98,7 @@ const AVAILABLE: readonly (true | string)[] = [
   true,
   true,
   CLOSE_PERIOD_REFUSALS.noBills.message,
-  fractionalTotalsMessage(tenantNames(FRACTIONAL)),
+  fractionalTotalsMessage(FRACTIONAL),
   // A closed period offers no Close.
   true,
 ];

@@ -12,21 +12,7 @@
  */
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Fmt } from "@/lib/gui/surface";
-import type { CloseReview } from "./close";
-
-/** Names shown in a warning before the rest are counted. */
-const NAMES_SHOWN = 5;
-
-/**
- * The tenants a warning names: the first five, then "and N more". The close
- * checklist (./surface/close-checklist-model.ts) names them with this too, so
- * the checklist and the confirmation list the same tenants.
- */
-export function tenantNames(list: readonly { tenantName: string }[]): string {
-  const shown = list.slice(0, NAMES_SHOWN).map((t) => t.tenantName).join(", ");
-  const more = list.length - NAMES_SHOWN;
-  return more > 0 ? `${shown} and ${more} more` : shown;
-}
+import { tenantNames, type CloseReview } from "./close";
 
 /** "1 bill has", "2 bills have": a number with the singular or plural phrase after it. */
 export const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
