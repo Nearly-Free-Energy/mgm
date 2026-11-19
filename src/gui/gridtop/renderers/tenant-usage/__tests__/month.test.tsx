@@ -108,7 +108,8 @@ describe("Gridtop's tenant month", () => {
     const cell = cellOf("2026-11-03");
     const shown = [...cell.querySelectorAll("span")].filter((s) => !tokens(s).includes("gt:sr-only") && !s.closest(".gt\\:sr-only"));
     expect(shown.map((s) => s.textContent)).toContain("No meter");
-    expect(screen.getByRole("link", { name: "3 Nov 2026, No data, No meter on this day" })).toBe(cell);
+    // The note says it; "No meter" is drawn for sight, and no figure is read out.
+    expect(screen.getByRole("link", { name: "3 Nov 2026, No meter on this day" })).toBe(cell);
     expect(tokens(cell).some((t) => t.startsWith("gt:bg-"))).toBe(false);
   });
 
@@ -166,11 +167,18 @@ describe("Gridtop's tenant month", () => {
     expect(tokens(foot.querySelector(".gt\\:font-semibold")!)).toContain("gt:text-dense");
   });
 
-  it("totals No data with what it covers when a day was not read", async () => {
-    await draw(monthModel({ gap: true }));
+  it("totals the days read, and says how many are missing, when a day was not read", async () => {
+    const model = monthModel({ gap: true });
+    await draw(model);
+    const total = model.body.totals!.usage.text;
+    expect(total).toMatch(/kWh$/);
+    // Above the calendar and in its footer, each with the note.
+    expect(count(total)).toBe(2);
+    expect(count("So far · 1 day missing")).toBe(2);
     const foot = calendar().querySelector("tfoot")!;
-    expect(foot.textContent).toContain("No data");
-    expect(foot.textContent).toContain("No data for 1 day");
+    expect(foot.textContent).toContain(total);
+    expect(foot.textContent).toContain("So far · 1 day missing");
+    expect(foot.textContent).not.toContain("No data");
   });
 
   it("marks every synthetic figure, and shows the host's notice once", async () => {
