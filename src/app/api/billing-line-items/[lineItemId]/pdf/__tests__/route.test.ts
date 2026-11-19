@@ -106,6 +106,14 @@ const rateScheduleFilters: Array<[string, unknown]> = [];
 // Captured updates to billing_line_items so tests can assert the persist.
 const capturedUpdates: { invoice_number?: string }[] = [];
 let updateError: { code?: string; message: string } | null = null;
+/**
+ * The bill the invoice-number UPDATE returns, before the number is added:
+ * by default the bill as first read. `null` when the UPDATE matches no row
+ * (another download numbered the bill first).
+ */
+let storedBill: Record<string, unknown> | null | undefined;
+/** What a re-read of the bill (no joins) returns. */
+let rereadBill: { data: unknown; error: unknown } | undefined;
 let rpcCalls: { fn: string; args: unknown }[] = [];
 let rpcCounter = 1;
 
@@ -117,22 +125,29 @@ const mockGetUser = vi.fn().mockResolvedValue({
 function makeFromImpl(table: string) {
   if (table === "billing_line_items") {
     return {
-      select: () => ({
+      select: (columns: string) => ({
         eq: () => ({
-          maybeSingle: () => Promise.resolve(fromState.lineItem),
+          // The first read joins the period and tenant; a re-read does not.
+          maybeSingle: () =>
+            Promise.resolve(columns.includes("billing_periods!inner") || !rereadBill ? fromState.lineItem : rereadBill),
         }),
       }),
       update: (payload: Record<string, unknown>) => ({
         eq: () => ({
-          is: () => {
-            capturedUpdates.push(payload as { invoice_number: string });
-            if (updateError) {
-              const err = updateError;
-              updateError = null; // surface only once
-              return Promise.resolve({ data: null, error: err });
-            }
-            return Promise.resolve({ data: payload, error: null });
-          },
+          is: () => ({
+            select: () => ({
+              maybeSingle: () => {
+                capturedUpdates.push(payload as { invoice_number: string });
+                if (updateError) {
+                  const err = updateError;
+                  updateError = null; // surface only once
+                  return Promise.resolve({ data: null, error: err });
+                }
+                const base = storedBill === undefined ? (fromState.lineItem.data as Record<string, unknown>) : storedBill;
+                return Promise.resolve({ data: base === null ? null : { ...base, ...payload }, error: null });
+              },
+            }),
+          }),
         }),
       }),
     };
@@ -320,6 +335,8 @@ beforeEach(() => {
   rpcCalls = [];
   rpcCounter = 1;
   updateError = null;
+  storedBill = undefined;
+  rereadBill = undefined;
   // Default: row visible, helper succeeds with mint result, renderer returns
   // a tiny PDF buffer.
   fromState.lineItem = { data: lineItemRow(), error: null };
@@ -497,47 +514,11 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
   });
 
   it("invoice number race: 23505 unique violation → reload + use persisted value", async () => {
-    // The route inserts via fn_next_invoice_number, then UPDATE…IS NULL.
-    // Simulate the UPDATE failing with 23505 (concurrent winner) and the
-    // re-SELECT returning the persisted value.
+    // The route allocates via fn_next_invoice_number, then UPDATE…IS NULL,
+    // which fails with 23505 (a concurrent winner reached the same number);
+    // the re-read returns the number that download stored.
     updateError = { code: "23505", message: "unique_violation" };
-    // Stub the second `from('billing_line_items').select('invoice_number').eq().maybeSingle()`
-    // by patching the from impl on second call to return the persisted row.
-    let lineItemSelectsCount = 0;
-    mockFrom.mockImplementation((table: string) => {
-      if (table === "billing_line_items") {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () => {
-                lineItemSelectsCount += 1;
-                // 1st: scoped row with no invoice_number;
-                // 2nd: re-SELECT after 23505 returns persisted value.
-                if (lineItemSelectsCount === 1) {
-                  return Promise.resolve(fromState.lineItem);
-                }
-                return Promise.resolve({
-                  data: { invoice_number: "NFE-2026-99999" },
-                  error: null,
-                });
-              },
-            }),
-          }),
-          update: () => ({
-            eq: () => ({
-              is: () => {
-                capturedUpdates.push({});
-                return Promise.resolve({
-                  data: null,
-                  error: { code: "23505", message: "unique_violation" },
-                });
-              },
-            }),
-          }),
-        };
-      }
-      return makeFromImpl(table);
-    });
+    rereadBill = { data: lineItemRow({ invoice_number: "NFE-2026-99999" }), error: null };
 
     const { GET } = await import("../route");
     const res = await GET(makeReq(), {
@@ -547,6 +528,76 @@ describe("GET /api/billing-line-items/[lineItemId]/pdf", () => {
     expect(res.headers.get("Content-Disposition")).toContain(
       "NFE-2026-99999.pdf",
     );
+    expect(renderInvoicePdfMock.mock.calls[0][0].lineItem.invoice_number).toBe("NFE-2026-99999");
+  });
+
+  it("renders the bill as stored with its new number, not as first read, when a regeneration wrote it in between", async () => {
+    // The bill was read at 50,000; a regeneration committed 60,000 before the
+    // UPDATE stored the number, so the UPDATE returns the regenerated bill.
+    storedBill = lineItemRow({
+      total_amount: 60000,
+      usage_kwh: 120,
+      end_kwh: 120,
+      tier_breakdown: [{ label: "Tier 1", kwh: 120, amount: 60000 }],
+    });
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    const input = renderInvoicePdfMock.mock.calls[0][0];
+    expect(input.invoiceNumber).toBe(capturedUpdates[0].invoice_number);
+    expect(input.lineItem).toMatchObject({
+      invoice_number: capturedUpdates[0].invoice_number,
+      total_amount: 60000,
+      usage_kwh: 120,
+      end_kwh: 120,
+      tier_breakdown: [{ label: "Tier 1", kwh: 120, amount: 60000 }],
+    });
+  });
+
+  it("renders the bill as re-read, with the number it has, when another download numbered it first", async () => {
+    // The UPDATE matches no row: its number was never stored, so it is never shown.
+    storedBill = null;
+    rereadBill = { data: lineItemRow({ invoice_number: "NFE-2026-00007", total_amount: 60000 }), error: null };
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    expect(capturedUpdates).toHaveLength(1);
+    expect(capturedUpdates[0].invoice_number).not.toBe("NFE-2026-00007");
+    expect(res.headers.get("Content-Disposition")).toContain("NFE-2026-00007.pdf");
+    expect(renderInvoicePdfMock.mock.calls[0][0]).toMatchObject({
+      invoiceNumber: "NFE-2026-00007",
+      lineItem: { invoice_number: "NFE-2026-00007", total_amount: 60000 },
+    });
+  });
+
+  it.each([
+    ["the re-read finds no number", { data: lineItemRow(), error: null }],
+    ["the re-read finds no bill", { data: null, error: null }],
+    ["the re-read fails", { data: null, error: { message: "read failed" } }],
+  ])("500, and renders nothing, when the UPDATE matches no row and %s", async (_label, reread) => {
+    storedBill = null;
+    rereadBill = reread;
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(500);
+    expect((await res.json()).reason).toBe("invoice_number_race_unresolved");
+    expect(renderInvoicePdfMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves the entered-by name of the bill as stored when its reading was entered by someone else", async () => {
+    fromState.lineItem = {
+      data: lineItemRow({ reading_source: "manual", entered_by_user_id: "aaaaaaaa-1111-4111-8111-000000000001" }),
+      error: null,
+    };
+    storedBill = lineItemRow({ reading_source: "manual", entered_by_user_id: "aaaaaaaa-1111-4111-8111-000000000002" });
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
+    expect(res.status).toBe(200);
+    const lookups = rpcCalls.filter((c) => c.fn === "fn_list_visible_users").map((c) => c.args);
+    expect(lookups).toEqual([
+      { _target_user_ids: ["aaaaaaaa-1111-4111-8111-000000000001"] },
+      { _target_user_ids: ["aaaaaaaa-1111-4111-8111-000000000002"] },
+    ]);
   });
 
   it("403: caller with no role rows", async () => {

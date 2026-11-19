@@ -13,7 +13,9 @@
  * route's read and its write is refused by the write itself
  * (fn_regenerate_bill_with_audit), and the same regeneration sent twice,
  * one after the other or at once, is recorded once, also when the two
- * copies change only the reason or who entered the reading.
+ * copies change only the reason or who entered the reading. A bill's first
+ * PDF download that read the bill before a regeneration wrote it stores its
+ * invoice number on the regenerated bill and shows that bill.
  *
  * Manual readings throughout, so no metering provider is read.
  *
@@ -41,6 +43,19 @@ let caller: TestUser | null = null;
  * route's read and its write.
  */
 let beforeWrite: (() => Promise<void>) | null = null;
+/**
+ * Runs once, just before the PDF route allocates an invoice number: after it
+ * read the bill, before it stores the number.
+ */
+let beforeInvoiceNumber: (() => Promise<void>) | null = null;
+const { renderInvoicePdf } = vi.hoisted(() => ({ renderInvoicePdf: vi.fn(async () => Buffer.from("%PDF-1.4 stub", "utf8")) }));
+// What the PDF route renders, not how.
+vi.mock("@/lib/invoices/render", () => ({ renderInvoicePdf }));
+// No payment link: these organizations have no payment account.
+vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+  return { ...actual, isReleasedRoute: (path: string) => !path.endsWith("/pay") && actual.isReleasedRoute(path) };
+});
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => {
     if (!caller) throw new Error("[regenerate.db] no caller");
@@ -52,6 +67,11 @@ vi.mock("@/lib/supabase/server", () => ({
             if (name === "fn_regenerate_bill_with_audit" && beforeWrite) {
               const hook = beforeWrite;
               beforeWrite = null;
+              await hook();
+            }
+            if (name === "fn_next_invoice_number" && beforeInvoiceNumber) {
+              const hook = beforeInvoiceNumber;
+              beforeInvoiceNumber = null;
               await hook();
             }
             return target.rpc(name, args);
@@ -67,6 +87,7 @@ vi.mock("@/lib/supabase/server", () => ({
 import { composeBilling } from "@/lib/billing/compose";
 import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "@/lib/billing/schemas";
 import { POST } from "../route";
+import { GET as downloadPdfRoute } from "../../pdf/route";
 
 const ORG = "e7900000-0000-4000-8000-000000000001";
 const OTHER_ORG = "e7900000-0000-4000-8000-000000000002";
@@ -88,6 +109,11 @@ let manager: TestUser;
 let secondManager: TestUser;
 let other: TestUser;
 let tenantUser: TestUser;
+
+const downloadPdf = (id: string) =>
+  downloadPdfRoute(new NextRequest(`http://localhost/api/billing-line-items/${id}/pdf`, { method: "GET" }), {
+    params: Promise.resolve({ lineItemId: id }),
+  });
 
 const regenerate = (id: string, body: unknown) =>
   POST(
@@ -167,7 +193,7 @@ beforeAll(async () => {
     [
       "communities",
       [
-        { id: COMMUNITY, org_id: ORG, name: "Regenerate DB Community" },
+        { id: COMMUNITY, org_id: ORG, name: "Regenerate DB Community", invoice_prefix: "RGN" },
         { id: OTHER_COMMUNITY, org_id: OTHER_ORG, name: "Regenerate DB Other Community" },
       ],
     ],
@@ -189,7 +215,7 @@ beforeAll(async () => {
         tax_rate: 0,
       },
     ],
-    ["tenants", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
+    ["tenants", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
     [
       "billing_periods",
       [
@@ -214,8 +240,9 @@ beforeAll(async () => {
         row(3, { payment_status: "refunded", paid_at: paidAt }),
         row(4, { payment_status: "paid", paid_at: paidAt }),
         row(5, { billing_period_id: CLOSED }),
-        // Invoiced: its PDF was downloaded, which allocates the number.
-        row(6, { invoice_number: "RGN-2026-00001" }),
+        // Invoiced: its PDF was downloaded, which allocates the number. Last
+        // year's, so the PDF download below gets a number nothing holds.
+        row(6, { invoice_number: "RGN-2025-00001" }),
         // For the races, the repeated submits and the conditional write itself.
         row(7),
         row(8),
@@ -223,6 +250,8 @@ beforeAll(async () => {
         // For two copies of one regeneration that change only the reason, or who entered it.
         row(10),
         row(11),
+        // For a first PDF download that a regeneration overtakes.
+        row(12),
       ],
     ],
   ];
@@ -241,6 +270,7 @@ afterAll(async () => {
   if (shouldSkip()) return;
   caller = null;
   beforeWrite = null;
+  beforeInvoiceNumber = null;
   await cleanup();
 }, 60_000);
 
@@ -383,7 +413,7 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
     // The PDF route allocates the number on the bill's first download.
     beforeWrite = async () => {
       const svc = await serviceClient();
-      const { error } = await svc.from("billing_line_items").update({ invoice_number: "RGN-2026-00002" }).eq("id", bill(8)).is("invoice_number", null);
+      const { error } = await svc.from("billing_line_items").update({ invoice_number: "RGN-2025-00002" }).eq("id", bill(8)).is("invoice_number", null);
       if (error) throw new Error(`[regenerate.db] invoice_number: ${error.message}`);
     };
     const res = await regenerate(bill(8), { readings: "manual", start_kwh: 100, end_kwh: 180 });
@@ -487,6 +517,47 @@ describe.skipIf(shouldSkip())("two copies of one regeneration that reach the wri
 
     expect((await bills()).get(bill(11))).toMatchObject({ manual_reason: "second visit", entered_by_user_id: secondManager.userId });
     expect((await auditRows()).length - auditBefore.length).toBe(1);
+  });
+});
+
+describe.skipIf(shouldSkip())("a first PDF download that a regeneration overtakes (live database)", () => {
+  it("stores the invoice number on the regenerated bill and shows that bill, not the one it read", async () => {
+    caller = manager;
+    renderInvoicePdf.mockClear();
+    // The download reads the bill at 30,000 with no number; a regeneration
+    // then finds no number, writes 60,000 and commits; only then does the
+    // download store its number.
+    beforeInvoiceNumber = async () => {
+      const res = await regenerate(bill(12), { readings: "manual", start_kwh: 100, end_kwh: 190, reason: "re-read" });
+      expect(res.status).toBe(200);
+    };
+    const res = await downloadPdf(bill(12));
+    expect(beforeInvoiceNumber).toBeNull();
+    expect(res.status).toBe(200);
+
+    const svc = await serviceClient();
+    const { data: stored, error } = await svc.from("billing_line_items").select("invoice_number, total_amount").eq("id", bill(12)).single();
+    if (error) throw new Error(`[regenerate.db] bill 12: ${error.message}`);
+    expect(stored.invoice_number).toMatch(/^RGN-\d{4}-\d+$/);
+    expect(Number(stored.total_amount)).toBe(60000);
+    expect(res.headers.get("Content-Disposition")).toContain(`${stored.invoice_number}.pdf`);
+
+    // The PDF shows the bill stored under that number.
+    expect(renderInvoicePdf).toHaveBeenCalledTimes(1);
+    const [input] = renderInvoicePdf.mock.calls[0] as unknown as [{ invoiceNumber: string; lineItem: Record<string, unknown> }];
+    expect(input.invoiceNumber).toBe(stored.invoice_number);
+    expect(input.lineItem.invoice_number).toBe(stored.invoice_number);
+    expect(Number(input.lineItem.total_amount)).toBe(60000);
+    expect(Number(input.lineItem.usage_kwh)).toBe(90);
+    expect(Number(input.lineItem.end_kwh)).toBe(190);
+    expect(input.lineItem.manual_reason).toBe("re-read");
+
+    // A later download shows the same bill under the same number.
+    const again = await downloadPdf(bill(12));
+    expect(again.status).toBe(200);
+    expect(again.headers.get("Content-Disposition")).toContain(`${stored.invoice_number}.pdf`);
+    const [later] = renderInvoicePdf.mock.calls[1] as unknown as [{ lineItem: Record<string, unknown> }];
+    expect(Number(later.lineItem.total_amount)).toBe(60000);
   });
 });
 

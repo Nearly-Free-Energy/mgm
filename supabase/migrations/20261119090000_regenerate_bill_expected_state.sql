@@ -47,7 +47,14 @@
 --     fn_billing_line_item_closed_period_guard then takes the period FOR
 --     SHARE, which does not conflict with this function's FOR SHARE.
 --   * The PDF route's UPDATE ... SET invoice_number ... WHERE invoice_number
---     IS NULL takes the bill's row lock, as fn_apply_payment_event does.
+--     IS NULL takes the bill's row lock, as fn_apply_payment_event does. An
+--     UPDATE that comes first makes this function refuse. One that comes
+--     after, the route having read the bill before this function wrote it,
+--     stores the number on the regenerated bill; the lock does not stop
+--     that, so the route renders the PDF from the row its UPDATE returns,
+--     not from the bill it read before
+--     (src/app/api/billing-line-items/[lineItemId]/pdf/route.ts). If the
+--     route goes back to rendering its first read, revisit.
 -- If one of those comes to lock the period FOR UPDATE after locking a bill,
 -- revisit.
 --
