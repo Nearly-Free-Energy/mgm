@@ -258,17 +258,24 @@ staff rows they held before (the host reads the rows held now): the host
 gives them the tenant manifest (`buildTenantManifestModel` in
 `src/lib/gui/host/shared/manifest-model.ts`), whose `org` is their current
 unit, whose places are their units and whose nav is tenant entries only.
-The (gui) layout keeps them to tenant pages, deny by default: a page is a
+The (gui) layout sends them to tenant pages, deny by default: a page is a
 tenant page when the catalog has a view serve it and the contributed view
 whose path fits it has scope `tenant` (`isTenantPage` in
 `src/lib/gui/host/server/tenant-pages.ts`, which reads the surface, so a new
 tenant view needs no list edited). From any other page under the layout,
 `/` and every staff page included, it sends them to `/my` before the
-manifest is read, and never to `/setup`. While `/my` is not a released route
-(`src/lib/mgm/released-routes.ts`), it sends them to `/no-access` instead,
-which has Log out: middleware would answer `/my` with the static "not in
-this release" page, which has no script and links back to `/`. `/no-access`
-is outside the layout, and sign-out is a Supabase Auth call from the
+manifest is awaited, and never to `/setup`. This is navigation, not an access
+check. The redirect runs only when the layout renders: on a full load the
+layout renders alongside the page, and a client-side navigation within the
+`(gui)` group skips it, rendering from the first segment that changes. So a
+staff page's server code can still run for such a person, and what they can
+read there is decided as for anyone, by the page's own checks and RLS (their
+own tenant, `tenant_devices` and device rows, which they could query
+directly), with `dispatchView` refusing them every view that is not a tenant
+view. While `/my` is not a released route (`src/lib/mgm/released-routes.ts`),
+it sends them to `/no-access` instead, which has Log out: middleware would
+answer `/my` with the static "not in this release" page, which has no script
+and links back to `/`. `/no-access` is outside the layout, and sign-out is a Supabase Auth call from the
 browser, so neither sends them round. Otherwise they reach `/no-access` only
 when the manifest refuses because none of their units can be read. The
 layout's test walks every catalog page and every page file under

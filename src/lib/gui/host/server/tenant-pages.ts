@@ -2,9 +2,12 @@ import "server-only";
 
 /**
  * Which pages a person whose rows are all tenant rows may open (RFC mgm#197
- * § 4): the pages a contributed tenant view serves, and nothing else. The
- * (gui) layout sends such a person anywhere else to their home, so a staff
- * page never renders for them with only RLS behind it.
+ * § 4): the pages a contributed tenant view serves, and nothing else. When
+ * the (gui) layout renders for such a person on any other page, it sends
+ * them home. The layout does not render on every request (a client-side
+ * navigation within the group skips it), so this decides where they are
+ * sent, not what they may read: staff pages' own checks, RLS and
+ * dispatchView do that.
  *
  * The list is not kept here. A page is a tenant page when the catalog lists
  * it as served by a view (matchCatalogPage, `servedBy: "view"`, so no

@@ -23,9 +23,10 @@ import { NavigationProgress } from "@/components/ui/navigation-progress";
  * the organizations and places the caller can see (getManifest); they
  * authorize nothing, and each page still checks access itself. If
  * getManifest or a page starts deciding access from either, revisit. The
- * layout itself refuses one thing by path: a person whose rows are all
- * tenant rows opens tenant pages only (isTenantPage), and goes home from
- * any other. That narrows what they reach; it grants nothing.
+ * layout itself redirects one person by path: when it renders for someone
+ * whose rows are all tenant rows on a page that is not a tenant page
+ * (isTenantPage), it sends them home. That is navigation, not an access
+ * check: it grants nothing and guards nothing on its own, as below.
  */
 export default async function GuiLayout({
   children,
@@ -100,13 +101,21 @@ export default async function GuiLayout({
     redirect("/no-access");
   }
 
-  // A person whose rows are all tenant rows sees tenant pages only: the
-  // pages a contributed tenant view serves (isTenantPage, which reads the
-  // GUI surface, so a new tenant view needs no edit here). Every other path
-  // under this layout, the staff start page "/" included, sends them to their
-  // home before the manifest is read, so no staff page renders for them with
-  // only RLS behind it. Staff, tenant rows or not, are not affected
-  // (START_PAGE in @/lib/auth/return-path).
+  // A person whose rows are all tenant rows is sent to their home from any
+  // page that is not a tenant page, a page a contributed tenant view serves
+  // (isTenantPage, which reads the GUI surface, so a new tenant view needs
+  // no edit here): the staff start page "/" included, before the manifest is
+  // awaited and before the shell renders. Staff, tenant rows or not, are not
+  // affected (START_PAGE in @/lib/auth/return-path).
+  //
+  // This runs only when the layout renders: on a full load, alongside the
+  // page, whose server code may already have started, and not at all on a
+  // client-side navigation within this group, which renders from the first
+  // segment that changes (CLAUDE.md, "Session checks before privilege"). So
+  // it keeps such a person off staff pages in ordinary use and is not what
+  // refuses them: each staff page's own checks and RLS do, and dispatchView
+  // refuses them every view that is not a tenant view. If a check is added
+  // that runs on every render of a staff page, say so here.
   //
   // The home only while it is a released route a tenant view serves: until
   // then middleware answers it with the static "not in this release" page,

@@ -333,7 +333,7 @@ function hostPages(): string[] {
   return found.sort();
 }
 
-describe("GuiLayout keeps a person whose rows are all tenant rows to tenant pages (RFC mgm#197 § 4)", () => {
+describe("GuiLayout sends a person whose rows are all tenant rows to tenant pages (RFC mgm#197 § 4)", () => {
   // The surface is the real one, from the root runtime (only the shell's
   // first-paint view is mocked above), so which pages are a tenant view's is
   // decided by the contributed views, as in production.
@@ -381,7 +381,7 @@ describe("GuiLayout keeps a person whose rows are all tenant rows to tenant page
     expect(open).toEqual([TENANT_START_PAGE]);
   });
 
-  it.each(STAFF_PAGES)("sends them from %s to their home before the manifest is read", async (page) => {
+  it.each(STAFF_PAGES)("sends them from %s to their home before the manifest is awaited", async (page) => {
     expect(await opens(sample(page), tenantRows)).toBe(TENANT_START_PAGE);
     expect(mocks.getManifest).not.toHaveBeenCalled();
     // Naming one of their units changes nothing on a staff page.
