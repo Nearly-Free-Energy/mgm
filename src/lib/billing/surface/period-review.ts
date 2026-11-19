@@ -389,8 +389,10 @@ export async function prepareRegenerateBill(
  * runs once, with the loader's prefill), so a step that named the prefilled
  * status could confirm a different one. It shows the current status instead,
  * next to the form where the new one is chosen; the route enforces which
- * changes are allowed and who may make them. If the host comes to lock a
- * prefilled field, or each status gets its own route, name it here.
+ * changes are allowed, who may make them, and that a refund carries the
+ * tenant's name typed (only Mark as refunded's typed step sends it). If the
+ * host comes to lock a prefilled field, or each status gets its own route,
+ * name it here.
  */
 const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen in the form.";
 

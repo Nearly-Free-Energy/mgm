@@ -262,7 +262,10 @@ export const BILLING_SURFACE: Contribution = {
     // each is `targeted: false`: appended elsewhere it would open with no
     // status. The kit form does not lock that prefill, so a person can
     // submit another status; the route's transition and super-admin checks
-    // stay the authority. If Prepare comes to supply fixed values, revisit.
+    // stay the authority, and it refuses a refund without the tenant's name
+    // typed, which only Mark as refunded (typed) sends: a confirm-level
+    // action's form switched to refunded sends no confirmation (invoke.ts).
+    // If Prepare comes to supply fixed values, revisit.
     // Every one of them has a confirmation step, Mark as unpaid included.
     // No available(): the loader already offers each by the bill's status
     // and the person's role, and prepare checks both again.

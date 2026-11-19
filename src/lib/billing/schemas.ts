@@ -446,10 +446,9 @@ export const LineItemPaymentStatusBody = z.strictObject(
       .transform((notes) => (notes ? notes : null))
       .meta({ title: "Notes" }),
     // The host's Confirmation (src/lib/gui/contract.ts), sent with a typed
-    // action: billing.mark-refunded asks for the tenant's name. The route
-    // does not check it yet, because the legacy row menu refunds through this
-    // route without one; when that menu goes, check the name here as the
-    // delete route does. Version 2 added it.
+    // action: billing.mark-refunded asks for the tenant's name, and the
+    // route refuses a refund without it (428), whoever sends it; the legacy
+    // row menu's refund dialog sends it too. Version 2 added it.
     confirmation: z
       .strictObject(
         {

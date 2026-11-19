@@ -485,6 +485,57 @@ describe("RowActionsMenu — payment-status PATCH per ALLOWED_MANUAL_TRANSITIONS
     });
   });
 
+  it("paid → refunded: the dialog asks for the tenant's name, and sends it as the confirmation the route checks", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ status: "success" }),
+    });
+    vi.stubGlobal("fetch", mockFetch);
+
+    renderMenu(
+      makeProps({
+        lineItem: {
+          id: "li-1",
+          payment_status: "paid",
+          reading_source: "edge",
+          total_amount: 100,
+          pesapal_redirect_url: null,
+        },
+      }),
+    );
+
+    await act(async () => {
+      openMenu(screen.getByRole("button", { name: /row actions for/i }));
+    });
+    await clickMenuItem(/mark as refunded/i);
+
+    const confirm = (await screen.findByRole("button", { name: "Mark as refunded" })) as HTMLButtonElement;
+    const typed = screen.getByLabelText("Type the tenant name to confirm") as HTMLInputElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(typed, { target: { value: "alice mukasa" } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(typed, { target: { value: " Alice Mukasa " } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText(/payment notes/i), { target: { value: "receipt 42" } });
+
+    await act(async () => {
+      confirm.click();
+    });
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/billing-line-items/li-1/payment-status`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({
+            status: "refunded",
+            notes: "receipt 42",
+            confirmation: { acknowledged: [], typed: "Alice Mukasa" },
+          }),
+        }),
+      );
+    });
+  });
+
   it("link_generated row surfaces THREE menu items (paid + cancel + failed)", async () => {
     renderMenu(
       makeProps({
