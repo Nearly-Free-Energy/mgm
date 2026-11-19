@@ -446,10 +446,13 @@ export const LineItemPaymentStatusBody = z.strictObject(
       .transform((notes) => (notes ? notes : null))
       .meta({ title: "Notes" }),
     // The host's Confirmation (src/lib/gui/contract.ts), sent with a typed
-    // action: billing.mark-refunded asks for the tenant's name. The route
-    // does not check it yet, because the legacy row menu refunds through this
-    // route without one; when that menu goes, check the name here as the
-    // delete route does. Version 2 added it.
+    // action: billing.mark-refunded asks for the tenant's name, and the
+    // route refuses a refund without it (428), whoever sends it; the legacy
+    // row menu's refund dialog sends it too. Version 2 added it. typed has
+    // no length limit: the route compares it with tenants.display_name, which
+    // has none either (TEXT; createTenant and the tenant update only trim
+    // it), so any cap here would leave a longer-named tenant's bill with no
+    // way to be refunded. If display_name gets a length limit, cap typed at it.
     confirmation: z
       .strictObject(
         {
@@ -458,7 +461,7 @@ export const LineItemPaymentStatusBody = z.strictObject(
               error: LINE_ITEMS_CONFIRMATION,
             })
             .max(20, { error: LINE_ITEMS_CONFIRMATION }),
-          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).max(200, { error: LINE_ITEMS_CONFIRMATION }).optional(),
+          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).optional(),
         },
         { error: LINE_ITEMS_CONFIRMATION }
       )
@@ -467,6 +470,17 @@ export const LineItemPaymentStatusBody = z.strictObject(
   { error: lineItemsPaymentBodyError }
 );
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
+
+/**
+ * The acknowledgement regenerating a paid bill needs on the regenerate route:
+ * billing.regenerate-bill's prepare offers it
+ * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
+ * bill without it. POST /api/billing/generate asks for none and rewrites a
+ * paid bill as well; the legacy dialogs that call it warn on the client only.
+ */
+export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
+
+const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 
 /**
  * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an
@@ -488,10 +502,29 @@ export const RegenerateBillBody = z.strictObject(
       .max(500, { error: "reason must be 500 characters or fewer" })
       .optional()
       .meta({ title: "Reason" }),
+    // The host's Confirmation (src/lib/gui/contract.ts), sent with a
+    // ceremony action: billing.regenerate-bill asks a paid bill's
+    // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
+    // this route refuses a paid bill without it (POST /api/billing/generate
+    // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
+    // the form. Version 2 added it.
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: REGENERATE_CONFIRMATION }).max(64, { error: REGENERATE_CONFIRMATION }), {
+              error: REGENERATE_CONFIRMATION,
+            })
+            .max(20, { error: REGENERATE_CONFIRMATION }),
+          typed: z.string({ error: REGENERATE_CONFIRMATION }).max(200, { error: REGENERATE_CONFIRMATION }).optional(),
+        },
+        { error: REGENERATE_CONFIRMATION }
+      )
+      .optional(),
   },
   { error: bodyError }
 );
-export const REGENERATE_BILL_BODY_VERSION = 1;
+export const REGENERATE_BILL_BODY_VERSION = 2;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

@@ -22,6 +22,7 @@ import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
+import { REGENERATE_PAID_ACKNOWLEDGEMENT } from "../schemas";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
@@ -338,11 +339,18 @@ async function readBill(req: SurfaceRequest, lineItemId: string, columns: string
   return { ok: true as const, bill: data, period, currency, facts, tenant };
 }
 
+/** The paid bill's acknowledgement: the legacy dialog's warning (src/components/billing/regenerate-row-dialog.tsx). */
+export const REGENERATE_PAID_LABEL =
+  "The bill is currently marked paid. Regenerating will recalculate the readings and totals; the payment record (paid_at, paid_by_user_id, payment_notes, pesapal_order_id, payment_events history) is preserved.";
+
 /**
  * billing.regenerate-bill's confirmation: whose bill, its current total and
- * payment status, and the legacy dialog's warnings for a paid or refunded
- * bill and a closed period. It shows no new total: the read-only preview
- * re-pins a draft period's tariff, which a prepare must not do.
+ * payment status; for a paid bill, the legacy dialog's warning as an
+ * acknowledgement to tick, which the route requires
+ * (REGENERATE_PAID_ACKNOWLEDGEMENT); and a closed period's warning. It
+ * shows no new total: the read-only preview re-pins a draft period's tariff,
+ * which a prepare must not do. The route answers with the previous and new
+ * totals, which the host shows as the action's result.
  */
 export async function prepareRegenerateBill(
   req: SurfaceRequest,
@@ -357,13 +365,8 @@ export async function prepareRegenerateBill(
   const { bill, period, currency, facts } = read;
   if (bill.payment_status === "refunded") return BILL_REFUSALS.refunded;
   const warnings: string[] = [];
-  if (bill.payment_status === "paid") {
-    // The legacy dialog's copy (src/components/billing/regenerate-row-dialog.tsx).
-    warnings.push(
-      `The bill is currently marked ${bill.payment_status}. Regenerating will recalculate the readings and totals; the payment record (paid_at, paid_by_user_id, payment_notes, pesapal_order_id, payment_events history) is preserved.`,
-    );
-  }
   if (period.status === "closed") warnings.push("Regenerating writes an audit-log revision; the period stays closed.");
+  const acknowledgements = bill.payment_status === "paid" ? [{ id: REGENERATE_PAID_ACKNOWLEDGEMENT, label: REGENERATE_PAID_LABEL }] : [];
   return {
     ok: true,
     model: {
@@ -375,7 +378,7 @@ export async function prepareRegenerateBill(
         { label: "Payment", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
       ],
       warnings,
-      acknowledgements: [],
+      acknowledgements,
     },
   };
 }
@@ -387,8 +390,10 @@ export async function prepareRegenerateBill(
  * runs once, with the loader's prefill), so a step that named the prefilled
  * status could confirm a different one. It shows the current status instead,
  * next to the form where the new one is chosen; the route enforces which
- * changes are allowed and who may make them. If the host comes to lock a
- * prefilled field, or each status gets its own route, name it here.
+ * changes are allowed, who may make them, and that a refund carries the
+ * tenant's name typed (only Mark as refunded's typed step sends it). If the
+ * host comes to lock a prefilled field, or each status gets its own route,
+ * name it here.
  */
 const PAYMENT_STATEMENT = "Change this bill's payment status to the one chosen in the form.";
 

@@ -7,7 +7,6 @@ import "server-only";
  * stops, so each page asks for the exact count of what is left. A read that
  * cannot be completed is a refusal, never a partial sum.
  */
-import { currencyFractionDigits } from "@/components/format/currency";
 
 export const BILL_PAGE = 1000;
 
@@ -54,10 +53,4 @@ export async function readAllPagesInOrder<T>(read: (from: number, to: number) =>
     if (rows.length === 0) return out;
     if (typeof count === "number" ? out.length >= count : rows.length < BILL_PAGE) return out;
   }
-}
-
-/** Sums amounts in the currency's minor units, so adding many bills cannot drift. */
-export function sumMoney(amounts: number[], currency: string): number {
-  const scale = 10 ** currencyFractionDigits(currency);
-  return amounts.reduce((sum, a) => sum + Math.round(a * scale), 0) / scale;
 }

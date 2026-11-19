@@ -1,10 +1,9 @@
 /**
  * period-review-model.ts — one billing period's bills, as a `collection`
- * view model (`billing.period-review`), with the actions on the period and
- * on each bill.
+ * view model (`billing.period-review`), with the actions on each bill.
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
- * shows is built here. The columns, totals and empty-state copy are the
+ * shows is built here. The columns, totals and empty-state titles are the
  * legacy period page's (src/components/BillingTable.tsx), and each row's
  * actions follow its row menu (computeMenuItems in
  * src/components/billing/row-actions-menu.tsx; period-review-menu-parity.test.ts
@@ -19,6 +18,7 @@ import type { LinkRef, Value } from "@/lib/gui/contract";
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentStatus } from "@/lib/payments/state";
 import { buildCsvFilename } from "../csv-export";
+import { sumMoney } from "../money";
 import { roundKwh } from "../precision";
 import type { PeriodReviewExtData } from "./period-review-ext";
 
@@ -36,7 +36,13 @@ export const PERIOD_REVIEW_MAX_TIERS = 20;
 /** Begin, end, usage and total, and each tier's kWh and amount: every column a person copies. */
 export const PERIOD_REVIEW_MAX_COPY_COLUMNS = 4 + 2 * PERIOD_REVIEW_MAX_TIERS;
 
-/** The billing actions the view offers; BILLING_SURFACE (../surface.ts) defines them. */
+/**
+ * The billing actions on bills; BILLING_SURFACE (../surface.ts) defines them.
+ * The view offers every one but Generate, which no interface can submit yet:
+ * GenerateBillsBody's tenant arrays have no kit form, and no GUI registers
+ * one (parity.test.ts keeps generate-bills pending until one does). Offer it
+ * in buildPeriodReviewModel once a form exists.
+ */
 export const GENERATE_BILLS_ACTION = { id: "billing.generate-bills", title: "Generate bills" } as const;
 export const REGENERATE_BILL_ACTION = { id: "billing.regenerate-bill", title: "Regenerate bill" } as const;
 export const RECORD_USAGE_ACTION = { id: "billing.record-usage", title: "Correct usage" } as const;
@@ -212,15 +218,7 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   const currency = microgrid.currency;
   const label = periodLabel(fmt, period.start_date, period.end_date);
   const historyHref = `/microgrids/${microgrid.id}/billing/${period.id}/history` as const;
-  const isDraft = period.status === "draft";
 
-  // No prefill: GenerateBillsBody is refined, so the host cannot check one
-  // and would drop it (cleanPrefill in src/lib/gui/host/server/merge.ts).
-  const generate: ActionLink = {
-    action: GENERATE_BILLS_ACTION.id,
-    params: { billingPeriodId: period.id },
-    ...(i.bills.length > 0 ? { label: "Refresh readings" } : {}),
-  };
 
   const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
   const money = (amount: number | null | undefined) =>
@@ -299,28 +297,35 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   let totals: Record<string, Value> | undefined;
   if (i.bills.length > 0) {
     const tierKwh = tiers.map(() => 0);
-    const tierAmount = tiers.map(() => 0);
+    const tierAmounts = tiers.map((): number[] => []);
     let usage = 0;
-    let total = 0;
     for (const bill of i.bills) {
       usage += num(bill.usage_kwh);
-      total += num(bill.total_amount);
       const breakdown = bill.tier_breakdown ?? [];
       // By index, and only as many tiers as the tariff has.
       for (let n = 0; n < breakdown.length && n < tiers.length; n++) {
         tierKwh[n] += num(breakdown[n].kwh);
-        tierAmount[n] += num(breakdown[n].amount);
+        tierAmounts[n].push(num(breakdown[n].amount));
       }
     }
+    // Money in minor units, as the periods list sums a period (../money.ts),
+    // so the two show the same total.
     totals = {
       usage: fmt.energy(usage * 1000, { bare: true }),
       ...Object.fromEntries(
         tiers.flatMap((_, n) => [
           [`tier.${n + 1}.kwh`, fmt.energy(tierKwh[n] * 1000, { bare: true })],
-          [`tier.${n + 1}.amount`, fmt.money(tierAmount[n], currency, { bare: true })],
+          [`tier.${n + 1}.amount`, fmt.money(sumMoney(tierAmounts[n], currency), currency, { bare: true })],
         ]),
       ),
-      total: fmt.money(total, currency, { bare: true }),
+      total: fmt.money(
+        sumMoney(
+          i.bills.map((b) => num(b.total_amount)),
+          currency,
+        ),
+        currency,
+        { bare: true },
+      ),
     };
   }
 
@@ -347,20 +352,18 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     });
   }
 
+  // The legacy titles. Without Generate (GENERATE_BILLS_ACTION above) a
+  // draft's empty state has no call to action, so it does not ask for one.
   const empty: LoadedModel<"collection">["body"]["empty"] =
-    i.tenants.length === 0
-      ? { title: "No tenants configured for this microgrid." }
-      : isDraft
-        ? { title: "No billing data yet.", text: "Generate bills to fetch meter readings and calculate costs.", action: generate }
-        : { title: "No billing data yet." };
+    i.tenants.length === 0 ? { title: "No tenants configured for this microgrid." } : { title: "No billing data yet." };
 
   return {
     // A one-day period shows its one date, as the legacy list does.
     title: period.start_date === period.end_date ? fmt.date(period.start_date).text : label,
     ...(period.timezone ? { subtitle: period.timezone } : {}),
     entity: { kind: "billingPeriod", id: period.id, label },
-    // Bills are generated on a draft; a closed period's are regenerated one at a time.
-    actions: isDraft ? [generate] : [],
+    // No period action: Generate is not offered until a form exists (GENERATE_BILLS_ACTION).
+    actions: [],
     links,
     body: {
       columns,

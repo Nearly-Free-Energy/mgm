@@ -21,6 +21,7 @@ import {
   LineItemPaymentStatusBody,
   LineItemUsageBody,
   REGENERATE_BILL_BODY_VERSION,
+  REGENERATE_PAID_ACKNOWLEDGEMENT,
   RegenerateBillBody,
 } from "../../schemas";
 
@@ -47,6 +48,7 @@ import {
   generateBillsAvailable,
   recordUsageAvailable,
   regenerateBillAvailable,
+  REGENERATE_PAID_LABEL,
   USAGE_REASONS,
 } from "../period-review";
 import { PERIOD_REVIEW_LOADED_EXAMPLES } from "../period-review-examples";
@@ -146,7 +148,8 @@ describe("the period review's actions", () => {
       path: "/api/billing-line-items/[lineItemId]/regenerate",
       bind: { path: { lineItemId: "lineItem" } },
       risk: "money",
-      confirm: "confirm",
+      // A ceremony, so the host sends a paid bill's acknowledgement to the route.
+      confirm: "ceremony",
       humanOnly: true,
     });
     expect(REGENERATE).not.toHaveProperty("targeted");
@@ -225,8 +228,9 @@ describe("the period review's actions in the view", () => {
       expect(kept).toEqual(given);
       const refs = resolved.body.rows.flatMap((r) => r.actions);
       expect(refs.every((a) => a.enabled)).toBe(true);
-      // A typed action is shown as dangerous (merge-actions.ts); the rest carry no tone.
-      for (const a of refs) expect([a.action, a.tone]).toEqual([a.action, a.action === "billing.mark-refunded" ? "danger" : undefined]);
+      // A typed or ceremony action is shown as dangerous (merge-actions.ts); the rest carry no tone.
+      const danger = new Set(["billing.mark-refunded", "billing.regenerate-bill"]);
+      for (const a of refs) expect([a.action, a.tone]).toEqual([a.action, danger.has(a.action) ? "danger" : undefined]);
     },
   );
 });
@@ -348,7 +352,7 @@ describe("preparing the period review's actions", () => {
     const out = await prepare(onBill(REGENERATE.id, { body: { readings: "manual", start_kwh: 0 } }));
     if (!out.ok) throw new Error(out.message);
     expect(out.value).toMatchObject({
-      confirm: "confirm",
+      confirm: "ceremony",
       method: "POST",
       path: `/api/billing-line-items/${BILL}/regenerate`,
       bound: {},
@@ -363,21 +367,36 @@ describe("preparing the period review's actions", () => {
         { label: "Payment", value: { t: "status", v: "unpaid" } },
       ],
       warnings: [],
+      acknowledgements: [],
     });
+    // The form never shows the confirmation: the host sends it.
     const input = out.value.spec.input as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(input.properties)).toEqual(["readings", "start_kwh", "end_kwh", "reason"]);
-    const body = await sent(out.value, { readings: "manual", start_kwh: 0, end_kwh: 12 }, "confirm");
-    expect(RegenerateBillBody.parse(body)).toEqual({ readings: "manual", start_kwh: 0, end_kwh: 12 });
+    const body = await sent(out.value, { readings: "manual", start_kwh: 0, end_kwh: 12 }, "ceremony", { acknowledged: [] });
+    expect(RegenerateBillBody.parse(body)).toEqual({ readings: "manual", start_kwh: 0, end_kwh: 12, confirmation: { acknowledged: [] } });
   });
 
-  it("warns before regenerating a paid bill or one in a closed period", async () => {
-    const client = tables({ bill: [billRow({ payment_status: "paid" }, { status: "closed" })] }).client;
-    const out = await prepare(onBill(REGENERATE.id), client);
+  it("asks a paid bill's regeneration to be acknowledged, and sends the acknowledgement the route requires", async () => {
+    const client = tables({ bill: [billRow({ payment_status: "paid" })] }).client;
+    const out = await prepare(onBill(REGENERATE.id, { body: { readings: "edge" } }), client);
     if (!out.ok) throw new Error(out.message);
-    expect(out.value.ceremony?.warnings).toEqual([
-      expect.stringContaining("The bill is currently marked paid."),
-      "Regenerating writes an audit-log revision; the period stays closed.",
-    ]);
+    expect(out.value.ceremony).toMatchObject({
+      warnings: [],
+      acknowledgements: [{ id: REGENERATE_PAID_ACKNOWLEDGEMENT, label: REGENERATE_PAID_LABEL }],
+    });
+    expect(REGENERATE_PAID_LABEL).toContain("The bill is currently marked paid.");
+    const body = await sent(out.value, { readings: "edge" }, "ceremony", { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] });
+    expect(RegenerateBillBody.parse(body)).toEqual({ readings: "edge", confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] } });
+  });
+
+  it("warns before regenerating a bill in a closed period, and asks a paid one there to be acknowledged too", async () => {
+    const closed = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({}, { status: "closed" })] }).client);
+    if (!closed.ok) throw new Error(closed.message);
+    expect(closed.value.ceremony).toMatchObject({ warnings: ["Regenerating writes an audit-log revision; the period stays closed."], acknowledgements: [] });
+    const paid = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({ payment_status: "paid" }, { status: "closed" })] }).client);
+    if (!paid.ok) throw new Error(paid.message);
+    expect(paid.value.ceremony?.warnings).toEqual(["Regenerating writes an audit-log revision; the period stays closed."]);
+    expect(paid.value.ceremony?.acknowledgements.map((a) => a.id)).toEqual([REGENERATE_PAID_ACKNOWLEDGEMENT]);
   });
 
   it("refuses to regenerate a refunded bill", async () => {

@@ -5,8 +5,9 @@ import "server-only";
  * its pages, which are served outside the GUI contract (`legacy: true`), with
  * the labels the current chrome uses; a microgrid's billing periods as the
  * `billing.periods` view, with creating a period and deleting a draft; one
- * period's bills as the `billing.period-review` view, with generating them
- * and the actions on each bill; and the savings as the `billing.savings`
+ * period's bills as the `billing.period-review` view, with the actions on
+ * each bill (generating them is contributed but offered nowhere yet, below);
+ * and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
@@ -205,11 +206,15 @@ export const BILLING_SURFACE: Contribution = {
     // All human-only (no assistant proposes a billing write yet) and money:
     // each changes what a tenant is billed or what they owe.
     //
-    // Generating a period's bills. `targeted: false`: the kit cannot render
-    // GenerateBillsBody's arrays (its form is NO_FORM until a GUI registers
-    // one), and it is refined, so a loader's prefill would be dropped. The
-    // legacy page's pre-flight panel still serves Generate; a GUI's own form
-    // for billing.generate-bills (GuiPlugin.forms) replaces it.
+    // Generating a period's bills. Contributed, but no view offers it: the
+    // kit cannot render GenerateBillsBody's tenant arrays (its form is
+    // NO_FORM) and no GUI registers a form for billing.generate-bills
+    // (GuiPlugin.forms), so no interface could submit it. The legacy page's
+    // pre-flight panel still serves Generate, and parity.test.ts keeps the
+    // row pending until a form exists; then the period review offers it
+    // (GENERATE_BILLS_ACTION in ./surface/period-review-model.ts).
+    // `targeted: false`: GenerateBillsBody is refined, so a loader's prefill
+    // would be dropped, and appended elsewhere it would open with no form.
     {
       ...GENERATE_BILLS_ACTION,
       target: "billingPeriod",
@@ -227,7 +232,10 @@ export const BILLING_SURFACE: Contribution = {
     // One bill, from the meter or from readings entered, on its own route so
     // it can never become a whole-period run. Targeted: its form needs only
     // the readings choice, and available() and prepare check the bill, so it
-    // is sound on any view of a bill.
+    // is sound on any view of a bill. A ceremony, so the host sends the
+    // acknowledgement a paid bill's prepare asks for and the route requires
+    // (only typed and ceremony actions are sent a confirmation, invoke.ts);
+    // the host therefore shows it in the danger tone on every bill.
     {
       ...REGENERATE_BILL_ACTION,
       target: "lineItem",
@@ -237,7 +245,7 @@ export const BILLING_SURFACE: Contribution = {
       path: "/api/billing-line-items/[lineItemId]/regenerate",
       bind: { path: { lineItemId: "lineItem" } },
       risk: "money",
-      confirm: "confirm",
+      confirm: "ceremony",
       humanOnly: true,
       prepare: prepareRegenerateBill,
       available: regenerateBillAvailable,
@@ -263,7 +271,10 @@ export const BILLING_SURFACE: Contribution = {
     // each is `targeted: false`: appended elsewhere it would open with no
     // status. The kit form does not lock that prefill, so a person can
     // submit another status; the route's transition and super-admin checks
-    // stay the authority. If Prepare comes to supply fixed values, revisit.
+    // stay the authority, and it refuses a refund without the tenant's name
+    // typed, which only Mark as refunded (typed) sends: a confirm-level
+    // action's form switched to refunded sends no confirmation (invoke.ts).
+    // If Prepare comes to supply fixed values, revisit.
     // Every one of them has a confirmation step, Mark as unpaid included.
     // No available(): the loader already offers each by the bill's status
     // and the person's role, and prepare checks both again.

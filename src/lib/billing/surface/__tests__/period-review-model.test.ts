@@ -1,7 +1,7 @@
 /**
  * The `billing.period-review` model: the legacy period page's table as a
  * collection, one row per bill of a readable tenant, totals over every bill,
- * the period's links and Generate, and each bill's actions and links.
+ * the period's links, and each bill's actions and links. Generate is not offered.
  */
 import { describe, expect, it } from "vitest";
 import type { LinkRef } from "@/lib/gui/contract";
@@ -9,6 +9,7 @@ import { createFmt } from "@/lib/gui/fmt";
 import { strictParseModel } from "@/lib/gui/host/server/parse";
 import type { ViewDef } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
+import { sumMoney } from "../../money";
 import { BILLING_SURFACE } from "../../surface";
 import { PERIOD_REVIEW_EXAMPLES, PERIOD_REVIEW_LOADED_EXAMPLES } from "../period-review-examples";
 import {
@@ -226,6 +227,32 @@ describe("buildPeriodReviewModel: totals", () => {
     });
   });
 
+  it("adds money in the currency's minor units, as the periods list does, so the total is the rows' sum", () => {
+    // Each row shows 1,251 (UGX has no minor unit); adding the floats would give 2,501.
+    const half = { total_amount: 1250.5, tier_breakdown: [{ label: "Lifeline", kwh: 5, amount: 1250.5 }] };
+    const model = build({ tenants: [A, B], bills: [bill(1, A, half), bill(2, B, half)] });
+    expect(model.body.rows.map((r) => r.cells.total)).toEqual([fmt.money(1251, "UGX", { bare: true }), fmt.money(1251, "UGX", { bare: true })]);
+    expect(model.body.totals?.total).toEqual(fmt.money(2502, "UGX", { bare: true }));
+    expect(model.body.totals?.["tier.1.amount"]).toEqual(fmt.money(2502, "UGX", { bare: true }));
+    expect(model.body.totals?.total).toEqual(fmt.money(sumMoney([1250.5, 1250.5], "UGX"), "UGX", { bare: true }));
+
+    // In a currency with cents too: each row shows 0.01, so the total is
+    // 0.02; adding the floats would give 0.01. (0.1 + 0.2 would not do here:
+    // fmt.money rounds 0.30000000000000004 to the same 0.30.)
+    const usd = build({
+      microgrid: { id: MG, name: "North", currency: "USD" },
+      tenants: [A, B],
+      bills: [
+        bill(1, A, { total_amount: 0.005, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.005 }] }),
+        bill(2, B, { total_amount: 0.005, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.005 }] }),
+      ],
+    });
+    expect(usd.body.rows.map((r) => r.cells.total)).toEqual([fmt.money(0.01, "USD", { bare: true }), fmt.money(0.01, "USD", { bare: true })]);
+    expect(usd.body.totals?.total).toEqual(fmt.money(0.02, "USD", { bare: true }));
+    expect(usd.body.totals?.["tier.1.amount"]).toEqual(fmt.money(0.02, "USD", { bare: true }));
+    expect(fmt.money(0.005 + 0.005, "USD", { bare: true })).not.toEqual(fmt.money(0.02, "USD", { bare: true }));
+  });
+
   it("has no totals with no bills", () => {
     expect(build({ bills: [] }).body).not.toHaveProperty("totals");
   });
@@ -346,11 +373,12 @@ describe("buildPeriodReviewModel: the period", () => {
     expect(oneDay).not.toHaveProperty("subtitle");
   });
 
-  it("offers Generate on a draft, as Refresh readings once there are bills, with no prefill", () => {
-    expect(build({ bills: [] }).actions).toEqual([{ action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD } }]);
-    expect(build().actions).toEqual([{ action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD }, label: "Refresh readings" }]);
-    const closed = build({ period: { ...input().period, status: "closed" } });
-    expect(closed.actions).toEqual([]);
+  it("does not offer Generate anywhere, since no interface can submit it until a form exists", () => {
+    for (const model of [build({ bills: [] }), build(), build({ period: { ...input().period, status: "closed" } })]) {
+      expect(model.actions).toEqual([]);
+      expect(model.body.empty).not.toHaveProperty("action");
+      expect(JSON.stringify(model)).not.toContain(GENERATE_BILLS_ACTION.id);
+    }
   });
 
   it("links the history always, and the CSV export only when there are bills", () => {
@@ -371,15 +399,8 @@ describe("buildPeriodReviewModel: the period", () => {
   it.each([
     ["no tenants, a draft", { tenants: [], bills: [] }, { title: "No tenants configured for this microgrid." }],
     ["no tenants, closed", { tenants: [], bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No tenants configured for this microgrid." }],
-    [
-      "tenants and no bills, a draft",
-      { bills: [] },
-      {
-        title: "No billing data yet.",
-        text: "Generate bills to fetch meter readings and calculate costs.",
-        action: { action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD } },
-      },
-    ],
+    // The legacy page adds Generate here; with no form for it, nothing asks for it.
+    ["tenants and no bills, a draft", { bills: [] }, { title: "No billing data yet." }],
     ["tenants and no bills, closed", { bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No billing data yet." }],
   ])("shows the legacy empty state for %s", (_label, o, empty) => {
     const model = build(o);

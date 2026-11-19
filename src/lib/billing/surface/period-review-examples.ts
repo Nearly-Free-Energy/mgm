@@ -5,8 +5,8 @@ import "server-only";
  * against it: a draft period seen by an organization manager, with an edge
  * bill, a manual paid one, one with a pending payment link and a refunded
  * one; a closed period seen by a super admin, who is also offered marking a
- * bill failed or refunded; a draft with tenants and no bills, whose empty
- * state offers Generate; a microgrid with no tenants; and the first again
+ * bill failed or refunded; a draft with tenants and no bills; a microgrid
+ * with no tenants; and the first again
  * while billing is off, with every action disabled and the gate's notice.
  * Built at import the way the loader builds them, so each carries the
  * `billing.period-review@1` ext and a GUI with a renderer for it (Gridtop's)
@@ -18,7 +18,6 @@ import type { ActionLink, LoadedModel } from "@/lib/gui/surface";
 import {
   buildPeriodReviewModel,
   CANCEL_PAYMENT_LINK_ACTION,
-  GENERATE_BILLS_ACTION,
   MARK_FAILED_ACTION,
   MARK_PAID_ACTION,
   MARK_REFUNDED_ACTION,
@@ -43,7 +42,6 @@ const BILLING_DISABLED =
 
 const TITLES: Record<string, string> = Object.fromEntries(
   [
-    GENERATE_BILLS_ACTION,
     REGENERATE_BILL_ACTION,
     RECORD_USAGE_ACTION,
     MARK_PAID_ACTION,
@@ -53,6 +51,9 @@ const TITLES: Record<string, string> = Object.fromEntries(
     CANCEL_PAYMENT_LINK_ACTION,
   ].map((a) => [a.id, a.title]),
 );
+
+/** The actions the host shows in the danger tone: typed or ceremony (merge-actions.ts). */
+const DANGER = new Set<string>([REGENERATE_BILL_ACTION.id, MARK_REFUNDED_ACTION.id]);
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const, timezone: "Africa/Kampala" };
@@ -154,6 +155,7 @@ const resolve =
   (link: ActionLink): ActionRef => ({
     ...link,
     label: link.label ?? TITLES[link.action],
+    ...(DANGER.has(link.action) ? { tone: "danger" as const } : {}),
     ...(disabled ? { enabled: false, reason: BILLING_DISABLED } : { enabled: true }),
   });
 
