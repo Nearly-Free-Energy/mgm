@@ -143,6 +143,7 @@ describe("legacyView on every catalog page", () => {
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+      "/microgrids/[id]/billing/[periodId]/close": ["billing.close-checklist", "billing.periods"],
       // A tenant's page: a staff manifest has no tenant entry, and /my names no place.
       "/my": ["tenant.home", null],
     };

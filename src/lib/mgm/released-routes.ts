@@ -78,8 +78,8 @@ const RELEASE_2_API_ROUTES = [
 ];
 
 const RELEASE_3_PAGE_ROUTES = [
-  // Billing period list, detail, and history.
-  /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/history)?)?$/,
+  // Billing period list, detail, history and close checklist.
+  /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/(?:history|close))?)?$/,
   // Tariff setup.
   /^\/microgrids\/[^/]+\/setup\/rates$/,
   // Invoice branding for PDF exports.

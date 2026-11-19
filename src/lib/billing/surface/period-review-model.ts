@@ -58,6 +58,18 @@ export const CANCEL_PAYMENT_LINK_ACTION = { id: "billing.cancel-payment-link", t
 export const EXPORT_CSV_LINK = "billing.export-csv";
 export const VIEW_HISTORY_LINK = "billing.view-history";
 export const DOWNLOAD_BILL_LINK = "billing.download-bill";
+/** A draft's link to its close checklist (`billing.close-checklist`, ./close-checklist-model.ts). */
+export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
+
+/**
+ * The close checklist of a period: the path the `billing.close-checklist`
+ * view is registered on (../surface.ts). Here rather than in
+ * ./close-checklist-model.ts, which imports this module's link ids, so
+ * neither module imports the other in a cycle.
+ */
+export function closeChecklistHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/close`;
+}
 
 /**
  * The statuses only a super admin may set by hand: the payment-status
@@ -337,6 +349,13 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   };
 
   const links: LinkRef[] = [{ id: VIEW_HISTORY_LINK, label: "View history", href: historyHref }];
+  // A draft links to its close checklist, with or without bills: the
+  // checklist says what blocks the close, where the legacy page shows a
+  // disabled Close Period button. Not attached as a section, which would run
+  // the close review on every load of this view.
+  if (period.status === "draft") {
+    links.push({ id: CLOSE_CHECKLIST_LINK, label: "Close period", href: closeChecklistHref(microgrid.id, period.id) });
+  }
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {
     links.push({

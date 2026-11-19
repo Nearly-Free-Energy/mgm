@@ -75,6 +75,7 @@ describe("billing's savings actions", () => {
     expect(actions.map((a) => a.id)).toEqual([
       "billing.create-period",
       "billing.delete-period",
+      "billing.close-period",
       "billing.generate-bills",
       "billing.regenerate-bill",
       "billing.record-usage",

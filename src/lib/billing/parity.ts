@@ -423,6 +423,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.close-checklist",
     },
     pr: CLOSE,
+    note: "Offered on the close checklist's last step, which the period review's Close period link opens; prepare returns the route's own ceremony (closeCeremony), so the totals, warnings, acknowledgements, typed name and digest are the server's. Differences from the legacy dialog: a 409 for totals that changed shows the same confirmation again with the error, so the person reopens Close for the new totals (the dialog swapped them in); the host draws a ceremony in its danger tone, not the dialog's neutral one; the host requires the typed name exactly, after trimming, where the route also ignores case and spacing; the GUI refuses a period with no bills or no pinned tariff, which the route would close; and Export CSV for URA is a link on the refreshed checklist once the period is closed, not a button in the dialog.",
   },
   {
     id: "payment-link",

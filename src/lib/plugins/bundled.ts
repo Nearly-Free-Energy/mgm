@@ -287,6 +287,12 @@ export const BILLING_PLUGIN: BundledPlugin = {
       path: "/microgrids/[id]/billing/[periodId]/history",
       params: { id: "microgrid", periodId: "billingPeriod" },
     },
+    // The close checklist, as the billing.close-checklist view.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/close",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
     { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
     { path: "/communities/[id]/invoice", params: { id: "community" } },
     // The savings under the Operations day, as the billing.savings view.
