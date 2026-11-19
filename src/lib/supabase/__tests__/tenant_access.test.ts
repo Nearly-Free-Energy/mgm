@@ -40,6 +40,10 @@
  *   superAdmin   — super admin
  *   noRole       — an account with no role rows
  *   grantee      — no rows at first; given and then removed access to B
+ *   microgridOnly — an ems_operator row and nothing else, created and
+ *                  removed by one invitation test, so the staff record
+ *                  (staff_access_accounts, history that outlives rows) never
+ *                  names noRole
  * and, created by the staff-record tests (after the access tests, so the
  * counts above do not move):
  *   formerStaff  — org manager of the organization, whose row is removed;
@@ -136,6 +140,7 @@ const EMAIL = {
   superAdmin: "tenant-access-super-admin@test.local",
   noRole: "tenant-access-no-role@test.local",
   grantee: "tenant-access-grantee@test.local",
+  microgridOnly: "tenant-access-microgrid-only@test.local",
   formerStaff: "tenant-access-former-staff@test.local",
   emsTenant: "tenant-access-ems-tenant@test.local",
   madeStaff: "tenant-access-made-staff@test.local",
@@ -1170,12 +1175,16 @@ desc("the staff role functions keep refusing the tenant role", () => {
         p_scope_id: F.org,
       });
 
-    const { error: insErr } = await svc
-      .from("user_roles")
-      .insert({ user_id: noRole.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
-    expect(insErr).toBeNull();
+    // An account of its own: the staff record keeps any account that ever
+    // held a row other than tenant (20261118140000), and the staff-record
+    // tests below expect noRole never to have held one.
+    const microgridOnly = await createTestUser({ email: EMAIL.microgridOnly, role: null });
     try {
-      for (const target of [tenantOnly.userId, noRole.userId]) {
+      const { error: insErr } = await svc
+        .from("user_roles")
+        .insert({ user_id: microgridOnly.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
+      expect(insErr).toBeNull();
+      for (const target of [tenantOnly.userId, microgridOnly.userId]) {
         const before = await snapshot(target);
         for (const caller of [manager.client, superAdmin.client]) {
           expectCode((await invite(caller, target)).error, "42501");
@@ -1183,7 +1192,7 @@ desc("the staff role functions keep refusing the tenant role", () => {
         expect(await snapshot(target)).toEqual(before);
       }
     } finally {
-      await svc.from("user_roles").delete().eq("user_id", noRole.userId);
+      await svc.auth.admin.deleteUser(microgridOnly.userId);
     }
   });
 
