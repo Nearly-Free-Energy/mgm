@@ -22,6 +22,7 @@
 --     as tenant_access_accounts (20261118100100) does for tenant rows: a
 --     trigger on user_roles writes it, and this file backfills it. Only
 --     fn_list_visible_users reads it, and only for accounts with no rows.
+--     It has no effect on what a person may do.
 --  4. fn_tenant_access_grant keeps 20261118100100's body: tenant access does
 --     not depend on organization roles, so the grant decides only the
 --     actor's authority, the unit and the account. A person may hold both,
@@ -225,8 +226,12 @@ COMMENT ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) IS
 -- Its one reader is fn_list_visible_users (section 5), and only for an
 -- account that holds no row at all: there it tells a former staff member,
 -- who stays listed, from a former tenant who was never staff, who does not.
--- Whether someone is staff now is read from their rows, never from here; if
--- anything starts reading this table as current staff, revisit.
+-- The record has no effect on what a person may do: it grants nothing and
+-- refuses nothing (fn_tenant_access_grant, sign-in and every access check
+-- read the rows held now), and decides only whether an account with no rows
+-- is listed on the Users page. Whether someone is staff now is read from
+-- their rows, never from here; if anything starts reading this table as
+-- current staff, or to allow or refuse anything, revisit.
 --
 -- "Not tenant" rather than a list of staff roles, so a staff role added
 -- later is counted without touching this file. If a second role that is not
@@ -288,7 +293,8 @@ INSERT INTO public.staff_access_accounts (user_id)
 -- former staff member. Recording one of those by mistake changes nothing
 -- for them while they hold a row: the record counts only for an account
 -- with no rows (section 5), so it would list them again after their last
--- unit is revoked.
+-- unit is revoked. Being recorded, rightly or not, has no effect on what a
+-- person may do; it decides only whether an account with no rows is listed.
 INSERT INTO public.staff_access_accounts (user_id)
   SELECT au.id
   FROM auth.users au
