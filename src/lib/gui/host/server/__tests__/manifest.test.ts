@@ -475,8 +475,10 @@ describe("buildManifest for a person who holds units", () => {
     const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), { gui: "gridtop" });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9" });
-    expect(outcome.manifest.org.places.map((p) => p.id)).toEqual([UNIT_B]);
+    // The person still holds two units, so the link names the one it is for:
+    // a bare /my would ask them to choose (chooseTenantUnit counts role rows).
+    expect(outcome.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9", href: `/my?unit=${UNIT_B}` });
+    expect(outcome.manifest.org.places.map((p) => [p.id, p.href])).toEqual([[UNIT_B, `/my?unit=${UNIT_B}`]]);
   });
 
   it("fails a tenant-only person's manifest when a unit cannot be read", async () => {

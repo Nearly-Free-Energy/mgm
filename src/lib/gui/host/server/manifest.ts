@@ -27,7 +27,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Manifest } from "../../contract";
 import { createFmt } from "../../fmt";
 import { buildManifestModel, buildTenantManifestModel, livePlugins, MAX_PLACES_PER_KIND } from "../shared/manifest-model";
-import { chooseTenantUnit, unitsNamedBy } from "../shared/tenant-units";
+import { chooseTenantUnit, tenantUnitIds, unitsNamedBy } from "../shared/tenant-units";
 import { hostContext, requireIssued, type HostContext, type HostRefusal } from "./access";
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate, unitPluginGate } from "./gate-state";
@@ -180,6 +180,7 @@ async function buildTenantManifest(
     user: { name, email: ctx.access.user.email },
     units: units.map((u) => ({ id: u.tenantId, label: u.label, timezone: u.timezone })),
     current,
+    several: tenantUnitIds(ctx.access.roles).length > 1,
     tenantGate: await unitsGate(ctx, units),
     nav: snapshot.nav,
     views: snapshot.views,

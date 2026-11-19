@@ -260,6 +260,14 @@ export interface TenantManifestInput {
   units: readonly { id: string; label: string; timezone: string | null }[];
   /** The unit the page is about, one of `units`; else the first is. */
   current: string | null;
+  /**
+   * Whether the person holds several tenant rows, counted from their rows
+   * rather than from `units`, which leaves out a unit that could not be
+   * read. Tenant views choose from the rows (chooseTenantUnit), so while one
+   * of two units cannot be read the other's links still name it. Defaults
+   * to `units` having more than one.
+   */
+  several?: boolean;
   /** As ManifestInput.tenantGate. */
   tenantGate: Partial<Record<MgmPluginName, boolean>>;
   nav: ManifestInput["nav"];
@@ -281,7 +289,7 @@ export function buildTenantManifestModel(input: TenantManifestInput): Manifest {
   const [first] = input.units;
   if (!first) throw new Error("GUI host: a tenant manifest needs a unit");
   const unit = input.units.find((u) => u.id === input.current) ?? first;
-  const several = input.units.length > 1;
+  const several = input.several ?? input.units.length > 1;
   const nav = navOf({ gate: {}, tenantGate: input.tenantGate, nav: input.nav, views: input.views }, {
     staff: false,
     superAdmin: false,
