@@ -330,6 +330,66 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: values and timestamps",
     expect(series.kwh["dev-1"].slice(0, 6)).toEqual([0.001, 0.002, 0.003, 0.004, 0.005, null]);
   });
 
+  it("reads the UTC instants the stock OpenEMS backend sends, hours and days alike", async () => {
+    clearPilotEnv();
+    // 00:00 Kampala is 21:00 UTC the day before.
+    const hourStamps = Array.from({ length: 48 }, (_, i) =>
+      new Date(LEAD + i * HOUR).toISOString().replace(".000Z", "Z")
+    );
+    expect(hourStamps[24]).toBe("2026-11-04T21:00:00Z");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(response({
+      timestamps: hourStamps,
+      data: { [METER0]: hourStamps.map((_, i) => (i < 24 ? 999 : dayWh(i - 24))) },
+    })).mockResolvedValueOnce(response({
+      timestamps: ["2026-10-30T21:00:00Z", "2026-10-31T21:00:00Z", "2026-11-01T21:00:00Z"],
+      data: { [METER0]: [5_000, 1_200, 3_400] },
+    }));
+
+    const hours = await provider().getDeviceEnergySeries(seriesRequest());
+    const days = await provider().getDeviceEnergySeries(seriesRequest({
+      resolution: "day", startDate: "2026-11-01", endDate: "2026-11-03",
+    }));
+
+    expect(hours.buckets[0]).toBe(K0);
+    expect(hours.kwh["dev-1"]).toEqual(Array.from({ length: 24 }, (_, hour) => dayWh(hour) / 1000));
+    expect(days.buckets.map(iso)).toEqual([
+      "2026-10-31T21:00:00.000Z",
+      "2026-11-01T21:00:00.000Z",
+      "2026-11-02T21:00:00.000Z",
+    ]);
+    // The lead day (31 October) is dropped; 3 November had no bucket.
+    expect(days.kwh["dev-1"]).toEqual([1.2, 3.4, null]);
+  });
+
+  it("refuses timestamps with no zone or offset rather than read them in the server's zone", async () => {
+    clearPilotEnv();
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: ["2026-11-05T00:00:00", "2026-11-05T01:00", "2026-11-05", K0 + 3 * HOUR],
+      data: { [METER0]: [1, 2, 3, 4] },
+    }));
+
+    const error = await provider().getDeviceEnergySeries(seriesRequest()).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: "METERING_INVALID_DATA", statusCode: 502 });
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "MGM energy series: unreadable OpenEMS timestamps",
+      expect.objectContaining({ count: 4, unreadable: 3 })
+    );
+  });
+
+  it("leaves a single naive timestamp's bucket null instead of shifting its value", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [K0, "2026-11-05T01:00:00", K0 + 2 * HOUR],
+      data: { [METER0]: [7, 8, 9] },
+    }));
+
+    const series = await provider().getDeviceEnergySeries(seriesRequest());
+
+    expect(series.kwh["dev-1"].slice(0, 3)).toEqual([0.007, null, 0.009]);
+  });
+
   it("fails with 502 METERING_INVALID_DATA when most timestamps cannot be read", async () => {
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -568,6 +628,15 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: errors", () => {
       async () => new Response(JSON.stringify({ error: { message: "Edge edge-1 is not connected" } }), {
         status: 200,
       }),
+      { code: "METERING_UNAVAILABLE", statusCode: 502 },
+      "OpenEMS could not provide this usage. Try again shortly.",
+    ],
+    [
+      "a JSON-RPC error inside the edge's reply payload",
+      async () => new Response(JSON.stringify({
+        jsonrpc: "2.0",
+        result: { payload: { jsonrpc: "2.0", error: { code: 1, message: "Edge edge-1 is not connected" } } },
+      }), { status: 200 }),
       { code: "METERING_UNAVAILABLE", statusCode: 502 },
       "OpenEMS could not provide this usage. Try again shortly.",
     ],

@@ -1561,6 +1561,84 @@ describe("OpenEmsClient", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
 
+    it("turns an error inside the edge's reply payload into OPENEMS_RPC_ERROR, not a missing result", async () => {
+      fetchSpy.mockResolvedValue(mockResponse({
+        jsonrpc: "2.0",
+        id: "outer-id",
+        result: {
+          payload: { jsonrpc: "2.0", id: "inner-id", error: { code: 1, message: "Channel meter9 is not available" } },
+        },
+      }));
+
+      const error = await client.queryEnergyPerPeriod(
+        "edge0", ["meter0/ActiveConsumptionEnergy"], "2026-11-04", "2026-11-05", "Africa/Kampala", "Hours"
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(OpenEmsError);
+      expect(error).toMatchObject({
+        code: "OPENEMS_RPC_ERROR",
+        statusCode: 502,
+        message: "OpenEMS RPC error: Channel meter9 is not available",
+        details: { code: 1, message: "Channel meter9 is not available" },
+      });
+    });
+
+    it.each([
+      ["a TimeoutError", () => new DOMException("The operation was aborted due to timeout", "TimeoutError")],
+      ["an AbortError", () => new DOMException("This operation was aborted", "AbortError")],
+    ])("turns the deadline ending (%s) while the reply's body is read into OPENEMS_UNREACHABLE", async (_label, make) => {
+      const cause = make();
+      fetchSpy.mockResolvedValue({
+        ...mockResponse({}),
+        text: () => Promise.reject(cause),
+      } as Response);
+
+      const error = await client.queryEnergyPerPeriod(
+        "edge0", ["meter0/ActiveConsumptionEnergy"], "2026-11-04", "2026-11-05", "Africa/Kampala", "Days",
+        { signal: new AbortController().signal }
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(OpenEmsError);
+      expect(error).toMatchObject({ code: "OPENEMS_UNREACHABLE", statusCode: 503 });
+      expect((error as OpenEmsError).details).toBe(cause);
+      expect((error as OpenEmsError).message).toBe(
+        "OpenEMS at http://localhost:8075 did not answer within the time allowed"
+      );
+    });
+
+    it("names the seconds when the request's own timeout ends while the body is read", async () => {
+      fetchSpy.mockResolvedValue({
+        ...mockResponse({}),
+        text: () => Promise.reject(new DOMException("timed out", "TimeoutError")),
+      } as Response);
+
+      await expect(
+        client.queryHistoricSamples(
+          "edge0", ["ess0/Soc"], "2026-11-01", "2026-11-01", "Africa/Kampala", 5, { timeoutMs: 20_000 }
+        )
+      ).rejects.toMatchObject({
+        code: "OPENEMS_UNREACHABLE",
+        message: "OpenEMS at http://localhost:8075 did not answer within 20 s",
+      });
+    });
+
+    it("turns any other failure while the body is read into OPENEMS_UNREACHABLE", async () => {
+      fetchSpy.mockResolvedValue({
+        ...mockResponse({}),
+        text: () => Promise.reject(new TypeError("terminated")),
+      } as Response);
+
+      await expect(
+        client.queryEnergyPerPeriod(
+          "edge0", ["meter0/ActiveConsumptionEnergy"], "2026-11-04", "2026-11-05", "Africa/Kampala", "Days"
+        )
+      ).rejects.toMatchObject({
+        code: "OPENEMS_UNREACHABLE",
+        statusCode: 503,
+        message: "Failed to reach OpenEMS at http://localhost:8075: terminated",
+      });
+    });
+
     it("is what queryDailyEnergyByChannel reads, one day at a time, with no abort signal", async () => {
       fetchSpy.mockResolvedValue(perPeriodResponse({ timestamps: [], data: {} }));
 

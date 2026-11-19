@@ -8,6 +8,7 @@ import type {
   DeviceEnergyResult,
   EdgeConfig,
   EdgeStatus,
+  JsonRpcErrorResponse,
   JsonRpcResponse,
 } from "./types";
 
@@ -87,6 +88,17 @@ export class OpenEmsClient implements DeviceDataAdapter {
         503,
         cause
       );
+    // A transport failure, while sending or while reading the reply: a
+    // deadline ending is a timeout, anything else a failure to reach it.
+    const transportError = (err: unknown) =>
+      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
+        ? timedOut(err)
+        : new OpenEmsError(
+            `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            "OPENEMS_UNREACHABLE",
+            503,
+            err
+          );
     // A deadline that has already passed starts no request.
     if (signal?.aborted) throw timedOut(signal.reason);
 
@@ -112,18 +124,7 @@ export class OpenEmsClient implements DeviceDataAdapter {
         ...(signal ? { signal } : {}),
       });
     } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === "TimeoutError" || err.name === "AbortError")
-      ) {
-        throw timedOut(err);
-      }
-      throw new OpenEmsError(
-        `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-        "OPENEMS_UNREACHABLE",
-        503,
-        err
-      );
+      throw transportError(err);
     }
 
     // A redirect is a configuration problem, not a transport detail. Checked
@@ -201,7 +202,14 @@ export class OpenEmsClient implements DeviceDataAdapter {
     // the stream, so a `response.text()` in the catch would read an already-
     // used body and yield "" — an error message promising the first bytes and
     // delivering none, which is worse than not offering them.
-    const raw = await response.text();
+    // The body arrives after the headers, under the same signal: a deadline
+    // that ends while it streams is a timeout, as it is during the fetch.
+    let raw: string;
+    try {
+      raw = await response.text();
+    } catch (err) {
+      throw transportError(err);
+    }
 
     let json: { error?: { message?: string } } & Record<string, unknown>;
     try {
@@ -549,10 +557,12 @@ export class OpenEmsClient implements DeviceDataAdapter {
     options: RpcOptions = {}
   ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
     const result = await this.rpc<{
-      payload: JsonRpcResponse<{
-        timestamps: Array<number | string>;
-        data: Record<string, (number | null)[]>;
-      }>;
+      payload:
+        | JsonRpcResponse<{
+            timestamps: Array<number | string>;
+            data: Record<string, (number | null)[]>;
+          }>
+        | JsonRpcErrorResponse;
     }>("edgeRpc", {
       edgeId,
       payload: {
@@ -568,7 +578,19 @@ export class OpenEmsClient implements DeviceDataAdapter {
         },
       },
     }, options);
-    return result.payload.result;
+    // The edge's own answer travels inside the backend's, so its error can
+    // come back there, in place of the result, inside a successful outer
+    // reply: it is an RPC error, as one in the outer reply is.
+    const { payload } = result;
+    if ("error" in payload) {
+      throw new OpenEmsError(
+        `OpenEMS RPC error: ${payload.error?.message}`,
+        "OPENEMS_RPC_ERROR",
+        502,
+        payload.error
+      );
+    }
+    return payload.result;
   }
 
   /** Fifteen-minute channel samples used only to prove billing coverage. */

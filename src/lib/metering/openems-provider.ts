@@ -225,12 +225,22 @@ type SampleSet = {
 };
 
 /**
- * OpenEMS installations return either epoch milliseconds or ISO strings. A
- * Java `ZonedDateTime` string carries its zone after the offset, as in
- * `2026-11-01T00:00+03:00[Africa/Kampala]`; the offset alone fixes the
- * instant, so the bracketed zone is dropped before parsing.
+ * An ISO string that names its own instant: it ends in `Z` or a `±HH:MM`
+ * offset, then optionally the zone in brackets, as Java's `ZonedDateTime`
+ * prints it (`2026-11-01T00:00+03:00[Africa/Kampala]`).
+ */
+const ZONED_ISO = /(?:Z|[+-]\d{2}:\d{2})(?:\[[^\]]+\])?$/;
+
+/**
+ * OpenEMS installations return either epoch milliseconds (or seconds) or ISO
+ * strings; the stock backend sends instants in UTC, such as
+ * `2026-11-04T21:00:00Z` for midnight in Kampala. A string with no `Z` or
+ * offset is unreadable rather than parsed: `Date.parse` would read it in the
+ * server's own zone and move every bucket by that zone's offset. The offset
+ * alone fixes the instant, so a bracketed zone is dropped before parsing.
  */
 function toEpochMs(raw: number | string): number | null {
+  if (typeof raw === "string" && !/^\d{10,13}$/.test(raw) && !ZONED_ISO.test(raw)) return null;
   const numeric = typeof raw === "number"
     ? raw
     : /^\d{10,13}$/.test(raw) ? Number(raw) : null;
