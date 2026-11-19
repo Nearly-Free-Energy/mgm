@@ -174,7 +174,11 @@ export async function loadBillAttempts(req: SurfaceRequest): Promise<Loaded<Load
  * (00065_payments_capability.sql), the policy the host's
  * resolveTargetOrganization('paymentAttempt') relies on too; an id it does
  * not show is not found. Then one composition, and one listHistory per
- * bill. A read that fails throws, and the host shows the action unchecked.
+ * bill. A completed adjustment also reads each bill's tenant name, since
+ * prepareRecordAdjustment and PaymentsCapability.reconcile refuse it for a
+ * tenant with none (tenants.display_name has no CHECK against a blank
+ * name; if one is added, this read can go). A read that fails throws, and
+ * the host shows the action unchecked.
  */
 export function reconcileAvailable(which: "record" | "accept") {
   return async (req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> => {
@@ -200,12 +204,24 @@ export function reconcileAvailable(which: "record" | "accept") {
         await composed.data.dispose();
       }
     }
+    const names = new Map<string, string>();
+    if (which === "record" && bills.length > 0) {
+      const billRes = await req.supabase.from("billing_line_items").select("id, tenants(display_name)").in("id", bills);
+      if (billRes.error) throw new Error("payments.bill-attempts: could not read the bills");
+      for (const b of (billRes.data ?? []) as unknown as { id: string; tenants: Embedded<{ display_name: string | null }> }[]) names.set(b.id, tenantName(b));
+    }
     for (const id of ids) {
       const bill = billOf.get(id);
       const history = bill === undefined ? undefined : histories.get(bill);
       if (bill === undefined) out[id] = ATTEMPT_REFUSALS.notFound.message;
       else if (!history) out[id] = ATTEMPT_REFUSALS.unavailable.message;
-      else out[id] = reconcileReason(history, id, which) ?? true;
+      else {
+        const reason = reconcileReason(history, id, which);
+        if (reason !== null) out[id] = reason;
+        else if (which === "record" && !names.has(bill)) out[id] = ATTEMPT_REFUSALS.notFound.message;
+        else if (which === "record" && names.get(bill) === "") out[id] = ATTEMPT_REFUSALS.noName.message;
+        else out[id] = true;
+      }
     }
     return out;
   };

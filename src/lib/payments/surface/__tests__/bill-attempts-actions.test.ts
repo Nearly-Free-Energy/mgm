@@ -106,14 +106,28 @@ describe("reconcileAvailable", () => {
     expect(composePayments).not.toHaveBeenCalled();
   });
 
+  it("refuses recording an adjustment for a tenant with no name, as prepare and the capability do, and still allows accepting", async () => {
+    listHistory.mockResolvedValue(history({ received: 5000 }));
+    const blank = () => client({ bill: [{ id: B1, tenants: { display_name: "  " } }] });
+    expect(await reconcileAvailable("record")(req(blank().client), [A1])).toEqual({ [A1]: ATTEMPT_REFUSALS.noName.message });
+    expect(await reconcileAvailable("accept")(req(blank().client), [A1])).toEqual({ [A1]: true });
+    expect(await prepareRecordAdjustment(req(blank().client), { params: { id: A1 } })).toEqual(ATTEMPT_REFUSALS.noName);
+  });
+
+  it("says a completed adjustment on a bill the person's client does not show is not found", async () => {
+    expect(await reconcileAvailable("record")(req(client({ bill: [] }).client), [A1])).toEqual({ [A1]: ATTEMPT_REFUSALS.notFound.message });
+  });
+
   it("reads each bill's history once", async () => {
     const c = client({ attempts: [rawAttempt(), rawAttempt({ id: A2 })] });
     await reconcileAvailable("record")(req(c.client), [A1, A2]);
     expect(listHistory).toHaveBeenCalledTimes(1);
   });
 
-  it("throws when the attempts or the composition cannot be read, so the host shows it unchecked", async () => {
+  it("throws when the attempts, the bills or the composition cannot be read, so the host shows it unchecked", async () => {
     await expect(reconcileAvailable("record")(req(client({ attemptsError: true }).client), [A1])).rejects.toThrow();
+    const billsError = tableClient({ payment_attempts: { data: [rawAttempt()] }, billing_line_items: { data: null, error: { message: "secret" } } });
+    await expect(reconcileAvailable("record")(req(billsError.client), [A1])).rejects.toThrow();
     composePayments.mockResolvedValue({ ok: false, status: 500, code: "x", message: "secret" });
     await expect(reconcileAvailable("record")(req(client().client), [A1])).rejects.toThrow();
   });
