@@ -4,7 +4,8 @@
  * interface shell shows in place of the old sidebar and the home page's quick
  * links. These checks keep it complete and stable: every link the old chrome
  * offered has an entry with its label, every released page is reached from
- * an entry or a page link that exists, each entry's `needs` matches its
+ * an entry, a page link that exists or a link a view's examples carry (for
+ * a page linked from a page the host serves), each entry's `needs` matches its
  * page's segments, and ids and groups do not change, since /go/<id> links
  * will name them. An entry that moved to a view keeps its id and its row,
  * checked here in VIEW_ROWS; the host checks the view itself.
@@ -12,7 +13,8 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Icon, NavGroup } from "@/lib/gui/contract";
+import type { Icon, Id, NavGroup } from "@/lib/gui/contract";
+import { DATA_KEYS } from "@/lib/gui/host/server/parse";
 import type { NavDef } from "@/lib/gui/surface";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
@@ -36,7 +38,6 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
   "community.communities": ["Communities", "operate", "communities", 30],
   "community.tenants": ["Tenants", "operate", "tenants", 50],
   "metering.devices": ["Edges & Devices", "operate", "devices", 60],
-  "billing.periods": ["Billing", "money", "billing", 10],
   "billing.tariff": ["Rate Schedule", "configure", "tariff", 10],
   "metering.data-source": ["OpenEMS Backend", "configure", "data-source", 20],
   "billing.invoice-branding": ["Invoice branding", "configure", "branding", 30],
@@ -54,6 +55,7 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
  */
 const VIEW_ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: number, view: string]> = {
   "metering.operations": ["Operations", "operate", "live", 40, "metering.site-day"],
+  "billing.periods": ["Billing", "money", "billing", 10, "billing.periods"],
   "tenant.home": ["My home", "operate", "tenants", 80, "tenant.home"],
 };
 
@@ -84,9 +86,12 @@ const pageFile = (pattern: string) => `${GUI}${pattern === "/" ? "" : pattern}/p
  * old bookmarks, since nothing links to it any more. `link` is the source
  * text that makes the claim true: it is in the last file of `via`, and each
  * file from the page's own page.tsx (the `from` page's, or for a redirect the
- * redirecting page's) imports the next.
+ * redirecting page's) imports the next. `fromView` is a contributed view
+ * whose examples carry a link to the page (a row's, a LinkRef's or an
+ * EntityRef's href), for a page linked from a page the host serves, which
+ * has no page.tsx to read.
  */
-type Reach = ({ from: string } | { redirectsTo: string }) & { via?: string[]; link: string };
+type Reach = (({ from: string } | { redirectsTo: string }) & { via?: string[]; link: string }) | { fromView: Id };
 const REACHED_IN_PAGE: Record<string, Reach> = {
   "/organizations/[id]": { from: "/organizations", link: "href={`/organizations/${org.id}`}" },
   "/organizations/[id]/email": { from: "/organizations/[id]", link: "href={`/organizations/${id}/email`}" },
@@ -109,11 +114,7 @@ const REACHED_IN_PAGE: Record<string, Reach> = {
     from: "/microgrids/[id]/setup/edges",
     link: "href={`/microgrids/${id}/setup/edges/shared`}",
   },
-  "/microgrids/[id]/billing/[periodId]": {
-    from: "/microgrids/[id]/billing",
-    via: ["src/components/BillingPeriodList.tsx"],
-    link: "href={`/microgrids/${microgridId}/billing/${period.id}`}",
-  },
+  "/microgrids/[id]/billing/[periodId]": { fromView: "billing.periods" },
   "/communities/[id]/payment": {
     from: "/microgrids/[id]/billing/[periodId]",
     via: ["src/components/BillingTable.tsx"],
@@ -167,6 +168,37 @@ async function viewNav(): Promise<(ViewEntry & { path: string })[]> {
   });
 }
 
+/** A contributed view's definition, by id. */
+async function contributed(id: Id) {
+  const view = (await getMgmRuntime()).mgmSurface.snapshot().views.find((v) => v.def.id === id);
+  if (!view) throw new Error(`no plugin contributes ${id}`);
+  return view.def;
+}
+
+/**
+ * Every href in a model outside its data subtrees, as the host reads links
+ * (DATA_KEYS in src/lib/gui/host/server/parse.ts) and as parity.test.ts
+ * finds a link row's href.
+ */
+function hrefsOf(value: unknown, out: string[] = []): string[] {
+  if (Array.isArray(value)) value.forEach((item) => hrefsOf(item, out));
+  else if (value !== null && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (typeof o.href === "string") out.push(o.href);
+    for (const [key, child] of Object.entries(o)) if (!DATA_KEYS.has(key)) hrefsOf(child, out);
+  }
+  return out;
+}
+
+/** A page path as a pattern: each [segment] any one segment, any query or fragment allowed. */
+function pagePattern(page: string): RegExp {
+  const body = page
+    .split("/")
+    .map((s) => (/^\[.+\]$/.test(s) ? "[^/?#]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    .join("/");
+  return new RegExp(`^${body}(?:[?#].*)?$`);
+}
+
 const fill = (pattern: string) => pattern.replace(/\[[^\]]+\]/g, "x");
 
 afterAll(() => resetMgmRuntimeForTests());
@@ -195,7 +227,8 @@ describe("legacy navigation", () => {
   });
 
   it("reaches every released catalog page from a nav entry or a page link", async () => {
-    const hrefs = new Set<string>((await legacyNav()).map((e) => e.def.href));
+    // A view entry's link goes to the path of the view it names.
+    const hrefs = new Set<string>([...(await legacyNav()).map((e) => e.def.href), ...(await viewNav()).map((e) => e.path)]);
     // A page a view serves is reached through the views it is attached to or
     // linked from, which the host lists, not through a page file.
     const released = MGM_BUNDLED_PLUGINS.flatMap((p) => p.pages.filter((page) => page.servedBy === undefined).map((page) => page.path)).filter(
@@ -210,13 +243,19 @@ describe("legacy navigation", () => {
         expect(hops, `${start} does not lead back to a nav entry`).toBeLessThan(5);
         const via = REACHED_IN_PAGE[at];
         expect(via, `${at} is neither a nav entry nor reached in a page`).toBeDefined();
-        at = "from" in via ? via.from : via.redirectsTo;
+        at = "fromView" in via ? (await contributed(via.fromView)).path : "from" in via ? via.from : via.redirectsTo;
       }
     }
   });
 
-  it("finds each in-page link REACHED_IN_PAGE names, on the page it names", () => {
+  it("finds each in-page link REACHED_IN_PAGE names, on the page it names", async () => {
     for (const [target, reach] of Object.entries(REACHED_IN_PAGE)) {
+      if ("fromView" in reach) {
+        const view = await contributed(reach.fromView);
+        const links = view.examples.flatMap((example) => hrefsOf(example));
+        expect(links.some((href) => pagePattern(target).test(href)), `${target}: no link to it in ${reach.fromView}'s examples`).toBe(true);
+        continue;
+      }
       const chain = [pageFile("from" in reach ? reach.from : target), ...(reach.via ?? [])];
       for (let i = 1; i < chain.length; i++) {
         const [file, next] = [chain[i - 1], chain[i]];

@@ -66,8 +66,6 @@ const PENDING = new Set<string>([
   // Unscheduled: the host hides a disabled plugin's tab and disables its
   // actions, which the routes accept while Payments is off (parity.ts).
   "payments-while-off",
-  // Serve the billing pages through the GUI host
-  "billing-tab",
 ]);
 
 /**
@@ -79,11 +77,11 @@ const PENDING = new Set<string>([
 const LEGACY_SCREENS = [
   "src/components/BillingTable.tsx",
   "src/components/BillingPeriodList.tsx",
-  "src/app/(gui)/microgrids/[id]/billing/page.tsx",
   "src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx",
-  // …/[periodId]/history/page.tsx left with "Serve the billing pages through
-  // the GUI host": no row of the period-history screen was pending, and the
-  // billing.period-history view serves its URL.
+  // billing/page.tsx and …/[periodId]/history/page.tsx left with "Serve the
+  // billing pages through the GUI host": no row of the periods or
+  // period-history screen was pending, and the billing.periods and
+  // billing.period-history views serve their URLs.
 ];
 
 /**

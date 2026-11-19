@@ -1,10 +1,10 @@
 import "server-only";
 
 /**
- * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation to
- * its pages, which are served outside the GUI contract (`legacy: true`), with
- * the labels the current chrome uses; a microgrid's billing periods as the
- * `billing.periods` view, with creating a period and deleting a draft; one
+ * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation,
+ * with the labels the current chrome uses, to its billing periods view and
+ * to its pages served outside the GUI contract (`legacy: true`); a
+ * microgrid's billing periods as the `billing.periods` view, with creating a period and deleting a draft; one
  * period's bills as the `billing.period-review` view, with the actions on
  * each bill (generating them is contributed but offered nowhere yet, below);
  * one period's audit history as the `billing.period-history` view, reached
@@ -18,14 +18,18 @@ import "server-only";
  * counts. A page that moves to a view keeps its nav id.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
- * have the Billing pages' own paths. The catalog serves the history's path
- * by its view (`servedBy: "view"`) and the host's catch-all renders it; the
- * periods list and the review are still the legacy pages, so those two
- * views are reached through GET /api/gui/view until #201's "Serve the
- * billing pages through the GUI host" moves them. `billing.close-checklist`
+ * have the Billing pages' own paths. The catalog serves the periods list's
+ * and the history's paths by their views (`servedBy: "view"`), so the
+ * host's catch-all renders them, and the Billing nav entry opens
+ * `billing.periods`. A period's review is still its legacy page
+ * (BillingTable): it keeps controls no interface can replace yet (generating
+ * bills, the link to the community's Payment page, payment history while
+ * Payments is off), so parity.test.ts keeps its URL there while those rows
+ * of src/lib/billing/parity.ts are pending, and `billing.period-review` is
+ * reached through GET /api/gui/view until they clear. `billing.close-checklist`
  * and `billing.send-queue` are new pages (…/[periodId]/close and
  * …/[periodId]/send) with no page.tsx, so the catalog marks them
- * `servedBy: "view"` and the host's catch-all serves them now.
+ * `servedBy: "view"` and the host's catch-all serves them.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -97,15 +101,14 @@ import { GRID_TARIFF_ADD_ACTION, SAVINGS_EXT_SCHEMA, SAVINGS_KEYS, SAVINGS_SETTI
 export const BILLING_SURFACE: Contribution = {
   plugin: BILLING_PLUGIN_NAME,
   nav: [
+    // Opens the billing.periods view, which serves the Billing pages' own path.
     {
       id: "billing.periods",
       title: "Billing",
       icon: "billing",
       group: "money",
       order: 10,
-      href: "/microgrids/[id]/billing",
-      needs: ["microgrid"],
-      legacy: true,
+      view: "billing.periods",
     },
     {
       id: "billing.tariff",
@@ -252,10 +255,11 @@ export const BILLING_SURFACE: Contribution = {
   // replacing the row, revisit.
   actions: [
     // Human-only, as no assistant proposes a period yet (#201).
-    // `targeted: false`: offered only by billing.periods. Appended to another
-    // plugin's view of the microgrid (metering.site-day) it would open an
-    // empty date form there. Revisit when the billing pages are served
-    // through the GUI host.
+    // `targeted: false`: offered only by billing.periods, which the host now
+    // serves at the Billing path. Appended to another plugin's view of the
+    // microgrid (metering.site-day) it would open an empty date form there,
+    // away from the periods it adds to. If the host's prepare comes to
+    // supply starting dates, revisit.
     {
       ...CREATE_PERIOD_ACTION,
       target: "microgrid",
@@ -292,8 +296,10 @@ export const BILLING_SURFACE: Contribution = {
     // ClosePeriodBody's `confirmation`, which no form shows.
     // `targeted: false`: offered only on the close checklist's last step,
     // after the steps that explain its warnings. Appended to another
-    // plugin's view of a period it would offer Close out of that context.
-    // Revisit when the billing pages are served through the GUI host.
+    // plugin's view of a period (payments.bill-attempts, say) it would offer
+    // Close out of that context; serving the billing pages through the host
+    // does not change that. If the checklist's explanations move into the
+    // ceremony itself, revisit.
     {
       ...CLOSE_PERIOD_ACTION,
       target: "billingPeriod",

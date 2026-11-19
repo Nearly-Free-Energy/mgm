@@ -5,17 +5,25 @@
  * The legacy screens are the periods list (BillingPeriodList.tsx), the
  * period review (BillingTable.tsx and the menus, panels and dialogs it
  * renders) and the period history page, under
- * src/app/(gui)/microgrids/[id]/billing/. #201 keeps them mounted until
- * every row here is contributed, then deletes them; parity.test.ts fails
+ * src/app/(gui)/microgrids/[id]/billing/. A screen's URL moves to the GUI
+ * host only once none of its rows is pending, and the legacy components are
+ * deleted only once no row is; parity.test.ts enforces both, and fails
  * while a row has no contribution and is not listed as pending there, so a
- * control cannot be lost on the way.
+ * control cannot be lost on the way. Since "Serve the billing pages through
+ * the GUI host" the host serves the periods list and the history (their
+ * page.tsx files are gone); the review keeps its page.tsx until
+ * generate-bills, payment-setup and payments-while-off are decided, and
+ * BillingPeriodList, AuditLogList and BillingTable stay until the Deletes
+ * pull request.
  *
  * Out of the table, on purpose:
  *  - The rest of the microgrid layout's chrome on these pages (the
  *    Operations and Setup tabs, the breadcrumb, Edit microgrid and the
- *    timezone nudge): it belongs to the microgrid pages and stays. The
- *    Billing tab is billing's sub-navigation, which #201's Deletes item
- *    removes, so it is a row (billing-tab).
+ *    timezone nudge): it belongs to the microgrid pages. The host serves the
+ *    periods list and the history outside that layout, so they show the
+ *    GUI's own dock and trail instead; the chrome stays on Setup and on a
+ *    period's review. The Billing tab is billing's sub-navigation, which
+ *    #201's Deletes item removes, so it is a row (billing-tab).
  *  - Controls that only change what is on screen (opening the pre-flight
  *    panel, the create form, a dialog, a period picker's list) and the fields
  *    inside a form: they are the form of the action their submit maps to.
@@ -187,7 +195,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/app/(gui)/microgrids/[id]/tab-nav.tsx",
     replacedBy: { kind: "nav", nav: "billing.periods" },
     pr: SERVE,
-    note: "Today the nav entry is legacy: true and points at the legacy page; it is contributed when it opens the view.",
+    note: "The nav entry opens the billing.periods view, which the host serves at the Billing tab's own path, so the tab lands on it too.",
   },
 
   // ── Period review ─────────────────────────────────────────────────────────

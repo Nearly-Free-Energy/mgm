@@ -84,7 +84,6 @@ const CURRENT_APP: Record<string, Id | null> = {
   "/microgrids/[id]/setup/edges/[edgeId]": "metering.devices",
   "/microgrids/[id]/setup/edges/shared": "metering.devices",
   "/microgrids/[id]/setup/openems-backend": "metering.data-source",
-  "/microgrids/[id]/billing": "billing.periods",
   "/microgrids/[id]/billing/[periodId]": "billing.periods",
   "/microgrids/[id]/setup/rates": "billing.tariff",
   "/communities/[id]/invoice": "billing.invoice-branding",
@@ -142,6 +141,7 @@ describe("legacyView on every catalog page", () => {
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+      "/microgrids/[id]/billing": ["billing.periods", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/history": ["billing.period-history", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/close": ["billing.close-checklist", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/send": ["billing.send-queue", "billing.periods"],
@@ -208,7 +208,7 @@ describe("legacyView trails", () => {
   });
 
   it("titles a page with no current app by its last crumb", () => {
-    const view = legacyView(`/microgrids/${MICROGRID}/billing`, { org: { ...MANIFEST.org, nav: [] } })!;
+    const view = legacyView(`/microgrids/${MICROGRID}/setup/rates`, { org: { ...MANIFEST.org, nav: [] } })!;
     expect(view.nav).toBeNull();
     expect(view.title).toBe("Kasana East");
   });
@@ -234,11 +234,11 @@ describe("legacyView trails", () => {
   });
 
   it("decodes percent-encoded segments", () => {
-    const encoded = `/microgrids/%${MICROGRID.charCodeAt(0).toString(16)}${MICROGRID.slice(1)}/billing`;
+    const encoded = `/microgrids/%${MICROGRID.charCodeAt(0).toString(16)}${MICROGRID.slice(1)}/setup/rates`;
     expect(legacyView(encoded, MANIFEST)!.scope.microgrid?.id).toBe(MICROGRID);
     expect(entityFromPath(encoded)).toEqual({ kind: "microgrid", id: MICROGRID });
-    expect(legacyView("/microgrids/%E0%A4%A/billing", MANIFEST)).toBeNull();
-    expect(entityFromPath("/microgrids/%E0%A4%A/billing")).toBeNull();
+    expect(legacyView("/microgrids/%E0%A4%A/setup/rates", MANIFEST)).toBeNull();
+    expect(entityFromPath("/microgrids/%E0%A4%A/setup/rates")).toBeNull();
   });
 });
 
@@ -261,16 +261,16 @@ describe("legacyView on an untrusted path", () => {
   });
 
   it("labels nothing the manifest does not hold, and says the path is unplaced", () => {
-    const view = legacyView(`/microgrids/${STRANGER}/billing`, MANIFEST)!;
+    const view = legacyView(`/microgrids/${STRANGER}/setup/rates`, MANIFEST)!;
     expect(view.unplaced).toBe(true);
-    expect(view.nav).toBe("billing.periods");
+    expect(view.nav).toBe("billing.tariff");
     expect(view.scope).toEqual({ organization: expect.objectContaining({ id: ORG }) });
     expect(view.trail).toEqual([{ label: "Org One", href: `/organizations/${ORG}` }]);
     expect(JSON.stringify(view)).not.toContain(STRANGER);
   });
 
   it("matches a path id only against places of the kind its segment names", () => {
-    const view = legacyView(`/microgrids/${COMMUNITY}/billing`, MANIFEST)!;
+    const view = legacyView(`/microgrids/${COMMUNITY}/setup/rates`, MANIFEST)!;
     expect(view.unplaced).toBe(true);
     expect(view.scope.microgrid).toBeUndefined();
     expect(view.trail).toEqual([{ label: "Org One", href: `/organizations/${ORG}` }]);
@@ -284,7 +284,7 @@ describe("legacyView on an untrusted path", () => {
   });
 
   it("keeps an encoded slash inside one id, which matches no place", () => {
-    const view = legacyView("/microgrids/..%2F..%2Fapi%2Fx/billing", MANIFEST)!;
+    const view = legacyView("/microgrids/..%2F..%2Fapi%2Fx/setup/rates", MANIFEST)!;
     expect(view.unplaced).toBe(true);
     expect(JSON.stringify(view)).not.toContain("api");
   });
@@ -300,7 +300,7 @@ describe("legacyView on an untrusted path", () => {
 
 describe("resolveLegacyView", () => {
   it("is legacyView on a catalog page served outside the contract", () => {
-    const path = `/microgrids/${MICROGRID}/billing`;
+    const path = `/microgrids/${MICROGRID}/setup/rates`;
     expect(resolveLegacyView(path, MANIFEST)).toEqual(legacyView(path, MANIFEST));
   });
 
@@ -423,7 +423,7 @@ describe("a tenant manifest (RFC mgm#197 § 4)", () => {
   it("shows the unit alone on any other path, and labels no staff place", () => {
     const m = tenantManifest([{ id: UNIT_A, label: "Grace Namata" }]);
     expect(resolveLegacyView("/no-such-page", m)).toMatchObject({ title: "Grace Namata", trail: [{ label: "Grace Namata", href: "/my" }] });
-    const staffPage = legacyView(`/microgrids/${MICROGRID}/billing`, m)!;
+    const staffPage = legacyView(`/microgrids/${MICROGRID}/setup/rates`, m)!;
     expect(staffPage).toMatchObject({ nav: null, unplaced: true });
     expect(staffPage.scope.microgrid).toBeUndefined();
   });

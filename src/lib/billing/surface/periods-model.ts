@@ -4,8 +4,9 @@
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here. The columns and empty-state copy are the legacy
- * periods list's (src/components/BillingPeriodList.tsx and the billing page
- * that loads it), so the two show the same thing while both are served.
+ * periods list's (src/components/BillingPeriodList.tsx), which this view
+ * replaced at the Billing path; the component stays until #201's Deletes
+ * pull request.
  */
 import type { Fmt, LoadedModel } from "@/lib/gui/surface";
 
@@ -41,7 +42,8 @@ type Row = LoadedModel<"collection">["body"]["rows"][number];
 export function buildPeriodsModel({ microgridId, currency, periods, fmt }: PeriodsModelInput): LoadedModel<"collection"> {
   // No prefill on create: CreatePeriodBody is refined, so the host cannot
   // check one and would drop it (cleanPrefill in src/lib/gui/host/server/merge.ts).
-  // The form opens empty; the legacy page starts it at the previous month.
+  // The form opens empty; the legacy list (BillingPeriodList) started it at
+  // the previous month.
   const create = { action: CREATE_PERIOD_ACTION.id, params: { microgrid_id: microgridId } };
   const rows: Row[] = periods.map((p) => {
     // As the host labels a billing period (src/lib/gui/host/server/entities.ts).
