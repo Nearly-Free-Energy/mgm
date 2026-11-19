@@ -1,0 +1,434 @@
+/**
+ * Gridtop's renderer for `billing.period-review@1`: when Gridtop picks it,
+ * the copy table and the cards, what a copy writes and announces, the
+ * keyboard, the controls, the empty state, the live refresh, and that inside
+ * the shell nothing is drawn twice. The view's own examples go through
+ * src/lib/gui/__tests__/view-examples.test.tsx.
+ */
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ModelView, checkModel, loadLazyRenderers, renderInKit, renderShell, withPoke, type Recorded } from "@/lib/gui/conformance";
+import type { ActionRef, ActionResult, GuiKit, LiveState, ViewModel, ViewProps, ViewState } from "@/lib/gui/contract";
+import { kit } from "@/lib/gui/kit";
+import { GridtopGui } from "../../..";
+import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__/places-fixture";
+import { GRIDTOP_RENDERERS, drawnBespoke } from "../..";
+import { COPY_FAILED, copyFigure } from "../copy";
+import { readPeriodReviewExt } from "../ext";
+import PeriodReviewView from "../view";
+import {
+  BILLING_OFF,
+  COPY_KEYS,
+  EXPORT,
+  GENERATE,
+  HISTORY,
+  MARK_PAID,
+  REFRESH,
+  TENANTS,
+  TOTALS,
+  TOTAL_FIGURES,
+  billId,
+  billingOffModel,
+  closedModel,
+  draftModel,
+  noBillsModel,
+  noTenantsModel,
+  pdf,
+  tenantHref,
+  versioned,
+  withFigures,
+} from "./period-review-fixture";
+
+let unmount: (() => void) | null = null;
+afterEach(() => {
+  unmount?.();
+  unmount = null;
+  vi.restoreAllMocks();
+  Reflect.deleteProperty(navigator, "clipboard");
+});
+
+async function draw(model: ViewModel, use: GuiKit = kit): Promise<Recorded> {
+  const rendered = await renderInKit(<PeriodReviewView model={model} kit={use} />);
+  unmount = rendered.unmount;
+  return rendered.log;
+}
+const said = () => document.querySelector("[aria-live='polite']")?.textContent ?? "";
+const region = () => screen.getByRole("region", { name: /^Bills, / });
+const cards = () => screen.getByRole("list", { name: "Bills" });
+const tableRow = (i: number) => within(region()).getAllByRole("row")[i + 1];
+const clipboard = () => {
+  const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  return writeText;
+};
+const key = (k: string, o: Record<string, unknown> = {}) => fireEvent.keyDown(region(), { key: k, ...o });
+const FAILED: ActionResult = { type: "result", ok: false, status: 500, code: "failed", message: "Could not mark the bill paid." };
+const CANCELLED: ActionResult = { type: "result", ok: false, status: 0, code: "cancelled", message: "Cancelled" };
+
+describe("Gridtop's period-review renderer: choosing it", () => {
+  it("is registered for version 1 in the table the window bar checks, which marks it as placing its own controls", () => {
+    expect(GRIDTOP_RENDERERS["billing.period-review"].reads).toEqual([1]);
+    expect(drawnBespoke(draftModel())).toBe(true);
+    expect(drawnBespoke(versioned("billing.period-review@2"))).toBe(false);
+    expect(drawnBespoke({ ...draftModel(), ext: undefined })).toBe(false);
+  });
+
+  it("draws version 1 itself, once its chunk loads, and leaves @2 or no ext to the kit's view", async () => {
+    unmount = (await renderInKit(<ModelView gui={GridtopGui} model={draftModel()} />)).unmount;
+    await waitFor(() => expect(document.querySelector("[data-period-review]")).not.toBeNull());
+    unmount();
+    for (const model of [versioned("billing.period-review@2"), { ...draftModel(), ext: undefined }]) {
+      unmount = (await renderInKit(<ModelView gui={GridtopGui} model={model} />)).unmount;
+      expect(document.querySelector("[data-period-review]")).toBeNull();
+      expect(document.querySelector("[data-gui-kind='collection']")).not.toBeNull();
+      unmount();
+    }
+    unmount = null;
+  });
+
+  it("reads the figures as the server sends them", () => {
+    expect(readPeriodReviewExt(draftModel())).toMatchObject({ columns: COPY_KEYS, totals: TOTAL_FIGURES });
+    expect(readPeriodReviewExt(draftModel())!.rows.map((r) => r.id)).toEqual([0, 1, 2].map(billId));
+    expect(readPeriodReviewExt(noBillsModel())).toEqual({ columns: COPY_KEYS, rows: [], totals: [] });
+  });
+
+  it.each([
+    ["columns that are not the copy columns", { columns: [...COPY_KEYS].reverse() }],
+    ["a row that is not the model's", { rows: [{ id: "other", figures: Array(8).fill(null) }, ...(draftModel().ext!.data as { rows: unknown[] }).rows.slice(1)] }],
+    ["a row with too few figures", { rows: [0, 1, 2].map((i) => ({ id: billId(i), figures: ["1"] })) }],
+    ["a grouped figure", { totals: [...TOTAL_FIGURES.slice(0, -1), "4,216,800"] }],
+    ["no totals while the model has some", { totals: [] }],
+    ["data that is not an object", [1, 2]],
+  ])("draws a model with %s with the kit's view", async (_, patch) => {
+    const model = withFigures(patch as never);
+    expect(readPeriodReviewExt(model)).toBeNull();
+    await draw(model);
+    expect(document.querySelector("[data-period-review]")).toBeNull();
+    expect(document.querySelector("[data-gui-kind='collection']")).not.toBeNull();
+  });
+});
+
+describe("Gridtop's period-review renderer: drawing", () => {
+  beforeAll(async () => {
+    await loadLazyRenderers(GridtopGui, [draftModel()]);
+  }, 30_000);
+
+  it.each([
+    ["a draft with bills", draftModel],
+    ["a closed period", closedModel],
+    ["a draft with no bills", noBillsModel],
+    ["no tenants", noTenantsModel],
+    ["billing off", billingOffModel],
+  ])("passes the conformance view checks, with acme.poke offered: %s", async (name, model) => {
+    expect(await checkModel(GridtopGui, withPoke(model()), name)).toEqual([]);
+  }, 60_000);
+
+  it("draws the bills as a table, with the tenant as each row's header, and as cards, each tenant linked to its page", async () => {
+    await draw(draftModel());
+    const headers = within(region()).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual([...draftModel().body.columns.map((c) => c.label), "Actions"]);
+    expect(within(region()).getAllByRole("rowheader").map((h) => h.textContent)).toEqual([...TENANTS]);
+    expect(within(cards()).getAllByRole("listitem").filter((li) => li.parentElement === cards())).toHaveLength(3);
+    for (const [i, name] of TENANTS.entries()) {
+      expect(screen.getAllByRole("link", { name }).map((a) => a.getAttribute("href"))).toEqual([tenantHref(i), tenantHref(i)]);
+    }
+    // The table sits in a sideways-scrolling box of its own, shown from 600 px; the cards below it.
+    expect(region().className).toContain("gt:overflow-x-auto");
+    expect(region().parentElement!.className).toContain("gt:medium:block");
+    expect(cards().parentElement!.className).toContain("gt:medium:hidden");
+  });
+
+  it("prints a bare figure without its currency, which the header names", async () => {
+    await draw(draftModel());
+    expect(within(region()).getByRole("columnheader", { name: "Total (UGX)" })).toBeTruthy();
+    const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
+    expect(cell.textContent).toBe("55,875");
+    const button = within(cards()).getByRole("button", { name: "Copy Total (UGX), Aisha M., 55,875" });
+    expect(button.textContent).toBe("55,875");
+    expect(within(cards()).getAllByText("Total (UGX)")).toHaveLength(3);
+  });
+
+  it("draws the totals once, below the table and the cards, never as a row", async () => {
+    await draw(draftModel());
+    const totals = document.querySelector<HTMLElement>("[data-totals]")!;
+    for (const before of [region(), cards()]) expect(before.compareDocumentPosition(totals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(totals).getByText("83,626")).toBeTruthy();
+    expect(within(region()).queryByText("83,626")).toBeNull();
+    expect([...document.querySelectorAll("tr")].some((tr) => tr.textContent?.includes("83,626"))).toBe(false);
+    // begin and end have no total.
+    expect(within(totals).queryByText("Begin (kWh)")).toBeNull();
+  });
+
+  it("shows the host's notice, and why each action is unavailable, tied to its button", async () => {
+    const log = await draw(billingOffModel());
+    expect(screen.getAllByText(BILLING_OFF).length).toBeGreaterThan(1);
+    for (const button of [screen.getByRole("button", { name: "Refresh readings" }), ...within(tableRow(0)).getAllByRole("button", { name: "Mark as paid" })]) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(document.getElementById(button.getAttribute("aria-describedby")!)?.textContent).toBe(BILLING_OFF);
+      await act(async () => fireEvent.click(button));
+    }
+    expect(log.act).toEqual([]);
+  });
+
+  it("uses token colour classes only, Gridtop's prefix on every class, and a 44 px touch height on every link and disclosure", async () => {
+    const palette = /\b(?:bg|text|fill|stroke|border)-(?:red|blue|green|gray|slate|zinc|amber|orange|yellow|emerald)-\d/;
+    for (const model of [draftModel(), billingOffModel(), noBillsModel(), noTenantsModel()]) {
+      await draw(model);
+      expect(document.body.innerHTML).not.toMatch(palette);
+      for (const el of document.querySelectorAll("[class]")) {
+        for (const name of el.getAttribute("class")!.split(/\s+/).filter(Boolean)) expect(name.startsWith("gt:"), name).toBe(true);
+      }
+      for (const el of document.querySelectorAll("a, summary")) expect(el.className, el.textContent ?? "").toMatch(/gt:pointer-coarse:(min-)?h-11/);
+      unmount?.();
+    }
+    unmount = null;
+  });
+});
+
+describe("Gridtop's period-review renderer: copying", () => {
+  it("copies the figure as the CSV writes it from a table cell, and says what it copied", async () => {
+    const writeText = clipboard();
+    await draw(draftModel());
+    const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
+    await act(async () => fireEvent.click(cell));
+    expect(writeText).toHaveBeenCalledWith("55875");
+    expect(said()).toBe("Total (UGX), Aisha M., copied 55875");
+    expect(cell.textContent).toBe("55,875✓");
+    // A kWh figure is copied to 3 decimals, though it shows 1.
+    await act(async () => fireEvent.click(within(tableRow(0)).getByText("84.5").closest("td")!));
+    expect(writeText).toHaveBeenLastCalledWith("84.512");
+    expect(said()).toBe("Usage (kWh), Aisha M., copied 84.512");
+  });
+
+  it("copies from a card and from the totals", async () => {
+    const writeText = clipboard();
+    await draw(draftModel());
+    await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Total (UGX), Aisha M., 55,875" })));
+    expect(writeText).toHaveBeenLastCalledWith("55875");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy total Total (UGX), 83,626" })));
+    expect(writeText).toHaveBeenLastCalledWith("83626");
+    expect(said()).toBe("Total Total (UGX), copied 83626");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy total Usage (kWh), 126.5" })));
+    expect(writeText).toHaveBeenLastCalledWith("126.512");
+  });
+
+  it("offers no copy for an empty cell", async () => {
+    const writeText = clipboard();
+    await draw(draftModel());
+    // 8 figures, 4 and 8: Brian K. has no end, usage or second tier.
+    expect(region().querySelectorAll("td[data-copy]")).toHaveLength(20);
+    const usage = within(tableRow(1)).getAllByRole("cell")[2];
+    expect(usage.textContent).toBe("—");
+    expect(usage.hasAttribute("data-copy")).toBe(false);
+    await act(async () => fireEvent.click(usage));
+    expect(writeText).not.toHaveBeenCalled();
+    expect(within(cards()).queryByRole("button", { name: /^Copy Usage \(kWh\), Brian K\./ })).toBeNull();
+  });
+
+  it("says so when there is no clipboard, and marks nothing copied", async () => {
+    await draw(draftModel());
+    const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
+    await act(async () => fireEvent.click(cell));
+    expect(said()).toBe(COPY_FAILED);
+    expect(document.body.textContent).not.toContain("✓");
+    expect(await copyFigure("1")).toBe(false);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => Promise.reject(new Error("denied")) }, configurable: true });
+    const error = vi.spyOn(console, "error");
+    expect(await copyFigure("1")).toBe(false);
+    expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gridtop's period-review renderer: the keyboard", () => {
+  it("moves over the figures only, skipping the tenant, the statuses, the text and the empty cells", async () => {
+    clipboard();
+    await draw(draftModel());
+    act(() => region().focus());
+    key("ArrowRight");
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    key("ArrowDown");
+    expect(said()).toBe("End (kWh), Carol N., 542.0");
+    key("ArrowUp");
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    key("ArrowLeft");
+    key("ArrowLeft");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    for (let i = 0; i < 10; i++) key("ArrowRight");
+    // The last figure is the total: past it are the statuses and the text.
+    expect(said()).toBe("Total (UGX), Aisha M., 55,875");
+    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("55,875");
+  });
+
+  it("goes to the ends with Home and End, ten rows with Page Up and Down, and down the columns with Tab", async () => {
+    clipboard();
+    await draw(draftModel());
+    act(() => region().focus());
+    key("End");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    key("Home");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    key("PageDown");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    key("PageUp");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    key("End", { ctrlKey: true });
+    expect(said()).toBe("Total (UGX), Carol N., 24,000");
+    key("Home", { metaKey: true });
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    key("Tab");
+    key("Tab");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    key("Tab");
+    // Brian K. has no end reading.
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    key("Tab", { shiftKey: true });
+    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+  });
+
+  it("copies with Enter, Space or C and moves on, and says where the table ends", async () => {
+    const writeText = clipboard();
+    await draw(draftModel());
+    act(() => region().focus());
+    await act(async () => key("Enter"));
+    expect(writeText).toHaveBeenLastCalledWith("1200");
+    expect(said()).toBe("Begin (kWh), Aisha M., copied 1200. Next: Begin (kWh), Brian K., 310.0");
+    await act(async () => key(" "));
+    expect(writeText).toHaveBeenLastCalledWith("310");
+    await act(async () => key("c"));
+    expect(writeText).toHaveBeenLastCalledWith("500");
+    // From the bottom of a column to the top of the next.
+    expect(said()).toBe("Begin (kWh), Carol N., copied 500. Next: End (kWh), Aisha M., 1,284.5");
+    key("End", { ctrlKey: true });
+    await act(async () => key("C"));
+    expect(writeText).toHaveBeenLastCalledWith("24000");
+    expect(said()).toBe("Total (UGX), Carol N., copied 24000. End of table");
+    // A copy shortcut with a modifier is the browser's.
+    await act(async () => key("c", { ctrlKey: true }));
+    expect(writeText).toHaveBeenCalledTimes(4);
+  });
+
+  it("lets Tab leave past the last figure and Shift+Tab before the first, and Escape leave at any time", async () => {
+    clipboard();
+    await draw(draftModel());
+    act(() => region().focus());
+    expect(key("Tab", { shiftKey: true })).toBe(true);
+    key("End", { ctrlKey: true });
+    expect(key("Tab")).toBe(true);
+    expect(key("ArrowDown")).toBe(false);
+    key("Escape");
+    expect(document.activeElement).not.toBe(region());
+  });
+
+  it("leaves a key pressed on a control inside the table to that control", async () => {
+    await draw(draftModel());
+    act(() => region().focus());
+    const summary = within(tableRow(0)).getByText("Actions");
+    expect(fireEvent.keyDown(summary, { key: "Enter" })).toBe(true);
+    expect(said()).toBe("");
+  });
+});
+
+describe("Gridtop's period-review renderer: the controls", () => {
+  it("calls nothing on mount, and acts with the very ref the model gave", async () => {
+    const poked = withPoke(draftModel());
+    const log = await draw(poked);
+    expect(log.act).toEqual([]);
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("button", { name: "Mark as paid" })));
+    expect(log.act).toEqual([MARK_PAID(0)]);
+    // Each bill's disclosure is named for its tenant.
+    expect(within(tableRow(0)).getByText("Actions").getAttribute("aria-label")).toBe("Actions for Aisha M.");
+  });
+
+  it("shows a failed action's message, and nothing when the person cancels", async () => {
+    await draw(draftModel(), { ...kit, act: vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => FAILED) });
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("button", { name: "Mark as paid" })));
+    expect(within(tableRow(0)).getByRole("alert").textContent).toBe(FAILED.message);
+    unmount?.();
+    await draw(draftModel(), { ...kit, act: vi.fn<(ref: ActionRef) => Promise<ActionResult>>(async () => CANCELLED) });
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("button", { name: "Mark as paid" })));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("opens a download through kit.open, and a page through a link", async () => {
+    const log = await draw(draftModel());
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Export CSV" })));
+    await act(async () => fireEvent.click(within(tableRow(0)).getByRole("link", { name: "Download bill (PDF)" })));
+    expect(log.open).toEqual([EXPORT, pdf(0)]);
+    const history = screen.getAllByRole("link", { name: "View history" }).map((a) => a.getAttribute("href"));
+    expect(history.filter((h) => h === HISTORY.href)).toHaveLength(1);
+    expect(history).toContain(`${HISTORY.href}?tenant_id=${draftModel().body.rows[0].related![0].id}`);
+  });
+});
+
+describe("Gridtop's period-review renderer: the empty state", () => {
+  it("owns Generate at zero rows, with no table, cards or totals", async () => {
+    await draw(noBillsModel());
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("No billing data yet.");
+    expect(document.body.textContent).toContain("Generate bills to fetch meter readings and calculate costs.");
+    expect(screen.getAllByRole("button", { name: GENERATE.label })).toHaveLength(1);
+    expect(screen.queryByRole("region", { name: /^Bills, / })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Bills" })).toBeNull();
+    expect(document.querySelector("[data-totals]")).toBeNull();
+    expect(screen.getByRole("link", { name: "View history" }).getAttribute("href")).toBe(HISTORY.href);
+  });
+
+  it("offers no action where the empty state has none", async () => {
+    await draw(noTenantsModel());
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("No tenants configured for this microgrid.");
+    // Generate is the toolbar's here, since the empty state does not offer it.
+    expect(screen.getAllByRole("button", { name: GENERATE.label })).toHaveLength(1);
+  });
+});
+
+describe("Gridtop's period-review renderer: the live refresh", () => {
+  const liveOf = (model: ViewModel): LiveState => ({ model, ageSeconds: () => null, stale: () => false, polling: "on" });
+
+  it("draws the model the refresh returned", async () => {
+    const before = draftModel();
+    const after: ViewModel = {
+      ...before,
+      body: { ...before.body, totals: { ...TOTALS, total: { t: "money", v: 99999, currency: "UGX", text: "99,999" } } },
+      ext: { ...before.ext!, data: { ...(before.ext!.data as object), totals: [...TOTAL_FIGURES.slice(0, -1), "99999"] } },
+    };
+    const useLive = vi.fn<(model: ViewModel) => LiveState>(() => liveOf(after));
+    const writeText = clipboard();
+    await draw(before, { ...kit, useLive });
+    expect(useLive).toHaveBeenCalledWith(before);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy total Total (UGX), 99,999" })));
+    expect(writeText).toHaveBeenLastCalledWith("99999");
+  });
+
+  it("hands a refreshed model it cannot read to the kit's view, which does not poll again", async () => {
+    const KitView = vi.fn((props: ViewProps) => <kit.KitView {...props} />);
+    await draw(draftModel(), { ...kit, useLive: () => liveOf(withFigures({ columns: [] })), KitView });
+    expect(document.querySelector("[data-period-review]")).toBeNull();
+    expect(KitView).toHaveBeenCalled();
+    expect(KitView.mock.calls[0][0].model.live).toBeUndefined();
+  });
+});
+
+describe("Gridtop's window bar over the period review", () => {
+  const fixture = () =>
+    placesFixture({
+      pathname: `/microgrids/m1/billing/p1`,
+      initial: { view: "billing.period-review", title: "Billing", trail: EAST_TRAIL, tabs: [], scope: { organization: ORG, community: KASANA, microgrid: EAST } },
+    });
+  function withModel(model: ViewModel) {
+    const real = kit.useView;
+    vi.spyOn(kit, "useView").mockImplementation((): ViewState => ({ ...real(), model }));
+  }
+
+  it.each([
+    ["with bills", draftModel, REFRESH.label],
+    ["with no bills", noBillsModel, GENERATE.label],
+  ])("shows the title and leaves the period's actions and links to the renderer, so each is drawn once: %s", async (_, model, action) => {
+    withModel(model());
+    unmount = (await renderShell(GridtopGui, fixture(), <ModelView gui={GridtopGui} model={model()} />)).unmount;
+    await waitFor(() => expect(document.querySelector("[data-period-review]")).not.toBeNull());
+    const bar = document.querySelector<HTMLElement>("[data-window-bar]")!;
+    expect(bar.textContent).toContain("1 Nov 2026 – 30 Nov 2026");
+    expect(within(bar).queryByRole("button", { name: "Actions" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: action })).toHaveLength(1);
+    expect(screen.getAllByRole("link").filter((a) => a.getAttribute("href") === HISTORY.href)).toHaveLength(1);
+  });
+});
