@@ -317,10 +317,15 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's close checklist", (
     expect(await status(WARN)).toBe("draft");
   });
 
-  it("gives a tenant of the microgrid nothing", async () => {
+  it("gives a tenant of the microgrid nothing, and their close is refused", async () => {
     caller = tenantUser;
-    expect((await view(href(WARN))).status).toBe(404);
+    const res = await view(href(WARN));
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain("Close site");
     expect((await prepare(WARN)).status).toBe(404);
+    // The route's own reads, with the tenant's client, find no period.
+    expect((await postClose(WARN, {})).status).toBe(404);
+    expect(await status(WARN)).toBe("draft");
   });
 
   it("still loads while billing is off, with the gate's notice and Close disabled; prepare is refused", async () => {
