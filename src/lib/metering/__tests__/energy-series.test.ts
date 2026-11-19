@@ -88,7 +88,7 @@ describe("energySeriesAxis refuses a request no provider should read", () => {
     ["an unknown zone", { timezone: "Mars/OlympusMons" }],
     ["an offset in place of a zone", { timezone: "UTC+3" }],
     ["more hours than a week", { startDate: "2026-11-01", endDate: "2026-11-08" }],
-    ["more days than two months", { resolution: "day" as const, startDate: "2026-01-01", endDate: "2026-03-04" }],
+    ["more days than a month", { resolution: "day" as const, startDate: "2026-01-01", endDate: "2026-02-01" }],
   ])("with 400 METERING_INVALID_DATA for %s", (_label, overrides) => {
     const error = (() => {
       try {
@@ -102,10 +102,10 @@ describe("energySeriesAxis refuses a request no provider should read", () => {
   });
 
   it("accepts the longest range of each resolution", () => {
-    expect(ENERGY_SERIES_MAX_DAYS).toEqual({ day: 62, hour: 7 });
+    expect(ENERGY_SERIES_MAX_DAYS).toEqual({ day: 31, hour: 7 });
     expect(energySeriesAxis(request({ startDate: "2026-11-01", endDate: "2026-11-07" })).buckets).toHaveLength(7 * 24);
     expect(
-      energySeriesAxis(request({ resolution: "day", startDate: "2026-01-01", endDate: "2026-03-03" })).buckets
-    ).toHaveLength(62);
+      energySeriesAxis(request({ resolution: "day", startDate: "2026-01-01", endDate: "2026-01-31" })).buckets
+    ).toHaveLength(31);
   });
 });

@@ -14,6 +14,12 @@
  * reads X's device row, but the usage source reads edges only of A's
  * microgrid, so X is never sent to a provider and every day X is in force
  * has no data.
+ *
+ * Unit C has every link that is not its use (USAGE_METER_ROLE, as decided
+ * on mgm#210): a grid meter linked as its primary, a battery, and M, B's
+ * primary, linked to C as a secondary meter. Its only use is its own
+ * primary consumption meter, from 21 October, on /my as on /my/usage and
+ * /my/usage/day.
  * The capability's own database test (src/lib/tenant-app/__tests__/usage.db.test.ts)
  * checks the same facts below the host; this one checks them as the page
  * receives them, and that staff and another unit's tenant get nothing.
@@ -67,15 +73,21 @@ const METER = "e7800000-0000-4000-8004-000000000001";
 const METER_X = "e7800000-0000-4000-8004-000000000002";
 const UNIT_A = "e7800000-0000-4000-8005-000000000001";
 const UNIT_B = "e7800000-0000-4000-8005-000000000002";
+const UNIT_C = "e7800000-0000-4000-8005-000000000003";
+const GRID_METER = "e7800000-0000-4000-8004-000000000003";
+const BATTERY = "e7800000-0000-4000-8004-000000000004";
+const OWN_METER = "e7800000-0000-4000-8004-000000000005";
 const LINK_X = "e7800000-0000-4000-8006-000000000001";
 const EMAIL_A = "gui-tenant-usage-a@test.local";
 const EMAIL_B = "gui-tenant-usage-b@test.local";
+const EMAIL_C = "gui-tenant-usage-c@test.local";
 const EMAIL_MANAGER = "gui-tenant-usage-manager@test.local";
-const EMAILS = [EMAIL_A, EMAIL_B, EMAIL_MANAGER];
+const EMAILS = [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_MANAGER];
 const KAMPALA = "Africa/Kampala";
 
 let tenantA: TestUser;
 let tenantB: TestUser;
+let tenantC: TestUser;
 let manager: TestUser;
 
 const energySeries = vi.spyOn(FixtureMeteringProvider.prototype, "getDeviceEnergySeries");
@@ -124,11 +136,19 @@ beforeAll(async () => {
     ["edges", { id: OTHER_EDGE, microgrid_id: OTHER_MICROGRID, name: "Other edge", openems_edge_id: `SYNTHETIC-EDGE-${OTHER_MICROGRID}` }],
     ["devices", { id: METER, edge_id: EDGE, name: "Meter M", device_type: "consumption_meter", openems_component_id: "meter1" }],
     ["devices", { id: METER_X, edge_id: OTHER_EDGE, name: "Meter X", device_type: "consumption_meter", openems_component_id: "meter1" }],
+    ["devices", { id: GRID_METER, edge_id: EDGE, name: "Grid meter", device_type: "grid_meter", openems_component_id: "meter0" }],
+    ["devices", { id: BATTERY, edge_id: EDGE, name: "Battery", device_type: "battery", openems_component_id: "ess0" }],
+    ["devices", { id: OWN_METER, edge_id: EDGE, name: "Meter C", device_type: "consumption_meter", openems_component_id: "meter3" }],
     ["tenants", { id: UNIT_A, microgrid_id: MICROGRID, display_name: "Unit A", primary_phone: "+256700000001" }],
     ["tenants", { id: UNIT_B, microgrid_id: MICROGRID, display_name: "Unit B", primary_phone: "+256700000002" }],
+    ["tenants", { id: UNIT_C, microgrid_id: MICROGRID, display_name: "Unit C", primary_phone: "+256700000003" }],
     ["tenant_devices", { tenant_id: UNIT_A, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: "2026-09-15" }],
     ["tenant_devices", { tenant_id: UNIT_B, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
     ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: GRID_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: "2026-10-21" }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: BATTERY, role: "battery", effective_from: "2026-10-01", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: METER, role: "secondary_meter", effective_from: "2026-10-01", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_C, device_id: OWN_METER, role: "primary_consumption_meter", effective_from: "2026-10-21", effective_to: null }],
     // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts).
     ["mgm_plugins", { org_id: ORG, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }],
   ];
@@ -138,6 +158,7 @@ beforeAll(async () => {
   }
   tenantA = await createTestUser({ email: EMAIL_A, role: "tenant", scopeId: UNIT_A });
   tenantB = await createTestUser({ email: EMAIL_B, role: "tenant", scopeId: UNIT_B });
+  tenantC = await createTestUser({ email: EMAIL_C, role: "tenant", scopeId: UNIT_C });
   manager = await createTestUser({ email: EMAIL_MANAGER, role: "org_manager", scopeId: ORG });
 }, 60_000);
 
@@ -154,16 +175,16 @@ beforeEach(() => {
   energySeries.mockClear();
 });
 
-/** Meter M's generated figures, as the synthetic provider makes them for MICROGRID. */
-function generated(startDate: string, endDate: string, resolution: "day" | "hour") {
+/** A meter's generated figures (M's by default), as the synthetic provider makes them for MICROGRID. */
+function generated(startDate: string, endDate: string, resolution: "day" | "hour", meter = { id: METER, componentId: "meter1" }) {
   return generateDeviceEnergySeries({
     microgridId: MICROGRID,
-    devices: [{ id: METER, edgeOpenemsId: `SYNTHETIC-EDGE-${MICROGRID}`, componentId: "meter1" }],
+    devices: [{ id: meter.id, edgeOpenemsId: `SYNTHETIC-EDGE-${MICROGRID}`, componentId: meter.componentId }],
     startDate,
     endDate,
     resolution,
     timezone: KAMPALA,
-  }).kwh[METER];
+  }).kwh[meter.id];
 }
 
 const september = Array.from({ length: 30 }, (_, i) => addDaysToDateKey("2026-09-01", i));
@@ -236,6 +257,37 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a tenant's use", () => {
     for (const hidden of [METER, METER_X, EDGE, OTHER_EDGE, MICROGRID, OTHER_MICROGRID, ORG, "SYNTHETIC-EDGE", "meter1"]) {
       expect(text).not.toContain(hidden);
     }
+  });
+
+  it("shows unit C only its own primary consumption meter, on /my, /my/usage and /my/usage/day", async () => {
+    const october = Array.from({ length: 31 }, (_, i) => addDaysToDateKey("2026-10-01", i));
+    const own = { id: OWN_METER, componentId: "meter3" };
+
+    const month = await view(tenantC, "/my/usage?month=2026-10");
+    expect(month.status).toBe(200);
+    const rows = month.body.body.rows as Row[];
+    // Before the 21st C has no primary consumption meter: the grid meter
+    // linked as its primary, the battery and M, B's primary, are not its use.
+    for (const row of rows.slice(0, 20)) {
+      expect(row.cells, row.id).toMatchObject({ usage: { text: "No data" }, note: { text: "No meter on this day" } });
+    }
+    close(rows.slice(20).map(shown), generated("2026-10-21", "2026-10-31", "day", own).map(expected));
+    expect(rows.map((r) => r.id)).toEqual(october);
+    expect(energySeries).toHaveBeenCalledTimes(1);
+    expect(energySeries.mock.calls[0][0].devices.map((d) => d.id)).toEqual([OWN_METER]);
+
+    const day = await view(tenantC, "/my/usage/day?date=2026-10-15");
+    expect(day.status).toBe(200);
+    expect(day.body).toMatchObject({ view: "tenant.usage-day", ext: { data: { date: "2026-10-15", meters: 0 } } });
+    expect(day.body.body.rows).toEqual([]);
+    expect(energySeries).toHaveBeenCalledTimes(1);
+
+    const home = await view(tenantC, "/my");
+    expect(home.status).toBe(200);
+    expect(home.body).toMatchObject({ view: "tenant.home", kind: "record" });
+    const text = JSON.stringify(home.body);
+    expect(text).toContain("Meter C");
+    for (const name of ["Meter M", "Grid meter", "Battery"]) expect(text).not.toContain(name);
   });
 
   it("gives staff, and a tenant naming another unit, the answer a missing page gets", async () => {

@@ -102,6 +102,15 @@ describe("FixtureMeteringPlugin", () => {
       expect(series).toEqual(generateDeviceEnergySeries(request, { nowMs: Date.now() }));
       // From 15:00 on, nothing has been counted yet.
       expect(series.kwh["house-1"].slice(15).every((value) => value === null)).toBe(true);
+
+      // A request that carries the caller's clock is read at it, not at the
+      // system's: 12:30, so from 13:00 on nothing has been counted.
+      const atNoon = { ...request, nowMs: Date.parse("2026-11-18T09:30:00Z") };
+      const earlier = await provider.getDeviceEnergySeries!(atNoon);
+      expect(earlier).toEqual(generateDeviceEnergySeries(request, { nowMs: atNoon.nowMs }));
+      expect(earlier.kwh["house-1"][12]).not.toBeNull();
+      expect(earlier.kwh["house-1"].slice(13).every((value) => value === null)).toBe(true);
+      expect(earlier).not.toEqual(series);
     } finally {
       vi.useRealTimers();
     }

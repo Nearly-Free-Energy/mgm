@@ -148,9 +148,10 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
   }
 
   /**
-   * The unit, its microgrid and the meters assigned to it today. "Today" is
-   * the microgrid's day, as the tenant's calendar will be; a stored zone that
-   * is not a valid IANA id reads as UTC, as the metering capability does.
+   * The unit, its microgrid and its primary consumption meters in force
+   * today. "Today" is the microgrid's day, as the tenant's calendar is; a
+   * stored zone that is not a valid IANA id reads as UTC, as the metering
+   * capability does.
    */
   async getHome(): Promise<TenantAppResult<TenantHome>> {
     const inactive = this.ensureActive();
