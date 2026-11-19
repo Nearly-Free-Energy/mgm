@@ -588,13 +588,18 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         message: "Payment attempt not found.",
       };
     }
+    // The receipts a refresh answers with. The snapshot is already applied
+    // by then, so a failed read of them answers none rather than turning the
+    // applied refresh into an error; the next listHistory reads them again,
+    // and throws if that read fails too.
+    const receiptsAfter = () => this.repo.listReceiptsForAttempt(attempt.id).catch(() => [] as import("./repository").PaymentReceipt[]);
     const outcome = snapshotToAttemptOutcome(input.snapshot.status);
     if (!outcome) {
       if (["pending", "confirmation_pending"].includes(attempt.status)) await this.repo.markAttemptStatus({ attemptId: attempt.id, status: "confirmation_pending" });
       const refreshed = (await this.repo.getAttempt(attempt.id)) ?? attempt;
       return {
         ok: true as const,
-        data: { attempt: refreshed, receipts: await this.repo.listReceiptsForAttempt(attempt.id) },
+        data: { attempt: refreshed, receipts: await receiptsAfter() },
       };
     }
     const verifiedAmount = input.snapshot.amount;
@@ -619,7 +624,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     const refreshed = (await this.repo.getAttempt(attempt.id)) ?? attempt;
     return {
       ok: true as const,
-      data: { attempt: refreshed, receipts: await this.repo.listReceiptsForAttempt(attempt.id) },
+      data: { attempt: refreshed, receipts: await receiptsAfter() },
     };
   }
 

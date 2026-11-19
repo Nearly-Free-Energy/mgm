@@ -194,6 +194,13 @@ describe("PaymentsCapability verified payment regressions", () => {
     expect((await new PaymentsCapability(repo, scope(), provider.factory, () => true, p => p).refreshPaymentStatus(ATTEMPT)).ok).toBe(true);
     expect(load).toHaveBeenCalledWith(saved); expect(resolve).not.toHaveBeenCalled();
   });
+  it("lets a failed receipts read fail the history, but still answers a refresh it has applied", async () => {
+    const saved = attempt();
+    const repo = baseRepo({ getAttempt: async () => saved, listAttemptsForLineItem: async () => [saved], listReceiptsForAttempt: async () => { throw new Error("Could not load payment receipts"); } });
+    const cap = new PaymentsCapability(repo, scope(), verifiedProvider().factory, () => true, p => p);
+    await expect(cap.listHistory(LINE_ITEM)).rejects.toThrow("Could not load payment receipts");
+    expect(await cap.refreshPaymentStatus(ATTEMPT)).toMatchObject({ ok: true, data: { receipts: [] } });
+  });
   it.each([{ amount: undefined }, { currency: undefined }, { merchantReference: undefined }])("rejects incomplete provider evidence %j", async missing => {
     const repo = baseRepo({ getAttempt: async () => attempt() }); const commit = vi.spyOn(repo, "commitVerification"); const provider = verifiedProvider(missing);
     expect(await new PaymentsCapability(repo, scope(), provider.factory, () => true, p => p).refreshPaymentStatus(ATTEMPT)).toMatchObject({ ok: false, code: "payments_incomplete_evidence" }); expect(commit).not.toHaveBeenCalled();

@@ -215,6 +215,7 @@ export interface PaymentsRepository {
     rawPayload: unknown;
   }): Promise<{ created: boolean; error: RepositoryError | null }>;
   listExternalAdjustments(lineItemId: string): Promise<{ amount: number; reference: string | null; notes: string | null; at: string }[]>;
+  /** The attempt's receipts, oldest first; throws when the read fails, as listAttemptsForLineItem does. */
   listReceiptsForAttempt(attemptId: string): Promise<PaymentReceipt[]>;
   upsertNotification(input: {
     orgId: string | null;
