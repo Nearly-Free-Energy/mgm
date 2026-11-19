@@ -36,20 +36,32 @@ const problem = z
 const total = (buckets: number) =>
   z.strictObject({
     kwh,
-    /** The total as the rows' footer prints it: "54.3 kWh", or "No data". */
+    /** The total as the rows' footer prints it, with the rows' decimals: "54.3 kWh", "1.24 kWh", or "No data". */
     text: label(32),
     /** "So far", "No data for 2 days", or "". */
     note: label(40),
     /** Buckets with a meter in force and no figure: why `kwh` is null. */
     withoutData: z.number().int().min(0).max(buckets),
   });
+/** A bucket's note as the rows print it, or null; one cap for the day and hour notes. */
+const note = label(40).nullable();
 const read = {
   /** Generated, not measured (the synthetic metering provider). */
   synthetic: z.boolean(),
   /** The figures are an earlier read, served because the unit is over its read limit. */
   stale: z.boolean(),
   /** When the metering source was read; null when nothing was read. */
-  readAt: instant.nullable(),
+  readAt: z
+    .strictObject({
+      at: instant,
+      /**
+       * "As read at 14:05." in the unit's zone (with the UTC offset on a 23-
+       * or 25-hour day) while `stale`, as the subtitle prints it; null for
+       * fresh figures.
+       */
+      label: label(48).nullable(),
+    })
+    .nullable(),
   problem,
 };
 
@@ -77,6 +89,8 @@ export const TenantUsageMonthExt = z.strictObject({
         kwh,
         /** The figure as the rows print it: "2.4 kWh", "No data", "—", or "" for a future day. */
         text: label(32),
+        /** "So far today", "No meter on this day", or null, as the day's row prints it. */
+        note,
         /** Shade tier relative to the month's highest day, 1–4; null without a figure. */
         tier: z.number().int().min(1).max(4).nullable(),
         /** The day view; null for a future day. */
@@ -115,6 +129,8 @@ export const TenantUsageDayExt = z.strictObject({
         kwh,
         /** "0.08 kWh", "No data", "—", or "" for a future hour. */
         text: label(32),
+        /** "So far" for the hour that held the read, "Not read yet" for one begun since, else null. */
+        note,
       }),
     )
     .max(25),

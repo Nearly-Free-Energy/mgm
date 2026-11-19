@@ -126,6 +126,11 @@ export function readTimeLabel(readAt: number, timezone: string, locale: string):
   return clock(readAt, timezone, locale, unusualDay(readAt, timezone));
 }
 
+/** "As read at 14:05." for kept figures (an earlier read), in the unit's zone; null for fresh ones. */
+function staleNote(read: TenantUsageMonth["read"], timezone: string, locale: string): string | null {
+  return read.stale && read.readAt !== null ? `As read at ${readTimeLabel(read.readAt, timezone, locale)}.` : null;
+}
+
 /** The unit's title, then why there are no figures, or when the kept ones were read. */
 function subtitleOf(
   tenant: TenantUsageMonth["tenant"],
@@ -134,13 +139,33 @@ function subtitleOf(
   locale: string,
 ): string {
   const parts = [unitTitle(tenant)];
+  const stale = staleNote(read, timezone, locale);
   if (read.problem) parts.push(TENANT_USAGE_PROBLEMS[read.problem].message);
-  else if (read.stale && read.readAt !== null) parts.push(`As read at ${readTimeLabel(read.readAt, timezone, locale)}.`);
+  else if (stale) parts.push(stale);
   return parts.join(" · ");
 }
 
 function problemExt(read: TenantUsageMonth["read"]): TenantUsageMonthExtData["problem"] {
   return read.problem ? { kind: read.problem, ...TENANT_USAGE_PROBLEMS[read.problem] } : null;
+}
+
+/** When the figures were read, with the stale note a renderer prints; null when nothing was read. */
+function readAtExt(read: TenantUsageMonth["read"], timezone: string, locale: string): TenantUsageMonthExtData["readAt"] {
+  return read.readAt === null ? null : { at: iso(read.readAt), label: staleNote(read, timezone, locale) };
+}
+
+/** A day row's note: today so far, or no meter in force. */
+function dayNote(d: TenantUsageBucket): string | null {
+  return d.state === "partial" ? "So far today" : d.state === "no-meter" ? "No meter on this day" : null;
+}
+
+/**
+ * An hour row's note: the hour that held the read shows its figure so far;
+ * one begun since was not read yet, and is never counted as missing.
+ */
+function hourNote(h: TenantUsageBucket & { start: number }, read: TenantUsageDay["read"]): string | null {
+  if (h.state !== "partial") return null;
+  return read.readAt !== null && h.start > read.readAt ? "Not read yet" : "So far";
 }
 
 /** A bucket's use as a cell: the figure, "—" for a partial bucket with none yet, or "No data". */
@@ -164,12 +189,19 @@ function bucketText(bucket: TenantUsageBucket, o: Options, synthetic: boolean, d
  */
 function totalCells(
   total: TenantUsageTotal,
-  o: Options & { synthetic: boolean; current: boolean; problem: boolean; unit: [one: string, many: string] },
+  o: Options & {
+    synthetic: boolean;
+    current: boolean;
+    problem: boolean;
+    unit: [one: string, many: string];
+    /** The rows' own decimals, so the total never rounds away what they show. */
+    digits: 1 | 2;
+  },
 ): { cells: Record<string, Value>; text: string; note: string } {
   const usage =
     total.kwh === null
       ? o.fmt.text(NO_DATA)
-      : o.fmt.energy(total.kwh * 1000, o.synthetic ? { synthetic: true } : undefined);
+      : o.fmt.energy(total.kwh * 1000, { digits: o.digits, ...(o.synthetic ? { synthetic: true } : {}) });
   const note = o.problem
     ? ""
     : total.kwh !== null
@@ -200,7 +232,7 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
 
   const rows: Row[] = anyMeter
     ? shown.map((d) => {
-        const note = d.state === "partial" ? "So far today" : d.state === "no-meter" ? "No meter on this day" : null;
+        const note = dayNote(d);
         return {
           id: d.date,
           cells: {
@@ -218,6 +250,7 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
     current: month.month === month.today.slice(0, 7),
     problem: read.problem !== null,
     unit: ["day", "days"],
+    digits: 1,
   });
 
   const tier = tiers(month.days.map((d) => (hasFigure(d) ? d.kwh : null)));
@@ -242,13 +275,14 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
       state: d.state,
       kwh: d.kwh,
       text: bucketText(d, o, synthetic, 1),
+      note: dayNote(d),
       tier: tier[i],
       href: d.state === "future" ? null : dayHref(d.date, links),
     })),
     total: { kwh: month.total.kwh, text: footer.text, note: footer.note, withoutData: month.total.withoutData },
     synthetic,
     stale: read.stale,
-    readAt: read.readAt === null ? null : iso(read.readAt),
+    readAt: readAtExt(read, timezone, locale),
     problem: problemExt(read),
   };
 
@@ -284,12 +318,7 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
   const rows: Row[] =
     day.meters > 0
       ? shown.map((h) => {
-          // The hour that held the read shows its figure so far; one begun
-          // since was not read yet, and is never counted as missing.
-          const note =
-            h.state === "partial"
-              ? read.readAt !== null && h.start > read.readAt ? "Not read yet" : "So far"
-              : null;
+          const note = hourNote(h, read);
           return {
             id: iso(h.start),
             cells: {
@@ -307,6 +336,7 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
     current: day.date === day.today,
     problem: read.problem !== null,
     unit: ["hour", "hours"],
+    digits: 2,
   });
   const month = day.date.slice(0, 7);
 
@@ -329,11 +359,12 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
       state: h.state,
       kwh: h.kwh,
       text: bucketText(h, o, synthetic, 2),
+      note: hourNote(h, read),
     })),
     total: { kwh: day.total.kwh, text: footer.text, note: footer.note, withoutData: day.total.withoutData },
     synthetic,
     stale: read.stale,
-    readAt: read.readAt === null ? null : iso(read.readAt),
+    readAt: readAtExt(read, timezone, locale),
     problem: problemExt(read),
   };
 

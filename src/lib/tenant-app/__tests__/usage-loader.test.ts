@@ -127,7 +127,12 @@ beforeEach(() => {
   }));
 });
 
-type Ext = { problem: { kind: string } | null; stale: boolean; readAt: string | null; total: { kwh: number | null } };
+type Ext = {
+  problem: { kind: string } | null;
+  stale: boolean;
+  readAt: { at: string; label: string | null } | null;
+  total: { kwh: number | null };
+};
 const ext = (loaded: Awaited<ReturnType<typeof loadTenantUsageMonth>>) => {
   if (!loaded.ok) throw new Error(`refused: ${loaded.status}`);
   return { model: loaded.model, data: loaded.model.ext!.data as unknown as Ext };
@@ -154,7 +159,7 @@ describe("the usage read limit, as a tenant meets it", () => {
     // October was read at T0; 30 s later it comes from the cache, limit or not.
     const cached = ext(await loadTenantUsageMonth(request("month=2026-10", T0 + 30_000)));
     expect(reads).toHaveLength(6);
-    expect(cached.data).toMatchObject({ problem: null, stale: false, readAt: new Date(T0).toISOString() });
+    expect(cached.data).toMatchObject({ problem: null, stale: false, readAt: { at: new Date(T0).toISOString(), label: null } });
     expect(cached.model.body.rows.some((r) => r.cells.usage.t === "energy")).toBe(true);
   });
 
@@ -173,7 +178,11 @@ describe("the usage read limit, as a tenant meets it", () => {
     // October's read, from T0, is past its minute but kept: shown, marked stale, with its time in Kampala.
     const kept = ext(await loadTenantUsageMonth(request("month=2026-10", T0 + 80_000)));
     expect(reads).toHaveLength(12);
-    expect(kept.data).toMatchObject({ problem: null, stale: true, readAt: new Date(T0).toISOString() });
+    expect(kept.data).toMatchObject({
+      problem: null,
+      stale: true,
+      readAt: { at: new Date(T0).toISOString(), label: "As read at 12:00." },
+    });
     expect(kept.model.subtitle).toBe("Unit 4 · As read at 12:00.");
     expect(kept.model.body.rows.some((r) => r.cells.usage.t === "energy")).toBe(true);
   });

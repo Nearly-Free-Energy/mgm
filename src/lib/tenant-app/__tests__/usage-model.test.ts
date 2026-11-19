@@ -120,9 +120,29 @@ describe("the month model", () => {
     expect(TenantUsageMonthExt.safeParse(ext).success).toBe(true);
     expect(ext.days).toHaveLength(30);
     expect(ext.days.slice(18).every((d) => d.state === "future" && d.text === "" && d.tier === null && d.href === null)).toBe(true);
-    expect(ext.days[17]).toMatchObject({ date: TODAY, day: 18, state: "partial", kwh: 0.5, text: kwh(0.5) });
+    expect(ext.days[17]).toMatchObject({ date: TODAY, day: 18, state: "partial", kwh: 0.5, text: kwh(0.5), note: "So far today" });
+    expect(ext.days[0]).toMatchObject({ state: "data", note: null });
+    expect(ext.days[18]).toMatchObject({ state: "future", note: null });
     expect(ext.total).toEqual({ kwh: 34.5, text: kwh(34.5), note: "So far", withoutData: 0 });
-    expect(ext).toMatchObject({ synthetic: true, stale: false, readAt: "2026-11-18T11:30:00.000Z", problem: null });
+    // Fresh figures: the read time, with no note.
+    expect(ext).toMatchObject({
+      synthetic: true,
+      stale: false,
+      readAt: { at: "2026-11-18T11:30:00.000Z", label: null },
+      problem: null,
+    });
+  });
+
+  it("gives each day of the ext the note its row carries", () => {
+    const { model, ext } = month("2026-11", figures(NOVEMBER), [link("m", "2026-11-10")]);
+    for (const row of model.body.rows) {
+      const shown = ext.days.find((d) => d.date === row.id)!;
+      expect(shown.note, row.id).toBe(row.cells.note?.text ?? null);
+    }
+    expect(ext.days[0].note).toBe("No meter on this day");
+    expect(ext.days[9].note).toBeNull();
+    expect(ext.days[17].note).toBe("So far today");
+    expect(ext.days[29].note).toBeNull();
   });
 
   it("shows a day a meter did not report as No data, never beside a figure, and has no total then", () => {
@@ -196,7 +216,12 @@ describe("the month model", () => {
   it("names the read time of kept figures in the unit's zone", () => {
     const { model, ext } = month("2026-11", figures(NOVEMBER, Date.parse("2026-11-18T11:05:00Z"), true));
     expect(model.subtitle).toBe("Unit 4 · As read at 14:05.");
-    expect(ext).toMatchObject({ stale: true, readAt: "2026-11-18T11:05:00.000Z" });
+    expect(ext).toMatchObject({ stale: true, readAt: { at: "2026-11-18T11:05:00.000Z", label: "As read at 14:05." } });
+    expect(TenantUsageMonthExt.safeParse(ext).success).toBe(true);
+  });
+
+  it("has no read time in the ext when nothing was read", () => {
+    expect(month("2026-11", { kind: "problem", problem: "limited" }).ext.readAt).toBeNull();
   });
 
   it("links the days and the months around it, naming the unit only for a person with several", () => {
@@ -237,8 +262,12 @@ describe("the day model", () => {
       usage: fmt.energy(40, { digits: 2, synthetic: true }),
       note: { t: "text", text: "So far" },
     });
-    // The total is one decimal, as the month's figures.
-    expect(model.body.totals).toEqual({ usage: fmt.energy(1230, { synthetic: true }), note: { t: "text", text: "So far" } });
+    // The total has the hours' two decimals.
+    expect(model.body.totals).toEqual({ usage: fmt.energy(1230, { digits: 2, synthetic: true }), note: { t: "text", text: "So far" } });
+    expect(ext.total.text).toBe(kwh(1.23, 2));
+    expect(ext.hours[0].note).toBeNull();
+    expect(ext.hours[14].note).toBe("So far");
+    expect(ext.hours[15].note).toBeNull();
     expect(model.ext?.schema).toBe(TENANT_USAGE_DAY_EXT_SCHEMA);
     expect(TenantUsageDayExt.safeParse(ext).success).toBe(true);
     expect(ext.hours).toHaveLength(24);
@@ -257,8 +286,29 @@ describe("the day model", () => {
     expect(model.body.rows[13].cells).toMatchObject({ usage: fmt.energy(80, { digits: 2 }), note: { text: "So far" } });
     expect(model.body.rows[14].cells).toEqual({ hour: { t: "text", text: "14:00" }, usage: fmt.empty(), note: { t: "text", text: "Not read yet" } });
     expect(ext.hours[14].text).toBe(fmt.empty().text);
+    expect(ext.hours.slice(12, 15).map((h) => h.note)).toEqual([null, "So far", "Not read yet"]);
     // Neither is missing: the total is the sum so far.
     expect(ext.total).toMatchObject({ kwh: 1.38, withoutData: 0, note: "So far" });
+  });
+
+  it("totals a day of small hours to the hours' decimals, never rounding them away to 0.0", () => {
+    // Read at 03:30: 00:00 used 0.01 kWh, 01:00 0.03, and 02:00 and 03:00 so far none; 0.04 kWh in all.
+    const nowMs = hours[3] + 30 * 60_000;
+    const values = { [String(hours[0])]: 0.01, [String(hours[1])]: 0.03, [String(hours[2])]: 0, [String(hours[3])]: 0 };
+    const { model, ext } = day(TODAY, figures(values, nowMs), undefined, { nowMs });
+    expect(model.body.rows.map((r) => r.cells.usage.text)).toEqual([kwh(0.01, 2), kwh(0.03, 2), kwh(0, 2), kwh(0, 2)]);
+    expect(model.body.totals).toEqual({ usage: fmt.energy(40, { digits: 2 }), note: { t: "text", text: "So far" } });
+    expect(model.body.totals!.usage.text).toBe(kwh(0.04, 2));
+    expect(model.body.totals!.usage.text).not.toBe(kwh(0, 1));
+    expect(ext.total).toEqual({ kwh: 0.04, text: kwh(0.04, 2), note: "So far", withoutData: 0 });
+  });
+
+  it("names the stale read time in the ext as the subtitle does", () => {
+    const readAt = Date.parse("2026-11-18T10:05:00Z");
+    const { model, ext } = day(TODAY, figures(TODAY_HOURS, readAt, true));
+    expect(model.subtitle).toBe("Unit 4 · As read at 13:05.");
+    expect(ext.readAt).toEqual({ at: "2026-11-18T10:05:00.000Z", label: "As read at 13:05." });
+    expect(TenantUsageDayExt.safeParse(ext).success).toBe(true);
   });
 
   it("shows an hour a meter did not report as No data, and no total for the day", () => {
