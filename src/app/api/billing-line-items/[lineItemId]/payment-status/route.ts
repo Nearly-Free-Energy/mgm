@@ -73,9 +73,17 @@ const UUID_RE =
 /** Statuses gated to super_admin only (reconciliation-class). */
 const SUPER_ADMIN_ONLY_STATUSES: readonly PaymentStatus[] = ["failed", "refunded"];
 
-/** A refund's typed-name refusals: fixed copy, never the name itself. */
+/**
+ * A refund's typed-name refusals: fixed copy, never the name itself. The
+ * required one names Mark as refunded because the step that sent the
+ * request may have had no name field: the GUI's confirm-level payment
+ * actions (Mark as unpaid, Mark as paid …) share this route, and their form
+ * lets a person switch the status to refunded, but the host sends them no
+ * confirmation (sendsConfirmation in src/lib/gui/host/client/invoke.ts). If
+ * those steps come to ask for the name, the copy can just ask for it.
+ */
 const REFUND_NAME_REFUSALS = {
-  required: { error: "Type the tenant's name to confirm the refund.", reason: "refund_name_required" },
+  required: { error: "A refund needs the tenant's name typed: use Mark as refunded.", reason: "refund_name_required" },
   mismatch: { error: "The name typed does not match this bill's tenant.", reason: "refund_name_mismatch" },
 } as const;
 

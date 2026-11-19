@@ -491,10 +491,11 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
   });
 
   describe("(n) 428: a refund needs the tenant's name typed", () => {
+    const REQUIRED = "A refund needs the tenant's name typed: use Mark as refunded.";
     it.each([
-      ["no confirmation", {}, "refund_name_required", "Type the tenant's name to confirm the refund."],
-      ["a confirmation with no name", { confirmation: { acknowledged: [] } }, "refund_name_required", "Type the tenant's name to confirm the refund."],
-      ["a blank name", { confirmation: { acknowledged: [], typed: "   " } }, "refund_name_required", "Type the tenant's name to confirm the refund."],
+      ["no confirmation", {}, "refund_name_required", REQUIRED],
+      ["a confirmation with no name", { confirmation: { acknowledged: [] } }, "refund_name_required", REQUIRED],
+      ["a blank name", { confirmation: { acknowledged: [], typed: "   " } }, "refund_name_required", REQUIRED],
       ["another name", { confirmation: { acknowledged: [], typed: "Bob Okello" } }, "refund_name_mismatch", "The name typed does not match this bill's tenant."],
       ["the name in another case", { confirmation: { acknowledged: [], typed: "alice mukasa" } }, "refund_name_mismatch", "The name typed does not match this bill's tenant."],
     ])("refuses %s, and writes nothing", async (_label, extra, reason, error) => {
@@ -529,6 +530,8 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
       const { PATCH } = await import("../route");
       const res = await PATCH(makeReq({ status: "refunded" }), { params: Promise.resolve({ lineItemId: LINE_ITEM_ID }) });
       expect(res.status).toBe(428);
+      // That step had no name field, so the refusal points to the one that has.
+      expect(await res.json()).toEqual({ error: REQUIRED, reason: "refund_name_required" });
       expect(mockRpc).not.toHaveBeenCalled();
     });
 
