@@ -194,6 +194,17 @@ describe("humanizeHistoryEntry", () => {
     const model = build({ entries: [{ ...e, tenantName: null }] });
     expect(strictParseModel(view, model)).toMatchObject({ ok: true });
   });
+
+  it("clips a long tenant name in the filter's subtitle and empty state, so the model still parses", () => {
+    // tenants.display_name has no length limit.
+    const long = "n".repeat(5000);
+    const filter = { tenantId: TENANT, tenantName: long };
+    for (const model of [build({ filter }), build({ filter, entries: [entry({ eventType: "line_item_generated", tenantName: long })] })]) {
+      expect(strictParseModel(view, model)).toMatchObject({ ok: true });
+      expect(model.subtitle).toContain("n".repeat(PERIOD_HISTORY_NOTE_MAX - 1) + "…");
+    }
+    expect(build({ filter }).body.empty.title).toBe(`No changes recorded for ${"n".repeat(PERIOD_HISTORY_NOTE_MAX - 1)}…`);
+  });
 });
 
 describe("buildPeriodHistoryModel: rows", () => {
@@ -328,9 +339,20 @@ describe("the cursor", () => {
   it("round-trips", () => {
     const c = { source: "p" as const, id: uuid(3), at: "2026-10-31T21:00:00.123+00:00" };
     expect(parseCursor(encodeCursor(c))).toEqual(c);
+    for (const at of ["2024-02-29T00:00:00Z", "2026-12-31 23:59:59.999999+03:00", "2026-10-31T21:00:00+15:59", "2026-10-31T21:00:00-0530"]) {
+      expect(parseCursor(encodeCursor({ ...c, at }))?.at, at).toBe(at);
+    }
   });
 
-  it.each([null, "", "a", "x~" + uuid(1) + "~2026-10-31T21:00:00+00:00", "a~not-a-uuid~2026-10-31T21:00:00+00:00", `a~${uuid(1)}~yesterday`, `a~${uuid(1)}~2026-13-45T99:00:00+00:00`, `a~${uuid(1)}~2026-10-31T21:00:00+00:00~x`])(
+  it.each([null, "", "a", "x~" + uuid(1) + "~2026-10-31T21:00:00+00:00", "a~not-a-uuid~2026-10-31T21:00:00+00:00", `a~${uuid(1)}~yesterday`, `a~${uuid(1)}~2026-13-45T99:00:00+00:00`,
+    // Date.parse takes these; Postgres refuses them, which would fail the read.
+    `a~${uuid(1)}~2026-02-30T00:00:00Z`,
+    `a~${uuid(1)}~2025-02-29T00:00:00+00:00`,
+    `a~${uuid(1)}~2026-04-31 12:00:00+00`,
+    `a~${uuid(1)}~0000-10-31T21:00:00Z`,
+    `a~${uuid(1)}~2026-10-31T21:00:00+16:00`,
+    `a~${uuid(1)}~2026-10-31T24:00:00Z`,
+    `a~${uuid(1)}~2026-10-31T21:00:00+00:00~x`])(
     "reads %j as the first page",
     (raw) => {
       expect(parseCursor(raw)).toBeNull();
@@ -412,17 +434,19 @@ describe("mergePage", () => {
 
 describe("the examples", () => {
   it("are received models of this view, built by the model", () => {
-    expect(PERIOD_HISTORY_EXAMPLES).toHaveLength(6);
+    expect(PERIOD_HISTORY_EXAMPLES).toHaveLength(7);
     for (const [n, example] of PERIOD_HISTORY_EXAMPLES.entries()) {
       expect(example).toMatchObject({ view: "billing.period-history", kind: "collection", title: "Audit history", actions: [] });
       expect(example.trail).toHaveLength(2);
       expect(example.links[0].id).toBe(BACK_TO_PERIOD_LINK);
       if (n < PERIOD_HISTORY_LOADED_EXAMPLES.length) expect(example.body).toEqual(PERIOD_HISTORY_LOADED_EXAMPLES[n].body);
     }
-    expect(PERIOD_HISTORY_EXAMPLES[5].notice).toMatchObject({ tone: "warning" });
-    // The first holds every kind of entry a period holds, in order, and a next page.
+    expect(PERIOD_HISTORY_EXAMPLES[6].notice).toMatchObject({ tone: "warning" });
+    // The first holds every kind of entry a period holds, in order, down to
+    // the period's creation, so no next page.
     const first = PERIOD_HISTORY_EXAMPLES[0];
-    expect(first.body.next).toMatch(/[?&]before=/);
+    expect(first.body.next).toBeUndefined();
+    expect(first.body.rows.at(-1)?.cells.change.text).toBe("Period created");
     const keyed = first.body.rows.map((r): HistoryKeyed => {
       const [source, id] = r.id.split(":");
       const at = r.cells.at;
@@ -434,6 +458,21 @@ describe("the examples", () => {
     expect(first.body.rows.map((r) => r.cells.by.text)).toEqual(expect.arrayContaining(["System", "Restricted", "Okello Daniel"]));
     expect(PERIOD_HISTORY_EXAMPLES[2].body.empty.title).toBe("No changes recorded for unknown tenant");
     expect(PERIOD_HISTORY_EXAMPLES[4].links.map((l) => l.id)).toContain(HISTORY_LATEST_LINK);
+  });
+
+  it("show a next page only where mergePage gives one, at the page size they name", () => {
+    // Only the shrunk page (five rows, ./period-history-examples.ts) has more to follow.
+    expect(PERIOD_HISTORY_EXAMPLES.map((e) => Boolean(e.body.next))).toEqual([false, false, false, false, false, true, false]);
+    const paged = PERIOD_HISTORY_EXAMPLES[5];
+    expect(paged.body.rows.map((r) => r.id)).toEqual(PERIOD_HISTORY_EXAMPLES[0].body.rows.slice(0, 5).map((r) => r.id));
+    // Its next page is the later-page example.
+    const later = PERIOD_HISTORY_EXAMPLES[4];
+    const before = (href: string) => new URL(href, "http://x").searchParams.get("before");
+    const latest = later.links.find((l) => l.id === HISTORY_LATEST_LINK)!;
+    expect(before(paged.body.next!)).not.toBeNull();
+    expect(parseCursor(before(paged.body.next!))).toMatchObject({ source: "p", id: paged.body.rows.at(-1)!.id.split(":")[1] });
+    expect(later.body.rows.map((r) => r.id)).toEqual(PERIOD_HISTORY_EXAMPLES[0].body.rows.slice(5).map((r) => r.id));
+    expect(before(latest.href)).toBeNull();
   });
 });
 

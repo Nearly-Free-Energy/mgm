@@ -124,13 +124,32 @@ export function encodeCursor(c: HistoryCursor): string {
 
 const CURSOR_RE = /^([ap])~([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})~(.+)$/;
 
+/**
+ * Whether every field of a timestamp is in range, as Postgres requires of a
+ * timestamptz: Date.parse rolls 30 February over into March and takes year
+ * 0 and offsets past ±15:59, all of which Postgres refuses, so a cursor
+ * carrying one would fail the read instead of giving the first page.
+ */
+function inRange(ts: string): boolean {
+  const m = TIMESTAMP_RE.exec(ts);
+  if (!m) return false;
+  const [, y, mo, d, h, mi, s, , zone = "Z"] = m;
+  const [year, month, day, hour, minute, second] = [y, mo, d, h, mi, s].map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  if (year < 1 || days === undefined || day < 1 || day > days || hour > 23 || minute > 59 || second > 59) return false;
+  if (zone === "Z") return true;
+  const digits = zone.slice(1).replace(":", "");
+  return Number(digits.slice(0, 2)) <= 15 && Number(digits.slice(2, 4) || "0") <= 59;
+}
+
 /** The cursor in a `before` parameter, or null (the first page) for anything malformed. */
 export function parseCursor(raw: string | null | undefined): HistoryCursor | null {
   if (!raw) return null;
   const m = CURSOR_RE.exec(raw);
   if (!m) return null;
   const [, source, id, at] = m;
-  if (!TIMESTAMP_RE.test(at) || Number.isNaN(Date.parse(at)) || instantKey(at) === "") return null;
+  if (!inRange(at) || Number.isNaN(Date.parse(at)) || instantKey(at) === "") return null;
   return { source: source as HistorySource, id, at };
 }
 
@@ -312,7 +331,8 @@ export function buildPeriodHistoryModel(i: PeriodHistoryInput): LoadedModel<"col
   // A one-day period shows its one date, as the period review's title does.
   const shown = period.start_date === period.end_date ? fmt.date(period.start_date).text : label;
   // Never the raw parameter: only a tenant this microgrid has is named.
-  const tenantLabel = filter ? (filter.tenantName ?? "unknown tenant") : null;
+  // Clipped as the cells are: tenants.display_name has no length limit.
+  const tenantLabel = filter ? clipText(filter.tenantName ?? "unknown tenant") : null;
   const tenantId = filter?.tenantId ?? null;
 
   const rows: Row[] = i.entries.map((entry) => {

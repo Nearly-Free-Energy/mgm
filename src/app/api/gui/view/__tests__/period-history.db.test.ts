@@ -393,6 +393,17 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's history", (
     expect(JSON.stringify(model)).not.toContain("not-a-uuid");
   });
 
+  it("answers a cursor with a date Postgres refuses with the first page, not an error", async () => {
+    caller = manager;
+    // Date.parse rolls 30 February over into March; the database refuses it.
+    const res = await view(`${historyHref()}?before=${encodeURIComponent(`a~${auditId(1)}~2026-02-30T00:00:00Z`)}`);
+    expect(res.status).toBe(200);
+    const model = (await res.json()) as Model;
+    const first = (await (await view(historyHref())).json()) as Model;
+    expect(model.body.rows.map((r) => r.id)).toEqual(first.body.rows.map((r) => r.id));
+    expect(model.links.map((l) => l.id)).toEqual(["billing.back-to-period"]);
+  });
+
   it("shows a period with no entries as empty", async () => {
     caller = manager;
     const res = await view(historyHref(EMPTY));

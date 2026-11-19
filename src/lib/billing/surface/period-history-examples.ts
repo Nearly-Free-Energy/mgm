@@ -2,18 +2,19 @@ import "server-only";
 
 /**
  * Examples of the `billing.period-history` view, so every GUI can be tested
- * against it: a first page with every kind of entry a period holds and a
- * next page to follow; the history filtered to one tenant; filtered to a
+ * against it: a period's whole history on one page, with every kind of
+ * entry a period holds; the history filtered to one tenant; filtered to a
  * tenant this microgrid does not have; a period with no entries; a later
- * page, which leads back to the latest changes; and the first again while
- * billing is off, with the gate's notice. Built at import the way the
+ * page, which leads back to the latest changes; the first page before it,
+ * at a page size shrunk to five, with more to follow; and the first again
+ * while billing is off, with the gate's notice. Built at import the way the
  * loader builds them.
  */
 import type { ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { LoadedModel } from "@/lib/gui/surface";
 import type { BillingAuditLogEntry } from "@/lib/types/billing-audit";
-import { buildPeriodHistoryModel, encodeCursor, type PeriodHistoryInput } from "./period-history-model";
+import { buildPeriodHistoryModel, encodeCursor, mergePage, type PeriodHistoryInput } from "./period-history-model";
 import { periodLabel } from "./period-label";
 
 const ORG = "00000000-0000-4000-8000-0000000000a0";
@@ -116,8 +117,21 @@ const FIRST_PAGE: BillingAuditLogEntry[] = [
 ];
 
 const AKELLO_ONLY = FIRST_PAGE.filter((e) => e.billingLineItemId === BILL_AKELLO);
-const cursorAfter = (e: BillingAuditLogEntry) =>
-  encodeCursor({ source: e.id.startsWith("audit:") ? "a" : "p", id: e.id.slice(e.id.indexOf(":") + 1), at: e.createdAt });
+const keyOf = (e: BillingAuditLogEntry) => ({ source: e.id.startsWith("audit:") ? ("a" as const) : ("p" as const), id: e.id.slice(e.id.indexOf(":") + 1), at: e.createdAt });
+const cursorAfter = (e: BillingAuditLogEntry) => encodeCursor(keyOf(e));
+
+/**
+ * The first page of the same history with a page of five rather than
+ * PERIOD_HISTORY_PAGE, so a GUI meets a next link without two hundred rows
+ * to draw (the view matrix draws every row); paged by mergePage as the
+ * loader pages it, and followed by the later page below.
+ */
+const EXAMPLE_PAGE = 5;
+const SHORT_PAGE = mergePage(
+  FIRST_PAGE.map((e) => ({ ...keyOf(e), entry: e })),
+  [],
+  EXAMPLE_PAGE,
+);
 
 const base = (o: Partial<PeriodHistoryInput>): PeriodHistoryInput => ({
   microgrid: MICROGRID,
@@ -132,8 +146,8 @@ const base = (o: Partial<PeriodHistoryInput>): PeriodHistoryInput => ({
 
 /** The models as the loader returns them, before the host fills its fields. */
 export const PERIOD_HISTORY_LOADED_EXAMPLES: readonly LoadedModel<"collection">[] = [
-  // The first page, with more to follow.
-  buildPeriodHistoryModel(base({ entries: FIRST_PAGE, next: cursorAfter(FIRST_PAGE[FIRST_PAGE.length - 1]) })),
+  // A period's whole history, on one page: it ends with the period's creation.
+  buildPeriodHistoryModel(base({ entries: FIRST_PAGE })),
   // Filtered to one tenant, as the period review's row links it.
   buildPeriodHistoryModel(base({ entries: AKELLO_ONLY, filter: { tenantId: AKELLO.id, tenantName: AKELLO.name } })),
   // Filtered to a tenant this microgrid does not have.
@@ -142,6 +156,8 @@ export const PERIOD_HISTORY_LOADED_EXAMPLES: readonly LoadedModel<"collection">[
   buildPeriodHistoryModel(base({})),
   // A later page.
   buildPeriodHistoryModel(base({ entries: FIRST_PAGE.slice(5), before: cursorAfter(FIRST_PAGE[4]) })),
+  // A first page with more to follow, at the example's page size: the page before the later page above.
+  buildPeriodHistoryModel(base({ entries: SHORT_PAGE.entries.map((e) => e.entry), next: SHORT_PAGE.next })),
 ];
 
 /** A loaded model with the fields the host fills, as a GUI receives it; `disabled` as while billing is off. */
