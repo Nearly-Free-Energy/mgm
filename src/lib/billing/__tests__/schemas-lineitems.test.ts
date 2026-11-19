@@ -240,7 +240,14 @@ describe("RegenerateBillBody", () => {
       readings: "edge",
       confirmation: { acknowledged: ["regenerate-paid-bill"] },
     });
-    for (const confirmation of [true, {}, { acknowledged: "regenerate-paid-bill" }, { acknowledged: [], extra: 1 }]) {
+    for (const confirmation of [
+      true,
+      {},
+      { acknowledged: "regenerate-paid-bill" },
+      { acknowledged: [], extra: 1 },
+      // The ceremony asks for no name, so a typed one is not taken.
+      { acknowledged: [], typed: "Unit 1" },
+    ]) {
       expect(firstIssue(RegenerateBillBody, { readings: "edge", confirmation })).toMatchObject({
         message: "confirmation needs the acknowledgements ticked",
       });
@@ -261,7 +268,6 @@ describe("RegenerateBillBody", () => {
           type: "object",
           properties: {
             acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
-            typed: { type: "string", maxLength: 200 },
           },
           required: ["acknowledged"],
           additionalProperties: false,
