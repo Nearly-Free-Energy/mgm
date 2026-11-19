@@ -90,6 +90,7 @@ import type {
   BillingLineItemPaymentStatus,
 } from "@/lib/types/domain";
 import type { LineItemRegeneratedDetails } from "@/lib/types/billing-audit";
+import { REGENERATE_REFUSAL_COPY } from "./schemas";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -144,6 +145,15 @@ export type GenerationErrorCode =
   | "meter_assignment_continuity"
   | "unknown_tenant"
   /**
+   * A per-bill regeneration (`expectedBill`) found the bill no longer as the
+   * caller read it: its period closed, it was invoiced, or its payment
+   * status or figures changed (fn_regenerate_bill_with_audit). Nothing was
+   * written.
+   */
+  | "period_closed"
+  | "invoiced"
+  | "bill_changed"
+  /**
    * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
    * the meter read zero at period start and printed that on the invoice.
@@ -178,6 +188,19 @@ export type PreviewTenantResult = {
   previousPaymentStatus: BillingLineItemPaymentStatus | null;
 };
 
+/**
+ * A per-bill regeneration (`expectedBill`) whose new figures are the ones the
+ * bill already has: nothing was written and no audit row was added, so
+ * sending the same regeneration twice records it once.
+ */
+export type UnchangedTenantResult = {
+  kind: "unchanged";
+  tenantId: string;
+  tenantName: string;
+  lineItemId: string;
+  totalAmount: number;
+};
+
 /** A currently-manual tenant that a bulk run left as it was (Q5). */
 export type KeptTenantResult = {
   kind: "kept";
@@ -198,7 +221,8 @@ export type TenantResult =
   | WrittenTenantResult
   | PreviewTenantResult
   | KeptTenantResult
-  | ErrorTenantResult;
+  | ErrorTenantResult
+  | UnchangedTenantResult;
 
 export type GenerationResult = {
   results: TenantResult[];
@@ -248,6 +272,29 @@ export type RunGenerationParams = {
    *  single assignment does not cover the entire period. Legacy schemas
    *  do not have these columns, so this check is opt-in. */
   requireEffectiveDatedAssignments?: boolean;
+  /**
+   * A per-bill regeneration: the bill as the caller read it before deciding
+   * to rewrite it (POST /api/billing-line-items/[lineItemId]/regenerate).
+   * When set, the run names that bill's one tenant, writes through
+   * fn_regenerate_bill_with_audit, which refuses unless the period is still
+   * a draft and the bill still has no invoice number and these values, under
+   * locks held to commit, and writes nothing when the new figures are the
+   * ones the bill already has (`kind: 'unchanged'`). Unset, as on POST
+   * /api/billing/generate, nothing here applies.
+   */
+  expectedBill?: ExpectedBill;
+};
+
+/** The bill a per-bill regeneration read (RunGenerationParams.expectedBill). */
+export type ExpectedBill = {
+  lineItemId: string;
+  tenantId: string;
+  paymentStatus: BillingLineItemPaymentStatus;
+  totalAmount: number;
+  usageKwh: number | null;
+  startKwh: number | null;
+  endKwh: number | null;
+  readingSource: ReadingSource | null;
 };
 
 export type RunGenerationFatal =
@@ -281,6 +328,7 @@ type TenantRow = {
 };
 
 type PriorItem = {
+  id: string;
   tenant_id: string;
   total_amount: number;
   payment_status: BillingLineItemPaymentStatus;
@@ -327,6 +375,22 @@ export async function runGenerationFor(
   // physical meter, and the same tenant can change meters.
   const seedByDevice = new Map<string, SeedReadingInput>();
   for (const s of params.seedReadings ?? []) seedByDevice.set(s.deviceId, s);
+
+  // ── 0a. A per-bill regeneration names its one tenant and nothing else ──────
+  const expectedBill = mode === "write" ? params.expectedBill : undefined;
+  if (
+    expectedBill &&
+    (tenantIdsParam?.length !== 1 ||
+      tenantIdsParam[0] !== expectedBill.tenantId ||
+      manualReadingsParam.some((m) => m.tenantId !== expectedBill.tenantId) ||
+      (params.seedReadings ?? []).length > 0)
+  ) {
+    return {
+      kind: "fatal",
+      status: 400,
+      body: { error: "A per-bill regeneration names its bill's one tenant.", code: "expected_bill_mismatch" },
+    };
+  }
 
   // ── 0. Empty-array short-circuit (AC3 explicit no-op) ─────────────────────
   // `tenantIds: []` AND `manualReadings: []` is a well-defined no-op.
@@ -583,7 +647,7 @@ export async function runGenerationFor(
       // entered_by_user_id, entered_at, manual_reason) are read for #218's
       // `previous_snapshot` audit-details capture — the RPC overwrites them
       // on UPSERT-UPDATE, so we must read them BEFORE calling the RPC.
-      "tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason"
+      "id, tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason"
     )
     .eq("billing_period_id", periodId);
   const existingByTenant = new Map<string, PriorItem>();
@@ -910,7 +974,37 @@ export async function runGenerationFor(
       continue;
     }
 
-    // mode === 'write' — call the audit-aware RPC.
+    // mode === 'write'. A per-bill regeneration whose figures are the ones
+    // the bill already has writes nothing, so a repeated submit adds no
+    // second audit row. Compared as fn_record_line_item_with_audit would
+    // store them (kWh to 3 places, amounts to whole units, which
+    // calculateTieredCost has already rounded).
+    const enteredBy = readingSource === "manual" ? actorUserId : null;
+    if (
+      expectedBill &&
+      prior &&
+      sameBill(prior, {
+        deviceId,
+        usageKwh: usageKwhRounded,
+        startKwh: startKwhRounded,
+        endKwh: endKwhRounded,
+        tierBreakdown: calc.tierBreakdown,
+        totalAmount: roundAmount(calc.totalAmount),
+        readingSource,
+        enteredBy,
+        manualReason: readingSource === "manual" ? manualReason : null,
+      })
+    ) {
+      results.push({
+        kind: "unchanged",
+        tenantId: hid,
+        tenantName,
+        lineItemId: prior.id,
+        totalAmount: roundAmount(Number(prior.total_amount)),
+      });
+      continue;
+    }
+
     const auditDetails: LineItemRegeneratedDetails = {
       tenant_name: tenantName,
       previous_total_amount: previousTotalAmount,
@@ -948,28 +1042,47 @@ export async function runGenerationFor(
     // actor_ref). PostgREST overload-resolution will reject DROP-less signature
     // changes with PGRST203. Any future param addition requires
     // `DROP FUNCTION IF EXISTS` in the migration BEFORE `CREATE OR REPLACE`.
-    // See PR #209 / #250 for prior lessons.
-    const { data: rpcRow, error: rpcErr } = await supabase.rpc(
-      "fn_record_line_item_with_audit",
-      {
-        _billing_period_id: periodId,
-        _tenant_id: hid,
-        _device_id: deviceId,
-        _usage_kwh: usageKwhRounded,
-        _start_kwh: startKwhRounded,
-        _end_kwh: endKwhRounded,
-        _tier_breakdown: calc.tierBreakdown,
-        _total_amount: calc.totalAmount,
-        _reading_source: readingSource,
-        _entered_by_user_id: actorUserId,
-        _manual_reason: manualReason,
-        _actor_user_id: actorUserId,
-        _audit_details: auditDetails as unknown as Record<string, unknown>,
-        _rate_schedule_id: rateScheduleId,
-        _actor_kind: actorKind,
-        _actor_ref: actorRef,
-      }
-    );
+    // See PR #209 / #250 for prior lessons. fn_regenerate_bill_with_audit
+    // takes the same arguments plus `_expected` and passes them on, so a
+    // parameter added to one is added to the other in the same migration.
+    const recordArgs = {
+      _billing_period_id: periodId,
+      _tenant_id: hid,
+      _device_id: deviceId,
+      _usage_kwh: usageKwhRounded,
+      _start_kwh: startKwhRounded,
+      _end_kwh: endKwhRounded,
+      _tier_breakdown: calc.tierBreakdown,
+      _total_amount: calc.totalAmount,
+      _reading_source: readingSource,
+      _entered_by_user_id: actorUserId,
+      _manual_reason: manualReason,
+      _actor_user_id: actorUserId,
+      _audit_details: auditDetails as unknown as Record<string, unknown>,
+      _rate_schedule_id: rateScheduleId,
+      _actor_kind: actorKind,
+      _actor_ref: actorRef,
+    };
+    const { data: rpcRow, error: rpcErr } = expectedBill
+      ? await supabase.rpc("fn_regenerate_bill_with_audit", {
+          ...recordArgs,
+          _expected: {
+            line_item_id: expectedBill.lineItemId,
+            payment_status: expectedBill.paymentStatus,
+            total_amount: expectedBill.totalAmount,
+            usage_kwh: expectedBill.usageKwh,
+            start_kwh: expectedBill.startKwh,
+            end_kwh: expectedBill.endKwh,
+            reading_source: expectedBill.readingSource,
+          },
+        })
+      : await supabase.rpc("fn_record_line_item_with_audit", recordArgs);
+
+    const refused = expectedBill && rpcErr ? expectedBillRefusal(rpcErr) : null;
+    if (refused) {
+      results.push({ kind: "error", tenantId: hid, tenantName, ...refused });
+      continue;
+    }
 
     if (rpcErr || !rpcRow) {
       results.push({
@@ -1002,4 +1115,62 @@ export async function runGenerationFor(
   }
 
   return { results };
+}
+
+// ── Per-bill regeneration helpers ───────────────────────────────────────────
+
+/**
+ * fn_regenerate_bill_with_audit's refusals (migration
+ * 20261119090000_regenerate_bill_expected_state.sql), by the token its
+ * message starts with, as fixed copy. Anything else is an ordinary write
+ * failure.
+ */
+const EXPECTED_BILL_REFUSALS: Record<string, { code: GenerationErrorCode; error: string }> = {
+  billing_period_closed: { code: "period_closed", error: REGENERATE_REFUSAL_COPY.closed },
+  billing_line_item_invoiced: { code: "invoiced", error: REGENERATE_REFUSAL_COPY.invoiced },
+  billing_line_item_changed: { code: "bill_changed", error: REGENERATE_REFUSAL_COPY.changed },
+};
+
+function expectedBillRefusal(err: { code?: string; message?: string }): { code: GenerationErrorCode; error: string } | null {
+  if (err.code !== "23514") return null;
+  const token = (err.message ?? "").split(":")[0].trim();
+  return EXPECTED_BILL_REFUSALS[token] ?? null;
+}
+
+const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+
+/** Whether a bill already holds the figures a regeneration would write. */
+function sameBill(
+  prior: PriorItem,
+  next: {
+    deviceId: string | null;
+    usageKwh: number;
+    startKwh: number | null;
+    endKwh: number | null;
+    tierBreakdown: TierBreakdown[];
+    totalAmount: number;
+    readingSource: ReadingSource;
+    enteredBy: string | null;
+    manualReason: string | null;
+  },
+): boolean {
+  const tiers = Array.isArray(prior.tier_breakdown) ? (prior.tier_breakdown as { label?: unknown; kwh?: unknown; amount?: unknown }[]) : null;
+  return (
+    prior.reading_source === next.readingSource &&
+    (prior.device_id ?? null) === next.deviceId &&
+    numOrNull(prior.usage_kwh) === next.usageKwh &&
+    numOrNull(prior.start_kwh) === next.startKwh &&
+    numOrNull(prior.end_kwh) === next.endKwh &&
+    Number(prior.total_amount) === next.totalAmount &&
+    (prior.entered_by_user_id ?? null) === next.enteredBy &&
+    (prior.manual_reason ?? null) === next.manualReason &&
+    tiers !== null &&
+    tiers.length === next.tierBreakdown.length &&
+    tiers.every(
+      (t, n) =>
+        t?.label === next.tierBreakdown[n].label &&
+        Number(t?.kwh) === roundKwh(next.tierBreakdown[n].kwh) &&
+        Number(t?.amount) === roundAmount(next.tierBreakdown[n].amount),
+    )
+  );
 }

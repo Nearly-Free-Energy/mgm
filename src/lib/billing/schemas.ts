@@ -491,6 +491,9 @@ export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
  *    regenerated bill would carry new figures under the number already
  *    issued.
  *  - refunded: refunding then re-billing reads as data corruption.
+ *  - changed: the bill changed after the route read it (a payment, a
+ *    refund, another regeneration); only the write itself finds this
+ *    (fn_regenerate_bill_with_audit).
  * POST /api/billing/generate, which the legacy dialogs call, refuses none of
  * these: if it comes to, say so here.
  */
@@ -498,6 +501,9 @@ export const REGENERATE_REFUSAL_COPY = {
   closed: "Bills in a closed period cannot be regenerated.",
   invoiced: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
   refunded: "A refunded bill cannot be regenerated.",
+  // fn_regenerate_bill_with_audit found the bill changed between the route's
+  // read and the write: paid, refunded or regenerated meanwhile.
+  changed: "This bill changed while it was being regenerated. Refresh it and try again.",
 } as const;
 
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";

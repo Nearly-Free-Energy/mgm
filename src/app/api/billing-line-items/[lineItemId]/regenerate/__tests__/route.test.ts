@@ -22,6 +22,10 @@ type Bill = {
   reading_source: string | null;
   payment_status: string;
   invoice_number: string | null;
+  total_amount: number | string;
+  usage_kwh: number | string | null;
+  start_kwh: number | string | null;
+  end_kwh: number | string | null;
 };
 
 let user: { id: string } | null;
@@ -78,6 +82,20 @@ const post = (body: unknown, id = LINE_ITEM, headers: Record<string, string> = {
   );
 const money = (amount: number, currency = "UGX", locale = "en") => createFmt({ locale }).money(amount, currency).text;
 const acknowledged = { confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] } };
+/** The bill as the route read it, which the write must still find (fn_regenerate_bill_with_audit). */
+const expected = (o: Record<string, unknown> = {}) => ({
+  expectedBill: {
+    lineItemId: LINE_ITEM,
+    tenantId: TENANT,
+    paymentStatus: "unpaid",
+    totalAmount: 5000,
+    usageKwh: 50,
+    startKwh: 100,
+    endKwh: 150,
+    readingSource: "edge",
+    ...o,
+  },
+});
 
 const written = (total = 5200, previous: number | null = 5000) => ({
   ok: true,
@@ -92,7 +110,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   reads.length = 0;
   user = { id: "11111111-1111-4111-8111-111111111111" };
-  bill = { id: LINE_ITEM, tenant_id: TENANT, billing_period_id: PERIOD, reading_source: "edge", payment_status: "unpaid", invoice_number: null };
+  // NUMERIC columns as PostgREST may send them: some as strings.
+  bill = {
+    id: LINE_ITEM,
+    tenant_id: TENANT,
+    billing_period_id: PERIOD,
+    reading_source: "edge",
+    payment_status: "unpaid",
+    invoice_number: null,
+    total_amount: "5000",
+    usage_kwh: 50,
+    start_kwh: "100.000",
+    end_kwh: 150,
+  };
   billError = null;
   periodError = null;
   microgridError = null;
@@ -174,7 +204,7 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
   it("reads the bill through the person's client, with the columns it needs", async () => {
     await post({ readings: "edge" });
     expect(reads).toEqual([
-      ["billing_line_items", "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number"],
+      ["billing_line_items", "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh"],
       ["billing_periods", "id, microgrid_id, status"],
       ["microgrids", "id, currency, communities!inner(org_id)"],
     ]);
@@ -242,9 +272,11 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
       lineItemId: LINE_ITEM,
       totalAmount: 5200,
       previousTotalAmount: 5000,
+      changed: true,
       message: `Regenerated the bill. Its total was ${money(5000)} and is now ${money(5200)}.`,
     });
-    expect(generateBills).toHaveBeenCalledWith({ billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: undefined });
+    // The bill as read, numbers as numbers, goes with the call: the write refuses if it has changed since.
+    expect(generateBills).toHaveBeenCalledWith({ billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: undefined }, expected());
   });
 
   it("answers the new total as a number when the database sends NUMERIC as a string", async () => {
@@ -289,11 +321,14 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
     bill!.payment_status = "paid";
     const res = await post({ readings: "manual", start_kwh: 10, end_kwh: 20, ...acknowledged });
     expect(res.status).toBe(200);
-    expect(generateBills).toHaveBeenCalledWith({
-      billingPeriodId: PERIOD,
-      tenantIds: [TENANT],
-      manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 20 }],
-    });
+    expect(generateBills).toHaveBeenCalledWith(
+      {
+        billingPeriodId: PERIOD,
+        tenantIds: [TENANT],
+        manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 20 }],
+      },
+      expected({ paymentStatus: "paid" }),
+    );
   });
 
   it.each(["unpaid", "link_generated", "failed"])("asks no acknowledgement of a %s bill, and ignores one sent", async (status) => {
@@ -306,22 +341,64 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
   it("switches a manual bill back to edge data", async () => {
     bill!.reading_source = "manual";
     await post({ readings: "edge" });
-    expect(generateBills).toHaveBeenCalledWith({ billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: [TENANT] });
+    expect(generateBills).toHaveBeenCalledWith(
+      { billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: [TENANT] },
+      expected({ readingSource: "manual" }),
+    );
   });
 
   it("sends manual readings, with the trimmed reason when one is given", async () => {
     await post({ readings: "manual", start_kwh: 10, end_kwh: 25.5, reason: "  dial photo " });
-    expect(generateBills).toHaveBeenLastCalledWith({
-      billingPeriodId: PERIOD,
-      tenantIds: [TENANT],
-      manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 25.5, reason: "dial photo" }],
-    });
+    expect(generateBills).toHaveBeenLastCalledWith(
+      {
+        billingPeriodId: PERIOD,
+        tenantIds: [TENANT],
+        manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 25.5, reason: "dial photo" }],
+      },
+      expected(),
+    );
     await post({ readings: "manual", start_kwh: 10, end_kwh: 10 });
-    expect(generateBills).toHaveBeenLastCalledWith({
-      billingPeriodId: PERIOD,
-      tenantIds: [TENANT],
-      manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 10 }],
+    expect(generateBills).toHaveBeenLastCalledWith(
+      {
+        billingPeriodId: PERIOD,
+        tenantIds: [TENANT],
+        manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 10 }],
+      },
+      expected(),
+    );
+  });
+
+  it("sends a bill with no readings yet as nulls", async () => {
+    bill = { ...bill!, usage_kwh: null, start_kwh: null, end_kwh: null, total_amount: 0 };
+    await post({ readings: "edge" });
+    expect(generateBills.mock.calls[0][1]).toEqual(expected({ totalAmount: 0, usageKwh: null, startKwh: null, endKwh: null }));
+  });
+
+  it("answers 200 with changed false, and the total, when the bill already had these figures", async () => {
+    generateResult = {
+      ok: true,
+      data: { results: [{ kind: "unchanged", tenantId: TENANT, tenantName: "Unit 1", lineItemId: LINE_ITEM, totalAmount: 5000 }] },
+    };
+    const res = await post({ readings: "edge" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      lineItemId: LINE_ITEM,
+      totalAmount: 5000,
+      previousTotalAmount: 5000,
+      changed: false,
+      message: `Nothing changed: the bill already has these figures. Its total is ${money(5000)}.`,
     });
+  });
+
+  it.each([
+    ["period_closed", REGENERATE_REFUSAL_COPY.closed],
+    ["invoiced", REGENERATE_REFUSAL_COPY.invoiced],
+    ["bill_changed", REGENERATE_REFUSAL_COPY.changed],
+  ])("409 %s when the write found the bill changed since it was read", async (code, error) => {
+    generateResult = { ok: true, data: { results: [{ kind: "error", tenantId: TENANT, tenantName: "Unit 1", error, code }] } };
+    const res = await post({ readings: "edge" });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error, reason: code });
   });
 
   it("409 with generation's code when it refused this tenant", async () => {

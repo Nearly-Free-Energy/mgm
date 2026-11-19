@@ -17,6 +17,7 @@ import type {
   BillingRepository,
   BillingResult,
   BillingScope,
+  ExpectedBill,
   GenerationFatal,
   GenerationOutput,
   ManualPaymentStatus,
@@ -708,7 +709,7 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: { periodId, microgridId: period.microgrid_id, name } };
   }
 
-  private async runGeneration(input: unknown, mode: "write" | "preview") {
+  private async runGeneration(input: unknown, mode: "write" | "preview", expectedBill?: ExpectedBill) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     // The routes parse first (generate with this schema, regenerate-preview
@@ -742,6 +743,7 @@ export class BillingCapability implements BillingCapabilityContract {
       seedReadings: parsed.seedReadings,
       mode,
       actorUserId: this.scope.userId,
+      ...(expectedBill ? { expectedBill } : {}),
     });
     if ((out as GenerationFatal).kind === "fatal") {
       const fatal = out as GenerationFatal;
@@ -764,8 +766,8 @@ export class BillingCapability implements BillingCapabilityContract {
     return this.runGeneration(input, "preview");
   }
 
-  async generateBills(input: unknown) {
-    return this.runGeneration(input, "write");
+  async generateBills(input: unknown, options: { expectedBill?: ExpectedBill } = {}) {
+    return this.runGeneration(input, "write", options.expectedBill);
   }
 
   async recordManualPayment(lineItemId: string, input: unknown) {

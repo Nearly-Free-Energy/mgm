@@ -326,9 +326,11 @@ export async function PATCH(
       { status: 500 }
     );
   }
-  if (result.kind === "kept") {
+  if (result.kind === "kept" || result.kind === "unchanged") {
     // Should never happen — a manualReadings entry for the tenant lifts
-    // the engine's keep-manual guard, and this route always sends one.
+    // the engine's keep-manual guard, and this route always sends one; and
+    // only a per-bill regeneration (expectedBill), which this route does
+    // not ask for, reports a bill unchanged.
     return NextResponse.json(
       { error: "Internal error: line item was not rewritten.", reason: "unknown_error" },
       { status: 500 }

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { composeBilling, type BillingResult } from "@/lib/billing/compose";
+import type { ExpectedBill } from "@/lib/billing/generate";
 import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY, RegenerateBillBody } from "@/lib/billing/schemas";
+import type { BillingLineItemPaymentStatus } from "@/lib/types/domain";
 import { createFmt } from "@/lib/gui/fmt";
 import { formatLocale } from "@/lib/locale";
 import { parseJsonBody } from "@/lib/validation/parse-body";
@@ -33,11 +35,13 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   If generation comes to refuse any of these itself, say so here.
  *
  * Responses:
- *   200 → { lineItemId, totalAmount, previousTotalAmount, message } — both
- *         totals numbers (previousTotalAmount null for a new bill);
+ *   200 → { lineItemId, totalAmount, previousTotalAmount, changed, message }
+ *         — both totals numbers (previousTotalAmount null for a new bill);
  *         message names the previous and new totals, in the microgrid's
  *         currency and the request's locale; the GUI host shows it as the
- *         action's result
+ *         action's result. changed is false, and nothing was written (no
+ *         audit row), when the bill already had the figures this
+ *         regeneration computed: sending it twice records it once
  *   400 → { error, field?, code: "invalid_body" } (body, or a reading the
  *         mode does not take or lacks); { error, reason: "bad_request" } (id)
  *   401 → { error: "unauthorized" }
@@ -46,7 +50,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         (REGENERATE_REFUSAL_COPY: a bill in a closed period, a bill with
  *         an invoice number, a refunded bill; nothing is written), or
  *         { error, reason: <generation code> } when generation refused this
- *         tenant (GenerationErrorCode)
+ *         tenant (GenerationErrorCode), including "period_closed",
+ *         "invoiced" and "bill_changed" when the bill changed between this
+ *         route's read and the write
  *   428 → { error, reason: "paid_acknowledgement_required" } (a paid bill
  *         without the acknowledgement; nothing is written)
  *   500 → { error, reason: "unknown_error" } (the bill, its period or its
@@ -82,9 +88,16 @@ type BillRow = {
   tenant_id: string;
   billing_period_id: string;
   reading_source: "edge" | "manual" | null;
-  payment_status: string;
+  payment_status: BillingLineItemPaymentStatus;
   invoice_number: string | null;
+  // NUMERIC columns, which can arrive as strings.
+  total_amount: number | string;
+  usage_kwh: number | string | null;
+  start_kwh: number | string | null;
+  end_kwh: number | string | null;
 };
+
+const numOrNull = (v: number | string | null): number | null => (v === null ? null : Number(v));
 
 export async function POST(
   request: NextRequest,
@@ -120,7 +133,7 @@ export async function POST(
   // Read through the person's own client: a bill RLS hides is a 404.
   const { data: bill, error: billError } = await supabase
     .from("billing_line_items")
-    .select("id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number")
+    .select("id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number, total_amount, usage_kwh, start_kwh, end_kwh")
     .eq("id", lineItemId)
     .maybeSingle<BillRow>();
   if (billError) return readFailed("Failed to look up billing line item.");
@@ -169,6 +182,21 @@ export async function POST(
     }
 
     const tenantId = bill.tenant_id;
+    // The bill as read here, which every check above was made on. The write
+    // (fn_regenerate_bill_with_audit) refuses, under locks held to commit,
+    // unless the period is still a draft and the bill still has no invoice
+    // number and these values: a payment, refund, invoice number, close or
+    // other regeneration since this read answers 409 and writes nothing.
+    const expectedBill: ExpectedBill = {
+      lineItemId: bill.id,
+      tenantId,
+      paymentStatus: bill.payment_status,
+      totalAmount: Number(bill.total_amount),
+      usageKwh: numOrNull(bill.usage_kwh),
+      startKwh: numOrNull(bill.start_kwh),
+      endKwh: numOrNull(bill.end_kwh),
+      readingSource: bill.reading_source,
+    };
     const result = await composed.data.billing.generateBills(
       parsed.readings === "edge"
         ? {
@@ -184,13 +212,24 @@ export async function POST(
               { tenantId, startKwh: parsed.start_kwh, endKwh: parsed.end_kwh, ...(parsed.reason ? { reason: parsed.reason } : {}) },
             ],
           },
+      { expectedBill },
     );
     if (!result.ok) return mapError(result);
 
     const mine = result.data.results.find((r) => r.tenantId === tenantId);
+    const fmt = createFmt({ locale: formatLocale(request.headers.get("accept-language")) });
+    const currency = microgrid?.currency ?? "UGX";
+    if (mine?.kind === "unchanged") {
+      // The same regeneration sent again: nothing written, no audit row.
+      return NextResponse.json({
+        lineItemId: mine.lineItemId,
+        totalAmount: mine.totalAmount,
+        previousTotalAmount: mine.totalAmount,
+        changed: false,
+        message: `Nothing changed: the bill already has these figures. Its total is ${fmt.money(mine.totalAmount, currency).text}.`,
+      });
+    }
     if (mine?.kind === "written") {
-      const fmt = createFmt({ locale: formatLocale(request.headers.get("accept-language")) });
-      const currency = microgrid?.currency ?? "UGX";
       const now = fmt.money(Number(mine.lineItem.total_amount), currency).text;
       const message =
         mine.previousTotalAmount === null
@@ -201,6 +240,7 @@ export async function POST(
         // A NUMERIC column, which can arrive as a string: answered as a number.
         totalAmount: Number(mine.lineItem.total_amount),
         previousTotalAmount: mine.previousTotalAmount,
+        changed: true,
         message,
       });
     }
