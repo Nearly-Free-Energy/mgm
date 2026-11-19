@@ -154,7 +154,11 @@ export async function POST(
       _actor: actorId,
     });
     if (granted.error || typeof granted.data !== "string") {
-      if (created) await removeIfStillUnused(svc, userId);
+      // An account this request created stays: with no role row it gets no
+      // sign-in link (fn_auth_sign_in_target needs one) and is on no list,
+      // and a retry finds it. Deleting it could take another request's grant
+      // with it, made meanwhile for the same address, since user_roles.user_id
+      // cascades from auth.users.
       const { code, message } = (granted.error ?? {}) as { code?: string; message?: string };
       if (code === "42501") return forbidden();
       if (code === "P0002" && message === "Tenant not found.") return tenantNotFound();
@@ -223,45 +227,6 @@ async function accountFor(
   const newId = res.data.user?.id;
   if (!newId) return { ok: false, response: failed() };
   return { ok: true, userId: newId, created: true };
-}
-
-/**
- * Removes an account this request created once its grant has failed, unless
- * it has gained a role row or a record of one since: another request may
- * have given access to the same address meanwhile (a second manager's
- * grant, or an invitation reusing an account with no rows), and deleting the
- * account would take that row with it, because user_roles.user_id cascades
- * from auth.users. If that cascade goes, this check is no longer needed.
- * It narrows the window and does not close it: the check and the delete are
- * two calls. An account left with no rows gets no sign-in link
- * (fn_auth_sign_in_target needs a role row), like an invitation that did
- * not finish.
- */
-async function removeIfStillUnused(svc: SupabaseClient, userId: string): Promise<void> {
-  try {
-    const [roles, tenantHistory, staffHistory] = await Promise.all([
-      svc.from("user_roles").select("id", { head: true, count: "exact" }).eq("user_id", userId),
-      svc
-        .from("tenant_access_accounts")
-        .select("user_id", { head: true, count: "exact" })
-        .eq("user_id", userId),
-      svc
-        .from("staff_access_accounts")
-        .select("user_id", { head: true, count: "exact" })
-        .eq("user_id", userId),
-    ]);
-    const unused = [roles, tenantHistory, staffHistory].every(
-      (read) => !read.error && read.count === 0
-    );
-    if (!unused) {
-      console.warn("[tenant-access] Kept a new account after a failed grant.");
-      return;
-    }
-    const { error } = await svc.auth.admin.deleteUser(userId);
-    if (error) console.error("[tenant-access] Could not remove a new account after a failed grant:", error.name);
-  } catch (error) {
-    console.error("[tenant-access] Could not remove a new account after a failed grant:", (error as Error).name);
-  }
 }
 
 /**

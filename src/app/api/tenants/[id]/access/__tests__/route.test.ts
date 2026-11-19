@@ -38,7 +38,6 @@ let createResult: { data: { user: { id: string } | null }; error: PgError | null
 /** Accounts that appear in the Auth list once createUser has run (the email_exists race). */
 let appearAfterCreate: { id: string; email: string }[];
 let grantResult: { data: string | null; error: PgError | null };
-let cleanupCounts: Record<string, { count: number | null; error: PgError | null }>;
 let noticeResult: { ok: true; via: string } | { ok: false; reason: string } | "throw";
 
 const events: string[] = [];
@@ -110,10 +109,7 @@ vi.mock("@/lib/supabase/service", () => ({
         throw new Error(`Unexpected RPC on the service client: ${fn}`);
       },
       from: (table: string) => {
-        events.push(`service:${table}`);
-        return {
-          select: () => ({ eq: async () => cleanupCounts[table] ?? { count: 0, error: null } }),
-        };
+        throw new Error(`Unexpected table on the service client: ${table}`);
       },
     };
   },
@@ -194,7 +190,6 @@ beforeEach(() => {
   createResult = { data: { user: { id: NEW_ID } }, error: null };
   appearAfterCreate = [];
   grantResult = { data: ACCESS_ID, error: null };
-  cleanupCounts = {};
   noticeResult = { ok: true, via: "organization" };
 });
 
@@ -460,28 +455,15 @@ describe("POST /api/tenants/[id]/access: a grant that fails", () => {
     [{ code: "P0002", message: "Tenant not found." }, 404, "tenant_not_found"],
     [{ code: "P0002", message: "User not found." }, 503, "tenant_access_unavailable"],
     [{ code: "XX000", message: "boom" }, 500, "tenant_access_failed"],
-  ])("removes the account it created that still holds nothing, and maps %j", async (error, status, code) => {
+  ])("keeps the account it created, which can sign in to nothing, and maps %j", async (error, status, code) => {
     grantResult = { data: null, error };
     const out = await call();
     expect(out.status).toBe(status);
     expect(out.body.code).toBe(code);
     expect(JSON.stringify(out.body)).not.toContain("boom");
-    expect(deleteUserSpy).toHaveBeenCalledWith(NEW_ID);
-    expect(sendNoticeSpy).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["a role row", "user_roles", { count: 1, error: null }],
-    ["a record of tenant access", "tenant_access_accounts", { count: 1, error: null }],
-    ["a record of staff access", "staff_access_accounts", { count: 1, error: null }],
-    ["an unreadable role row count", "user_roles", { count: null, error: { message: "down" } }],
-    ["an unreadable record", "staff_access_accounts", { count: null, error: { message: "down" } }],
-  ])("keeps the account it created once it has %s", async (_name, table, read) => {
-    grantResult = { data: null, error: { code: "XX000", message: "boom" } };
-    cleanupCounts = { [table]: read };
-    const out = await call();
-    expect(out.status).toBe(500);
+    // Deleting it could take a grant another request made meanwhile.
     expect(deleteUserSpy).not.toHaveBeenCalled();
+    expect(sendNoticeSpy).not.toHaveBeenCalled();
   });
 
   it("never removes an account that existed before the request", async () => {
