@@ -30,6 +30,7 @@ const BACK: LinkRef = { id: "billing.back-to-period", label: "Back to period", h
 const HISTORY: LinkRef = { id: "billing.view-history", label: "View history", href: `/microgrids/${MG}/billing/${PERIOD}/history` };
 const NOT_SET_UP = "No payment provider is configured. Ask a super admin to configure Payment for this community.";
 const PAID_NOTE = "Paid: no link to send.";
+const INTRO = "Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.";
 const BILLING_OFF = "Billing is disabled for this organization. Enable it in Settings → Plugins.";
 
 const COLUMNS: Column[] = [
@@ -73,13 +74,13 @@ const ROWS = [
   row(2, { total: [31250, "UGX 31,250"], status: ["paid", "success", "Paid"], linked: false, note: PAID_NOTE }),
 ];
 
-function model(o: { rows?: RowOf<ActionRef>[]; urls?: (string | null)[]; note?: Json; empty?: ModelOf<"collection">["body"]["empty"] } & Partial<Omit<ModelOf<"collection">, "body">> = {}): ModelOf<"collection"> {
-  const { rows = ROWS, urls, note = null, empty, ...rest } = o;
+function model(o: { rows?: RowOf<ActionRef>[]; urls?: (string | null)[]; note?: Json; intro?: Json; empty?: ModelOf<"collection">["body"]["empty"] } & Partial<Omit<ModelOf<"collection">, "body">> = {}): ModelOf<"collection"> {
+  const { rows = ROWS, urls, note = null, intro = INTRO, empty, ...rest } = o;
   return {
     type: "view",
     view: "billing.send-queue",
     kind: "collection",
-    title: "Send November 2026 bills",
+    title: "November 2026 payment links",
     subtitle: "Africa/Kampala",
     org: "00000000-0000-4000-8000-0000000000a0",
     entity: { kind: "billingPeriod", id: PERIOD, label: "1 Nov 2026 – 30 Nov 2026" },
@@ -88,10 +89,10 @@ function model(o: { rows?: RowOf<ActionRef>[]; urls?: (string | null)[]; note?: 
     links: [BACK, HISTORY],
     attached: [],
     live: { refreshSeconds: 30, staleAfterSeconds: 120 },
-    body: { columns: COLUMNS, rows, empty: empty ?? { title: "No bills to send yet.", text: "Generate this period's bills on the period page first." } },
+    body: { columns: COLUMNS, rows, empty: empty ?? { title: "No bills yet.", text: "Generate this period's bills on the period page first." } },
     ext: {
       schema: "billing.send-queue@1",
-      data: { rows: rows.map((r, n) => ({ id: r.id, url: urls ? urls[n] : r.cells.link.t === "text" ? r.cells.link.text : null })), note } as unknown as Json,
+      data: { intro, rows: rows.map((r, n) => ({ id: r.id, url: urls ? urls[n] : r.cells.link.t === "text" ? r.cells.link.text : null })), note } as unknown as Json,
     },
     ...rest,
   };
@@ -106,7 +107,7 @@ const noBills = () => model({ rows: [] });
 /** The model of three bills with the ext's rows replaced outright, so they need not follow the model's. */
 function withExtRows(extRows: { id: string; url: string | null }[]): ModelOf<"collection"> {
   const m = model();
-  return { ...m, ext: { schema: "billing.send-queue@1", data: { rows: extRows, note: null } } };
+  return { ...m, ext: { schema: "billing.send-queue@1", data: { intro: INTRO, rows: extRows, note: null } } };
 }
 /** The ext rows model() builds for ROWS, each valid against its own row. */
 const EXT_ROWS = [
@@ -137,7 +138,7 @@ const clipboard = (fail = false) => {
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   return writeText;
 };
-const cards = () => within(screen.getByRole("list", { name: "Bills to send" })).getAllByRole("listitem").filter((li) => li.parentElement?.getAttribute("aria-label") === "Bills to send");
+const cards = () => within(screen.getByRole("list", { name: "Bills" })).getAllByRole("listitem").filter((li) => li.parentElement?.getAttribute("aria-label") === "Bills");
 
 describe("Gridtop's send-queue renderer: choosing it", () => {
   it("is registered for version 1, and leaves the page's controls to the window bar", () => {
@@ -159,11 +160,11 @@ describe("Gridtop's send-queue renderer: choosing it", () => {
   });
 
   it("reads the links and note as the server sends them", () => {
-    expect(readSendQueueExt(model())).toEqual({ urls: [urlOf(0), urlOf(1), null], note: null });
+    expect(readSendQueueExt(model())).toEqual({ intro: INTRO, urls: [urlOf(0), urlOf(1), null], note: null });
     // The rows the refusals below start from are themselves read.
-    expect(readSendQueueExt(withExtRows(EXT_ROWS))).toEqual({ urls: [urlOf(0), urlOf(1), null], note: null });
-    expect(readSendQueueExt(unconfigured())).toEqual({ urls: [null, null, null], note: { tone: "warning", text: NOT_SET_UP } });
-    expect(readSendQueueExt(noBills())).toEqual({ urls: [], note: null });
+    expect(readSendQueueExt(withExtRows(EXT_ROWS))).toEqual({ intro: INTRO, urls: [urlOf(0), urlOf(1), null], note: null });
+    expect(readSendQueueExt(unconfigured())).toEqual({ intro: INTRO, urls: [null, null, null], note: { tone: "warning", text: NOT_SET_UP } });
+    expect(readSendQueueExt(noBills())).toEqual({ intro: INTRO, urls: [], note: null });
   });
 
   it.each([
@@ -176,6 +177,7 @@ describe("Gridtop's send-queue renderer: choosing it", () => {
     ["a link cell with no url", model({ urls: [null, urlOf(1), null] })],
     ["a url that is not http", model({ urls: ["javascript:alert(1)", urlOf(1), null] })],
     ["a note of another tone", model({ note: { tone: "danger", text: "x" } })],
+    ["an ext with no intro", model({ intro: null })],
   ])("draws the kit's view for %s", async (_label, m) => {
     expect(readSendQueueExt(m)).toBeNull();
     await draw(m);
@@ -197,6 +199,14 @@ describe("Gridtop's send-queue renderer: drawing", () => {
   ])("passes the conformance view checks, with acme.poke offered: %s", async (name, m) => {
     expect(await checkModel(GridtopGui, withPoke(m()), name)).toEqual([]);
   }, 60_000);
+
+  it("says at the top that nothing is sent from the page", async () => {
+    await draw(model());
+    const intro = screen.getByText(INTRO);
+    expect(intro.closest("header")).not.toBeNull();
+    // Before the bills.
+    expect(intro.compareDocumentPosition(screen.getByRole("list", { name: "Bills" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 
   it("draws a card per bill, with the link as selectable text and never an anchor", async () => {
     await draw(model());
@@ -247,8 +257,9 @@ describe("Gridtop's send-queue renderer: drawing", () => {
 
   it("shows the empty state with no bills", async () => {
     await draw(noBills());
-    expect(screen.getByRole("heading", { name: "No bills to send yet." })).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Bills to send" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "No bills yet." })).toBeTruthy();
+    expect(screen.getByText(INTRO)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Bills" })).toBeNull();
   });
 
   it("shows the host's notice", async () => {

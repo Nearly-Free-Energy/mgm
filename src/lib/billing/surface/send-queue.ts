@@ -49,7 +49,7 @@ type Refusal = Extract<Loaded<never>, { ok: false }>;
 
 export const SEND_QUEUE_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This billing period could not be found." },
-  unavailable: { ok: false, status: 503, message: "Could not load this period's bills to send right now. Try again shortly." },
+  unavailable: { ok: false, status: 503, message: "Could not load this period's payment links right now. Try again shortly." },
   // The period review's copy: the legacy period page shows no period
   // without a pinned tariff, and so offers none of its payment links.
   noTariff: PERIOD_REVIEW_REFUSALS.noTariff,

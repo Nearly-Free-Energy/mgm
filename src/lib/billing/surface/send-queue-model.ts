@@ -18,7 +18,14 @@
  *
  * The link is the row's `link` cell, as text a person can select, and the
  * `billing.send-queue@1` ext (./send-queue-ext.ts) carries it again for a
- * renderer that offers to copy it, with the note on readiness in full.
+ * renderer that offers to copy it, with the note on readiness in full and
+ * the line that says nothing is sent from the page.
+ *
+ * Nothing on this view sends anything: the manager copies each link and
+ * shares it, so the view is titled for its links and says so at the top
+ * (SEND_QUEUE_COPY.intro). The view id and its path (…/send) keep the name
+ * they were released under. If the view comes to send a link itself, revisit
+ * the title, the intro and the period review's link to it.
  *
  * Tenants' email addresses and phone numbers never enter the model: the
  * loader passes only whether a tenant has one.
@@ -68,6 +75,8 @@ export type SendReadiness =
 
 /** The fixed notes, per bill and on readiness. */
 export const SEND_QUEUE_COPY = {
+  /** The line at the top of the page: the view only lists links. */
+  intro: "Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.",
   paid: "Paid: no link to send.",
   refunded: "Refunded: no link to send.",
   zero: "Nothing to collect.",
@@ -174,6 +183,9 @@ export function readinessNote(readiness: SendReadiness, superAdmin: boolean): Se
   }
 }
 
+/** The view's title: the period's links, never a promise to send them. */
+export const sendQueueTitle = (period: string) => `${period} payment links`;
+
 export function buildSendQueueModel(i: SendQueueInput): LoadedModel<"collection"> {
   const { microgrid, period, fmt } = i;
   const label = periodLabel(fmt, period.start_date, period.end_date);
@@ -224,16 +236,17 @@ export function buildSendQueueModel(i: SendQueueInput): LoadedModel<"collection"
   const empty: LoadedModel<"collection">["body"]["empty"] =
     i.tenants.length === 0
       ? { title: "No tenants configured for this microgrid." }
-      : { title: "No bills to send yet.", text: "Generate this period's bills on the period page first." };
+      : { title: "No bills yet.", text: "Generate this period's bills on the period page first." };
 
   const ext: SendQueueExtData = {
+    intro: SEND_QUEUE_COPY.intro,
     rows: rows.map((row, n) => ({ id: row.id, url: urls[n] })),
     note: readinessNote(i.readiness, i.superAdmin),
   };
 
   const subtitle = isSilent(i.readiness) ? period.timezone : SEND_QUEUE_SUBTITLES[i.readiness];
   return {
-    title: `Send ${periodName(period.start_date, period.end_date) ?? label} bills`,
+    title: sendQueueTitle(periodName(period.start_date, period.end_date) ?? label),
     ...(subtitle ? { subtitle } : {}),
     entity: { kind: "billingPeriod", id: period.id, label },
     actions: [],

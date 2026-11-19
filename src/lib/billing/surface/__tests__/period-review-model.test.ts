@@ -384,7 +384,7 @@ describe("buildPeriodReviewModel: the period", () => {
   it("links the history always, a draft's close checklist, and the send queue and CSV export only when there are bills", () => {
     const history = { id: "billing.view-history", label: "View history", href: `/microgrids/${MG}/billing/${PERIOD}/history` };
     const close = { id: "billing.close-checklist", label: "Close period", href: `/microgrids/${MG}/billing/${PERIOD}/close` };
-    const send = { id: "billing.send-queue", label: "Send bills", icon: "share", href: `/microgrids/${MG}/billing/${PERIOD}/send` };
+    const send = { id: "billing.send-queue", label: "Payment links", icon: "payments", href: `/microgrids/${MG}/billing/${PERIOD}/send` };
     // With no bills too: the checklist says why Close is blocked. No bills, nothing to send.
     expect(build({ bills: [] }).links).toEqual([history, close]);
     expect(build({ bills: [], period: { ...input().period, status: "closed" } }).links).toEqual([history]);

@@ -236,7 +236,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     // Generate is not offered until an interface has a form for it (parity.test.ts).
     expect(model.actions).toEqual([]);
     expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.close-checklist", "billing.send-queue", "billing.export-csv"]);
-    expect(model.links[2]).toMatchObject({ label: "Send bills", href: `/microgrids/${MICROGRID}/billing/${DRAFT}/send` });
+    expect(model.links[2]).toMatchObject({ label: "Payment links", href: `/microgrids/${MICROGRID}/billing/${DRAFT}/send` });
     expect(rows[0].links.map((l) => l.id)).toEqual(["billing.download-bill", "billing.view-history"]);
 
     // The prefills survive the host's check against each input.

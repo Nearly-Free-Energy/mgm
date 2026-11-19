@@ -209,7 +209,7 @@ describe("loadSendQueue", () => {
     if (!out.ok) throw new Error(out.message);
     expect(composePayments).not.toHaveBeenCalled();
     expect(out.model.body.rows).toEqual([]);
-    expect(out.model.body.empty.title).toBe("No bills to send yet.");
+    expect(out.model.body.empty.title).toBe("No bills yet.");
     // Not the "could not check" warning: nothing failed, there is just nothing to send.
     expect(out.model.subtitle).toBe("Africa/Kampala");
     expect((out.model.ext!.data as { note: unknown }).note).toBeNull();
