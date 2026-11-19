@@ -21,10 +21,12 @@ import type { UserRoleRecord } from "@/lib/types/domain";
 import type { MgmGate } from "./gate";
 
 /**
- * The caller and organization one request acts for. Capability plugins
- * other than TenantAppPlugin take `organizationId` and `roles` as access
- * their composer has already authorized with authorizeOrganization. In a
- * tenant-app scope (composeTenantApp) they are not: the organization is
+ * The caller and organization one request acts for. The community
+ * management, metering, billing and payments capability plugins take
+ * `organizationId` and `roles` as access their composer has already
+ * authorized with authorizeOrganization; billing-review gets no roles and
+ * reads only through RLS (composeBillingReview). In a tenant-app scope
+ * (composeTenantApp) they are not organization access: the organization is
  * only the tenant's unit's, and the roles only the tenant's rows, so
  * nothing else is loaded there (openOrganizationScope).
  */

@@ -160,12 +160,13 @@ export async function composeTenantApp(options: {
   // An organization scope for a person who may hold no access to that
   // organization: its id is only the unit's, and its roles are only the
   // caller's tenant rows, so a manager who rents carries no staff row into
-  // it. Nothing but TenantAppPlugin may be loaded into this scope. Every
-  // other capability plugin (community-management, metering, billing,
-  // billing-review, payments) treats mgmRequest.organizationId and roles as
-  // access its composer authorized with authorizeOrganization, and would
-  // then rest on RLS alone, payments with its service-role writer too. The
-  // composition hands out no ctx or load, so keep it that way.
+  // it. Nothing but TenantAppPlugin may be loaded into this scope. The
+  // community-management, metering, billing and payments plugins treat
+  // mgmRequest.organizationId and roles as access their composer authorized
+  // with authorizeOrganization, and would then rest on RLS alone, payments
+  // with its service-role writer too; billing-review reads only through RLS
+  // but is a staff capability. The composition hands out no ctx or load, so
+  // keep it that way.
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
     requestScope = await openOrganizationScope({

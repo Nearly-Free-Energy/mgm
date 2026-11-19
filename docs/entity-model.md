@@ -132,10 +132,12 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   by the Users page or any other path, they are exactly a tenant who never
   had one: their tenant rows untouched, given further units like any
   tenant, off the Users page, and sent from `/` as a tenant. Their session
-  is not ended; only removing their last row does that. The Users page
-  lists current staff through their own rows, and an account left with no
-  rows at all if it has ever been staff (`staff_access_accounts`,
-  `20261118140000_tenant_app_plugin.sql`) or never held tenant access.
+  is not ended; only `fn_tenant_access_revoke` ends sessions, when it
+  removes a person's last row (`DELETE /api/users/[id]` ends none). The
+  Users page lists current staff through their own rows, and an account
+  left with no rows at all if it has ever been staff
+  (`staff_access_accounts`, `20261118140000_tenant_app_plugin.sql`) or
+  never held tenant access.
 - A tenant role row is removed with its tenant: `user_roles.scope_tenant_id`
   references `tenants` with `ON DELETE CASCADE`.
 - Tenants read no microgrid, edge, community or organization row. The few

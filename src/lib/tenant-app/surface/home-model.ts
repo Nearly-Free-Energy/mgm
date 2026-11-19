@@ -22,8 +22,10 @@ export const TENANT_HOME_KEYS = ["unit", "microgrid", "today", "meters"] as cons
 /**
  * What the view calls the unit: its unit label, else the tenant's display
  * name, which is the tenant's own name and the same for every unit they
- * rent. The GUI host names units the same way in the shell (unitName in
- * @/lib/gui/host/server/units); change both together.
+ * rent. The GUI host names units the same way (unitName in
+ * @/lib/gui/host/server/units); change both together. The shell's label adds
+ * the microgrid when two of the person's units share a name, which this view,
+ * seeing one unit, cannot know; the Microgrid field below tells them apart.
  */
 function unitTitle(tenant: TenantHome["tenant"]): string {
   return tenant.unitLabel?.trim() || tenant.displayName.trim() || "Your unit";

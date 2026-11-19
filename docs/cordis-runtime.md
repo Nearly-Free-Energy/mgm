@@ -58,8 +58,9 @@ except the tenant app's, which calls `authorizeTenant()` (see "The tenant
 app" below). `openOrganizationScope()` is a low-level constructor accepting
 an already authorized request; it does not authenticate or authorize. The
 capability plugins take its `organizationId` and `roles` as organization
-access their composer authorized, except in the tenant app's scope, which
-carries none (below).
+access their composer authorized, except billing-review, whose composer
+passes no roles and whose plugin reads only through RLS, and the tenant
+app's scope, which carries no organization access (below).
 Public payment callers establish their separate bearer-token/notification
 verification boundary.
 It creates an *isolated* child context of the root. Isolation gives the request its own `mgmRequest`, capability and
@@ -135,10 +136,10 @@ are the gate's own. Only then does it open the scope for that organization with
 opened for a person who may hold no access to the organization: its
 `organizationId` is only the unit's and its `roles` only the caller's tenant
 rows. So nothing but the `tenant-app` capability may be loaded into it:
-every other capability plugin (community-management, metering, billing,
-billing-review, payments) treats those fields as access its composer
-authorized with `authorizeOrganization`. The composition hands out no
-context to load more. The `tenant-app` capability
+the community-management, metering, billing and payments plugins treat
+those fields as access their composer authorized with
+`authorizeOrganization`, and billing-review, which reads only through RLS,
+is a staff capability. The composition hands out no context to load more. The `tenant-app` capability
 provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`). The
 capability is read-only, so it has no write to re-check, and
 `compose-fail-closed.test.ts` leaves it out:

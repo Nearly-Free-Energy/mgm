@@ -56,7 +56,10 @@ type HomeRow = {
  * display name, else "Your unit". The unit label comes first because the
  * display name is the tenant's own name, which one person's units share.
  * The tenant.home view titles itself the same way (tenant-app
- * surface/home-model.ts); change both together.
+ * surface/home-model.ts); change both together. The view sees one unit, so
+ * its title is this name, never the shell's `label`: for two units that
+ * share a name the shell adds the microgrid and the view's title does not
+ * (its Microgrid field tells them apart).
  */
 export function unitName(unit: { unitLabel: string | null; displayName: string | null }): string {
   return unit.unitLabel?.trim() || unit.displayName?.trim() || "Your unit";
