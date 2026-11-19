@@ -11,9 +11,11 @@
  * control cannot be lost on the way.
  *
  * Out of the table, on purpose:
- *  - The microgrid layout's chrome on these pages (the Operations, Billing
- *    and Setup tabs, the breadcrumb, Edit microgrid and the timezone nudge):
- *    it belongs to the microgrid pages and is not deleted with billing's.
+ *  - The rest of the microgrid layout's chrome on these pages (the
+ *    Operations and Setup tabs, the breadcrumb, Edit microgrid and the
+ *    timezone nudge): it belongs to the microgrid pages and stays. The
+ *    Billing tab is billing's sub-navigation, which #201's Deletes item
+ *    removes, so it is a row (billing-tab).
  *  - Controls that only change what is on screen (opening the pre-flight
  *    panel, the create form, a dialog, a period picker's list) and the fields
  *    inside a form: they are the form of the action their submit maps to.
@@ -37,7 +39,14 @@ export type ParityPullRequest =
   | "Contribute a period's history"
   | "Contribute the close checklist on …/close"
   | "Contribute the send queue on …/send"
-  /** Nothing in #201 contributes it yet: it needs a decision before the deletes. */
+  | "Draw period review as a copy table in Gridtop"
+  | "Serve the billing pages through the GUI host"
+  /** Added to #201 in review (#205): the payments plugin's view of a bill's attempts. */
+  | "Contribute a bill's payment attempts"
+  /**
+   * Nothing in #201 contributes it yet: it needs a decision before the
+   * deletes. parity.test.ts keeps such a row pending whatever is contributed.
+   */
   | "unscheduled";
 
 export type ParityScreen = "periods" | "period-review" | "period-history";
@@ -51,6 +60,8 @@ export type ParityAction = {
   method: "POST" | "PUT" | "PATCH" | "DELETE";
   /** The route as spelled under src/app/api, with its own segment names. */
   route: string;
+  /** The contract derives the tone and the lowest confirmation from it (contribution-schema.ts). */
+  risk: "write" | "money" | "external" | "destructive";
   confirm: Confirm;
   /**
    * The schema in src/lib/billing/schemas.ts the route parses its body with,
@@ -73,6 +84,29 @@ export type ParityLink = {
   download?: true;
 };
 
+/**
+ * A clipboard control. Copying is the GUI's to draw, not an action or a link,
+ * so nothing in a contribution shows it: the pull request that delivers it
+ * removes the row from PENDING, and the test then requires its view.
+ */
+export type ParityCopy = {
+  kind: "copy";
+  view: string;
+  what: string;
+};
+
+/** A control replaced by a whole contributed view. */
+export type ParityView = {
+  kind: "view";
+  view: string;
+};
+
+/** Navigation replaced by a contributed nav entry that opens a view (not a legacy page). */
+export type ParityNav = {
+  kind: "nav";
+  nav: string;
+};
+
 export type ParityRow = {
   id: string;
   screen: ParityScreen;
@@ -80,7 +114,7 @@ export type ParityRow = {
   control: string;
   /** Where it is today. */
   legacy: string;
-  replacedBy: ParityAction | ParityLink;
+  replacedBy: ParityAction | ParityLink | ParityCopy | ParityView | ParityNav;
   pr: ParityPullRequest;
   note?: string;
 };
@@ -90,6 +124,9 @@ const REVIEW = "Contribute period review, with targeted actions for each bill";
 const HISTORY = "Contribute a period's history";
 const CLOSE = "Contribute the close checklist on …/close";
 const SEND = "Contribute the send queue on …/send";
+const GRIDTOP = "Draw period review as a copy table in Gridtop";
+const SERVE = "Serve the billing pages through the GUI host";
+const ATTEMPTS = "Contribute a bill's payment attempts";
 
 export const BILLING_PARITY: readonly ParityRow[] = [
   // ── Periods list ──────────────────────────────────────────────────────────
@@ -105,6 +142,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "microgrid",
       method: "POST",
       route: "/api/billing-periods",
+      risk: "write",
       confirm: "none",
       form: "CreatePeriodBody",
       view: "billing.periods",
@@ -132,12 +170,23 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       method: "DELETE",
       route: "/api/billing-periods/[periodId]",
       // A DELETE needs typed or ceremony confirmation (contribution-schema.ts).
+      risk: "destructive",
       confirm: "typed",
       form: "DeletePeriodBody",
       view: "billing.periods",
     },
     pr: PERIODS,
     note: "The legacy screens still delete through PostgREST with the browser's own client, with no typed name and no plugin gate, until they are deleted.",
+  },
+
+  {
+    id: "billing-tab",
+    screen: "periods",
+    control: "The Billing tab in the microgrid's tabs",
+    legacy: "src/app/(gui)/microgrids/[id]/tab-nav.tsx",
+    replacedBy: { kind: "nav", nav: "billing.periods" },
+    pr: SERVE,
+    note: "Today the nav entry is legacy: true and points at the legacy page; it is contributed when it opens the view.",
   },
 
   // ── Period review ─────────────────────────────────────────────────────────
@@ -153,6 +202,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "billingPeriod",
       method: "POST",
       route: "/api/billing/generate",
+      risk: "money",
       confirm: "confirm",
       form: "GenerateBillsBody",
       view: "billing.period-review",
@@ -172,6 +222,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "POST",
       route: "/api/billing/generate",
+      risk: "money",
       confirm: "confirm",
       form: "GenerateBillsBody",
       view: "billing.period-review",
@@ -191,6 +242,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/usage",
+      risk: "money",
       confirm: "none",
       form: "LineItemUsageBody",
       view: "billing.period-review",
@@ -209,6 +261,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
+      risk: "money",
       confirm: "confirm",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
@@ -227,6 +280,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
+      risk: "money",
       confirm: "none",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
@@ -245,11 +299,13 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
-      confirm: "confirm",
+      risk: "money",
+      confirm: "typed",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
     },
     pr: REVIEW,
+    note: "Typed: a refund is final (no change leads out of refunded).",
   },
   {
     id: "mark-failed",
@@ -263,6 +319,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
+      risk: "money",
       confirm: "confirm",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
@@ -281,6 +338,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "PATCH",
       route: "/api/billing-line-items/[lineItemId]/payment-status",
+      risk: "money",
       confirm: "confirm",
       form: "LineItemPaymentStatusBody",
       view: "billing.period-review",
@@ -349,6 +407,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "billingPeriod",
       method: "POST",
       route: "/api/billing-periods/[periodId]/close",
+      risk: "money",
       confirm: "ceremony",
       form: "ClosePeriodBody",
       view: "billing.close-checklist",
@@ -367,7 +426,8 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "lineItem",
       method: "POST",
       route: "/api/billing-line-items/[lineItemId]/url",
-      confirm: "none",
+      risk: "external",
+      confirm: "confirm",
       form: null,
       view: "billing.send-queue",
     },
@@ -379,10 +439,11 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Payment history on a row (opens the attempts dialog)",
     legacy: "src/components/payments/payment-history.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/api/payments/attempts" },
-    pr: "unscheduled",
-    note: "Payments' attempts for a bill have no view yet, and no #201 pull request contributes one.",
+    replacedBy: { kind: "view", view: "payments.bill-attempts" },
+    pr: ATTEMPTS,
+    note: "The payments plugin's view of a bill's attempts, attached to period review; decided in review of #205.",
   },
+
   {
     id: "refresh-attempt",
     screen: "period-review",
@@ -395,12 +456,13 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "paymentAttempt",
       method: "POST",
       route: "/api/payments/attempts/[id]/refresh",
+      risk: "write",
       confirm: "none",
       form: null,
-      view: "billing.period-review",
+      view: "payments.bill-attempts",
     },
-    pr: "unscheduled",
-    note: "Owned by the payments plugin; no #201 pull request contributes it.",
+    pr: ATTEMPTS,
+    note: "Owned by the payments plugin; offered on its view of a bill's attempts.",
   },
   {
     id: "record-adjustment",
@@ -414,12 +476,13 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "paymentAttempt",
       method: "POST",
       route: "/api/payments/attempts/[id]/reconcile",
-      confirm: "confirm",
+      risk: "money",
+      confirm: "typed",
       form: null,
-      view: "billing.period-review",
+      view: "payments.bill-attempts",
     },
-    pr: "unscheduled",
-    note: "Owned by the payments plugin, whose route validates its body by hand; no #201 pull request contributes it.",
+    pr: ATTEMPTS,
+    note: "Owned by the payments plugin, whose reconcile route validates its body by hand; it needs a schema before it can be contributed. Typed: it records an amount from outside MGM, possibly negative.",
   },
   {
     id: "accept-receipts",
@@ -433,12 +496,30 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       target: "paymentAttempt",
       method: "POST",
       route: "/api/payments/attempts/[id]/reconcile",
+      risk: "money",
       confirm: "confirm",
       form: null,
-      view: "billing.period-review",
+      view: "payments.bill-attempts",
     },
-    pr: "unscheduled",
-    note: "Owned by the payments plugin; no #201 pull request contributes it.",
+    pr: ATTEMPTS,
+    note: "Owned by the payments plugin; offered on its view of a bill's attempts.",
+  },
+
+  {
+    id: "copy-cells",
+    screen: "period-review",
+    control: "Copy on a cell of the bills table, and the Copy buttons on the totals (the URA paste workflow)",
+    legacy: "src/components/BillingTable.tsx",
+    replacedBy: { kind: "copy", view: "billing.period-review", what: "each cell's bare figure, and each total" },
+    pr: GRIDTOP,
+  },
+  {
+    id: "copy-payment-link",
+    screen: "period-review",
+    control: "Copy link in the payment-link popover; row menu Copy payment link",
+    legacy: "src/components/billing/payment-link-popover.tsx, src/components/billing/row-actions-menu.tsx",
+    replacedBy: { kind: "copy", view: "billing.send-queue", what: "a bill's payment link" },
+    pr: SEND,
   },
 
   // ── Period history ────────────────────────────────────────────────────────
