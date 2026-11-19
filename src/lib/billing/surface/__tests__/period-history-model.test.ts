@@ -286,6 +286,38 @@ describe("buildPeriodHistoryModel: the period and links", () => {
     expect(build({ entries: [], before: "a~x~y" }).body.empty).toEqual({ title: "No earlier changes recorded" });
   });
 
+  it("says a filtered later page that comes back empty has no earlier changes, not none at all", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    expect(build({ entries: [], before, filter: { tenantId: TENANT, tenantName: "Unit 1" } }).body.empty).toEqual({
+      title: "No earlier changes recorded for Unit 1",
+    });
+    expect(build({ entries: [], before, filter: { tenantId: TENANT, tenantName: null } }).body.empty).toEqual({
+      title: "No earlier changes recorded for unknown tenant",
+    });
+  });
+
+  it("treats a page filtered by a tenant id that is not a UUID as the first, whatever its cursor", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    const model = build({ entries: [], before, filter: { tenantId: null, tenantName: null } });
+    // Show all and Latest changes would both be the unfiltered history: only Show all is offered.
+    expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+      [BACK_TO_PERIOD_LINK, `/microgrids/${MG}/billing/${PERIOD}`],
+      [HISTORY_SHOW_ALL_LINK, `/microgrids/${MG}/billing/${PERIOD}/history`],
+    ]);
+    expect(new Set(model.links!.map((l) => l.href)).size).toBe(model.links!.length);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for unknown tenant", text: "Other tenants on this period may have entries." });
+  });
+
+  it("never offers two of its own links to the same place", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    for (const filter of [null, { tenantId: TENANT, tenantName: "Unit 1" }, { tenantId: TENANT, tenantName: null }, { tenantId: null, tenantName: null }]) {
+      for (const b of [null, before]) {
+        const hrefs = build({ filter, before: b }).links!.map((l) => l.href);
+        expect(new Set(hrefs).size, JSON.stringify({ filter, before: b })).toBe(hrefs.length);
+      }
+    }
+  });
+
   it("links the next page with both parameters, encoded", () => {
     const next = encodeCursor({ source: "p", id: uuid(3), at: "2026-10-31T21:00:00.5+03:00" });
     const model = build({ next, filter: { tenantId: TENANT, tenantName: "Unit 1" } });

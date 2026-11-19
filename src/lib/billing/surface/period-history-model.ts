@@ -334,6 +334,10 @@ export function buildPeriodHistoryModel(i: PeriodHistoryInput): LoadedModel<"col
   // Clipped as the cells are: tenants.display_name has no length limit.
   const tenantLabel = filter ? clipText(filter.tenantName ?? "unknown tenant") : null;
   const tenantId = filter?.tenantId ?? null;
+  // A filter that is not a UUID matches nothing on any page, and the latest
+  // page of it could only be linked by echoing it: such a page is the first,
+  // whatever its cursor, so Latest changes never repeats Show all.
+  const later = i.before !== null && !(filter && tenantId === null);
 
   const rows: Row[] = i.entries.map((entry) => {
     const h = humanizeHistoryEntry(entry, fmt, microgrid.currency);
@@ -356,12 +360,13 @@ export function buildPeriodHistoryModel(i: PeriodHistoryInput): LoadedModel<"col
   const links: LinkRef[] = [{ id: BACK_TO_PERIOD_LINK, label: "Back to period", href: `/microgrids/${microgrid.id}/billing/${period.id}` }];
   if (filter) links.push({ id: HISTORY_SHOW_ALL_LINK, label: "Show all", href: periodHistoryHref(microgrid.id, period.id) });
   // Not on the legacy page, which has one page: "More" replaces the page, so this leads back to the newest entries.
-  if (i.before) links.push({ id: HISTORY_LATEST_LINK, label: "Latest changes", href: periodHistoryHref(microgrid.id, period.id, { tenantId }) });
+  if (later) links.push({ id: HISTORY_LATEST_LINK, label: "Latest changes", href: periodHistoryHref(microgrid.id, period.id, { tenantId }) });
 
-  const empty: LoadedModel<"collection">["body"]["empty"] = filter
-    ? { title: `No changes recorded for ${tenantLabel}`, text: "Other tenants on this period may have entries." }
-    : i.before
-      ? { title: "No earlier changes recorded" }
+  // A later page that comes back empty has shown its entries already, filtered or not.
+  const empty: LoadedModel<"collection">["body"]["empty"] = later
+    ? { title: tenantLabel === null ? "No earlier changes recorded" : `No earlier changes recorded for ${tenantLabel}` }
+    : filter
+      ? { title: `No changes recorded for ${tenantLabel}`, text: "Other tenants on this period may have entries." }
       : {
           title: "No changes recorded yet",
           text: "This period has no events. As you generate bills, close the period, or take payments, entries will appear here.",
