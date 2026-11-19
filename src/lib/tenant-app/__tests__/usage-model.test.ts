@@ -141,6 +141,16 @@ describe("the month model", () => {
     expect(TenantUsageMonthExt.safeParse(ext).success).toBe(true);
   });
 
+  it("shows a month total under 1 kWh to 2 decimals, so it never reads 0.0", () => {
+    const small = Object.fromEntries(Object.keys(NOVEMBER).map((d) => [d, 0.002]));
+    const { model, ext } = month("2026-11", figures(small));
+    // 18 days of 2 Wh: 36 Wh, "0.04 kWh" rather than "0.0 kWh".
+    expect(model.body.totals).toEqual({ usage: fmt.energy(36, { digits: 2 }), note: { t: "text", text: "So far" } });
+    expect(ext.total).toEqual({ kwh: 0.036, text: kwh(0.036, 2), note: "So far", withoutData: 0 });
+    // The days keep 1 decimal.
+    expect(cellsOf(model)["2026-11-01"].usage).toEqual(fmt.energy(2, { digits: 1 }));
+  });
+
   it("gives each day of the ext the note its row carries", () => {
     const { model, ext } = month("2026-11", figures(NOVEMBER), [link("m", "2026-11-10")]);
     for (const row of model.body.rows) {

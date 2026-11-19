@@ -170,6 +170,10 @@ export async function composeTenantApp(options: {
       plugin: TENANT_APP_PLUGIN_NAME,
       target: { kind: "organization", id: access.unit.organizationId },
       method: "GET",
+      // A read, asked as a write: the gate decides only writes and passes
+      // every read (GateRequest.access in @/lib/runtime/gate), and the tenant
+      // app's reads must be refused while it is off. If the gate starts
+      // deciding reads, this can say "read".
       access: "write",
     });
   } catch (error) {

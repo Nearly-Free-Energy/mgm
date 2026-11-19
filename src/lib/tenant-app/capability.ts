@@ -226,6 +226,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             endDate: inForce[inForce.length - 1],
             resolution: "day",
             timezone,
+            nowMs,
           });
           if (!result.ok) return { ok: false, failure: result.reason };
           // Built here, from the buckets' own days, so a source that returns
@@ -291,6 +292,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             endDate: date,
             resolution: "hour",
             timezone,
+            nowMs,
           });
           if (!result.ok) return { ok: false, failure: result.reason };
           // Matched by instant, not position, so a missing hour shifts none;

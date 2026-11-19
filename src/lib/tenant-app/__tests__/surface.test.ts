@@ -217,6 +217,14 @@ describe("monthSoFar: the home's month", () => {
     });
   });
 
+  it("shows a total under 1 kWh to 2 decimals, so a small month never reads 0.0", () => {
+    expect(monthSoFar(usageMonth({ kwh: 0.36, withoutData: 0 }), o)).toEqual({
+      value: fmt.energy(360, { digits: 2 }),
+      note: null,
+    });
+    expect(monthSoFar(usageMonth({ kwh: 0.36, withoutData: 0 }), o).value.text).toBe("0.36 kWh");
+  });
+
   it("shows a total with gaps as the sum of the rest, saying how many days it leaves out and when a kept read was made", () => {
     expect(monthSoFar(usageMonth({ kwh: 41.25, withoutData: 1 }, { stale: true }), o)).toEqual({
       value: fmt.energy(41_250, { digits: 1 }),

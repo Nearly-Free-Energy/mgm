@@ -191,6 +191,12 @@ export type TenantUsageSeriesRequest = {
   endDate: string;
   resolution: "day" | "hour";
   timezone: string;
+  /**
+   * The capability's clock when the view was asked for, epoch ms. A day the
+   * source sums from hours counts only the hours ended by then, so the
+   * figure and the view's own "today" and partial day agree.
+   */
+  nowMs: number;
 };
 
 export type TenantUsageSeries = {

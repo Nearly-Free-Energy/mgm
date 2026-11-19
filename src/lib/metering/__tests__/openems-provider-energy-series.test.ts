@@ -376,6 +376,22 @@ describe("OpenEmsMeteringProvider.getDeviceEnergySeries: days", () => {
     expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, 1.43, null]);
   });
 
+  it("counts today up to the caller's clock when the request carries one, not the provider's", async () => {
+    clearPilotEnv();
+    // The system clock says 14:20, but the view was asked for at 12:20, so
+    // only 00:00 to 11:00 have ended and 12:00 holds the caller's now.
+    vi.setSystemTime(Date.parse("2026-11-03T14:20:00+03:00"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(hoursResponse(RANGE_DATES, (date, hour) =>
+      date === "2026-11-03" && hour === 12 ? 30 : 100
+    ));
+
+    const series = await provider().getDeviceEnergySeries(dayRequest({
+      nowMs: Date.parse("2026-11-03T12:20:00+03:00"),
+    }));
+
+    expect(series.kwh["dev-1"]).toEqual([2.4, 2.4, 1.23]);
+  });
+
   it("does not count the hour now holds as missing before its first value arrives", async () => {
     clearPilotEnv();
     vi.setSystemTime(Date.parse("2026-11-03T14:01:00+03:00"));

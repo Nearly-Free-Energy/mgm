@@ -105,6 +105,7 @@ function syntheticSource() {
         endDate: request.endDate,
         resolution: request.resolution,
         timezone: request.timezone,
+        nowMs: request.nowMs,
       });
       return { ok: true, series: { ...series, synthetic: provider.synthetic === true } };
     },
@@ -228,10 +229,10 @@ describe("a meter moved from one unit to another mid-month (RFC mgm#197 § 5)", 
 
     // Each read asks only for that unit's days, and nothing after today.
     expect(a.requests).toEqual([
-      { deviceIds: [M], startDate: "2026-11-01", endDate: "2026-11-14", resolution: "day", timezone: KAMPALA },
+      { deviceIds: [M], startDate: "2026-11-01", endDate: "2026-11-14", resolution: "day", timezone: KAMPALA, nowMs: clock.now },
     ]);
     expect(b.requests).toEqual([
-      { deviceIds: [M], startDate: "2026-11-15", endDate: "2026-11-25", resolution: "day", timezone: KAMPALA },
+      { deviceIds: [M], startDate: "2026-11-15", endDate: "2026-11-25", resolution: "day", timezone: KAMPALA, nowMs: clock.now },
     ]);
 
     expect(monthA.total).toEqual({
@@ -263,7 +264,7 @@ describe("a meter moved from one unit to another mid-month (RFC mgm#197 § 5)", 
     const shown = await day(capabilityFor(UNIT_B, linksB, b.source).capability, { date: "2026-11-15" });
 
     expect(b.requests).toEqual([
-      { deviceIds: [M], startDate: "2026-11-15", endDate: "2026-11-15", resolution: "hour", timezone: KAMPALA },
+      { deviceIds: [M], startDate: "2026-11-15", endDate: "2026-11-15", resolution: "hour", timezone: KAMPALA, nowMs: clock.now },
     ]);
     const expected = generatedHours(M, "2026-11-15");
     expect(shown.hours.map((h) => h.start)).toEqual(localHourStarts("2026-11-15", KAMPALA));

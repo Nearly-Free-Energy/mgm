@@ -202,14 +202,17 @@ function totalCells(
     current: boolean;
     problem: boolean;
     unit: [one: string, many: string];
-    /** The rows' own decimals, so the total never rounds away what they show. */
+    /** The rows' own decimals, so the total never rounds away what they show; 2 under 1 kWh. */
     digits: 1 | 2;
   },
 ): { cells: Record<string, Value>; text: string; note: string } {
   const usage =
     total.kwh === null
       ? o.fmt.text(NO_DATA)
-      : o.fmt.energy(total.kwh * 1000, { digits: o.digits, ...(o.synthetic ? { synthetic: true } : {}) });
+      : o.fmt.energy(total.kwh * 1000, {
+          digits: totalDigits(total.kwh, o.digits),
+          ...(o.synthetic ? { synthetic: true } : {}),
+        });
   const note = o.problem
     ? ""
     : total.kwh !== null
@@ -220,6 +223,14 @@ function totalCells(
         ? `No data for ${total.withoutData} ${total.withoutData === 1 ? o.unit[0] : o.unit[1]}`
         : "";
   return { cells: { usage, ...(note ? { note: o.fmt.text(note) } : {}) }, text: usage.text, note };
+}
+
+/**
+ * A total's decimals: its rows' own, or 2 under 1 kWh, as an hour's use is
+ * shown, so a small month's total never reads "0.0".
+ */
+function totalDigits(kwh: number, rows: 1 | 2): 1 | 2 {
+  return kwh < 1 ? 2 : rows;
 }
 
 /**
@@ -244,7 +255,7 @@ export function monthSoFar(month: TenantUsageMonth, o: { fmt: Fmt; locale: strin
     staleNote(read, timezone, o.locale) ?? "",
   ].filter(Boolean);
   return {
-    value: o.fmt.energy(total.kwh * 1000, { digits: 1, ...(read.synthetic ? { synthetic: true } : {}) }),
+    value: o.fmt.energy(total.kwh * 1000, { digits: totalDigits(total.kwh, 1), ...(read.synthetic ? { synthetic: true } : {}) }),
     note: parts.length > 0 ? parts.join(" · ") : null,
   };
 }

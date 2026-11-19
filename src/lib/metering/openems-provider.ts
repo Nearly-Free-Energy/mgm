@@ -518,7 +518,7 @@ async function getOpenEmsEnergySeries(
   // again. A gap in telemetry leaves its hour null rather than carrying its
   // energy into the next hour, which is why an ended hour without a value
   // makes its day null.
-  const nowMs = Date.now();
+  const nowMs = request.nowMs ?? Date.now();
   const toSeries = (wh: (number | null)[]): (number | null)[] => {
     if (request.resolution === "hour") {
       return wh.map((value) => (value === null ? null : value / 1000));
