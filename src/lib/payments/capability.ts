@@ -26,6 +26,7 @@ import { ATTEMPT_NOT_OPEN } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
 import { stablePaymentLinkPath } from "./payment-link";
+import { RECONCILE_COPY } from "./schemas";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,6 +37,27 @@ function splitName(full: string): { first: string; last: string } {
   const parts = trimmed.split(/\s+/);
   if (parts.length === 1) return { first: parts[0], last: "" };
   return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+/** A name with its outer whitespace removed and inner runs collapsed to one space. */
+const sameSpacing = (s: string) => s.trim().split(/\s+/).filter(Boolean).join(" ");
+
+/**
+ * fn_payment_reconcile's refusals as fixed copy, so a person never reads a
+ * database message. Matches its RAISE texts and its 42501 actor check
+ * (20261010202643_payments_integrity.sql, its only definition); if they
+ * change, revisit. Anything else is a 500 with no detail.
+ */
+function reconcileRefusal(error: RepositoryError) {
+  const refuse = (status: 403 | 409 | 500, code: string, message: string) => ({ ok: false as const, status, code, message });
+  if (error.code === "42501") return refuse(403, "payments_scope_mismatch", RECONCILE_COPY.forbidden);
+  const text = error.message.toLowerCase();
+  if (text.includes("nothing to reconcile")) return refuse(409, "payments_nothing_to_reconcile", RECONCILE_COPY.notNeeded);
+  if (text.includes("unknown submission outcome")) return refuse(409, "payments_unknown_outcome", RECONCILE_COPY.unknownOutcome);
+  if (text.includes("mixed receipt currencies")) return refuse(409, "payments_mixed_currencies", RECONCILE_COPY.mixed);
+  if (text.includes("receipts are not exact settlement")) return refuse(409, "payments_not_exact", RECONCILE_COPY.notExact);
+  if (text.includes("must exactly reconcile")) return refuse(409, "payments_adjustment_inexact", RECONCILE_COPY.adjustmentInexact);
+  return refuse(500, "payments_unavailable", RECONCILE_COPY.unavailable);
 }
 
 export class PaymentsCapability implements PaymentsCapabilityContract {
@@ -732,9 +754,11 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         ok: false as const,
         status: 409 as const,
         code: "payments_nothing_to_reconcile",
-        message: "This attempt does not need reconciliation.",
+        message: RECONCILE_COPY.notNeeded,
       };
     }
+    // The route parses ReconcileAttemptBody first (./schemas.ts); these
+    // checks hold for any caller.
     const rec = (input ?? {}) as Record<string, unknown>;
     const action = rec.action;
     if (action !== "accept_exact" && action !== "record_external") {
@@ -749,14 +773,49 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     const externalReference =
       typeof rec.externalReference === "string" ? rec.externalReference.trim() : "";
     const notes = typeof rec.notes === "string" ? rec.notes.trim().slice(0, 500) : "";
+    if (action === "accept_exact" && rec.externalAmount !== undefined && rec.externalAmount !== 0) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "payments_accept_takes_no_amount",
+        message: RECONCILE_COPY.acceptNoAmount,
+        field: "externalAmount",
+      };
+    }
     if (action === "record_external" && (!externalReference || !notes || typeof rec.externalAmount !== "number" || !Number.isFinite(rec.externalAmount))) {
       return {
         ok: false as const,
         status: 400 as const,
         code: "payments_invalid_action",
-        message: "An external amount, reference, and notes are required for a completed adjustment.",
+        message: RECONCILE_COPY.adjustmentFields,
         field: "externalReference",
       };
+    }
+    if (action === "record_external") {
+      // A completed adjustment records an amount from outside MGM, so the
+      // person types the tenant's name, as a refund asks (the
+      // payments.record-adjustment action's typed confirmation; the legacy
+      // payment history dialog asks for it too).
+      const confirmation = rec.confirmation as { typed?: unknown } | undefined;
+      const typed = typeof confirmation?.typed === "string" ? sameSpacing(confirmation.typed) : "";
+      if (typed === "") {
+        return { ok: false as const, status: 428 as const, code: "payments_reconcile_name_required", message: RECONCILE_COPY.nameRequired };
+      }
+      let bill: BillSnapshot | null;
+      try {
+        bill = await this.repo.loadBillSnapshot(attempt.line_item_id);
+      } catch {
+        return { ok: false as const, status: 500 as const, code: "payments_unavailable", message: RECONCILE_COPY.unavailable };
+      }
+      if (!bill) return { ok: false as const, status: 404 as const, code: "payments_bill_not_found", message: "Bill not found" };
+      // The snapshot carries the tenant's name split on whitespace
+      // (loadBillSnapshot in ./infrastructure/supabase-repository.ts), so
+      // both sides are compared with their spacing collapsed; if the
+      // snapshot comes to carry the name whole, compare it as stored.
+      const expected = sameSpacing(`${bill.contactFirstName} ${bill.contactLastName}`);
+      if (expected === "" || typed !== expected) {
+        return { ok: false as const, status: 428 as const, code: "payments_reconcile_name_mismatch", message: RECONCILE_COPY.nameMismatch };
+      }
     }
     const { error } = await this.repo.reconcileAttempt({
       attemptId,
@@ -766,14 +825,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       notes: notes || null,
       actorUserId: this.scope.userId,
     });
-    if (error) {
-      return {
-        ok: false as const,
-        status: 500 as const,
-        code: "payments_unavailable",
-        message: `Could not reconcile attempt: ${error.message}.`,
-      };
-    }
+    if (error) return reconcileRefusal(error);
     const refreshed = (await this.repo.getAttempt(attemptId)) ?? attempt;
     return { ok: true as const, data: { attempt: refreshed } };
   }

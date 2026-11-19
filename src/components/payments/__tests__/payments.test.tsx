@@ -30,20 +30,21 @@ it("shows a failed credential test without claiming the configuration was saved"
 });
 it("shows reconciliation amounts and records only the entered external adjustment", async () => {
  fetchMock.mockImplementation(async (_url, options) => response(options ? {} : history));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  fireEvent.click(screen.getByText("Payment history"));
  await screen.findByText(/Difference: 20 UGX/);
  fireEvent.change(screen.getByLabelText("External amount (negative for refund)"), { target: { value: "20" } });
  fireEvent.change(screen.getByLabelText("External reference"), { target: { value: "cash-receipt-1" } });
  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Cash collected by manager" } });
+ fireEvent.change(screen.getByLabelText("Type Akello Grace to confirm"), { target: { value: "Akello Grace" } });
  fireEvent.click(screen.getByText("Record completed adjustment"));
  await waitFor(() => expect(refresh).toHaveBeenCalled());
  const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
- expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager" });
+ expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager", confirmation: { acknowledged: [], typed: "Akello Grace" } });
 });
 it("accepts exact receipts with the action alone", async () => {
  fetchMock.mockImplementation(async (_url, options) => response(options ? {} : history));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  fireEvent.click(screen.getByText("Payment history"));
  await screen.findByText(/Difference: 20 UGX/);
  fireEvent.click(screen.getByText("Accept exact receipts"));
@@ -54,7 +55,7 @@ it("accepts exact receipts with the action alone", async () => {
 });
 it("opens payment history as a dialog that keeps focus inside and closes on Escape", async () => {
  fetchMock.mockImplementation(async () => response(history));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  const trigger = screen.getByRole("button", { name: "Payment history" });
  fireEvent.click(trigger);
  const dialog = await screen.findByRole("dialog", { name: "Payment history" });
@@ -71,7 +72,7 @@ it("opens payment history as a dialog that keeps focus inside and closes on Esca
 it("keeps focus on Payment history after Escape while a request runs, and ignores clicks on it until the request ends", async () => {
  let finish!: () => void;
  fetchMock.mockImplementation((_url, options) => options ? new Promise(resolve => { finish = () => resolve(response({})); }) : Promise.resolve(response(history)));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  const trigger = screen.getByRole("button", { name: "Payment history" });
  fireEvent.click(trigger);
  const dialog = await screen.findByRole("dialog", { name: "Payment history" });

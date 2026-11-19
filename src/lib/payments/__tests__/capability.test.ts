@@ -218,8 +218,101 @@ describe("PaymentsCapability verified payment regressions", () => {
     const reconcile = vi.spyOn(repo, "reconcileAttempt"); const cap = new PaymentsCapability(repo, scope(), providers(), () => true, p => p);
     expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalReference: "receipt" })).ok).toBe(false);
     expect(reconcile).not.toHaveBeenCalled();
-    expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally" })).ok).toBe(true);
+    expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally", confirmation: { acknowledged: [], typed: "Aaron NFE" } })).ok).toBe(true);
     expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ externalAmount: -500, actorUserId: "user-1" }));
+  });
+});
+
+describe("PaymentsCapability reconcile", () => {
+  const RECORD = { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally" };
+  const named = (typed: string) => ({ ...RECORD, confirmation: { acknowledged: [], typed } });
+  const setup = (overrides: Parameters<typeof baseRepo>[0] = {}) => {
+    const repo = baseRepo({ getAttempt: async () => attempt("needs_reconciliation"), ...overrides });
+    const reconcileAttempt = vi.spyOn(repo, "reconcileAttempt");
+    return { cap: new PaymentsCapability(repo, scope(), providers(), () => true, (p) => p), reconcileAttempt };
+  };
+
+  it("refuses a completed adjustment without the tenant's name typed, before writing", async () => {
+    const { cap, reconcileAttempt } = setup();
+    for (const body of [RECORD, named(""), named("   ")]) {
+      expect(await cap.reconcile(ATTEMPT, body)).toEqual({
+        ok: false,
+        status: 428,
+        code: "payments_reconcile_name_required",
+        message: "Recording a completed adjustment needs the tenant's name typed: use Record completed adjustment.",
+      });
+    }
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+  });
+
+  it("refuses another name, and accepts the tenant's name with any spacing", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect(await cap.reconcile(ATTEMPT, named("Aaron"))).toEqual({
+      ok: false,
+      status: 428,
+      code: "payments_reconcile_name_mismatch",
+      message: "The name typed does not match this bill's tenant.",
+    });
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+    expect((await cap.reconcile(ATTEMPT, named("  Aaron   NFE "))).ok).toBe(true);
+    expect(reconcileAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares the name to the bill's tenant as the snapshot splits it", async () => {
+    const { cap } = setup({
+      loadBillSnapshot: async () => ({ ...(await baseRepo().loadBillSnapshot(LINE_ITEM))!, contactFirstName: "Akello", contactLastName: "Grace Mary" }),
+    });
+    expect((await cap.reconcile(ATTEMPT, named("Akello Grace Mary"))).ok).toBe(true);
+  });
+
+  it("answers 404 when the bill cannot be read, and 500 with fixed copy when reading it fails", async () => {
+    expect(await setup({ loadBillSnapshot: async () => null }).cap.reconcile(ATTEMPT, named("Aaron NFE"))).toMatchObject({ ok: false, status: 404 });
+    const failed = await setup({
+      loadBillSnapshot: async () => {
+        throw new Error("Could not load bill");
+      },
+    }).cap.reconcile(ATTEMPT, named("Aaron NFE"));
+    expect(failed).toEqual({ ok: false, status: 500, code: "payments_unavailable", message: "Could not reconcile this attempt right now." });
+  });
+
+  it("accepts exact receipts without a name, whatever confirmation is sent", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect((await cap.reconcile(ATTEMPT, { action: "accept_exact" })).ok).toBe(true);
+    expect((await cap.reconcile(ATTEMPT, { action: "accept_exact", externalAmount: 0, confirmation: { acknowledged: [], typed: "Someone" } })).ok).toBe(true);
+    expect(reconcileAttempt).toHaveBeenCalledTimes(2);
+    expect(reconcileAttempt).toHaveBeenCalledWith(expect.objectContaining({ action: "accept_exact", externalAmount: 0 }));
+  });
+
+  it("refuses an amount on an exact acceptance", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect(await cap.reconcile(ATTEMPT, { action: "accept_exact", externalAmount: 5 })).toEqual({
+      ok: false,
+      status: 400,
+      code: "payments_accept_takes_no_amount",
+      message: "Accepting exact receipts takes no amount: record a completed adjustment instead.",
+      field: "externalAmount",
+    });
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attempt that needs no reconciliation with fixed copy", async () => {
+    const { cap } = setup({ getAttempt: async () => attempt("verified") });
+    expect(await cap.reconcile(ATTEMPT, { action: "accept_exact" })).toMatchObject({ status: 409, message: "This attempt does not need reconciliation." });
+  });
+
+  it.each([
+    [{ message: "receipts are not exact settlement" }, 409, "payments_not_exact", "The verified receipts do not come to exactly the current bill: record a completed adjustment instead."],
+    [{ message: "external collection/refund must exactly reconcile balance and include reference and notes" }, 409, "payments_adjustment_inexact", "The amount must bring the received total to exactly the current bill, with a reference and notes."],
+    [{ message: "unknown submission outcome must be investigated with provider" }, 409, "payments_unknown_outcome", "A checkout for this bill has an unknown outcome: investigate its reference with the provider before reconciling."],
+    [{ message: "mixed receipt currencies require provider investigation" }, 409, "payments_mixed_currencies", "This bill's receipts are in more than one currency: investigate them with the provider before reconciling."],
+    [{ message: "nothing to reconcile" }, 409, "payments_nothing_to_reconcile", "This attempt does not need reconciliation."],
+    [{ code: "42501", message: "manager authorization required" }, 403, "payments_scope_mismatch", "Not authorized to act on this organization."],
+    [{ code: "XX000", message: "connection reset by peer at 10.0.0.1" }, 500, "payments_unavailable", "Could not reconcile this attempt right now."],
+  ])("answers the database's %o with fixed copy", async (error, status, code, message) => {
+    const { cap } = setup({ reconcileAttempt: async () => ({ error }) });
+    const result = await cap.reconcile(ATTEMPT, named("Aaron NFE"));
+    expect(result).toEqual({ ok: false, status, code, message });
+    expect(JSON.stringify(result)).not.toContain(error.message);
   });
 });
 

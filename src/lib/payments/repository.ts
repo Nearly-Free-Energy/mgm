@@ -18,7 +18,7 @@ export type PaymentsResult<T> =
   | { ok: true; data: T }
   | {
       ok: false;
-      status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502 | 503;
+      status: 400 | 401 | 403 | 404 | 409 | 422 | 428 | 500 | 502 | 503;
       code: string;
       message: string;
       field?: string;
