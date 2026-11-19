@@ -3,7 +3,8 @@
  *
  * The page passes the user list RPC result to UsersPageClient. An RPC error
  * must reach the client as `loadFailed` (so it does not render the "No users
- * yet" empty state) and be logged server-side.
+ * yet" empty state) and be logged server-side. A person whose rows are all
+ * tenant rows (RFC mgm#197) is not staff: the page is not found for them.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type React from "react";
@@ -25,10 +26,22 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth/access", () => ({
-  currentUserIsSuperAdmin: vi.fn().mockResolvedValue(true),
-  getCurrentUserRoles: vi.fn().mockResolvedValue([]),
+const getCurrentUserRoles = vi.fn();
+const currentUserIsSuperAdmin = vi.fn();
+vi.mock("@/lib/auth/access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/access")>()),
+  currentUserIsSuperAdmin: (...args: unknown[]) => currentUserIsSuperAdmin(...args),
+  getCurrentUserRoles: (...args: unknown[]) => getCurrentUserRoles(...args),
 }));
+vi.mock("next/navigation", () => ({
+  notFound: () => {
+    throw new Error("not-found");
+  },
+}));
+
+const row = (role: string, scope_type: string, scope_id: string | null) => ({ user_id: "caller-1", role, scope_type, scope_id });
+const SUPER_ADMIN_ROW = row("super_admin", "org", null);
+const tenantRow = (id: string) => row("tenant", "tenant", id);
 
 import SettingsUsersPage from "../page";
 import type { UsersPageClientProps } from "../users-page-client";
@@ -44,6 +57,8 @@ describe("SettingsUsersPage", () => {
 
   beforeEach(() => {
     mockRpc.mockReset();
+    getCurrentUserRoles.mockReset().mockResolvedValue([SUPER_ADMIN_ROW]);
+    currentUserIsSuperAdmin.mockReset().mockResolvedValue(true);
     consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -89,5 +104,21 @@ describe("SettingsUsersPage", () => {
     expect(props.loadFailed).toBe(false);
     expect(props.rows.map((r) => r.user_id)).toEqual(["user-1"]);
     expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it("is not found for a person whose rows are all tenant rows, before the list is read", async () => {
+    getCurrentUserRoles.mockResolvedValue([tenantRow("unit-1"), tenantRow("unit-2")]);
+    await expect(renderPageProps()).rejects.toThrow("not-found");
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(currentUserIsSuperAdmin).not.toHaveBeenCalled();
+  });
+
+  it("counts only a manager's organization rows, not their tenant rows, as their scopes", async () => {
+    currentUserIsSuperAdmin.mockResolvedValue(false);
+    getCurrentUserRoles.mockResolvedValue([row("org_manager", "org", "org-1"), tenantRow("unit-1")]);
+    mockRpc.mockResolvedValue({ data: [], error: null });
+    const props = await renderPageProps();
+    expect(props.callerRole).toBe("org_manager");
+    expect(props.callerOrgIds).toEqual(["org-1"]);
   });
 });

@@ -193,6 +193,56 @@ describe("MgmGate", () => {
     ).resolves.toMatchObject({ status: 409, code: "community_management_disabled" });
   });
 
+  it("uses the tenant_app code prefix", async () => {
+    const { supabase, rpc } = makeSupabase({ enabled: false });
+    await expect(
+      gate.check(supabase, {
+        plugin: "tenant-app",
+        target: { kind: "organization", id: ORG_ID },
+        method: "GET",
+        access: "write",
+      })
+    ).resolves.toEqual({
+      ok: false,
+      status: 409,
+      code: "tenant_app_disabled",
+      message: expect.stringContaining("The tenant app is not turned on"),
+    });
+    expect(rpc).toHaveBeenCalledWith("mgm_plugin_enabled_for_org", {
+      _org_id: ORG_ID,
+      _plugin_name: "tenant-app",
+    });
+    const unreadable = makeSupabase({ rpcError: { message: "down" } });
+    await expect(
+      gate.check(unreadable.supabase, {
+        plugin: "tenant-app",
+        target: { kind: "organization", id: ORG_ID },
+        method: "POST",
+      })
+    ).resolves.toMatchObject({ ok: false, status: 503, code: "tenant_app_gate_unavailable" });
+  });
+
+  it("names each non-core plugin's 409 code after the plugin, without hyphens", async () => {
+    const codes: Record<string, string> = {};
+    for (const plugin of MGM_BUNDLED_PLUGINS.filter((p) => !p.core)) {
+      const { supabase } = makeSupabase({ enabled: false });
+      const decision = await gate.check(supabase, {
+        plugin: plugin.name,
+        target: { kind: "organization", id: ORG_ID },
+        method: "POST",
+      });
+      if (!decision.ok) codes[plugin.name] = decision.code;
+    }
+    expect(codes).toEqual({
+      "community-management": "community_management_disabled",
+      metering: "metering_disabled",
+      billing: "billing_disabled",
+      payments: "payments_disabled",
+      pesapal: "pesapal_disabled",
+      "tenant-app": "tenant_app_disabled",
+    });
+  });
+
   it("passes a write with the resolved organization when enabled", async () => {
     const { supabase } = makeSupabase({ row: { id: TARGET_ID, microgrids: microgrid }, enabled: true });
     await expect(

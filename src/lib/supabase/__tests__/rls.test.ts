@@ -91,6 +91,8 @@ const testUserEmails = [
   "rls-test-userb@test.local",
   "rls-test-userc@test.local",
   "rls-test-userd@test.local",
+  // Created by the user_roles case for a manager who rents.
+  "rls-test-usere@test.local",
 ];
 
 // ── Setup / teardown ──────────────────────────────────────────────────────
@@ -929,6 +931,33 @@ describe("RLS: user_roles", () => {
       .eq("scope_id", FIXTURE.orgA)
       .eq("role", "org_manager");
     expect(rows).toEqual([]);
+  });
+
+  it("User D (super_admin) removing a manager who rents, as DELETE /api/users/[id] does, removes only the staff row", async () => {
+    if (skipIfRequested()) return;
+    // The route's own query (src/app/api/users/[id]/route.ts), with the
+    // caller's client: a tenant row (RFC mgm#197) is the person's access to
+    // the unit they rent, given and removed from the tenant record.
+    const renter = await createTestUser({
+      email: testUserEmails[4],
+      role: "org_manager",
+      scopeId: FIXTURE.orgA,
+      extraRoles: [{ role: "tenant", scopeType: "tenant", scopeId: FIXTURE.tenantA }],
+    });
+    const svc = await serviceClient();
+    const rowsOf = async () =>
+      (await svc.from("user_roles").select("id, role, scope_type, scope_id").eq("user_id", renter.userId).order("role")).data;
+    const tenantRows = (await rowsOf())?.filter((r) => r.role === "tenant");
+    expect(tenantRows).toHaveLength(1);
+
+    const { error, count } = await userD.client
+      .from("user_roles")
+      .delete({ count: "exact" })
+      .eq("user_id", renter.userId)
+      .neq("role", "tenant");
+    expect(error).toBeNull();
+    expect(count).toBe(1);
+    expect(await rowsOf()).toEqual(tenantRows);
   });
 });
 

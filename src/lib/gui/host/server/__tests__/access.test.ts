@@ -1,7 +1,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
-import { hostContext, installationRequest, surfaceRequest, type HostContext } from "../access";
-import { ORG_A, ORG_B, contextFor, fakeFmt, managerOf, superAdmin } from "./host-fakes";
+import { hostContext, installationRequest, surfaceRequest, tenantRequest, type HostContext } from "../access";
+import { ORG_A, ORG_B, contextFor, fakeFmt, managerOf, superAdmin, tenantOf } from "./host-fakes";
 
 const deps = { newClient: vi.fn(), makeFmt: () => fakeFmt };
 
@@ -28,6 +28,15 @@ describe("hostContext", () => {
     const bad = hostContext(access, new Headers({ "accept-language": "not a tag!" }), deps);
     expect(lg.ok && lg.ctx.locale).toBe("lg-UG");
     expect(bad.ok && bad.ctx.locale).toBe("en");
+  });
+
+  it("gives a person whose rows are all tenant rows a context, which carries those rows only", () => {
+    // RFC mgm#197 § 4: the host serves a tenant their own units; each staff
+    // entry point refuses them by their roles (below, and in the files of
+    // gate-state, organization, entities and view).
+    const unit = "e7400000-0000-4000-8000-00000000000a";
+    const made = hostContext({ user: { id: "u" } as User, roles: [tenantOf(unit)] }, new Headers(), deps);
+    expect(made.ok && made.ctx.access.roles).toEqual([tenantOf(unit)]);
   });
 
   it("freezes the context, its access and a copy of the roles", () => {
@@ -76,11 +85,48 @@ describe("surfaceRequest and installationRequest", () => {
     ).resolves.toMatchObject({ organizationId: ORG_B });
   });
 
+  it("refuse a person whose rows are all tenant rows, before opening a client", async () => {
+    const newClient = vi.fn(async () => ({}) as SupabaseClient);
+    const ctx = contextFor([tenantOf("e7400000-0000-4000-8000-00000000000a")], newClient);
+    await expect(surfaceRequest(ctx, ORG_A, {}, new URLSearchParams())).rejects.toThrow(/cannot access/);
+    await expect(installationRequest(ctx, {}, new URLSearchParams())).rejects.toThrow(/no staff role/);
+    expect(newClient).not.toHaveBeenCalled();
+    // A tenant row beside a staff row takes nothing away.
+    const both = contextFor([tenantOf("e7400000-0000-4000-8000-00000000000a"), managerOf(ORG_A)], newClient);
+    await expect(installationRequest(both, {}, new URLSearchParams())).resolves.toMatchObject({ organizationId: null });
+    await expect(surfaceRequest(both, ORG_A, {}, new URLSearchParams())).resolves.toMatchObject({ organizationId: ORG_A });
+  });
+
   it("refuse a context hostContext did not issue", async () => {
     const forged = { ...contextFor([superAdmin()]) } as HostContext;
     await expect(installationRequest(forged, {}, new URLSearchParams())).rejects.toThrow(/did not issue/);
     await expect(surfaceRequest(forged, ORG_A, {}, new URLSearchParams())).rejects.toThrow(/did not issue/);
     const frozenCopy = Object.freeze({ ...contextFor([superAdmin()]) }) as HostContext;
     await expect(installationRequest(frozenCopy, {}, new URLSearchParams())).rejects.toThrow(/did not issue/);
+  });
+});
+
+describe("tenantRequest", () => {
+  const UNIT = "e7400000-0000-4000-8000-00000000000a";
+  const OTHER_UNIT = "e7400000-0000-4000-8000-00000000000b";
+
+  it("carries the unit, no organization and no params, on a new client, and drops ui.* parameters", async () => {
+    const newClient = vi.fn(async () => ({}) as SupabaseClient);
+    const ctx = contextFor([tenantOf(UNIT)], newClient);
+    const req = await tenantRequest(ctx, UNIT, new URLSearchParams("month=2026-11&ui.tab=2"));
+    expect(req).toMatchObject({ tenantId: UNIT, organizationId: null, params: {}, locale: "en-UG", fmt: fakeFmt });
+    expect(req.search.toString()).toBe("month=2026-11");
+    expect(req.supabase).toBe(await newClient.mock.results[0].value);
+  });
+
+  it("refuses a unit the caller holds no tenant row for, staff rows included", async () => {
+    await expect(tenantRequest(contextFor([tenantOf(UNIT)]), OTHER_UNIT, new URLSearchParams())).rejects.toThrow(/does not hold/);
+    await expect(tenantRequest(contextFor([superAdmin()]), UNIT, new URLSearchParams())).rejects.toThrow(/does not hold/);
+    await expect(tenantRequest(contextFor([managerOf(ORG_A)]), UNIT, new URLSearchParams())).rejects.toThrow(/does not hold/);
+  });
+
+  it("refuses a context hostContext did not issue", async () => {
+    const forged = { ...contextFor([tenantOf(UNIT)]) } as HostContext;
+    await expect(tenantRequest(forged, UNIT, new URLSearchParams())).rejects.toThrow(/did not issue/);
   });
 });

@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { METERING_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
-import "@/lib/runtime/services";
+import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { FixtureMeteringProvider, type FixtureReading } from "./fixture-provider";
 import { MeteringRegistry } from "./registry";
 import { MeteringCapability } from "./capability";
@@ -56,6 +56,7 @@ export const MeteringPlugin = {
   inject: ["mgmRequest", "meteringProviders"],
   apply(ctx: Context, config: MeteringPluginConfig) {
     const request = ctx.mgmRequest;
+    requireOrganizationAudience(request, "Metering");
     if (!request.userId) throw new Error("Metering requires an authenticated user");
     const scope: MeteringScope = {
       organizationId: request.organizationId,

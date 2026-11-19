@@ -76,15 +76,24 @@ may hold several. Three roles ship:
 - `super_admin` — staff, all organizations (`scope_type = 'org'`,
   `scope_id` NULL);
 - `org_manager` — staff, one organization (`scope_type = 'org'`);
-- `tenant` — someone who rents a unit, one row per unit
-  (`scope_type = 'tenant'`, `scope_id` = `tenants.id`). It is not staff: a
-  tenant reads their own tenant row, its meter assignments and those meters,
-  and nothing else (`CLAUDE.md` § "RLS helper functions").
+- `tenant` — someone who rents a unit, one row per unit, as many units as
+  they rent, in any organizations (`scope_type = 'tenant'`, `scope_id` =
+  `tenants.id`). It is not staff: a tenant reads their own tenant rows,
+  their meter assignments and those meters, and nothing else (`CLAUDE.md`
+  § "RLS helper functions").
+
+Staff is not a role (`user_role` has no `staff` value): it means holding a
+`user_roles` row whose role is not `tenant` (`super_admin`, `org_manager`, or
+the inert `ems_operator`), now. `staff_access_accounts` records history: the
+accounts that have ever held such a row. `src/lib/roles.ts` holds the
+definition.
 
 `user_roles_role_scope_type_consistent` pins each role to its scope type and
-rejects any role it does not list. A manager who also rents holds a staff row
-and a tenant row, so "has a role row" no longer means "is staff": a staff
-check filters on the staff roles or the org scope. Further roles —
+rejects any role it does not list. A tenant who is later made staff holds a
+tenant row and a staff row (and a manager who rents may be given tenant
+access on the same address, below), so "has a role row" no longer means "is
+staff": a staff check filters on the staff roles or the org scope. Further
+roles —
 `microgrid_manager`, `community_admin`, `region_admin` — are future
 extensions by enum addition; before adding one, read `CLAUDE.md` on why a
 scoped configuration role was added and then removed.
@@ -111,7 +120,30 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   turn a contact field into a credential, so access is always granted
   explicitly. The grant is made by the access route with the service role, on
   the manager's behalf, for the account of the address the manager typed; no
-  signed-in caller names an account by id.
+  signed-in caller names an account by id. Tenant access does not depend on
+  organization roles: the grant looks only at the manager's authority, the
+  unit and the account, so a manager who rents may be given the unit on the
+  same address, and a person may rent several units, each with its own
+  meters, in different organizations.
+- The Users page never touches tenant rows. Removing someone's staff access
+  there leaves the units they rent. Inviting an address whose only rows
+  are tenant rows is a role change, so only a super admin's invitation
+  makes it staff, through `fn_change_user_role`, which keeps the tenant
+  rows; an org manager gets the answer any account with other access gets
+  and nothing is written, so no answer tells them that the address is a
+  tenant's. The invite route never calls `fn_finalize_user_invitation` for
+  an account that holds any role row. Once their staff role is removed,
+  by the Users page or any other path, they are exactly a tenant who never
+  had one: their tenant rows untouched, given further units like any
+  tenant, off the Users page, and sent to tenant pages by the (gui)
+  layout, which, like any layout, is navigation rather than an access
+  check (`docs/cordis-runtime.md`). Their session
+  is not ended; only `fn_tenant_access_revoke` ends sessions, when it
+  removes a person's last row (`DELETE /api/users/[id]` ends none). The
+  Users page lists current staff through their own rows, and an account
+  left with no rows at all if it has ever been staff
+  (`staff_access_accounts`, `20261118140000_tenant_app_plugin.sql`) or
+  never held tenant access.
 - A tenant role row is removed with its tenant: `user_roles.scope_tenant_id`
   references `tenants` with `ON DELETE CASCADE`.
 - Tenants read no microgrid, edge, community or organization row. The few

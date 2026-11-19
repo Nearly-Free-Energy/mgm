@@ -110,8 +110,13 @@ export function goTarget(manifest: Manifest, navId: string, requested: string | 
     // layout picks: `?org=` before the cookie (manifest-hints.ts). Keep the
     // one `?org=` chose here, as view.ts does for attached views; if that
     // order changes, revisit. The hint is read as pickOrganization reads it,
-    // and only the manifest's own id goes into the link.
-    const keep = !entry.needs.includes("organization") && organizationHint(requested) === manifest.org.id;
+    // and only the manifest's own id goes into the link. A tenant manifest
+    // (RFC mgm#197 § 4) has no organization: its `org` is a unit, listed
+    // among no `orgs`, so nothing is kept for it.
+    const keep =
+      !entry.needs.includes("organization") &&
+      manifest.orgs.some((org) => org.id === manifest.org.id) &&
+      organizationHint(requested) === manifest.org.id;
     const href = keep ? (`${choices[0].href}?org=${encodeURIComponent(manifest.org.id)}` as Href) : choices[0].href;
     return { kind: "redirect", href };
   }

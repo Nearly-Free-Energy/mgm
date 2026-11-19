@@ -247,7 +247,13 @@ function readPluginEnabled(
 }
 
 /**
- * Whether one plugin is enabled for an organization (missing row = enabled).
+ * Whether one plugin is enabled for an organization. A missing row answers
+ * the plugin's default, which `mgm_plugin_enabled_for_org` decides: enabled
+ * for every plugin but those it lists as off by default (the tenant app),
+ * the same list as `defaultEnabled` in bundled.ts, which
+ * default-off-plugins.test.ts compares with the newest migration.
+ * The function answers any signed-in caller, tenant-only accounts included,
+ * about any organization (20261118140000 § 2); access is the caller's job.
  * Throws when the state cannot be read, so callers decide how to fail. The
  * per-plugin helpers below keep their historical contract: a database error
  * reads as disabled, a thrown client error propagates.

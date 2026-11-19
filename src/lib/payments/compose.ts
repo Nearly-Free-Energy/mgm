@@ -18,7 +18,7 @@ import {
   PESAPAL_PLUGIN_VERSION,
 } from "@/lib/plugins/bundled";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
-import "@/lib/runtime/services";
+import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { PaymentsCapability } from "./capability";
 import { createSupabasePaymentsRepository } from "./infrastructure/supabase-repository";
 import "./scope";
@@ -59,6 +59,7 @@ export const PaymentsPlugin = {
   inject: ["mgmRequest", "paymentProviderRegistry"],
   apply(ctx: Context, config: PaymentsPluginConfig) {
     const request = ctx.mgmRequest;
+    requireOrganizationAudience(request, "Payments");
     const scope: PaymentsScope = {
       organizationId: request.organizationId,
       userId: request.userId,

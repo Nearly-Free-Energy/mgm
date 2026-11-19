@@ -12,11 +12,11 @@
  * Auth that has ended the session, so a helper that trusted the claims or
  * the rows instead would fail them.
  *
- * The composers that run authorizeOrganization are trusted the same way:
- * service-role-session-check.test.ts does not list the routes that call
- * them, because they settle the session before they open a request scope,
- * and only a scope loads the plugins that build providers or a service-role
- * repository. The last tests check that ordering.
+ * The composers that run authorizeOrganization or authorizeTenant are
+ * trusted the same way: service-role-session-check.test.ts does not list the
+ * routes that call them, because they settle the session before they open a
+ * request scope, and only a scope loads the plugins that build providers or
+ * a service-role repository. The last tests check that ordering.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -32,12 +32,13 @@ import {
   currentUserCanAccessCommunity,
   currentUserCanAccessMicrogrid,
 } from "../access";
-import { authorizeOrganization } from "@/lib/runtime/scope";
+import { authorizeOrganization, authorizeTenant } from "@/lib/runtime/scope";
 import { composeBilling } from "@/lib/billing/compose";
 import { composeCommunityManagement } from "@/lib/community-management/compose";
 import { composeBillingReview } from "@/lib/cordis/billing-review";
 import { composeMetering } from "@/lib/metering/compose";
 import { composePayments } from "@/lib/payments/compose";
+import { composeTenantApp } from "@/lib/tenant-app/compose";
 
 // Counts request scopes. Every composer imports openOrganizationScope from
 // this module, so a scope opened anywhere inside one is counted.
@@ -54,6 +55,7 @@ vi.mock("@/lib/runtime/scope", async (importOriginal) => {
 });
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
+const TENANT_ID = "22222222-2222-4222-8222-222222222222";
 
 /** Every query chain resolves to `data`, whatever it calls. */
 function rows(data: unknown) {
@@ -94,6 +96,7 @@ function sessionEndedElsewhere(live = false): SupabaseClient {
         return rows([
           { user_id: "u1", role: "super_admin", scope_type: "org", scope_id: null },
           { user_id: "u1", role: "org_manager", scope_type: "org", scope_id: ORG_ID },
+          { user_id: "u1", role: "tenant", scope_type: "tenant", scope_id: TENANT_ID },
         ]);
       }
       if (table === "microgrids") {
@@ -101,8 +104,25 @@ function sessionEndedElsewhere(live = false): SupabaseClient {
       }
       return rows({ org_id: ORG_ID });
     },
-    // Every plugin is enabled.
-    rpc: async () => ({ data: true, error: null }),
+    // The tenant's unit is readable, and every plugin is enabled.
+    rpc: async (fn: string) =>
+      fn === "fn_tenant_home"
+        ? {
+            data: [
+              {
+                tenant_id: TENANT_ID,
+                display_name: "Unit 4",
+                unit_label: "4",
+                microgrid_id: "mg-1",
+                microgrid_name: "Kasana East",
+                timezone: "Africa/Kampala",
+                currency: "UGX",
+                organization_id: ORG_ID,
+              },
+            ],
+            error: null,
+          }
+        : { data: true, error: null },
   } as unknown as SupabaseClient;
 }
 
@@ -128,6 +148,14 @@ describe("a session signed out elsewhere, whose token still verifies", () => {
       reason: "unauthenticated",
     });
   });
+
+  it("is refused by the tenant authorization step, though it holds the unit's tenant row", async () => {
+    expect(await authorizeTenant(sessionEndedElsewhere(), TENANT_ID)).toEqual({
+      ok: false,
+      reason: "unauthenticated",
+    });
+    expect(await authorizeTenant(sessionEndedElsewhere(true), TENANT_ID)).toMatchObject({ ok: true });
+  });
 });
 
 describe("the composers that check the session themselves", () => {
@@ -147,6 +175,7 @@ describe("the composers that check the session themselves", () => {
       () => composeCommunityManagement({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID }),
     ],
     ["composePayments", () => composePayments({ supabase: sessionEndedElsewhere(), organizationId: ORG_ID })],
+    ["composeTenantApp", () => composeTenantApp({ supabase: sessionEndedElsewhere(), tenantId: TENANT_ID })],
   ])("%s answers 401 without opening a request scope", async (_name, compose) => {
     expect(await compose()).toMatchObject({ ok: false, status: 401 });
     expect(opened.scopes).toBe(0);
@@ -157,6 +186,13 @@ describe("the composers that check the session themselves", () => {
   // case, a composer holding the unwrapped opener would pass the ones above.
   it("composeMetering opens a counted request scope for a live session", async () => {
     const composed = await composeMetering({ supabase: sessionEndedElsewhere(true), organizationId: ORG_ID });
+    if (!composed.ok) throw new Error(composed.code);
+    await composed.data.dispose();
+    expect(opened.scopes).toBe(1);
+  });
+
+  it("composeTenantApp opens a counted request scope for a live session", async () => {
+    const composed = await composeTenantApp({ supabase: sessionEndedElsewhere(true), tenantId: TENANT_ID });
     if (!composed.ok) throw new Error(composed.code);
     await composed.data.dispose();
     expect(opened.scopes).toBe(1);

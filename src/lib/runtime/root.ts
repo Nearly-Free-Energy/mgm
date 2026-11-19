@@ -27,6 +27,7 @@ import { CommunityManagementSurfacePlugin } from "@/lib/community-management/sur
 import { MeteringSurfacePlugin } from "@/lib/metering/surface-plugin";
 import { BillingSurfacePlugin } from "@/lib/billing/surface-plugin";
 import { PaymentsSurfacePlugin } from "@/lib/payments/surface-plugin";
+import { TenantAppSurfacePlugin } from "@/lib/tenant-app/surface-plugin";
 import { MgmGate } from "./gate";
 import {
   MailTransportRegistry,
@@ -115,6 +116,7 @@ export const PLATFORM_PLUGINS: readonly Plugin.Object<void>[] = [
   MeteringSurfacePlugin,
   BillingSurfacePlugin,
   PaymentsSurfacePlugin,
+  TenantAppSurfacePlugin,
   MeteringProvidersPlugin,
   OpenEmsMeteringPlugin,
   FixtureMeteringPlugin,
