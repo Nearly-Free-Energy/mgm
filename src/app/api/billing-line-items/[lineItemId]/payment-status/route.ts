@@ -19,13 +19,21 @@
  *     actions; org_managers are gated to avoid accidental terminal states).
  *
  * Body:
- *   { status: 'unpaid' | 'paid' | 'failed' | 'refunded', notes?: string (≤500 chars) }
+ *   { status: 'unpaid' | 'paid' | 'failed' | 'refunded', notes?: string (≤500 chars),
+ *     confirmation?: { acknowledged: string[], typed?: string } }
  *   Notes are trimmed server-side; empty string after trim → stored as NULL.
  *   Parsed with `LineItemPaymentStatusBody` (`@/lib/billing/schemas`);
  *   unknown keys are refused.
  *   'link_generated' is NOT a manual body input — that state is set by the
  *   link generation route only. Manual transitions OUT of 'link_generated'
  *   are still admitted (operator may cancel a pending link).
+ *   A refund is final, so 'refunded' needs `confirmation.typed`: the
+ *   tenant's display name, compared trimmed on both sides. This route is the
+ *   authority on it (ADR-006), whatever sent the request: the GUI host sends
+ *   it for billing.mark-refunded, whose prepare names the same tenant
+ *   (src/lib/billing/surface/period-review.ts), and the legacy row menu's
+ *   refund dialog asks for it (src/components/billing/row-actions-menu.tsx).
+ *   Every other status ignores `confirmation`.
  *
  * Response:
  *   200 → { status: 'success', line_item: <updated row with all payment cols> }
@@ -34,6 +42,8 @@
  *   401 → { error, reason: 'session_expired' }
  *   403 → { error, reason: 'forbidden' | 'super_admin_required' }
  *   404 → { error, reason: 'not_found' }
+ *   428 → { error, reason: 'refund_name_required' | 'refund_name_mismatch' }
+ *         (a refund without the tenant's name typed, or with another)
  *   500 → { error, reason: 'invariant_violation' | 'unknown_error' }
  *
  * Structured logging:
@@ -63,6 +73,20 @@ const UUID_RE =
 /** Statuses gated to super_admin only (reconciliation-class). */
 const SUPER_ADMIN_ONLY_STATUSES: readonly PaymentStatus[] = ["failed", "refunded"];
 
+/**
+ * A refund's typed-name refusals: fixed copy, never the name itself. The
+ * required one names Mark as refunded because the step that sent the
+ * request may have had no name field: the GUI's confirm-level payment
+ * actions (Mark as unpaid, Mark as paid …) share this route, and their form
+ * lets a person switch the status to refunded, but the host sends them no
+ * confirmation (sendsConfirmation in src/lib/gui/host/client/invoke.ts). If
+ * those steps come to ask for the name, the copy can just ask for it.
+ */
+const REFUND_NAME_REFUSALS = {
+  required: { error: "A refund needs the tenant's name typed: use Mark as refunded.", reason: "refund_name_required" },
+  mismatch: { error: "The name typed does not match this bill's tenant.", reason: "refund_name_mismatch" },
+} as const;
+
 // ── Scope type (query result) ─────────────────────────────────────────────────
 
 type LineItemScopeRow = {
@@ -77,7 +101,7 @@ type LineItemScopeRow = {
         end_date: string;
       }
     | null;
-  tenants: { display_name: string } | null;
+  tenants: { display_name: string } | { display_name: string }[] | null;
 };
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -209,6 +233,20 @@ export async function PATCH(
       );
     }
     throw err;
+  }
+
+  // 4a. A refund is final: the person must have typed the tenant's name.
+  //     A tenant whose name cannot be read cannot be confirmed this way.
+  if (parsed.status === "refunded") {
+    const tenant = Array.isArray(scoped.tenants) ? scoped.tenants[0] : scoped.tenants;
+    const expected = (tenant?.display_name ?? "").trim();
+    const typed = parsed.confirmation?.typed?.trim() ?? "";
+    if (typed === "") {
+      return NextResponse.json(REFUND_NAME_REFUSALS.required, { status: 428 });
+    }
+    if (expected === "" || typed !== expected) {
+      return NextResponse.json(REFUND_NAME_REFUSALS.mismatch, { status: 428 });
+    }
   }
 
   // 5. Session guard: the manual-mark route is operator-only and the audit

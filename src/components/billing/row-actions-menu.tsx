@@ -520,12 +520,16 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
     async (
       newStatus: BillingLineItemPaymentStatus,
       notesValue: string | null,
+      typedName?: string,
     ): Promise<void> => {
       const prev = optimisticStatus;
       setOptimisticStatus(newStatus);
 
+      // Only a request that never got an answer is a network error: the
+      // route's own refusals (403, 404, 428 …) show their message once.
+      let res: Response;
       try {
-        const res = await fetch(
+        res = await fetch(
           `/api/billing-line-items/${lineItem.id}/payment-status`,
           {
             method: "PATCH",
@@ -533,30 +537,14 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
             body: JSON.stringify({
               status: newStatus,
               ...(notesValue ? { notes: notesValue } : {}),
+              // The route refuses a refund without the tenant's name typed (428).
+              ...(typedName !== undefined
+                ? { confirmation: { acknowledged: [], typed: typedName } }
+                : {}),
             }),
           },
         );
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          setOptimisticStatus(prev);
-          onRowBanner({
-            id: `${lineItem.id}-status-err-${Date.now()}`,
-            lineItemId: lineItem.id,
-            tone: "destructive",
-            message: body.error ?? "Failed to update payment status.",
-            durationMs: ERROR_BANNER_DURATION_MS,
-          });
-          // Throw so the ConfirmDialog inline retry surface lights up.
-          throw new Error(body.error ?? "Failed to update payment status.");
-        }
       } catch (err) {
-        // Network error path — guard against re-throwing the same error
-        // we already pushed to the banner above.
-        if (err instanceof Error && err.message.includes("Failed to update")) {
-          throw err;
-        }
         setOptimisticStatus(prev);
         onRowBanner({
           id: `${lineItem.id}-status-net-${Date.now()}`,
@@ -566,6 +554,21 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
           durationMs: ERROR_BANNER_DURATION_MS,
         });
         throw err;
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setOptimisticStatus(prev);
+        onRowBanner({
+          id: `${lineItem.id}-status-err-${Date.now()}`,
+          lineItemId: lineItem.id,
+          tone: "destructive",
+          message: body.error ?? "Failed to update payment status.",
+          durationMs: ERROR_BANNER_DURATION_MS,
+        });
+        // Throw so the ConfirmDialog inline retry surface lights up.
+        throw new Error(body.error ?? "Failed to update payment status.");
       }
     },
     [lineItem.id, onRowBanner, optimisticStatus],
@@ -879,7 +882,8 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         onConfirm={(notes) => patchStatus("paid", notes || null)}
       />
 
-      {/* "Mark as refunded…" — notes textarea variant */}
+      {/* "Mark as refunded…" — notes textarea variant. A refund is final, so
+          the person types the tenant's name, which the route checks. */}
       <PaymentNotesConfirmDialog
         open={markRefundedOpen}
         onOpenChange={setMarkRefundedOpen}
@@ -888,7 +892,13 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         tenantName={tenant.display_name}
         periodLabel={periodLabel}
         totalAmount={lineItem.total_amount}
-        onConfirm={(notes) => patchStatus("refunded", notes || null)}
+        requireTypedConfirmation={{
+          label: "Type the tenant name to confirm",
+          expected: tenant.display_name,
+        }}
+        onConfirm={(notes) =>
+          patchStatus("refunded", notes || null, tenant.display_name)
+        }
       />
 
       {/* "Cancel pending link" — plain neutral confirm, no notes */}
