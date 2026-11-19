@@ -38,6 +38,7 @@ import { DATA_KEYS } from "@/lib/gui/host/server/parse";
 import { fieldsOf } from "@/lib/gui/kit/action-form";
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
+import * as paymentSchemas from "@/lib/payments/schemas";
 import * as schemas from "../schemas";
 import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow } from "../parity";
 
@@ -58,11 +59,9 @@ const PENDING = new Set<string>([
   // Unscheduled: the send queue explains, but the link to the community's
   // Payment page needs payments to contribute that page (parity.ts).
   "payment-setup",
-  // Contribute a bill's payment attempts
-  "payment-history",
-  "refresh-attempt",
-  "record-adjustment",
-  "accept-receipts",
+  // Unscheduled: the host hides a disabled plugin's tab and disables its
+  // actions, which the routes accept while Payments is off (parity.ts).
+  "payments-while-off",
   // Serve the billing pages through the GUI host
   "billing-tab",
 ]);
@@ -79,6 +78,11 @@ const LEGACY_SCREENS = [
 const SURFACES: Record<ParityAction["plugin"], Contribution> = {
   billing: BILLING_SURFACE,
   payments: PAYMENTS_SURFACE,
+};
+/** Each plugin's schemas module, which its routes parse with. */
+const SCHEMAS: Record<ParityAction["plugin"], Record<string, unknown>> = {
+  billing: schemas,
+  payments: paymentSchemas,
 };
 
 type Kind = ParityRow["replacedBy"]["kind"];
@@ -236,7 +240,7 @@ describe("the billing parity table", () => {
       expect(source, `src/app${a.route}/route.ts`).not.toBeNull();
       expect(exportsMethod(source!, a.method), `${a.route} exports ${a.method}`).toBe(true);
       if (a.form) {
-        expect(Object.hasOwn(schemas, a.form), `${a.form} is exported from schemas.ts`).toBe(true);
+        expect(Object.hasOwn(SCHEMAS[a.plugin], a.form), `${a.form} is exported from src/lib/${a.plugin}/schemas.ts`).toBe(true);
         expect(source!, `${a.route} parses ${a.form}`).toMatch(new RegExp(`parseJsonBody\\(\\s*\\w+\\s*,\\s*${a.form}\\s*\\)`));
       }
     }
@@ -294,7 +298,7 @@ describe("parity with the contributed actions and views", () => {
       confirm: by.confirm,
       target: by.target,
     });
-    if (by.form) expect(def.input, `${id}'s input is ${by.form}`).toBe((schemas as Record<string, unknown>)[by.form]);
+    if (by.form) expect(def.input, `${id}'s input is ${by.form}`).toBe(SCHEMAS[by.plugin][by.form]);
   });
 
   it("does not count an action as contributed while no interface can submit it", () => {

@@ -44,6 +44,19 @@ export const STATUS_MAPS = {
   billingAuditEntry: {
     post_close_revision: { label: "Post-close revision", tone: "warning" },
   },
+  // An online payment attempt's status (payments.bill-attempts) — mirrors
+  // AttemptStatus in src/lib/payments/repository.ts and the CHECK on
+  // payment_attempts.status. Failed and needs reconciliation carry a dot:
+  // each asks a person to look.
+  paymentAttempt: {
+    pending:              { label: "Pending",               tone: "neutral"            },
+    confirmation_pending: { label: "Awaiting confirmation", tone: "warning"            },
+    verified:             { label: "Verified",              tone: "success"            },
+    failed:               { label: "Failed",                tone: "danger",  dot: true },
+    reversed:             { label: "Reversed",              tone: "warning"            },
+    needs_reconciliation: { label: "Needs reconciliation",  tone: "warning", dot: true },
+    resolved:             { label: "Resolved",              tone: "success"            },
+  },
   billingPeriod: {
     draft:  { label: "Draft",  tone: "warning", dot: true },
     closed: { label: "Closed", tone: "success", dot: true },

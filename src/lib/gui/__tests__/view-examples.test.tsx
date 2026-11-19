@@ -39,7 +39,11 @@ beforeAll(async () => {
 describe.each(Object.entries(INSTALLED_GUIS))("%s draws the contributed views' examples", (_name, gui) => {
   it.each(EXAMPLES.map((e) => [e.name, e.model] as const))("%s", async (name, model) => {
     const poked = withPoke(model);
-    expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
+    // An entity is optional in the contract: a view that declares none and
+    // whose loader sets none (payments.bill-attempts, so that no other
+    // plugin's action on its period is appended) gets the poke only on its
+    // rows' entities, if they have any.
+    if (model.entity) expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
     expect(await checkModel(gui, poked, name)).toEqual([]);
   });
 });

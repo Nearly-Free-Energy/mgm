@@ -84,6 +84,7 @@ describe("isReleasedRoute", () => {
     "/api/payments/reconcile-worker",
     "/p/abc123",
     "/payment/callback",
+    "/microgrids/abc/billing/period-1/payments",
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",
@@ -118,6 +119,7 @@ describe("isReleasedRoute", () => {
     "/admin",
     "/microgrids/abc/billing/period-1/close/extra",
     "/microgrids/abc/billing/period-1/send/extra",
+    "/microgrids/abc/billing/period-1/payments/extra",
     "/microgrids/mg-1/operations/extra",
     "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",

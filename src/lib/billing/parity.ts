@@ -64,9 +64,10 @@ export type ParityAction = {
   risk: "write" | "money" | "external" | "destructive";
   confirm: Confirm;
   /**
-   * The schema in src/lib/billing/schemas.ts the route parses its body with,
-   * or null when the route has no JSON body today; a route must parse a
-   * schema before its action can be contributed (gui-surface.test.ts check 2).
+   * The schema in the plugin's schemas module (src/lib/<plugin>/schemas.ts)
+   * the route parses its body with, or null when the route has no JSON body
+   * today; a route must parse a schema before its action can be contributed
+   * (gui-surface.test.ts check 2).
    */
   form: string | null;
   /** Set when the route does not exist yet, with what replaces today's call. */
@@ -403,7 +404,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "link", view: "payments.community-payment", href: "/communities/[id]/payment" },
     pr: "unscheduled",
-    note: "The send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but the Payment page is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. It waits for payments to contribute that page as a view (payments.community-payment, which does not exist yet), or a view attached to billing.send-queue that carries the link.",
+    note: "The send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but the Payment page is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. It waits for payments to contribute that page as a view (payments.community-payment, which does not exist yet), or a view attached to billing.send-queue that carries the link. The bill attempts pull request left it: the banner's main case is Payments off, when a payments tab is hidden, and an attached view is given only its parent's path segments, which on the send queue name no community.",
   },
   {
     id: "close-period",
@@ -441,7 +442,16 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/payments/payment-history.tsx",
     replacedBy: { kind: "view", view: "payments.bill-attempts" },
     pr: ATTEMPTS,
-    note: "The payments plugin's view of a bill's attempts, attached to period review; decided in review of #205.",
+    note: "The payments plugin's view of a bill's attempts (decided in review of #205), a tab of the period review titled Payments: it lists the period's bills, and ?bill=<id> shows one bill's attempts, receipts and balance (Bill, Received, Difference in the subtitle). There is no entry from a bill's row, one click more than the legacy row button: the contract attaches a view to a view, not to a row, and a billing row may not link a payments page (gui-surface.test.ts check 7). An attempt's failure message, which may hold a provider's raw response, becomes a fixed note from its failure code.",
+  },
+  {
+    id: "payments-while-off",
+    screen: "period-review",
+    control: "Payment history, Refresh status and reconciliation while Payments is off (the row's dialog)",
+    legacy: "src/components/payments/payment-history.tsx",
+    replacedBy: { kind: "view", view: "payments.bill-attempts" },
+    pr: "unscheduled",
+    note: "While Payments is off the legacy dialog still shows history and offers Refresh status and both reconciliations, which the routes accept by design (their PaymentExemption entries in src/lib/runtime/__tests__/route-rules.ts; docs/payments-rollout.md keeps history and verification available). The host instead leaves a disabled plugin's tab out of the period review, and shows its own actions disabled and refuses to prepare them, so through a GUI the view is reachable only by its URL, read-only. It needs a decision before the deletes, most likely a host rule that keeps an exempt route's action enabled while its plugin is off (src/lib/gui, code-owned).",
   },
 
   {
@@ -458,11 +468,11 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       route: "/api/payments/attempts/[id]/refresh",
       risk: "write",
       confirm: "none",
-      form: null,
+      form: "RefreshAttemptBody",
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Owned by the payments plugin; offered on its view of a bill's attempts.",
+    note: "Owned by the payments plugin; offered on its view of a bill's attempts, only on an attempt with a provider tracking id. The legacy dialog offered it on every attempt, and the capability refuses one without a tracking id (409, the unknown-outcome copy), which the view's row shows as its note instead.",
   },
   {
     id: "record-adjustment",
@@ -478,11 +488,11 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       route: "/api/payments/attempts/[id]/reconcile",
       risk: "money",
       confirm: "typed",
-      form: null,
+      form: "ReconcileAttemptBody",
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Owned by the payments plugin, whose reconcile route validates its body by hand; it needs a schema before it can be contributed. Typed: it records an amount from outside MGM, possibly negative.",
+    note: "Typed: it records an amount from outside MGM, possibly negative, and marks the bill paid. The person types the tenant's name, which the capability checks (428 without it or with another), so the legacy dialog asks for it too; prepare names the amount that settles the bill. The kit form shows the Resolution choice with its raw values, prefilled record_external.",
   },
   {
     id: "accept-receipts",
@@ -498,11 +508,11 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       route: "/api/payments/attempts/[id]/reconcile",
       risk: "money",
       confirm: "confirm",
-      form: null,
+      form: "ReconcileAttemptBody",
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Owned by the payments plugin; offered on its view of a bill's attempts.",
+    note: "Offered on every attempt that needs reconciliation, unavailable with the reason when the received total is not exactly the bill, a checkout's outcome is unknown or receipts are in several currencies (available() mirrors fn_payment_reconcile). The kit form also shows the optional amount, reference and notes, prefilled accept_exact; the capability refuses an amount.",
   },
 
   {

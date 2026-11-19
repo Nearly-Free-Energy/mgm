@@ -109,6 +109,9 @@ const RELEASE_4_PAGE_ROUTES = [
   /^\/organizations\/[^/]+\/payments$/,
   // Community payment configuration (org default + override states).
   /^\/communities\/[^/]+\/payment$/,
+  // A billing period's bills and one bill's payment attempts (?bill=), as
+  // the payments.bill-attempts view.
+  /^\/microgrids\/[^/]+\/billing\/[^/]+\/payments$/,
   // Stable customer-facing payment-link indirection (no session).
   /^\/p\/[^/]+$/,
 ];

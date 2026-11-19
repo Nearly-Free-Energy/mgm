@@ -347,6 +347,13 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
   pages: [
     { path: "/organizations/[id]/payments", params: { id: "organization" } },
     { path: "/communities/[id]/payment", params: { id: "community" } },
+    // A billing period's bills and one bill's payment attempts, as the
+    // payments.bill-attempts view, shown as a tab of billing's period review.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payments",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
   ],
   tables: [
     "payment_merchant_accounts",

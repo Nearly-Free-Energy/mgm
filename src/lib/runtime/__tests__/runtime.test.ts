@@ -103,6 +103,7 @@ describe("MGM root runtime", () => {
       "billing billing.close-checklist",
       "billing billing.send-queue",
       "billing billing.savings",
+      "payments payments.bill-attempts",
       "tenant-app tenant.home",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([
