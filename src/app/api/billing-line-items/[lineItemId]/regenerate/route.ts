@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { composeBilling, type BillingResult } from "@/lib/billing/compose";
-import { RegenerateBillBody } from "@/lib/billing/schemas";
+import { REGENERATE_PAID_ACKNOWLEDGEMENT, RegenerateBillBody } from "@/lib/billing/schemas";
+import { createFmt } from "@/lib/gui/fmt";
+import { formatLocale } from "@/lib/locale";
 import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
@@ -16,15 +18,23 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   { readings: "edge" }                              — from the meter; a
  *     manual bill is switched back to edge data
  *   { readings: "manual", start_kwh, end_kwh, reason? } — the readings given
+ *   and, for a paid bill, confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] }:
+ *   the acknowledgement billing.regenerate-bill's prepare asks for. This
+ *   route is the authority on it (ADR-006).
  *
  * Responses:
- *   200 → { lineItemId, totalAmount, previousTotalAmount }
+ *   200 → { lineItemId, totalAmount, previousTotalAmount, message } —
+ *         message names the previous and new totals, in the microgrid's
+ *         currency and the request's locale; the GUI host shows it as the
+ *         action's result
  *   400 → { error, field?, code: "invalid_body" } (body, or a reading the
  *         mode does not take or lacks); { error, reason: "bad_request" } (id)
  *   401 → { error: "unauthorized" }
  *   404 → { error, reason: "not_found" } (bill, period or microgrid hidden by RLS)
  *   409 → { error, reason: "refunded" }, or { error, reason: <generation code> }
  *         when generation refused this tenant (GenerationErrorCode)
+ *   428 → { error, reason: "paid_acknowledgement_required" } (a paid bill
+ *         without the acknowledgement; nothing is written)
  *   500 → { error, reason: "unknown_error" }
  *   and the capability's own refusals (plugin gate, organization scope).
  *
@@ -102,9 +112,9 @@ export async function POST(
   if (!period) return notFound();
   const { data: microgrid } = await supabase
     .from("microgrids")
-    .select("id, communities!inner(org_id)")
+    .select("id, currency, communities!inner(org_id)")
     .eq("id", period.microgrid_id)
-    .maybeSingle<{ id: string; communities: { org_id: string } | { org_id: string }[] }>();
+    .maybeSingle<{ id: string; currency: string | null; communities: { org_id: string } | { org_id: string }[] }>();
   const communities = microgrid?.communities;
   const orgId = Array.isArray(communities) ? communities[0]?.org_id : communities?.org_id;
   if (!orgId) return notFound();
@@ -117,6 +127,17 @@ export async function POST(
     // Refunding then re-billing reads as data corruption; the legacy menu hides it too.
     if (bill.payment_status === "refunded") {
       return NextResponse.json({ error: "A refunded bill cannot be regenerated.", reason: "refunded" }, { status: 409 });
+    }
+    // Regenerating a paid bill changes what was paid for: the person ticks
+    // that they know it is paid, as billing.regenerate-bill's prepare asks.
+    if (bill.payment_status === "paid" && !parsed.confirmation?.acknowledged.includes(REGENERATE_PAID_ACKNOWLEDGEMENT)) {
+      return NextResponse.json(
+        {
+          error: "This bill is marked paid. Confirm that you want to regenerate it anyway.",
+          reason: "paid_acknowledgement_required",
+        },
+        { status: 428 },
+      );
     }
 
     const tenantId = bill.tenant_id;
@@ -140,10 +161,18 @@ export async function POST(
 
     const mine = result.data.results.find((r) => r.tenantId === tenantId);
     if (mine?.kind === "written") {
+      const fmt = createFmt({ locale: formatLocale(request.headers.get("accept-language")) });
+      const currency = microgrid?.currency ?? "UGX";
+      const now = fmt.money(Number(mine.lineItem.total_amount), currency).text;
+      const message =
+        mine.previousTotalAmount === null
+          ? `Regenerated the bill. Its total is now ${now}.`
+          : `Regenerated the bill. Its total was ${fmt.money(Number(mine.previousTotalAmount), currency).text} and is now ${now}.`;
       return NextResponse.json({
         lineItemId: mine.lineItem.id,
         totalAmount: mine.lineItem.total_amount,
         previousTotalAmount: mine.previousTotalAmount,
+        message,
       });
     }
     if (mine?.kind === "error") {

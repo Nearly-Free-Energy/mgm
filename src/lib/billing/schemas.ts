@@ -468,6 +468,15 @@ export const LineItemPaymentStatusBody = z.strictObject(
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
 
 /**
+ * The acknowledgement regenerating a paid bill needs: billing.regenerate-bill's
+ * prepare offers it (src/lib/billing/surface/period-review.ts), and the
+ * regenerate route refuses a paid bill without it.
+ */
+export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
+
+const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
+
+/**
  * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an
  * object-level refinement, so the GUI host can check a prefill
  * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit form can
@@ -487,10 +496,28 @@ export const RegenerateBillBody = z.strictObject(
       .max(500, { error: "reason must be 500 characters or fewer" })
       .optional()
       .meta({ title: "Reason" }),
+    // The host's Confirmation (src/lib/gui/contract.ts), sent with a
+    // ceremony action: billing.regenerate-bill asks a paid bill's
+    // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
+    // the route refuses a paid bill without it. The host hides it from the
+    // form. Version 2 added it.
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: REGENERATE_CONFIRMATION }).max(64, { error: REGENERATE_CONFIRMATION }), {
+              error: REGENERATE_CONFIRMATION,
+            })
+            .max(20, { error: REGENERATE_CONFIRMATION }),
+          typed: z.string({ error: REGENERATE_CONFIRMATION }).max(200, { error: REGENERATE_CONFIRMATION }).optional(),
+        },
+        { error: REGENERATE_CONFIRMATION }
+      )
+      .optional(),
   },
   { error: bodyError }
 );
-export const REGENERATE_BILL_BODY_VERSION = 1;
+export const REGENERATE_BILL_BODY_VERSION = 2;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

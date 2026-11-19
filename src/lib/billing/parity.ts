@@ -225,12 +225,13 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       method: "POST",
       route: "/api/billing-line-items/[lineItemId]/regenerate",
       risk: "money",
-      confirm: "confirm",
+      // A ceremony: a paid bill's regeneration is acknowledged, and the route requires it.
+      confirm: "ceremony",
       form: "RegenerateBillBody",
       view: "billing.period-review",
     },
     pr: REVIEW,
-    note: "On its own route: on /api/billing/generate a per-bill action could carry only { billingPeriodId }, since GenerateBillsBody is refined (a tenant prefill is dropped), the kit cannot render its arrays and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total and the legacy warnings; a read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row, or generate-bills with tenantIds through a GUI's own form.",
+    note: "On its own route: on /api/billing/generate a per-bill action could carry only { billingPeriodId }, since GenerateBillsBody is refined (a tenant prefill is dropped), the kit cannot render its arrays and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total, the legacy paid-bill warning as an acknowledgement the route requires, and the closed-period warning; the route answers with the previous and new totals, which the host shows as the result. A read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row, or generate-bills with tenantIds through a GUI's own form.",
   },
   {
     id: "record-usage",

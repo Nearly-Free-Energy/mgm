@@ -21,7 +21,7 @@ let user: { id: string } | null;
 let bill: Bill | null;
 let billError: { message: string } | null;
 let period: { id: string; microgrid_id: string } | null;
-let microgrid: { id: string; communities: { org_id: string } } | null;
+let microgrid: { id: string; currency?: string | null; communities: { org_id: string } } | null;
 let composeResult: { ok: false; status: number; code: string; message: string } | null;
 let generateResult: unknown;
 const generateBills = vi.fn();
@@ -53,17 +53,21 @@ vi.mock("@/lib/billing/compose", () => ({
   }),
 }));
 
+import { REGENERATE_PAID_ACKNOWLEDGEMENT } from "@/lib/billing/schemas";
+import { createFmt } from "@/lib/gui/fmt";
 import { POST } from "../route";
 
-const post = (body: unknown, id = LINE_ITEM) =>
+const post = (body: unknown, id = LINE_ITEM, headers: Record<string, string> = {}) =>
   POST(
     new NextRequest(`http://localhost/api/billing-line-items/${id}/regenerate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
     { params: Promise.resolve({ lineItemId: id }) },
   );
+const money = (amount: number, currency = "UGX", locale = "en") => createFmt({ locale }).money(amount, currency).text;
+const acknowledged = { confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] } };
 
 const written = (total = 5200, previous: number | null = 5000) => ({
   ok: true,
@@ -169,8 +173,62 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
   it("regenerates an edge bill from the meter for its one tenant", async () => {
     const res = await post({ readings: "edge" });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ lineItemId: LINE_ITEM, totalAmount: 5200, previousTotalAmount: 5000 });
+    expect(await res.json()).toEqual({
+      lineItemId: LINE_ITEM,
+      totalAmount: 5200,
+      previousTotalAmount: 5000,
+      message: `Regenerated the bill. Its total was ${money(5000)} and is now ${money(5200)}.`,
+    });
     expect(generateBills).toHaveBeenCalledWith({ billingPeriodId: PERIOD, tenantIds: [TENANT], revertToEdgeTenantIds: undefined });
+  });
+
+  it("names the previous and new totals in the microgrid's currency and the request's locale", async () => {
+    microgrid!.currency = "USD";
+    generateResult = written(12.5, 10.25);
+    const res = await post({ readings: "edge" }, LINE_ITEM, { "accept-language": "en-GB,en;q=0.8" });
+    const { message } = await res.json();
+    expect(message).toBe(`Regenerated the bill. Its total was ${money(10.25, "USD", "en-GB")} and is now ${money(12.5, "USD", "en-GB")}.`);
+    expect(message).toContain("10.25");
+    expect(message).toContain("12.50");
+    // A bill that had no total before names only the new one.
+    generateResult = written(12.5, null);
+    expect((await (await post({ readings: "edge" })).json()).message).toBe(`Regenerated the bill. Its total is now ${money(12.5, "USD")}.`);
+  });
+
+  it("428 for a paid bill without the acknowledgement its prepare asks for, and writes nothing", async () => {
+    bill!.payment_status = "paid";
+    for (const body of [
+      { readings: "edge" },
+      { readings: "edge", confirmation: { acknowledged: [] } },
+      { readings: "edge", confirmation: { acknowledged: ["something-else"] } },
+    ]) {
+      const res = await post(body);
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "This bill is marked paid. Confirm that you want to regenerate it anyway.",
+        reason: "paid_acknowledgement_required",
+      });
+    }
+    expect(generateBills).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledTimes(3);
+  });
+
+  it("regenerates a paid bill with the acknowledgement, as the host sends it", async () => {
+    bill!.payment_status = "paid";
+    const res = await post({ readings: "manual", start_kwh: 10, end_kwh: 20, ...acknowledged });
+    expect(res.status).toBe(200);
+    expect(generateBills).toHaveBeenCalledWith({
+      billingPeriodId: PERIOD,
+      tenantIds: [TENANT],
+      manualReadings: [{ tenantId: TENANT, startKwh: 10, endKwh: 20 }],
+    });
+  });
+
+  it.each(["unpaid", "link_generated", "failed"])("asks no acknowledgement of a %s bill, and ignores one sent", async (status) => {
+    bill!.payment_status = status;
+    expect((await post({ readings: "edge" })).status).toBe(200);
+    expect((await post({ readings: "edge", ...acknowledged })).status).toBe(200);
+    expect(generateBills).toHaveBeenCalledTimes(2);
   });
 
   it("switches a manual bill back to edge data", async () => {

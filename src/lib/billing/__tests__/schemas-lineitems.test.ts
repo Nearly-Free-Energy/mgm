@@ -229,8 +229,20 @@ describe("RegenerateBillBody", () => {
     expect(RegenerateBillBody.omit({}).partial().safeParse({ readings: "manual", start_kwh: 12 }).success).toBe(true);
   });
 
-  it("pins the JSON Schema of version 1", () => {
-    expect(REGENERATE_BILL_BODY_VERSION).toBe(1);
+  it("takes the host's confirmation, and refuses one of another shape", () => {
+    expect(RegenerateBillBody.parse({ readings: "edge", confirmation: { acknowledged: ["regenerate-paid-bill"] } })).toEqual({
+      readings: "edge",
+      confirmation: { acknowledged: ["regenerate-paid-bill"] },
+    });
+    for (const confirmation of [true, {}, { acknowledged: "regenerate-paid-bill" }, { acknowledged: [], extra: 1 }]) {
+      expect(firstIssue(RegenerateBillBody, { readings: "edge", confirmation })).toMatchObject({
+        message: "confirmation needs the acknowledgements ticked",
+      });
+    }
+  });
+
+  it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
+    expect(REGENERATE_BILL_BODY_VERSION).toBe(2);
     expect(z.toJSONSchema(RegenerateBillBody, { io: "input" })).toEqual({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
@@ -239,6 +251,15 @@ describe("RegenerateBillBody", () => {
         start_kwh: { title: "Start reading (kWh)", type: "number", minimum: 0 },
         end_kwh: { title: "End reading (kWh)", type: "number", minimum: 0 },
         reason: { title: "Reason", type: "string", maxLength: 500 },
+        confirmation: {
+          type: "object",
+          properties: {
+            acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+            typed: { type: "string", maxLength: 200 },
+          },
+          required: ["acknowledged"],
+          additionalProperties: false,
+        },
       },
       required: ["readings"],
       additionalProperties: false,
