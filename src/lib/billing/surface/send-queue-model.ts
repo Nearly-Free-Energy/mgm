@@ -155,6 +155,16 @@ export const linksOffered = (readiness: SendReadiness): boolean => readiness ===
  * the contact as present or not, without trimming): the link would only
  * lead the tenant to that refusal. If ensureCheckout stops refusing these,
  * or refuses something else a bill's own fields show, revisit.
+ *
+ * Not mirrored: ensureCheckout's refusals that read the bill's payment
+ * attempts (one needing reconciliation, isBlockedForNewCheckout, or a
+ * receipt already recorded), so such a bill still gets a link that ends in
+ * a 409. The attempts are payments' records; the only read of them a
+ * billing loader may call is listHistory (LOADER_READS in
+ * gui-surface.test.ts), one bill at a time with several queries each, on
+ * every 30-second refresh. #201's "Contribute a bill's payment attempts"
+ * owns them, and can give the queue a read of which bills checkout would
+ * refuse, or attach its view; once it does, mirror them here.
  */
 export function billNote(bill: SendBill, tenant: SendTenant): string | null {
   if (bill.payment_status === "paid") return SEND_QUEUE_COPY.paid;

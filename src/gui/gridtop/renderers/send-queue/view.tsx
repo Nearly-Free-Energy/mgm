@@ -48,6 +48,16 @@ function tenantOf(row: RowOf<ActionRef>): string {
   return cell?.t === "ref" ? cell.ref.label : (row.entity?.label ?? cell?.text ?? row.id);
 }
 
+/**
+ * Copies a link and marks its button, as useCopier in ../period-review/copy.ts
+ * does for a figure, but announces only whose link was copied: useCopier's
+ * announcement ends with the copied figure, which for a link would have a
+ * screen reader read the whole URL aloud, and its failure tells the person
+ * to select "the figure". Sharing the module is not what stops reuse (this
+ * view already takes copyFigure from it, and both renderers load on demand,
+ * outside the shell's first load); the wording is. If useCopier comes to
+ * take its announcements from the caller, use it here instead.
+ */
 function useCopy(announce: (message: string) => void) {
   const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
