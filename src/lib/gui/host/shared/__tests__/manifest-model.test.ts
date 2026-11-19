@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { GUI_CONTRACT, type Id, type StatusItem } from "../../../contract";
 import type { NavDef } from "../../../surface";
@@ -8,10 +8,22 @@ import {
   MAX_ORGS,
   MAX_PLACES_PER_KIND,
   buildManifestModel,
+  buildTenantManifestModel,
   kindNamedHref,
   livePlugins,
+  navShownTo,
   type ManifestInput,
+  type TenantManifestInput,
 } from "../manifest-model";
+
+// Paths a test releases on top of the real list, such as /my, which PR 5 of
+// RFC mgm#197 releases.
+const extraReleased = vi.hoisted(() => new Set<string>());
+vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+  return { ...actual, isReleasedRoute: (path: string) => extraReleased.has(path) || actual.isReleasedRoute(path) };
+});
+afterEach(() => extraReleased.clear());
 
 const ORG = "e7100000-0000-4000-8000-000000000001";
 const OTHER = "e7100000-0000-4000-8000-000000000002";
@@ -72,6 +84,8 @@ function input(over: Partial<ManifestInput> = {}): ManifestInput {
     gui: "gridtop",
     user: { name: "Ada Okello", email: "ada@test.local" },
     superAdmin: false,
+    staff: true,
+    tenant: false,
     org: { id: ORG, name: "Org A" },
     orgs: [
       { id: ORG, name: "Org A" },
@@ -116,6 +130,59 @@ describe("buildManifestModel", () => {
   it("shows super-admin entries to super admins only", () => {
     expect(navIds(input())).not.toContain("org.organizations");
     expect(navIds(input({ superAdmin: true }))).toContain("org.organizations");
+  });
+
+  describe("nav audiences", () => {
+    // A tenant entry names a tenant view. "/" is released and stands in for
+    // /my, which is not yet (RFC mgm#197: released by PR 5).
+    const tenantHome: ManifestInput["nav"][number] = {
+      plugin: "tenant-app",
+      def: { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
+    };
+    const tenantView = (path: string): ManifestInput["views"] => [{ plugin: "tenant-app", def: { id: "tenant.home", path, params: {} } }];
+    // Tenant entries follow the gate of the person's own units' organizations
+    // (tenantGate), not that of the organization the manifest is built for.
+    const UNITS_ON: ManifestInput["gate"] = { ...ALL_ON, "tenant-app": true };
+    const withTenant = (over: Partial<ManifestInput>, path = "/") =>
+      navIds(input({ tenantGate: UNITS_ON, nav: [...legacyNav, tenantHome], views: tenantView(path), ...over }));
+    const staffIds = navIds(input()).filter((id) => id !== "org.organizations");
+
+    it("shows staff entries, the default audience, to staff only", () => {
+      expect(navShownTo(undefined, { staff: true, superAdmin: false, tenant: false })).toBe(true);
+      expect(navShownTo("staff", { staff: false, superAdmin: false, tenant: true })).toBe(false);
+      expect(navShownTo(undefined, { staff: false, superAdmin: false, tenant: true })).toBe(false);
+      expect(withTenant({ staff: false, tenant: true })).not.toContain("org.today");
+    });
+
+    it("shows tenant entries to tenants only", () => {
+      expect(navShownTo("tenant", { staff: true, superAdmin: true, tenant: false })).toBe(false);
+      expect(navShownTo("tenant", { staff: false, superAdmin: false, tenant: true })).toBe(true);
+      expect(withTenant({})).not.toContain("tenant.home");
+      expect(withTenant({ superAdmin: true })).not.toContain("tenant.home");
+      expect(withTenant({ staff: false, tenant: true })).toEqual(["tenant.home"]);
+    });
+
+    it("shows a person with staff and tenant rows both groups", () => {
+      expect([...withTenant({ tenant: true })].sort()).toEqual([...staffIds, "tenant.home"].sort());
+    });
+
+    it("leaves out a tenant entry whose page is not released, and one whose plugin is off", () => {
+      expect(withTenant({ staff: false, tenant: true }, "/my")).toEqual([]);
+      expect(withTenant({ staff: false, tenant: true, tenantGate: ALL_ON })).toEqual([]);
+      expect(withTenant({ staff: false, tenant: true, tenantGate: undefined })).toEqual([]);
+    });
+
+    it("decides tenant entries by the units' organizations, and staff entries by the organization's", () => {
+      // The tenant app is on where the person rents and off in the
+      // organization they manage, and the other way round.
+      const managed = { ...ALL_ON, "tenant-app": false };
+      expect(withTenant({ tenant: true, gate: managed, tenantGate: UNITS_ON })).toContain("tenant.home");
+      expect(withTenant({ tenant: true, gate: UNITS_ON, tenantGate: ALL_ON })).not.toContain("tenant.home");
+      // A dependency off where the person rents takes the entry away too.
+      expect(withTenant({ tenant: true, tenantGate: { ...UNITS_ON, metering: false } })).not.toContain("tenant.home");
+      // Staff entries ignore the units' gate.
+      expect(withTenant({ tenant: true, gate: { ...ALL_ON, billing: false } })).not.toContain("billing.periods");
+    });
   });
 
   it("drops the nav and status of a plugin that is off, or whose dependency is off", () => {
@@ -332,5 +399,88 @@ describe("kindNamedHref", () => {
     expect(kindNamedHref("/microgrids/[id]", () => "metering.send")).toBeNull();
     expect(kindNamedHref("/microgrids/[a]/billing/[b]", () => "microgrid")).toBeNull();
     expect(kindNamedHref("/nowhere/[id]", () => "microgrid")).toBeNull();
+  });
+});
+
+describe("buildTenantManifestModel", () => {
+  const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
+  const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
+  const tenantHome: ManifestInput["nav"][number] = {
+    plugin: "tenant-app",
+    def: { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
+  };
+  const ON: ManifestInput["gate"] = { ...ALL_ON, "tenant-app": true };
+
+  function tenantInput(over: Partial<TenantManifestInput> = {}): TenantManifestInput {
+    return {
+      release: null,
+      locale: "en-UG",
+      now: new Date("2026-11-09T08:00:00Z"),
+      gui: "gridtop",
+      user: { name: "Grace Namata", email: "grace@test.local" },
+      units: [{ id: UNIT_A, label: "Grace Namata", timezone: "Africa/Kampala" }],
+      current: null,
+      tenantGate: ON,
+      nav: [...legacyNav, tenantHome],
+      views: [{ plugin: "tenant-app", def: { id: "tenant.home", path: "/my", params: {} } }],
+      ...over,
+    };
+  }
+
+  it("makes the person's one unit the manifest's place and context, with no organization", () => {
+    extraReleased.add("/my");
+    const m = buildTenantManifestModel(tenantInput());
+    expect(manifestSchema.parse(m)).toEqual(m);
+    expect(m.org).toEqual({
+      id: UNIT_A,
+      name: "Grace Namata",
+      href: "/my",
+      timezone: "Africa/Kampala",
+      nav: [expect.objectContaining({ id: "tenant.home", href: "/my", needs: [] })],
+      status: [],
+      places: [{ kind: "tenant", id: UNIT_A, label: "Grace Namata", href: "/my" }],
+    });
+    expect(m.orgs).toEqual([]);
+    expect(m.user).toStrictEqual({ name: "Grace Namata", email: "grace@test.local" });
+  });
+
+  it("shows tenant entries only, of plugins live for the person's units", () => {
+    extraReleased.add("/my");
+    // Every staff entry's plugin is on in the gate, and none is shown.
+    expect(buildTenantManifestModel(tenantInput()).org.nav.map((n) => n.id)).toEqual(["tenant.home"]);
+    expect(buildTenantManifestModel(tenantInput({ tenantGate: ALL_ON })).org.nav).toEqual([]);
+    expect(buildTenantManifestModel(tenantInput({ tenantGate: { ...ON, "community-management": false } })).org.nav).toEqual([]);
+  });
+
+  it("leaves out an unreleased home and the places' links to it, keeping the unit's own href", () => {
+    const m = buildTenantManifestModel(tenantInput());
+    expect(manifestSchema.safeParse(m).success).toBe(true);
+    expect(m.org.nav).toEqual([]);
+    expect(m.org.places).toEqual([{ kind: "tenant", id: UNIT_A, label: "Grace Namata" }]);
+    expect(m.org.href).toBe("/my");
+  });
+
+  it("names the unit in every link for a person with two, and acts in the current one", () => {
+    extraReleased.add("/my");
+    const units = [
+      { id: UNIT_A, label: "Grace Namata", timezone: "Africa/Kampala" },
+      { id: UNIT_B, label: "Shop 4", timezone: "Africa/Nairobi" },
+    ];
+    const m = buildTenantManifestModel(tenantInput({ units, current: UNIT_B }));
+    expect(manifestSchema.parse(m)).toEqual(m);
+    expect(m.org).toMatchObject({ id: UNIT_B, name: "Shop 4", href: `/my?unit=${UNIT_B}`, timezone: "Africa/Nairobi" });
+    expect(m.org.places).toEqual([
+      { kind: "tenant", id: UNIT_A, label: "Grace Namata", href: `/my?unit=${UNIT_A}` },
+      { kind: "tenant", id: UNIT_B, label: "Shop 4", href: `/my?unit=${UNIT_B}` },
+    ]);
+    // The nav entry is the bare home, which asks a person with two units to choose.
+    expect(m.org.nav.map((n) => n.href)).toEqual(["/my"]);
+    // No current unit, or one that is not theirs: the first.
+    expect(buildTenantManifestModel(tenantInput({ units, current: null })).org.id).toBe(UNIT_A);
+    expect(buildTenantManifestModel(tenantInput({ units, current: ORG })).org.id).toBe(UNIT_A);
+  });
+
+  it("refuses to build for a person with no unit", () => {
+    expect(() => buildTenantManifestModel(tenantInput({ units: [] }))).toThrow(/needs a unit/);
   });
 });

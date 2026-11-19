@@ -1429,6 +1429,21 @@ export type Database = {
           },
         ]
       }
+      staff_access_accounts: {
+        Row: {
+          first_recorded_at: string
+          user_id: string
+        }
+        Insert: {
+          first_recorded_at?: string
+          user_id: string
+        }
+        Update: {
+          first_recorded_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       tenant_access_accounts: {
         Row: {
           first_granted_at: string

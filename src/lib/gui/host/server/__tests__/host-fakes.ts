@@ -24,6 +24,51 @@ function role(r: "super_admin" | "org_manager", scopeId: string | null): UserRol
 }
 export const managerOf = (orgId: string) => role("org_manager", orgId);
 export const superAdmin = () => role("super_admin", null);
+/**
+ * An `fn_tenant_home` row (20261118100100) for each of `units`, answering
+ * only the unit asked for, as the function answers a caller holding a
+ * tenant row for it. Pass to tableClient's `rpcs`.
+ */
+export function tenantHomes(
+  units: readonly { id: string; name: string; unitLabel?: string | null; microgrid?: string; timezone?: string; orgId: string }[],
+) {
+  return {
+    fn_tenant_home: (args: Record<string, unknown>): TableResult => {
+      const unit = units.find((u) => u.id === args._tenant_id);
+      return {
+        data: unit
+          ? [
+              {
+                tenant_id: unit.id,
+                display_name: unit.name,
+                unit_label: unit.unitLabel ?? null,
+                microgrid_id: "e7100000-0000-4000-8003-000000000001",
+                microgrid_name: unit.microgrid ?? "Kasana East",
+                timezone: unit.timezone ?? "Africa/Kampala",
+                currency: "UGX",
+                organization_id: unit.orgId,
+              },
+            ]
+          : [],
+      };
+    },
+  };
+}
+
+/** A tenant row for the unit `tenantId` (RFC mgm#197): not staff, so it reaches no organization. */
+export function tenantOf(tenantId: string): UserRoleRecord {
+  return {
+    id: `role-tenant-${tenantId}`,
+    user_id: USER.id,
+    role: "tenant",
+    scope_type: "tenant",
+    scope_id: tenantId,
+    scope_org_id: null,
+    scope_microgrid_id: null,
+    scope_tenant_id: tenantId,
+    created_at: "2026-01-01T00:00:00Z",
+  };
+}
 
 /** Enough of Fmt for labels: a date prints as D(<date>), so a label that skips fmt shows. */
 export const fakeFmt = { date: (d: string) => ({ t: "date", v: d, text: `D(${d})` }) } as unknown as Fmt;
@@ -46,12 +91,22 @@ type TableResult = { data: unknown; error?: { message: string } | null };
 
 /**
  * A client whose from(table) answers `results[table]` whatever the filters,
- * awaited or through maybeSingle() (the first row). `calls` records each
- * query's table and the methods called on it.
+ * awaited or through maybeSingle() (the first row), and whose rpc(name,
+ * args) answers `rpcs[name](args)`, or an error for a function not given.
+ * `calls` records each query's table and the methods called on it, and each
+ * call as table `rpc:<name>` with its arguments.
  */
-export function tableClient(results: Record<string, TableResult>) {
+export function tableClient(
+  results: Record<string, TableResult>,
+  rpcs: Record<string, (args: Record<string, unknown>) => TableResult> = {},
+) {
   const calls: { table: string; ops: [string, unknown[]][] }[] = [];
   const client = {
+    async rpc(name: string, args: Record<string, unknown> = {}) {
+      calls.push({ table: `rpc:${name}`, ops: [["rpc", [args]]] });
+      const answer = rpcs[name]?.(args) ?? { data: null, error: { message: `no fake for ${name}` } };
+      return { data: answer.data ?? null, error: answer.error ?? null };
+    },
     from(table: string) {
       const ops: [string, unknown[]][] = [];
       calls.push({ table, ops });

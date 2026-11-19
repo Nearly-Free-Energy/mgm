@@ -61,6 +61,7 @@ const SURFACE_MODULES: Partial<Record<MgmPluginName, string>> = {
   metering: "@/lib/metering/surface",
   billing: "@/lib/billing/surface",
   payments: "@/lib/payments/surface",
+  "tenant-app": "@/lib/tenant-app/surface",
 };
 
 /** Words that make a declared name look like a secret, alone or with an "s". */
@@ -83,6 +84,7 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
   MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
   PaymentsCapabilityContract: ["getReadiness", "listHistory"],
+  TenantAppCapabilityContract: ["getHome"],
 };
 const CONTRACT = /CapabilityContract$/;
 

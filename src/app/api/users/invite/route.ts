@@ -5,9 +5,12 @@ import { createServiceClient } from "@/lib/supabase/service";
 import {
   currentUserIsSuperAdmin,
   currentUserCanAccessOrg,
+  getCurrentUserRoles,
+  rolesIncludeSuperAdmin,
+  staffRoles,
 } from "@/lib/auth/access";
 import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
-import { buildInviteDataPayload } from "@/lib/auth/invite-data-payload";
+import { buildInviteDataPayload, type InviteDataPayload } from "@/lib/auth/invite-data-payload";
 import { invitationNotice } from "@/lib/auth/invitation-notice";
 import { sendNotice } from "@/lib/email/notices";
 import { getMgmRuntime } from "@/lib/runtime/root";
@@ -21,13 +24,15 @@ import type { UserRole } from "@/lib/types/domain";
  *
  *   userClient = createClient()         → user-bound, used for:
  *                                           1) defense-in-depth perm checks
- *                                           2) fn_finalize_user_invitation RPC
- *                                              (the RPC is SECURITY DEFINER
- *                                              but still reads auth.uid()
- *                                              from the caller's JWT — so
- *                                              the permission helpers inside
- *                                              the RPC evaluate against the
- *                                              caller, not the function owner)
+ *                                           2) fn_finalize_user_invitation RPC,
+ *                                              or fn_change_user_role for a
+ *                                              tenant made staff (both are
+ *                                              SECURITY DEFINER but still read
+ *                                              auth.uid() from the caller's
+ *                                              JWT — so the permission
+ *                                              helpers inside them evaluate
+ *                                              against the caller, not the
+ *                                              function owner)
  *   svc        = createServiceClient()  → service-role, used ONLY for:
  *                                           svc.auth.admin.listUsers
  *                                           svc.auth.admin.createUser
@@ -40,19 +45,32 @@ import type { UserRole } from "@/lib/types/domain";
  *
  * Steps:
  *   1. Validate body + defense-in-depth permission check.
- *   2. Look up an existing account for the email. Decided by role rows,
- *      not by the profile: every auth.users row has a profile (trigger,
- *      00017), so a profile says nothing about access.
- *        - Already holds the requested access → 409 `already_member`.
- *        - Holds other access → 409 `other_access` (a role change).
- *        - Holds none (access removed, or an unfinished invitation) →
- *          reuse the account. Profile fields the person already has are
+ *   2. Look up an existing account for the email and read all of its
+ *      user_roles rows. Decided by those rows, not by the profile: every
+ *      auth.users row has a profile (trigger, 00017), so a profile says
+ *      nothing about access.
+ *        - Staff rows (staffRoles), one of them the requested access →
+ *          409 `already_member`.
+ *        - Other staff rows → 409 `other_access` (a role change).
+ *        - Tenant rows only (RFC mgm#197): a person who rents a unit.
+ *          Making them staff is a role change too, so only a super admin
+ *          does it here, through fn_change_user_role as
+ *          PATCH /api/users/[id]/role does; its DELETE takes org-scoped
+ *          rows only, so a tenant made staff keeps their home. Their profile
+ *          is kept as it is, and the notice goes as for any existing
+ *          account (step 5). Anyone else gets the `other_access` answer, word
+ *          for word, and nothing is written: it says no more about the
+ *          address than that answer says for any account that holds access.
+ *          fn_finalize_user_invitation is never called for an account that
+ *          holds any user_roles row.
+ *        - No rows (access removed, or an invitation that did not finish)
+ *          → reuse the account. Profile fields the person already has are
  *          kept.
  *      No account: svc.auth.admin.createUser(email) creates one with no
  *      password and email_confirmed_at = NULL, and sends nothing.
  *   3. userClient.rpc('fn_finalize_user_invitation', ...) — inserts the
  *      user_profiles + user_roles rows atomically under the caller's
- *      session.
+ *      session, for a new account or one with no rows.
  *   4. Cleanup on RPC failure: svc.auth.admin.deleteUser(userId), only for
  *      an account step 2 created. Best effort — log if cleanup also fails.
  *   5. Only once the access is saved, the invitation notice (RFC #186 § 5)
@@ -66,7 +84,8 @@ import type { UserRole } from "@/lib/types/domain";
  * Error contract: { error: string, field?: string, code?: string }
  *   403 — not authorized (either at the defense-in-depth check or at
  *         the RPC ERRCODE 42501).
- *   409 — the email's account already has access (see step 2).
+ *   409 — the email's account already has access (see step 2), or, for a
+ *         tenant made staff, fn_change_user_role's 40000.
  *   422 — validation error.
  *   500 — unexpected.
  */
@@ -179,13 +198,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // Who invited them, to what and as what, for the notice; also kept on
-  // auth.users.raw_user_meta_data as before.
-  const inviteData = await buildInviteDataPayload({
-    caller,
-    targetRole: role,
-    targetOrgId: scopeId,
-    supabase: userClient,
-  });
+  // auth.users.raw_user_meta_data as before. Alongside it, whether the
+  // caller is a super admin, which only an address whose rows are all
+  // tenant rows needs (step 2). It is read here, for every invitation, so
+  // the `other_access` answer for such an address follows the same reads
+  // as the one for an address with staff rows.
+  const [inviteData, callerRoles] = await Promise.all([
+    buildInviteDataPayload({
+      caller,
+      targetRole: role,
+      targetOrgId: scopeId,
+      supabase: userClient,
+    }),
+    getCurrentUserRoles(userClient, caller),
+  ]);
+  const callerIsSuperAdmin = rolesIncludeSuperAdmin(callerRoles);
 
   const svc = createServiceClient();
 
@@ -211,13 +238,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (lookup.user) {
     const existing = lookup.user;
-    const roles = await rolesOf(svc, existing.id);
-    if (roles === null) {
+    const rows = await roleRowsOf(svc, existing.id);
+    if (rows === null) {
       return NextResponse.json(
         { error: "Could not check the account's access. Please retry." },
         { status: 500 }
       );
     }
+    const roles = staffRoles(rows);
 
     if (roles.some((r) => grantsRequestedAccess(r, role, scopeId))) {
       return NextResponse.json(
@@ -234,23 +262,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     if (roles.length > 0) {
-      // A user may hold several role rows; any other access means this is
-      // a role change, which has its own flow and permission rules.
-      return NextResponse.json(
-        {
-          error:
-            `${email} already has an MGM account with a different role. ` +
-            "A super admin can change it from the Users list.",
-          field: "email",
-          code: "other_access",
-        },
-        { status: 409 }
-      );
+      // A user may hold several role rows; any other staff access means
+      // this is a role change, which has its own flow and permission rules.
+      return otherAccess(email);
     }
 
-    // An account with no access: someone whose access was removed (DELETE
-    // /api/users/[id] keeps the account and profile so they can be invited
-    // again) or one left behind by an invitation that did not finish.
+    if (rows.length > 0) {
+      // Tenant rows only: staffRoles keeps every row but a tenant row, and
+      // kept none.
+      // Making a tenant staff is a role change: a super admin's, through
+      // fn_change_user_role, and anyone else gets the answer above.
+      if (!callerIsSuperAdmin) return otherAccess(email);
+      return makeTenantStaff({ userClient, svc, userId: existing.id, email, role, scopeId, inviteData });
+    }
+
+    // An account with no rows: someone whose access was removed
+    // (DELETE /api/users/[id] keeps the account and profile so they can be
+    // invited again), or one left behind by an invitation that did not
+    // finish.
     targetUserId = existing.id;
 
     // Keep what the person already has on their profile; the form only
@@ -345,19 +374,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ── Step 5: the invitation notice, once the access is saved ──────────
-  let emailSent = false;
-  try {
-    const runtime = await getMgmRuntime();
-    const notice = await sendNotice({
-      service: svc,
-      transports: runtime.mailTransports,
-      orgId: role === ORG_MANAGER ? scopeId : null,
-      message: invitationNotice({ to: email, data: inviteData }),
-    });
-    emailSent = notice.ok;
-  } catch (noticeErr) {
-    console.error("[invite] The invitation notice failed:", (noticeErr as Error).name);
-  }
+  const emailSent = await sendInvitationNotice({ svc, email, role, scopeId, inviteData });
 
   return NextResponse.json(
     {
@@ -366,6 +383,88 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       email_sent: emailSent,
     },
     { status: 201 }
+  );
+}
+
+/**
+ * Step 2 for an account whose rows are all tenant rows, once the caller is
+ * known to be a super admin: the requested staff role through
+ * fn_change_user_role, called and its errors mapped as
+ * PATCH /api/users/[id]/role does. Its DELETE is limited to org-scoped rows,
+ * so the person's tenant rows stay; if that changes, revisit. The profile is
+ * not written: what the person has is kept, and the form's fields are not
+ * filled in, because the only write this route makes to a profile is
+ * fn_finalize_user_invitation's. Then the notice, as for any existing
+ * account.
+ */
+async function makeTenantStaff(input: {
+  userClient: SupabaseClient;
+  svc: SupabaseClient;
+  userId: string;
+  email: string;
+  role: UserRole;
+  scopeId: string | null;
+  inviteData: InviteDataPayload;
+}): Promise<NextResponse> {
+  const { error } = await input.userClient.rpc("fn_change_user_role", {
+    p_user_id: input.userId,
+    p_role: input.role,
+    p_scope_id: input.scopeId ?? undefined,
+  });
+  if (error) {
+    const pgCode = (error as { code?: string }).code;
+    let status = 500;
+    if (pgCode === "42501") status = 403;
+    else if (pgCode === "22023") status = 422;
+    else if (pgCode === "40000") status = 409;
+    return NextResponse.json({ error: `Invite failed: ${error.message}` }, { status });
+  }
+
+  const emailSent = await sendInvitationNotice(input);
+  return NextResponse.json(
+    { user_id: input.userId, existing_account: true, email_sent: emailSent },
+    { status: 201 }
+  );
+}
+
+/**
+ * The invitation notice (step 5), through the invited organization's mail
+ * sender, or the deployment's for a super admin. True iff it was sent; a
+ * notice that cannot be sent leaves the access in place.
+ */
+async function sendInvitationNotice(input: {
+  svc: SupabaseClient;
+  email: string;
+  role: UserRole;
+  scopeId: string | null;
+  inviteData: InviteDataPayload;
+}): Promise<boolean> {
+  try {
+    const runtime = await getMgmRuntime();
+    const notice = await sendNotice({
+      service: input.svc,
+      transports: runtime.mailTransports,
+      orgId: input.role === ORG_MANAGER ? input.scopeId : null,
+      message: invitationNotice({ to: input.email, data: input.inviteData }),
+    });
+    return notice.ok;
+  } catch (noticeErr) {
+    console.error("[invite] The invitation notice failed:", (noticeErr as Error).name);
+    return false;
+  }
+}
+
+/** The 409 for an account that already holds access other than the one requested. */
+function otherAccess(email: string): NextResponse {
+  return NextResponse.json(
+    {
+      error:
+        `${email} already has an MGM account with a different role. ` +
+        "A super admin can change it from the Users list.",
+      field: "email",
+      code: "other_access",
+    },
+    { status: 409 }
   );
 }
 
@@ -413,7 +512,8 @@ interface RoleRow {
   scope_id: string | null;
 }
 
-async function rolesOf(
+/** All of the account's user_roles rows, tenant rows (RFC mgm#197) included; null when they cannot be read. */
+async function roleRowsOf(
   svc: SupabaseClient,
   userId: string
 ): Promise<RoleRow[] | null> {

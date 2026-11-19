@@ -96,7 +96,7 @@ vi.mock("@/lib/runtime/gate", () => ({
 }));
 
 import { resolveSegments, type Segment } from "../entities";
-import { contextFor, managerOf, superAdmin } from "./host-fakes";
+import { contextFor, managerOf, superAdmin, tenantOf } from "./host-fakes";
 
 /** Column lists each table was read with. */
 let selects: Record<string, string[]>;
@@ -278,6 +278,27 @@ describe("resolveSegments", () => {
     await expect(
       resolveSegments(contextFor([managerOf(ORG_A)], newClient), NO_ENTITIES, [seg("microgrid", F.microgridB)]),
     ).resolves.toEqual({ ok: false, status: 404 });
+  });
+
+  it("refuses a person whose rows are all tenant rows, reading nothing, even for their own unit", async () => {
+    // Row-level security shows a tenant their own tenant row and devices,
+    // but every segment resolves to an organization, which they never reach.
+    const organizationOf = vi.fn();
+    const snapshot = {
+      entities: new Map<EntityKind, RegisteredEntity>([["acme.thing", { plugin: "billing", organizationOf } as unknown as RegisteredEntity]]),
+    };
+    const ctx = contextFor([tenantOf(F.tenantA)], newClient);
+    for (const segments of [
+      [seg("tenant", F.tenantA)],
+      [seg("microgrid", F.microgridA), seg("tenant", F.tenantA, "tenantId")],
+      [seg("organization", ORG_A)],
+      [seg("acme.thing", "t-1")],
+    ]) {
+      await expect(resolveSegments(ctx, snapshot, segments)).resolves.toEqual({ ok: false, status: 404 });
+    }
+    expect(newClient).not.toHaveBeenCalled();
+    expect(resolveTargetOrganization).not.toHaveBeenCalled();
+    expect(organizationOf).not.toHaveBeenCalled();
   });
 
   it("refuses a segment that does not sit under the one above it", async () => {
