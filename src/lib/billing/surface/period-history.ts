@@ -145,7 +145,11 @@ export async function loadPeriodHistory(req: SurfaceRequest): Promise<Loaded<Loa
           .eq("id", tenantId)
           .eq("microgrid_id", period.microgrid_id)
           .maybeSingle<{ id: string; display_name: string | null }>(),
-        // At most one: a tenant has one bill a period (idx_billing_line_items_period_household, 00029).
+        // At most one: a tenant has one bill a period (the unique index
+        // idx_billing_line_items_period_tenant, 00029, renamed by
+        // 20261116230000). If that index stops being unique, maybeSingle
+        // errors on a second bill and this view refuses every history
+        // filtered to that tenant: read every bill here and filter on all.
         req.supabase.from("billing_line_items").select("id").eq("billing_period_id", period.id).eq("tenant_id", tenantId).maybeSingle<{ id: string }>(),
       ]);
       if (tenantRes.error || billRes.error) return PERIOD_HISTORY_REFUSALS.unavailable;
