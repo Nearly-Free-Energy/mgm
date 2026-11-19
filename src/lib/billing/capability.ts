@@ -25,7 +25,14 @@ import type {
   TierInput,
   UnresolvedTenant,
 } from "./repository";
-import { missingAcknowledgements, periodName, typedNameMatches, type CloseReview } from "./close";
+import {
+  CLOSE_REFUSAL_COPY,
+  fractionalTotalsMessage,
+  missingAcknowledgements,
+  periodName,
+  typedNameMatches,
+  type CloseReview,
+} from "./close";
 import { isPeriodKeptError, PERIOD_KEPT_CLOSED_MESSAGE, periodDeleteErrorMessage } from "./period-delete";
 import { ClosePeriodBody, CreatePeriodBody, DeletePeriodBody, GenerateBillsBody } from "./schemas";
 
@@ -39,10 +46,7 @@ function fractionalTotals(review: CloseReview | undefined) {
     ok: false as const,
     status: 409 as const,
     code: "billing_close_fractional_totals",
-    message:
-      names.length > 0
-        ? `Regenerate the bills for ${names.join(", ")} before closing: their totals are not whole numbers.`
-        : "Regenerate the bills whose totals are not whole numbers before closing.",
+    message: fractionalTotalsMessage(names.join(", ")),
     ...(review ? { review } : {}),
   };
 }
@@ -392,7 +396,7 @@ export class BillingCapability implements BillingCapabilityContract {
     } catch {
       return {
         ok: false, status: 503, code: "billing_review_unavailable",
-        message: "Could not load the period's totals. Retry before closing the period.",
+        message: CLOSE_REFUSAL_COPY.reviewUnavailable,
       };
     }
   }
@@ -463,7 +467,7 @@ export class BillingCapability implements BillingCapabilityContract {
         ok: false as const,
         status: 409 as const,
         code: "billing_period_closed",
-        message: "Billing period is already closed.",
+        message: CLOSE_REFUSAL_COPY.closed,
       };
     }
 
@@ -535,7 +539,7 @@ export class BillingCapability implements BillingCapabilityContract {
           ok: false as const,
           status: 409 as const,
           code: "billing_period_closed",
-          message: "Billing period is already closed.",
+          message: CLOSE_REFUSAL_COPY.closed,
         };
       }
       if (token === "billing_period_not_found" || error?.code === "P0002") {

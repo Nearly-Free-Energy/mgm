@@ -32,6 +32,24 @@ const ACKNOWLEDGEMENT_IDS = Object.keys(CLOSE_ACKNOWLEDGEMENTS) as [
   ...CloseAcknowledgementId[],
 ];
 
+/**
+ * The refusals of a close that the close route (./capability.ts
+ * closePeriod) and the contributed close action's prepare
+ * (./surface/close-checklist.ts) both give, so a person reads the same
+ * sentence in every interface.
+ */
+export const CLOSE_REFUSAL_COPY = {
+  closed: "Billing period is already closed.",
+  reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
+} as const;
+
+/** The refusal of a close while some bill totals are not whole numbers, naming those tenants. */
+export function fractionalTotalsMessage(names: string): string {
+  return names.length > 0
+    ? `Regenerate the bills for ${names} before closing: their totals are not whole numbers.`
+    : "Regenerate the bills whose totals are not whole numbers before closing.";
+}
+
 const tenantRef = z.object({ tenantId: z.string(), tenantName: z.string() });
 const calendarDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 

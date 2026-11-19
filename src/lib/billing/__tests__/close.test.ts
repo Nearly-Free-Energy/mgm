@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOSE_ACKNOWLEDGEMENTS,
+  CLOSE_REFUSAL_COPY,
+  fractionalTotalsMessage,
   missingAcknowledgements,
   parseCloseReview,
   periodName,
@@ -101,5 +103,21 @@ describe("missingAcknowledgements", () => {
     expect(missingAcknowledgements(review, [])).toEqual(["totals_reviewed", "tenants_without_bills"]);
     expect(missingAcknowledgements(review, ["tenants_without_bills", "unrelated"])).toEqual(["totals_reviewed"]);
     expect(missingAcknowledgements(review, ["totals_reviewed", "tenants_without_bills"])).toEqual([]);
+  });
+});
+
+describe("the close refusals' copy", () => {
+  it("names the tenants whose totals are not whole numbers, or speaks of the bills when none is named", () => {
+    expect(fractionalTotalsMessage("House 1, House 2")).toBe(
+      "Regenerate the bills for House 1, House 2 before closing: their totals are not whole numbers."
+    );
+    expect(fractionalTotalsMessage("")).toBe("Regenerate the bills whose totals are not whole numbers before closing.");
+  });
+
+  it("is the route's copy for a closed period and an unreadable review", () => {
+    expect(CLOSE_REFUSAL_COPY).toEqual({
+      closed: "Billing period is already closed.",
+      reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
+    });
   });
 });
