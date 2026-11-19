@@ -6,14 +6,16 @@ Set the server-only `MGM_APP_URL` to the canonical HTTPS application origin. The
 
 In Organization → Payment accounts, configure and test a Pesapal sandbox merchant first. Enable Payments and Pesapal in plugin settings. A community inherits the organization default unless its Payment accounts page selects an override. Failed credential tests preserve the active configuration. No automatic payment email is sent; use the stable MGM payment link in an invoice or copy it manually. Managers copy each bill's link from its period's send queue (`/microgrids/<id>/billing/<period id>/send`, Send bills on the period), which shows links only while the community's payment readiness is ready or sandbox, and says why there are none otherwise. Each link lets whoever holds it start a checkout for that bill, so send it only to the bill's tenant.
 
+While Payments is off, the period's Payments tab is hidden and its Refresh status and reconciliation actions are shown disabled, although the routes still accept them; the period row's Payment history dialog keeps them available until that is decided (the billing parity table's `payments-while-off` row, `src/lib/billing/parity.ts`).
+
 Before enabling live payments, have the operator perform a sandbox checkout and confirm all of the following:
 
 - The return page (`/payment/callback`) says the status was checked only after a server-side lookup, never from the redirect parameters, and the bill, receipt, and audit event agree. The provider should bring the tenant back with a `GET`: a `POST` shows the plain "not confirmed yet" page and checks nothing.
 - The return page names the operator from the community's invoice branding: the trade name, else the organization's name, with the community beneath, and the WhatsApp contact the bill shows. A PNG or JPEG logo of 6 KB or less, uploaded for that community, appears too; a larger logo, or an SVG, leaves the name alone. The page waits at most 2 seconds for the branding: past that it answers without the logo, or without any branding if the names were not read in time.
 - Repeated IPNs, repeated clicks, and worker delivery do not duplicate accounting or create another outstanding checkout.
-- A draft total correction flags any old payment for reconciliation. Payment history shows the current total, received amount, and difference.
+- A draft total correction flags any old payment for reconciliation. Payment history shows the current total, received amount, and difference: in the period row's Payment history dialog, and on the period's Payments tab (`/microgrids/<id>/billing/<period id>/payments`, one bill with `?bill=<bill id>`).
 - Plugin disablement blocks new checkout while keeping history and verification available. Manual payment recording remains independent.
-- A verified reversal updates accounting. Any external reconciliation records the actual signed collection/refund amount, reference, and notes; MGM does not execute refunds.
+- A verified reversal updates accounting. Any external reconciliation records the actual signed collection/refund amount, reference, and notes, and asks for the tenant's name typed; MGM does not execute refunds.
 - Notifications recover after a worker interruption, and persistent failures remain visible for investigation.
 
 Local verification uses synthetic records and rolls back all rehearsal writes. Run `psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/scripts/rehearse-payments.sql` against a scratch database. This exercises reservation, settlement rollback, duplicate events, reversal, correction, external settlement, organization isolation, and scheduler presence. It does not replace the operator's Pesapal sandbox transaction or deployment configuration checks.

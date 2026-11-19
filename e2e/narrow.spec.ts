@@ -94,3 +94,35 @@ test("a period's send queue renders at 360 px", async ({ page }) => {
   await reportTiming(page, "Send queue");
   watch.assertClean();
 });
+
+test("a bill's payments render at 360 px", async ({ page }) => {
+  const { microgridId, periodId, billId } = readSmokeFixtures();
+  // Opening Record completed adjustment prepares the action, a POST that
+  // writes nothing (src/lib/gui/host/server/prepare.ts); if prepare starts
+  // writing, take it out of here. Nothing is submitted, and Refresh status is
+  // never pressed: it asks the payment provider.
+  const watch = await watchPage(page, { expectedWrites: [/^\/api\/gui\/prepare$/] });
+  await page.goto(`/microgrids/${microgridId}/billing/${periodId}/payments?bill=${billId}`);
+  await expect(page.getByRole("heading", { name: "Payments: Smoke tenant 1 with a long display name" })).toBeVisible();
+  await expect(page.getByText("Needs reconciliation", { exact: true })).toBeVisible();
+  for (const name of ["Refresh status", "Record completed adjustment", "Accept exact receipts"]) {
+    await expect(page.getByRole("button", { name })).toBeVisible();
+  }
+  await checkNarrowPage(page);
+  await reportTiming(page, "Bill payments");
+
+  // The typed step fits the screen. Escape leaves it unsent.
+  await page.getByRole("button", { name: "Record completed adjustment" }).click();
+  const dialog = page.locator('[role="dialog"], [role="alertdialog"]');
+  await expect(dialog).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box, "the dialog has a box").not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(800);
+  await checkTouchTargets(page, '[role="dialog"], [role="alertdialog"]');
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  watch.assertClean();
+});

@@ -497,16 +497,23 @@ checks that the step fits the screen and that its controls are 44 px
 targets, and leaves without confirming. It opens the period's send queue,
 with a sandbox payment account seeded for the organization, and checks that
 the bill with a total offers its payment link to copy, without opening or
-copying it. Every page fails on a page error, a
+copying it. It opens that bill's payments, with an online payment attempt
+seeded on it and held for reconciliation, checks that Refresh status and
+both reconciliations are offered, and opens Record completed adjustment to
+check that its step fits the screen, leaving without sending it; it never
+presses Refresh status, which would ask the payment provider. Every page
+fails on a page error, a
 console error or a content security policy violation, popups included, and
 on any write to the app's API other than the invoice preview and the
-close's prepare step, neither of which writes. The headless Chromium it runs
+prepare steps, none of which writes. The headless Chromium it runs
 has no PDF viewer, so it sees the preview as a download; it cannot show
 that a desktop browser displays it. It creates its own organization,
 community (with an invoice logo in the `invoice-logos` bucket), microgrids,
 tenants, tariff, billing period, bills, payment account (no credential, and
-never contacted) and user in the local database and deletes them
-afterwards.
+never contacted), payment attempt and user in the local database and deletes
+them afterwards (an organization with payment records is purged as the
+database owner, which needs the `supabase` CLI and this project's
+directory, or `SUPABASE_WORKDIR`).
 Timings are printed, not enforced.
 
 ```bash
