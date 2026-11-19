@@ -41,10 +41,11 @@ reads no `microgrids` or `edges` row, so the usage source builds the unit's
 microgrid's provider on the service role, after `composeTenantApp` has
 authorized the unit, for the microgrid `fn_tenant_home` named and the device
 rows the tenant's own client returned, and, for the device ids the tenant's
-own client returned as the unit's `secondary_meter` links, reads the date
-spans on which other units hold them as primary (see "The tenant app"
-below). That read returns dates only, never whose; if it ever returns a
-tenant id or takes ids from anywhere else, revisit it. A new
+own client returned as the unit's primary consumption meter links, reads
+the date spans on which other units also hold them as primary (see "The
+tenant app" below). That read returns dates only, cut to the unit's own
+links, never whose; if it ever returns a tenant id or takes ids from
+anywhere else, revisit it. A new
 caller that builds a provider on the service role needs the same reasoning,
 and a listing in `service-role-session-check.test.ts`. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
@@ -192,15 +193,18 @@ linked to the unit. The capability writes nothing, but its usage reads are
 provider calls: the usage source asks the metering gate with the tenant's
 client right before each one, in place of the metering capability's
 `requirePlugin` re-check, and the tenant-app gate is asked at composition,
-in the same request. Only `consumption_meter` devices count as a unit's use,
-and a secondary link drops the days its meter is another unit's primary
-(`TENANT_METER_ROLES` in `src/lib/tenant-app/types.ts`). For that, the
-usage source reads other units' primary links of the unit's secondary
-meters on the service role; that read concerns MGM's own link rows, not the
-backend, so it runs without the metering gate, and only for a unit with a
-secondary link in the range. It returns dates only, for ids the tenant's
-own client returned as the unit's secondary links; if it ever returns a
-tenant id or takes ids from anywhere else, revisit it. A read is cached in process memory for 60 s per unit,
+in the same request. Only the unit's primary consumption meter is its use,
+on the home, the month and the day (`USAGE_METER_ROLE` in
+`src/lib/tenant-app/types.ts`). A meter two units hold as primary on the
+same day is shown to each with the label "Shared with another unit, not
+only yours" on those days (D12). For that, the usage source reads other
+units' primary links of the unit's primary meters on the service role;
+that read concerns MGM's own link rows, not the backend, so it runs
+without the metering gate and outside the usage cache, on every view. It
+returns dates only, cut to the unit's own links, for ids the tenant's own
+client returned as the unit's primary links; if it ever returns a tenant id
+or takes ids from anywhere else, revisit it. If it fails, the view answers
+`tenant_app_unavailable` rather than show shared use unlabelled. A read is cached in process memory for 60 s per unit,
 view and period, and a unit may cause at most six uncached reads a minute
 in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
 store, so keys that need no session cannot evict a unit's count); over the

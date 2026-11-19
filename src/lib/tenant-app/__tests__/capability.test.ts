@@ -53,7 +53,7 @@ function repository(meters: TenantMeter[] | Error) {
   };
 }
 
-/** The home reads no usage; a source that fails the test if asked. */
+/** The home reads no usage; a source that fails the test if asked for it, and finds no meter shared. */
 const noUsage: TenantUsageSource = {
   readSeries: async () => {
     throw new Error("the home reads no usage");
@@ -64,8 +64,8 @@ const noUsage: TenantUsageSource = {
 describe("TenantAppCapability.getHome", () => {
   it("returns the unit, its microgrid and the meters in force today in the microgrid's zone", async () => {
     const { repo, listMetersInForce } = repository([
-      meter({ deviceId: "d3", name: "B secondary", role: "secondary_meter" }),
-      meter({ deviceId: "d2", name: "Z main" }),
+      meter({ deviceId: "d3", name: "Z main" }),
+      meter({ deviceId: "d2", name: "B main" }),
       meter({ deviceId: "d1", name: "A main" }),
     ]);
     const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, noUsage);
@@ -86,6 +86,38 @@ describe("TenantAppCapability.getHome", () => {
         ],
       },
     });
+  });
+
+  it("marks a meter that is also another unit's primary today, asking about the unit's meters for today only", async () => {
+    const { repo } = repository([meter({ deviceId: "d2", name: "B main" }), meter({ deviceId: "d1", name: "A main" })]);
+    const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere: async (request) => {
+        asked.push(request);
+        return [{ deviceId: "d2", effectiveFrom: "2026-11-19", effectiveTo: "2026-11-20" }];
+      },
+    });
+
+    const result = await capability.getHome();
+
+    expect(asked).toEqual([{ deviceIds: ["d1", "d2"], fromDate: "2026-11-19", toDate: "2026-11-20" }]);
+    expect(result.ok && result.data.meters).toEqual([
+      expect.not.objectContaining({ shared: true }),
+      expect.objectContaining({ deviceId: "d2", shared: true }),
+    ]);
+  });
+
+  it("answers 503, rather than show a shared meter unmarked, when the shared days cannot be read", async () => {
+    const { repo } = repository([meter({ deviceId: "d1", name: "A main" })]);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere: async () => {
+        throw new Error("statement timeout");
+      },
+    });
+
+    expect(await capability.getHome()).toMatchObject({ ok: false, status: 503, code: "tenant_app_unavailable" });
   });
 
   it("reads a stored zone that is not an IANA id as UTC", async () => {
@@ -173,7 +205,10 @@ describe("the Supabase tenant app repository", () => {
       ["from", "tenant_devices"],
       ["select", "device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)"],
       ["eq", "tenant_id", TENANT_ID],
-      ["in", "role", ["primary_consumption_meter", "secondary_meter"]],
+      // The meters whose use the views show: the unit's primary consumption
+      // meters only (USAGE_METER_ROLE); the database filter is tested in
+      // usage.db.test.ts.
+      ["eq", "role", "primary_consumption_meter"],
       ["eq", "devices.device_type", "consumption_meter"],
       ["lte", "effective_from", "2026-11-19"],
       ["or", "effective_to.is.null,effective_to.gt.2026-11-19"],

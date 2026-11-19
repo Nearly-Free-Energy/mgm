@@ -84,8 +84,8 @@ function setup(options: {
   devicesError?: ReadError;
   edges?: Edge[];
   edgesError?: ReadError;
-  /** What the tenant's own `tenant_devices` read returns. */
-  ownLinks?: { device_id: string }[];
+  /** What the tenant's own `tenant_devices` read returns: the unit's primary links. */
+  ownLinks?: { device_id: string; effective_from: string; effective_to: string | null }[];
   ownLinksError?: ReadError;
   /** What the service role's `tenant_devices` read returns. */
   primaryLinks?: Record<string, unknown>[];
@@ -441,70 +441,81 @@ describe("createTenantUsageSource", () => {
   });
 });
 
-describe("the primary links other units hold on the unit's secondary meters", () => {
+describe("the days the unit's primary meters are also another unit's primary (D12)", () => {
   const range = { fromDate: "2026-11-01", toDate: "2026-12-01" };
+  const own = (device_id: string, effective_from: string, effective_to: string | null = null) => ({
+    device_id,
+    effective_from,
+    effective_to,
+  });
 
-  it("confirms the ids as the unit's secondary links on the tenant's client, then reads other units' primary links on the service role", async () => {
+  it("confirms the ids as the unit's primary links on the tenant's client, then reads other units' on the service role, cut to the unit's days and the range", async () => {
     const { source } = setup({
-      ownLinks: [{ device_id: "s1" }, { device_id: "s2" }],
+      ownLinks: [own("p1", "2026-10-01"), own("p2", "2026-11-05", "2026-11-20")],
       primaryLinks: [
-        { device_id: "s2", effective_from: "2026-10-15", effective_to: null },
-        { device_id: "s1", effective_from: "2026-11-03", effective_to: "2026-11-09" },
+        { device_id: "p2", effective_from: "2026-10-15", effective_to: null },
+        { device_id: "p1", effective_from: "2026-11-03", effective_to: "2026-11-09" },
+        // Before the range: no day of it is shared.
+        { device_id: "p1", effective_from: "2026-09-01", effective_to: "2026-10-10" },
       ],
     });
 
-    const spans = await source.listPrimaryElsewhere({ deviceIds: ["s2", "s1"], ...range });
+    const spans = await source.listPrimaryElsewhere({ deviceIds: ["p2", "p1"], ...range });
 
     expect(log).toEqual([
       [
         "tenant",
         "tenant_devices",
-        ["select", "device_id"],
+        ["select", "device_id, effective_from, effective_to, devices!inner(device_type)"],
         ["eq", "tenant_id", unit.tenantId],
-        ["eq", "role", "secondary_meter"],
-        ["in", "device_id", ["s2", "s1"]],
+        ["eq", "role", "primary_consumption_meter"],
+        ["eq", "devices.device_type", "consumption_meter"],
+        ["in", "device_id", ["p2", "p1"]],
+        ["lt", "effective_from", "2026-12-01"],
+        ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
       ],
       ["createServiceClient"],
       [
         "service",
         "tenant_devices",
         ["select", "device_id, effective_from, effective_to"],
-        ["in", "device_id", ["s1", "s2"]],
+        ["in", "device_id", ["p1", "p2"]],
         ["eq", "role", "primary_consumption_meter"],
         ["neq", "tenant_id", unit.tenantId],
         ["lt", "effective_from", "2026-12-01"],
         ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
       ],
     ]);
-    // Dates only: whose link it is never leaves the source.
+    // Dates only, and only days that are the unit's own: p2 from the unit's
+    // 5th to its 20th, though the other unit's link runs from October.
     expect(spans).toEqual([
-      { deviceId: "s2", effectiveFrom: "2026-10-15", effectiveTo: null },
-      { deviceId: "s1", effectiveFrom: "2026-11-03", effectiveTo: "2026-11-09" },
+      { deviceId: "p2", effectiveFrom: "2026-11-05", effectiveTo: "2026-11-20" },
+      { deviceId: "p1", effectiveFrom: "2026-11-03", effectiveTo: "2026-11-09" },
     ]);
     expect(mocks.checkGate).not.toHaveBeenCalled();
   });
 
-  it("never asks the service role about an id the tenant's client did not return as the unit's secondary link", async () => {
+  it("never asks the service role about an id the tenant's client did not return as the unit's primary link", async () => {
     const { source } = setup({
-      ownLinks: [{ device_id: "s1" }, { device_id: "not-asked" }],
+      ownLinks: [own("p1", "2026-11-01"), own("not-asked", "2026-11-01")],
       primaryLinks: [
-        { device_id: "s1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
         { device_id: "p1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
+        { device_id: "x1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
       ],
     });
 
-    const spans = await source.listPrimaryElsewhere({ deviceIds: ["s1", "p1"], ...range });
+    const spans = await source.listPrimaryElsewhere({ deviceIds: ["p1", "x1"], ...range });
 
     const serviceRead = log.find((entry) => entry[0] === "service")!;
-    expect(serviceRead).toContainEqual(["in", "device_id", ["s1"]]);
-    expect(spans).toEqual([{ deviceId: "s1", effectiveFrom: "2026-11-01", effectiveTo: null }]);
+    expect(serviceRead).toContainEqual(["in", "device_id", ["p1"]]);
+    expect(spans).toEqual([{ deviceId: "p1", effectiveFrom: "2026-11-01", effectiveTo: "2026-12-01" }]);
     expect(JSON.stringify(spans)).not.toContain("tenant");
   });
 
-  it("creates no service client when the tenant's client confirms no secondary link, or for no ids", async () => {
+  it("creates no service client when the tenant's client confirms no primary link, or for no ids", async () => {
     const { source } = setup({ ownLinks: [] });
 
-    expect(await source.listPrimaryElsewhere({ deviceIds: ["s1"], ...range })).toEqual([]);
+    expect(await source.listPrimaryElsewhere({ deviceIds: ["p1"], ...range })).toEqual([]);
     expect(await source.listPrimaryElsewhere({ deviceIds: [], ...range })).toEqual([]);
     expect(mocks.createServiceClient).not.toHaveBeenCalled();
     expect(log.filter((entry) => entry[0] === "tenant")).toHaveLength(1);
@@ -515,24 +526,24 @@ describe("the primary links other units hold on the unit's secondary meters", ()
     ["2026-11-01", "2026-12-01)"],
     ["2026-02-30", "2026-03-01"],
   ])("rejects %s .. %s before any read", async (fromDate, toDate) => {
-    const { source } = setup({ ownLinks: [{ device_id: "s1" }] });
+    const { source } = setup({ ownLinks: [own("p1", "2026-11-01")] });
 
-    await expect(source.listPrimaryElsewhere({ deviceIds: ["s1"], fromDate, toDate })).rejects.toThrow();
+    await expect(source.listPrimaryElsewhere({ deviceIds: ["p1"], fromDate, toDate })).rejects.toThrow();
     expect(log).toEqual([]);
     expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "primary-links", code: "invalid_date" });
   });
 
   it.each([
-    ["the tenant's read fails", { ownLinksError: { code: "57014", message: "statement timeout" } }, { step: "secondary-links", code: "57014" }],
+    ["the tenant's read fails", { ownLinksError: { code: "57014", message: "statement timeout" } }, { step: "own-links", code: "57014" }],
     [
       "the service role's read fails",
-      { ownLinks: [{ device_id: "s1" }], primaryLinksError: { code: "PGRST301", message: "JWT rejected" } },
+      { ownLinks: [own("p1", "2026-11-01")], primaryLinksError: { code: "PGRST301", message: "JWT rejected" } },
       { step: "primary-links", code: "PGRST301" },
     ],
   ])("rejects when %s, logging a step and code only", async (_label, options, detail) => {
     const { source } = setup(options);
 
-    await expect(source.listPrimaryElsewhere({ deviceIds: ["s1"], ...range })).rejects.toThrow();
+    await expect(source.listPrimaryElsewhere({ deviceIds: ["p1"], ...range })).rejects.toThrow();
     expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", detail);
     expect(JSON.stringify(errors.mock.calls)).not.toMatch(/timeout|JWT/);
   });

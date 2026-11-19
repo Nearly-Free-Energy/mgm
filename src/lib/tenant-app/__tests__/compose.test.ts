@@ -17,7 +17,19 @@ import { openOrganizationScope } from "@/lib/runtime/scope";
 import { BillingPlugin } from "@/lib/billing/compose";
 import { composeTenantApp } from "../compose";
 
-const state = vi.hoisted(() => ({ failToConstruct: false }));
+const state = vi.hoisted(() => ({ failToConstruct: false, serviceReads: [] as unknown[][] }));
+
+// The home asks the usage source whether a meter is also another unit's
+// primary today (D12). The service role finds no other unit's link here.
+vi.mock("@/lib/supabase/service", () => ({
+  createServiceClient: () => ({
+    from(table: string) {
+      const filters: unknown[][] = [["from", table]];
+      state.serviceReads.push(filters);
+      return query(() => ({ data: [], error: null }), filters);
+    },
+  }),
+}));
 
 // Wrapped, not replaced: the spy records whether the composer opened a scope.
 vi.mock("@/lib/runtime/scope", async (importOriginal) => {
@@ -58,6 +70,11 @@ type Caller = {
   homeError?: { message: string };
   /** How `mgm_plugin_enabled_for_org` answers for the caller. */
   plugin: "enabled" | "disabled" | "error";
+  /**
+   * The unit's own primary links, as the shared-use check reads them; the
+   * meter by default. None means the check asks the service role nothing.
+   */
+  ownPrimary?: "none";
 };
 
 const tenantRow = (userId: string, unit: string): Role => ({
@@ -85,7 +102,7 @@ function query(result: () => { data: unknown; error: unknown }, filters: unknown
       Promise.resolve(result()).then(resolve, reject),
     returns: () => chain,
   };
-  for (const method of ["select", "eq", "in", "lte", "or"]) {
+  for (const method of ["select", "eq", "neq", "in", "lt", "lte", "or"]) {
     chain[method] = (...args: unknown[]) => {
       filters.push([method, ...args]);
       return chain;
@@ -148,9 +165,10 @@ function client(caller: Caller): FakeClient {
       if (table === "tenant_devices") {
         const filters: unknown[][] = [];
         meterReads.push(filters);
+        const sharedCheck = () => filters.some(([method, column]) => method === "in" && column === "device_id");
         return query(
           () => ({
-            data: [
+            data: caller.ownPrimary === "none" && sharedCheck() ? [] : [
               {
                 device_id: `meter-${caller.label}`,
                 role: "primary_consumption_meter",
@@ -185,6 +203,7 @@ async function gateRefusal(supabase: SupabaseClient, org: string) {
 
 beforeEach(() => {
   state.failToConstruct = false;
+  state.serviceReads.length = 0;
   vi.clearAllMocks();
 });
 
@@ -316,6 +335,20 @@ describe("composeTenantApp composition", () => {
         ["eq", "tenant_id", UNIT_A],
         ["lte", "effective_from", "2026-11-19"],
       ]),
+      // Whether today's meter is also another unit's primary: the unit's own
+      // primary links first, on its own client, then the service role.
+      expect.arrayContaining([
+        ["eq", "tenant_id", UNIT_A],
+        ["eq", "role", "primary_consumption_meter"],
+        ["in", "device_id", ["meter-a"]],
+      ]),
+    ]);
+    expect(state.serviceReads).toEqual([
+      expect.arrayContaining([
+        ["from", "tenant_devices"],
+        ["in", "device_id", ["meter-a"]],
+        ["neq", "tenant_id", UNIT_A],
+      ]),
     ]);
 
     await result.data.dispose();
@@ -386,13 +419,18 @@ describe("composeTenantApp composition", () => {
   });
 
   it("keeps concurrent tenants' requests apart", async () => {
-    const a = client(tenantOfA());
+    // Neither unit's own links confirm a meter for the shared-use check, so
+    // no service client is made: in Vitest, two homes importing the mocked
+    // service module at the same moment race, and the second gets the real
+    // one. The test above covers the service role's read.
+    const a = client(tenantOfA({ ownPrimary: "none" }));
     const b = client({
       label: "b",
       user: { id: "tenant-b" },
       roles: [tenantRow("tenant-b", UNIT_B)],
       units: { [UNIT_B]: { organization_id: ORG_B, display_name: "Unit B tenant" } },
       plugin: "enabled",
+      ownPrimary: "none",
     });
 
     const [ra, rb] = await Promise.all([
@@ -406,9 +444,10 @@ describe("composeTenantApp composition", () => {
       expect(rb.data.scope).toMatchObject({ tenantId: UNIT_B, organizationId: ORG_B, userId: "tenant-b" });
       expect(homeA).toMatchObject({ ok: true, data: { meters: [{ deviceId: "meter-a" }] } });
       expect(homeB).toMatchObject({ ok: true, data: { meters: [{ deviceId: "meter-b" }] } });
-      // Each read went through its own caller's client.
-      expect(a.meterReads).toHaveLength(1);
-      expect(b.meterReads).toHaveLength(1);
+      // Each read went through its own caller's client: the meters, then
+      // the unit's own primary links for the shared-use check.
+      expect(a.meterReads).toHaveLength(2);
+      expect(b.meterReads).toHaveLength(2);
     } finally {
       await Promise.all([ra.data.dispose(), rb.data.dispose()]);
     }

@@ -50,10 +50,13 @@ export type TenantAppScope = {
 };
 
 /**
- * The meter roles the tenant home lists (listMetersInForce), for consumption
- * meters only (USAGE_DEVICE_TYPE), as billing and the metering capability's
- * house meters count them. Only the first is ever the unit's use: see
- * USAGE_METER_ROLE.
+ * The roles a tenant's meter link can have, as billing and the metering
+ * capability's house meters name them. The tenant app reads only the first,
+ * on the home as on the month and the day: see USAGE_METER_ROLE. A
+ * secondary link, which may be to another unit's primary meter, is never
+ * shown (Hillary, mgm#217, 19 November). A meter that is two units' primary
+ * on the same day is shown to each, labelled as shared (SHARED_USE_NOTE in
+ * surface/home-model.ts, D12 on mgm#217).
  */
 export const TENANT_METER_ROLES = ["primary_consumption_meter", "secondary_meter"] as const;
 export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
@@ -65,12 +68,14 @@ export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
  * meter billing bills the unit for (billing/generate.ts). So a secondary
  * link, which may be to another unit's primary meter, never counts, and
  * neither does a grid meter, a battery or any other device, whatever role
- * links it. listMeterAssignments reads only these links, so the capability
+ * links it. Both repository reads take only these links, so the capability
  * and the usage source never see another meter. The overlap trigger and
  * exclusion constraint keep one unit to one primary link a day, but a device
- * may still be two units' primary at once; each then sees its whole use, as
- * billing bills each. If billing ever bills another role or device type,
- * revisit this with it.
+ * may still be two units' primary at once. Each unit then sees the meter's
+ * whole use, as billing bills each, labelled on those days as shared with
+ * another unit and never as the unit's own (D12, decided on mgm#217, 19
+ * November): listPrimaryElsewhere reads the days. If billing ever bills
+ * another role or device type, revisit this with it.
  */
 export const USAGE_METER_ROLE = "primary_consumption_meter" satisfies TenantMeterRole;
 export const USAGE_DEVICE_TYPE = "consumption_meter" satisfies DeviceType;
@@ -85,13 +90,15 @@ export type TenantMeter = {
   effectiveFrom: string;
   /** The first day it is no longer in force, or null while it lasts. */
   effectiveTo: string | null;
+  /** On the home only: the meter is also another unit's primary today (D12). */
+  shared?: true;
 };
 
 /** What `tenant.home` shows: the unit, its microgrid and its meters today. */
 export type TenantHome = {
   tenant: { id: string; displayName: string; unitLabel: string | null };
   microgrid: { name: string; timezone: string; currency: string };
-  /** Today in `microgrid.timezone`; `meters` are the ones in force on it. */
+  /** Today in `microgrid.timezone`; `meters` are the unit's primary consumption meters in force on it. */
   date: string;
   meters: TenantMeter[];
 };
@@ -114,7 +121,16 @@ export type TenantUsageState =
   /** After now. */
   | "future";
 
-export type TenantUsageBucket = { state: TenantUsageState; kwh: number | null };
+export type TenantUsageBucket = {
+  state: TenantUsageState;
+  kwh: number | null;
+  /**
+   * The figure includes a meter that is also another unit's primary that day
+   * (D12): it is the meter's whole use, shown with SHARED_USE_NOTE. Set only
+   * on a day of the month with a figure.
+   */
+  shared?: true;
+};
 
 /**
  * Why a read shows no figures at all: `unavailable`, a read that failed and
@@ -146,6 +162,8 @@ export type TenantUsageTotal = {
   kwh: number | null;
   /** Buckets with a meter in force and no figure (`no-data`): what `kwh` leaves out. */
   withoutData: number;
+  /** Days whose figure is shared with another unit (`shared` buckets); absent when none. */
+  shared?: number;
 };
 
 export type TenantUsageMonth = {
@@ -176,6 +194,8 @@ export type TenantUsageDay = {
   nextDate: string | null;
   /** Meters of the unit in force on `date`. */
   meters: number;
+  /** A meter in force on `date` is also another unit's primary that day (D12). */
+  shared?: true;
   /** Every local hour of `date` (23–25), in order; `start` is epoch ms. */
   hours: (TenantUsageBucket & { start: number })[];
   total: TenantUsageTotal;
@@ -230,10 +250,12 @@ export type PrimaryElsewhereSpan = {
 export interface TenantUsageSource {
   readSeries(request: TenantUsageSeriesRequest): Promise<TenantUsageSeriesResult>;
   /**
-   * The spans overlapping [fromDate, toDate) (half-open) on which any of
-   * `deviceIds` is another unit's primary consumption meter. Asked only about
-   * this unit's own secondary links; an id that is not one is ignored.
-   * Rejects when the read fails, so the capability fails closed.
+   * The days of [fromDate, toDate) (half-open) on which any of `deviceIds`
+   * is both this unit's primary consumption meter and another unit's (D12),
+   * as spans cut to the unit's own links and to the range: dates only, never
+   * which unit. An id that is not this unit's primary meter is ignored.
+   * Rejects when the read fails: the capability then fails closed, since a
+   * span missed would show shared use as the unit's own.
    */
   listPrimaryElsewhere(request: {
     deviceIds: string[];

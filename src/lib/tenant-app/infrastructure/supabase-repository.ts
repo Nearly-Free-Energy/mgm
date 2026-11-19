@@ -11,7 +11,6 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DeviceType } from "@/lib/types/domain";
 import {
-  TENANT_METER_ROLES,
   USAGE_DEVICE_TYPE,
   USAGE_METER_ROLE,
   type TenantAppRepository,
@@ -75,15 +74,17 @@ export function createSupabaseTenantAppRepository(
       // policy stops covering links in force, meters drop out of the home
       // silently, so revisit this read with it.
       //
-      // The device-type filter on the embed drops the link row too (an inner
-      // join): a grid meter, battery, PV meter or inverter linked to the unit
-      // is never one of its meters, on the home or the calendar
-      // (USAGE_DEVICE_TYPE).
+      // The home lists the meters whose use it shows: the unit's primary
+      // consumption meters, as listMeterAssignments reads them
+      // (USAGE_METER_ROLE). The device-type filter on the embed drops the
+      // link row too (an inner join), so a grid meter, battery, PV meter or
+      // inverter linked to the unit is never listed, and neither is a
+      // secondary link, which may be to another unit's primary meter.
       const { data, error } = await supabase
         .from("tenant_devices")
         .select("device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)")
         .eq("tenant_id", tenantId)
-        .in("role", [...TENANT_METER_ROLES])
+        .eq("role", USAGE_METER_ROLE)
         .eq("devices.device_type", USAGE_DEVICE_TYPE)
         .lte("effective_from", date)
         .or(`effective_to.is.null,effective_to.gt.${date}`);

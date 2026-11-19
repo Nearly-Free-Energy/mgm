@@ -20,10 +20,11 @@
  *     device rows only, and only on the microgrid `fn_tenant_home` named;
  *   - provider selection, the EMS configuration and its decrypt: the service
  *     role, for that microgrid only;
- *   - other units' primary links of this unit's secondary meters
- *     (listPrimaryElsewhere): the service role, for the device ids the
- *     tenant's own client returned as this unit's `secondary_meter` links,
- *     returning date spans only, never which unit holds them.
+ *   - other units' primary links of this unit's primary meters
+ *     (listPrimaryElsewhere, for the shared-use label, D12): the service
+ *     role, for the device ids the tenant's own client returned as this
+ *     unit's primary consumption meter links, returning date spans cut to
+ *     those links, never which unit holds them.
  *
  * So no microgrid, edge or device id is ever taken from a request (query,
  * path or body): the microgrid is the unit's, which authorizeTenant read, and
@@ -33,10 +34,11 @@
  * No service client is created for the metering provider before the
  * metering gate passes, or when no device is readable. The primary-links
  * read concerns MGM's own link rows, not the backend, so it runs without
- * that gate; it runs only for a unit that has secondary links in the range.
- * If it ever returns a tenant id, or takes ids the tenant's own client did
- * not return as this unit's secondary links, revisit it with CLAUDE.md "The
- * tenant app's usage reads". Nothing the backend says reaches the tenant:
+ * that gate, on every usage view and the home of a unit with a meter: one
+ * indexed query on each client. If it ever returns a tenant id, or takes
+ * ids the tenant's own client did not return as this unit's primary links,
+ * revisit it with CLAUDE.md "The tenant app's usage reads". Nothing the
+ * backend says reaches the tenant:
  * every failure is a reason, and the server log gets a code and a status,
  * never a message.
  *
@@ -58,6 +60,7 @@ import type { MeteringProviderFactories } from "@/lib/runtime/services";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
 import {
   USAGE_DEVICE_TYPE,
+  USAGE_METER_ROLE,
   type PrimaryElsewhereSpan,
   type TenantUnit,
   type TenantUsageSeriesRequest,
@@ -226,46 +229,52 @@ export function createTenantUsageSource(options: {
         if (deviceIds.length === 0) return [];
 
         // The tenant's own client first ("Tenants can read their own meter
-        // assignments"): which of these ids are this unit's secondary links.
-        // Only those are asked about on the service role.
+        // assignments"): which of these ids are this unit's primary
+        // consumption meters, and on which days of the range. Only those ids
+        // are asked about on the service role, and only those days answered.
         const own = await supabase
           .from("tenant_devices")
-          .select("device_id")
+          .select("device_id, effective_from, effective_to, devices!inner(device_type)")
           .eq("tenant_id", unit.tenantId)
-          .eq("role", "secondary_meter")
-          .in("device_id", deviceIds);
-        if (own.error) throw new UsageReadError("secondary-links", own.error.code);
-        const confirmed = [
-          ...new Set(
-            ((own.data ?? []) as { device_id: string }[])
-              .map((row) => row.device_id)
-              .filter((id) => deviceIds.includes(id))
-          ),
-        ].sort();
+          .eq("role", USAGE_METER_ROLE)
+          .eq("devices.device_type", USAGE_DEVICE_TYPE)
+          .in("device_id", deviceIds)
+          .lt("effective_from", toDate)
+          .or(`effective_to.is.null,effective_to.gt.${fromDate}`);
+        if (own.error) throw new UsageReadError("own-links", own.error.code);
+        const mine = ((own.data ?? []) as PrimaryLinkRow[]).filter((row) => deviceIds.includes(row.device_id));
+        const confirmed = [...new Set(mine.map((row) => row.device_id))].sort();
         if (confirmed.length === 0) return [];
 
-        // Other units' primary links of those devices, on the service role:
-        // a tenant reads no other unit's links. Every other unit counts, on
-        // any microgrid, since leaving out more days is the side that shows
-        // the tenant nothing that is not theirs. Dates only: the unit is
-        // never selected.
+        // Other units' primary links of those devices, on the service role: a
+        // tenant reads no other unit's links. Dates only, and the unit is
+        // never selected. Each span is cut to this unit's own links and to
+        // the range, so the answer is "shared on these days of yours". That
+        // still tells the tenant another unit holds the meter on those days,
+        // which D12 accepts; if it ever must not, the label goes with it.
         const { createServiceClient } = await import("@/lib/supabase/service");
         const rows = await createServiceClient()
           .from("tenant_devices")
           .select("device_id, effective_from, effective_to")
           .in("device_id", confirmed)
-          .eq("role", "primary_consumption_meter")
+          .eq("role", USAGE_METER_ROLE)
           .neq("tenant_id", unit.tenantId)
           .lt("effective_from", toDate)
           .or(`effective_to.is.null,effective_to.gt.${fromDate}`);
         if (rows.error) throw new UsageReadError("primary-links", rows.error.code);
-        return ((rows.data ?? []) as PrimaryLinkRow[])
-          .filter((row) => confirmed.includes(row.device_id))
-          .map((row) => ({
-            deviceId: row.device_id,
-            effectiveFrom: row.effective_from,
-            effectiveTo: row.effective_to,
-          }));
+        const spans: PrimaryElsewhereSpan[] = [];
+        for (const other of (rows.data ?? []) as PrimaryLinkRow[]) {
+          if (!confirmed.includes(other.device_id)) continue;
+          for (const link of mine) {
+            if (link.device_id !== other.device_id) continue;
+            const from = [fromDate, link.effective_from, other.effective_from].reduce((a, b) => (a > b ? a : b));
+            const to = [toDate, link.effective_to, other.effective_to]
+              .filter((date): date is string => date !== null)
+              .reduce((a, b) => (a < b ? a : b));
+            if (from < to) spans.push({ deviceId: other.device_id, effectiveFrom: from, effectiveTo: to });
+          }
+        }
+        return spans;
       } catch (error) {
         logFailure(error);
         throw error;

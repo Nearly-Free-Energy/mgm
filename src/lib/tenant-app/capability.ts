@@ -20,6 +20,7 @@ import {
   type TenantAppScope,
   type TenantHome,
   type TenantMeter,
+  type PrimaryElsewhereSpan,
   type TenantMeterRole,
   type TenantUnit,
   type TenantUsageDay,
@@ -138,6 +139,21 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     return (this.now ?? Date.now)();
   }
 
+  /**
+   * The days of [fromDate, toDate) on which a meter of these links is also
+   * another unit's primary (D12, decided on mgm#217, 19 November). Rejects
+   * when the read fails, and the view then answers meterLinksUnavailable: a
+   * span missed would show shared use as the unit's own. It reads MGM's own
+   * link rows, not the metering backend, so every view asks for it afresh,
+   * outside the usage throttle and its cache, and a kept figure is never
+   * served without its label.
+   */
+  private async sharedSpans(links: readonly TenantMeter[], fromDate: string, toDate: string): Promise<PrimaryElsewhereSpan[]> {
+    const deviceIds = [...new Set(links.map((link) => link.deviceId))].sort();
+    if (deviceIds.length === 0) return [];
+    return this.usage.listPrimaryElsewhere({ deviceIds, fromDate, toDate });
+  }
+
   private ensureActive(): TenantAppFailure | null {
     if (this.isActive()) return null;
     return tenantAppFailure({
@@ -148,9 +164,11 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
   }
 
   /**
-   * The unit, its microgrid and the meters assigned to it today. "Today" is
-   * the microgrid's day, as the tenant's calendar will be; a stored zone that
-   * is not a valid IANA id reads as UTC, as the metering capability does.
+   * The unit, its microgrid and its primary consumption meters in force
+   * today, each marked when it is also another unit's primary today (D12).
+   * "Today" is the microgrid's day, as the tenant's calendar is; a stored
+   * zone that is not a valid IANA id reads as UTC, as the metering
+   * capability does.
    */
   async getHome(): Promise<TenantAppResult<TenantHome>> {
     const inactive = this.ensureActive();
@@ -162,6 +180,11 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     let meters: TenantMeter[];
     try {
       meters = await this.repo.listMetersInForce(unit.tenantId, date);
+      // Cut to today, so a span names a meter shared today.
+      const spans = await this.sharedSpans(meters, date, addDaysToDateKey(date, 1));
+      meters = meters.map((meter) =>
+        spans.some((span) => span.deviceId === meter.deviceId) ? { ...meter, shared: true as const } : meter
+      );
     } catch {
       return meterLinksUnavailable();
     }
@@ -204,8 +227,10 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     const last = dates[dates.length - 1];
 
     let links: TenantMeter[];
+    let shared: PrimaryElsewhereSpan[];
     try {
       links = await this.repo.listMeterAssignments(unit.tenantId, dates[0], addDaysToDateKey(last, 1));
+      shared = await this.sharedSpans(links, dates[0], addDaysToDateKey(last, 1));
     } catch {
       return meterLinksUnavailable();
     }
@@ -252,6 +277,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
         nowMs,
         assignments: links,
         figures,
+        shared,
       }),
     };
   }
@@ -272,8 +298,10 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     const date = resolveRequestedDate(input.date, today);
 
     let links: TenantMeter[];
+    let shared: PrimaryElsewhereSpan[];
     try {
       links = await this.repo.listMeterAssignments(unit.tenantId, date, addDaysToDateKey(date, 1));
+      shared = await this.sharedSpans(links, date, addDaysToDateKey(date, 1));
     } catch {
       return meterLinksUnavailable();
     }
@@ -318,6 +346,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
         nowMs,
         assignments: links,
         figures,
+        shared,
       }),
     };
   }

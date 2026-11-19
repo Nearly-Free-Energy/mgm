@@ -8,7 +8,8 @@ import "server-only";
  * before any bespoke renderer exists (RFC mgm#197 § 4).
  *
  * It shows only what `fn_tenant_home` and the tenant's own meter rows give
- * the tenant, and the summed kWh the usage views show, and no organization
+ * the tenant, the summed kWh the usage views show, and whether a meter is
+ * also another unit's primary today (never which unit), and no organization
  * or microgrid id: the view never links to a staff page.
  */
 import type { Value } from "@/lib/gui/contract";
@@ -23,6 +24,15 @@ export const TENANT_METER_PREFIX = "meter.";
  * `month` is the month's use so far and `monthNote` what it leaves out.
  */
 export const TENANT_HOME_KEYS = ["unit", "microgrid", "today", "month", "monthNote", "meters"] as const;
+
+/**
+ * The label on use from a meter that is also another unit's primary (D12,
+ * decided on mgm#217, 19 November): the figure is the meter's whole use,
+ * shown to each unit and never as the unit's own. The month's days, the
+ * month's and the day's totals (./usage-model.ts), and the home's meter
+ * carry it.
+ */
+export const SHARED_USE_NOTE = "Shared with another unit, not only yours";
 
 /** The month's use so far as the home shows it (monthSoFar in ./usage-model.ts). */
 export type TenantHomeMonth = { value: Value; note: string | null };
@@ -55,7 +65,11 @@ export function buildTenantHomeModel(home: TenantHome, fmt: Fmt, month: TenantHo
     label: meter.name,
     // The role's label from the staff pages' map, without its tone: a
     // tenant's own meter is not a state to draw attention to.
-    value: fmt.text(statusEntry("tenantDeviceRole", meter.role)?.label ?? meter.role),
+    value: fmt.text(
+      [statusEntry("tenantDeviceRole", meter.role)?.label ?? meter.role, meter.shared ? SHARED_USE_NOTE : ""]
+        .filter(Boolean)
+        .join(" · ")
+    ),
   }));
   return {
     title: unitTitle(home.tenant),

@@ -13,6 +13,7 @@ import {
   startOfDayInZone,
 } from "@/lib/timezone/day-key";
 import type {
+  PrimaryElsewhereSpan,
   TenantMeter,
   TenantUsageBucket,
   TenantUsageDay,
@@ -200,6 +201,22 @@ function valueOf(figures: UsageFigures, key: string): number | null | undefined 
 }
 
 /** A month of the unit's use per local day, in `timezone`; `figures.values` keyed by date. */
+/**
+ * A meter of the unit in force on `date` is also another unit's primary that
+ * day (D12, decided on mgm#217, 19 November): the day's figure is then the
+ * meter's whole use, shown to each unit as shared, never as its own.
+ */
+export function sharedOn(
+  assignments: readonly TenantMeter[],
+  spans: readonly PrimaryElsewhereSpan[],
+  date: string
+): boolean {
+  const ids = metersOn(assignments, date);
+  return spans.some(
+    (span) => ids.has(span.deviceId) && span.effectiveFrom <= date && (span.effectiveTo === null || date < span.effectiveTo)
+  );
+}
+
 export function computeUsageMonth(input: {
   tenant: TenantUsageMonth["tenant"];
   timezone: string;
@@ -210,11 +227,12 @@ export function computeUsageMonth(input: {
   nowMs: number;
   assignments: readonly TenantMeter[];
   figures: UsageFigures;
+  /** Days on which a meter of the unit is also another unit's primary; none when absent. */
+  shared?: readonly PrimaryElsewhereSpan[];
 }): TenantUsageMonth {
   const { timezone, month, today, figures } = input;
-  const days = datesOfMonth(month).map((date) => ({
-    date,
-    ...bucketState(
+  const days = datesOfMonth(month).map((date) => {
+    const bucket = bucketState(
       {
         start: startOfDayInZone(date, timezone).getTime(),
         end: startOfDayInZone(addDaysToDateKey(date, 1), timezone).getTime(),
@@ -223,8 +241,15 @@ export function computeUsageMonth(input: {
         value: valueOf(figures, date),
       },
       figures
-    ),
-  }));
+    );
+    // Labelled only where a figure is shown: a day with no figure shows no use.
+    const shared =
+      (bucket.state === "data" || bucket.state === "partial") &&
+      bucket.kwh !== null &&
+      sharedOn(input.assignments, input.shared ?? [], date);
+    return { date, ...bucket, ...(shared ? { shared: true as const } : {}) };
+  });
+  const sharedDays = days.filter((day) => day.shared).length;
   return {
     tenant: input.tenant,
     timezone,
@@ -233,7 +258,7 @@ export function computeUsageMonth(input: {
     previousMonth: addMonths(month, -1),
     nextMonth: month < today.slice(0, 7) ? addMonths(month, 1) : null,
     days,
-    total: totalOf(days, figures),
+    total: { ...totalOf(days, figures), ...(sharedDays > 0 ? { shared: sharedDays } : {}) },
     read: readInfo(figures),
   };
 }
@@ -248,6 +273,8 @@ export function computeUsageDay(input: {
   nowMs: number;
   assignments: readonly TenantMeter[];
   figures: UsageFigures;
+  /** As for computeUsageMonth. */
+  shared?: readonly PrimaryElsewhereSpan[];
 }): TenantUsageDay {
   const { timezone, date, today, nowMs, figures } = input;
   const meters = metersOn(input.assignments, date).size;
@@ -274,6 +301,7 @@ export function computeUsageDay(input: {
     previousDate: addDaysToDateKey(date, -1),
     nextDate: date < today ? addDaysToDateKey(date, 1) : null,
     meters,
+    ...(sharedOn(input.assignments, input.shared ?? [], date) ? { shared: true as const } : {}),
     hours,
     total: totalOf(hours, figures),
     read: readInfo(figures),
