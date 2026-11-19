@@ -16,6 +16,7 @@ import type { Context, Plugin } from "cordis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { checkGate, type GateDecision } from "@/lib/runtime/gate";
+import { SCOPE_TENANT, TENANT } from "@/lib/roles";
 import { authorizeTenant, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
 import { TenantAppCapability } from "./capability";
@@ -49,6 +50,11 @@ export type TenantAppPluginConfig = {
 /**
  * The tenant app capability plugin, loaded per request. Unloading it (when
  * the request's scope is disposed) deactivates the capability.
+ *
+ * It is the only capability plugin built for a scope whose
+ * `mgmRequest.organizationId` is not organization access: it reads only the
+ * request's user and the unit authorizeTenant read, and checks that the
+ * unit is in that organization.
  */
 export const TenantAppPlugin = {
   name: TENANT_APP_PLUGIN_NAME,
@@ -125,8 +131,13 @@ export async function composeTenantApp(options: {
   // and a disabled tenant app must refuse reads too. So the 409 and 503 and
   // their copy are the gate's own. The state is read with the tenant's own
   // client through `mgm_plugin_enabled_for_org`, which answers any signed-in
-  // caller and counts a missing tenant-app row as off; if it starts checking
-  // the caller's organization access, every tenant is refused here with 503.
+  // caller, tenant-only accounts included, about any organization, and
+  // counts a missing tenant-app row as off; if it starts checking the
+  // caller's organization access, every tenant is refused here with 503.
+  // resolveTargetOrganization (@/lib/runtime/gate) returns an organization
+  // target's id unchecked, so for a tenant this id is trusted only because
+  // it came from `fn_tenant_home` in authorizeTenant; never pass an id taken
+  // from the request here.
   let decision: GateDecision;
   try {
     decision = await checkGate(options.supabase, {
@@ -146,12 +157,21 @@ export async function composeTenantApp(options: {
     });
   }
 
+  // An organization scope for a person who may hold no access to that
+  // organization: its id is only the unit's, and its roles are only the
+  // caller's tenant rows, so a manager who rents carries no staff row into
+  // it. Nothing but TenantAppPlugin may be loaded into this scope. Every
+  // other capability plugin (community-management, metering, billing,
+  // billing-review, payments) treats mgmRequest.organizationId and roles as
+  // access its composer authorized with authorizeOrganization, and would
+  // then rest on RLS alone, payments with its service-role writer too. The
+  // composition hands out no ctx or load, so keep it that way.
   let requestScope: Awaited<ReturnType<typeof openOrganizationScope>> | null = null;
   try {
     requestScope = await openOrganizationScope({
       organizationId: access.unit.organizationId,
       userId: access.user.id,
-      roles: access.roles,
+      roles: access.roles.filter((row) => row.role === TENANT && row.scope_type === SCOPE_TENANT),
       supabase: options.supabase,
     });
     await requestScope.load(TenantAppPlugin, {

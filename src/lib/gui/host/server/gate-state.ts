@@ -63,9 +63,11 @@ export function pluginGate(ctx: HostContext, organizationId: string): PluginGate
  *
  * Asked with the tenant's own client, as composeTenantApp
  * (@/lib/tenant-app/compose) asks it: `mgm_plugin_enabled_for_org` answers
- * any signed-in caller. If it starts checking the caller's organization
- * access, every decision here becomes the gate's 503, and the person is
- * shown no tenant entry.
+ * any signed-in caller, tenant-only accounts included, about any
+ * organization, so its answer is not scoped to the caller's organizations
+ * and the check above is what limits what is asked. If it starts checking
+ * the caller's organization access, every decision here becomes the gate's
+ * 503, and the person is shown no tenant entry.
  */
 export function unitPluginGate(ctx: HostContext, unit: { tenantId: string; organizationId: string }): PluginGate {
   requireIssued(ctx);

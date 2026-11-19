@@ -3,10 +3,11 @@
  * person whose rows are all tenant rows, whose `org` is their current unit,
  * whose places are their units and who has no organization to switch to.
  * The manifest here is written as the host's tenant manifest builds it.
- * Only the context path is checked here; the tenant dock and the 360 px
- * smoke come with the tenant renderers (RFC § 8, PR 4).
+ * The context path and the account menu's Sign out are checked here; the
+ * tenant dock and the 360 px smoke come with the tenant renderers (RFC § 8,
+ * PR 4).
  */
-import { screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderShell, type ManifestFixture, type Rendered } from "@/lib/gui/conformance";
 import type { Manifest, NavEntry } from "@/lib/gui/contract";
@@ -80,5 +81,19 @@ describe("Gridtop's shell for a tenant", () => {
       ["Grace Namata", `/my?unit=${UNIT_A}`],
       ["My home", "/my"],
     ]);
+  });
+
+  it("offers Sign out in the account menu, as for staff", async () => {
+    // The shell's account menu is a tenant's way out once their home is
+    // released; until then the (gui) layout sends them from / to
+    // /no-access, which has its own.
+    rendered = await renderShell(GridtopGui, tenantFixture([{ id: UNIT_A, label: "Shop 9" }]), <p>The page</p>);
+    await act(async () =>
+      fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "Account: Grace Namata" })),
+    );
+    const sheet = screen.getByRole("dialog", { name: "Account" });
+    expect(within(sheet).getByText("grace@example.test")).toBeTruthy();
+    await act(async () => fireEvent.click(within(sheet).getByRole("button", { name: "Sign out" })));
+    expect(rendered.log.signOut).toBe(1);
   });
 });

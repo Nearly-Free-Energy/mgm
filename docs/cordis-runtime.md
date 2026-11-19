@@ -56,7 +56,10 @@ database (`docs/setup.md` § "Synthetic site data").
 `authorizeOrganization()` to authenticate and check organization access,
 except the tenant app's, which calls `authorizeTenant()` (see "The tenant
 app" below). `openOrganizationScope()` is a low-level constructor accepting
-an already authorized request; it does not authenticate or authorize.
+an already authorized request; it does not authenticate or authorize. The
+capability plugins take its `organizationId` and `roles` as organization
+access their composer authorized, except in the tenant app's scope, which
+carries none (below).
 Public payment callers establish their separate bearer-token/notification
 verification boundary.
 It creates an *isolated* child context of the root. Isolation gives the request its own `mgmRequest`, capability and
@@ -128,7 +131,14 @@ as `user_can_access_tenant` decides. The composer then asks the gate itself
 host asks whether a plugin is live), so a disabled tenant app refuses reads
 too and its `409 tenant_app_disabled` and `503 tenant_app_gate_unavailable`
 are the gate's own. Only then does it open the scope for that organization with
-`openOrganizationScope` and load the `tenant-app` capability, which
+`openOrganizationScope` and load the `tenant-app` capability. That scope is
+opened for a person who may hold no access to the organization: its
+`organizationId` is only the unit's and its `roles` only the caller's tenant
+rows. So nothing but the `tenant-app` capability may be loaded into it:
+every other capability plugin (community-management, metering, billing,
+billing-review, payments) treats those fields as access its composer
+authorized with `authorizeOrganization`. The composition hands out no
+context to load more. The `tenant-app` capability
 provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`). The
 capability is read-only, so it has no write to re-check, and
 `compose-fail-closed.test.ts` leaves it out:
@@ -139,9 +149,13 @@ plugin state another way, it goes into `COMPOSERS` in
 
 The tenant asks `mgm_plugin_enabled_for_org` with their own token, about an
 organization whose `mgm_plugins` rows they cannot read. That works because
-the function answers any signed-in caller about any organization; if it
-gains an access check, it must let a tenant through for their own unit's
-organization first, or every tenant is refused with `503`. Since
+the function answers any signed-in caller about any organization, tenant-only
+accounts included, so its answer is no access check: it discloses only an
+organization's plugin on/off state, for an id the caller already has. The gate
+returns an `organization` target's id unchecked (`resolveTargetOrganization`),
+so for a tenant the id is trusted only because it came from `fn_tenant_home`.
+If the function gains an access check, it must let a tenant through for their
+own unit's organization first, or every tenant is refused with `503`. Since
 `authorizeTenant` calls `getUser()` before any read,
 `service-role-session-check.test.ts` counts it and `composeTenantApp` as
 session checks, as it counts `authorizeOrganization` and the organization
@@ -233,9 +247,12 @@ staff rows they held before (the host reads the rows held now): the host
 gives them the tenant manifest (`buildTenantManifestModel` in
 `src/lib/gui/host/shared/manifest-model.ts`), whose `org` is their current
 unit, whose places are their units and whose nav is tenant entries only; the
-(gui) layout sends them from `/` to `/my` and never to `/setup`. They reach
-`/no-access` only when the manifest refuses because none of their units can
-be read. Every staff entry point of the host refuses them by their
+(gui) layout sends them from `/` to `/my` and never to `/setup`. While `/my`
+is not a released route (`src/lib/mgm/released-routes.ts`), it sends them
+from `/` to `/no-access` instead, which has Log out: middleware would answer
+`/my` with the static "not in this release" page, which has no script and
+links back to `/`. Otherwise they reach `/no-access` only when the manifest
+refuses because none of their units can be read. Every staff entry point of the host refuses them by their
 roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
 `visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
 view that is not a tenant view. A tenant view opened without `?unit=` by a
@@ -268,7 +285,9 @@ if (gate) return gate; // 409 <plugin>_disabled or 503 <plugin>_gate_unavailable
 
 The gate resolves the target's organization with one RLS-scoped query and asks
 the database whether the plugin is enabled for that organization
-(`mgm_plugin_enabled_for_org`).
+(`mgm_plugin_enabled_for_org`). That function answers any signed-in caller,
+tenants included, about any organization; who may act there is the
+composer's check, not the gate's.
 
 A missing `mgm_plugins` row means enabled, so existing organizations need no
 backfill, except for a plugin the catalog marks `defaultEnabled: false`, as

@@ -1,8 +1,9 @@
 /**
  * The (gui) layout: the redirects for signed-out, first-run and revoked
  * users, in their order; a person whose rows are all tenant rows sent from
- * the start page to their home, never to /setup, and to /no-access only when
- * the manifest refuses (RFC mgm#197 § 4); the manifest read started alongside them; and every page
+ * the start page to their home while it is a released route and to
+ * /no-access until then, never to /setup, and otherwise to /no-access only
+ * when the manifest refuses (RFC mgm#197 § 4); the manifest read started alongside them; and every page
  * rendered inside the shell of the GUI MGM_GUI selects, with the manifest
  * and the view the path names. A render the middleware did not see answers
  * 404 before any of that.
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   getManifest: vi.fn(),
   preloadManifest: vi.fn(),
   resolveInitialView: vi.fn(),
+  isReleasedRoute: vi.fn<(path: string) => boolean>(() => true),
   headers: new Headers(),
   cookies: new Map<string, string>(),
 }));
@@ -45,6 +47,11 @@ vi.mock("@/lib/auth/request-access", () => ({
 }));
 vi.mock("@/lib/mgm/organization-exists", () => ({
   organizationExists: mocks.organizationExists,
+}));
+// The middleware answers an unreleased page before the layout runs, so the
+// layout reads the list only for where to send a tenant from "/".
+vi.mock("@/lib/mgm/released-routes", () => ({
+  isReleasedRoute: mocks.isReleasedRoute,
 }));
 vi.mock("@/lib/gui/host/server/manifest", () => ({
   getManifest: mocks.getManifest,
@@ -133,6 +140,7 @@ beforeEach(() => {
   mocks.cookies.clear();
   mocks.getManifest.mockResolvedValue({ ok: true, manifest: MANIFEST });
   mocks.resolveInitialView.mockResolvedValue(null);
+  mocks.isReleasedRoute.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -239,14 +247,24 @@ describe("GuiLayout for a person who holds units (RFC mgm#197 § 4)", () => {
     mocks.organizationExists.mockResolvedValue(organizations);
   }
 
-  it.each(["/", "/?org=" + ORG, "/#top"])("sends a tenant-only person from the start page (%s) to their home, before the manifest", async (path) => {
+  it.each(["/", "/?org=" + ORG, "/#top"])("sends a tenant-only person from the start page (%s) to their home once it is released, before the manifest", async (path) => {
     signIn([tenantRow(UNIT_A), tenantRow(UNIT_B)]);
     mocks.headers = new Headers({ "x-mgm-path": path });
     await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/my");
+    expect(mocks.isReleasedRoute).toHaveBeenCalledWith("/my");
     expect(mocks.getManifest).not.toHaveBeenCalled();
   });
 
-  it("never sends a tenant-only person to /setup or /no-access, and renders their pages in the shell", async () => {
+  it("sends a tenant-only person from the start page to /no-access, which can sign them out, while their home is not released", async () => {
+    // The static "not in this release" page links back to "/", so sending
+    // them to /my now would bring them straight back.
+    mocks.isReleasedRoute.mockImplementation((path: string) => path !== "/my");
+    signIn([tenantRow(UNIT_A)]);
+    await expect(GuiLayout({ children: null })).rejects.toThrow("redirect:/no-access");
+    expect(mocks.getManifest).not.toHaveBeenCalled();
+  });
+
+  it("never sends a tenant-only person to /setup, and renders their pages in the shell", async () => {
     // No organization is reported, as if the check had gone wrong: a tenant
     // is never the first operator.
     signIn([tenantRow(UNIT_A)], false);

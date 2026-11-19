@@ -845,7 +845,9 @@ desc("the tenant-app plugin's state", () => {
     // The composer asks with the tenant's own token (composeTenantApp → checkGate).
     expect(await enabledFor(tenantOnly.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(true);
     expect(await enabledFor(manager.client, F.org, TENANT_APP_PLUGIN_NAME)).toBe(true);
-    // Per organization: the other one is still off.
+    // Per organization: the other one is still off. A tenant may ask about
+    // any organization id, theirs or not (20261118140000 § 2): the answer
+    // is the plugin's state, not access.
     expect(await enabledFor(tenantOnly.client, F.otherOrg, TENANT_APP_PLUGIN_NAME)).toBe(false);
 
     const off = await setTenantApp(manager.client, false);
@@ -866,6 +868,14 @@ desc("the tenant-app plugin's state", () => {
 
     // Left on for the rest of the suite, as an operator would.
     expect((await setTenantApp(manager.client, true)).error).toBeNull();
+  });
+
+  it("carries a comment naming tenant-only accounts among its callers", () => {
+    const [row] = ownerRows<{ comment: string | null }>(
+      "SELECT obj_description('public.mgm_plugin_enabled_for_org(uuid, text)'::regprocedure, 'pg_proc') AS comment",
+    );
+    expect(row.comment).toContain("tenant-only accounts");
+    expect(row.comment).toContain("not an access check");
   });
 
   it("the plugin-name CHECKs and fn_mgm_set_plugin_enabled still refuse a name that is not a plugin, the alias included", async () => {

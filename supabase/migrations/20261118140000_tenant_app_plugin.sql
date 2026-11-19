@@ -176,12 +176,16 @@ GRANT  EXECUTE ON FUNCTION public.fn_mgm_set_plugin_enabled(UUID, TEXT, TEXT, BO
 -- list with the catalog and fails while they differ.
 --
 -- It still answers any signed-in caller about any organization, with no
--- access check, as in 00056: composeTenantApp asks it, through the gate,
--- with a tenant's own token about the tenant's organization, whose
--- mgm_plugins rows the tenant cannot read. If an access check is ever added
--- here, let a tenant through for their own unit's organization first (as
--- user_can_access_tenant and fn_tenant_home decide it), or every tenant is
--- refused.
+-- access check, as in 00056. Its callers now include tenant-only accounts,
+-- which hold no organization access and can ask about any organization id:
+-- composeTenantApp asks it, through the gate, with a tenant's own token
+-- about the tenant's organization, whose mgm_plugins rows the tenant cannot
+-- read. What that discloses is one organization's plugin on/off state, for
+-- an id the caller already has; the answer is not an access check, and who
+-- may act in the organization is decided elsewhere. If an access check is
+-- ever added here, let a tenant through for their own unit's organization
+-- first (as user_can_access_tenant and fn_tenant_home decide it), or every
+-- tenant is refused. The comment below puts the same on the function.
 
 CREATE OR REPLACE FUNCTION public.mgm_plugin_enabled_for_org(_org_id UUID, _plugin_name TEXT)
 RETURNS BOOLEAN
@@ -203,6 +207,9 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) TO authenticated, service_role;
+
+COMMENT ON FUNCTION public.mgm_plugin_enabled_for_org(UUID, TEXT) IS
+  'Whether a plugin is on for an organization; a missing row answers the plugin''s default (tenant-app off, every other plugin on). Answers any signed-in caller about any organization id, with no access check: tenant-only accounts, which hold no organization access, are among its callers (composeTenantApp asks it with a tenant''s own token). It discloses only that organization''s plugin on/off state, for an id the caller already has, and is not an access check. If an access check is added, let a tenant through for their own unit''s organization first, or every tenant is refused.';
 
 -- ── 3. The accounts that have held staff access ─────────────────────────
 --

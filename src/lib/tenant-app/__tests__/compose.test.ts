@@ -338,6 +338,26 @@ describe("composeTenantApp composition", () => {
     }
   });
 
+  it("opens the scope with the caller's tenant rows only, so a manager who rents carries no staff row into it", async () => {
+    const managerWhoRents = tenantOfA({
+      roles: [
+        { user_id: "tenant-a", role: "org_manager", scope_type: "org", scope_id: ORG_B },
+        tenantRow("tenant-a", UNIT_A),
+        tenantRow("tenant-a", UNIT_B),
+      ],
+    });
+    const result = await composeTenantApp({ supabase: client(managerWhoRents), tenantId: UNIT_A });
+    if (!result.ok) throw new Error(result.code);
+    try {
+      expect(vi.mocked(openOrganizationScope)).toHaveBeenCalledTimes(1);
+      const [request] = vi.mocked(openOrganizationScope).mock.calls[0];
+      expect(request).toMatchObject({ organizationId: ORG_A, userId: "tenant-a" });
+      expect(request.roles).toEqual([tenantRow("tenant-a", UNIT_A), tenantRow("tenant-a", UNIT_B)]);
+    } finally {
+      await result.data.dispose();
+    }
+  });
+
   it("keeps concurrent tenants' requests apart", async () => {
     const a = client(tenantOfA());
     const b = client({

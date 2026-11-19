@@ -187,7 +187,17 @@ export type OrganizationScope = {
   dispose(): Promise<void>;
 };
 
-/** Low-level constructor: callers must authorize the request before opening it. */
+/**
+ * Low-level constructor: callers must authorize the request before opening
+ * it. For every composer but two, `request.organizationId` and `roles` are
+ * organization access the composer authorized with authorizeOrganization,
+ * and the capability plugins (community-management, metering, billing,
+ * billing-review, payments) rely on that. composePaymentsPublic opens one
+ * with no user for the payment the request names. composeTenantApp opens
+ * one for a tenant, who may hold no access to the organization, with only
+ * their tenant rows, and loads nothing but TenantAppPlugin into it; no
+ * other capability plugin may be loaded into such a scope.
+ */
 export async function openOrganizationScope(
   request: MgmRequest,
   options: {

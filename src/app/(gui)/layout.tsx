@@ -13,6 +13,7 @@ import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
 import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
 import { TENANT_START_PAGE } from "@/lib/gui/host/shared/tenant-units";
 import { organizationExists } from "@/lib/mgm/organization-exists";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 
 /**
@@ -97,9 +98,14 @@ export default async function GuiLayout({
 
   // The start page is the staff dashboard. A tenant starts at their own
   // home instead; staff, tenant rows or not, keep "/" (START_PAGE in
-  // @/lib/auth/return-path).
+  // @/lib/auth/return-path). Only while the tenant home is a released route,
+  // though: until then middleware answers it with the static "not in this
+  // release" page, which has no script, so no sign-out, and links back to
+  // "/", which would send them round again. /no-access has Log out. This
+  // reads src/lib/mgm/released-routes.ts, so it follows the release of
+  // TENANT_START_PAGE with no edit here.
   if (tenantOnly && (path ?? "/").split(/[?#]/, 1)[0] === "/") {
-    redirect(TENANT_START_PAGE);
+    redirect(isReleasedRoute(TENANT_START_PAGE) ? TENANT_START_PAGE : "/no-access");
   }
 
   if (!gui) throw guiError;
