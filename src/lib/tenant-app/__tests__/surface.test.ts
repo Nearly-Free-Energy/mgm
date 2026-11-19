@@ -17,7 +17,7 @@ import type { TenantRequest, ViewDef } from "@/lib/gui/surface";
 import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage } from "@/lib/plugins/bundled";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
-import type { TenantAppCapabilityContract, TenantAppResult, TenantHome } from "../types";
+import type { TenantAppCapabilityContract, TenantAppResult, TenantHome, TenantUsageMonth } from "../types";
 
 const composeTenantApp = vi.fn();
 vi.mock("../compose", () => ({ composeTenantApp: (...args: unknown[]) => composeTenantApp(...args) }));
@@ -30,6 +30,7 @@ import { loadTenantUsageDay, loadTenantUsageMonth } from "../surface/usage";
 import { TenantUsageDayExt, TenantUsageMonthExt } from "../surface/usage-ext";
 import {
   EXAMPLE_HIDDEN_IDS,
+  EXAMPLE_MONTHS_SO_FAR,
   EXAMPLE_SYNTHETIC_NOTICE,
   TENANT_USAGE_DAY_EXAMPLES,
   TENANT_USAGE_DAY_LOADED_EXAMPLES,
@@ -37,10 +38,12 @@ import {
   TENANT_USAGE_MONTH_LOADED_EXAMPLES,
 } from "../surface/usage-examples";
 import {
+  monthSoFar,
   TENANT_USAGE_DAY_EXT_SCHEMA,
   TENANT_USAGE_DAY_KEYS,
   TENANT_USAGE_MONTH_EXT_SCHEMA,
   TENANT_USAGE_MONTH_KEYS,
+  TENANT_USAGE_PROBLEMS,
 } from "../surface/usage-model";
 
 const view = TENANT_APP_SURFACE.views?.[0] as ViewDef;
@@ -64,8 +67,22 @@ const HOME: TenantHome = {
   ],
 };
 
+/** The month as getUsageMonth returns it; monthSoFar reads only its total, read info and zone. */
+function usageMonth(total: TenantUsageMonth["total"], read: Partial<TenantUsageMonth["read"]> = {}): TenantUsageMonth {
+  return {
+    tenant: HOME.tenant,
+    timezone: "Africa/Kampala",
+    month: "2026-11",
+    today: "2026-11-19",
+    previousMonth: "2026-10",
+    nextMonth: null,
+    days: [],
+    total,
+    read: { readAt: Date.parse("2026-11-19T11:05:00Z"), stale: false, synthetic: false, problem: null, ...read },
+  };
+}
 describe("TENANT_APP_SURFACE", () => {
-  it("contributes the tenant's home as a tenant record view at /my, read from the database", () => {
+  it("contributes the tenant's home as a tenant record view at /my, read from the database and the metering source", () => {
     expect(TENANT_APP_SURFACE.plugin).toBe("tenant-app");
     // The home stays first: contribution-schema.test.ts edits views[0] and nav[0].
     expect(TENANT_APP_SURFACE.views?.map((v) => v.id)).toEqual(["tenant.home", "tenant.usage-month", "tenant.usage-day"]);
@@ -74,7 +91,8 @@ describe("TENANT_APP_SURFACE", () => {
       scope: "tenant",
       path: "/my",
       params: {},
-      cost: "db",
+      // The month's use so far reads the metering source (RFC mgm#197 § 3).
+      cost: "vendor",
       declares: { keys: TENANT_HOME_KEYS, prefixes: [TENANT_METER_PREFIX] },
       load: loadTenantHome,
     });
@@ -133,8 +151,9 @@ describe("TENANT_APP_SURFACE", () => {
 });
 
 describe("the tenant.home model and examples", () => {
-  it("shows the unit, its microgrid, today and each meter by its role", () => {
-    expect(buildTenantHomeModel(HOME, fmt)).toEqual({
+  it("shows the unit, its microgrid, today, the month's use so far and each meter by its role", () => {
+    const month = monthSoFar(usageMonth({ kwh: 312.44, withoutData: 2 }), { fmt, locale: "en-GB" });
+    expect(buildTenantHomeModel(HOME, fmt, month)).toEqual({
       // The unit label, not the tenant's own name, which their units share.
       title: "Unit 4",
       entity: { kind: "tenant", id: UNIT, label: "Unit 4" },
@@ -146,6 +165,8 @@ describe("the tenant.home model and examples", () => {
               { key: "unit", label: "Unit", value: { t: "text", text: "Unit 4" } },
               { key: "microgrid", label: "Microgrid", value: { t: "text", text: "Kasana East" } },
               { key: "today", label: "Today", value: fmt.date("2026-11-19") },
+              { key: "month", label: "This month so far", value: fmt.energy(312_440, { digits: 1 }) },
+              { key: "monthNote", label: "Note", value: { t: "text", text: "2 days missing" } },
             ],
           },
           {
@@ -157,9 +178,12 @@ describe("the tenant.home model and examples", () => {
     });
   });
 
-  it("says when no meter is assigned today, and shows a missing unit label as empty", () => {
-    const model = buildTenantHomeModel({ ...HOME, tenant: { ...HOME.tenant, unitLabel: null }, meters: [] }, fmt);
+  it("says when no meter is assigned today, shows a missing unit label as empty, and no figure when the month could not be read", () => {
+    const model = buildTenantHomeModel({ ...HOME, tenant: { ...HOME.tenant, unitLabel: null }, meters: [] }, fmt, null);
     expect(model.body.sections[0].fields[0].value).toEqual(fmt.empty());
+    expect(model.body.sections[0].fields.slice(3)).toEqual([
+      { key: "month", label: "This month so far", value: { t: "text", text: "No data" } },
+    ]);
     expect(model.body.sections[1].fields).toEqual([
       { key: "meters", label: "Meters", value: { t: "text", text: "No meter is assigned to this unit today" } },
     ]);
@@ -171,6 +195,53 @@ describe("the tenant.home model and examples", () => {
     for (const model of TENANT_HOME_EXAMPLES) {
       expect(model).toMatchObject({ type: "view", view: "tenant.home", kind: "record", org: null, trail: [], attached: [], actions: [] });
     }
+    // The first shows a generated month so far, with the day its old meter
+    // did not report, and carries the host's notice; the second reads nothing.
+    const fields = TENANT_HOME_EXAMPLES.map((m) => Object.fromEntries(m.body.sections[0].fields.map((f) => [f.key, f.value])));
+    expect(fields[0].month).toMatchObject({ t: "energy", synthetic: true });
+    expect(fields[0].monthNote).toEqual({ t: "text", text: "1 day missing" });
+    expect(TENANT_HOME_EXAMPLES[0].notice).toEqual(SYNTHETIC_NOTICE);
+    expect(fields[1].month).toEqual({ t: "text", text: "No meter in use this month" });
+    expect(TENANT_HOME_EXAMPLES[1].notice).toBeUndefined();
+    expect(EXAMPLE_MONTHS_SO_FAR.november.total.withoutData).toBe(1);
+  });
+});
+
+describe("monthSoFar: the home's month", () => {
+  const o = { fmt, locale: "en-GB" };
+
+  it("shows the total, marked synthetic when generated, with no note when nothing is missing", () => {
+    expect(monthSoFar(usageMonth({ kwh: 41.25, withoutData: 0 }, { synthetic: true }), o)).toEqual({
+      value: fmt.energy(41_250, { digits: 1, synthetic: true }),
+      note: null,
+    });
+  });
+
+  it("shows a total with gaps as the sum of the rest, saying how many days it leaves out and when a kept read was made", () => {
+    expect(monthSoFar(usageMonth({ kwh: 41.25, withoutData: 1 }, { stale: true }), o)).toEqual({
+      value: fmt.energy(41_250, { digits: 1 }),
+      note: "1 day missing · As read at 14:05.",
+    });
+  });
+
+  it("says No data when no day has a figure, and why on a problem, in the month view's copy", () => {
+    expect(monthSoFar(usageMonth({ kwh: null, withoutData: 19 }), o)).toEqual({
+      value: { t: "text", text: "No data" },
+      note: "No data for 19 days",
+    });
+    for (const problem of ["unavailable", "limited", "not-offered"] as const) {
+      expect(monthSoFar(usageMonth({ kwh: null, withoutData: 0 }, { readAt: null, problem }), o)).toEqual({
+        value: { t: "text", text: "No data" },
+        note: TENANT_USAGE_PROBLEMS[problem].message,
+      });
+    }
+  });
+
+  it("says when no meter of the unit was in use this month, for which nothing was read", () => {
+    expect(monthSoFar(usageMonth({ kwh: null, withoutData: 0 }, { readAt: null }), o)).toEqual({
+      value: { t: "text", text: "No meter in use this month" },
+      note: null,
+    });
   });
 });
 
@@ -228,6 +299,8 @@ describe("the usage views' examples", () => {
 describe("loadTenantHome", () => {
   const dispose = vi.fn(async () => {});
   const getHome = vi.fn<TenantAppCapabilityContract["getHome"]>();
+  const getUsageMonth = vi.fn<TenantAppCapabilityContract["getUsageMonth"]>();
+  const MONTH = usageMonth({ kwh: 312.44, withoutData: 0 });
   const supabase = { caller: "tenant" } as unknown as SupabaseClient;
   const req: TenantRequest = {
     supabase,
@@ -245,13 +318,20 @@ describe("loadTenantHome", () => {
   beforeEach(() => {
     dispose.mockClear();
     getHome.mockReset();
+    getUsageMonth.mockReset();
+    getUsageMonth.mockResolvedValue({ ok: true, data: MONTH });
     composeTenantApp.mockReset();
-    composeTenantApp.mockResolvedValue({ ok: true, data: { scope: {}, tenantApp: { getHome }, dispose } });
+    composeTenantApp.mockResolvedValue({ ok: true, data: { scope: {}, tenantApp: { getHome, getUsageMonth }, dispose } });
   });
 
-  it("composes for the request's unit on the caller's client and clock, and disposes after reading", async () => {
+  it("composes for the request's unit on the caller's client and clock, reads the current month, and disposes after reading", async () => {
     getHome.mockResolvedValue({ ok: true, data: HOME });
-    expect(await loadTenantHome(req)).toEqual({ ok: true, model: buildTenantHomeModel(HOME, fmt) });
+    expect(await loadTenantHome(req)).toEqual({
+      ok: true,
+      model: buildTenantHomeModel(HOME, fmt, monthSoFar(MONTH, { fmt, locale: "en-GB" })),
+    });
+    // The current month, as /my/usage reads it with no parameter, so both share one cached read.
+    expect(getUsageMonth).toHaveBeenCalledWith();
     const options = composeTenantApp.mock.calls[0][0] as { supabase: unknown; tenantId: string; now: () => number };
     expect(options.supabase).toBe(supabase);
     expect(options.tenantId).toBe(UNIT);
@@ -259,9 +339,17 @@ describe("loadTenantHome", () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it("disposes when the read fails or throws", async () => {
+  it("still loads the home, with no figure, when the month's meter links cannot be read", async () => {
+    getHome.mockResolvedValue({ ok: true, data: HOME });
+    getUsageMonth.mockResolvedValue({ ok: false, status: 503, code: "tenant_app_unavailable", message: "x" });
+    expect(await loadTenantHome(req)).toEqual({ ok: true, model: buildTenantHomeModel(HOME, fmt, null) });
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("disposes when the read fails or throws, without reading the month", async () => {
     getHome.mockResolvedValue({ ok: false, status: 503, code: "tenant_app_unavailable", message: "x" });
     expect(await loadTenantHome(req)).toEqual(TENANT_HOME_REFUSALS.unavailable);
+    expect(getUsageMonth).not.toHaveBeenCalled();
     getHome.mockRejectedValue(new Error("boom"));
     await expect(loadTenantHome(req)).rejects.toThrow("boom");
     expect(dispose).toHaveBeenCalledTimes(2);

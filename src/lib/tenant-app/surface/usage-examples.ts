@@ -10,11 +10,11 @@ import "server-only";
  * states (../usage-calendar.ts). "Now" is 14:30 on 18 November 2026 in
  * Kampala.
  *
- * Month: November so far, with a second meter from the 10th and a day the
- * house meter did not report; October, whose read failed; November over the
+ * Month: November so far, with the house meter replaced on the 10th and a
+ * day the old meter did not report; October, whose read failed; November over the
  * read limit, with nothing kept and with a read kept from 14:20; February,
  * before the unit's first meter; and September, every day read.
- * Day: today so far; the day the house meter did not report three hours; a
+ * Day: today so far; the day the old meter did not report three hours; a
  * day before the unit's first meter; and a day whose read failed.
  *
  * The meters are picked by what the generator gives them, as the
@@ -26,7 +26,7 @@ import { createFmt } from "@/lib/gui/fmt";
 import type { LoadedModel } from "@/lib/gui/surface";
 import { generateDeviceEnergySeries, METER_FIXTURE_SEED, syntheticMeterDay } from "@/lib/metering/fixture/meter-energy";
 import { dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
-import type { TenantMeter, TenantUsageProblem } from "../types";
+import type { TenantMeter, TenantUsageMonth, TenantUsageProblem } from "../types";
 import {
   computeUsageDay,
   computeUsageMonth,
@@ -67,26 +67,27 @@ function meterWhere(test: (deviceId: string) => boolean, not: string[] = []): st
   throw new Error("no example meter fits");
 }
 
-/** The house meter: one day of 1–17 November unreported, and all of today. */
-const HOUSE = meterWhere((id) => unreported(id, between("2026-11-01", TODAY)).length === 1 && unreported(id, [TODAY]).length === 0);
+/** The house meter until the 10th: one day of 1–9 November unreported. */
+const HOUSE = meterWhere((id) => unreported(id, between("2026-11-01", "2026-11-09")).length === 1);
 /** The day the house meter did not report. */
-const GAP_DAY = unreported(HOUSE, between("2026-11-01", TODAY))[0];
-/** The shop meter, linked from the 10th: every day reported. */
-const SHOP = meterWhere((id) => unreported(id, between("2026-11-10", TODAY)).length === 0, [HOUSE]);
+const GAP_DAY = unreported(HOUSE, between("2026-11-01", "2026-11-09"))[0];
+/** The meter that replaced it on the 10th: every day reported, today included. */
+const NEW_METER = meterWhere((id) => unreported(id, between("2026-11-10", TODAY)).length === 0, [HOUSE]);
 /** A meter that reported every day of September. */
 const SEPTEMBER = meterWhere((id) => unreported(id, datesOfMonth("2026-09")).length === 0);
 
-const link = (deviceId: string, name: string, role: TenantMeter["role"], effectiveFrom: string): TenantMeter => ({
+/** A primary consumption meter link: the only kind that is the unit's use (USAGE_METER_ROLE). */
+const link = (deviceId: string, name: string, effectiveFrom: string, effectiveTo: string | null = null): TenantMeter => ({
   deviceId,
   name,
   deviceType: "consumption_meter",
-  role,
+  role: "primary_consumption_meter",
   effectiveFrom,
-  effectiveTo: null,
+  effectiveTo,
 });
 const LINKS: TenantMeter[] = [
-  link(HOUSE, "House meter", "primary_consumption_meter", "2026-03-01"),
-  link(SHOP, "Shop meter", "secondary_meter", "2026-11-10"),
+  link(HOUSE, "House meter", "2026-03-01", "2026-11-10"),
+  link(NEW_METER, "New house meter", "2026-11-10"),
 ];
 
 const devicesOf = (ids: Iterable<string>) => [...ids].sort().map((id) => ({ id, edgeOpenemsId: "SYNTHETIC-EDGE-EXAMPLE", componentId: "meter1" }));
@@ -129,9 +130,12 @@ function dayFigures(date: string, assignments: TenantMeter[], readAt: number): U
 
 const problem = (kind: TenantUsageProblem): UsageFigures => ({ kind: "problem", problem: kind });
 
+function computedMonth(month: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): TenantUsageMonth {
+  return computeUsageMonth({ tenant: TENANT, timezone: TIMEZONE, month, today: TODAY, nowMs: NOW, assignments, figures });
+}
+
 function month(month: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): LoadedModel<"collection"> {
-  const computed = computeUsageMonth({ tenant: TENANT, timezone: TIMEZONE, month, today: TODAY, nowMs: NOW, assignments, figures });
-  return buildUsageMonthModel(computed, { fmt, locale: LOCALE, links });
+  return buildUsageMonthModel(computedMonth(month, figures, assignments), { fmt, locale: LOCALE, links });
 }
 
 function day(date: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): LoadedModel<"collection"> {
@@ -139,7 +143,17 @@ function day(date: string, figures: UsageFigures, assignments: TenantMeter[] = L
   return buildUsageDayModel(computed, { fmt, locale: LOCALE, links });
 }
 
-const SEPTEMBER_LINKS = [link(SEPTEMBER, "House meter", "primary_consumption_meter", "2026-08-01")];
+const SEPTEMBER_LINKS = [link(SEPTEMBER, "House meter", "2026-08-01")];
+
+/**
+ * The current month as the tenant home reads it (../surface/examples.ts):
+ * November so far with the day the old meter did not report, and the unit
+ * with no meter, for which nothing is read.
+ */
+export const EXAMPLE_MONTHS_SO_FAR: { november: TenantUsageMonth; noMeter: TenantUsageMonth } = {
+  november: computedMonth("2026-11", monthFigures("2026-11", LINKS, NOW)),
+  noMeter: computedMonth("2026-11", { kind: "none" }, []),
+};
 
 /** The month view's models as the loader returns them, before the host fills its fields. */
 export const TENANT_USAGE_MONTH_LOADED_EXAMPLES: readonly LoadedModel<"collection">[] = [
@@ -200,4 +214,4 @@ export const TENANT_USAGE_DAY_EXAMPLES: readonly ModelOf<"collection">[] = TENAN
 );
 
 /** The example meters' ids and the microgrid's, which no example may show (surface.test.ts). */
-export const EXAMPLE_HIDDEN_IDS: readonly string[] = [MICROGRID, HOUSE, SHOP, SEPTEMBER];
+export const EXAMPLE_HIDDEN_IDS: readonly string[] = [MICROGRID, HOUSE, NEW_METER, SEPTEMBER];

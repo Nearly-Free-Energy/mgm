@@ -193,8 +193,10 @@ view and period, and a unit may cause at most six uncached reads a minute
 in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
 store, so keys that need no session cannot evict a unit's count); over the
 limit, a read kept for up to 15 minutes is served marked stale, or the view
-shows no data. An uncached read that fails, or finds metering off, also
-renders no data rather than a refusal. The cache is read before the metering
+shows no data. An uncached read that fails is answered the same way: the
+kept read, marked stale with its read time, or no data. One that finds
+metering off, or a provider with no series, shows no data and never a kept
+read. Neither is a refusal. The cache is read before the metering
 gate is asked, so while metering is off for the unit's organization nothing
 is read from the backend, but a figure read before it was turned off may
 still be served from the cache: for up to 60 s, or, while the unit is over

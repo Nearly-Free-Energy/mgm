@@ -165,16 +165,18 @@ function bucketState(bucket: BucketFacts, figures: UsageFigures): TenantUsageBuc
 }
 
 /**
- * No total ("No data") when any bucket with a meter in force has no figure,
- * when no bucket has one, or on a problem: never a lower number (RFC mgm#197
- * § 5). Otherwise the sum of the data and partial figures, to the Wh.
+ * The sum of the data and partial figures, to the Wh, with the number of
+ * buckets with a meter in force and no figure beside it: a total with gaps
+ * is the sum of the rest, always shown with what it leaves out (as decided
+ * on mgm#210, in place of RFC mgm#197 § 5's "No data"). No total ("No
+ * data") when no bucket has a figure, or on a problem.
  */
 function totalOf(buckets: readonly TenantUsageBucket[], figures: UsageFigures): TenantUsageTotal {
   const withoutData = buckets.filter((bucket) => bucket.state === "no-data").length;
   const shown = buckets.flatMap((bucket) =>
     (bucket.state === "data" || bucket.state === "partial") && bucket.kwh !== null ? [bucket.kwh] : []
   );
-  if (figures.kind !== "figures" || withoutData > 0 || shown.length === 0) {
+  if (figures.kind !== "figures" || shown.length === 0) {
     return { kwh: null, withoutData };
   }
   return { kwh: Math.round(shown.reduce((sum, kwh) => sum + kwh * 1000, 0)) / 1000, withoutData };

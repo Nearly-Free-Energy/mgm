@@ -133,6 +133,14 @@ describe("the month model", () => {
     });
   });
 
+  it("says So far and the days missing together for the current month", () => {
+    const { model, ext } = month("2026-11", figures({ ...NOVEMBER, "2026-11-03": null }));
+    // 32.5 kWh: the 34.5 above less the 2 kWh of the 3rd.
+    expect(model.body.totals).toEqual({ usage: fmt.energy(32_500, { digits: 1 }), note: { t: "text", text: "So far · 1 day missing" } });
+    expect(ext.total).toMatchObject({ kwh: 32.5, note: "So far · 1 day missing", withoutData: 1 });
+    expect(TenantUsageMonthExt.safeParse(ext).success).toBe(true);
+  });
+
   it("gives each day of the ext the note its row carries", () => {
     const { model, ext } = month("2026-11", figures(NOVEMBER), [link("m", "2026-11-10")]);
     for (const row of model.body.rows) {
@@ -145,7 +153,7 @@ describe("the month model", () => {
     expect(ext.days[29].note).toBeNull();
   });
 
-  it("shows a day a meter did not report as No data, never beside a figure, and has no total then", () => {
+  it("shows a day a meter did not report as No data, never beside a figure, and totals the rest with the days missing", () => {
     const { model, ext } = month("2026-10", figures({ ...Object.fromEntries(datesOfMonth("2026-10").map((d) => [d, 1.2])), "2026-10-07": null, "2026-10-20": null }));
     const cells = cellsOf(model);
     expect(cells["2026-10-07"]).toEqual({ date: fmt.date("2026-10-07"), usage: { t: "text", text: "No data" } });
@@ -154,15 +162,22 @@ describe("the month model", () => {
       const texts = Object.values(row.cells).map((c) => c.text);
       expect(texts.includes("No data") && row.cells.usage.t === "energy", row.id).toBe(false);
     }
-    expect(model.body.totals).toEqual({ usage: { t: "text", text: "No data" }, note: { t: "text", text: "No data for 2 days" } });
-    expect(ext.total).toEqual({ kwh: null, text: "No data", note: "No data for 2 days", withoutData: 2 });
+    // The 29 other days, never shown as the whole month's use (decided on mgm#210).
+    expect(model.body.totals).toEqual({ usage: fmt.energy(34_800, { digits: 1 }), note: { t: "text", text: "2 days missing" } });
+    expect(ext.total).toEqual({ kwh: 34.8, text: fmt.energy(34_800, { digits: 1 }).text, note: "2 days missing", withoutData: 2 });
     // A past month: no "So far", and the next month is there.
     expect(ext.next).toEqual({ month: "2026-11", label: "November 2026", href: "/my/usage?month=2026-11" });
   });
 
   it('says "1 day" for a single day without data', () => {
     const { ext } = month("2026-10", figures({ ...Object.fromEntries(datesOfMonth("2026-10").map((d) => [d, 1.2])), "2026-10-07": null }));
-    expect(ext.total.note).toBe("No data for 1 day");
+    expect(ext.total.note).toBe("1 day missing");
+  });
+
+  it("has no total, and says so, when no day of the month has a figure", () => {
+    const { model, ext } = month("2026-10", figures(Object.fromEntries(datesOfMonth("2026-10").map((d) => [d, null]))));
+    expect(model.body.totals).toEqual({ usage: { t: "text", text: "No data" }, note: { t: "text", text: "No data for 31 days" } });
+    expect(ext.total).toEqual({ kwh: null, text: "No data", note: "No data for 31 days", withoutData: 31 });
   });
 
   it("marks the days no meter of the unit was in force, and shades only days with a figure", () => {
@@ -311,14 +326,14 @@ describe("the day model", () => {
     expect(TenantUsageDayExt.safeParse(ext).success).toBe(true);
   });
 
-  it("shows an hour a meter did not report as No data, and no total for the day", () => {
+  it("shows an hour a meter did not report as No data, and totals the other hours with the hours missing", () => {
     const past = "2026-11-10";
     const values = Object.fromEntries(localHourStarts(past, KAMPALA).map((s, i) => [String(s), i >= 21 ? null : 0.1]));
     const { model, ext } = day(past, figures(values));
     expect(model.body.rows).toHaveLength(24);
     expect(model.body.rows[21].cells).toEqual({ hour: { t: "text", text: "21:00" }, usage: { t: "text", text: "No data" } });
-    expect(model.body.totals).toEqual({ usage: { t: "text", text: "No data" }, note: { t: "text", text: "No data for 3 hours" } });
-    expect(ext.total).toEqual({ kwh: null, text: "No data", note: "No data for 3 hours", withoutData: 3 });
+    expect(model.body.totals).toEqual({ usage: fmt.energy(2_100, { digits: 2 }), note: { t: "text", text: "3 hours missing" } });
+    expect(ext.total).toEqual({ kwh: 2.1, text: "2.10 kWh", note: "3 hours missing", withoutData: 3 });
     expect(ext.next).toEqual({ date: "2026-11-11", label: "11 Nov 2026", href: "/my/usage/day?date=2026-11-11" });
   });
 
