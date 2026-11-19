@@ -14,6 +14,7 @@ import type { LinkRef, Value } from "@/lib/gui/contract";
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentStatus } from "@/lib/payments/state";
 import { buildCsvFilename } from "../csv-export";
+import { sumMoney } from "../money";
 
 /** Every cell and total key the view emits, besides the per-tier ones under PERIOD_REVIEW_PREFIXES. */
 export const PERIOD_REVIEW_KEYS = ["tenant", "begin", "end", "usage", "total", "source", "payment", "entered"] as const;
@@ -258,28 +259,35 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   let totals: Record<string, Value> | undefined;
   if (i.bills.length > 0) {
     const tierKwh = tiers.map(() => 0);
-    const tierAmount = tiers.map(() => 0);
+    const tierAmounts = tiers.map((): number[] => []);
     let usage = 0;
-    let total = 0;
     for (const bill of i.bills) {
       usage += num(bill.usage_kwh);
-      total += num(bill.total_amount);
       const breakdown = bill.tier_breakdown ?? [];
       // By index, and only as many tiers as the tariff has.
       for (let n = 0; n < breakdown.length && n < tiers.length; n++) {
         tierKwh[n] += num(breakdown[n].kwh);
-        tierAmount[n] += num(breakdown[n].amount);
+        tierAmounts[n].push(num(breakdown[n].amount));
       }
     }
+    // Money in minor units, as the periods list sums a period (../money.ts),
+    // so the two show the same total.
     totals = {
       usage: fmt.energy(usage * 1000, { bare: true }),
       ...Object.fromEntries(
         tiers.flatMap((_, n) => [
           [`tier.${n + 1}.kwh`, fmt.energy(tierKwh[n] * 1000, { bare: true })],
-          [`tier.${n + 1}.amount`, fmt.money(tierAmount[n], currency, { bare: true })],
+          [`tier.${n + 1}.amount`, fmt.money(sumMoney(tierAmounts[n], currency), currency, { bare: true })],
         ]),
       ),
-      total: fmt.money(total, currency, { bare: true }),
+      total: fmt.money(
+        sumMoney(
+          i.bills.map((b) => num(b.total_amount)),
+          currency,
+        ),
+        currency,
+        { bare: true },
+      ),
     };
   }
 

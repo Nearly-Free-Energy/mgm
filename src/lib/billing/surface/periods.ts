@@ -23,8 +23,9 @@ import {
   PERIOD_KEPT_CLOSED_MESSAGE,
   PERIOD_KEPT_PAYMENTS_MESSAGE,
 } from "../period-delete";
+import { sumMoney } from "../money";
 import { buildPeriodsModel, type PeriodRowInput } from "./periods-model";
-import { pageAfter, readAllPages, sumMoney } from "./pages";
+import { pageAfter, readAllPages } from "./pages";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 

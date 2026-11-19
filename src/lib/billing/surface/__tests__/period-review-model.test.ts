@@ -9,6 +9,7 @@ import { createFmt } from "@/lib/gui/fmt";
 import { strictParseModel } from "@/lib/gui/host/server/parse";
 import type { ViewDef } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
+import { sumMoney } from "../../money";
 import { BILLING_SURFACE } from "../../surface";
 import { PERIOD_REVIEW_EXAMPLES, PERIOD_REVIEW_LOADED_EXAMPLES } from "../period-review-examples";
 import {
@@ -218,6 +219,28 @@ describe("buildPeriodReviewModel: totals", () => {
       "tier.2.amount": fmt.money(26437.5, "UGX", { bare: true }),
       total: fmt.money(32687.5, "UGX", { bare: true }),
     });
+  });
+
+  it("adds money in the currency's minor units, as the periods list does, so the total is the rows' sum", () => {
+    // Each row shows 1,251 (UGX has no minor unit); adding the floats would give 2,501.
+    const half = { total_amount: 1250.5, tier_breakdown: [{ label: "Lifeline", kwh: 5, amount: 1250.5 }] };
+    const model = build({ tenants: [A, B], bills: [bill(1, A, half), bill(2, B, half)] });
+    expect(model.body.rows.map((r) => r.cells.total)).toEqual([fmt.money(1251, "UGX", { bare: true }), fmt.money(1251, "UGX", { bare: true })]);
+    expect(model.body.totals?.total).toEqual(fmt.money(2502, "UGX", { bare: true }));
+    expect(model.body.totals?.["tier.1.amount"]).toEqual(fmt.money(2502, "UGX", { bare: true }));
+    expect(model.body.totals?.total).toEqual(fmt.money(sumMoney([1250.5, 1250.5], "UGX"), "UGX", { bare: true }));
+
+    // In a currency with cents, no float dust reaches the total: 0.1 + 0.2 is 0.3.
+    const usd = build({
+      microgrid: { id: MG, name: "North", currency: "USD" },
+      tenants: [A, B],
+      bills: [
+        bill(1, A, { total_amount: 0.1, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.1 }] }),
+        bill(2, B, { total_amount: 0.2, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.2 }] }),
+      ],
+    });
+    expect(usd.body.totals?.total).toEqual(fmt.money(0.3, "USD", { bare: true }));
+    expect(usd.body.totals?.["tier.1.amount"]).toEqual(fmt.money(0.3, "USD", { bare: true }));
   });
 
   it("has no totals with no bills", () => {
