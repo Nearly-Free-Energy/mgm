@@ -521,6 +521,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/billing/payment-link-popover.tsx, src/components/billing/row-actions-menu.tsx",
     replacedBy: { kind: "copy", view: "billing.send-queue", what: "a bill's payment link" },
     pr: SEND,
+    note: "Gridtop's renderer of the send queue (src/gui/gridtop/renderers/send-queue) draws Copy link on each bill that has a link, copying the ext's link; a GUI without that renderer shows the link cell as text a person can select.",
   },
 
   // ── Period history ────────────────────────────────────────────────────────

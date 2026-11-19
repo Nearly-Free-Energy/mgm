@@ -55,8 +55,6 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Contribute the send queue on …/send: delivered with Gridtop's renderer of the queue.
-  "copy-payment-link",
   // Unscheduled: the send queue explains, but the link to the community's
   // Payment page needs payments to contribute that page (parity.ts).
   "payment-setup",
