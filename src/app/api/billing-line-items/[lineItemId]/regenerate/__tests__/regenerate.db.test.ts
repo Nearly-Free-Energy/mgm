@@ -4,7 +4,9 @@
  * composes billing for the bill's organization and regenerates that one
  * bill through the capability's audit-aware write. In a period with several
  * bills only the one asked for changes, and its audit row is written;
- * another organization's manager finds nothing (404); a refunded bill, a
+ * another organization's manager finds nothing (404), and so does a
+ * tenant-only account of the same organization (404, before billing is
+ * composed; composing would refuse it with 403); a refunded bill, a
  * bill in a closed period and an invoiced bill are refused (409); and a paid
  * bill is refused without the acknowledgement its prepare asks for (428),
  * with nothing written. A payment or an invoice number landing between the
@@ -61,6 +63,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
+import { composeBilling } from "@/lib/billing/compose";
 import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "@/lib/billing/schemas";
 import { POST } from "../route";
 
@@ -76,9 +79,11 @@ const tenant = (n: number) => `e7900000-0000-4000-8004-00000000000${n}`;
 const bill = (n: number) => `e7900000-0000-4000-8005-00000000000${n}`;
 const EMAIL = "regenerate-db-manager@test.local";
 const OTHER_EMAIL = "regenerate-db-other@test.local";
+const TENANT_EMAIL = "regenerate-db-tenant@test.local";
 
 let manager: TestUser;
 let other: TestUser;
+let tenantUser: TestUser;
 
 const regenerate = (id: string, body: unknown) =>
   POST(
@@ -93,7 +98,7 @@ const regenerate = (id: string, body: unknown) =>
 async function cleanup() {
   const svc = await serviceClient();
   await svc.from("mgm_plugins").delete().in("org_id", [ORG, OTHER_ORG]);
-  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL] });
+  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
 }
 
 /** A manual bill of 50 kWh totalling 30,000, as stored: regeneration recomputes it from the readings. */
@@ -208,6 +213,8 @@ beforeAll(async () => {
   }
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: ORG });
   other = await createTestUser({ email: OTHER_EMAIL, role: "org_manager", scopeId: OTHER_ORG });
+  // A tenant-only account in the same organization: the tenant of unit 1, whose bill it is.
+  tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: tenant(1) });
 }, 60_000);
 
 afterAll(async () => {
@@ -305,6 +312,25 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
     // 70 kWh: 15 at 250 (3,750) and 55 at 750 (41,250). The payment record is kept.
     expect((await bills()).get(bill(4))).toMatchObject({ usage_kwh: 70, total_amount: 45000, payment_status: "paid" });
   });
+  it("refuses a tenant-only account in the same organization, its own unit's bill included, and writes nothing", async () => {
+    caller = tenantUser;
+    const before = await bills();
+    const auditBefore = await auditRows();
+    // Row security hides every bill from a tenant (no tenant policy on
+    // billing_line_items), so the route finds nothing before it composes billing.
+    for (const n of [1, 2]) {
+      const res = await regenerate(bill(n), { readings: "manual", start_kwh: 100, end_kwh: 999 });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "Billing line item not found.", reason: "not_found" });
+    }
+    expect(await bills()).toEqual(before);
+    expect(await auditRows()).toHaveLength(auditBefore.length);
+    // Had it got that far, composing billing for the organization refuses a tenant too.
+    const composed = await composeBilling({ supabase: tenantUser.client, organizationId: ORG });
+    expect(composed.ok).toBe(false);
+    if (!composed.ok) expect(composed.status).toBe(403);
+  });
+
   it("refuses, and writes nothing, when a payment lands between the route's read and its write", async () => {
     caller = manager;
     const auditBefore = await auditRows();
