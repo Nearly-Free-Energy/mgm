@@ -50,7 +50,7 @@ const pdf = (i: number): LinkRef => ({
 
 /** Bill i: its total, payment status and note, and its link when `linked`. */
 function row(i: number, o: { total: [number, string]; status: [string, "neutral" | "success" | "warning", string]; linked: boolean; note?: string }): RowOf<ActionRef> {
-  const tenant = { kind: "tenant" as const, id: tenantId(i), label: TENANTS[i], href: `/microgrids/${MG}/setup/tenants/${tenantId(i)}` };
+  const tenant = { kind: "tenant" as const, id: tenantId(i), label: TENANTS[i], href: `/microgrids/${MG}/setup/tenants/${tenantId(i)}` as const };
   return {
     id: billId(i),
     entity: { kind: "lineItem", id: billId(i), label: TENANTS[i] },

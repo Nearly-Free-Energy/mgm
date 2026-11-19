@@ -61,7 +61,7 @@ const link = (id: string) => `${ORIGIN}/api/billing-line-items/${id}/pay`;
 let manager: TestUser;
 let other: TestUser;
 let tenantUser: TestUser;
-let fetchSpy: ReturnType<typeof vi.spyOn>;
+let fetchSpy: { mock: { calls: Parameters<typeof fetch>[] }; mockRestore(): void };
 
 const href = (periodId: string, microgridId = MICROGRID) => `/microgrids/${microgridId}/billing/${periodId}/send`;
 const view = (path: string) => GET(new NextRequest(`http://localhost/api/gui/view?href=${encodeURIComponent(path)}`, { headers: { "accept-language": "en-GB" } }));
