@@ -216,7 +216,7 @@ function hrefPattern(href: string): RegExp {
 }
 
 const examplesOf = (view: string): readonly unknown[] =>
-  Object.values(SURFACES).flatMap((s) => (s.views ?? []).filter((v) => v.id === view).flatMap((v) => v.examples));
+  Object.values(SURFACES).flatMap((s) => (s.views ?? []).filter((v) => v.id === view).flatMap((v): readonly unknown[] => v.examples));
 
 /**
  * A link row is contributed only when an example of its view carries an
