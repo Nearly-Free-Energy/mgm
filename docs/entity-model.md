@@ -147,4 +147,9 @@ was dropped (`20261118100100_tenant_role_access.sql`).
 - A tenant role row is removed with its tenant: `user_roles.scope_tenant_id`
   references `tenants` with `ON DELETE CASCADE`.
 - Tenants read no microgrid, edge, community or organization row. The few
-  microgrid fields their pages need come from `fn_tenant_home`.
+  microgrid fields their pages need come from `fn_tenant_home`. Their use is
+  read by the server: after `composeTenantApp` has authorized the unit, the
+  tenant app's usage source reads their meters' edges and the microgrid's
+  OpenEMS connection on the service role
+  (`src/lib/tenant-app/infrastructure/usage-source.ts`); the tenant's own
+  client still reads no such row.

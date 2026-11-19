@@ -4,7 +4,8 @@ import { loadPlatformPlugins, MeteringProvidersPlugin } from "@/lib/runtime/root
 import { OpenEmsMeteringPlugin } from "../../providers-plugin";
 import type { MeteringProviderFactories } from "@/lib/runtime/services";
 import { MeteringError } from "../../errors";
-import type { SiteSamplesRequest } from "../../types";
+import type { DeviceEnergySeriesRequest, SiteSamplesRequest } from "../../types";
+import { generateDeviceEnergySeries } from "../meter-energy";
 import { generateSiteSamples } from "../site-samples";
 import {
   FixtureMeteringPlugin,
@@ -78,6 +79,32 @@ describe("FixtureMeteringPlugin", () => {
     await expect(
       provider.getReadings({ microgridId: MICROGRID, devices: [{ id: "m1" }] as never, startDate: "2026-11-01", endDate: "2026-11-30", timezone: "Africa/Kampala" })
     ).rejects.toThrow("Fixture reading is missing");
+  });
+
+  it("builds a synthetic provider that generates each meter's energy, today only up to now", async () => {
+    vi.stubEnv("MGM_METERING_FIXTURES", "on");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // 14:30 in Kampala.
+      vi.setSystemTime(new Date("2026-11-18T11:30:00Z"));
+      const { providers } = await load();
+      const provider = providers.create("synthetic", {} as never);
+      expect(provider.getDeviceEnergySeries).toBeTypeOf("function");
+      const request: DeviceEnergySeriesRequest = {
+        microgridId: MICROGRID,
+        devices: [{ id: "house-1", edgeOpenemsId: `${SYNTHETIC_EDGE_ID_PREFIX}001`, componentId: "meter1" }],
+        startDate: "2026-11-18",
+        endDate: "2026-11-18",
+        resolution: "hour",
+        timezone: "Africa/Kampala",
+      };
+      const series = await provider.getDeviceEnergySeries!(request);
+      expect(series).toEqual(generateDeviceEnergySeries(request, { nowMs: Date.now() }));
+      // From 15:00 on, nothing has been counted yet.
+      expect(series.kwh["house-1"].slice(15).every((value) => value === null)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is selected by a microgrid's edges beside the OpenEMS fallback", async () => {

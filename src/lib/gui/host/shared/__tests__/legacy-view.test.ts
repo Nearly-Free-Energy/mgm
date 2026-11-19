@@ -143,8 +143,10 @@ describe("legacyView on every catalog page", () => {
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
-      // A tenant's page: a staff manifest has no tenant entry, and /my names no place.
+      // Tenant pages: a staff manifest has no tenant entry, and /my names no place.
       "/my": ["tenant.home", null],
+      "/my/usage": ["tenant.usage-month", null],
+      "/my/usage/day": ["tenant.usage-day", null],
     };
     const served = ALL_PAGES.filter((p) => p.servedBy === "view");
     expect(served.map((p) => p.path).sort()).toEqual(Object.keys(SERVED).sort());

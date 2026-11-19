@@ -55,6 +55,7 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
 const VIEW_ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: number, view: string]> = {
   "metering.operations": ["Operations", "operate", "live", 40, "metering.site-day"],
   "tenant.home": ["My home", "operate", "tenants", 80, "tenant.home"],
+  "tenant.usage": ["My usage", "operate", "readings", 81, "tenant.usage-month"],
 };
 
 /**

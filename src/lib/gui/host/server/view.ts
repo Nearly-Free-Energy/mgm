@@ -244,10 +244,17 @@ async function embedViews<B>(ctx: HostContext, kind: ViewKind, body: B, org: str
  * session and refuses while the tenant app is off for the unit's organization
  * (a 409 the loader passes on, which this answers with NOT_RELEASED); if a
  * tenant view's loader ever reads without that composer, this function must
- * ask the gate. The model has no organization, trail,
- * attached views or actions: every action is a staff route, so none is
- * offered, whether the loader links it or another plugin targets the view's
- * entity. It is never loaded inside another view.
+ * ask the gate. A tenant view's loader may read an organization's records on
+ * the server, after composeTenantApp, to work out the unit's own figures:
+ * the usage source (@/lib/tenant-app/infrastructure/usage-source) reads the
+ * meters' edges and the microgrid's OpenEMS connection this way, and asks
+ * the metering gate itself. None of those records reaches the model. If a
+ * loader ever puts an organization's record into the model, or reads one
+ * before composeTenantApp or without asking the gate of the plugin it reads
+ * for, this function must check the model or ask that gate. The model has
+ * no organization, trail, attached views or actions: every action is a staff
+ * route, so none is offered, whether the loader links it or another plugin
+ * targets the view's entity. It is never loaded inside another view.
  */
 async function dispatchTenantView(
   ctx: HostContext,

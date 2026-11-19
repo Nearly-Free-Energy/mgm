@@ -1,9 +1,12 @@
 /**
- * The tenant app's GUI contribution (RFC mgm#197 § 3–4): `tenant.home`, a
- * tenant view of the caller's own unit at /my with its nav entry for the
- * tenant audience, accepted by the registry, never readable by an assistant,
- * with examples a GUI can be tested against; and its loader, which reads
- * through composeTenantApp and always disposes it.
+ * The tenant app's GUI contribution (RFC mgm#197 § 3–5): `tenant.home`, a
+ * tenant view of the caller's own unit at /my, and `tenant.usage-month` and
+ * `tenant.usage-day`, its use at /my/usage and /my/usage/day, with nav
+ * entries for the tenant audience, accepted by the registry, never readable
+ * by an assistant, with examples a GUI can be tested against; and the home's
+ * loader, which reads through composeTenantApp and always disposes it. The
+ * usage views' models and loaders have tests of their own
+ * (usage-model.test.ts, usage-loader.test.ts).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
@@ -11,6 +14,7 @@ import { createFmt } from "@/lib/gui/fmt";
 import { strictParseModel } from "@/lib/gui/host/server/parse";
 import { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
 import type { TenantRequest, ViewDef } from "@/lib/gui/surface";
+import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage } from "@/lib/plugins/bundled";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import type { TenantAppCapabilityContract, TenantAppResult, TenantHome } from "../types";
@@ -22,8 +26,25 @@ import { TENANT_APP_SURFACE } from "../surface";
 import { TENANT_HOME_EXAMPLES, TENANT_HOME_LOADED_EXAMPLES } from "../surface/examples";
 import { loadTenantHome, TENANT_HOME_REFUSALS, tenantHomeRefusal } from "../surface/home";
 import { buildTenantHomeModel, TENANT_HOME_KEYS, TENANT_METER_PREFIX } from "../surface/home-model";
+import { loadTenantUsageDay, loadTenantUsageMonth } from "../surface/usage";
+import { TenantUsageDayExt, TenantUsageMonthExt } from "../surface/usage-ext";
+import {
+  EXAMPLE_HIDDEN_IDS,
+  EXAMPLE_SYNTHETIC_NOTICE,
+  TENANT_USAGE_DAY_EXAMPLES,
+  TENANT_USAGE_DAY_LOADED_EXAMPLES,
+  TENANT_USAGE_MONTH_EXAMPLES,
+  TENANT_USAGE_MONTH_LOADED_EXAMPLES,
+} from "../surface/usage-examples";
+import {
+  TENANT_USAGE_DAY_EXT_SCHEMA,
+  TENANT_USAGE_DAY_KEYS,
+  TENANT_USAGE_MONTH_EXT_SCHEMA,
+  TENANT_USAGE_MONTH_KEYS,
+} from "../surface/usage-model";
 
 const view = TENANT_APP_SURFACE.views?.[0] as ViewDef;
+const viewById = (id: string) => TENANT_APP_SURFACE.views?.find((v) => v.id === id) as ViewDef;
 const UNIT = "550e8400-e29b-41d4-a716-4466554400a1";
 const fmt = createFmt({ locale: "en-GB" });
 
@@ -46,7 +67,8 @@ const HOME: TenantHome = {
 describe("TENANT_APP_SURFACE", () => {
   it("contributes the tenant's home as a tenant record view at /my, read from the database", () => {
     expect(TENANT_APP_SURFACE.plugin).toBe("tenant-app");
-    expect(TENANT_APP_SURFACE.views?.map((v) => v.id)).toEqual(["tenant.home"]);
+    // The home stays first: contribution-schema.test.ts edits views[0] and nav[0].
+    expect(TENANT_APP_SURFACE.views?.map((v) => v.id)).toEqual(["tenant.home", "tenant.usage-month", "tenant.usage-day"]);
     expect(view).toMatchObject({
       kind: "record",
       scope: "tenant",
@@ -60,13 +82,35 @@ describe("TENANT_APP_SURFACE", () => {
     for (const key of ["attach", "live", "agent", "query", "ext", "entity"]) expect(view).not.toHaveProperty(key);
   });
 
-  it("names it from a tenant nav entry, on a catalog page served by the view and not yet released", () => {
+  it.each([
+    ["tenant.usage-month", "/my/usage", "month", TENANT_USAGE_MONTH_KEYS, TENANT_USAGE_MONTH_EXT_SCHEMA, TenantUsageMonthExt, loadTenantUsageMonth],
+    ["tenant.usage-day", "/my/usage/day", "date", TENANT_USAGE_DAY_KEYS, TENANT_USAGE_DAY_EXT_SCHEMA, TenantUsageDayExt, loadTenantUsageDay],
+  ] as const)("contributes %s as a tenant collection at %s, read from the metering source by its one parameter", (id, path, param, keys, schema, zod, load) => {
+    expect(viewById(id)).toMatchObject({
+      kind: "collection",
+      scope: "tenant",
+      path,
+      params: {},
+      query: [param],
+      cost: "vendor",
+      declares: { keys },
+      ext: { schema, zod },
+      load,
+    });
+    // Never attached, never polled, never readable by an assistant, no entity segment.
+    for (const key of ["attach", "live", "agent", "entity"]) expect(viewById(id)).not.toHaveProperty(key);
+  });
+
+  it("names the home and the month from tenant nav entries, on catalog pages served by their views and not yet released", () => {
     expect(TENANT_APP_SURFACE.nav).toEqual([
       { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
+      { id: "tenant.usage", title: "My usage", icon: "readings", group: "operate", order: 81, view: "tenant.usage-month", audience: "tenant" },
     ]);
-    expect(matchCatalogPage("/my")).toMatchObject({ plugin: { name: "tenant-app" }, page: { path: "/my", servedBy: "view" } });
-    // RFC mgm#197: released by PR 5.
-    expect(isReleasedRoute("/my")).toBe(false);
+    for (const path of ["/my", "/my/usage", "/my/usage/day"]) {
+      expect(matchCatalogPage(path), path).toMatchObject({ plugin: { name: "tenant-app" }, page: { path, params: {}, servedBy: "view" } });
+      // RFC mgm#197: released by PR 5.
+      expect(isReleasedRoute(path), path).toBe(false);
+    }
   });
 
   it("contributes nothing else: no action, signal, status, search or entity", () => {
@@ -76,7 +120,12 @@ describe("TENANT_APP_SURFACE", () => {
   it("is accepted by the registry, and removed when its plugin unloads", () => {
     const registry = new SurfaceRegistry({ plugins: MGM_BUNDLED_PLUGINS });
     const remove = registry.contribute(TENANT_APP_SURFACE);
-    expect(registry.snapshot().views.map((v) => [v.plugin, v.def.id])).toEqual([["tenant-app", "tenant.home"]]);
+    expect(registry.snapshot().views.map((v) => [v.plugin, v.def.id])).toEqual([
+      ["tenant-app", "tenant.home"],
+      ["tenant-app", "tenant.usage-month"],
+      ["tenant-app", "tenant.usage-day"],
+    ]);
+    expect(registry.snapshot().nav.map((n) => n.def.id)).toEqual(["tenant.home", "tenant.usage"]);
     remove();
     expect(registry.snapshot().views).toEqual([]);
     expect(registry.snapshot().nav).toEqual([]);
@@ -122,6 +171,57 @@ describe("the tenant.home model and examples", () => {
     for (const model of TENANT_HOME_EXAMPLES) {
       expect(model).toMatchObject({ type: "view", view: "tenant.home", kind: "record", org: null, trail: [], attached: [], actions: [] });
     }
+  });
+});
+
+describe("the usage views' examples", () => {
+  const sets = [
+    ["tenant.usage-month", TENANT_USAGE_MONTH_LOADED_EXAMPLES, TENANT_USAGE_MONTH_EXAMPLES, TenantUsageMonthExt],
+    ["tenant.usage-day", TENANT_USAGE_DAY_LOADED_EXAMPLES, TENANT_USAGE_DAY_EXAMPLES, TenantUsageDayExt],
+  ] as const;
+
+  it.each(sets)("%s: pass the view's strict parse as the loader returns them, ext included", (id, loaded, received, zod) => {
+    expect(loaded.length).toBeGreaterThan(3);
+    for (const model of loaded) {
+      expect(strictParseModel(viewById(id), model)).toMatchObject({ ok: true });
+      expect(zod.safeParse(model.ext?.data).success).toBe(true);
+    }
+    for (const model of received) {
+      expect(model).toMatchObject({ type: "view", view: id, kind: "collection", org: null, trail: [], attached: [], actions: [], links: [] });
+      expect(model.body.rows.every((row) => row.actions.length === 0 && row.href === undefined)).toBe(true);
+    }
+  });
+
+  it.each(sets)("%s: carry the host's synthetic notice exactly when a figure is generated", (_id, loaded, received) => {
+    expect(EXAMPLE_SYNTHETIC_NOTICE).toEqual(SYNTHETIC_NOTICE);
+    received.forEach((model, i) => {
+      const cells = [...loaded[i].body.rows.flatMap((r) => Object.values(r.cells)), ...Object.values(loaded[i].body.totals ?? {})];
+      expect(model.notice).toEqual(cells.some((c) => c.synthetic) ? SYNTHETIC_NOTICE : undefined);
+      // Only figures are marked: never a "No data" text or a note.
+      for (const cell of cells) if (cell.synthetic) expect(cell.t).toBe("energy");
+    });
+    expect(received.filter((m) => m.notice).length).toBeGreaterThan(0);
+  });
+
+  it("cover every state and problem a tenant can meet", () => {
+    const months = TENANT_USAGE_MONTH_LOADED_EXAMPLES.map((m) => m.ext!.data as { days: { state: string }[]; problem: { kind: string } | null; stale: boolean; total: { kwh: number | null } });
+    const days = TENANT_USAGE_DAY_LOADED_EXAMPLES.map((m) => m.ext!.data as { hours: { state: string }[]; problem: { kind: string } | null; total: { kwh: number | null } });
+    const states = new Set([...months.flatMap((m) => m.days.map((d) => d.state)), ...days.flatMap((d) => d.hours.map((h) => h.state))]);
+    expect([...states].sort()).toEqual(["data", "future", "no-data", "no-meter", "partial"]);
+    expect(new Set(months.map((m) => m.problem?.kind ?? null))).toEqual(new Set([null, "unavailable", "limited"]));
+    expect(months.some((m) => m.stale)).toBe(true);
+    expect(months.some((m) => m.total.kwh !== null)).toBe(true);
+    expect(days.some((d) => d.problem?.kind === "unavailable")).toBe(true);
+    // An empty state for each view: a period before the unit's first meter.
+    expect(TENANT_USAGE_MONTH_LOADED_EXAMPLES.some((m) => m.body.rows.length === 0)).toBe(true);
+    expect(TENANT_USAGE_DAY_LOADED_EXAMPLES.some((m) => m.body.rows.length === 0)).toBe(true);
+  });
+
+  it("show none of the meters' or the microgrid's ids, only the unit's", () => {
+    const text = JSON.stringify([...TENANT_USAGE_MONTH_EXAMPLES, ...TENANT_USAGE_DAY_EXAMPLES]);
+    expect(EXAMPLE_HIDDEN_IDS.length).toBe(4);
+    for (const id of EXAMPLE_HIDDEN_IDS) expect(text).not.toContain(id);
+    expect(text).not.toMatch(/SYNTHETIC-EDGE|meter1|openems/i);
   });
 });
 

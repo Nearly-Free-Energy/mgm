@@ -9,6 +9,13 @@
  * plugin gate is then asked about the unit's organization, and a disabled
  * tenant app refuses every call, reads included. The caller disposes the
  * composition in `finally`.
+ *
+ * Privileged through TenantAppPlugin: its usage source reads the unit's
+ * edges and builds the microgrid's metering provider, which decrypts the
+ * stored OpenEMS credential, on the service role
+ * (infrastructure/usage-source.ts). composeTenantApp loads it only after
+ * authorizeTenant and the gate; anything else that loads TenantAppPlugin
+ * must authorize the unit the same way first.
  */
 import "server-only";
 
@@ -21,6 +28,7 @@ import { authorizeTenant, openOrganizationScope } from "@/lib/runtime/scope";
 import "@/lib/runtime/services";
 import { TenantAppCapability } from "./capability";
 import { createSupabaseTenantAppRepository } from "./infrastructure/supabase-repository";
+import { createTenantUsageSource } from "./infrastructure/usage-source";
 import "./scope";
 import {
   tenantAppFailure,
@@ -55,13 +63,19 @@ export type TenantAppPluginConfig = {
  * `mgmRequest.organizationId` is not organization access, and it loads only
  * into one: the request's audience must be "tenant" (composeTenantApp opens
  * it so), and every other capability plugin refuses such a request
- * (requireOrganizationAudience). It reads only the request's user and the
- * unit authorizeTenant read, and checks that the unit is in that
- * organization.
+ * (requireOrganizationAudience). It reads only the request's user and
+ * client and the unit authorizeTenant read, and checks that the unit is in
+ * that organization. Its usage source reads on the service role for that
+ * unit's microgrid, so whatever loads it must have authorized the unit as
+ * composeTenantApp does.
  */
 export const TenantAppPlugin = {
   name: TENANT_APP_PLUGIN_NAME,
-  inject: ["mgmRequest"],
+  // meteringProviders: the root registry the usage source builds the unit's
+  // microgrid provider from. No metering capability plugin loads into this
+  // scope (requireOrganizationAudience refuses it), so the usage source asks
+  // the metering gate itself before each read.
+  inject: ["mgmRequest", "meteringProviders"],
   apply(ctx: Context, config: TenantAppPluginConfig) {
     const request = ctx.mgmRequest;
     if (request.audience !== "tenant") throw new Error("The tenant app acts only for a tenant's request");
@@ -76,11 +90,19 @@ export const TenantAppPlugin = {
       unit: config.unit,
     };
     let active = true;
+    // Builds nothing yet: the source reads only when a usage view asks it,
+    // and only for the unit authorizeTenant read.
+    const usage = createTenantUsageSource({
+      supabase: request.supabase,
+      unit: config.unit,
+      providers: ctx.meteringProviders,
+    });
     const capability = new TenantAppCapability(
       config.repository,
       scope,
       () => active,
-      config.now
+      config.now,
+      usage
     );
     ctx.provide("tenantAppScope", scope);
     ctx.provide("tenantApp", capability);

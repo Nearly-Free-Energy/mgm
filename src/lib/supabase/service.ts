@@ -5,9 +5,20 @@ import "server-only";
  *
  * Introduced in UX5 (#79). Privileged routes that need to perform
  * `auth.admin.*` operations (invite, delete auth users, list users) use
- * this factory. Application code NEVER uses the service-role client for
- * application data reads/writes — that goes through the user-bound client
- * from `@/lib/supabase/server` so RLS evaluates against the caller.
+ * this factory, and so do the paths that read data RLS would not show the
+ * caller: billing exports and generation, invoices, payments, the v1 API,
+ * the OpenEMS credential decrypt (`@/lib/openems/config`) and the tenant
+ * app's usage reads. Everything else reads through the user-bound client
+ * from `@/lib/supabase/server`, so RLS evaluates against the caller.
+ *
+ * Rule (CLAUDE.md "Session checks before privilege"): the service-role
+ * client is used only after a `getUser()`-backed check on the caller's own
+ * code path, or on a path that serves callers with no session by design
+ * and has its own gate (sign-in by email, the payment provider's callbacks).
+ * `src/lib/__tests__/service-role-session-check.test.ts` follows the import
+ * graph and lists every path that reaches this module, with its reason; if
+ * that test stops following the import graph, this rule stops being
+ * enforced.
  *
  * Guardrails:
  *   - `import "server-only"` (first line) causes Next.js to fail the
@@ -25,8 +36,7 @@ import "server-only";
  *     Fail fast at first privileged use instead, with the same message.
  *
  * Two-client pattern — see ../../app/api/users/invite/route.ts for the
- * canonical caller shape. Reserved for: admin auth operations, future
- * tenant-API privileged writes.
+ * canonical caller shape.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {

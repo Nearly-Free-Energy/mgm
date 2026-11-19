@@ -4,8 +4,9 @@ import {
   SYNTHETIC_EDGE_ID_PREFIX,
   isSyntheticEdgeId,
 } from "../fixture-provider";
+import { generateDeviceEnergySeries } from "../fixture/meter-energy";
 import { generateSiteSamples } from "../fixture/site-samples";
-import type { SiteSamplesRequest } from "../types";
+import type { DeviceEnergySeriesRequest, SiteSamplesRequest } from "../types";
 
 const request = {
   microgridId: "microgrid-1",
@@ -120,5 +121,66 @@ describe("FixtureMeteringProvider.getSiteSamples", () => {
         siteRequest({ load: { id: "load", edgeOpenemsId: "edge0", componentId: "meter2" } })
       )
     ).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe("FixtureMeteringProvider.getDeviceEnergySeries", () => {
+  const synthetic = (id: string) => ({
+    id,
+    edgeOpenemsId: `${SYNTHETIC_EDGE_ID_PREFIX}001`,
+    componentId: `meter-${id}`,
+  });
+  const seriesRequest = (overrides: Partial<DeviceEnergySeriesRequest> = {}): DeviceEnergySeriesRequest => ({
+    microgridId: "microgrid-1",
+    devices: [synthetic("house-1"), synthetic("house-2")],
+    startDate: "2026-09-01",
+    endDate: "2026-09-30",
+    resolution: "day",
+    timezone: "Africa/Kampala",
+    ...overrides,
+  });
+  const generating = new FixtureMeteringProvider([], {
+    energySeries: (r) => generateDeviceEnergySeries(r),
+  });
+
+  it("generates the series for devices on synthetic edges", async () => {
+    const series = await generating.getDeviceEnergySeries(seriesRequest());
+    expect(series).toEqual(generateDeviceEnergySeries(seriesRequest()));
+    expect(series.buckets).toHaveLength(30);
+    expect(Object.keys(series.kwh)).toEqual(["house-1", "house-2"]);
+  });
+
+  it.each([
+    ["a real edge", { id: "house-3", edgeOpenemsId: "edge0", componentId: "meter0" }],
+    ["a lower-case look-alike", { id: "house-3", edgeOpenemsId: "synthetic-edge-1", componentId: "meter0" }],
+    ["no edge at all", { id: "house-3", edgeOpenemsId: "", componentId: "meter0" }],
+  ])("refuses a device on %s, so it never stands in for a real meter", async (_label, real) => {
+    const generator = vi.fn();
+    const provider = new FixtureMeteringProvider([], { energySeries: generator });
+    await expect(
+      provider.getDeviceEnergySeries(seriesRequest({ devices: [synthetic("house-1"), real] }))
+    ).rejects.toMatchObject({ code: "METERING_INVALID_DATA", statusCode: 400 });
+    expect(generator).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 without a generator", async () => {
+    await expect(new FixtureMeteringProvider([]).getDeviceEnergySeries(seriesRequest())).rejects.toMatchObject({
+      code: "METERING_CONFIGURATION",
+      statusCode: 503,
+    });
+  });
+
+  it.each([
+    ["an end before the start", { startDate: "2026-09-30", endDate: "2026-09-01" }],
+    ["more hours than a week", { resolution: "hour" as const }],
+    ["a malformed date", { startDate: "2026-9-01" }],
+  ])("refuses %s with the same 400 as the OpenEMS provider, before generating", async (_label, overrides) => {
+    const generator = vi.fn();
+    const provider = new FixtureMeteringProvider([], { energySeries: generator });
+    await expect(provider.getDeviceEnergySeries(seriesRequest(overrides))).rejects.toMatchObject({
+      code: "METERING_INVALID_DATA",
+      statusCode: 400,
+    });
+    expect(generator).not.toHaveBeenCalled();
   });
 });

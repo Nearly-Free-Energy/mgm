@@ -26,8 +26,9 @@ export const TENANT_HOME_KEYS = ["unit", "microgrid", "today", "meters"] as cons
  * @/lib/gui/host/server/units); change both together. The shell's label adds
  * the microgrid when two of the person's units share a name, which this view,
  * seeing one unit, cannot know; the Microgrid field below tells them apart.
+ * The usage views (./usage-model.ts) head their rows with it too.
  */
-function unitTitle(tenant: TenantHome["tenant"]): string {
+export function unitTitle(tenant: TenantHome["tenant"]): string {
   return tenant.unitLabel?.trim() || tenant.displayName.trim() || "Your unit";
 }
 

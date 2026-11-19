@@ -176,8 +176,13 @@ export async function getMicrogridEmsConfig(
  *
  * `authorizedClient` MUST be an RLS-evaluated client (`@/lib/supabase/server`).
  * Passing a service-role client makes step 1 a no-op — that is only correct
- * for machine callers that have already performed their own org check (e.g.
- * the token-authenticated generation route, which verifies `org_id` first).
+ * for callers that have already performed their own check for this
+ * microgrid: the token-authenticated generation route, which verifies
+ * `org_id` first, and the tenant app's usage source
+ * (src/lib/tenant-app/infrastructure/usage-source.ts), which builds its
+ * provider on the service role only after composeTenantApp's authorizeTenant,
+ * for the microgrid `fn_tenant_home` named, since a tenant's own client reads
+ * no `microgrids` row. A new caller of that kind needs the same reasoning.
  *
  * Returns the plaintext, or `null` when the caller is not authorized for the
  * row or no ciphertext is stored. Throws `OpenEmsError` on infrastructure
@@ -335,6 +340,10 @@ export async function resolveKeycloakConfig(
  * authorization. Written in the other order this becomes an ungated internal
  * decrypt — which is why there is one implementation rather than one per
  * secret: a second copy is how the two stop agreeing.
+ *
+ * On a service-role `authorizedClient` step 1 authorizes nothing; see
+ * `getEmsSecretForMicrogrid` for the two callers that pass one on purpose
+ * (the generation route and the tenant app's usage source) and why.
  */
 async function authorizeThenDecrypt(
   authorizedClient: SupabaseClient,

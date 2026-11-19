@@ -512,28 +512,9 @@ export class OpenEmsClient implements DeviceDataAdapter {
     toDate: string,
     timezone: string = "UTC"
   ): Promise<Record<string, Record<string, number>>> {
-    const result = await this.rpc<{
-      payload: JsonRpcResponse<{
-        timestamps: number[];
-        data: Record<string, (number | null)[]>;
-      }>;
-    }>("edgeRpc", {
-      edgeId,
-      payload: {
-        jsonrpc: "2.0",
-        id: crypto.randomUUID(),
-        method: "queryHistoricTimeseriesEnergyPerPeriod",
-        params: {
-          fromDate,
-          toDate,
-          channels,
-          timezone,
-          resolution: { value: 1, unit: "Days" },
-        },
-      },
-    });
-
-    const { timestamps, data } = result.payload.result;
+    const { timestamps, data } = await this.queryEnergyPerPeriod(
+      edgeId, channels, fromDate, toDate, timezone, "Days"
+    );
     const byChannel: Record<string, Record<string, number>> = {};
 
     for (let i = 0; i < timestamps.length; i++) {
@@ -549,6 +530,45 @@ export class OpenEmsClient implements DeviceDataAdapter {
     }
 
     return byChannel;
+  }
+
+  /**
+   * Energy per period (Wh) for each channel, as OpenEMS's
+   * queryHistoricTimeseriesEnergyPerPeriod returns it: one bucket per `unit`
+   * over whole local days `fromDate`..`toDate` (inclusive) in `timezone`, each
+   * timestamp a bucket start, null where the backend has no value. Raw: no
+   * keying, summing or null dropping. `options` as for queryHistoricSamples.
+   */
+  async queryEnergyPerPeriod(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string,
+    unit: "Hours" | "Days",
+    options: RpcOptions = {}
+  ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
+    const result = await this.rpc<{
+      payload: JsonRpcResponse<{
+        timestamps: Array<number | string>;
+        data: Record<string, (number | null)[]>;
+      }>;
+    }>("edgeRpc", {
+      edgeId,
+      payload: {
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "queryHistoricTimeseriesEnergyPerPeriod",
+        params: {
+          fromDate,
+          toDate,
+          channels,
+          timezone,
+          resolution: { value: 1, unit },
+        },
+      },
+    }, options);
+    return result.payload.result;
   }
 
   /** Fifteen-minute channel samples used only to prove billing coverage. */

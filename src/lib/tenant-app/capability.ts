@@ -1,14 +1,15 @@
 /**
  * TenantAppCapability — what a signed-in tenant reads about their own unit
- * (RFC mgm#197 § 3).
+ * (RFC mgm#197 § 3) and their use of it (§ 5).
  *
- * Import boundary: consumes the repository interface only, never a database
- * client, so every read goes through the tenant's own client in the
- * repository the composer built.
+ * Import boundary: consumes the repository and usage source interfaces only,
+ * never a database client, a provider or a vendor id, so every database read
+ * goes through the tenant's own client in the repository the composer built,
+ * and the meters whose use is read are the ones that repository returned.
  */
 import "server-only";
 
-import { dayKeyInZone } from "@/lib/timezone/day-key";
+import { addDaysToDateKey, dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
 import { validateTimezone } from "@/lib/validation/timezone";
 import {
   tenantAppFailure,
@@ -20,21 +21,98 @@ import {
   type TenantHome,
   type TenantMeter,
   type TenantMeterRole,
+  type TenantUnit,
+  type TenantUsageDay,
+  type TenantUsageMonth,
+  type TenantUsageSeries,
+  type TenantUsageSource,
 } from "./types";
+import {
+  assignmentsKey,
+  computeUsageDay,
+  computeUsageMonth,
+  datesOfMonth,
+  metersOn,
+  resolveRequestedDate,
+  resolveRequestedMonth,
+  sumMeters,
+  type UsageFigures,
+} from "./usage-calendar";
+import { readThrottled, type UsageReadOutcome } from "./usage-throttle";
 
 const ROLE_ORDER: Record<TenantMeterRole, number> = {
   primary_consumption_meter: 0,
   secondary_meter: 1,
 };
 
+/**
+ * The unit's zone: its microgrid's, or UTC when the stored one is not a
+ * valid IANA id, as the metering capability reads it.
+ */
+function zoneOf(unit: TenantUnit): string {
+  return validateTimezone(unit.timezone) ? "UTC" : unit.timezone;
+}
+
+/** What one usage read keeps: the clipped, summed figures, never a meter's own series. */
+type SummedFigures = { values: Record<string, number | null>; synthetic: boolean };
+
+/** A throttled read as the figures the calendar is built from. */
+function figuresOf(outcome: UsageReadOutcome<SummedFigures>): UsageFigures {
+  switch (outcome.from) {
+    case "backend":
+    case "cache":
+    case "stale":
+      return {
+        kind: "figures",
+        values: outcome.value.values,
+        readAt: outcome.readAt,
+        stale: outcome.from === "stale",
+        synthetic: outcome.value.synthetic,
+      };
+    case "limited":
+      return { kind: "problem", problem: "limited" };
+    case "failed":
+      return { kind: "problem", problem: "unavailable" };
+  }
+}
+
+/**
+ * The bucket index of each local day of `series`. A day the source returned
+ * twice has no index, so it reads as no data rather than as either figure.
+ */
+function dayIndexOf(series: TenantUsageSeries, timezone: string): Map<string, number | undefined> {
+  const index = new Map<string, number | undefined>();
+  series.buckets.forEach((start, i) => {
+    const date = dayKeyInZone(start, timezone);
+    index.set(date, index.has(date) ? undefined : i);
+  });
+  return index;
+}
+
+const meterLinksUnavailable = () =>
+  tenantAppFailure({
+    status: 503,
+    code: "tenant_app_unavailable",
+    message: "Could not read the unit's meters. Retry the request.",
+  });
+
 export class TenantAppCapability implements TenantAppCapabilityContract {
   constructor(
     private readonly repo: TenantAppRepository,
     private readonly scope: TenantAppScope,
     private readonly isActive: () => boolean,
-    /** The clock "today" is read from; tests fix it. */
-    private readonly now: () => number = Date.now
+    /** The clock "today" and "now" are read from; tests fix it. */
+    private readonly now: (() => number) | undefined,
+    /**
+     * Reads the unit's meters' energy from its microgrid's metering source.
+     * Only ever asked about device ids the repository returned for this unit.
+     */
+    private readonly usage: TenantUsageSource
   ) {}
+
+  private clock(): number {
+    return (this.now ?? Date.now)();
+  }
 
   private ensureActive(): TenantAppFailure | null {
     if (this.isActive()) return null;
@@ -54,18 +132,14 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     const { unit } = this.scope;
-    const timezone = validateTimezone(unit.timezone) ? "UTC" : unit.timezone;
-    const date = dayKeyInZone(this.now(), timezone);
+    const timezone = zoneOf(unit);
+    const date = dayKeyInZone(this.clock(), timezone);
 
     let meters: TenantMeter[];
     try {
       meters = await this.repo.listMetersInForce(unit.tenantId, date);
     } catch {
-      return tenantAppFailure({
-        status: 503,
-        code: "tenant_app_unavailable",
-        message: "Could not read the unit's meters. Retry the request.",
-      });
+      return meterLinksUnavailable();
     }
 
     return {
@@ -81,6 +155,143 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             a.deviceId.localeCompare(b.deviceId)
         ),
       },
+    };
+  }
+
+  /**
+   * A month of the unit's use per local day (RFC mgm#197 § 5), in the unit's
+   * zone. The meters of each day are the unit's links in force on it, read
+   * through the tenant's own client; the source is asked once, for every
+   * meter in force on some day up to today, from the unit's first such day
+   * of the month to its last, and each meter counts only on its own link's
+   * days. Future days are not read. A failed or refused read is not a
+   * failure of the call: the month still loads, and every day with a meter
+   * shows no data.
+   */
+  async getUsageMonth(input: { month?: string } = {}): Promise<TenantAppResult<TenantUsageMonth>> {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    const { unit } = this.scope;
+    const timezone = zoneOf(unit);
+    const nowMs = this.clock();
+    const today = dayKeyInZone(nowMs, timezone);
+    const month = resolveRequestedMonth(input.month, today);
+    const dates = datesOfMonth(month);
+    const last = dates[dates.length - 1];
+
+    let links: TenantMeter[];
+    try {
+      links = await this.repo.listMeterAssignments(unit.tenantId, dates[0], addDaysToDateKey(last, 1));
+    } catch {
+      return meterLinksUnavailable();
+    }
+
+    const readUntil = last < today ? last : today;
+    const inForce = dates.filter((date) => date <= readUntil && metersOn(links, date).size > 0);
+    let figures: UsageFigures = { kind: "none" };
+    if (inForce.length > 0) {
+      const devices = new Set(inForce.flatMap((date) => [...metersOn(links, date)]));
+      const outcome = await readThrottled<SummedFigures>(
+        unit.tenantId,
+        `month|${month}|${today}|${timezone}|${assignmentsKey(links)}`,
+        nowMs,
+        async () => {
+          const result = await this.usage.readSeries({
+            deviceIds: [...devices].sort(),
+            startDate: inForce[0],
+            endDate: inForce[inForce.length - 1],
+            resolution: "day",
+            timezone,
+          });
+          if (!result.ok) return { ok: false };
+          // Built here, from the buckets' own days, so a source that returns
+          // fewer buckets gives no data, never a figure on the wrong day.
+          const index = dayIndexOf(result.series, timezone);
+          const values: Record<string, number | null> = {};
+          for (const date of inForce) {
+            values[date] = sumMeters(result.series, metersOn(links, date), index.get(date));
+          }
+          return { ok: true, value: { values, synthetic: result.series.synthetic } };
+        }
+      );
+      figures = figuresOf(outcome);
+    }
+
+    return {
+      ok: true,
+      data: computeUsageMonth({
+        tenant: { id: unit.tenantId, displayName: unit.displayName, unitLabel: unit.unitLabel },
+        timezone,
+        month,
+        today,
+        nowMs,
+        assignments: links,
+        figures,
+      }),
+    };
+  }
+
+  /**
+   * One local day of the unit's use per hour (RFC mgm#197 § 5), in the
+   * unit's zone (23 or 25 hours on a daylight-saving day). The meters are
+   * the unit's links in force on that day; a day with none reads nothing.
+   * A failed or refused read still loads the day, with no data.
+   */
+  async getUsageDay(input: { date?: string } = {}): Promise<TenantAppResult<TenantUsageDay>> {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    const { unit } = this.scope;
+    const timezone = zoneOf(unit);
+    const nowMs = this.clock();
+    const today = dayKeyInZone(nowMs, timezone);
+    const date = resolveRequestedDate(input.date, today);
+
+    let links: TenantMeter[];
+    try {
+      links = await this.repo.listMeterAssignments(unit.tenantId, date, addDaysToDateKey(date, 1));
+    } catch {
+      return meterLinksUnavailable();
+    }
+
+    const devices = metersOn(links, date);
+    let figures: UsageFigures = { kind: "none" };
+    if (devices.size > 0) {
+      const outcome = await readThrottled<SummedFigures>(
+        unit.tenantId,
+        `day|${date}|${today}|${timezone}|${assignmentsKey(links)}`,
+        nowMs,
+        async () => {
+          const result = await this.usage.readSeries({
+            deviceIds: [...devices].sort(),
+            startDate: date,
+            endDate: date,
+            resolution: "hour",
+            timezone,
+          });
+          if (!result.ok) return { ok: false };
+          // Matched by instant, not position, so a missing hour shifts none.
+          const index = new Map(result.series.buckets.map((start, i) => [start, i]));
+          const values: Record<string, number | null> = {};
+          for (const start of localHourStarts(date, timezone)) {
+            values[String(start)] = sumMeters(result.series, devices, index.get(start));
+          }
+          return { ok: true, value: { values, synthetic: result.series.synthetic } };
+        }
+      );
+      figures = figuresOf(outcome);
+    }
+
+    return {
+      ok: true,
+      data: computeUsageDay({
+        tenant: { id: unit.tenantId, displayName: unit.displayName, unitLabel: unit.unitLabel },
+        timezone,
+        date,
+        today,
+        nowMs,
+        assignments: links,
+        figures,
+      }),
     };
   }
 }

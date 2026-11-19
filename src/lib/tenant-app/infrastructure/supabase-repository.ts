@@ -17,7 +17,7 @@ import {
   type TenantMeterRole,
 } from "../types";
 
-/** A calendar day, as `listMetersInForce` puts it into a PostgREST filter. */
+/** A calendar day, as the reads below put it into a PostgREST filter. */
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 type Embedded<T> = T | T[] | null;
@@ -32,6 +32,24 @@ type MeterLinkRow = {
 
 function one<T>(value: Embedded<T>): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+/** The links as meters; a link whose device row is not visible is left out. */
+function toMeters(rows: MeterLinkRow[]): TenantMeter[] {
+  return rows.flatMap((row) => {
+    const device = one(row.devices);
+    if (!device) return [];
+    return [
+      {
+        deviceId: row.device_id,
+        name: device.name,
+        deviceType: device.device_type,
+        role: row.role,
+        effectiveFrom: row.effective_from,
+        effectiveTo: row.effective_to,
+      },
+    ];
+  });
 }
 
 export function createSupabaseTenantAppRepository(
@@ -57,20 +75,30 @@ export function createSupabaseTenantAppRepository(
         .lte("effective_from", date)
         .or(`effective_to.is.null,effective_to.gt.${date}`);
       if (error) throw new Error(`Could not read the tenant's meters: ${error.message}`);
-      return ((data ?? []) as MeterLinkRow[]).flatMap((row) => {
-        const device = one(row.devices);
-        if (!device) return [];
-        return [
-          {
-            deviceId: row.device_id,
-            name: device.name,
-            deviceType: device.device_type,
-            role: row.role,
-            effectiveFrom: row.effective_from,
-            effectiveTo: row.effective_to,
-          },
-        ];
-      });
+      return toMeters((data ?? []) as MeterLinkRow[]);
+    },
+
+    async listMeterAssignments(tenantId: string, fromDate: string, toDate: string): Promise<TenantMeter[]> {
+      if (!DATE_KEY_RE.test(fromDate)) throw new Error(`Invalid date key: ${fromDate}`);
+      if (!DATE_KEY_RE.test(toDate)) throw new Error(`Invalid date key: ${toDate}`);
+      // Links that cover any day of [fromDate, toDate): half-open on both
+      // sides, as 00058 defines a link's period and billing reads it. A link
+      // that ends on `fromDate` covers none of the range; one that starts on
+      // `toDate` neither. The tenant app clips each link to its own days.
+      // Same columns and the same inner join as listMetersInForce, so the
+      // same note applies: a link drops out if its device row stops being
+      // visible to the tenant. The vendor columns are not read here; the
+      // usage source reads them.
+      const { data, error } = await supabase
+        .from("tenant_devices")
+        .select("device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)")
+        .eq("tenant_id", tenantId)
+        .in("role", [...TENANT_METER_ROLES])
+        .lt("effective_from", toDate)
+        .or(`effective_to.is.null,effective_to.gt.${fromDate}`)
+        .order("effective_from");
+      if (error) throw new Error(`Could not read the tenant's meters: ${error.message}`);
+      return toMeters((data ?? []) as MeterLinkRow[]);
     },
   };
 }

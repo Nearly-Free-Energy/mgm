@@ -92,14 +92,21 @@ export type CanaryIds = {
   mixedMicrogridId: string;
   /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
-   * views are dispatched as a tenant holding every one of them. The units
-   * have no meter assigned, so the microgrids' house meters, and with them
-   * the Operations day's reads, stay as they were. Tenant views that read a
-   * meter's use through the metering source (RFC mgm#197 § 5) need an
-   * assignment seeded here, of a meter of each microgrid.
+   * views are dispatched as a tenant holding every one of them. Each unit
+   * has that microgrid's house meter (TENANT_METER_COMPONENT, on its first
+   * edge) as its primary meter from 1 January 2026, so the tenant usage
+   * views (RFC mgm#197 § 5) read it through the microgrid's metering source
+   * with its stored credential, and the Operations day counts it as a house.
    */
   unitIds: readonly string[];
 };
+
+/**
+ * The component id of each unit's house meter. Only that meter has it (the
+ * site's battery and grid meter are ess0 and meter0), so a request for its
+ * channel is the tenant usage views' read.
+ */
+export const TENANT_METER_COMPONENT = "meter1";
 
 /** Every seeded microgrid: one per OpenEMS credential path, then the synthetic and mixed ones. */
 export const canaryMicrogrids = (ids: CanaryIds): string[] => [
@@ -119,7 +126,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
  * one, and the mixed microgrid has one edge of each. The organization also
  * gets an email sender (RFC #186) whose password is a canary, a tenant unit
- * on each microgrid (`unitIds`) and the tenant app turned on.
+ * on each microgrid (`unitIds`) linked to a house meter on its first edge,
+ * and the tenant app turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -152,6 +160,8 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
     { id: ids.mixedMicrogridId, name: "mixed", edgePrefixes: [SYNTHETIC_EDGE_ID_PREFIX, REAL], path: "bearer" },
   ];
   const site: [string, Record<string, unknown>][] = [];
+  /** Each microgrid's house meter, by microgrid id. */
+  const houseMeters = new Map<string, string>();
   for (const { id, name, edgePrefixes, path } of microgrids) {
     const [field, config] = OPENEMS_PATHS[path];
     const row = { id, community_id: ids.communityId, name: `GUI Canary Microgrid ${name}`, currency: "UGX", timezone: "Africa/Kampala", ems_backend_url: NOWHERE, ...config };
@@ -161,6 +171,11 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       site.push(["edges", { id: edge, microgrid_id: id, name: `Canary edge ${edgePrefix}`, openems_edge_id: `${edgePrefix}${id}` }]);
       for (const [type, component] of [["battery", "ess0"], ["grid_meter", "meter0"]]) {
         site.push(["devices", { edge_id: edge, name: `Canary ${type}`, device_type: type, openems_component_id: component }]);
+      }
+      if (!houseMeters.has(id)) {
+        const meter = randomUUID();
+        houseMeters.set(id, meter);
+        site.push(["devices", { id: meter, edge_id: edge, name: "Canary house meter", device_type: "consumption_meter", openems_component_id: TENANT_METER_COMPONENT }]);
       }
     }
   }
@@ -189,6 +204,12 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
   if (ids.unitIds.length !== places.length) throw new Error("[canary] unitIds needs one unit per seeded microgrid");
   places.forEach((microgridId, i) => {
     site.push(["tenants", { id: ids.unitIds[i], microgrid_id: microgridId, display_name: `Canary unit ${i}`, primary_phone: "+256700000000" }]);
+  });
+  places.forEach((microgridId, i) => {
+    site.push([
+      "tenant_devices",
+      { tenant_id: ids.unitIds[i], device_id: houseMeters.get(microgridId), role: "primary_consumption_meter", effective_from: "2026-01-01" },
+    ]);
   });
   // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts),
   // so its views would stop at the gate's 409 before reading anything.

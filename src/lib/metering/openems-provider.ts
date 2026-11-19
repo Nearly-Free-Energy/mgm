@@ -6,9 +6,12 @@ import type { OpenEmsClientConfig } from "@/lib/openems";
 import type { DeviceConfig, DeviceReading } from "@/lib/adapters/types";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
-import { dayKeyInZone } from "@/lib/timezone/day-key";
+import { addDaysToDateKey, dayKeyInZone } from "@/lib/timezone/day-key";
+import { energySeriesAxis } from "./energy-series";
 import { MeteringError } from "./errors";
 import type {
+  DeviceEnergySeries,
+  DeviceEnergySeriesRequest,
   MeteringProvider,
   MeteringReadRequest,
   SiteSamples,
@@ -28,8 +31,27 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       return await getOpenEmsSiteSamples(this.supabase, request);
     } catch (error) {
       if (error instanceof MeteringError) throw error;
-      if (error instanceof OpenEmsError) throw siteSamplesError(error);
+      if (error instanceof OpenEmsError) throw historyReadError(error, "site");
       console.error("Unexpected MGM site samples failure", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      throw new MeteringError(
+        "Metering provider failed unexpectedly",
+        "METERING_UNAVAILABLE",
+        503,
+        error
+      );
+    }
+  }
+
+  async getDeviceEnergySeries(request: DeviceEnergySeriesRequest): Promise<DeviceEnergySeries> {
+    try {
+      return await getOpenEmsEnergySeries(this.supabase, request);
+    } catch (error) {
+      if (error instanceof MeteringError) throw error;
+      if (error instanceof OpenEmsError) throw historyReadError(error, "usage");
+      console.error("Unexpected MGM energy series failure", {
         name: error instanceof Error ? error.name : typeof error,
         message: error instanceof Error ? error.message : "non-Error thrown",
       });
@@ -273,6 +295,35 @@ async function mapLimited<T, R>(
   return out;
 }
 
+/**
+ * One batch of channels, or, when OpenEMS refuses the batch because a
+ * channel in it has no history, each channel on its own. Each set comes with
+ * the channels it was asked for; a channel that still has no history gives
+ * no set.
+ */
+async function queryBatchOrEach(
+  channels: string[],
+  query: (channels: string[]) => Promise<SampleSet>
+): Promise<{ channels: string[]; set: SampleSet }[]> {
+  try {
+    return [{ channels, set: await query(channels) }];
+  } catch (error) {
+    if (!isNoEnergyData(error)) throw error;
+    // A channel with no history fails the whole batch; one by one, the
+    // others still answer and the missing one stays null. A few at a time,
+    // so a batch of many house meters does not become a burst of requests.
+    const single = await mapLimited(channels, SINGLE_CHANNEL_CONCURRENCY, async (channel) => {
+      try {
+        return { channels: [channel], set: await query([channel]) };
+      } catch (channelError) {
+        if (!isNoEnergyData(channelError)) throw channelError;
+        return null;
+      }
+    });
+    return single.filter((entry) => entry !== null);
+  }
+}
+
 async function querySiteEdge(
   client: ReturnType<typeof createOpenEmsClient>,
   edgeId: string,
@@ -281,27 +332,155 @@ async function querySiteEdge(
   /** The page read's one deadline, shared by every request and retry. */
   signal: AbortSignal
 ): Promise<SampleSet[]> {
-  const query = (list: string[]) => client.queryHistoricSamples(
+  const sets = await queryBatchOrEach(channels, (list) => client.queryHistoricSamples(
     edgeId, list, request.startDate, request.endDate, request.timezone,
     request.resolutionMinutes, { signal }
-  );
-  try {
-    return [await query(channels)];
-  } catch (error) {
-    if (!isNoEnergyData(error)) throw error;
-    // A channel with no history fails the whole batch; one by one, the
-    // others still answer and the missing one stays null. A few at a time,
-    // so a batch of many house meters does not become a burst of requests.
-    const single = await mapLimited(channels, SINGLE_CHANNEL_CONCURRENCY, async (channel) => {
-      try {
-        return await query([channel]);
-      } catch (channelError) {
-        if (!isNoEnergyData(channelError)) throw channelError;
-        return null;
-      }
-    });
-    return single.filter((set): set is SampleSet => set !== null);
+  ));
+  return sets.map(({ set }) => set);
+}
+
+/** A meter's consumption counter, as OpenEMS names its channel. */
+const consumptionChannel = (componentId: string) => `${componentId}/ActiveConsumptionEnergy`;
+
+/**
+ * Implements `MeteringProvider.getDeviceEnergySeries` for OpenEMS, with
+ * queryHistoricTimeseriesEnergyPerPeriod per edge.
+ */
+async function getOpenEmsEnergySeries(
+  supabase: SupabaseClient,
+  request: DeviceEnergySeriesRequest
+): Promise<DeviceEnergySeries> {
+  // Validates the request before anything is read.
+  const axis = energySeriesAxis(request);
+
+  // A device without OpenEMS identifiers is not requested; its series stays
+  // all null. Channels are grouped and deduplicated per edge only: component
+  // ids such as `meter0` repeat on every edge, so a channel name never
+  // identifies a meter on its own.
+  const channelsByEdge = new Map<string, string[]>();
+  for (const device of request.devices) {
+    if (!device.edgeOpenemsId || !device.componentId) continue;
+    const channels = channelsByEdge.get(device.edgeOpenemsId) ?? [];
+    const channel = consumptionChannel(device.componentId);
+    if (!channels.includes(channel)) channels.push(channel);
+    channelsByEdge.set(device.edgeOpenemsId, channels);
   }
+  const noValues = (): (number | null)[] => axis.buckets.map(() => null);
+  if (channelsByEdge.size === 0) {
+    // Nothing to read: no configuration is resolved, no credential decrypted.
+    return {
+      buckets: axis.buckets,
+      kwh: Object.fromEntries(request.devices.map((device) => [device.id, noValues()])),
+    };
+  }
+
+  const config = await resolveOpenEmsConfig(supabase, request.microgridId);
+  if (!config) {
+    throw new MeteringError(
+      "Metering provider is not configured for this microgrid",
+      "METERING_CONFIGURATION",
+      503,
+      { microgridId: request.microgridId }
+    );
+  }
+  const client = createOpenEmsClient(config);
+  // One deadline for the whole read, however many requests and retries it
+  // takes: once it passes, the client starts no further request.
+  const signal = AbortSignal.timeout(OpenEmsClient.PAGE_READ_TIMEOUT_MS);
+
+  // Lead day (spike on RFC mgm#197, 17 November 2026): the backend returns
+  // the first two hourly buckets of any range as null, and with the range
+  // started a day earlier the same two hours read 0.0. A daily read could
+  // therefore start with a short first day rather than a null one, and the
+  // spike could not tell the two apart. So both resolutions read from the
+  // day before the requested start; buckets before the start are not on
+  // the axis and are dropped below, so the lead day never leaves this
+  // function. A null inside the requested range is real missing data and
+  // stays null. If the backend stops leaving the first buckets empty, the
+  // extra day is merely wasted; if it ever leaves more than a day empty, the
+  // lead must grow. ENERGY_SERIES_MAX_DAYS applies to the request, not to
+  // the lead day.
+  const fromDate = addDaysToDateKey(request.startDate, -1);
+  const unit = request.resolution === "hour" ? "Hours" : "Days";
+
+  // Wh per bucket, keyed `${edgeId}|${channel}`: one value per bucket, or
+  // null; `seen` marks the buckets a response has already given a value for.
+  const values = new Map<string, { wh: (number | null)[]; seen: boolean[] }>();
+  await Promise.all([...channelsByEdge].map(async ([edgeId, channels]) => {
+    const sets = await queryBatchOrEach(channels, (list) => client.queryEnergyPerPeriod(
+      edgeId, list, fromDate, request.endDate, request.timezone, unit, { signal }
+    ));
+    for (const { channels: asked, set } of sets) {
+      const times = set.timestamps.map(toEpochMs);
+      const unreadable = times.filter((time) => time === null).length;
+      // A response whose instants mostly cannot be read is not missing
+      // data: say so rather than show every bucket as missing.
+      if (set.timestamps.length && unreadable * 2 > set.timestamps.length) {
+        console.error("MGM energy series: unreadable OpenEMS timestamps", {
+          edgeId,
+          count: set.timestamps.length,
+          unreadable,
+          examples: set.timestamps
+            .filter((_, i) => times[i] === null)
+            .slice(0, 3)
+            .map((raw) => String(raw).slice(0, 64)),
+        });
+        throw new MeteringError(
+          "OpenEMS returned this usage in a form MGM could not read. Try again shortly.",
+          "METERING_INVALID_DATA",
+          502,
+          { edgeId, count: set.timestamps.length, unreadable }
+        );
+      }
+      // Only the channels this set was asked for: a set never fills another
+      // request's channel.
+      for (const channel of asked) {
+        const raw = set.data[channel];
+        if (!raw) continue;
+        const key = `${edgeId}|${channel}`;
+        const entry = values.get(key) ?? {
+          wh: axis.buckets.map(() => null),
+          seen: axis.buckets.map(() => false),
+        };
+        values.set(key, entry);
+        for (let i = 0; i < times.length; i++) {
+          const time = times[i];
+          const index = time === null ? undefined : axis.indexOf(time);
+          if (index === undefined) continue;
+          if (entry.seen[index]) {
+            console.error("MGM energy series: two OpenEMS values for one bucket", {
+              edgeId,
+              channel,
+              bucket: new Date(axis.buckets[index]).toISOString(),
+            });
+            throw new MeteringError(
+              "OpenEMS returned this usage with ambiguous buckets. Try again shortly.",
+              "METERING_INVALID_DATA",
+              502,
+              { edgeId, channel }
+            );
+          }
+          entry.seen[index] = true;
+          const value = raw[i];
+          // A negative value is a counter reset, not energy used.
+          entry.wh[index] =
+            typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+        }
+      }
+    }
+  }));
+
+  // Looked up by edge and channel, never by the channel alone; each device
+  // gets its own array, so two devices on one channel never share one.
+  return {
+    buckets: axis.buckets,
+    kwh: Object.fromEntries(request.devices.map((device) => {
+      const wh = device.edgeOpenemsId && device.componentId
+        ? values.get(`${device.edgeOpenemsId}|${consumptionChannel(device.componentId)}`)?.wh
+        : undefined;
+      return [device.id, wh ? wh.map((value) => (value === null ? null : value / 1000)) : noValues()];
+    })),
+  };
 }
 
 /** Implements `MeteringProvider.getSiteSamples` for OpenEMS. */
@@ -542,13 +721,29 @@ export function createOpenEmsMeteringProvider(
 }
 
 /**
- * What the operations page says when OpenEMS fails a site read. The
- * client's own messages name the backend URL and quote its replies, so
- * they go to the server log only; the page gets a plain sentence per kind
- * of failure, and keeps the MeteringError code and status of
- * `translateOpenEmsError`.
+ * The history reads whose failures get fixed copy: the operations page's
+ * site read, and a meter energy series (a tenant's usage). `log` heads the
+ * server log line; `fallback` is the sentence for a failure with no more
+ * specific one.
  */
-function siteSamplesMessage(code: string): string {
+const HISTORY_READS = {
+  site: {
+    log: "MGM site samples: OpenEMS failed",
+    fallback: "OpenEMS could not provide this day's data. Try again shortly.",
+  },
+  usage: {
+    log: "MGM energy series: OpenEMS failed",
+    fallback: "OpenEMS could not provide this usage. Try again shortly.",
+  },
+} as const;
+
+/**
+ * What a history read says when OpenEMS fails it. The client's own
+ * messages name the backend URL and quote its replies, so they go to the
+ * server log only; the caller gets a plain sentence per kind of failure,
+ * and keeps the MeteringError code and status of `translateOpenEmsError`.
+ */
+function historyReadMessage(code: string, subject: keyof typeof HISTORY_READS): string {
   switch (code) {
     case "OPENEMS_UNREACHABLE":
       return "OpenEMS did not answer in time. Try again shortly.";
@@ -561,18 +756,18 @@ function siteSamplesMessage(code: string): string {
     case "OPENEMS_REDIRECT":
       return "The OpenEMS connection for this microgrid is not set up correctly. Check it under Setup.";
     default:
-      return "OpenEMS could not provide this day's data. Try again shortly.";
+      return HISTORY_READS[subject].fallback;
   }
 }
 
-function siteSamplesError(error: OpenEmsError): MeteringError {
-  console.error("MGM site samples: OpenEMS failed", {
+function historyReadError(error: OpenEmsError, subject: keyof typeof HISTORY_READS): MeteringError {
+  console.error(HISTORY_READS[subject].log, {
     code: error.code,
     message: error.message,
   });
   const translated = translateOpenEmsError(error);
   return new MeteringError(
-    siteSamplesMessage(error.code),
+    historyReadMessage(error.code, subject),
     translated.code,
     translated.statusCode,
     { openemsCode: error.code }
