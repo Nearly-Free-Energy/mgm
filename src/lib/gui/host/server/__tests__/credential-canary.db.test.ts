@@ -47,6 +47,13 @@ vi.mock("../snapshot", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../snapshot")>();
   return { surfaceSnapshot: async () => served ?? actual.surfaceSnapshot() };
 });
+// /my, the tenant app's page, is released by RFC mgm#197's PR 5. Until then
+// it is released here, so its view is scanned like every other; once it is
+// released, this mock changes nothing and can go.
+vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+  return { ...actual, isReleasedRoute: (path: string) => path === "/my" || actual.isReleasedRoute(path) };
+});
 
 import { SITE_DAY_PROBLEMS } from "@/lib/metering/surface/site-day-model";
 import { getMgmRuntime } from "@/lib/runtime/root";
@@ -81,27 +88,34 @@ const IDS: CanaryIds = {
   },
   syntheticMicrogridId: "e7400000-0000-4000-8002-000000000005",
   mixedMicrogridId: "e7400000-0000-4000-8002-000000000006",
-  billingPeriodId: "e7400000-0000-4000-8003-000000000001",
+  billingPeriodId: "e7400000-0000-4000-8007-000000000001",
   tenantId: "e7400000-0000-4000-8004-000000000001",
   lineItemId: "e7400000-0000-4000-8005-000000000001",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
+  unitIds: [1, 2, 3, 4, 5, 6].map((n) => `e7400000-0000-4000-8003-00000000000${n}`),
 };
 const MICROGRIDS = canaryMicrogrids(IDS);
 const EMAIL = "gui-canary-manager@test.local";
+const TENANT_EMAIL = "gui-canary-tenant@test.local";
 const COLUMNS = Object.entries(CREDENTIAL_COLUMNS).flatMap(([t, cs]) => cs.map((c) => `${t}.${c}`));
 
 let manager: TestUser;
 let roles: UserRoleRecord[];
+let tenant: TestUser;
+let tenantRoles: UserRoleRecord[];
 let canaries: Canary[];
 
-const ctx = () => {
-  const made = hostContext({ user: { id: manager.userId, email: EMAIL } as User, roles }, new Headers({ "accept-language": "en" }), {
-    newClient: async () => manager.client,
+const contextOf = (user: TestUser, email: string, rows: UserRoleRecord[]) => {
+  const made = hostContext({ user: { id: user.userId, email } as User, roles: rows }, new Headers({ "accept-language": "en" }), {
+    newClient: async () => user.client,
     makeFmt: (locale) => createFmt({ locale }),
   });
   if (!made.ok) throw new Error("canary context refused");
   return made.ctx;
 };
+const ctx = () => contextOf(manager, EMAIL, roles);
+/** A tenant of every seeded unit, and of nothing else. */
+const tenantCtx = () => contextOf(tenant, TENANT_EMAIL, tenantRoles);
 
 // payment_merchant_versions references organizations without ON DELETE
 // CASCADE, so its rows go first, as in gate.db.test.ts; if that foreign key
@@ -110,7 +124,7 @@ async function cleanup() {
   const svc = await serviceClient();
   const { error } = await svc.from("payment_merchant_versions").delete().eq("org_id", IDS.orgId);
   if (error) throw new Error(`[cleanup] payment_merchant_versions: ${error.message}`);
-  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL] });
+  await cleanupTestData({ orgIds: [IDS.orgId], userEmails: [EMAIL, TENANT_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -142,6 +156,16 @@ beforeAll(async () => {
   const { data, error } = await svc.from("user_roles").select("*").eq("user_id", manager.userId);
   if (error || !data?.length) throw new Error(`[fixture] user_roles: ${error?.message ?? "none"}`);
   roles = data as UserRoleRecord[];
+  const [first, ...rest] = IDS.unitIds;
+  tenant = await createTestUser({
+    email: TENANT_EMAIL,
+    role: "tenant",
+    scopeId: first,
+    extraRoles: rest.map((scopeId) => ({ role: "tenant" as const, scopeType: "tenant" as const, scopeId })),
+  });
+  const held = await svc.from("user_roles").select("*").eq("user_id", tenant.userId);
+  if (held.error || held.data?.length !== IDS.unitIds.length) throw new Error(`[fixture] tenant user_roles: ${held.error?.message ?? "count"}`);
+  tenantRoles = held.data as UserRoleRecord[];
 }, 60_000);
 
 afterAll(async () => {
@@ -218,12 +242,17 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     });
     let results: Awaited<ReturnType<typeof dispatchEveryView>>;
     try {
-      results = await dispatchEveryView(ctx(), snapshot, IDS, serve);
+      results = await dispatchEveryView(ctx(), snapshot, IDS, serve, tenantCtx());
     } finally {
       fetchSpy.mockRestore();
     }
     expect(new Set(results.map((r) => r.id)).size).toBe(snapshot.views.length);
     for (const r of results) assertNoCanary(r.output, canaries, `${r.id} (${r.href}, ${r.status})`);
+
+    // The tenant's home, read as the tenant through their own session, for each unit.
+    const homes = results.filter((r) => r.id === "tenant.home");
+    expect(homes.map((r) => [r.href, r.status])).toEqual(IDS.unitIds.map((unit) => [`/my?unit=${unit}`, 200]));
+    for (const [i, r] of homes.entries()) expect(JSON.parse(r.output.split("\n")[0]), r.href).toMatchObject({ title: `Canary unit ${i}`, org: null });
 
     // The decrypted credentials reached an OpenEMS client: every request for
     // a bearer, Basic or AWS microgrid's edge (its id is in the JSON-RPC body,
@@ -463,6 +492,23 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     it("refuses a view whose loader did not run", async () => {
       const fixture = surface([view("acme.unreleased", "/canary-unreleased", {}, () => ok("Battery"))]);
       await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow("loader did not run");
+    });
+
+    // A tenant view at /my whose loader is the self-test's own.
+    const tenantView = (load: () => unknown): SurfaceSnapshot => ({
+      ...surface([]),
+      views: [{ plugin: "tenant-app", def: { ...view("acme.mine", "/my", {}, load).def, scope: "tenant" } as unknown as ViewDef }],
+    });
+
+    it("dispatches a tenant view as the tenant, once for each seeded unit, and catches its leak", async () => {
+      const secret = await decrypted(canary(basic));
+      const results = await dispatchEveryView(ctx(), tenantView(() => ok(secret)), IDS, serve, tenantCtx());
+      expect(results.map((r) => [r.href, r.status])).toEqual(IDS.unitIds.map((unit) => [`/my?unit=${unit}`, 200]));
+      expect(scanAll(results)).toThrow(basic);
+    });
+
+    it("refuses a tenant view without a tenant's context", async () => {
+      await expect(dispatchEveryView(ctx(), tenantView(() => ok("Battery")), IDS, serve)).rejects.toThrow("pass a tenant's context");
     });
   });
 });

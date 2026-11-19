@@ -30,6 +30,7 @@ import type {
   NavDef,
   Prepare,
   ProposableAction,
+  TenantRequest,
   ViewDef,
 } from "../surface";
 import type { GateTarget } from "@/lib/runtime/gate";
@@ -113,6 +114,37 @@ describe("GUI contract types", () => {
       examples: [],
       load: async () => ({ ok: true, model: recordModel }),
     });
+  });
+
+  it("gives a tenant view's loader its unit, and refuses segments, attachments and assistant reading on it", () => {
+    const tenantView = {
+      id: "tenant.home",
+      kind: "record",
+      scope: "tenant",
+      path: "/my",
+      params: {},
+      cost: "db",
+      declares: { keys: [] },
+      examples: [],
+      load: async (req: TenantRequest) => {
+        expectTypeOf(req.tenantId).toEqualTypeOf<string>();
+        expectTypeOf(req.organizationId).toEqualTypeOf<null>();
+        return { ok: true as const, model: recordModel };
+      },
+    } as const;
+    accept<ViewDef>(tenantView);
+    // @ts-expect-error a tenant view's unit is the caller's, never a path segment
+    accept<ViewDef>({ ...tenantView, path: "/my/[id]", params: { id: "tenant" } });
+    // @ts-expect-error a tenant view is never attached to another view
+    accept<ViewDef>({ ...tenantView, attach: { to: "tenant", order: 1, hint: "tab" } });
+    // @ts-expect-error a tenant view is never read by an assistant
+    accept<ViewDef>({ ...tenantView, agent: "read" });
+    // @ts-expect-error an organization view's loader gets an organization, not a unit
+    accept<ViewDef>({ ...tenantView, scope: "organization" });
+  });
+
+  it("names the nav audiences", () => {
+    expectTypeOf<NonNullable<NavDef["audience"]>>().toEqualTypeOf<"staff" | "super-admin" | "tenant">();
   });
 
   it("refuses a View that renders asynchronously", () => {

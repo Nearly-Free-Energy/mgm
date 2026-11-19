@@ -14,7 +14,7 @@ import {
   type MeteringProviderName,
 } from "@/lib/metering";
 import { openOrganizationScope } from "@/lib/runtime/scope";
-import "@/lib/runtime/services";
+import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { resolveReviewOnlySeedReadings } from "./review-seeds";
 
 declare module "cordis" {
@@ -118,6 +118,9 @@ export const BillingReviewPlugin = {
   inject: ["mgmRequest", "meteringProviders"],
   apply(ctx: Context, config: BillingReviewPluginConfig) {
     const request = ctx.mgmRequest;
+    // A staff capability, though its composer passes no roles and it reads
+    // only through RLS: it is never one a tenant's request loads.
+    requireOrganizationAudience(request, "Billing review");
     const registry = new MeteringRegistry();
     for (const name of ctx.meteringProviders.names()) {
       registry.register(name, ctx.meteringProviders.create(name, request.supabase));

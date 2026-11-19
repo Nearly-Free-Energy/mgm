@@ -2,15 +2,19 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import type { GuiName } from "@/gui/meta";
+import { rolesAreTenantOnly } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { guiStylesheetHref, readGuiName } from "@/lib/config/gui";
 import { HostKitProvider } from "@/lib/gui/host/client/host-kit-provider";
 import { getManifest, preloadManifest } from "@/lib/gui/host/server/manifest";
 import { requireMiddlewarePath } from "@/lib/gui/host/server/middleware-path";
 import { resolveInitialView } from "@/lib/gui/host/server/render-view";
+import { isTenantPage } from "@/lib/gui/host/server/tenant-pages";
 import { resolveLegacyView } from "@/lib/gui/host/shared/legacy-view";
 import { manifestHints } from "@/lib/gui/host/shared/manifest-hints";
+import { TENANT_START_PAGE } from "@/lib/gui/host/shared/tenant-units";
 import { organizationExists } from "@/lib/mgm/organization-exists";
+import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 
 /**
@@ -18,7 +22,11 @@ import { NavigationProgress } from "@/components/ui/navigation-progress";
  * path and the organization cookie only choose what the shell shows among
  * the organizations and places the caller can see (getManifest); they
  * authorize nothing, and each page still checks access itself. If
- * getManifest or a page starts deciding access from either, revisit.
+ * getManifest or a page starts deciding access from either, revisit. The
+ * layout itself redirects one person by path: when it renders for someone
+ * whose rows are all tenant rows on a page that is not a tenant page
+ * (isTenantPage), it sends them home. That is navigation, not an access
+ * check: it grants nothing and guards nothing on its own, as below.
  */
 export default async function GuiLayout({
   children,
@@ -69,12 +77,17 @@ export default async function GuiLayout({
     redirect("/login");
   }
 
+  // A person whose rows are all tenant rows (RFC mgm#197 § 4) is signed in
+  // to the units they rent: neither a first operator for /setup nor revoked.
+  // A tenant row is not staff, so this reads the roles, never their count.
+  const tenantOnly = rolesAreTenantOnly(roles);
+
   // Release 1 (issue #3) — first-run bootstrap. When no organization exists
   // yet, the signed-in user is eligible to become the initial operator, so
   // send them to /setup instead of /no-access. Once the first organization
   // exists, unassigned users fall through to the revoked-user gate below
-  // and /no-access is retained for them.
-  if (!(await hasOrganization)) {
+  // and /no-access is retained for them. A tenant is never eligible.
+  if (!tenantOnly && !(await hasOrganization)) {
     redirect("/setup");
   }
 
@@ -88,10 +101,40 @@ export default async function GuiLayout({
     redirect("/no-access");
   }
 
+  // A person whose rows are all tenant rows is sent to their home from any
+  // page that is not a tenant page, a page a contributed tenant view serves
+  // (isTenantPage, which reads the GUI surface, so a new tenant view needs
+  // no edit here): the staff start page "/" included, before the manifest is
+  // awaited and before the shell renders. Staff, tenant rows or not, are not
+  // affected (START_PAGE in @/lib/auth/return-path).
+  //
+  // This runs only when the layout renders: on a full load, alongside the
+  // page, whose server code may already have started, and not at all on a
+  // client-side navigation within this group, which renders from the first
+  // segment that changes (CLAUDE.md, "Session checks before privilege"). So
+  // it keeps such a person off staff pages in ordinary use and is not what
+  // refuses them: each staff page's own checks and RLS do, and dispatchView
+  // refuses them every view that is not a tenant view. If a check is added
+  // that runs on every render of a staff page, say so here.
+  //
+  // The home only while it is a released route a tenant view serves: until
+  // then middleware answers it with the static "not in this release" page,
+  // which has no script, so no sign-out, and links back to "/", which would
+  // send them round again. /no-access has Log out, and like sign-out (a
+  // Supabase Auth call from the browser) it is outside this layout, so it
+  // cannot send them round either. This reads
+  // src/lib/mgm/released-routes.ts, so it follows the release of
+  // TENANT_START_PAGE with no edit here.
+  if (tenantOnly && !(await isTenantPage(path))) {
+    const home = isReleasedRoute(TENANT_START_PAGE) && (await isTenantPage(TENANT_START_PAGE));
+    redirect(home ? TENANT_START_PAGE : "/no-access");
+  }
+
   if (!gui) throw guiError;
 
   // Role rows whose organizations the caller cannot see leave no
-  // organization to show, which is no access for this layout.
+  // organization to show, which is no access for this layout, unless the
+  // person holds a unit: they get the manifest of their units instead.
   const outcome = await getManifest(gui, path, requested, preferred);
   if (!outcome.ok) redirect(outcome.status === 401 ? "/login" : "/no-access");
   const { manifest } = outcome;

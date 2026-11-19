@@ -20,7 +20,7 @@ vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
 
 import { UNCHECKED_REASON } from "../merge";
 import { MAX_PREPARE_BYTES, prepareAction, readPrepareBody } from "../prepare";
-import { ORG_A, ORG_B, contextFor, managerOf, tableClient } from "./host-fakes";
+import { ORG_A, ORG_B, contextFor, managerOf, tableClient, tenantOf } from "./host-fakes";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
 const HOUSE = "e7100000-0000-4000-8005-0000000000b1";
@@ -183,6 +183,19 @@ describe("prepareAction", () => {
     tables.microgrids = { data: [{ id: MG, name: "Kiwumu", community_id: null }] };
     resolveTargetOrganization.mockResolvedValue(ORG_B);
     expect(await prepare({ action: "metering.backend", params })).toMatchObject({ status: 404, code: "gui_not_found" });
+    expect(checkGate).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 for a person whose rows are all tenant rows, reading nothing, even about their own unit", async () => {
+    use(action({ bind: { path: { id: "microgrid" }, body: { tenant_id: "tenant" } }, input: z.object({ tenant_id: z.uuid() }) }));
+    tables.tenants = { data: [{ id: HOUSE, display_name: "House", microgrid_id: MG }] };
+    roles = [tenantOf(HOUSE)];
+    expect(await prepare({ action: "metering.backend", params: { id: MG, tenant_id: HOUSE } })).toMatchObject({
+      status: 404,
+      code: "gui_not_found",
+    });
+    expect(calls()).toEqual([]);
+    expect(resolveTargetOrganization).not.toHaveBeenCalled();
     expect(checkGate).not.toHaveBeenCalled();
   });
 

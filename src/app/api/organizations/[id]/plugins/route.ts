@@ -32,8 +32,9 @@ function mapError(error: unknown): NextResponse {
  * GET /api/organizations/[id]/plugins — trusted bundled plugin states.
  *
  * Returns definitions merged with organization state, dependency readiness,
- * and recent audit history. Missing state rows default to enabled so
- * existing deployments need no backfill.
+ * and recent audit history. A missing state row reads as the plugin's
+ * default (`defaultEnabled` in bundled.ts): enabled, so existing deployments
+ * need no backfill, except for the tenant app, which is off until turned on.
  */
 export async function GET(
   _request: NextRequest,

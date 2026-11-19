@@ -79,6 +79,17 @@ export interface SurfaceRequest {
 }
 /** Installation-wide views, such as the super admin's organization list, get no organization. */
 export type InstallationRequest = Omit<SurfaceRequest, "organizationId"> & { organizationId: null };
+/**
+ * A tenant view's request (RFC mgm#197 § 4): about one unit the caller rents,
+ * never about an organization's records. The host chose `tenantId` among the
+ * caller's own tenant rows (the `unit` query parameter, or their only unit),
+ * so `params` is empty. The loader still authorizes the unit itself, through
+ * composeTenantApp (@/lib/tenant-app/compose), which settles the session,
+ * finds the caller's tenant row and asks the plugin gate of the unit's
+ * organization. The host asks no gate for it, so a tenant loader that reads
+ * without that composer reads while the tenant app is off.
+ */
+export type TenantRequest = Omit<SurfaceRequest, "organizationId"> & { organizationId: null; tenantId: string };
 export type Loaded<T> =
   | { ok: true; model: T }
   | { ok: false; status: 403 | 404 | 409 | 500 | 503; message: string };
@@ -122,9 +133,26 @@ interface ViewDefBase<K extends ViewKind> {
   /** Fixtures, so every GUI can be tested against the view. */
   examples: readonly ModelOf<K>[];
 }
+/**
+ * A view about the caller's own unit, for the `tenant` nav audience. Its path
+ * has no segments, since the unit is the caller's, not a record a path names;
+ * it is never attached to another view, and never read by an assistant: it
+ * carries a tenant's name and unit, which #133's data boundary keeps from any
+ * model (RFC mgm#197 § 3). The host serves it with no actions, since every
+ * action is a staff route (dispatchView in host/server/view.ts).
+ */
+type TenantViewDef<K extends ViewKind> = {
+  scope: "tenant";
+  params: Record<string, never>;
+  entity?: never;
+  attach?: never;
+  agent?: never;
+  load(req: TenantRequest): Promise<Loaded<LoadedModel<K>>>;
+};
 export type ViewDefOf<K extends ViewKind> = ViewDefBase<K> & (
   | { scope?: "organization"; load(req: SurfaceRequest): Promise<Loaded<LoadedModel<K>>> }
   | { scope: "installation"; load(req: InstallationRequest): Promise<Loaded<LoadedModel<K>>> }
+  | TenantViewDef<K>
 );
 export type ViewDef = { [K in ViewKind]: ViewDefOf<K> }[ViewKind];
 
@@ -180,14 +208,24 @@ export type GuardedAction = ActionBase & {
 };
 export type ActionDef = ProposableAction | HumanAction | GuardedAction;
 
+/**
+ * Who a nav entry is shown to. "staff", the default, is a person holding a
+ * role other than tenant (rolesIncludeStaff; staff is an audience here, not
+ * a role, as @/lib/roles defines it); "super-admin" only super admins; "tenant" a person
+ * with a tenant row, and only for an entry naming a tenant view. A person
+ * with both kinds of row sees both groups (RFC mgm#197 § 4). An audience
+ * hides an entry; it authorizes nothing.
+ */
+export type NavAudience = "staff" | "super-admin" | "tenant";
+
 export type NavDef = {
   id: Id;
   title: string;
   icon: Icon;
   group: NavGroup;
   order: number;
-  /** Shown only to super admins. This hides the entry; it does not authorize anything. */
-  audience?: "super-admin";
+  /** Absent means "staff". This hides the entry; it does not authorize anything. */
+  audience?: NavAudience;
 } & (
   | { view: Id }
   // A legacy page's path. It becomes a NavEntry's Href, so it is one too: see

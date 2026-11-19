@@ -12,6 +12,7 @@ import { inspect } from "node:util";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { vi } from "vitest";
 import { SYNTHETIC_EDGE_ID_PREFIX } from "@/lib/metering/fixture-provider";
+import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import type { EntityKind } from "../../../contract";
 import { fillPath } from "../../shared/merge-actions";
 import type { HostContext } from "../access";
@@ -102,6 +103,15 @@ export type CanaryIds = {
   tenantId: string;
   /** The period's one bill: the tenant's, unpaid, entered by hand, with a starting reading. */
   lineItemId: string;
+  /**
+   * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
+   * views are dispatched as a tenant holding every one of them. The units
+   * have no meter assigned, so the microgrids' house meters, and with them
+   * the Operations day's reads, stay as they were. Tenant views that read a
+   * meter's use through the metering source (RFC mgm#197 § 5) need an
+   * assignment seeded here, of a meter of each microgrid.
+   */
+  unitIds: readonly string[];
 };
 
 /** Every seeded microgrid: one per OpenEMS credential path, then the synthetic and mixed ones. */
@@ -125,8 +135,9 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * period pinned to that tariff: a draft with one unpaid bill and no recorded
  * payment, so delete's available() and prepare run, and every bill action
  * reaches its own steps. The organization's delete removes them with it.
- * The organization also gets an email
- * sender (RFC #186) whose password is a canary.
+ * The organization also gets an email sender (RFC #186) whose password is a
+ * canary, a tenant unit on each microgrid (`unitIds`) and the tenant app
+ * turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -229,6 +240,14 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       ...(await secret("organization_email_senders", "password_encrypted", ids.orgId)),
     },
   ]);
+  const places = canaryMicrogrids(ids);
+  if (ids.unitIds.length !== places.length) throw new Error("[canary] unitIds needs one unit per seeded microgrid");
+  places.forEach((microgridId, i) => {
+    site.push(["tenants", { id: ids.unitIds[i], microgrid_id: microgridId, display_name: `Canary unit ${i}`, primary_phone: "+256700000000" }]);
+  });
+  // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts),
+  // so its views would stop at the gate's 409 before reading anything.
+  site.push(["mgm_plugins", { org_id: ids.orgId, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }]);
   for (const [table, row] of [...rows, ...site]) {
     const { error } = await svc.from(table).insert(row);
     if (error) throw new Error(`[canary] ${table}: ${error.message}`);
@@ -327,13 +346,16 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
  * console meanwhile. `serve` must make the host's surfaceSnapshot() return
  * the snapshot it is given (null: stop), so the loop can count loader runs:
  * a view whose loader did not run, or whose path names a kind with no seeded
- * row, throws rather than passing unscanned.
+ * row, throws rather than passing unscanned. A tenant view (scope "tenant")
+ * is dispatched as `tenant`, a person holding every seeded unit, once per
+ * unit with `?unit=`; without `tenant` it throws.
  */
 export async function dispatchEveryView(
   ctx: HostContext,
   snapshot: SurfaceSnapshot,
   ids: CanaryIds,
   serve: (snapshot: SurfaceSnapshot | null) => void,
+  tenant?: HostContext,
 ): Promise<Dispatched[]> {
   const runs = new Map<string, number>();
   const views = snapshot.views.map(({ plugin, def }) => {
@@ -348,13 +370,19 @@ export async function dispatchEveryView(
   serve({ ...snapshot, views });
   try {
     for (const { def } of snapshot.views) {
-      for (const params of seededParams(ids, def.params, `view ${def.id}`)) {
-        const path = fillPath(def.path, params);
-        if (path === null) throw new Error(`[canary] view ${def.id}: path ${def.path} could not be filled`);
-        const href = Object.keys(def.params).length === 0 ? `${path}?org=${ids.orgId}` : path;
+      const asTenant = def.scope === "tenant";
+      if (asTenant && !tenant) throw new Error(`[canary] view ${def.id} is a tenant view: pass a tenant's context`);
+      const hrefs = asTenant
+        ? ids.unitIds.map((unit) => `${def.path}?unit=${unit}`)
+        : seededParams(ids, def.params, `view ${def.id}`).map((params) => {
+            const path = fillPath(def.path, params);
+            if (path === null) throw new Error(`[canary] view ${def.id}: path ${def.path} could not be filled`);
+            return Object.keys(def.params).length === 0 ? `${path}?org=${ids.orgId}` : path;
+          });
+      for (const href of hrefs) {
         for (const spy of spies) spy.mockClear();
         const before = runs.get(def.id) ?? 0;
-        const response = hostOutcome(await dispatchView(ctx, href));
+        const response = hostOutcome(await dispatchView(asTenant ? tenant! : ctx, href));
         const body = await response.text();
         if ((runs.get(def.id) ?? 0) === before) throw new Error(`[canary] view ${def.id} (${href}): loader did not run: ${response.status} ${body}`);
         const logged = spies.flatMap((spy) => spy.mock.calls.flat().map(show));

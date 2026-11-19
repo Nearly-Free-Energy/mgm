@@ -48,6 +48,7 @@ const COMPOSER_MODULES = new Map<string, readonly string[]>([
   [inSrc("lib/billing/compose.ts"), ["composeBilling"]],
   [inSrc("lib/payments/compose.ts"), ["composePayments", "composePaymentsPublic"]],
   [inSrc("lib/cordis/billing-review.ts"), ["composeBillingReview"]],
+  [inSrc("lib/tenant-app/compose.ts"), ["composeTenantApp"]],
 ]);
 
 const OPENER = "openOrganizationScope";

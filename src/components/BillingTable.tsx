@@ -20,7 +20,7 @@ import {
   lineItemHasRecordedPayment,
   periodDeleteErrorMessage,
 } from "@/lib/billing/period-delete";
-import { ClosePeriodDialog, type ClosePeriodSummaryRow } from "@/components/ui/close-period-dialog";
+import { ClosePeriodDialog } from "@/components/ui/close-period-dialog";
 import { Banner } from "@/components/ui/banner";
 import { RowActionsMenu } from "@/components/billing/row-actions-menu";
 import {
@@ -112,7 +112,6 @@ export function BillingTable({
   // pre-flight panel owns its own submit state. Kept for the disabled-
   // state semantics on the header buttons.
   const [generating] = useState(false);
-  const [closing, setClosing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generateErrors, setGenerateErrors] = useState<
@@ -122,12 +121,6 @@ export function BillingTable({
   // Dialog state
   const [closePeriodOpen, setClosePeriodOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  // Release 3 (issue #5, review P1): the server is the source of truth for
-  // unresolved tenants. The first confirm goes out unconfirmed; a 409
-  // `billing_unresolved_tenants` escalates the dialog's Retry into an
-  // explicit close-anyway. Reset whenever the dialog closes.
-  const closeConfirmedRef = useRef(false);
 
   // Phase B (#157) — toast queue for IPN-driven paid transitions. Pollable
   // because Supabase Realtime is not yet wired into this repo; polling every
@@ -437,78 +430,11 @@ export function BillingTable({
     router.push(`/microgrids/${microgridId}/billing`);
   }
 
-  async function handleClose() {
-    setError(null);
-    setClosing(true);
-
-    // Release 3 (issue #5, review P1): closing runs through the billing
-    // capability (POST /api/billing-periods/[id]/close) — org-scoped,
-    // plugin-gated, with the unresolved-tenant safeguard — never a
-    // direct table update, so disabling Billing stops closure with a 409.
-    // The client warning is informational only. Confirmation is sent only
-    // after the server reports its authoritative unresolved-tenant list.
-    try {
-      const res = await fetch(`/api/billing-periods/${period.id}/close`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(closeConfirmedRef.current ? { confirmed: true } : {}),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        code?: string;
-        message?: string;
-        error?: string;
-        unresolved?: { tenantName: string; reason: string }[];
-      };
-      if (res.status === 409 && body.code === "billing_unresolved_tenants") {
-        closeConfirmedRef.current = true;
-        throw new Error(
-          [body.message ?? "Period has unresolved tenants. Retry to close anyway.",
-            ...(body.unresolved ?? []).map((tenant) => `${tenant.tenantName}: ${tenant.reason}`)
-          ].join("\n")
-        );
-      }
-      if (!res.ok) {
-        throw new Error(
-          body.message ?? body.error ?? "Could not close the period."
-        );
-      }
-    } catch (err) {
-      setClosing(false);
-      throw err instanceof Error ? err : new Error("Network error.");
-    }
-
-    closeConfirmedRef.current = false;
-    setClosing(false);
-    router.refresh();
-  }
-
-  function handleCloseDialogChange(open: boolean) {
-    if (!open) closeConfirmedRef.current = false;
-    setClosePeriodOpen(open);
-  }
-
-  // Build period label for ClosePeriodDialog
+  // The period label for the table caption.
   const periodLabel =
     period.start_date === period.end_date
       ? period.start_date
       : `${period.start_date} – ${period.end_date}`;
-
-  // #167 — derive the list of un-metered tenants whose `usage_kwh` is
-  // still NULL. These are the rows that would silently lock in zero kWh /
-  // zero amount on close. Surfaced to <ClosePeriodDialog> as a warning
-  // banner; closing is still permitted (operator may genuinely intend to
-  // bill nothing) but the gesture becomes more deliberate.
-  const unfilledTenantNames = lineItems
-    .filter(
-      (item) =>
-        item.device_id === null &&
-        (item.usage_kwh === null || item.usage_kwh === undefined)
-    )
-    .map(
-      (item) =>
-        tenants.find((h) => h.id === item.tenant_id)?.display_name ??
-        "Unknown tenant"
-    );
 
   // #293 — persistent "not billed — no meter data" indicator. Reads from
   // PERSISTED state (tenants ∖ line items), not from a transient generate
@@ -528,22 +454,6 @@ export function BillingTable({
         !lineItemMap.has(h.id)
     )
     .map((h) => h.display_name);
-
-  // Build summary rows for ClosePeriodDialog
-  const closePeriodSummaryRows: ClosePeriodSummaryRow[] = [
-    {
-      label: "Tenants",
-      value: String(lineItems.length),
-    },
-    {
-      label: `Total (${currency})`,
-      value: <Currency value={grandTotal} bareNumber />,
-    },
-    {
-      label: "Total (kWh)",
-      value: <Kwh value={grandTotalKwh} bareNumber />,
-    },
-  ];
 
   // CopyTable columns built from tiers
   // Format helpers (plain string, for CopyTable column defs)
@@ -769,15 +679,17 @@ export function BillingTable({
       />
 
       {/* Close Period Dialog */}
+      {/* Closing runs through the billing capability (POST
+          /api/billing-periods/[id]/close), never a direct table update: the
+          dialog shows the server's review through the host's confirmation
+          step and sends the digest, acknowledgements and typed name the
+          close function checks (#201). */}
       <ClosePeriodDialog
         open={closePeriodOpen}
-        onOpenChange={handleCloseDialogChange}
-        periodLabel={periodLabel}
-        summaryRows={closePeriodSummaryRows}
-        grandTotal={grandTotal}
-        onConfirm={handleClose}
+        onOpenChange={setClosePeriodOpen}
+        periodId={period.id}
+        onClosed={() => router.refresh()}
         onExportCsv={() => triggerCsvDownload(period.id)}
-        unfilledTenantNames={unfilledTenantNames}
       />
 
       {/* BC3 (#175 AC2) — per-row regenerate dialog. Mounts only when
@@ -904,7 +816,7 @@ export function BillingTable({
               <>
                 <button
                   onClick={handleGenerate}
-                  disabled={generating || closing || deleting}
+                  disabled={generating || deleting}
                   className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {generating
@@ -915,10 +827,10 @@ export function BillingTable({
                 </button>
                 <button
                   onClick={() => setClosePeriodOpen(true)}
-                  disabled={generating || closing || deleting || lineItems.length === 0}
+                  disabled={generating || deleting || lineItems.length === 0}
                   className="rounded-md border border-border bg-card px-4 py-2 text-sm text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {closing ? "Closing..." : "Close Period"}
+                  Close Period
                 </button>
                 {/* Delete is offered on drafts with no recorded payment on
                     a loaded line item: fn_billing_period_before_delete_guard
@@ -929,7 +841,7 @@ export function BillingTable({
                 {!hasRecordedPayment && (
                   <button
                     onClick={() => setDeleteDialogOpen(true)}
-                    disabled={generating || closing || deleting}
+                    disabled={generating || deleting}
                     className="rounded-md border border-destructive bg-card px-4 py-2 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {deleting ? "Deleting..." : "Delete"}

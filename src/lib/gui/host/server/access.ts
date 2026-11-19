@@ -5,8 +5,8 @@ import "server-only";
  * loaders, signals, search and prepare functions receive.
  *
  * A HostContext exists only after the caller's session has been checked with
- * getUser() on this request. Every SurfaceRequest and InstallationRequest gets
- * a new client from the route's factory, bound to the caller's own session
+ * getUser() on this request. Every SurfaceRequest, InstallationRequest and
+ * TenantRequest gets a new client from the route's factory, bound to the caller's own session
  * (row-level security): never the client the route checked the session on,
  * and never the service role. supabase-js holds a client's auth lock for the
  * whole getUser() call, and composers call getUser() again, so separate
@@ -14,10 +14,11 @@ import "server-only";
  * queries behind getUser(), one client would do.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import { rolesCanAccessOrg, type CurrentUserAccess } from "@/lib/auth/access";
-import { detectLocale } from "@/lib/locale";
+import { rolesCanAccessOrg, rolesIncludeStaff, type CurrentUserAccess } from "@/lib/auth/access";
+import { formatLocale } from "@/lib/locale";
 import type { UserRoleRecord } from "@/lib/types/domain";
-import type { Fmt, InstallationRequest, SurfaceRequest } from "../../surface";
+import type { Fmt, InstallationRequest, SurfaceRequest, TenantRequest } from "../../surface";
+import { tenantUnitIds } from "../shared/tenant-units";
 
 /**
  * Returns a new row-level-security client for this request's session. Every
@@ -49,14 +50,9 @@ export type HostRefusal = {
  */
 const ISSUED = Symbol("gui.hostContext");
 
-/** The request's locale from Accept-Language, or "en" when the tag is not one Intl accepts. */
+/** The request's locale from Accept-Language (formatLocale, @/lib/locale). */
 function localeOf(headers: Headers): string {
-  const tag = detectLocale(headers.get("accept-language"));
-  try {
-    return Intl.getCanonicalLocales(tag)[0] ?? "en";
-  } catch {
-    return "en";
-  }
+  return formatLocale(headers.get("accept-language"));
 }
 
 /**
@@ -66,6 +62,14 @@ function localeOf(headers: Headers): string {
  * getRequestUserAccess (@/lib/auth/request-access) returned on this request:
  * both ask Supabase Auth with getUser(). If either stops calling getUser(),
  * revisit. No user is a 401 and no role row a 403, before anything is loaded.
+ *
+ * A person whose rows are all tenant rows (RFC mgm#197 § 4) gets a context
+ * too: the host serves them their own units' views and nothing of an
+ * organization. Each staff entry point refuses them on its own, by their
+ * roles: surfaceRequest and installationRequest below, pluginGate
+ * (./gate-state.ts), visibleOrganizations (./organization.ts),
+ * resolveSegments (./entities.ts) and dispatchView (./view.ts). A context
+ * says who the person is, never that they are staff.
  */
 export function hostContext(
   access: CurrentUserAccess,
@@ -138,11 +142,36 @@ export async function surfaceRequest(
   return { ...(await baseRequest(ctx, params, search)), organizationId };
 }
 
-/** A request for an installation-wide call or a plugin's organizationOf, on a new client. */
+/**
+ * A request for an installation-wide call or a plugin's organizationOf, on a
+ * new client. Throws when the caller holds no staff row: both are staff
+ * reads, and dispatchView and resolveSegments refuse a person with only
+ * tenant rows before they build one, so this only fails on a host bug.
+ */
 export async function installationRequest(
   ctx: HostContext,
   params: Record<string, string>,
   search: URLSearchParams,
 ): Promise<InstallationRequest> {
+  requireIssued(ctx);
+  if (!rolesIncludeStaff(ctx.access.roles)) {
+    throw new Error("GUI host: installation request from a caller with no staff role");
+  }
   return { ...(await baseRequest(ctx, params, search)), organizationId: null };
+}
+
+/**
+ * A request for a tenant view about `tenantId`, on a new client, with no
+ * params. Throws unless the caller holds a tenant row for that unit:
+ * dispatchView picks the unit among those rows (chooseTenantUnit) first, so
+ * this only fails on a host bug; if the host stops picking before it builds
+ * requests, this throw is what refuses. Staff rows never reach a unit here,
+ * as `user_can_access_tenant` decides in the database.
+ */
+export async function tenantRequest(ctx: HostContext, tenantId: string, search: URLSearchParams): Promise<TenantRequest> {
+  requireIssued(ctx);
+  if (!tenantUnitIds(ctx.access.roles).includes(tenantId)) {
+    throw new Error("GUI host: tenant request for a unit the caller does not hold");
+  }
+  return { ...(await baseRequest(ctx, {}, search)), organizationId: null, tenantId };
 }
