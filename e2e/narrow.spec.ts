@@ -57,8 +57,10 @@ test("a period's close checklist and its confirmation render at 360 px", async (
 
   // The host's confirmation step: the totals, a box for each
   // acknowledgement and the name to type, inside the screen.
+  // A confirm-level step is an alertdialog (the kit's Overlay,
+  // src/lib/gui/kit/overlay.tsx); if the host frames it otherwise, follow it.
   await page.getByRole("button", { name: "Close period" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("alertdialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("Type October 2026 to confirm")).toBeVisible();
   await expect(dialog.getByRole("checkbox")).toHaveCount(3);
@@ -69,7 +71,7 @@ test("a period's close checklist and its confirmation render at 360 px", async (
   expect(box!.y).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(360);
   expect(box!.y + box!.height).toBeLessThanOrEqual(800);
-  await checkTouchTargets(page, '[role="dialog"]');
+  await checkTouchTargets(page, '[role="alertdialog"]');
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   watch.assertClean();
