@@ -119,10 +119,13 @@ describe("the close refusals' copy", () => {
     expect(fractionalTotalsMessage([])).toBe("Regenerate the bills whose totals are not whole numbers before closing.");
   });
 
-  it("is the route's copy for a closed period and an unreadable review", () => {
+  it("is the route's copy for a closed period, an unreadable review and totals that changed", () => {
     expect(CLOSE_REFUSAL_COPY).toEqual({
       closed: "Billing period is already closed.",
       reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
+      // The GUI host shows its old step again after a refusal, so not "confirm again".
+      totalsChanged:
+        "The period's totals changed after you reviewed them. Close this dialog and choose Close period again to review the new totals.",
     });
   });
 });
