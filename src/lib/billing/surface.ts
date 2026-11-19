@@ -18,12 +18,12 @@ import "server-only";
  * counts. A page that moves to a view keeps its nav id.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
- * have the Billing pages' own paths, which the legacy pages still serve: the
- * catalog gives those pages no servedBy, so the views are reached through
- * GET /api/gui/view until
- * #201's "Serve the billing pages through the GUI host" moves the pages and
- * the nav entry to the views. `billing.close-checklist` and
- * `billing.send-queue` are new pages (…/[periodId]/close and
+ * have the Billing pages' own paths. The catalog serves the history's path
+ * by its view (`servedBy: "view"`) and the host's catch-all renders it; the
+ * periods list and the review are still the legacy pages, so those two
+ * views are reached through GET /api/gui/view until #201's "Serve the
+ * billing pages through the GUI host" moves them. `billing.close-checklist`
+ * and `billing.send-queue` are new pages (…/[periodId]/close and
  * …/[periodId]/send) with no page.tsx, so the catalog marks them
  * `servedBy: "view"` and the host's catch-all serves them now.
  */

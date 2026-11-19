@@ -2,7 +2,8 @@
  * The billing parity table (src/lib/billing/parity.ts) against the code (#201).
  *
  * Every row names something real: its route with the method and body
- * schema, its page or GET route, and, while it is pending, its legacy
+ * schema, its page (a page.tsx, or a catalog page a view serves) or GET
+ * route, and, while it is pending, its legacy
  * component. Every row is either contributed, matching the contribution, or
  * listed in PENDING below. The contributing pull requests of #201 remove
  * their rows from PENDING as they land; the legacy billing screens may be
@@ -42,7 +43,7 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
 import * as paymentSchemas from "@/lib/payments/schemas";
 import * as schemas from "../schemas";
-import { BILLING_PLUGIN } from "@/lib/plugins/bundled";
+import { BILLING_PLUGIN, MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow, type ParityScreen } from "../parity";
 
 const ROOT = path.resolve(__dirname, "../../../..");
@@ -80,7 +81,9 @@ const LEGACY_SCREENS = [
   "src/components/BillingPeriodList.tsx",
   "src/app/(gui)/microgrids/[id]/billing/page.tsx",
   "src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx",
-  "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+  // …/[periodId]/history/page.tsx left with "Serve the billing pages through
+  // the GUI host": no row of the period-history screen was pending, and the
+  // billing.period-history view serves its URL.
 ];
 
 /**
@@ -141,6 +144,14 @@ function pageExists(href: string): boolean {
   };
   return walk(APP, segments);
 }
+
+/**
+ * A catalog page the GUI host's catch-all serves by a view (`servedBy:
+ * "view"`), which has no page.tsx of its own. If the host comes to serve a
+ * page some other way, revisit.
+ */
+const servedByView = (href: string) =>
+  MGM_BUNDLED_PLUGINS.some((p) => p.pages.some((page) => page.path === href && page.servedBy === "view"));
 
 function contributedAction(a: ParityAction): ActionDef | undefined {
   return SURFACES[a.plugin].actions?.find((d) => d.id === a.action);
@@ -283,7 +294,7 @@ describe("the billing parity table", () => {
         expect(source, `src/app${l.href}/route.ts`).not.toBeNull();
         expect(exportsMethod(source!, "GET"), `${l.href} exports GET`).toBe(true);
       } else {
-        expect(pageExists(l.href), `a page at ${l.href}`).toBe(true);
+        expect(pageExists(l.href) || servedByView(l.href), `a page at ${l.href}`).toBe(true);
       }
     }
   );

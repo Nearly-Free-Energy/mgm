@@ -114,11 +114,6 @@ const REACHED_IN_PAGE: Record<string, Reach> = {
     via: ["src/components/BillingPeriodList.tsx"],
     link: "href={`/microgrids/${microgridId}/billing/${period.id}`}",
   },
-  "/microgrids/[id]/billing/[periodId]/history": {
-    from: "/microgrids/[id]/billing/[periodId]",
-    via: ["src/components/BillingTable.tsx"],
-    link: "href={`/microgrids/${microgridId}/billing/${period.id}/history`}",
-  },
   "/communities/[id]/payment": {
     from: "/microgrids/[id]/billing/[periodId]",
     via: ["src/components/BillingTable.tsx"],

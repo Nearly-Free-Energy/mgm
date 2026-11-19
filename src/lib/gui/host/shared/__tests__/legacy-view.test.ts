@@ -86,7 +86,6 @@ const CURRENT_APP: Record<string, Id | null> = {
   "/microgrids/[id]/setup/openems-backend": "metering.data-source",
   "/microgrids/[id]/billing": "billing.periods",
   "/microgrids/[id]/billing/[periodId]": "billing.periods",
-  "/microgrids/[id]/billing/[periodId]/history": "billing.periods",
   "/microgrids/[id]/setup/rates": "billing.tariff",
   "/communities/[id]/invoice": "billing.invoice-branding",
   "/organizations/[id]/payments": "payments.org-accounts",
@@ -143,6 +142,7 @@ describe("legacyView on every catalog page", () => {
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+      "/microgrids/[id]/billing/[periodId]/history": ["billing.period-history", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/close": ["billing.close-checklist", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/send": ["billing.send-queue", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payments": ["payments.bill-attempts", "billing.periods"],
@@ -173,7 +173,13 @@ describe("legacyView trails", () => {
 
   it("follows organization, community, microgrid, then the app unless it is the last crumb", () => {
     expect(crumbs("/")).toEqual(["Org One", "Dashboard"]);
-    expect(crumbs(`/microgrids/${MICROGRID}/billing/${DEEPER}/history`)).toEqual(["Org One", "Kasana", "Kasana East", "Billing"]);
+    // History is served by a view; UNSERVED asks what its place would be outside the contract.
+    expect(legacyView(`/microgrids/${MICROGRID}/billing/${DEEPER}/history`, MANIFEST, UNSERVED)!.trail.map((c) => c.label)).toEqual([
+      "Org One",
+      "Kasana",
+      "Kasana East",
+      "Billing",
+    ]);
     expect(legacyView(`/microgrids/${MICROGRID}/billing/${DEEPER}`, MANIFEST)!.trail.at(-1)?.href).toBe(
       `/microgrids/${MICROGRID}/billing`,
     );
