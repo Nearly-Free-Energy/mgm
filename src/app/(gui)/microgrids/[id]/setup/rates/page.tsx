@@ -7,12 +7,14 @@ import { isSupportedTimezone } from "@/lib/validation/timezone";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 export default async function RatesPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 

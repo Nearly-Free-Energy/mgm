@@ -8,6 +8,7 @@ import { currentUserIsSuperAdmin } from "@/lib/auth/access";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { Organization } from "@/lib/types/domain";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /organizations/[id] — organization detail page (#76).
@@ -24,6 +25,7 @@ export default async function OrganizationDetailPage({
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const sp = searchParams ? await searchParams : undefined;
   const supabase = await createClient();

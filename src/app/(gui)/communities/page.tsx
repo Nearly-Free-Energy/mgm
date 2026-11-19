@@ -4,6 +4,7 @@ import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { Community } from "@/lib/types/domain";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type CommunityRow = Community & {
   microgrids: { count: number }[];
@@ -16,6 +17,7 @@ export default async function CommunitiesPage({
 }: {
   searchParams?: Promise<{ org?: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { org: orgId } = (await searchParams) ?? {};
   const supabase = await createClient();
 

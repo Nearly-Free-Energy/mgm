@@ -44,6 +44,10 @@ let MOCK_LINE_ITEMS: { id: string; tenant_id: string }[] = [
   { id: LI_B, tenant_id: HH_B },
 ];
 
+// The page's first call keeps a tenant-only person to tenant pages; that is
+// tested for every page in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
+vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({
     from: (table: string) => {

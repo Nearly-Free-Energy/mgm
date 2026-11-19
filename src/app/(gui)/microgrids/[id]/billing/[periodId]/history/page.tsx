@@ -26,6 +26,7 @@ import { AuditLogList } from "@/components/billing/audit-log-list";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import type { BillingPeriod, Tenant } from "@/lib/types/domain";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 export default async function BillingPeriodHistoryPage({
   params,
@@ -34,6 +35,7 @@ export default async function BillingPeriodHistoryPage({
   params: Promise<{ id: string; periodId: string }>;
   searchParams: Promise<{ tenant_id?: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id, periodId } = await params;
   const { tenant_id } = await searchParams;
   const supabase = await createClient();

@@ -187,9 +187,9 @@ const MODULES: Record<string, Module> = {
       "renderView loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load. resolveInitialView reads only the registered view definitions from the snapshot and runs no loader.",
   },
   "src/lib/gui/host/server/tenant-pages.ts": {
-    privilegedExports: ["isTenantPage"],
+    privilegedExports: ["isTenantPage", "tenantOnlyRedirect"],
     reason:
-      "Reads only the registered view definitions from the snapshot, to tell whether a path is a tenant view's page, and runs no loader.",
+      "Reads only the registered view definitions from the snapshot, to tell whether a path is a tenant view's page, and runs no loader. tenantOnlyRedirect takes the roles its caller read. keepTenantOnlyToTenantPages passes nothing on: it reads the user and their rows with getRequestUserAccess (getUser) first, and reaches the snapshot only for a signed-in person whose rows are all tenant rows.",
   },
   "src/lib/gui/host/server/go.ts": {
     privilegedExports: ["resolveGoTarget"],
@@ -243,7 +243,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
-      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; isTenantPage runs only after getUser() and runs no view loader either.",
+      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; tenantOnlyRedirect runs only after getUser() and runs no view loader either.",
   },
   "src/app/(gui)/[...path]/page.tsx": {
     kind: "session",

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ProfileForm } from "./profile-form";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /settings/profile — edit your own profile (UX5 / #79).
@@ -8,6 +9,7 @@ import { ProfileForm } from "./profile-form";
  * policy allows self). Email comes from auth.users and is read-only.
  */
 export default async function SettingsProfilePage() {
+  await keepTenantOnlyToTenantPages();
   const supabase = await createClient();
 
   const {

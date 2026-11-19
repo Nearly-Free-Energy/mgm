@@ -4,12 +4,14 @@ import { BillingPeriodList } from "@/components/BillingPeriodList";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { requestUserCanAccessMicrogrid } from "@/lib/auth/request-access";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 export default async function BillingPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 
