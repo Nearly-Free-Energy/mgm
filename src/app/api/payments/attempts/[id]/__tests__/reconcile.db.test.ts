@@ -5,7 +5,11 @@
  * typed and an amount that settles the bill exactly, and then marks the
  * bill paid, resolves the attempt and records a payment event with the
  * person as its actor; accepting exact receipts does the same without an
- * amount; another organization's manager and a tenant are refused.
+ * amount; another organization's manager and a tenant are refused; and
+ * fn_payment_reconcile's own refusals of a bill with a checkout whose
+ * outcome is unknown, or with receipts in another currency, reach the
+ * person as fixed copy, so a reworded RAISE fails here rather than turning
+ * into a 500.
  * Refresh status is not called here: it would ask the provider.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
@@ -31,6 +35,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
+import { RECONCILE_COPY } from "@/lib/payments/schemas";
 import { POST } from "../reconcile/route";
 
 const ORG = "e8700000-0000-4000-8000-000000000001";
@@ -47,6 +52,13 @@ const BILL_B = "e8700000-0000-4000-8005-000000000002";
 const A_HELD = "e8700000-0000-4000-8008-000000000001";
 /** Bill B (3,000): held, with a receipt of exactly 3,000. */
 const B_HELD = "e8700000-0000-4000-8008-000000000002";
+const BILL_C = "e8700000-0000-4000-8005-000000000003";
+const BILL_D = "e8700000-0000-4000-8005-000000000004";
+/** Bill C (4,000): held, with a receipt of exactly 4,000, beside a pending checkout with no tracking id. */
+const C_HELD = "e8700000-0000-4000-8008-000000000003";
+const C_UNKNOWN = "e8700000-0000-4000-8008-000000000004";
+/** Bill D (2,000): held, with a receipt of exactly 2,000 and another in USD. */
+const D_HELD = "e8700000-0000-4000-8008-000000000005";
 const EMAIL = "attempts-reconcile-manager@test.local";
 const OTHER_EMAIL = "attempts-reconcile-other@test.local";
 const TENANT_EMAIL = "attempts-reconcile-tenant@test.local";
@@ -86,7 +98,7 @@ async function cleanup() {
   await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
 }
 
-const attempt = (id: string, lineItem: string, amount: number, tracking: string) => ({
+const attempt = (id: string, lineItem: string, amount: number, tracking: string | null, status = "needs_reconciliation") => ({
   id,
   org_id: ORG,
   line_item_id: lineItem,
@@ -98,14 +110,14 @@ const attempt = (id: string, lineItem: string, amount: number, tracking: string)
   bill_revision_total: amount,
   merchant_reference: `MGM-${id}`,
   provider_tracking_id: tracking,
-  status: "needs_reconciliation",
-  failure_code: "balance_mismatch",
+  status,
+  failure_code: status === "needs_reconciliation" ? "balance_mismatch" : null,
 });
-const receipt = (attemptId: string, amount: number, tracking: string) => ({
+const receipt = (attemptId: string, amount: number, tracking: string, currency = "UGX") => ({
   org_id: ORG,
   attempt_id: attemptId,
   amount,
-  currency: "UGX",
+  currency,
   provider: "pesapal",
   provider_status: "completed",
   provider_tracking_id: tracking,
@@ -135,6 +147,8 @@ beforeAll(async () => {
       [
         { id: tenant(1), microgrid_id: MICROGRID, display_name: "Akello  Grace", primary_phone: "+256700000901" },
         { id: tenant(2), microgrid_id: MICROGRID, display_name: "Byaruhanga Peter", primary_phone: "+256700000902" },
+        { id: tenant(3), microgrid_id: MICROGRID, display_name: "Kato Joseph", primary_phone: "+256700000903" },
+        { id: tenant(4), microgrid_id: MICROGRID, display_name: "Nambi Ruth", primary_phone: "+256700000904" },
       ],
     ],
     ["billing_periods", { id: PERIOD, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", status: "draft", timezone: "Africa/Kampala", rate_schedule_id: SCHEDULE }],
@@ -143,11 +157,31 @@ beforeAll(async () => {
       [
         { id: BILL_A, billing_period_id: PERIOD, tenant_id: tenant(1), start_kwh: 0, end_kwh: 10, usage_kwh: 10, total_amount: 5000, reading_source: "manual" },
         { id: BILL_B, billing_period_id: PERIOD, tenant_id: tenant(2), start_kwh: 0, end_kwh: 6, usage_kwh: 6, total_amount: 3000, reading_source: "manual" },
+        { id: BILL_C, billing_period_id: PERIOD, tenant_id: tenant(3), start_kwh: 0, end_kwh: 8, usage_kwh: 8, total_amount: 4000, reading_source: "manual" },
+        { id: BILL_D, billing_period_id: PERIOD, tenant_id: tenant(4), start_kwh: 0, end_kwh: 4, usage_kwh: 4, total_amount: 2000, reading_source: "manual" },
       ],
     ],
     ["payment_merchant_accounts", { id: MERCHANT, org_id: ORG, provider: "pesapal", is_default: true, sandbox: true, last_test_status: "success", ipn_id: "ipn-test" }],
-    ["payment_attempts", [attempt(A_HELD, BILL_A, 5000, "trk-a"), attempt(B_HELD, BILL_B, 3000, "trk-b")]],
-    ["payment_receipts", [receipt(A_HELD, 3000, "trk-a"), receipt(B_HELD, 3000, "trk-b")]],
+    [
+      "payment_attempts",
+      [
+        attempt(A_HELD, BILL_A, 5000, "trk-a"),
+        attempt(B_HELD, BILL_B, 3000, "trk-b"),
+        attempt(C_HELD, BILL_C, 4000, "trk-c"),
+        attempt(C_UNKNOWN, BILL_C, 4000, null, "pending"),
+        attempt(D_HELD, BILL_D, 2000, "trk-d"),
+      ],
+    ],
+    [
+      "payment_receipts",
+      [
+        receipt(A_HELD, 3000, "trk-a"),
+        receipt(B_HELD, 3000, "trk-b"),
+        receipt(C_HELD, 4000, "trk-c"),
+        receipt(D_HELD, 2000, "trk-d"),
+        receipt(D_HELD, 1, "trk-d-usd", "USD"),
+      ],
+    ],
   ];
   for (const [table, value] of rows) {
     const { error } = await svc.from(table).insert(value);
@@ -253,6 +287,29 @@ describe.skipIf(shouldSkip())("POST /api/payments/attempts/[id]/reconcile on the
     expect(after.bill).toBe("paid");
     expect(after.attempt?.status).toBe("resolved");
     expect(after.events).toEqual([expect.objectContaining({ actor_user_id: manager.userId, raw_payload: expect.objectContaining({ action: "accept_exact", external_amount: 0 }) })]);
+  });
+
+  it("refuses, with fixed copy, a bill with a checkout whose outcome is unknown, whichever the resolution", async () => {
+    caller = manager;
+    const refusal = { status: 409, body: { error: RECONCILE_COPY.unknownOutcome, reason: "payments_unknown_outcome" } };
+    expect(await reconcile(C_HELD, { action: "accept_exact" })).toEqual(refusal);
+    expect(await reconcile(C_HELD, record({ amount: 0, typed: "Kato Joseph" }))).toEqual(refusal);
+    const after = await state(BILL_C, C_HELD);
+    expect(after.bill).toBe("unpaid");
+    expect(after.attempt?.status).toBe("needs_reconciliation");
+    expect(after.events).toEqual([]);
+  });
+
+  it("refuses, with fixed copy, a bill with receipts in another currency", async () => {
+    caller = manager;
+    expect(await reconcile(D_HELD, { action: "accept_exact" })).toEqual({
+      status: 409,
+      body: { error: RECONCILE_COPY.mixed, reason: "payments_mixed_currencies" },
+    });
+    const after = await state(BILL_D, D_HELD);
+    expect(after.bill).toBe("unpaid");
+    expect(after.attempt?.status).toBe("needs_reconciliation");
+    expect(after.events).toEqual([]);
   });
 
   it("called nothing but the local Supabase", () => {
