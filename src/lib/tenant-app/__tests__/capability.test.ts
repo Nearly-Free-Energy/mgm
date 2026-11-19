@@ -172,7 +172,11 @@ describe("the Supabase tenant app repository", () => {
       ["from", "tenant_devices"],
       ["select", "device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)"],
       ["eq", "tenant_id", TENANT_ID],
-      ["in", "role", ["primary_consumption_meter", "secondary_meter"]],
+      // The meters whose use the views show: the unit's primary consumption
+      // meters only (USAGE_METER_ROLE); the database filter is tested in
+      // usage.db.test.ts.
+      ["eq", "role", "primary_consumption_meter"],
+      ["eq", "devices.device_type", "consumption_meter"],
       ["lte", "effective_from", "2026-11-19"],
       ["or", "effective_to.is.null,effective_to.gt.2026-11-19"],
     ]);

@@ -50,9 +50,11 @@ export type TenantAppScope = {
 };
 
 /**
- * The meter roles the tenant home lists (listMetersInForce), as billing and
- * the metering capability's house meters count them. Only the first is ever
- * the unit's use: see USAGE_METER_ROLE.
+ * The roles a tenant's meter link can have, as billing and the metering
+ * capability's house meters name them. The tenant app reads only the first,
+ * on the home as on the month and the day: see USAGE_METER_ROLE. A
+ * secondary link, which may be to another unit's primary meter, is never
+ * shown (Hillary, mgm#217, 19 November).
  */
 export const TENANT_METER_ROLES = ["primary_consumption_meter", "secondary_meter"] as const;
 export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
@@ -64,7 +66,7 @@ export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
  * meter billing bills the unit for (billing/generate.ts). So a secondary
  * link, which may be to another unit's primary meter, never counts, and
  * neither does a grid meter, a battery or any other device, whatever role
- * links it. listMeterAssignments reads only these links, so the capability
+ * links it. Both repository reads take only these links, so the capability
  * and the usage source never see another meter. The overlap trigger and
  * exclusion constraint keep one unit to one primary link a day, but a device
  * may still be two units' primary at once; each then sees its whole use, as
@@ -90,7 +92,7 @@ export type TenantMeter = {
 export type TenantHome = {
   tenant: { id: string; displayName: string; unitLabel: string | null };
   microgrid: { name: string; timezone: string; currency: string };
-  /** Today in `microgrid.timezone`; `meters` are the ones in force on it. */
+  /** Today in `microgrid.timezone`; `meters` are the unit's primary consumption meters in force on it. */
   date: string;
   meters: TenantMeter[];
 };

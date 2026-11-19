@@ -307,13 +307,27 @@ describe("the sum across a unit's meters", () => {
     const { source, requests } = fakeSource(() => 2);
     const { capability } = capabilityFor(
       UNIT_A,
-      [link("p", "2026-10-01", null), link("p", "2026-10-01", null, "secondary_meter")],
+      [link("p", "2026-10-01", "2026-10-20"), link("p", "2026-10-10", null)],
       source
     );
     const shown = await month(capability, { month: "2026-10" });
 
     expect(requests[0].deviceIds).toEqual(["p"]);
     expect(shown.days.every((d) => d.state === "data" && d.kwh === 2)).toBe(true);
+    expect(shown.total).toEqual({ kwh: 62, withoutData: 0 });
+  });
+
+  it("never counts a link that is not to the unit's primary consumption meter, even when given one", async () => {
+    const { source, requests } = fakeSource(() => 2);
+    const grid = { ...link("g", "2026-10-01", null), deviceType: "grid_meter" as const };
+    const { capability } = capabilityFor(
+      UNIT_A,
+      [link("p", "2026-10-01", null), link("s", "2026-10-01", null, "secondary_meter"), grid],
+      source
+    );
+    const shown = await month(capability, { month: "2026-10" });
+
+    expect(requests[0].deviceIds).toEqual(["p"]);
     expect(shown.total).toEqual({ kwh: 62, withoutData: 0 });
   });
 
