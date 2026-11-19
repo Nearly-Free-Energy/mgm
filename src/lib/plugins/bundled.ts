@@ -381,9 +381,8 @@ export const TENANT_APP_PLUGIN: BundledPlugin = {
   defaultEnabled: false,
   // Read-only for tenants. It reads tenants and their meter assignments
   // through the tenant's own row-level access, and its meters' use through
-  // the metering provider registry, reading the meters' edges and the
-  // microgrid's OpenEMS connection on the service role after
-  // composeTenantApp (src/lib/tenant-app/infrastructure/usage-source.ts).
+  // the metering provider registry; what that read takes on the service
+  // role, and why, is in src/lib/tenant-app/infrastructure/usage-source.ts.
   // It owns no API route: its views are read through /api/gui/view. Giving
   // a tenant access is community management's (/api/tenants).
   provides: ["tenant home", "tenant usage"],

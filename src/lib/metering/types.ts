@@ -34,7 +34,9 @@ export interface MeteringProvider {
   getSiteSamples?(request: SiteSamplesRequest): Promise<SiteSamples>;
   /**
    * Energy per local day or hour for each device. Optional: a source that
-   * cannot provide it leaves it out, and a tenant's usage shows "no data".
+   * cannot provide it leaves it out, and a tenant's usage shows no figures,
+   * with the copy for that case in TENANT_USAGE_PROBLEMS
+   * (src/lib/tenant-app/surface/usage-model.ts).
    */
   getDeviceEnergySeries?(request: DeviceEnergySeriesRequest): Promise<DeviceEnergySeries>;
 }

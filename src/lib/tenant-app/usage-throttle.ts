@@ -54,8 +54,13 @@ export type UsageReadOutcome<T, F = never> =
  * composeTenantApp has authorized the request: a hit answers without any
  * check of its own, and a revoked tenant, an ended session or a turned-off
  * tenant app gets no cached figure only because the composer refuses them
- * before this runs. A failed read is counted against the limit and never
- * cached, whatever its failure; the failure is passed back as it is.
+ * before this runs. Metering turned off is not among them while the
+ * metering gate is asked only inside `read` (the usage source asks it):
+ * after metering is turned off nothing is read from the backend, but a
+ * figure read before then is still served, for up to USAGE_FRESH_MS, or up
+ * to USAGE_KEEP_MS marked stale while the unit is over its limit. A failed
+ * read is counted against the limit and never cached, whatever its failure;
+ * the failure is passed back as it is.
  *
  * Order: a fresh entry → "cache"; over the limit → a kept entry (younger
  * than USAGE_KEEP_MS) as "stale", else "limited"; otherwise read → "backend"

@@ -190,7 +190,11 @@ in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with 
 store, so keys that need no session cannot evict a unit's count); over the
 limit, a read kept for up to 15 minutes is served marked stale, or the view
 shows no data. An uncached read that fails, or finds metering off, also
-renders no data rather than a refusal. `compose-fail-closed.test.ts` still leaves the
+renders no data rather than a refusal. The cache is read before the metering
+gate is asked, so while metering is off for the unit's organization nothing
+is read from the backend, but a figure read before it was turned off may
+still be served from the cache: for up to 60 s, or, while the unit is over
+its limit, marked stale for up to 15 minutes. `compose-fail-closed.test.ts` still leaves the
 tenant app out, because the composer reads plugin state only through
 `checkGate`: `src/lib/tenant-app/__tests__/compose.test.ts` compares its
 refusals with the gate's and covers its load failure. If the capability

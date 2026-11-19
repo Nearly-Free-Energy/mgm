@@ -14,7 +14,10 @@ import "server-only";
  * reaches the metering provider on the service role
  * (../infrastructure/usage-source.ts), and serves a read again from its
  * cache for a minute, so neither happens before that authorization. A failed
- * or refused read is not a refusal: the view loads and shows no data. Only
+ * or refused read is not a refusal: the view loads and shows no data, with
+ * fixed copy for why. While metering is off for the unit's organization
+ * nothing is read from the backend, but a figure cached before it was turned
+ * off may still be shown for its cache lifetime (../usage-throttle.ts). Only
  * the composition and the meter links read refuse it, with fixed copy chosen
  * by status, never the capability's message.
  */

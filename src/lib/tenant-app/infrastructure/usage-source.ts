@@ -94,11 +94,15 @@ export function createTenantUsageSource(options: {
 
       // Read only while metering is on for the unit's organization, as the
       // metering capability re-checks before each provider call: this read
-      // is a provider call the tenant app makes for metering. The target is
-      // an organization, so the gate reads no organization row, only
+      // is a provider call the tenant app makes for metering. It is asked
+      // only for an uncached read, so after metering is turned off nothing
+      // more is read from the backend, but a figure the capability cached
+      // before then can still be served (../usage-throttle.ts). The target
+      // is an organization, so the gate reads no organization row, only
       // `mgm_plugin_enabled_for_org` with the tenant's token; if that
       // function starts checking organization access, every tenant reads
-      // "metering-off" here. The id is fn_tenant_home's, never the request's.
+      // "metering-off" here (it answers false) or "unavailable" (it raises).
+      // The id is fn_tenant_home's, never the request's.
       let gate: GateDecision;
       try {
         gate = await checkGate(supabase, {
