@@ -2,8 +2,10 @@ import { defineConfig, type PlaywrightTestOptions } from "@playwright/test";
 
 // The browser smoke (e2e/): sign-in, home, a microgrid's tenants list
 // and a community's invoice branding page (logo and PDF preview) on a 360 px
-// touch screen, against the production build (`npm run build`
-// first) and a local Supabase. docs/setup.md, "Browser smoke test".
+// touch screen, as an organization manager; and a tenant's sign-in and,
+// once RFC mgm#197 PR 5 releases them, the tenant's usage month and day on
+// a synthetic meter. Against the production build (`npm run build` first)
+// and a local Supabase. docs/setup.md, "Browser smoke test".
 // Chromium only; CI installs it in its own step.
 const PORT = 3100;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -36,8 +38,18 @@ export default defineConfig({
     {
       name: "narrow",
       testMatch: /\.spec\.ts$/,
+      testIgnore: /tenant\.spec\.ts/,
       dependencies: ["setup"],
       use: { ...phone, storageState: "e2e/.auth/manager.json" },
+    },
+    // The tenant signs in with the rows the setup project created, and the
+    // setup project's teardown runs after this one too.
+    { name: "tenant-setup", testMatch: /tenant\.setup\.ts/, dependencies: ["setup"], use: phone },
+    {
+      name: "tenant",
+      testMatch: /tenant\.spec\.ts/,
+      dependencies: ["setup", "tenant-setup"],
+      use: { ...phone, storageState: "e2e/.auth/tenant.json" },
     },
   ],
   webServer: {
@@ -53,6 +65,10 @@ export default defineConfig({
       MGM_APP_URL: ORIGIN,
       MGM_SMTP_URL: process.env.MGM_SMTP_URL ?? "smtp://127.0.0.1:54325",
       MGM_MAIL_FROM: process.env.MGM_MAIL_FROM ?? "MGM <no-reply@smoke.test>",
+      // The tenant's meter is on a SYNTHETIC-EDGE- edge (e2e/fixtures.ts),
+      // which only the fixture metering provider serves. It serves no other
+      // microgrid: the manager's have no edges.
+      MGM_METERING_FIXTURES: "1",
     },
     url: `${ORIGIN}/login`,
     reuseExistingServer: !process.env.CI,

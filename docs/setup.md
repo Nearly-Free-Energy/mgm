@@ -507,6 +507,18 @@ community (with an invoice logo in the `invoice-logos` bucket), microgrids,
 tenants and user in the local database and deletes them afterwards.
 Timings are printed, not enforced.
 
+It also signs in a tenant (RFC #197) at 360 px. Their unit is in a second
+organization of the smoke's own, with the tenant app turned on and one
+meter on a `SYNTHETIC-EDGE-` edge, so the server runs with
+`MGM_METERING_FIXTURES=1` ([Synthetic site data](#synthetic-site-data)).
+While the tenant pages (`/my`, `/my/usage`, `/my/usage/day`) are not
+released routes, the tenant lands on `/no-access` and the usage tests skip
+themselves. Once they are released (RFC #197 PR 5), the tenant lands on
+`/my`, and the smoke opens a past month and one of its days, checks that
+neither scrolls sideways and that every link and button in `main` is at
+least 44 × 44 px, and follows the links from the month to a day, to the
+day before and back up to the month.
+
 ```bash
 npx playwright install chromium        # once
 npm run build
@@ -523,7 +535,9 @@ app sends its sign-in link to the mail catcher on the default local ports
 `MGM_MAIL_CATCHER_URL=http://127.0.0.1:54324`); set both if your Supabase
 uses other ports. The smoke sets `MGM_APP_URL` to the app on port 3100
 itself, because the link is built from it, and checks that the link lands
-there.
+there. It sets `MGM_METERING_FIXTURES=1` on the server it starts; a server
+you started yourself and it reuses needs that setting too, or the tenant's
+usage pages show no figures.
 
 ## Full-Stack Setup (with OpenEMS)
 

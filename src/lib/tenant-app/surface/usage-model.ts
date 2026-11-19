@@ -131,7 +131,15 @@ function staleNote(read: TenantUsageMonth["read"], timezone: string, locale: str
   return read.stale && read.readAt !== null ? `As read at ${readTimeLabel(read.readAt, timezone, locale)}.` : null;
 }
 
-/** The unit's title, then why there are no figures, or when the kept ones were read. */
+/**
+ * The unit's title, then why there are no figures, or when the kept ones
+ * were read. Gridtop's usage renderer prints this whole subtitle below
+ * 600 px when there is no problem, since its window bar does not show the
+ * subtitle there, and the unit's label alone when there is one (its band
+ * shows the message); if the unit stops coming first or the problem
+ * message moves out of the ext, revisit
+ * (src/gui/gridtop/renderers/tenant-usage/parts.tsx).
+ */
 function subtitleOf(
   tenant: TenantUsageMonth["tenant"],
   read: TenantUsageMonth["read"],
@@ -234,6 +242,7 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
     ? shown.map((d) => {
         const note = dayNote(d);
         return {
+          // Gridtop joins rows to the ext's days by this id (src/gui/gridtop/renderers/tenant-usage/ext.ts).
           id: d.date,
           cells: {
             date: fmt.date(d.date),
@@ -320,6 +329,7 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
       ? shown.map((h) => {
           const note = hourNote(h, read);
           return {
+            // Gridtop joins rows to the ext's hours by this id, the hour's `start` (src/gui/gridtop/renderers/tenant-usage/ext.ts).
             id: iso(h.start),
             cells: {
               hour: fmt.text(label(h.start)),
