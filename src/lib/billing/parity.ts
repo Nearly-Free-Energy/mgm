@@ -402,8 +402,8 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     control: "Go to Payment tab, in the banner shown when online payments are not set up",
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "link", view: "payments.community-payment", href: "/communities/[id]/payment" },
-    pr: "unscheduled",
-    note: "The send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but the Payment page is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. It waits for payments to contribute that page as a view (payments.community-payment, which does not exist yet), or a view attached to billing.send-queue that carries the link.",
+    pr: ATTEMPTS,
+    note: "Decided in review of the send queue (#216): the payments plugin contributes it with a bill's payment attempts, either as its view of the community's Payment page (payments.community-payment) carrying this link, or as a view of its own attached to billing.send-queue that carries the setup link. Until then the send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but cannot link the page: it is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. If the attached view is the one built, its id replaces payments.community-payment here.",
   },
   {
     id: "close-period",
