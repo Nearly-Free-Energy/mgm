@@ -541,6 +541,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]" },
     pr: HISTORY,
+    note: "LinkRef billing.back-to-period; the host's trail also links the period.",
   },
   {
     id: "history-show-all",
@@ -549,5 +550,6 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history" },
     pr: HISTORY,
+    note: "LinkRef billing.history-show-all, offered while the view is filtered by tenant_id.",
   },
 ];

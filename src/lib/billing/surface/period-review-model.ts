@@ -20,7 +20,9 @@ import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentS
 import { buildCsvFilename } from "../csv-export";
 import { sumMoney } from "../money";
 import { roundKwh } from "../precision";
+import { periodHistoryHref } from "./period-history-model";
 import type { PeriodReviewExtData } from "./period-review-ext";
+import { periodLabel } from "./period-label";
 
 /** Every cell and total key the view emits, besides the per-tier ones under PERIOD_REVIEW_PREFIXES. */
 export const PERIOD_REVIEW_KEYS = ["tenant", "begin", "end", "usage", "total", "source", "payment", "entered"] as const;
@@ -152,10 +154,7 @@ type Column = LoadedModel<"collection">["body"]["columns"][number];
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-/** A period as the host labels it (src/lib/gui/host/server/entities.ts). */
-export function periodLabel(fmt: Fmt, start: string, end: string): string {
-  return `${fmt.date(start).text} – ${fmt.date(end).text}`;
-}
+export { periodLabel };
 
 /** The actions one bill is offered, in the legacy row menu's order. */
 function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput): ActionLink[] {
@@ -217,8 +216,8 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   const { microgrid, period, tiers, fmt } = i;
   const currency = microgrid.currency;
   const label = periodLabel(fmt, period.start_date, period.end_date);
-  const historyHref = `/microgrids/${microgrid.id}/billing/${period.id}/history` as const;
-
+  // Built by the history view's own helper, so these links and the query name it reads cannot drift apart.
+  const historyHref = periodHistoryHref(microgrid.id, period.id);
 
   const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
   const money = (amount: number | null | undefined) =>
@@ -264,7 +263,7 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
         // The route names the file after the invoice number it allocates on first use; before then, as the legacy menu falls back.
         download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
       },
-      { id: VIEW_HISTORY_LINK, label: "View history", href: `${historyHref}?tenant_id=${tenant.id}` },
+      { id: VIEW_HISTORY_LINK, label: "View history", href: periodHistoryHref(microgrid.id, period.id, { tenantId: tenant.id }) },
     ];
     return [
       {

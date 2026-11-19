@@ -99,6 +99,7 @@ describe("MGM root runtime", () => {
       "metering metering.site-day",
       "billing billing.periods",
       "billing billing.period-review",
+      "billing billing.period-history",
       "billing billing.savings",
       "tenant-app tenant.home",
     ]);

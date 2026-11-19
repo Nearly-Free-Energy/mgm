@@ -7,13 +7,15 @@ import "server-only";
  * `billing.periods` view, with creating a period and deleting a draft; one
  * period's bills as the `billing.period-review` view, with the actions on
  * each bill (generating them is contributed but offered nowhere yet, below);
- * and the savings as the `billing.savings`
+ * one period's audit history as the `billing.period-history` view, reached
+ * from the review's View history links; and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
- * `billing.periods` and `billing.period-review` have the Billing pages' own
- * paths, which the legacy pages still serve: the catalog gives those pages
- * no servedBy, so the views are reached through GET /api/gui/view until
+ * `billing.periods`, `billing.period-review` and `billing.period-history`
+ * have the Billing pages' own paths, which the legacy pages still serve: the
+ * catalog gives those pages no servedBy, so the views are reached through
+ * GET /api/gui/view until
  * #201's "Serve the billing pages through the GUI host" moves the pages and
  * the nav entry to the views.
  */
@@ -50,6 +52,9 @@ import {
   recordUsageAvailable,
   regenerateBillAvailable,
 } from "./surface/period-review";
+import { loadPeriodHistory } from "./surface/period-history";
+import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
+import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
 import { PERIOD_REVIEW_EXAMPLES } from "./surface/period-review-examples";
 import { PeriodReviewExt } from "./surface/period-review-ext";
 import {
@@ -138,6 +143,24 @@ export const BILLING_SURFACE: Contribution = {
       ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, zod: PeriodReviewExt },
       examples: PERIOD_REVIEW_EXAMPLES,
       load: loadPeriodReview,
+    },
+    {
+      id: "billing.period-history",
+      kind: "collection",
+      path: "/microgrids/[id]/billing/[periodId]/history",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      entity: "periodId",
+      // The tenant the period review's row links filter to, and the page's
+      // cursor (HISTORY_TENANT_PARAM and HISTORY_CURSOR_PARAM in
+      // ./surface/period-history-model.ts).
+      query: ["tenant_id", "before"],
+      // Read through the person's own client; still loads while billing is
+      // off, with the gate's notice. No actions and no refresh: a log only
+      // grows, and the newest entries are a link away.
+      cost: "db",
+      declares: { keys: PERIOD_HISTORY_KEYS },
+      examples: PERIOD_HISTORY_EXAMPLES,
+      load: loadPeriodHistory,
     },
     {
       id: "billing.savings",

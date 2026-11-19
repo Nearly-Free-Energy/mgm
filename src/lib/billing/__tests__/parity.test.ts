@@ -55,9 +55,6 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Contribute a period's history
-  "back-to-period",
-  "history-show-all",
   // Contribute the close checklist on …/close
   "close-period",
   // Contribute the send queue on …/send
