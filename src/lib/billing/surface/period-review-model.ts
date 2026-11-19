@@ -219,7 +219,10 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   // Built by the history view's own helper, so these links and the query name it reads cannot drift apart.
   const historyHref = periodHistoryHref(microgrid.id, period.id);
 
-  const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
+  // A bill's readings and usage to 3 dp, as the legacy table shows them; the
+  // totals below stay at 1 dp, as its grand total row does.
+  const energy = (kwh: number | null | undefined) =>
+    kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true, digits: 3 });
   const money = (amount: number | null | undefined) =>
     amount === null || amount === undefined ? fmt.empty() : fmt.money(num(amount), currency, { bare: true });
 

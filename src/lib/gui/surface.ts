@@ -51,7 +51,8 @@ export interface Fmt {
    * integer minor units. If money columns move to minor units, revisit.
    */
   money(amount: number, currency: string, o?: { bare?: true }): Value;
-  energy(wh: number, o?: { bare?: true; at?: string; derived?: true; synthetic?: true }): Value;
+  /** `digits`: decimals shown, 1 unless given; a meter reading is shown to 3, as the legacy billing table shows it. */
+  energy(wh: number, o?: { bare?: true; digits?: number; at?: string; derived?: true; synthetic?: true }): Value;
   power(w: number, o?: { at?: string; derived?: true; synthetic?: true }): Value;
   percent(v: number, o?: { at?: string; synthetic?: true }): Value;
   date(isoDate: string): Value;
