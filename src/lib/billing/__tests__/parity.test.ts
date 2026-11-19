@@ -55,8 +55,6 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Draw period review as a copy table in Gridtop
-  "copy-cells",
   // Contribute a period's history
   "back-to-period",
   "history-show-all",
@@ -160,6 +158,21 @@ function submittable(def: ActionDef): boolean {
 
 function contributedView(id: string): boolean {
   return Object.values(SURFACES).some((s) => s.views?.some((v) => v.id === id));
+}
+
+/**
+ * Whether a view's copy figures reach a person: the view declares an ext, and
+ * an installed GUI registers a renderer reading its version. The kit's view
+ * copies nothing, so without both a copy row has no control.
+ */
+function copiedByARenderer(id: string): boolean {
+  const view = Object.values(SURFACES)
+    .flatMap((s) => s.views ?? [])
+    .find((v) => v.id === id);
+  const schema = view?.ext?.schema;
+  if (!schema) return false;
+  const version = Number(schema.slice(schema.lastIndexOf("@") + 1));
+  return Object.values(INSTALLED_GUIS).some((gui) => gui.renderers?.[id as `${string}.${string}`]?.reads.includes(version) === true);
 }
 
 /** Every href in a model outside data subtrees, and whether it sits on an object with a `download`. */
@@ -281,7 +294,10 @@ describe("parity with the contributed actions and views", () => {
     const by = row.replacedBy;
     if (by.kind === "copy") {
       // Never seen in a contribution: once it leaves PENDING, its view must exist.
-      if (!PENDING.has(id)) expect(contributedView(by.view), `${id}'s view ${by.view}`).toBe(true);
+      if (!PENDING.has(id)) {
+        expect(contributedView(by.view), `${id}'s view ${by.view}`).toBe(true);
+        expect(copiedByARenderer(by.view), `${id}: ${by.view} declares an ext that an installed GUI's renderer reads`).toBe(true);
+      }
       return;
     }
     if (by.kind === "action" && contributedAction(by) && !submittable(contributedAction(by)!)) {

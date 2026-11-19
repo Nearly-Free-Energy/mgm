@@ -8,17 +8,33 @@
  * actions follow its row menu (computeMenuItems in
  * src/components/billing/row-actions-menu.tsx; period-review-menu-parity.test.ts
  * compares the two), so both show the same thing while both are served.
+ *
+ * Every figure a person copies is in the `billing.period-review@1` ext
+ * (./period-review-ext.ts) as a plain machine number, for a renderer that
+ * draws the bills as a copy table.
  */
+import { currencyFractionDigits } from "@/components/format/currency";
 import type { LinkRef, Value } from "@/lib/gui/contract";
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentStatus } from "@/lib/payments/state";
 import { buildCsvFilename } from "../csv-export";
 import { sumMoney } from "../money";
+import { roundKwh } from "../precision";
+import type { PeriodReviewExtData } from "./period-review-ext";
 
 /** Every cell and total key the view emits, besides the per-tier ones under PERIOD_REVIEW_PREFIXES. */
 export const PERIOD_REVIEW_KEYS = ["tenant", "begin", "end", "usage", "total", "source", "payment", "entered"] as const;
 /** `tier.<n>.kwh` and `tier.<n>.amount`, n counting the period's tariff tiers from 1. */
 export const PERIOD_REVIEW_PREFIXES = ["tier."] as const;
+
+/** The ext this model carries; its shape is PeriodReviewExt in ./period-review-ext.ts. */
+export const PERIOD_REVIEW_EXT_SCHEMA = "billing.period-review@1" as const;
+/** Rows past the host's row cap (MODEL_CAPS.rows in src/lib/gui/host/server/parse.ts) are refused, never cut. */
+export const PERIOD_REVIEW_MAX_ROWS = 500;
+/** 10 fixed columns and 2 per tier must stay within the host's 50 (MODEL_CAPS.columns). */
+export const PERIOD_REVIEW_MAX_TIERS = 20;
+/** Begin, end, usage and total, and each tier's kWh and amount: every column a person copies. */
+export const PERIOD_REVIEW_MAX_COPY_COLUMNS = 4 + 2 * PERIOD_REVIEW_MAX_TIERS;
 
 /**
  * The billing actions on bills; BILLING_SURFACE (../surface.ts) defines them.
@@ -172,24 +188,51 @@ function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput
   return out;
 }
 
+/**
+ * The figure a person copies from a cell: a plain number, with no grouping,
+ * a "." decimal point and no unit, or null for an empty cell. kWh to 3
+ * decimals and money in the currency's minor unit, as the period's CSV
+ * export writes them (../csv-export.ts rounds with roundKwh and roundAmount
+ * from ../precision.ts; roundAmount keeps no minor unit, so the two agree
+ * for a currency with none, such as UGX): if the CSV's rounding changes,
+ * revisit. Money comes from the minor units the shown text
+ * was rounded to, so the two never round apart.
+ */
+function copyFigure(v: Value | undefined): string | null {
+  if (!v) return null;
+  switch (v.t) {
+    case "energy":
+      // String() of a rounded number writes no float-dust.
+      return String(roundKwh(v.unit === "Wh" ? v.v / 1000 : v.v));
+    case "money": {
+      const minor = currencyFractionDigits(v.currency);
+      return minor === 0 ? String(v.v) : (v.v / 10 ** minor).toFixed(minor);
+    }
+    default:
+      return null;
+  }
+}
+
 export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"collection"> {
   const { microgrid, period, tiers, fmt } = i;
   const currency = microgrid.currency;
   const label = periodLabel(fmt, period.start_date, period.end_date);
   const historyHref = `/microgrids/${microgrid.id}/billing/${period.id}/history` as const;
 
-
-  const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
+  // A bill's readings and usage to 3 dp, as the legacy table shows them; the
+  // totals below stay at 1 dp, as its grand total row does.
+  const energy = (kwh: number | null | undefined) =>
+    kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true, digits: 3 });
   const money = (amount: number | null | undefined) =>
     amount === null || amount === undefined ? fmt.empty() : fmt.money(num(amount), currency, { bare: true });
 
   const columns: Column[] = [
     { key: "tenant", label: "Tenant", type: "ref", priority: 1 },
-    { key: "begin", label: "Begin (kWh)", type: "energy", priority: 3 },
-    { key: "end", label: "End (kWh)", type: "energy", priority: 3 },
-    { key: "usage", label: "Usage (kWh)", type: "energy", priority: 2 },
+    { key: "begin", label: "Begin (kWh)", type: "energy", priority: 3, copy: "bare" },
+    { key: "end", label: "End (kWh)", type: "energy", priority: 3, copy: "bare" },
+    { key: "usage", label: "Usage (kWh)", type: "energy", priority: 2, copy: "bare" },
     ...tiers.flatMap((tier, n): Column[] => [
-      { key: `tier.${n + 1}.kwh`, label: `${tier.label} kWh`, type: "energy", priority: 3 },
+      { key: `tier.${n + 1}.kwh`, label: `${tier.label} kWh`, type: "energy", priority: 3, copy: "bare" },
       { key: `tier.${n + 1}.amount`, label: `${tier.label} (${currency})`, type: "money", priority: 3, copy: "bare" },
     ]),
     // A bare money column names its currency in the header.
@@ -288,6 +331,14 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     };
   }
 
+  // The copy figures, in the order of the columns a person copies.
+  const copyKeys = columns.filter((c) => c.copy === "bare").map((c) => c.key);
+  const ext: PeriodReviewExtData = {
+    columns: copyKeys,
+    rows: rows.map((row) => ({ id: row.id, figures: copyKeys.map((k) => copyFigure(row.cells[k])) })),
+    totals: totals ? copyKeys.map((k) => (totals[k] ? copyFigure(totals[k]) : null)) : [],
+  };
+
   const links: LinkRef[] = [{ id: VIEW_HISTORY_LINK, label: "View history", href: historyHref }];
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {
@@ -322,5 +373,6 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
       ...(totals ? { totals } : {}),
       empty,
     },
+    ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, data: ext },
   };
 }
