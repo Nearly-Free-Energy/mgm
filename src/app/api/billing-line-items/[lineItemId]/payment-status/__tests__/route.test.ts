@@ -490,6 +490,21 @@ describe("PATCH /api/billing-line-items/[lineItemId]/payment-status (Phase B)", 
     expect(mockRpc).toHaveBeenCalledTimes(1);
   });
 
+  it("(m3) 200 paid→refunded for a tenant whose name is over 200 characters", async () => {
+    // tenants.display_name has no length limit, so neither has the typed name.
+    const name = "Alice Mukasa ".repeat(20).trim();
+    expect(name.length).toBeGreaterThan(200);
+    scopeResponse = { data: { ...makeScopeRow("paid"), tenants: [{ display_name: name }] }, error: null };
+    rpcResponse = { data: makeUpdatedRow("refunded"), error: null };
+
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makeReq({ status: "refunded", confirmation: { acknowledged: [], typed: name } }), {
+      params: Promise.resolve({ lineItemId: LINE_ITEM_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockRpc).toHaveBeenCalledTimes(1);
+  });
+
   describe("(n) 428: a refund needs the tenant's name typed", () => {
     const REQUIRED = "A refund needs the tenant's name typed: use Mark as refunded.";
     it.each([

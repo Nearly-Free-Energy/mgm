@@ -448,7 +448,11 @@ export const LineItemPaymentStatusBody = z.strictObject(
     // The host's Confirmation (src/lib/gui/contract.ts), sent with a typed
     // action: billing.mark-refunded asks for the tenant's name, and the
     // route refuses a refund without it (428), whoever sends it; the legacy
-    // row menu's refund dialog sends it too. Version 2 added it.
+    // row menu's refund dialog sends it too. Version 2 added it. typed has
+    // no length limit: the route compares it with tenants.display_name, which
+    // has none either (TEXT; createTenant and the tenant update only trim
+    // it), so any cap here would leave a longer-named tenant's bill with no
+    // way to be refunded. If display_name gets a length limit, cap typed at it.
     confirmation: z
       .strictObject(
         {
@@ -457,7 +461,7 @@ export const LineItemPaymentStatusBody = z.strictObject(
               error: LINE_ITEMS_CONFIRMATION,
             })
             .max(20, { error: LINE_ITEMS_CONFIRMATION }),
-          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).max(200, { error: LINE_ITEMS_CONFIRMATION }).optional(),
+          typed: z.string({ error: LINE_ITEMS_CONFIRMATION }).optional(),
         },
         { error: LINE_ITEMS_CONFIRMATION }
       )

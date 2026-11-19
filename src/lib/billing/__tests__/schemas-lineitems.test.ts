@@ -158,6 +158,12 @@ describe("LineItemPaymentStatusBody", () => {
     expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", confirmation: { typed: "Akello" } })).toMatchObject({ field: "confirmation" });
   });
 
+  it("takes a typed name of any length, as tenants.display_name has no limit", () => {
+    const long = "Akello ".repeat(100).trim();
+    expect(long.length).toBeGreaterThan(200);
+    expect(firstIssue(LineItemPaymentStatusBody, { status: "refunded", confirmation: { acknowledged: [], typed: long } })).toBe("ok");
+  });
+
   it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
     expect(LINE_ITEM_PAYMENT_STATUS_BODY_VERSION).toBe(2);
     // maxLength applies to the untrimmed input here, so a form built from it
@@ -172,7 +178,7 @@ describe("LineItemPaymentStatusBody", () => {
           type: "object",
           properties: {
             acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
-            typed: { type: "string", maxLength: 200 },
+            typed: { type: "string" },
           },
           required: ["acknowledged"],
           additionalProperties: false,
