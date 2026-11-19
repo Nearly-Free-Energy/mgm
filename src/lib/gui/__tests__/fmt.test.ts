@@ -147,6 +147,9 @@ describe.each(LOCALES)("createFmt in %s", (locale) => {
       text: `${formatKwh(12.345, locale)} kWh`,
     });
     expect(fmt.energy(12345, { bare: true }).text).toBe(formatKwh(12.345, locale));
+    // To 1 dp unless `digits` says otherwise; v keeps every digit either way.
+    expect(fmt.energy(84512, { bare: true }).text).toBe(formatKwh(84.512, locale, { digits: 1 }));
+    expect(fmt.energy(84512, { bare: true, digits: 3 })).toEqual({ t: "energy", v: 84.512, unit: "kWh", text: formatKwh(84.512, locale, { digits: 3 }) });
   });
 
   it("formats power in W below 1000 W and in kW from there", () => {

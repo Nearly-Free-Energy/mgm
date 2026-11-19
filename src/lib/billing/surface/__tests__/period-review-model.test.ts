@@ -146,7 +146,7 @@ describe("buildPeriodReviewModel: rows", () => {
 
   it("formats readings, tiers by index, bare money and statuses", () => {
     const [row] = build().body.rows;
-    expect(row.cells.begin).toMatchObject({ t: "energy", v: 100, unit: "kWh", text: "100.0" });
+    expect(row.cells.begin).toMatchObject({ t: "energy", v: 100, unit: "kWh", text: "100.000" });
     expect(row.cells.usage).toMatchObject({ t: "energy", v: 50.25 });
     expect(row.cells["tier.2.kwh"]).toMatchObject({ t: "energy", v: 35.25 });
     expect(row.cells["tier.1.amount"]).toEqual({ t: "money", v: 3750, currency: "UGX", text: "3,750" });
@@ -296,7 +296,8 @@ describe("buildPeriodReviewModel: the copy figures (ext)", () => {
         }),
       ],
     });
-    expect(model.body.rows[0].cells.usage.text).toBe("84.5");
+    // Shown to 3 dp, as the legacy table shows it, and copied the same.
+    expect(model.body.rows[0].cells.usage.text).toBe("84.512");
     expect(figure(model, 0, "begin")).toBe("1200");
     expect(figure(model, 0, "end")).toBe("1284.5");
     expect(figure(model, 0, "usage")).toBe("84.512");

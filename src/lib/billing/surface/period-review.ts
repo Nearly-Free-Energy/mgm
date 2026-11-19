@@ -36,7 +36,6 @@ import {
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
-
 export const PERIOD_REVIEW_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This billing period could not be found." },
   unavailable: { ok: false, status: 503, message: "Could not load this billing period right now. Try again shortly." },

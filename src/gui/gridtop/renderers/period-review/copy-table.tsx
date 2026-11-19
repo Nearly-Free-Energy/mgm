@@ -21,7 +21,7 @@
  * disclosure; Escape leaves the box, after which Tab goes to the cursor
  * row's link. Entering the box, each move and each copy is announced.
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { ActionRef, Column, GuiKit, LiveState, ModelOf, RowOf } from "@/lib/gui/contract";
 import { RowControls, ValueText } from "./controls";
 import type { Copier } from "./copy";
@@ -33,7 +33,7 @@ type At = { r: number; c: number };
 const NUMERIC = new Set(["number", "percent", "money", "energy", "power"]);
 const PAGE = 10;
 export const END_OF_TABLE = "End of table";
-const KEYS = "Arrow keys move; C, Enter or Space copies; A goes to the row's actions.";
+const KEYS = "Arrow keys move; Tab moves down the columns; C, Enter or Space copies; A goes to the row's actions; Escape leaves the table.";
 
 /** The tenant of a row, as the announcements and the controls name it. */
 export function tenantOf(row: RowOf<ActionRef>, tenantKey: string | undefined): string {
@@ -51,7 +51,10 @@ export function CopyTable(props: {
   const { model, figures, live, kit, copier, announce } = props;
   const { columns, rows } = model.body;
   const region = useRef<HTMLDivElement>(null);
-  // Set while a click focuses the box, which announces its copy instead of the cursor.
+  const keysId = useId();
+  // Set from a press on a figure until its click: the press focuses the box
+  // before the click, and that focus announces the copy, not the cursor, and
+  // scrolls nothing, so the figure stays under the pointer for the click.
   const clicking = useRef(false);
   const [at, setAt] = useState<At | null>(null);
   const [focused, setFocused] = useState(false);
@@ -76,7 +79,7 @@ export function CopyTable(props: {
   // since focus stays on the box and the browser scrolls to nothing.
   const [cr, cc] = [current?.r, current?.c];
   useEffect(() => {
-    if (!focused || cr === undefined) return;
+    if (!focused || cr === undefined || clicking.current) return;
     region.current?.querySelector<HTMLElement>(`td[data-r="${cr}"][data-c="${cc}"]`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [focused, cr, cc]);
   // kit.Link takes no tabIndex (LinkProps in the GUI contract), so the
@@ -103,6 +106,8 @@ export function CopyTable(props: {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     // Keys pressed on a link or control inside the table are that control's.
     if (event.target !== event.currentTarget || !current) return;
+    // A press that never became a click (the pointer moved off) ends here.
+    clicking.current = false;
     const { r, c } = current;
     const modified = event.ctrlKey || event.metaKey;
     const i = indexOf(current);
@@ -187,7 +192,8 @@ export function CopyTable(props: {
       ref={region}
       role="region"
       tabIndex={0}
-      aria-label={`Bills, ${model.title}. ${KEYS}`}
+      aria-label={`Bills, ${model.title}`}
+      aria-describedby={keysId}
       onKeyDown={onKeyDown}
       onFocus={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -197,15 +203,15 @@ export function CopyTable(props: {
         if (current && !clicking.current) announce(describe(current));
       }}
       onBlur={(event) => {
-        if (event.target === event.currentTarget) setFocused(false);
+        if (event.target !== event.currentTarget) return;
+        clicking.current = false;
+        setFocused(false);
       }}
       className="gt:relative gt:overflow-x-auto gt:rounded-md gt:border gt:border-border gt:bg-card gt:focus-visible:outline-2 gt:focus-visible:outline-ring"
     >
       <table className="gt:w-full gt:border-collapse gt:text-dense gt:tabular-nums">
         <caption className="gt:sr-only">
-          <span>
-            Bills, {n} {n === 1 ? "tenant" : "tenants"}. {KEYS}
-          </span>
+          Bills, {n} {n === 1 ? "tenant" : "tenants"}
         </caption>
         <thead>
           <tr>
@@ -250,9 +256,15 @@ export function CopyTable(props: {
                     data-copy=""
                     data-r={r}
                     data-c={p.c}
-                    onClick={() => {
-                      setAt(p);
+                    // The press moves the cursor here before the browser focuses
+                    // the box, so that focus finds the cursor on this figure.
+                    onMouseDown={() => {
                       clicking.current = true;
+                      setAt(p);
+                    }}
+                    onClick={() => {
+                      clicking.current = true;
+                      setAt(p);
                       region.current?.focus({ preventScroll: true });
                       clicking.current = false;
                       void copyAt(p);
@@ -281,6 +293,10 @@ export function CopyTable(props: {
           ))}
         </tbody>
       </table>
+      {/* The keys, read once, as the box's description. */}
+      <p id={keysId} hidden>
+        {KEYS}
+      </p>
     </div>
   );
 }
