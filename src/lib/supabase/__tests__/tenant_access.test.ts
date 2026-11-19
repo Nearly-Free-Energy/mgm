@@ -1386,7 +1386,8 @@ desc("staff_access_accounts, the tenant grant and the Users page", () => {
       .from("user_roles")
       .insert({ user_id: emsTenant.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
     expect(ems.error).toBeNull();
-    // A tenant made org manager, as an invitation of their address would.
+    // A tenant made org manager, as a super admin's invitation of their
+    // address would (fn_change_user_role adds the row).
     const made = await svc
       .from("user_roles")
       .insert({ user_id: madeStaff.userId, role: "org_manager", scope_type: "org", scope_id: F.org });
@@ -1511,7 +1512,7 @@ desc("staff_access_accounts, the tenant grant and the Users page", () => {
     const before = await tenantRowsOf(rejoined.userId);
     expect(before.map((r) => r.scope_id)).toEqual([F.tenantB]);
 
-    // Made org manager, as an invitation of their address adds the row.
+    // Made org manager, as a super admin's invitation of their address adds the row.
     const made = await svc
       .from("user_roles")
       .insert({ user_id: rejoined.userId, role: "org_manager", scope_type: "org", scope_id: F.org });

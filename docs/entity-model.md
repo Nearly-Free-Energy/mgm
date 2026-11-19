@@ -126,9 +126,13 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   same address, and a person may rent several units, each with its own
   meters, in different organizations.
 - The Users page never touches tenant rows. Removing someone's staff access
-  there leaves the units they rent, and inviting an address whose only rows
-  are tenant rows makes it staff and keeps them; no answer tells the
-  inviter that the address is a tenant's. Once their staff role is removed,
+  there leaves the units they rent. Inviting an address whose only rows
+  are tenant rows is a role change, so only a super admin's invitation
+  makes it staff, through `fn_change_user_role`, which keeps the tenant
+  rows; an org manager gets the answer any account with other access gets
+  and nothing is written, so no answer tells them that the address is a
+  tenant's. The invite route never calls `fn_finalize_user_invitation` for
+  an account that holds any role row. Once their staff role is removed,
   by the Users page or any other path, they are exactly a tenant who never
   had one: their tenant rows untouched, given further units like any
   tenant, off the Users page, and kept to tenant pages. Their session
