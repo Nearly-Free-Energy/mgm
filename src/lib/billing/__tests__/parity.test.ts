@@ -42,8 +42,6 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Draw period review as a copy table in Gridtop
-  "copy-cells",
   // Contribute a period's history
   "back-to-period",
   "history-show-all",
