@@ -21,6 +21,16 @@ describe("sumMoney", () => {
     expect(sumMoney([1.005], "USD")).toBe(1.01);
   });
 
+  it("sums amounts too large to print without an exponent", () => {
+    expect(String(1e21)).toBe("1e+21");
+    expect(sumMoney([1e21], "UGX")).toBe(1e21);
+    expect(sumMoney([1e21, 1e21], "UGX")).toBe(2e21);
+    // 1e19 dollars is 1e21 cents.
+    expect(sumMoney([1e19, 0.01], "USD")).toBe(1e19);
+    expect(sumMoney([5e18, 5e18], "USD")).toBe(1e19);
+    expect(Number.isNaN(sumMoney([1e19, 1e19], "USD"))).toBe(false);
+  });
+
   it("sums nothing to zero, and keeps negative amounts", () => {
     expect(sumMoney([], "UGX")).toBe(0);
     expect(sumMoney([-0.1, -0.2], "USD")).toBe(-0.3);

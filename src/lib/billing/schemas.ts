@@ -480,6 +480,32 @@ export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
  */
 export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
 
+/**
+ * Why the regenerate route refuses a bill, as fixed copy: the route answers
+ * with it and billing.regenerate-bill's availability and prepare explain the
+ * same refusal before it happens (src/lib/billing/surface/period-review.ts).
+ *  - closed: the period's totals were reviewed and closed; regenerating
+ *    would change money a closed period was closed with.
+ *  - invoiced: the bill has an invoice number (allocated the first time its
+ *    PDF is downloaded, GET /api/billing-line-items/[lineItemId]/pdf), and a
+ *    regenerated bill would carry new figures under the number already
+ *    issued.
+ *  - refunded: refunding then re-billing reads as data corruption.
+ *  - changed: the bill changed after the route read it (a payment, a
+ *    refund, another regeneration); only the write itself finds this
+ *    (fn_regenerate_bill_with_audit).
+ * POST /api/billing/generate, which the legacy dialogs call, refuses none of
+ * these: if it comes to, say so here.
+ */
+export const REGENERATE_REFUSAL_COPY = {
+  closed: "Bills in a closed period cannot be regenerated.",
+  invoiced: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
+  refunded: "A refunded bill cannot be regenerated.",
+  // fn_regenerate_bill_with_audit found the bill changed between the route's
+  // read and the write: paid, refunded or regenerated meanwhile.
+  changed: "This bill changed while it was being regenerated. Refresh it and try again.",
+} as const;
+
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 
 /**
@@ -507,7 +533,10 @@ export const RegenerateBillBody = z.strictObject(
     // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
     // this route refuses a paid bill without it (POST /api/billing/generate
     // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
-    // the form. Version 2 added it.
+    // the form. Version 2 added it. It takes no typed name: the ceremony
+    // asks for none (prepareRegenerateBill), so the host sends none, and a
+    // body carrying one is refused as an unknown key. If the ceremony comes
+    // to ask for a name, add typed here and check it in the route.
     confirmation: z
       .strictObject(
         {
@@ -516,7 +545,6 @@ export const RegenerateBillBody = z.strictObject(
               error: REGENERATE_CONFIRMATION,
             })
             .max(20, { error: REGENERATE_CONFIRMATION }),
-          typed: z.string({ error: REGENERATE_CONFIRMATION }).max(200, { error: REGENERATE_CONFIRMATION }).optional(),
         },
         { error: REGENERATE_CONFIRMATION }
       )

@@ -90,6 +90,7 @@ const row = (id: string, periodId: string, tenantId: string, o: Record<string, u
   reading_source: "edge",
   payment_status: "unpaid",
   paid_at: null,
+  invoice_number: null,
   ...o,
 });
 
@@ -122,9 +123,10 @@ beforeAll(async () => {
       {
         id: SCHEDULE,
         microgrid_id: MICROGRID,
+        // Whole kWh from 1, bounds inclusive, as the tariff routes take them.
         tiers: [
-          { label: "Lifeline", min_kwh: 0, max_kwh: 15, rate_per_kwh: 250 },
-          { label: "Standard", min_kwh: 15, max_kwh: null, rate_per_kwh: 750 },
+          { label: "Lifeline", min_kwh: 1, max_kwh: 15, rate_per_kwh: 250 },
+          { label: "Standard", min_kwh: 16, max_kwh: null, rate_per_kwh: 750 },
         ],
         service_charge: 0,
         tax_rate: 0,
@@ -157,7 +159,8 @@ beforeAll(async () => {
       [
         row(bill(1), DRAFT, tenant(1)),
         row(bill(2), DRAFT, tenant(2), { payment_status: "paid", paid_at: paidAt }),
-        row(bill(3), DRAFT, tenant(3), { payment_status: "link_generated" }),
+        // Invoiced: its PDF was downloaded, which allocates the number.
+        row(bill(3), DRAFT, tenant(3), { payment_status: "link_generated", invoice_number: "GRV-2026-00001" }),
         row(bill(4), DRAFT, tenant(4), { payment_status: "refunded", paid_at: paidAt }),
         row(bill(5), DRAFT, tenant(5), { reading_source: "manual", start_kwh: 10, end_kwh: 20, usage_kwh: 10, total_amount: 2500 }),
         row(bill(6), CLOSED, tenant(1), { payment_status: "paid", paid_at: paidAt }),
@@ -185,7 +188,7 @@ type Row = {
   entity: { kind: string; id: string };
   related: { kind: string; id: string; href: string }[];
   cells: Record<string, { t: string; v?: number; text: string }>;
-  actions: { action: string; enabled: boolean; prefill?: unknown; label: string }[];
+  actions: { action: string; enabled: boolean; reason?: string; prefill?: unknown; label: string }[];
   links: { id: string; href: string }[];
 };
 const actionIds = (rows: Row[]) => rows.flatMap((r) => r.actions.map((a) => a.action));
@@ -246,6 +249,16 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(rows[3].actions.map((a) => a.action)).toEqual(["billing.record-usage"]);
     // The unmetered manual bill on a draft can have its usage corrected.
     expect(rows[4].actions.map((a) => a.action)).toContain("billing.record-usage");
+    // Regenerating is offered, and disabled with the route's reason on the invoiced bill only.
+    const regenerate = (r: Row) => r.actions.filter((a) => a.action === "billing.regenerate-bill");
+    for (const n of [0, 1, 4]) for (const a of regenerate(rows[n])) expect(a).toMatchObject({ enabled: true });
+    expect(regenerate(rows[2]).length).toBeGreaterThan(0);
+    for (const a of regenerate(rows[2])) {
+      expect(a).toMatchObject({
+        enabled: false,
+        reason: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
+      });
+    }
   });
 
   it("offers a super admin marking a bill failed or refunded", async () => {
@@ -257,14 +270,17 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(rows[2].actions.map((a) => a.action)).toContain("billing.mark-failed");
   });
 
-  it("offers no usage correction on a closed period, and regenerates its bills one at a time", async () => {
+  it("offers no usage correction on a closed period, and shows its bills' regeneration disabled with the route's reason", async () => {
     caller = manager;
     const res = await view(`/microgrids/${MICROGRID}/billing/${CLOSED}`);
     expect(res.status).toBe(200);
     const model = await res.json();
     expect(model.actions).toEqual([]);
     expect(actionIds(model.body.rows)).not.toContain("billing.record-usage");
-    expect(actionIds(model.body.rows)).toContain("billing.regenerate-bill");
+    // Listed as the legacy row menu lists them (period-review-menu-parity.test.ts), but not available.
+    const regenerate = (model.body.rows as Row[]).flatMap((r) => r.actions).filter((a) => a.action === "billing.regenerate-bill");
+    expect(regenerate.length).toBeGreaterThan(0);
+    for (const a of regenerate) expect(a).toMatchObject({ enabled: false, reason: "Bills in a closed period cannot be regenerated." });
   });
 
   it("finds no period under another microgrid", async () => {

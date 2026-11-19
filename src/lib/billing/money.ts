@@ -30,5 +30,9 @@ function toMinorUnits(amount: number, digits: number): number {
 export function sumMoney(amounts: readonly number[], currency: string): number {
   const digits = currencyFractionDigits(currency);
   const minor = amounts.reduce((sum, a) => sum + toMinorUnits(a, digits), 0);
-  return Number(`${minor}e-${digits}`);
+  // Divided, not written as `${minor}e-${digits}`: from 1e21 a number prints
+  // in exponent form ("1e+21"), and "1e+21e-2" is NaN. Division is correctly
+  // rounded, so for a whole number of minor units it gives the same double as
+  // parsing the decimal would.
+  return minor / 10 ** digits;
 }
