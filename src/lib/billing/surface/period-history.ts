@@ -117,24 +117,26 @@ export async function loadPeriodHistory(req: SurfaceRequest): Promise<Loaded<Loa
       .select("id, microgrid_id, start_date, end_date, timezone")
       .eq("id", req.params.periodId)
       .eq("microgrid_id", microgridId)
-      .maybeSingle<{ id: string; microgrid_id: string; start_date: string; end_date: string; timezone: string | null }>(),
-    req.supabase.from("microgrids").select("id, currency, timezone").eq("id", microgridId).maybeSingle<{ id: string; currency: string | null; timezone: string | null }>(),
+      .maybeSingle<{ id: string; microgrid_id: string; start_date: string; end_date: string; timezone: string }>(),
+    req.supabase.from("microgrids").select("id, currency").eq("id", microgridId).maybeSingle<{ id: string; currency: string }>(),
   ]);
   if (periodRes.error || microgridRes.error) return PERIOD_HISTORY_REFUSALS.unavailable;
   const period = periodRes.data;
   const microgrid = microgridRes.data;
   if (!period || !microgrid) return PERIOD_HISTORY_REFUSALS.notFound;
   // History needs no tariff, so a period with none still loads (unlike the review).
-  const timezone = period.timezone ?? microgrid.timezone ?? "UTC";
+  // billing_periods.timezone and microgrids.currency are NOT NULL (00055,
+  // 00001), so neither has a fallback: if either becomes nullable, type it so
+  // above and give it one.
 
   // The tenant filter. A value that is not a UUID is never sent to the
   // database (it would fail as invalid input, not as no rows) and never echoed.
   const rawTenant = req.search.get(HISTORY_TENANT_PARAM);
-  let filter: { tenantId: string | null; tenantName: string | null } | null = null;
+  let filter: { tenantId: string | null; tenantName: string | null; canMatch: boolean } | null = null;
   let lineItemId: string | null = null;
   if (rawTenant) {
     if (!isUuid(rawTenant)) {
-      filter = { tenantId: null, tenantName: null };
+      filter = { tenantId: null, tenantName: null, canMatch: false };
     } else {
       const tenantId = rawTenant.toLowerCase();
       const [tenantRes, billRes] = await Promise.all([
@@ -153,8 +155,9 @@ export async function loadPeriodHistory(req: SurfaceRequest): Promise<Loaded<Loa
         req.supabase.from("billing_line_items").select("id").eq("billing_period_id", period.id).eq("tenant_id", tenantId).maybeSingle<{ id: string }>(),
       ]);
       if (tenantRes.error || billRes.error) return PERIOD_HISTORY_REFUSALS.unavailable;
-      filter = { tenantId, tenantName: tenantRes.data?.display_name ?? null };
       lineItemId = tenantRes.data && billRes.data ? billRes.data.id : null;
+      // Entries are read only for that bill (below), so with none no page has any.
+      filter = { tenantId, tenantName: tenantRes.data?.display_name ?? null, canMatch: lineItemId !== null };
     }
   }
 
@@ -231,8 +234,8 @@ export async function loadPeriodHistory(req: SurfaceRequest): Promise<Loaded<Loa
   return {
     ok: true,
     model: buildPeriodHistoryModel({
-      microgrid: { id: microgrid.id, currency: microgrid.currency ?? "UGX" },
-      period: { id: period.id, start_date: period.start_date, end_date: period.end_date, timezone },
+      microgrid: { id: microgrid.id, currency: microgrid.currency },
+      period: { id: period.id, start_date: period.start_date, end_date: period.end_date, timezone: period.timezone },
       entries,
       filter,
       // Only a cursor that parses is this page's; anything else read the first page.

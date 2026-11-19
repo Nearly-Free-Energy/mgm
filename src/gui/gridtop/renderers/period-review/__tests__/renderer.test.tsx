@@ -216,10 +216,37 @@ describe("Gridtop's period-review renderer: copying", () => {
     expect(writeText).toHaveBeenCalledWith("55875");
     expect(said()).toBe("Total (UGX), Aisha M., copied 55875");
     expect(cell.textContent).toBe("55,875✓");
-    // A kWh figure is copied to 3 decimals, though it shows 1.
-    await act(async () => fireEvent.click(within(tableRow(0)).getByText("84.5").closest("td")!));
+    // A kWh figure is copied as a plain number: no grouping, no trailing zeros.
+    await act(async () => fireEvent.click(within(tableRow(0)).getByText("84.512").closest("td")!));
     expect(writeText).toHaveBeenLastCalledWith("84.512");
     expect(said()).toBe("Usage (kWh), Aisha M., copied 84.512");
+  });
+
+  it("copies on a first press without scrolling or announcing the old cursor, as a browser focuses the box before the click", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true });
+    try {
+      const writeText = clipboard();
+      await draw(draftModel());
+      const cell = within(tableRow(2)).getByText("24,000").closest("td")!;
+      // A browser's order: the press, the box taking focus, then the click.
+      act(() => {
+        fireEvent.mouseDown(cell);
+        region().focus();
+      });
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(said()).toBe("");
+      expect(region().querySelector(".gt\\:outline-ring")).toBe(cell);
+      await act(async () => fireEvent.click(cell));
+      expect(writeText).toHaveBeenCalledWith("24000");
+      expect(said()).toBe("Total (UGX), Carol N., copied 24000");
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      // The keyboard scrolls again once the click is over.
+      key("ArrowLeft");
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(2)).getByText("20,250").closest("td"));
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   });
 
   it("copies from a card and from the totals", async () => {
@@ -236,7 +263,7 @@ describe("Gridtop's period-review renderer: copying", () => {
     await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Standard (UGX), Aisha M., 52,125" })));
     expect(writeText).toHaveBeenLastCalledWith("52125");
     expect(said()).toBe("Standard (UGX), Aisha M., copied 52125");
-    await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Usage (kWh), Aisha M., 84.5" })));
+    await act(async () => fireEvent.click(within(cards()).getByRole("button", { name: "Copy Usage (kWh), Aisha M., 84.512" })));
     expect(writeText).toHaveBeenLastCalledWith("84.512");
   });
 
@@ -271,8 +298,8 @@ describe("Gridtop's period-review renderer: copying", () => {
     await draw(draftModel());
     const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
     await act(async () => fireEvent.click(cell));
-    expect(said()).toBe(copyFailed("Total (UGX), Aisha M."));
-    expect(said()).toBe("Could not copy Total (UGX), Aisha M.: select the figure and copy it.");
+    expect(said()).toBe(copyFailed("Total (UGX), Aisha M.", "55875"));
+    expect(said()).toBe("Could not copy Total (UGX), Aisha M.: the clipboard is not available. The figure is 55875.");
     expect(document.body.textContent).not.toContain("✓");
     // A second failure is said again.
     const first = spoken();
@@ -291,16 +318,16 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     clipboard();
     await draw(draftModel());
     act(() => region().focus());
-    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.000");
     key("ArrowRight");
-    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.512");
     key("ArrowDown");
-    expect(said()).toBe("End (kWh), Carol N., 542.0");
+    expect(said()).toBe("End (kWh), Carol N., 542.000");
     key("ArrowUp");
-    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.512");
     key("ArrowLeft");
     key("ArrowLeft");
-    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.000");
     for (let i = 0; i < 10; i++) key("ArrowRight");
     // The last figure is the total: past it are the statuses and the text.
     expect(said()).toBe("Total (UGX), Aisha M., 55,875");
@@ -309,9 +336,9 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     key("Home", { ctrlKey: true });
     key("ArrowDown");
     key("ArrowRight");
-    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.000");
     key("ArrowLeft");
-    expect(said()).toBe("Begin (kWh), Brian K., 310.0");
+    expect(said()).toBe("Begin (kWh), Brian K., 310.000");
     key("ArrowRight");
     key("ArrowRight");
     expect(said()).toBe("Lifeline (UGX), Brian K., 3,751");
@@ -327,11 +354,11 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     try {
       await draw(draftModel());
       act(() => region().focus());
-      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("1,200.0").closest("td"));
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("1,200.000").closest("td"));
       for (const k of ["ArrowRight", "PageDown", "Tab"]) key(k);
       expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest", inline: "nearest" });
       // End, Carol N., then Tab down to the next column's top.
-      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("84.5").closest("td"));
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(0)).getByText("84.512").closest("td"));
       key("End", { ctrlKey: true });
       expect(scrollIntoView.mock.contexts.at(-1)).toBe(within(tableRow(2)).getByText("24,000").closest("td"));
     } finally {
@@ -344,25 +371,25 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     await draw(draftModel());
     act(() => region().focus());
     key("End");
-    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.000");
     key("Home");
-    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.000");
     key("PageDown");
-    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.000");
     key("PageUp");
-    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.000");
     key("End", { ctrlKey: true });
     expect(said()).toBe("Total (UGX), Carol N., 24,000");
     key("Home", { metaKey: true });
-    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., 1,200.000");
     key("Tab");
     key("Tab");
-    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.000");
     key("Tab");
     // Brian K. has no end reading.
-    expect(said()).toBe("End (kWh), Aisha M., 1,284.5");
+    expect(said()).toBe("End (kWh), Aisha M., 1,284.512");
     key("Tab", { shiftKey: true });
-    expect(said()).toBe("Begin (kWh), Carol N., 500.0");
+    expect(said()).toBe("Begin (kWh), Carol N., 500.000");
   });
 
   it("copies with Enter, Space or C and moves on, and says where the table ends", async () => {
@@ -371,13 +398,13 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     act(() => region().focus());
     await act(async () => key("Enter"));
     expect(writeText).toHaveBeenLastCalledWith("1200");
-    expect(said()).toBe("Begin (kWh), Aisha M., copied 1200. Next: Begin (kWh), Brian K., 310.0");
+    expect(said()).toBe("Begin (kWh), Aisha M., copied 1200. Next: Begin (kWh), Brian K., 310.000");
     await act(async () => key(" "));
     expect(writeText).toHaveBeenLastCalledWith("310");
     await act(async () => key("c"));
     expect(writeText).toHaveBeenLastCalledWith("500");
     // From the bottom of a column to the top of the next.
-    expect(said()).toBe("Begin (kWh), Carol N., copied 500. Next: End (kWh), Aisha M., 1,284.5");
+    expect(said()).toBe("Begin (kWh), Carol N., copied 500. Next: End (kWh), Aisha M., 1,284.512");
     key("End", { ctrlKey: true });
     await act(async () => key("C"));
     expect(writeText).toHaveBeenLastCalledWith("24000");
@@ -397,12 +424,12 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     await draw(draftModel());
     act(() => region().focus());
     await act(async () => key("c"));
-    expect(said()).toBe(copyFailed("Begin (kWh), Aisha M."));
-    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("1,200.0");
+    expect(said()).toBe(copyFailed("Begin (kWh), Aisha M.", "1200"));
+    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("1,200.000");
     const writeText = clipboard();
     await act(async () => key("c"));
     expect(writeText).toHaveBeenLastCalledWith("1200");
-    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("310.0");
+    expect(region().querySelector(".gt\\:outline-ring")?.textContent).toBe("310.000");
   });
 
   it("says where the cursor is on coming back to the table", async () => {
@@ -410,13 +437,13 @@ describe("Gridtop's period-review renderer: the keyboard", () => {
     act(() => region().focus());
     key("ArrowDown");
     key("ArrowRight");
-    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.000");
     key("Escape");
     act(() => tableRow(0).querySelector<HTMLElement>("summary")!.focus());
     const before = spoken();
     act(() => region().focus());
     expect(spoken()).not.toBe(before);
-    expect(said()).toBe("Lifeline kWh, Brian K., 15.0");
+    expect(said()).toBe("Lifeline kWh, Brian K., 15.000");
   });
 
   it("lets Tab leave past the last figure and Shift+Tab before the first, and Escape leave at any time", async () => {

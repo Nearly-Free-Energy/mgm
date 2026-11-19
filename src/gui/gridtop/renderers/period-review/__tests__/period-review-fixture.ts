@@ -53,12 +53,12 @@ type Bill = { cells: Record<string, Value>; figures: (string | null)[] };
 const BILLS: Bill[] = [
   {
     cells: {
-      begin: energy(1200, "1,200.0"),
-      end: energy(1284.512, "1,284.5"),
-      usage: energy(84.512, "84.5"),
-      "tier.1.kwh": energy(15, "15.0"),
+      begin: energy(1200, "1,200.000"),
+      end: energy(1284.512, "1,284.512"),
+      usage: energy(84.512, "84.512"),
+      "tier.1.kwh": energy(15, "15.000"),
       "tier.1.amount": money(3750, "3,750"),
-      "tier.2.kwh": energy(69.512, "69.5"),
+      "tier.2.kwh": energy(69.512, "69.512"),
       "tier.2.amount": money(52125, "52,125"),
       total: money(55875, "55,875"),
       source: status("edge", "info", "Edge"),
@@ -69,10 +69,10 @@ const BILLS: Bill[] = [
   },
   {
     cells: {
-      begin: energy(310, "310.0"),
+      begin: energy(310, "310.000"),
       end: EMPTY,
       usage: EMPTY,
-      "tier.1.kwh": energy(15, "15.0"),
+      "tier.1.kwh": energy(15, "15.000"),
       "tier.1.amount": money(3751, "3,751"),
       "tier.2.kwh": EMPTY,
       "tier.2.amount": EMPTY,
@@ -85,12 +85,12 @@ const BILLS: Bill[] = [
   },
   {
     cells: {
-      begin: energy(500, "500.0"),
-      end: energy(542, "542.0"),
-      usage: energy(42, "42.0"),
-      "tier.1.kwh": energy(15, "15.0"),
+      begin: energy(500, "500.000"),
+      end: energy(542, "542.000"),
+      usage: energy(42, "42.000"),
+      "tier.1.kwh": energy(15, "15.000"),
       "tier.1.amount": money(3750, "3,750"),
-      "tier.2.kwh": energy(27, "27.0"),
+      "tier.2.kwh": energy(27, "27.000"),
       "tier.2.amount": money(20250, "20,250"),
       total: money(24000, "24,000"),
       source: status("edge", "info", "Edge"),

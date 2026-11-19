@@ -360,6 +360,13 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
       params: { id: "microgrid", periodId: "billingPeriod" },
       servedBy: "view",
     },
+    // The community's payment readiness, with the link to its Payment page,
+    // as the payments.payment-setup view, a section of billing's send queue.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payment-setup",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
   ],
   tables: [
     "payment_merchant_accounts",

@@ -57,6 +57,18 @@ export const STATUS_MAPS = {
     needs_reconciliation: { label: "Needs reconciliation",  tone: "warning", dot: true },
     resolved:             { label: "Resolved",              tone: "success"            },
   },
+  // A community's online payment readiness (payments.payment-setup) —
+  // mirrors the states of PaymentReadiness in src/lib/payments/repository.ts,
+  // plus `unchecked`, the view's own state for a readiness that could not be
+  // read. Not set up and not connected carry a dot: each asks a person to act.
+  paymentReadiness: {
+    ready:            { label: "Live",          tone: "success"            },
+    sandbox:          { label: "Sandbox",       tone: "warning"            },
+    disabled:         { label: "Off",           tone: "neutral"            },
+    unconfigured:     { label: "Not set up",    tone: "warning", dot: true },
+    connection_error: { label: "Not connected", tone: "danger",  dot: true },
+    unchecked:        { label: "Not checked",   tone: "neutral"            },
+  },
   billingPeriod: {
     draft:  { label: "Draft",  tone: "warning", dot: true },
     closed: { label: "Closed", tone: "success", dot: true },

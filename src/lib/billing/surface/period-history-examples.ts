@@ -149,9 +149,9 @@ export const PERIOD_HISTORY_LOADED_EXAMPLES: readonly LoadedModel<"collection">[
   // A period's whole history, on one page: it ends with the period's creation.
   buildPeriodHistoryModel(base({ entries: FIRST_PAGE })),
   // Filtered to one tenant, as the period review's row links it.
-  buildPeriodHistoryModel(base({ entries: AKELLO_ONLY, filter: { tenantId: AKELLO.id, tenantName: AKELLO.name } })),
+  buildPeriodHistoryModel(base({ entries: AKELLO_ONLY, filter: { tenantId: AKELLO.id, tenantName: AKELLO.name, canMatch: true } })),
   // Filtered to a tenant this microgrid does not have.
-  buildPeriodHistoryModel(base({ filter: { tenantId: id(0xc9), tenantName: null } })),
+  buildPeriodHistoryModel(base({ filter: { tenantId: id(0xc9), tenantName: null, canMatch: false } })),
   // A period with no entries yet.
   buildPeriodHistoryModel(base({})),
   // A later page.

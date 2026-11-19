@@ -499,8 +499,9 @@ leaving without creating one; and it opens that period's history (the
 draft billing period's close checklist and its Close
 confirmation step (the totals, the acknowledgements and the name to type),
 checks that the step fits the screen and that its controls are 44 px
-targets, and leaves without confirming. It opens the period's send queue,
-with a sandbox payment account seeded for the organization, and checks that
+targets, and leaves without confirming. It opens the period's payment
+links (the send queue, `…/send`), with a sandbox payment account seeded for
+the organization, and checks that it says nothing is sent from it and that
 the bill with a total offers its payment link to copy, without opening or
 copying it. It opens that bill's payments, with an online payment attempt
 seeded on it and held for reconciliation, checks that Refresh status and

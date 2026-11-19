@@ -142,8 +142,9 @@ describe("billing.close-period", () => {
     expect((out.value.spec.input as { properties: object }).properties).toEqual({});
     expect(checkGate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ plugin: "billing", access: "write" }));
     // Every read is the person's own client: the host resolves the period,
-    // available() reads the review, and prepare reads the period and the review.
+    // available() reads the period and the review, and prepare reads them again.
     expect(calls.map((c) => c.table).filter((t) => t !== "microgrids")).toEqual([
+      "billing_periods",
       "billing_periods",
       "rpc:fn_billing_period_close_review",
       "billing_periods",
@@ -179,13 +180,19 @@ describe("billing.close-period", () => {
     expect(await prepare(tables(o).client)).toMatchObject({ ok: false, status, code: "gui_action_unavailable", message });
   });
 
-  it("refuses a period with no pinned tariff in prepare, with the period review's copy", async () => {
+  it("refuses a period with no pinned tariff, with the period review's copy", async () => {
+    // Availability gives prepare's reason, so the host refuses before prepare reads anything.
     expect(await prepare(tables({ period: [{ ...PERIOD_ROW, rate_schedule_id: null }] }).client)).toMatchObject({
       ok: false,
       status: 409,
-      code: "gui_action_refused",
+      code: "gui_action_unavailable",
       message: CLOSE_PERIOD_REFUSALS.noTariff.message.slice(0, 300),
     });
+    // Past availability, prepare refuses it itself, before reading the review.
+    const { client, calls } = tables({ period: [{ ...PERIOD_ROW, rate_schedule_id: null }] });
+    const req = { supabase: client, fmt } as unknown as SurfaceRequest;
+    expect(await prepareClosePeriod(req, { params: { periodId: PERIOD } })).toEqual(CLOSE_PERIOD_REFUSALS.noTariff);
+    expect(calls.map((c) => c.table)).toEqual(["billing_periods"]);
   });
 
   it("refuses a period row-level security hides as not found", async () => {
@@ -242,25 +249,34 @@ describe("billing.close-period", () => {
 describe("close's availability", () => {
   const req = (client: SupabaseClient) => ({ supabase: client }) as unknown as SurfaceRequest;
 
-  it("is true for a draft with bills, whatever it asks to acknowledge", async () => {
+  it("is true for a draft with a tariff and bills, whatever it asks to acknowledge, in one read of the periods and the review", async () => {
     const { client, calls } = tables();
     expect(await closePeriodAvailable(req(client), [PERIOD])).toEqual({ [PERIOD]: true });
-    expect(calls).toEqual([{ table: "rpc:fn_billing_period_close_review", ops: [["rpc", [{ _period_id: PERIOD }]]] }]);
+    expect(calls).toEqual([
+      { table: "billing_periods", ops: [["select", ["id, rate_schedule_id"]], ["in", ["id", [PERIOD]]]] },
+      { table: "rpc:fn_billing_period_close_review", ops: [["rpc", [{ _period_id: PERIOD }]]] },
+    ]);
   });
 
   it.each([
-    ["missing", () => ({ data: null }), CLOSE_PERIOD_REFUSALS.notFound.message],
-    ["closed", () => ({ data: { ...REVIEW, status: "closed" } }), CLOSE_REFUSAL_COPY.closed],
-    ["without bills", () => ({ data: { ...REVIEW, billCount: 0 } }), CLOSE_PERIOD_REFUSALS.noBills.message],
-  ])("gives the reason for a period %s", async (_label, answer, reason) => {
-    expect(await closePeriodAvailable(req(tables({ review: answer }).client), [PERIOD])).toEqual({ [PERIOD]: reason });
+    ["missing", {}, () => ({ data: null }), CLOSE_PERIOD_REFUSALS.notFound.message],
+    ["row-level security hides", { period: [] }, undefined, CLOSE_PERIOD_REFUSALS.notFound.message],
+    ["with no pinned tariff", { period: [{ ...PERIOD_ROW, rate_schedule_id: null }] }, undefined, CLOSE_PERIOD_REFUSALS.noTariff.message],
+    // The tariff first, as prepare refuses.
+    ["closed, with no pinned tariff", { period: [{ ...PERIOD_ROW, rate_schedule_id: null }] }, () => ({ data: { ...REVIEW, status: "closed" } }), CLOSE_PERIOD_REFUSALS.noTariff.message],
+    ["closed", {}, () => ({ data: { ...REVIEW, status: "closed" } }), CLOSE_REFUSAL_COPY.closed],
+    ["without bills", {}, () => ({ data: { ...REVIEW, billCount: 0 } }), CLOSE_PERIOD_REFUSALS.noBills.message],
+  ])("gives the reason for a period %s", async (_label, o, answer, reason) => {
+    expect(await closePeriodAvailable(req(tables({ ...o, review: answer }).client), [PERIOD])).toEqual({ [PERIOD]: reason });
   });
 
   it.each([
-    ["a failed read", () => ({ data: null, error: { message: SECRET } })],
-    ["a review in another shape", () => ({ data: { ...REVIEW, digest: "" } })],
-  ])("throws on %s, so the host shows it as not checked", async (_label, answer) => {
-    await expect(closePeriodAvailable(req(tables({ review: answer }).client), [PERIOD])).rejects.toThrow();
+    ["a failed read of the review", {}, () => ({ data: null, error: { message: SECRET } })],
+    ["a review in another shape", {}, () => ({ data: { ...REVIEW, digest: "" } })],
+    ["a failed read of the periods", { periodError: true }, undefined],
+  ])("throws on %s, so the host shows it as not checked", async (_label, o, answer) => {
+    const out = closePeriodAvailable(req(tables({ ...o, review: answer }).client), [PERIOD]);
+    await expect(out).rejects.toThrow("billing.close-period: availability not read");
   });
 });
 

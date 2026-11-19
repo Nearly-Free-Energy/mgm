@@ -11,9 +11,10 @@ import "server-only";
  * from the review's View history links; a draft period's close checklist as
  * the `billing.close-checklist` view, reached from the review's Close period
  * link, with the close itself (`billing.close-period`, the server's close
- * ceremony); a period's bills with each one's stable payment link, to copy
- * and send, as the `billing.send-queue` view, reached from the review's Send
- * bills link; and the savings as the `billing.savings`
+ * ceremony); a period's bills with each one's stable payment link, for the
+ * manager to copy and share (the page sends nothing), as the
+ * `billing.send-queue` view, reached from the review's Payment links link;
+ * and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
@@ -217,8 +218,9 @@ export const BILLING_SURFACE: Contribution = {
       cost: "db",
       live: { refreshSeconds: 30, staleAfterSeconds: 120 },
       declares: { keys: SEND_QUEUE_KEYS },
-      // Each bill's link again, and the readiness note in full, for a GUI
-      // that offers the link to copy (Gridtop's, in
+      // Each bill's link again, the readiness note in full and the line
+      // saying nothing is sent from the page, for a GUI that offers the link
+      // to copy (Gridtop's, in
       // src/gui/gridtop/renderers/send-queue).
       ext: { schema: SEND_QUEUE_EXT_SCHEMA, zod: SendQueueExt },
       examples: SEND_QUEUE_EXAMPLES,

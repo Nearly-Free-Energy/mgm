@@ -7,13 +7,13 @@ import "server-only";
  * Everything here reads through the person's own client (row-level
  * security) and composes no capability: billing_periods and
  * billing_line_items are FOR ALL on user_can_access_microgrid, and the close
- * review is fn_billing_period_close_review (migration 20261118130000), the
- * function the close route's capability reads through
- * createSupabaseBillingRepository.getCloseReview. That function is SECURITY
- * INVOKER and answers null for a period the caller cannot read, so a tenant
- * or another organization's manager gets a 404 here; if it stops being
- * SECURITY INVOKER, or its result changes shape (parseCloseReview in
- * ../close.ts), revisit this module. The checklist loads while billing is
+ * review is read by the close route's own reader,
+ * createSupabaseBillingRepository(req.supabase).getCloseReview, over that
+ * client. It calls fn_billing_period_close_review (migration
+ * 20261118130000), which is SECURITY INVOKER and answers null for a period
+ * the caller cannot read, so a tenant or another organization's manager
+ * gets a 404 here; if it stops being SECURITY INVOKER, or the reader comes
+ * to use another client, revisit this module. The checklist loads while billing is
  * off, and the host shows the gate's notice with Close disabled.
  *
  * The close route (POST /api/billing-periods/[periodId]/close) is the
@@ -26,8 +26,9 @@ import "server-only";
  */
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
-import { CLOSE_REFUSAL_COPY, fractionalTotalsMessage, parseCloseReview, type CloseReview } from "../close";
+import { CLOSE_REFUSAL_COPY, fractionalTotalsMessage, type CloseReview } from "../close";
 import { closeCeremony } from "../close-ceremony";
+import { createSupabaseBillingRepository } from "../infrastructure/supabase-repository";
 import { buildCloseChecklistModel } from "./close-checklist-model";
 import { pageAfter, readAllPages } from "./pages";
 import { PERIOD_REVIEW_REFUSALS } from "./period-review";
@@ -69,16 +70,26 @@ type PeriodRow = {
   rate_schedule_id: string | null;
 };
 
-/** The period's close review, null when the caller cannot read the period, or "failed". */
+/**
+ * The period's close review, null when the caller cannot read the period, or
+ * "failed". The close route's reader, so the checklist and the close read the
+ * same review by construction; it throws on a failed read or a review in
+ * another shape, and its messages are never shown.
+ */
 async function readReview(req: SurfaceRequest, periodId: string): Promise<CloseReview | null | "failed"> {
-  const { data, error } = await req.supabase.rpc("fn_billing_period_close_review", { _period_id: periodId });
-  if (error) return "failed";
-  if (data === null || data === undefined) return null;
-  return parseCloseReview(data) ?? "failed";
+  try {
+    return await createSupabaseBillingRepository(req.supabase).getCloseReview(periodId);
+  } catch {
+    return "failed";
+  }
 }
 
-/** Why a draft cannot be closed through this GUI, from its review alone; null when it can. */
-function closeRefusal(review: CloseReview): Refusal | null {
+/**
+ * Why a period cannot be closed through this GUI, null when it can: from its
+ * row (whether it has a pinned tariff) and its review, in prepare's order.
+ */
+function closeRefusal(period: { rate_schedule_id: string | null }, review: CloseReview): Refusal | null {
+  if (!period.rate_schedule_id) return CLOSE_PERIOD_REFUSALS.noTariff;
   if (review.status === "closed") return CLOSE_PERIOD_REFUSALS.closed;
   if (review.billCount === 0) return CLOSE_PERIOD_REFUSALS.noBills;
   if (review.fractionalTotals.length > 0) {
@@ -112,6 +123,9 @@ export async function loadCloseChecklist(req: SurfaceRequest): Promise<Loaded<Lo
   const [review, bills] = await Promise.all([
     readReview(req, period.id),
     // Only to count where the readings came from; the review sums the rest.
+    // A read apart from the review, so a bill changed between the two can
+    // leave these counts a bill out from the review; only a figure shown
+    // here, since the close confirms the review's digest, never the counts.
     // usage_kwh too: a bill with no usage still has reading_source 'edge',
     // the column's default (00029), and is counted as neither.
     readAllPages<{ id: string; reading_source: string | null; usage_kwh: number | null }>((after) =>
@@ -166,26 +180,34 @@ export async function prepareClosePeriod(
   const review = await readReview(req, period.id);
   if (review === "failed") return CLOSE_PERIOD_REFUSALS.unavailable;
   if (review === null) return CLOSE_PERIOD_REFUSALS.notFound;
-  const refused = closeRefusal(review);
+  const refused = closeRefusal(period, review);
   if (refused) return refused;
   return { ok: true, model: closeCeremony(review, req.fmt) };
 }
 
 /**
- * Which periods can be offered a close: a draft with bills, none of them a
- * fractional total. One review per id; only the checklist offers the action
- * (it is `targeted: false`), so that is one read. The tariff is left to the
- * loader and prepare.
+ * Which periods can be offered a close: those prepare would prepare, a draft
+ * with a pinned tariff and bills, none of them a fractional total, with
+ * prepare's refusals. One read of the periods and one review per id; only
+ * the checklist offers the action (it is `targeted: false`), so that is one
+ * period.
  */
 export async function closePeriodAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
-  const reviews = await Promise.all(ids.map((id) => readReview(req, id)));
+  const [periods, reviews] = await Promise.all([
+    req.supabase.from("billing_periods").select("id, rate_schedule_id").in("id", ids),
+    Promise.all(ids.map((id) => readReview(req, id))),
+  ]);
   // Thrown, so the host shows each one as not checked.
-  if (reviews.includes("failed")) throw new Error("billing.close-period: availability not read");
+  if (periods.error || reviews.includes("failed")) throw new Error("billing.close-period: availability not read");
+  const rows = new Map(
+    ((periods.data ?? []) as { id: string; rate_schedule_id: string | null }[]).map((p) => [p.id, p]),
+  );
   return Object.fromEntries(
     ids.map((id, n): [string, true | string] => {
+      const period = rows.get(id);
       const review = reviews[n] as CloseReview | null;
-      if (review === null) return [id, CLOSE_PERIOD_REFUSALS.notFound.message];
-      return [id, closeRefusal(review)?.message ?? true];
+      if (!period || review === null) return [id, CLOSE_PERIOD_REFUSALS.notFound.message];
+      return [id, closeRefusal(period, review)?.message ?? true];
     }),
   );
 }

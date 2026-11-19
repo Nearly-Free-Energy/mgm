@@ -1,7 +1,7 @@
 /**
  * The `billing.send-queue@1` ext: each bill's payment link, for a renderer
- * that offers it to copy, and the note on why links can or cannot be made,
- * in full. The link is also the row's `link` cell, so a GUI without a
+ * that offers it to copy, the note on why links can or cannot be made, in
+ * full, and the line saying nothing is sent from the page. The link is also the row's `link` cell, so a GUI without a
  * renderer for this ext shows it as text a person can select.
  *
  * The link field is `url`, not `link`: "link" is one of the host's href keys
@@ -19,6 +19,8 @@ import { z } from "zod";
 import { PERIOD_REVIEW_MAX_ROWS } from "./period-review-model";
 
 export const SendQueueExt = z.strictObject({
+  /** The line a renderer shows at the top: nothing is sent from the page (SEND_QUEUE_COPY.intro). */
+  intro: z.string().max(200),
   /** One per model row, in the same order and with the same id (the bill's). Null where the row's link cell is empty. */
   rows: z
     .array(
@@ -32,7 +34,7 @@ export const SendQueueExt = z.strictObject({
       }),
     )
     .max(PERIOD_REVIEW_MAX_ROWS),
-  /** Why links are made from a sandbox account, or why none can be made; null when the payment account is live and ready, or when the period has no bills to send. */
+  /** Why links are made from a sandbox account, or why none can be made; null when the payment account is live and ready, or when the period has no bills. */
   note: z.strictObject({ tone: z.enum(["info", "warning"]), text: z.string().max(500) }).nullable(),
 });
 

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PaymentsCapability } from "../capability";
+import { PaymentsCapability, READINESS_UNREADABLE } from "../capability";
 import { createSupabasePaymentsRepository } from "../infrastructure/supabase-repository";
 import type { PaymentsRepository } from "../repository";
 import { COMMUNITY, ORG, baseRepo, providers, scope } from "./fixtures";
@@ -76,9 +76,9 @@ describe("getReadiness", () => {
   it.each<[string, Partial<PaymentsRepository>]>([
     ["payments is off", { isPaymentsEnabled: off }],
     ["pesapal is off", { isPesapalEnabled: off }],
-    ["payments state is unreadable", { isPaymentsEnabled: unreadable }],
-    ["pesapal state is unreadable", { isPesapalEnabled: unreadable }],
+    // Off is off, whatever the other read did.
     ["payments is off and pesapal is unreadable", { isPaymentsEnabled: off, isPesapalEnabled: unreadable }],
+    ["pesapal is off and payments is unreadable", { isPaymentsEnabled: unreadable, isPesapalEnabled: off }],
   ])("reports disabled when %s", async (_when, overrides) => {
     const repo = baseRepo({
       loadMerchantAccountPublic: async () => ({ ok: true as const, account: READY_ACCOUNT, hasOverride: false }),
@@ -92,6 +92,20 @@ describe("getReadiness", () => {
         message: "Online payments are disabled. Manual payment recording remains available.",
       },
     });
+  });
+
+  it.each<[string, Partial<PaymentsRepository>]>([
+    ["payments state is unreadable", { isPaymentsEnabled: unreadable }],
+    ["pesapal state is unreadable", { isPesapalEnabled: unreadable }],
+    ["both states are unreadable", { isPaymentsEnabled: unreadable, isPesapalEnabled: unreadable }],
+  ])("refuses with fixed copy, never as disabled, when %s and neither is off", async (_when, overrides) => {
+    const repo = baseRepo({
+      loadMerchantAccountPublic: async () => ({ ok: true as const, account: READY_ACCOUNT, hasOverride: false }),
+      ...overrides,
+    });
+    const readiness = await capabilityFor(repo).getReadiness(COMMUNITY);
+    expect(readiness).toEqual({ ok: false, status: 503, code: "payments_unavailable", message: READINESS_UNREADABLE });
+    expect(JSON.stringify(readiness)).not.toContain("rpc");
   });
 
   it("reports the merchant-account refusal ahead of plugin state", async () => {

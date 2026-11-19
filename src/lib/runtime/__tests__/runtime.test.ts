@@ -104,6 +104,7 @@ describe("MGM root runtime", () => {
       "billing billing.send-queue",
       "billing billing.savings",
       "payments payments.bill-attempts",
+      "payments payments.payment-setup",
       "tenant-app tenant.home",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([

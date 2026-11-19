@@ -6,7 +6,9 @@ import "server-only";
  * the labels the current chrome uses; and a billing period's online payment
  * attempts as the `payments.bill-attempts` view, a tab of billing's period
  * review, with Refresh status and the two reconciliations on each attempt.
- * A page that moves to a view keeps its nav id.
+ * A page that moves to a view keeps its nav id. And the community's payment
+ * readiness as the `payments.payment-setup` view, a section of billing's
+ * send queue, which carries the link to the community's Payment page.
  *
  * `payments.bill-attempts` is a new page (…/[periodId]/payments) with no
  * page.tsx, so the catalog marks it `servedBy: "view"` and the host's
@@ -22,6 +24,14 @@ import "server-only";
  * reachable meanwhile; parity.ts's payments-while-off row holds the deletes
  * until that is decided. If the host comes to keep a plugin's exempt actions
  * enabled while it is off, revisit this paragraph.
+ *
+ * `payments.payment-setup` is a new page too (…/[periodId]/payment-setup),
+ * served the same way. It replaces the legacy period page's banner shown
+ * when online payments are not set up (parity.ts, payment-setup). It is a
+ * section, not a tab, because the host lists a disabled plugin's sections
+ * with the gate's notice and leaves its tabs out, and Payments being off is
+ * one of the states it explains. If the host comes to hide a disabled
+ * plugin's sections too, revisit.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { PAYMENTS_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -38,6 +48,9 @@ import {
   reconcileAvailable,
 } from "./surface/bill-attempts";
 import { BILL_ATTEMPTS_EXAMPLES } from "./surface/bill-attempts-examples";
+import { loadPaymentSetup } from "./surface/payment-setup";
+import { PAYMENT_SETUP_EXAMPLES } from "./surface/payment-setup-examples";
+import { PAYMENT_SETUP_KEYS, PAYMENT_SETUP_VIEW } from "./surface/payment-setup-model";
 import {
   ACCEPT_RECEIPTS_ACTION,
   BILL_ATTEMPTS_KEYS,
@@ -85,6 +98,28 @@ export const PAYMENTS_SURFACE: Contribution = {
       declares: { keys: BILL_ATTEMPTS_KEYS },
       examples: BILL_ATTEMPTS_EXAMPLES,
       load: loadBillAttempts,
+    },
+    {
+      id: PAYMENT_SETUP_VIEW,
+      kind: "record",
+      path: "/microgrids/[id]/billing/[periodId]/payment-setup",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      // No `entity`: with the period as its entity, the host would append
+      // billing's targeted actions on a period (billing.delete-period) to
+      // this view, as for payments.bill-attempts.
+      // A section of the send queue, where a manager finds no links to send
+      // when payments are not set up; listed there while Payments is off.
+      attach: { to: { view: "billing.send-queue" }, order: 10, hint: "section" },
+      // No `agent`: never read by an assistant (#133, deny by default).
+      // Read through the person's own client and the capability's
+      // getReadiness (./surface/payment-setup.ts), which asks no provider;
+      // loads while Payments is off, with the gate's notice. No refresh:
+      // setup changes only on the community's Payment page, which a person
+      // leaves this page to visit.
+      cost: "db",
+      declares: { keys: PAYMENT_SETUP_KEYS },
+      examples: PAYMENT_SETUP_EXAMPLES,
+      load: loadPaymentSetup,
     },
   ],
   // All three human-only (no assistant proposes a payment write) and

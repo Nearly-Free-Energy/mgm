@@ -60,3 +60,19 @@ export type MicrogridPublic = Omit<
 // `Pick<Microgrid, …>` row type.
 export const MICROGRID_PUBLIC_COLUMNS_FOR_CUSTOMERAPP =
   "id, name, currency, community_id" as const;
+
+// A narrower read than MICROGRID_PUBLIC_COLUMNS, as a projection of it: a
+// loader that needs a few columns names them through microgridPublicColumns,
+// and the compiler refuses a name the projection leaves out, so a narrower
+// list cannot become the way a secret column is read. It follows the
+// constant above; if that stops being one ", "-separated literal, revisit
+// MicrogridPublicColumn.
+type ColumnsOf<S extends string> = S extends `${infer Head}, ${infer Rest}` ? Head | ColumnsOf<Rest> : S;
+
+/** A column of MICROGRID_PUBLIC_COLUMNS. */
+export type MicrogridPublicColumn = ColumnsOf<typeof MICROGRID_PUBLIC_COLUMNS>;
+
+/** A select list of some of MICROGRID_PUBLIC_COLUMNS, in the order given. */
+export function microgridPublicColumns(...columns: [MicrogridPublicColumn, ...MicrogridPublicColumn[]]): string {
+  return columns.join(", ");
+}

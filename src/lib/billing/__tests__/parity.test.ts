@@ -19,9 +19,11 @@
  *    installed GUI registers its own form for the action (GuiPlugin.forms).
  *    An action the host can only answer with NO_FORM stays pending, however
  *    it is contributed.
- *  - link: an example of the row's view carries an href the row fits (a
- *    LinkRef with `download` for a download row); the view existing is not
- *    enough.
+ *  - link: an example of the row's view carries an href the row fits on
+ *    what the row's `via` names: its LinkRef (by id; with `download` for a
+ *    download row), a row's own href or an EntityRef's. The view existing is
+ *    not enough, and neither is the same href on the host's trail or on
+ *    another of the view's links.
  *  - view: the view is contributed.
  *  - nav: the nav entry opens a view rather than a legacy page.
  *  - copy: never seen in a contribution, since copying is the GUI's to draw.
@@ -60,9 +62,6 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Unscheduled: the send queue explains, but the link to the community's
-  // Payment page needs payments to contribute that page (parity.ts).
-  "payment-setup",
   // Unscheduled: the host hides a disabled plugin's tab and disables its
   // actions, which the routes accept while Payments is off (parity.ts).
   "payments-while-off",
@@ -188,15 +187,51 @@ function contributedView(id: string): boolean {
   return Object.values(SURFACES).some((s) => s.views?.some((v) => v.id === id));
 }
 
-/** Every href in a model outside data subtrees, and whether it sits on an object with a `download`. */
-function hrefsOf(value: unknown, out: { href: string; download: boolean }[] = []): { href: string; download: boolean }[] {
-  if (Array.isArray(value)) value.forEach((item) => hrefsOf(item, out));
+/**
+ * Whether a view's copy figures reach a person: the view declares an ext, and
+ * an installed GUI registers a renderer reading its version. The kit's view
+ * copies nothing, so without both a copy row has no control.
+ */
+function copiedByARenderer(id: string): boolean {
+  const view = Object.values(SURFACES)
+    .flatMap((s) => s.views ?? [])
+    .find((v) => v.id === id);
+  const schema = view?.ext?.schema;
+  if (!schema) return false;
+  const version = Number(schema.slice(schema.lastIndexOf("@") + 1));
+  return Object.values(INSTALLED_GUIS).some((gui) => gui.renderers?.[id as `${string}.${string}`]?.reads.includes(version) === true);
+}
+
+/**
+ * Every object in a model outside data subtrees and the host's trail, with
+ * the key it sits under (an array's items take the array's key). The trail
+ * is the host's, filled from the path (src/lib/gui/host/server/entities.ts),
+ * and links every view's parents, so it shows nothing a view contributes.
+ */
+function objectsOf(value: unknown, key = "", out: { key: string; o: Record<string, unknown> }[] = []): { key: string; o: Record<string, unknown> }[] {
+  if (Array.isArray(value)) value.forEach((item) => objectsOf(item, key, out));
   else if (value !== null && typeof value === "object") {
     const o = value as Record<string, unknown>;
-    if (typeof o.href === "string") out.push({ href: o.href, download: o.download !== undefined });
-    for (const [key, child] of Object.entries(o)) if (!DATA_KEYS.has(key)) hrefsOf(child, out);
+    out.push({ key, o });
+    for (const [k, child] of Object.entries(o)) if (!DATA_KEYS.has(k) && k !== "trail") objectsOf(child, k, out);
   }
   return out;
+}
+
+/**
+ * The hrefs in a model that `via` names, and whether each sits on an object
+ * with a `download`: the LinkRef with that id (in a `links` list), a row's
+ * own href, or an EntityRef's. Only what the view itself put there.
+ */
+function carriedHrefs(model: unknown, via: NonNullable<ParityLink["via"]>): { href: string; download: boolean }[] {
+  return objectsOf(model)
+    .filter(({ key, o }) => {
+      if (typeof o.href !== "string") return false;
+      if (via === "row") return key === "rows";
+      if (via === "entity") return typeof o.kind === "string" && typeof o.id === "string" && typeof o.label === "string";
+      return key === "links" && o.id === via.link;
+    })
+    .map(({ o }) => ({ href: o.href as string, download: o.download !== undefined }));
 }
 
 /** A row's href as a pattern: each [segment] any one segment, any query or fragment allowed. */
@@ -208,18 +243,20 @@ function hrefPattern(href: string): RegExp {
   return new RegExp(`^${body}(?:[?#].*)?$`);
 }
 
+const examplesOf = (view: string): readonly unknown[] =>
+  Object.values(SURFACES).flatMap((s) => (s.views ?? []).filter((v) => v.id === view).flatMap((v): readonly unknown[] => v.examples));
+
 /**
  * A link row is contributed only when an example of its view carries an
- * href it fits (a LinkRef's, a row's or an EntityRef's), and for a download
- * row only a LinkRef with `download`: a view existing is not enough.
+ * href it fits on what the row names in `via` (for a download row, a LinkRef
+ * with `download`): a view existing is not enough, and neither is the same
+ * href on the host's trail or on another of the view's links.
  */
-function contributedLink(l: ParityLink): boolean {
+function contributedLink(l: ParityLink, examples: readonly unknown[] = examplesOf(l.view)): boolean {
+  const via = l.via;
+  if (via === undefined) return false;
   const pattern = hrefPattern(l.href);
-  return Object.values(SURFACES).some((s) =>
-    (s.views ?? [])
-      .filter((v) => v.id === l.view)
-      .some((v) => v.examples.some((example) => hrefsOf(example).some((h) => pattern.test(h.href) && (!l.download || h.download))))
-  );
+  return examples.some((example) => carriedHrefs(example, via).some((h) => pattern.test(h.href) && (!l.download || h.download)));
 }
 
 /** A nav entry that opens a view rather than a legacy page. */
@@ -307,7 +344,10 @@ describe("parity with the contributed actions and views", () => {
     const by = row.replacedBy;
     if (by.kind === "copy") {
       // Never seen in a contribution: once it leaves PENDING, its view must exist.
-      if (!PENDING.has(id)) expect(contributedView(by.view), `${id}'s view ${by.view}`).toBe(true);
+      if (!PENDING.has(id)) {
+        expect(contributedView(by.view), `${id}'s view ${by.view}`).toBe(true);
+        expect(copiedByARenderer(by.view), `${id}: ${by.view} declares an ext that an installed GUI's renderer reads`).toBe(true);
+      }
       return;
     }
     if (by.kind === "action" && contributedAction(by) && !submittable(contributedAction(by)!)) {
@@ -353,7 +393,33 @@ describe("parity with the contributed actions and views", () => {
   it("does not count a link as contributed because its view exists", () => {
     // billing.savings is contributed and carries no billing period link.
     expect(contributedView("billing.savings")).toBe(true);
-    expect(contributedLink({ kind: "link", view: "billing.savings", href: "/microgrids/[id]/billing/[periodId]" })).toBe(false);
+    expect(contributedLink({ kind: "link", view: "billing.savings", href: "/microgrids/[id]/billing/[periodId]", via: "row" })).toBe(false);
+  });
+
+  it.each(["back-to-period", "history-show-all"])(
+    "does not count %s as contributed on any href but its own LinkRef's, such as the trail's or Latest changes'",
+    (id) => {
+      const row = BILLING_PARITY.find((r) => r.id === id)!;
+      const link = row.replacedBy as ParityLink;
+      const via = link.via as { link: string };
+      expect(contributedLink(link)).toBe(true);
+      // The view's examples with that one LinkRef taken out: the trail and the other links stay.
+      const without = examplesOf(link.view).map((example) => {
+        const m = example as { links: { id: string }[]; trail: unknown[] };
+        return { ...m, links: m.links.filter((l) => l.id !== via.link) };
+      });
+      expect(without.some((m) => m.trail.length > 0)).toBe(true);
+      expect(contributedLink(link, without)).toBe(false);
+      // Its href is still in those examples, on the trail or another link: the old any-href match would have passed.
+      const pattern = hrefPattern(link.href);
+      const everyObject = without.flatMap((m) => [...objectsOf(m), ...objectsOf((m as { trail: unknown }).trail, "trail")]);
+      expect(everyObject.some(({ o }) => typeof o.href === "string" && pattern.test(o.href))).toBe(true);
+    },
+  );
+
+  it("does not count a link row that names nothing to carry it", () => {
+    const row = BILLING_PARITY.find((r) => r.id === "back-to-period")!;
+    expect(contributedLink({ ...(row.replacedBy as ParityLink), via: undefined })).toBe(false);
   });
 
   it("lists only rows of the table as pending", () => {

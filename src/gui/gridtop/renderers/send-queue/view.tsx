@@ -2,10 +2,10 @@
 
 /**
  * Gridtop's drawing of `billing.send-queue@1`, a period's bills with the
- * payment link a manager sends each tenant: the host's notice, the
- * readiness note, then one card per bill with its tenant, total, payment
- * status and note, the link as text a person can select, a Copy link
- * button, and the bill's own controls. It prints the text the server
+ * payment link a manager sends each tenant: the line saying nothing is sent
+ * from the page, the host's notice, the readiness note, then one card per
+ * bill with its tenant, total, payment status and note, the link as text a
+ * person can select, a Copy link button, and the bill's own controls. It prints the text the server
  * formatted and copies the ext's link, which is the same as the link cell.
  *
  * The link is never an anchor: opening it starts a checkout for the bill
@@ -48,6 +48,18 @@ function tenantOf(row: RowOf<ActionRef>): string {
   return cell?.t === "ref" ? cell.ref.label : (row.entity?.label ?? cell?.text ?? row.id);
 }
 
+/**
+ * Copies a link and marks its button, as useCopier in ../period-review/copy.ts
+ * does for a figure, but announces only whose link was copied: useCopier's
+ * announcements, its success and its failure (copyFailed) alike, end with
+ * the figure, which for a link would have a screen reader read the whole URL
+ * aloud. The link is shown in full, as text a person can select, so this
+ * failure tells them to select it instead. Sharing the module is not what
+ * stops reuse (this view already takes copyFigure from it, and both
+ * renderers load on demand, outside the shell's first load); the wording
+ * is. If useCopier comes to take its announcements from the caller, use it
+ * here instead.
+ */
 function useCopy(announce: (message: string) => void) {
   const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,6 +174,7 @@ function Queue({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
       {/* The window bar shows the title and subtitle. */}
       <header>
         <h1 className="gt:sr-only">{m.title}</h1>
+        <p className="gt:text-body gt:text-muted-foreground">{links.intro}</p>
       </header>
       {m.notice && (
         <p className={cls("gt:rounded-md gt:px-3 gt:py-2 gt:text-dense gt:font-medium", TONE[m.notice.tone] ?? TONE.neutral)}>{m.notice.text}</p>
@@ -174,7 +187,7 @@ function Queue({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
           {empty.text && <p className="gt:max-w-prose gt:text-body gt:text-muted-foreground">{empty.text}</p>}
         </section>
       ) : (
-        <ul aria-label="Bills to send" className="gt:grid gt:gap-3 gt:medium:grid-cols-2">
+        <ul aria-label="Bills" className="gt:grid gt:gap-3 gt:medium:grid-cols-2">
           {rows.map((row, i) => {
             const url = links.urls[i];
             return (

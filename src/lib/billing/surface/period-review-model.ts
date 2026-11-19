@@ -63,6 +63,8 @@ export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
 
 /** A period's link to its send queue (`billing.send-queue`, ./send-queue-model.ts). */
 export const SEND_QUEUE_LINK = "billing.send-queue";
+/** That link's label. */
+export const SEND_QUEUE_LINK_LABEL = "Payment links";
 
 /**
  * The close checklist of a period: the path the `billing.close-checklist`
@@ -254,7 +256,10 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   // Built by the history view's own helper, so these links and the query name it reads cannot drift apart.
   const historyHref = periodHistoryHref(microgrid.id, period.id);
 
-  const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
+  // A bill's readings and usage to 3 dp, as the legacy table shows them; the
+  // totals below stay at 1 dp, as its grand total row does.
+  const energy = (kwh: number | null | undefined) =>
+    kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true, digits: 3 });
   const money = (amount: number | null | undefined) =>
     amount === null || amount === undefined ? fmt.empty() : fmt.money(num(amount), currency, { bare: true });
 
@@ -373,9 +378,10 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     links.push({ id: CLOSE_CHECKLIST_LINK, label: "Close period", href: closeChecklistHref(microgrid.id, period.id) });
   }
   // The bills' payment links, for draft and closed periods alike (both are
-  // payable); left out with no bills, which have nothing to send.
+  // payable); left out with no bills, which have none. Labelled for the
+  // links, not a send: the view sends nothing (./send-queue-model.ts).
   if (i.bills.length > 0) {
-    links.push({ id: SEND_QUEUE_LINK, label: "Send bills", icon: "share", href: sendQueueHref(microgrid.id, period.id) });
+    links.push({ id: SEND_QUEUE_LINK, label: SEND_QUEUE_LINK_LABEL, icon: "payments", href: sendQueueHref(microgrid.id, period.id) });
   }
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {

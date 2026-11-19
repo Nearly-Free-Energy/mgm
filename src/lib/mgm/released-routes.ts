@@ -112,6 +112,8 @@ const RELEASE_4_PAGE_ROUTES = [
   // A billing period's bills and one bill's payment attempts (?bill=), as
   // the payments.bill-attempts view.
   /^\/microgrids\/[^/]+\/billing\/[^/]+\/payments$/,
+  // The community's payment readiness, as the payments.payment-setup view.
+  /^\/microgrids\/[^/]+\/billing\/[^/]+\/payment-setup$/,
   // Stable customer-facing payment-link indirection (no session).
   /^\/p\/[^/]+$/,
 ];

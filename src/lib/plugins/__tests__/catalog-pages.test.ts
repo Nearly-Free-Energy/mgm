@@ -93,6 +93,7 @@ const PAGE_OWNERS: Record<string, MgmPluginName> = {
   "/organizations/[id]/payments": "payments",
   "/communities/[id]/payment": "payments",
   "/microgrids/[id]/billing/[periodId]/payments": "payments",
+  "/microgrids/[id]/billing/[periodId]/payment-setup": "payments",
   "/my": "tenant-app",
 };
 

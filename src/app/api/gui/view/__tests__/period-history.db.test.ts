@@ -3,7 +3,8 @@
  * `billing.period-history`: the route checks the session, the host resolves
  * the microgrid and the period through the person's own client, and the
  * loader reads the audit log and payment events through that client, a
- * page at a time, newest first, with ties across a page boundary. The
+ * page at a time, newest first, with page boundaries inside a tie of both
+ * sources, on an audit entry and on a payment event. The
  * period review's View history link for a tenant opens that tenant's
  * entries; a tenant of another microgrid or organization is never named;
  * payment_events.raw_payload never leaves the database; another
@@ -37,6 +38,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
+import { instantKey, PERIOD_HISTORY_PAGE } from "@/lib/billing/surface/period-history-model";
 import { GET } from "../route";
 
 const ORG = "e7a00000-0000-4000-8000-000000000001";
@@ -58,8 +60,29 @@ const EMAIL = "gui-history-manager@test.local";
 const OTHER_EMAIL = "gui-history-other@test.local";
 const TENANT_EMAIL = "gui-history-tenant@test.local";
 const CANARY = "RAW-PAYLOAD-CANARY";
-/** Extra entries, enough that the first page's boundary falls inside a tie. */
-const EXTRA = 205;
+/**
+ * Three instants that many entries share, newest first. tie[2] carries
+ * both sources: audit entries and two payment events.
+ */
+const TIE = ["2026-10-31T21:00:00.25+00:00", "2026-10-31T20:00:00+00:00", "2026-10-31T19:00:00.000001+00:00"] as const;
+/** The entries newer than every tie: payment event 1 and audit entries 4, 3 and 2. */
+const HEAD = 4;
+/** Audit entries at tie[0] and tie[1]. */
+const TIED_EARLY = 60;
+/**
+ * Audit entries at tie[2]: as many as fill the first page after the head
+ * and the two earlier ties, so page 1 ends inside tie[2] on an audit entry,
+ * then one fewer than a page, so page 2 ends on the first of tie[2]'s
+ * payment events and page 3 starts with the second.
+ */
+const ON_PAGE_1 = PERIOD_HISTORY_PAGE - HEAD - 2 * TIED_EARLY;
+const ON_PAGE_2 = PERIOD_HISTORY_PAGE - 1;
+const TIED_LATE = ON_PAGE_1 + ON_PAGE_2;
+/** Extra audit entries: TIED_EARLY at each of tie[0] and tie[1], then TIED_LATE at tie[2]. */
+const EXTRA = 2 * TIED_EARLY + TIED_LATE;
+const tieOf = (n: number) => (n < TIED_EARLY ? 0 : n < 2 * TIED_EARLY ? 1 : 2);
+/** Extra audit entry n's id. */
+const extraId = (n: number) => auditId(0x100 + n);
 
 let manager: TestUser;
 let other: TestUser;
@@ -205,7 +228,6 @@ beforeAll(async () => {
   other = await createTestUser({ email: OTHER_EMAIL, role: "org_manager", scopeId: OTHER_ORG });
   tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: tenant(1) });
 
-  const tie = ["2026-10-31T21:00:00.25+00:00", "2026-10-31T20:00:00+00:00", "2026-10-31T19:00:00.000001+00:00"];
   const audit = [
     auditRow(auditId(1), { type: "period_created", at: "2026-10-01T06:00:00+00:00" }),
     auditRow(auditId(2), {
@@ -232,9 +254,9 @@ beforeAll(async () => {
     // The bill it was written for is gone: the snapshot names the tenant.
     auditRow(auditId(4), { at: "2026-11-03T09:00:00+00:00", details: { tenant_name: "Gone unit", new_total_amount: 100 } }),
     ...Array.from({ length: EXTRA }, (_, n) =>
-      auditRow(auditId(0x100 + n), {
+      auditRow(extraId(n), {
         lineItem: n % 2 ? bill(2) : bill(3),
-        at: tie[n % 3],
+        at: TIE[tieOf(n)],
         details: { tenant_name: n % 2 ? "Unit 2" : "Unit 3", new_total_amount: 1000 + n },
       }),
     ),
@@ -268,8 +290,21 @@ beforeAll(async () => {
       actor_kind: "system",
       actor_ref: "period-history-test",
       raw_payload: { marker: CANARY },
-      // At an instant extra audit entries share, so the merge breaks a tie across sources.
-      at: tie[1],
+      // At an instant extra audit entries share, so a page boundary falls
+      // inside a tie across sources, on an audit entry and then on a payment.
+      at: TIE[2],
+    },
+    {
+      id: eventId(3),
+      line_item_id: bill(2),
+      from_status: "unpaid",
+      to_status: "link_generated",
+      source: "generate_link",
+      actor_user_id: null,
+      actor_kind: "system",
+      actor_ref: "period-history-test",
+      raw_payload: { marker: CANARY },
+      at: TIE[2],
     },
   ];
   {
@@ -336,17 +371,53 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's history", (
     expect(rows.some((r) => r.cells.by.text === "System")).toBe(true);
   });
 
-  it("follows next to the end: every entry once, across ties and both sources", async () => {
+  it("follows next to the end: every entry once, in order, across ties and both sources", async () => {
     caller = manager;
     const pages = await allPages(historyHref());
-    expect(pages.length).toBe(Math.ceil(expectedIds.size / 200));
     const ids = pages.flatMap((p) => p.body.rows.map((r) => r.id));
     expect(new Set(ids).size).toBe(ids.length);
     expect(new Set(ids)).toEqual(expectedIds);
-    expect(pages.at(-1)!.body).not.toHaveProperty("next");
+    // The documented order: newest first; at one instant the audit log's
+    // entries before the payment events', each by id, descending.
+    const extras = (t: number) =>
+      Array.from({ length: EXTRA }, (_, n) => n)
+        .filter((n) => tieOf(n) === t)
+        .reverse()
+        .map((n) => `audit:${extraId(n)}`);
+    expect(ids).toEqual([
+      `payment_event:${eventId(1)}`,
+      `audit:${auditId(4)}`,
+      `audit:${auditId(3)}`,
+      `audit:${auditId(2)}`,
+      ...extras(0),
+      ...extras(1),
+      ...extras(2),
+      `payment_event:${eventId(3)}`,
+      `payment_event:${eventId(2)}`,
+      `audit:${auditId(1)}`,
+    ]);
+    expect(pages.map((p) => p.body.rows.length)).toEqual([PERIOD_HISTORY_PAGE, PERIOD_HISTORY_PAGE, 2]);
+    const cursorOf = (p: Model) => new URL(p.body.next!, "http://localhost").searchParams.get("before")!;
+
+    // Page 1 ends inside tie[2] on an audit entry, before every payment at that instant.
+    const [first, second, third] = pages;
+    expect(first.body.rows.at(-1)!.id).toBe(extras(2)[ON_PAGE_1 - 1]);
+    expect(cursorOf(first)).toMatch(/^a~/);
+    expect(instantKey(cursorOf(first).split("~")[2])).toBe(instantKey(TIE[2]));
+    // Page 2 reads after that audit cursor: the rest of tie[2]'s audit entries,
+    // then the first payment at that instant, which the payment side's
+    // at-or-before read keeps. It ends there, on a payment cursor.
+    expect(second.body.rows.map((r) => r.id)).toEqual([...extras(2).slice(ON_PAGE_1), `payment_event:${eventId(3)}`]);
+    expect(cursorOf(second)).toMatch(new RegExp(`^p~${eventId(3)}~`));
+    // To the microsecond, as the database returned it.
+    expect(instantKey(cursorOf(second).split("~")[2])).toBe(instantKey(TIE[2]));
+    // Page 3 reads after that payment cursor: the other payment at that
+    // instant (the payment tie read), then the older audit entry, and no
+    // audit entry of tie[2] again.
+    expect(third.body.rows.map((r) => r.id)).toEqual([`payment_event:${eventId(2)}`, `audit:${auditId(1)}`]);
+    expect(third.body).not.toHaveProperty("next");
     // A later page leads back to the latest changes.
-    expect(pages[1].links.map((l) => l.id)).toEqual(["billing.back-to-period", "billing.history-latest"]);
-    expect(ids.at(-1)).toBe(`audit:${auditId(1)}`);
+    expect(second.links.map((l) => l.id)).toEqual(["billing.back-to-period", "billing.history-latest"]);
   });
 
   it("opens the period review's View history link for a tenant on that tenant's entries", async () => {
@@ -394,6 +465,11 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's history", (
     expect(model.body.rows).toEqual([]);
     expect(model.subtitle).toMatch(/ · Showing changes for unknown tenant$/);
     expect(JSON.stringify(model)).not.toContain("not-a-uuid");
+    // With a cursor too it is the first page: Show all, and no Latest changes to the same place.
+    const before = encodeURIComponent(`a~${auditId(2)}~2026-11-01T09:00:00+00:00`);
+    const later = (await (await view(`${historyHref()}?tenant_id=not-a-uuid&before=${before}`)).json()) as Model;
+    expect(later.links.map((l) => l.id)).toEqual(["billing.back-to-period", "billing.history-show-all"]);
+    expect(later.body.empty.title).toBe("No changes recorded for unknown tenant");
   });
 
   it("answers a cursor with a date Postgres refuses with the first page, not an error", async () => {
