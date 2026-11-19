@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { TENANT } from "@/lib/roles";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,9 +25,17 @@ const UUID_RE =
  *     DELETE naturally produces zero rows affected for an org_manager
  *     targeting rows they don't own; we convert that to 403.
  *
- * Soft-delete semantics: removes all `user_roles` rows for the target
- * user. Does NOT touch `auth.users` or `user_profiles` — this preserves
- * the audit trail and allows re-invitation later.
+ * Soft-delete semantics: removes the target user's staff `user_roles`
+ * rows, every row whose role is not `tenant`. Does NOT touch `auth.users`
+ * or `user_profiles` — this preserves the audit trail and allows
+ * re-invitation later. A tenant row (RFC mgm#197) is the person's access to
+ * a unit they rent, given and removed from the tenant record
+ * (`fn_tenant_access_grant` / `fn_tenant_access_revoke`), never from the
+ * Users page, so it stays: removing someone's staff access leaves their
+ * home. Afterwards the person is a tenant like any other if they hold
+ * tenant rows (given further units, off the Users page, kept to tenant
+ * pages by the (gui) layout). "Not tenant" is staff as `staffRoles` (@/lib/auth/access) counts
+ * it; if a second role that is not staff is added, revisit both.
  *
  * Errors:
  *   204 — success (no body).
@@ -53,7 +62,8 @@ export async function DELETE(
   const { error, count } = await supabase
     .from("user_roles")
     .delete({ count: "exact" })
-    .eq("user_id", id);
+    .eq("user_id", id)
+    .neq("role", TENANT);
 
   if (error) {
     // Trigger RAISEs surface here with a pg code.
@@ -65,8 +75,10 @@ export async function DELETE(
   }
 
   if ((count ?? 0) === 0) {
-    // Either the user didn't have any role rows to begin with, or RLS
-    // filtered them out. Either way the caller cannot revoke — 403.
+    // Either the user had no staff rows to begin with (none at all, or only
+    // tenant rows), or RLS filtered them out. Either way the caller cannot
+    // revoke — 403, the same answer whichever, so it never tells a caller
+    // that an account holds tenant access.
     return NextResponse.json(
       { error: "No roles revoked (not authorized, or user has no roles)." },
       { status: 403 }

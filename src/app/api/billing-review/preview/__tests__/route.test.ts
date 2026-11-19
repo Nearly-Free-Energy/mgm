@@ -108,7 +108,36 @@ describe("POST /api/billing-review/preview", () => {
     );
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "periodId and tenantIds must be UUIDs; tenantIds is limited to 500 entries",
+      field: "tenantIds",
+      code: "invalid_body",
+    });
     expect(preview).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ periodId: PERIOD_ID, manualReadings: [] }, "Unknown field: manualReadings", undefined],
+    [{ periodId: PERIOD_ID, provider: "fixture" }, "Unknown field: provider", undefined],
+    [{ periodId: "not-a-uuid" }, "periodId and tenantIds must be UUIDs; tenantIds is limited to 500 entries", "periodId"],
+    [[PERIOD_ID], "periodId and tenantIds must be UUIDs; tenantIds is limited to 500 entries", undefined],
+  ])("refuses %j with 400 invalid_body", async (body, error, field) => {
+    const { POST } = await import("../route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/billing-review/preview", { method: "POST", body: JSON.stringify(body) })
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error, ...(field ? { field } : {}), code: "invalid_body" });
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("refuses a body that is not JSON", async () => {
+    const { POST } = await import("../route");
+    const response = await POST(
+      new NextRequest("http://localhost/api/billing-review/preview", { method: "POST", body: "{" })
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
   });
 
   it("does not preview when billing is disabled", async () => {

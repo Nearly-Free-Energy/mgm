@@ -17,7 +17,7 @@ import "server-only";
  * plugin's own kind through the organizationOf it contributed.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { rolesCanAccessOrg } from "@/lib/auth/access";
+import { rolesCanAccessOrg, rolesIncludeStaff } from "@/lib/auth/access";
 import { microgridHref } from "@/lib/microgrid-links";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
@@ -161,6 +161,9 @@ export async function resolveSegments(
 ): Promise<Resolution> {
   requireIssued(ctx);
   if (pathSegments.length === 0) return { ok: true, organizationId: null, scope: {}, trail: [] };
+  // Every segment resolves to an organization, which a person with only
+  // tenant rows (RFC mgm#197) never reaches: not found, before any read.
+  if (!rolesIncludeStaff(ctx.access.roles)) return { ok: false, status: 404 };
   for (const s of pathSegments) {
     if (isCore(s.kind) ? !UUID_RE.test(s.id) : !snapshot.entities.has(s.kind)) return { ok: false, status: 404 };
   }

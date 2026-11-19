@@ -4,10 +4,8 @@ import {
   composeBilling,
   type BillingResult,
 } from "@/lib/billing/compose";
-import type {
-  ManualReadingInput,
-  SeedReadingInput,
-} from "@/lib/billing/generate";
+import { GenerateBillsBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
   const { ok, status, ...body } = error;
@@ -40,6 +38,13 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *     - tenants whose current manual row may be replaced by an OpenEMS
  *       reading ("Switch back to edge data"); does not add them to the
  *       processed set, and may not repeat a manualReadings tenant
+ *   seedReadings?: Array<{ deviceId, dialReadingKwh, readAt, startKwh }>
+ *     - operator-supplied starting readings (#339); what is and is not
+ *       checked is written on GenerateBillsBody
+ *
+ * Parsed with `GenerateBillsBody` (`@/lib/billing/schemas`); unknown keys,
+ * at the top level or in a reading, are refused. A bad body answers
+ * 400 { error: <message>, field?, code: "invalid_body" }.
  *
  * AC3 changes from the legacy route:
  *   - Closed periods are NOT rejected (Q4=B logs `period_was_closed: true`).
@@ -69,235 +74,11 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
  *   { lineItems: number; kept: Array<{ tenantId, tenantName }>;
  *     errors: Array<...> }
  */
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type RawManualReading = {
-  tenantId: unknown;
-  startKwh: unknown;
-  endKwh: unknown;
-  reason?: unknown;
-};
-
-type ParseError = { error: string; details?: unknown };
-
-type ParsedBody = {
-  billingPeriodId: string;
-  tenantIds?: string[];
-  manualReadings?: ManualReadingInput[];
-  revertToEdgeTenantIds?: string[];
-  seedReadings?: SeedReadingInput[];
-};
-
-/**
- * Manual validation mirroring the Zod schema spec'd in #173 AC3 (Zod is not
- * a project dependency yet — same behavior, hand-rolled). Returns either
- * `{ parsed }` or `{ error, details }` — the route surfaces the error tree
- * verbatim as `{ error: 'invalid_body', details }`.
- */
-function parseBody(raw: unknown): { parsed: ParsedBody } | ParseError {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { error: "Body must be an object" };
-  }
-  const rec = raw as Record<string, unknown>;
-
-  // billingPeriodId — required UUID.
-  if (typeof rec.billingPeriodId !== "string" || !UUID_RE.test(rec.billingPeriodId)) {
-    return { error: "billingPeriodId must be a UUID string" };
-  }
-  const billingPeriodId = rec.billingPeriodId;
-
-  // tenantIds — optional UUID array (empty array allowed).
-  let tenantIds: string[] | undefined;
-  if (rec.tenantIds !== undefined) {
-    if (!Array.isArray(rec.tenantIds)) {
-      return { error: "tenantIds must be an array of UUIDs" };
-    }
-    for (const h of rec.tenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "tenantIds entries must be UUID strings" };
-      }
-    }
-    tenantIds = rec.tenantIds as string[];
-  }
-
-  // manualReadings — optional array of { tenantId, startKwh, endKwh, reason? }.
-  let manualReadings: ManualReadingInput[] | undefined;
-  if (rec.manualReadings !== undefined) {
-    if (!Array.isArray(rec.manualReadings)) {
-      return { error: "manualReadings must be an array" };
-    }
-    const out: ManualReadingInput[] = [];
-    for (let i = 0; i < rec.manualReadings.length; i++) {
-      const m = rec.manualReadings[i] as RawManualReading;
-      if (!m || typeof m !== "object") {
-        return { error: `manualReadings[${i}] must be an object` };
-      }
-      if (typeof m.tenantId !== "string" || !UUID_RE.test(m.tenantId)) {
-        return { error: `manualReadings[${i}].tenantId must be a UUID` };
-      }
-      if (
-        typeof m.startKwh !== "number" ||
-        !Number.isFinite(m.startKwh) ||
-        m.startKwh < 0
-      ) {
-        return {
-          error: `manualReadings[${i}].startKwh must be a non-negative finite number`,
-        };
-      }
-      if (
-        typeof m.endKwh !== "number" ||
-        !Number.isFinite(m.endKwh) ||
-        m.endKwh < 0
-      ) {
-        return {
-          error: `manualReadings[${i}].endKwh must be a non-negative finite number`,
-        };
-      }
-      if (m.endKwh < m.startKwh) {
-        return {
-          error: `manualReadings[${i}].endKwh must be >= startKwh`,
-        };
-      }
-      let reason: string | undefined;
-      if (m.reason !== undefined) {
-        if (typeof m.reason !== "string") {
-          return { error: `manualReadings[${i}].reason must be a string` };
-        }
-        if (m.reason.length > 500) {
-          return { error: `manualReadings[${i}].reason must be <= 500 chars` };
-        }
-        reason = m.reason;
-      }
-      out.push({
-        tenantId: m.tenantId,
-        startKwh: m.startKwh,
-        endKwh: m.endKwh,
-        reason,
-      });
-    }
-    manualReadings = out;
-  }
-
-  // revertToEdgeTenantIds — optional UUID array. Lets a currently-manual
-  // row be replaced by an OpenEMS reading; without it such a row is kept.
-  // A tenant in manualReadings too is a contradiction and refused.
-  let revertToEdgeTenantIds: string[] | undefined;
-  if (rec.revertToEdgeTenantIds !== undefined) {
-    if (!Array.isArray(rec.revertToEdgeTenantIds)) {
-      return { error: "revertToEdgeTenantIds must be an array of UUIDs" };
-    }
-    for (const h of rec.revertToEdgeTenantIds) {
-      if (typeof h !== "string" || !UUID_RE.test(h)) {
-        return { error: "revertToEdgeTenantIds entries must be UUID strings" };
-      }
-      if (manualReadings?.some((m) => m.tenantId === h)) {
-        return {
-          error: `Tenant ${h} cannot be in both manualReadings and revertToEdgeTenantIds`,
-        };
-      }
-    }
-    revertToEdgeTenantIds = rec.revertToEdgeTenantIds as string[];
-  }
-
-  // seedReadings — optional array of { deviceId, dialReadingKwh, readAt, startKwh } (#339).
-  //
-  // All four are required together. `startKwh` is derived by the client as
-  // `dialReadingKwh − usage(period start → readAt)`.
-  //
-  // WHAT THIS VALIDATES, precisely: shape, and the ordering invariant
-  // `startKwh <= dialReadingKwh` — you cannot have consumed a negative amount
-  // since the period began. It does NOT re-derive the subtraction: OpenEMS is
-  // not consulted here, so a wrong `startKwh` that still sits below the dial
-  // reading is accepted.
-  //
-  // That is a real gap and it is stated rather than papered over. Re-deriving
-  // server-side is buildable — `POST /api/openems/energy` already answers
-  // usage over an arbitrary window — and is tracked separately rather than
-  // claimed here. An earlier version of this comment asserted the
-  // recomputation; the comment was wrong, not the code, and a comment
-  // promising a stronger guarantee than the code delivers is the exact defect
-  // this repo has spent three days removing from migrations.
-  //
-  // The inputs travel with the derived value regardless, so a wrong seed stays
-  // diagnosable a year later instead of anonymous.
-  let seedReadings: SeedReadingInput[] | undefined;
-  if (rec.seedReadings !== undefined) {
-    if (!Array.isArray(rec.seedReadings)) {
-      return { error: "seedReadings must be an array" };
-    }
-    const out: SeedReadingInput[] = [];
-    const seenDevices = new Set<string>();
-    for (let i = 0; i < rec.seedReadings.length; i++) {
-      const r = rec.seedReadings[i] as Record<string, unknown>;
-      if (!r || typeof r !== "object") {
-        return { error: `seedReadings[${i}] must be an object` };
-      }
-      if (typeof r.deviceId !== "string" || !UUID_RE.test(r.deviceId)) {
-        return { error: `seedReadings[${i}].deviceId must be a UUID` };
-      }
-      // One seed per device. Two entries for the same meter is a client bug,
-      // and silently taking the last one would make which reading was used
-      // depend on array order.
-      if (seenDevices.has(r.deviceId)) {
-        return { error: `seedReadings has more than one entry for device ${r.deviceId}` };
-      }
-      seenDevices.add(r.deviceId);
-      for (const f of ["dialReadingKwh", "startKwh"] as const) {
-        const v = r[f];
-        if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
-          return {
-            error: `seedReadings[${i}].${f} must be a non-negative finite number`,
-          };
-        }
-      }
-      if (typeof r.readAt !== "string" || Number.isNaN(Date.parse(r.readAt))) {
-        return { error: `seedReadings[${i}].readAt must be an ISO timestamp` };
-      }
-      // The dial cannot read less than the period's own usage implies.
-      if ((r.startKwh as number) > (r.dialReadingKwh as number)) {
-        return {
-          error: `seedReadings[${i}].startKwh cannot exceed dialReadingKwh`,
-        };
-      }
-      out.push({
-        deviceId: r.deviceId,
-        dialReadingKwh: r.dialReadingKwh as number,
-        readAt: r.readAt,
-        startKwh: r.startKwh as number,
-      });
-    }
-    seedReadings = out;
-  }
-
-  return {
-    parsed: {
-      billingPeriodId,
-      tenantIds,
-      manualReadings,
-      revertToEdgeTenantIds,
-      seedReadings,
-    },
-  };
-}
-
 export async function POST(request: NextRequest) {
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const parseResult = parseBody(raw);
-  if ("error" in parseResult) {
-    return NextResponse.json(
-      { error: "invalid_body", details: parseResult.error },
-      { status: 400 }
-    );
-  }
-  const { parsed } = parseResult;
+  // Before the session check, so a malformed body answers 400 even without one.
+  const body = await parseJsonBody(request, GenerateBillsBody);
+  if (!body.ok) return body.response;
+  const parsed = body.data;
 
   const supabase = await createClient();
 

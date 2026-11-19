@@ -18,7 +18,8 @@ import "server-only";
  *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
  *      that guard only; it does not add a tenant to the processed set.
  *
- *   2. `POST /api/billing/regenerate-preview` — same body, mode='preview'.
+ *   2. `POST /api/billing/regenerate-preview` — same body without
+ *      `seedReadings` (`PreviewBillsBody`), mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
@@ -115,9 +116,11 @@ export type ManualReadingInput = {
  *     startKwh = dialReadingKwh − usage(period.start_date → readAt)
  *
  * All three are sent. The derived value is what generation uses; the inputs
- * are what make a wrong seed diagnosable a year later rather than anonymous,
- * and the route recomputes from them and rejects a mismatch — the client's
- * arithmetic is a display convenience, not a trusted input.
+ * are what make a wrong seed diagnosable a year later rather than anonymous.
+ * The route checks only that startKwh does not exceed dialReadingKwh
+ * (GenerateBillsBody); it does not recompute startKwh from the inputs, so
+ * the client's arithmetic is trusted. If a server-side recomputation is
+ * added, say so here.
  *
  * `readAt` is NOT "now". An operator can read a dial in the morning and type
  * it that evening, and the subtraction is over the interval that actually

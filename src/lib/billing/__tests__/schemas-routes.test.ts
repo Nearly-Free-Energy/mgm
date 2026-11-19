@@ -18,6 +18,18 @@ const PAIRS: [route: string, method: string, schema: string][] = [
   ["src/app/api/microgrids/[id]/grid-tariffs/route.ts", "POST", "AddGridTariffBody"],
   ["src/app/api/microgrids/[id]/savings-settings/route.ts", "PUT", "SaveSavingsSettingsBody"],
   ["src/app/api/billing-periods/[periodId]/close/route.ts", "POST", "ClosePeriodBody"],
+  ["src/app/api/billing-periods/route.ts", "POST", "CreatePeriodBody"],
+  ["src/app/api/billing/generate/route.ts", "POST", "GenerateBillsBody"],
+  ["src/app/api/billing/regenerate-preview/route.ts", "POST", "PreviewBillsBody"],
+  ["src/app/api/billing-review/preview/route.ts", "POST", "PreviewBillingReviewBody"],
+  ["src/app/api/billing-line-items/[lineItemId]/usage/route.ts", "PATCH", "LineItemUsageBody"],
+  ["src/app/api/billing-line-items/[lineItemId]/payment-status/route.ts", "PATCH", "LineItemPaymentStatusBody"],
+  ["src/app/api/rate-schedules/route.ts", "POST", "CreateRateScheduleBody"],
+  ["src/app/api/rate-schedules/[id]/route.ts", "PUT", "ReviseRateScheduleBody"],
+  ["src/app/api/communities/[id]/invoice-config/route.ts", "PATCH", "SaveInvoiceSettingsBody"],
+  ["src/app/api/communities/[id]/invoice-preview/route.ts", "POST", "PreviewInvoiceBody"],
+  ["src/app/api/v1/billing-periods/route.ts", "POST", "V1CreateBillingPeriodBody"],
+  ["src/app/api/v1/billing/generate/route.ts", "POST", "V1GenerateBody"],
 ];
 
 /** Why `source` does not parse its `method` body with `schema`, or null when it does. */

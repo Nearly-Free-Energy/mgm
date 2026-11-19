@@ -61,6 +61,7 @@ const SURFACE_MODULES: Partial<Record<MgmPluginName, string>> = {
   metering: "@/lib/metering/surface",
   billing: "@/lib/billing/surface",
   payments: "@/lib/payments/surface",
+  "tenant-app": "@/lib/tenant-app/surface",
 };
 
 /** Words that make a declared name look like a secret, alone or with an "s". */
@@ -83,6 +84,7 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
   MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
   PaymentsCapabilityContract: ["getReadiness", "listHistory"],
+  TenantAppCapabilityContract: ["getHome"],
 };
 const CONTRACT = /CapabilityContract$/;
 
@@ -532,13 +534,10 @@ describe("the GUI surface guard", () => {
     const snapshot = registry.snapshot();
     // Check 2 compares by identity, so the registry must keep each action's schema object.
     expect(snapshot.actions.get(createPeriod.id)?.def.input).toBe(createPeriod.input);
-    // The create-period and generate-bills routes still read their bodies by
-    // hand, so each of those actions fails check 2 alone. The close route
-    // parses ClosePeriodBody, which the fixture's close action uses, so it passes.
-    const unparsed = "does not parse its body with parseJsonBody(request, <schema>)";
+    // Each action's route parses its body with the schema the fixture's
+    // action takes (CreatePeriodBody, GenerateBillsBody, ClosePeriodBody), so
+    // every action passes check 2 and only the planted view problem remains.
     expect(surfaceProblems(snapshot, facts)).toEqual([
-      `billing.create-period (POST /api/billing-periods): ${unparsed}`,
-      `billing.generate-bills (POST /api/billing/generate): ${unparsed}`,
       'billing.periods: declares "apiKey", which looks like a secret; rename it or exempt it with a reason',
     ]);
   });

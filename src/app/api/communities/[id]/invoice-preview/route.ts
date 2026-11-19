@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { currentUserCanAccessOrg } from "@/lib/auth/access";
-import {
-  parseInvoiceConfig,
-  INVOICE_PREFIX_RE,
-} from "@/lib/invoices/config-schema";
+import { PreviewInvoiceBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 import {
   assembleSyntheticPreviewInput,
   type PreviewRateSchedule,
@@ -21,15 +18,18 @@ import { renderInvoicePdf } from "@/lib/invoices/render";
  * `window.open('about:blank')` synchronously inside the click handler, then
  * POSTs to this route, then sets the popup's `location` to the blob URL.
  *
- * Permission gate identical to the PATCH config route — UUID → row read →
+ * Checks in the PATCH config route's order — UUID → body → row read →
  * 404 → `currentUserCanAccessOrg` → 403. The synthetic preview must NOT be a
  * public endpoint.
  *
- * Body shape (mirrors the PATCH body — the form passes its in-memory state):
+ * Body shape (`PreviewInvoiceBody`, `@/lib/billing/schemas`; mirrors the
+ * PATCH body — the form passes its in-memory state):
  *   {
- *     invoice_prefix: string | null,
+ *     invoice_prefix: string | null,  // "" is read as null
  *     invoice_config: InvoiceConfig,
  *   }
+ * Unknown top-level keys are refused. A malformed body answers 400
+ * { error, field?, code: "invalid_body" } before the community is read.
  *
  * Synthesised content:
  *   - `paymentRedirectUrl = 'https://example.com/preview-payment'` — fake URL
@@ -67,13 +67,14 @@ export async function POST(
     );
   }
 
-  // (2) JSON parse.
-  let rawBody: unknown;
-  try {
-    rawBody = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  // (2) Body. Parsed (and validated, as defense-in-depth — the operator's
+  // form already validates client-side, but a malformed body here would
+  // crash the renderer with an opaque error) before the read: the answer
+  // depends only on the body the caller sent.
+  const parsed = await parseJsonBody(request, PreviewInvoiceBody);
+  if (!parsed.ok) return parsed.response;
+  const invoicePrefix = parsed.data.invoice_prefix || null;
+  const invoiceConfig = parsed.data.invoice_config;
 
   const supabase = await createClient();
 
@@ -105,60 +106,6 @@ export async function POST(
           "You do not have permission to preview invoices for this community.",
       },
       { status: 403 },
-    );
-  }
-
-  // (5) Body shape + Zod validation (defense-in-depth — the operator's form
-  // already validates client-side, but a malformed body here would crash the
-  // renderer with an opaque error).
-  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
-    return NextResponse.json(
-      { error: "Request body must be an object." },
-      { status: 400 },
-    );
-  }
-  const body = rawBody as Record<string, unknown>;
-
-  let invoicePrefix: string | null;
-  if (body.invoice_prefix === null) {
-    invoicePrefix = null;
-  } else if (typeof body.invoice_prefix === "string") {
-    if (
-      body.invoice_prefix.length > 0 &&
-      !INVOICE_PREFIX_RE.test(body.invoice_prefix)
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Invoice prefix must be 2-8 uppercase letters or digits (e.g. NFE, ACME01).",
-        },
-        { status: 400 },
-      );
-    }
-    invoicePrefix = body.invoice_prefix.length > 0 ? body.invoice_prefix : null;
-  } else {
-    return NextResponse.json(
-      { error: "invoice_prefix must be a string or null." },
-      { status: 400 },
-    );
-  }
-
-  let invoiceConfig;
-  try {
-    invoiceConfig = parseInvoiceConfig(body.invoice_config);
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      return NextResponse.json(
-        {
-          error:
-            "Invoice configuration is invalid. Save your changes to see the field errors.",
-        },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json(
-      { error: "Invoice configuration is invalid." },
-      { status: 400 },
     );
   }
 

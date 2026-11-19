@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { parseCloseReview } from "@/lib/billing/close";
 
 const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
 const PERIOD_ID = "770e8400-e29b-41d4-a716-446655440000";
@@ -62,7 +63,22 @@ function ctx() {
 const CONFIRMED = {
   confirmation: { digest: "v1:reviewed", acknowledged: ["totals_reviewed"], typed: "September 2026" },
 };
-const REVIEW = { digest: "v1:current", name: "September 2026", totalAmount: 250 };
+const REVIEW = parseCloseReview({
+  periodId: PERIOD_ID,
+  microgridId: MG_ID,
+  status: "draft",
+  startDate: "2026-09-01",
+  endDate: "2026-09-30",
+  currency: "UGX",
+  billCount: 2,
+  totalAmount: 250,
+  usageKwh: 3,
+  unbilled: [],
+  unmetered: [],
+  fractionalTotals: [],
+  acknowledgements: ["totals_reviewed"],
+  digest: "v1:current",
+})!;
 
 describe("POST /api/billing-periods/[periodId]/close (issue #5, #201)", () => {
   beforeEach(() => {
@@ -117,7 +133,7 @@ describe("POST /api/billing-periods/[periodId]/close (issue #5, #201)", () => {
     expect(received).toEqual(CONFIRMED);
   });
 
-  it("428 with the review when no confirmation is sent", async () => {
+  it("428 with the review and its confirmation step when no confirmation is sent", async () => {
     closeImpl = async () => ({
       ok: false,
       status: 428,
@@ -131,6 +147,14 @@ describe("POST /api/billing-periods/[periodId]/close (issue #5, #201)", () => {
     const json = (await res.json()) as { code: string; review: unknown; ok?: unknown; status?: unknown };
     expect(json.code).toBe("billing_close_confirmation_required");
     expect(json.review).toEqual(REVIEW);
+    // The host's step for that review, formatted on the server.
+    expect((json as { ceremony?: unknown }).ceremony).toMatchObject({
+      type: "ceremony",
+      digest: "v1:current",
+      typed: "September 2026",
+      acknowledgements: [{ id: "totals_reviewed" }],
+      facts: [{ label: "Period" }, { label: "Bills" }, { label: "Energy" }, { label: "Total", value: { t: "money", currency: "UGX" } }],
+    });
     expect(json).not.toHaveProperty("ok");
     expect(json).not.toHaveProperty("status");
   });
@@ -149,6 +173,15 @@ describe("POST /api/billing-periods/[periodId]/close (issue #5, #201)", () => {
     const json = (await res.json()) as { code: string; review: unknown };
     expect(json.code).toBe("billing_period_totals_changed");
     expect(json.review).toEqual(REVIEW);
+    expect((json as { ceremony?: { digest?: string } }).ceremony?.digest).toBe("v1:current");
+  });
+
+  it("sends no ceremony with a refusal that carries no review", async () => {
+    closeImpl = async () => ({ ok: false, status: 403, code: "billing_scope_mismatch", message: "Not authorized." });
+    const { POST } = await import("../close/route");
+    const res = await POST(post({}), ctx());
+    expect(res.status).toBe(403);
+    expect(await res.json()).not.toHaveProperty("ceremony");
   });
 
   it.each([

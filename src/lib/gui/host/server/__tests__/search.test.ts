@@ -11,7 +11,7 @@ let snapshot: SurfaceSnapshot;
 vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
 
 import { MAX_HITS, SEARCH_BUDGET_MS, runSearch } from "../search";
-import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient } from "./host-fakes";
+import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
 const CANARY = "CANARY-7f3a91";
 const mg = (i: number) => `e7100000-0000-4000-8002-${String(i).padStart(12, "0")}`;
@@ -169,6 +169,16 @@ describe("runSearch", () => {
   it("refuses with 403 when the person can see no organization", async () => {
     roles = [managerOf("e7100000-0000-4000-8000-0000000000ff")];
     expect(await run("si")).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+  });
+
+  it("refuses with 403 a person whose rows are all tenant rows, running no search and asking no gate", async () => {
+    // Even with organizations row-level security would show, and ?org= naming one.
+    roles = [tenantOf("e7400000-0000-4000-8000-00000000000a")];
+    const find = vi.fn(async () => [hit(1)]);
+    use([search("metering", find)]);
+    expect(await run("si", "@", ORG_A)).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+    expect(find).not.toHaveBeenCalled();
+    expect(checkGate).not.toHaveBeenCalled();
   });
 
   it("refuses a context hostContext did not issue", async () => {

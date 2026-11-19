@@ -21,9 +21,14 @@ vi.mock("@/lib/auth/request-access", () => ({ getRequestUserAccess: () => getReq
 const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en-UG" }) }));
+// /my is the tenant home, which RFC mgm#197's PR 5 releases.
+vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
+  return { ...real, isReleasedRoute: (path: string) => path === "/my" || real.isReleasedRoute(path) };
+});
 
 import { STATUS_BUDGET_MS, buildManifest, getManifest, preloadManifest } from "../manifest";
-import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient } from "./host-fakes";
+import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantHomes, tenantOf } from "./host-fakes";
 
 const COMMUNITY = "e7100000-0000-4000-8001-000000000001";
 const MICROGRID_A = "e7100000-0000-4000-8001-000000000002";
@@ -290,6 +295,216 @@ describe("buildManifest", () => {
     await expect(buildManifest({ ...contextFor([superAdmin()], newClient) }, { gui: "gridtop" })).rejects.toThrow(/did not issue/);
     expect(takeSnapshot).not.toHaveBeenCalled();
     expect(newClient).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildManifest for a person who holds units", () => {
+  const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
+  const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
+  const tenantHome = {
+    plugin: "tenant-app" as const,
+    def: { id: "tenant.home" as const, title: "My home", icon: "tenants" as const, group: "operate" as const, order: 80, view: "tenant.home" as const, audience: "tenant" as const },
+  };
+  const HOMES = tenantHomes([
+    { id: UNIT_A, name: "Grace Namata", unitLabel: "Unit 4", orgId: ORG_A, timezone: "Africa/Kampala" },
+    { id: UNIT_B, name: "Shop 9", orgId: ORG_B, timezone: "Africa/Nairobi" },
+  ]);
+
+  function withTenantApp(over: Partial<SurfaceSnapshot> = {}) {
+    snapshot = snapshotWith({
+      nav: [...snapshotWith().nav, tenantHome],
+      views: [{ plugin: "tenant-app", def: { id: "tenant.home", path: "/my", params: {} } } as unknown as SurfaceSnapshot["views"][number]],
+      ...over,
+    });
+  }
+
+  /** The tenant app on in `on` only; every other plugin on everywhere. */
+  function tenantAppOnIn(...on: string[]) {
+    checkGate.mockImplementation(async (_s, { plugin, target }) =>
+      plugin === "tenant-app" && !on.includes(target.id)
+        ? { ok: false, status: 409, code: "tenant_app_disabled", message: "off" }
+        : { ok: true, organizationId: target.id },
+    );
+  }
+
+  function clientFor(organizations: { id: string; name: string }[] = []) {
+    return tableClient(
+      {
+        organizations: { data: organizations },
+        user_profiles: { data: [{ first_name: "Grace", last_name: "Namata" }] },
+        communities: { data: [{ id: COMMUNITY, name: "Community A" }] },
+        microgrids: { data: [{ id: MICROGRID_A, name: "Microgrid A", community_id: COMMUNITY, timezone: "Africa/Kampala" }] },
+      },
+      HOMES,
+    );
+  }
+
+  beforeEach(() => {
+    withTenantApp();
+    tenantAppOnIn(ORG_A, ORG_B);
+  });
+
+  it("builds a tenant-only person's manifest from their one unit, and nothing of an organization", async () => {
+    const { client, calls } = clientFor();
+    const newClient = vi.fn(async () => client);
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A)], newClient), { gui: "gridtop", path: "/" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.manifest.user).toEqual({ name: "Grace Namata", email: "host@test.local" });
+    expect(outcome.manifest.org).toEqual({
+      id: UNIT_A,
+      // The unit label; "Grace Namata" is the tenant's own name.
+      name: "Unit 4",
+      href: "/my",
+      timezone: "Africa/Kampala",
+      nav: [expect.objectContaining({ id: "tenant.home", href: "/my" })],
+      status: [],
+      places: [{ kind: "tenant", id: UNIT_A, label: "Unit 4", href: "/my" }],
+    });
+    expect(outcome.manifest.orgs).toEqual([]);
+    // The unit through fn_tenant_home on the person's own session; no
+    // organization, community or microgrid read, and no path resolved.
+    expect(calls.map((c) => c.table).sort()).toEqual(["rpc:fn_tenant_home", "user_profiles"]);
+    expect(calls.find((c) => c.table === "rpc:fn_tenant_home")!.ops).toEqual([["rpc", [{ _tenant_id: UNIT_A }]]]);
+    expect(resolveTargetOrganization).not.toHaveBeenCalled();
+    // The gate of the unit's organization, asked with that same session.
+    expect(new Set(checkGate.mock.calls.map(([supabase, r]) => [supabase, r.target.id]).map(String))).toEqual(
+      new Set([String([client, ORG_A])]),
+    );
+    expect(checkGate).toHaveBeenCalledWith(client, expect.objectContaining({ plugin: "tenant-app", target: { kind: "organization", id: ORG_A } }));
+  });
+
+  it("shows no tenant entry while the tenant app is off for the unit's organization, and runs no status loader", async () => {
+    const load = vi.fn();
+    withTenantApp({ status: [status("billing", "billing.due", load)] });
+    tenantAppOnIn(ORG_B);
+    const { client } = clientFor();
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok && outcome.manifest.org.nav).toEqual([]);
+    expect(outcome.ok && outcome.manifest.org.status).toEqual([]);
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("gives a person with two units both as places, in the unit the path names, else the last used, else the first", async () => {
+    const { client } = clientFor();
+    const ctx = contextFor([tenantOf(UNIT_B), tenantOf(UNIT_A)], async () => client);
+    const named = await buildManifest(ctx, { gui: "gridtop", path: `/my?unit=${UNIT_B}` });
+    expect(named.ok).toBe(true);
+    if (!named.ok) return;
+    expect(named.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9", href: `/my?unit=${UNIT_B}`, timezone: "Africa/Nairobi" });
+    expect(named.manifest.org.places).toEqual([
+      { kind: "tenant", id: UNIT_B, label: "Shop 9", href: `/my?unit=${UNIT_B}` },
+      { kind: "tenant", id: UNIT_A, label: "Unit 4", href: `/my?unit=${UNIT_A}` },
+    ]);
+    // Each unit's organization's gate, once each.
+    expect(new Set(checkGate.mock.calls.map(([, r]) => r.target.id))).toEqual(new Set([ORG_A, ORG_B]));
+
+    const preferred = await buildManifest(ctx, { gui: "gridtop", path: "/my", preferred: UNIT_B });
+    expect(preferred.ok && preferred.manifest.org.id).toBe(UNIT_B);
+    // The first by label ("Shop 9" before "Unit 4"); neither organization hint names a unit.
+    const first = await buildManifest(ctx, { gui: "gridtop", path: "/my", preferred: ORG_A, requested: UNIT_A });
+    expect(first.ok && first.manifest.org.id).toBe(UNIT_B);
+  });
+
+  it("shows the tenant entry when the tenant app is on for any of the person's units", async () => {
+    tenantAppOnIn(ORG_B);
+    const { client } = clientFor();
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok && outcome.manifest.org.nav.map((n) => n.id)).toEqual(["tenant.home"]);
+  });
+
+  it("gives a person with staff and tenant rows the organization's manifest with both groups", async () => {
+    // Manager of Org B, tenant in Org A: the tenant app is on in Org A only.
+    tenantAppOnIn(ORG_A);
+    const { client, calls } = clientFor([{ id: ORG_B, name: "Org B" }]);
+    const outcome = await buildManifest(contextFor([managerOf(ORG_B), tenantOf(UNIT_A)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.manifest.org).toMatchObject({ id: ORG_B, name: "Org B", href: `/organizations/${ORG_B}` });
+    expect(outcome.manifest.org.nav.map((n) => n.id)).toEqual(["tenant.home", "billing.periods", "org.users"]);
+    // The organization's places only; a unit is not one of them.
+    expect(outcome.manifest.org.places.map((p) => p.kind)).toEqual(["community", "microgrid"]);
+    expect(calls.filter((c) => c.table === "rpc:fn_tenant_home")).toHaveLength(1);
+
+    // The tenant app on in the organization they manage but not where they rent.
+    tenantAppOnIn(ORG_B);
+    const elsewhere = await buildManifest(contextFor([managerOf(ORG_B), tenantOf(UNIT_A)], async () => client), { gui: "gridtop" });
+    expect(elsewhere.ok && elsewhere.manifest.org.nav.map((n) => n.id)).toEqual(["billing.periods", "org.users"]);
+  });
+
+  it("still builds a staff manifest when a unit cannot be read, without the tenant entries", async () => {
+    const { client } = tableClient(
+      {
+        organizations: { data: [{ id: ORG_B, name: "Org B" }] },
+        communities: { data: [] },
+        microgrids: { data: [] },
+      },
+      { fn_tenant_home: () => ({ data: null, error: { message: "unavailable" } }) },
+    );
+    const outcome = await buildManifest(contextFor([managerOf(ORG_B), tenantOf(UNIT_A)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok && outcome.manifest.org.nav.map((n) => n.id)).toEqual(["billing.periods", "org.users"]);
+  });
+
+  it("tells apart two units that share the tenant's name, in places and in the context", async () => {
+    // One person's two units, each named only by the tenant's own name.
+    const { client } = tableClient(
+      { user_profiles: { data: [] } },
+      tenantHomes([
+        { id: UNIT_A, name: "Grace Namata", orgId: ORG_A, microgrid: "Kasana East" },
+        { id: UNIT_B, name: "Grace Namata", orgId: ORG_B, microgrid: "Kiwumu" },
+      ]),
+    );
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), {
+      gui: "gridtop",
+      path: `/my?unit=${UNIT_B}`,
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.manifest.org.name).toBe("Grace Namata · Kiwumu");
+    expect(outcome.manifest.org.places.map((p) => p.label)).toEqual(["Grace Namata · Kasana East", "Grace Namata · Kiwumu"]);
+  });
+
+  it("builds a tenant-only person's manifest from the units that can be read when one cannot", async () => {
+    const { client } = tableClient(
+      { user_profiles: { data: [] } },
+      {
+        fn_tenant_home: (args: Record<string, unknown>) =>
+          args._tenant_id === UNIT_A ? { data: null, error: { message: "unavailable" } } : HOMES.fn_tenant_home(args),
+      },
+    );
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // The person still holds two units, so the link names the one it is for:
+    // a bare /my would ask them to choose (chooseTenantUnit counts role rows).
+    expect(outcome.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9", href: `/my?unit=${UNIT_B}` });
+    expect(outcome.manifest.org.places.map((p) => [p.id, p.href])).toEqual([[UNIT_B, `/my?unit=${UNIT_B}`]]);
+  });
+
+  it("fails a tenant-only person's manifest when a unit cannot be read", async () => {
+    const { client } = tableClient({}, { fn_tenant_home: () => ({ data: null, error: { message: "unavailable" } }) });
+    await expect(buildManifest(contextFor([tenantOf(UNIT_A)], async () => client), { gui: "gridtop" })).rejects.toThrow(
+      "a unit could not be read",
+    );
+  });
+
+  it("refuses a tenant-only person none of whose units answers any more", async () => {
+    const { client } = tableClient({}, tenantHomes([]));
+    await expect(buildManifest(contextFor([tenantOf(UNIT_A)], async () => client), { gui: "gridtop" })).resolves.toMatchObject({
+      ok: false,
+      status: 403,
+      code: "gui_no_access",
+    });
+  });
+
+  it("does not resolve a staff path's places for a tenant-only person", async () => {
+    const { client } = clientFor();
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A)], async () => client), {
+      gui: "gridtop",
+      path: `/microgrids/${MICROGRID_A}/billing`,
+    });
+    expect(outcome.ok && outcome.manifest.org.id).toBe(UNIT_A);
+    expect(resolveTargetOrganization).not.toHaveBeenCalled();
   });
 });
 

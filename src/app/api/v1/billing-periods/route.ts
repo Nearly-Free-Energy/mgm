@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveOrgFromToken, resolveMicrogridOrgId } from "@/lib/internal-auth";
 import { createServiceClient } from "@/lib/supabase/service";
 import { gateRoute } from "@/lib/runtime/gate";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+import { V1CreateBillingPeriodBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 export async function POST(request: NextRequest) {
   // #255 — per-org token auth replaces the dead-code INTERNAL_API_KEY
@@ -16,27 +15,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const rec = raw as Record<string, unknown>;
-
-  if (typeof rec.microgrid_id !== "string" || !UUID_RE.test(rec.microgrid_id)) {
-    return NextResponse.json({ error: "microgrid_id must be a UUID" }, { status: 400 });
-  }
-  if (typeof rec.start_date !== "string" || !DATE_RE.test(rec.start_date)) {
-    return NextResponse.json({ error: "start_date must be YYYY-MM-DD" }, { status: 400 });
-  }
-  if (typeof rec.end_date !== "string" || !DATE_RE.test(rec.end_date)) {
-    return NextResponse.json({ error: "end_date must be YYYY-MM-DD" }, { status: 400 });
-  }
-  if (rec.start_date > rec.end_date) {
-    return NextResponse.json({ error: "end_date must be on or after start_date" }, { status: 400 });
-  }
+  // After the token check, so a missing token answers 401 before the body
+  // is read. Unknown keys are dropped, not refused (V1CreateBillingPeriodBody).
+  const parsed = await parseJsonBody(request, V1CreateBillingPeriodBody);
+  if (!parsed.ok) return parsed.response;
+  const rec = parsed.data;
 
   const supabase = createServiceClient();
 

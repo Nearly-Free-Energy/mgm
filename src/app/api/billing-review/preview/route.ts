@@ -3,48 +3,22 @@ import { composeBillingReview, isRunGenerationFatal } from "@/lib/cordis/billing
 import { isMgmReviewer } from "@/lib/mgm/access";
 import { createClient } from "@/lib/supabase/server";
 import { checkGate, gateResponse } from "@/lib/runtime/gate";
+import { BILLING_REVIEW_MAX_TENANTS, PreviewBillingReviewBody } from "@/lib/billing/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 export const runtime = "nodejs";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_TENANT_IDS = 500;
-
-type PreviewBody = { periodId: string; tenantIds?: string[] };
-
-function parseBody(raw: unknown): PreviewBody | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const record = raw as Record<string, unknown>;
-  if (typeof record.periodId !== "string" || !UUID_RE.test(record.periodId)) return null;
-  if (record.tenantIds === undefined) return { periodId: record.periodId };
-  if (
-    !Array.isArray(record.tenantIds) ||
-    record.tenantIds.length > MAX_TENANT_IDS ||
-    !record.tenantIds.every((id) => typeof id === "string" && UUID_RE.test(id))
-  ) {
-    return null;
-  }
-  return { periodId: record.periodId, tenantIds: record.tenantIds };
-}
 
 /**
  * Read-only MGM bill comparison. The route operates entirely through the
  * user-scoped Supabase client, runs in an isolated request scope on the MGM
- * Cordis runtime, and never accepts manual readings or a provider name from the browser.
+ * Cordis runtime, and never accepts manual readings or a provider name from the browser:
+ * the body is parsed with `PreviewBillingReviewBody` (`@/lib/billing/schemas`), which
+ * refuses any key but periodId and tenantIds with 400 { error, field?, code: "invalid_body" }.
  */
 export async function POST(request: NextRequest) {
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
-  }
-  const body = parseBody(raw);
-  if (!body) {
-    return NextResponse.json(
-      { error: "invalid_body", details: "periodId and tenantIds must be UUIDs; tenantIds is limited to 500 entries" },
-      { status: 400 }
-    );
-  }
+  const parsed = await parseJsonBody(request, PreviewBillingReviewBody);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   const {
@@ -82,11 +56,11 @@ export async function POST(request: NextRequest) {
       .from("tenants")
       .select("id")
       .eq("microgrid_id", period.microgrid_id)
-      .limit(MAX_TENANT_IDS + 1);
+      .limit(BILLING_REVIEW_MAX_TENANTS + 1);
     if (tenantsError) {
       return NextResponse.json({ error: "tenants_unavailable" }, { status: 500 });
     }
-    if ((tenants ?? []).length > MAX_TENANT_IDS) {
+    if ((tenants ?? []).length > BILLING_REVIEW_MAX_TENANTS) {
       return NextResponse.json(
         { error: "too_many_tenants", details: "Select at most 500 tenants for one review" },
         { status: 413 },

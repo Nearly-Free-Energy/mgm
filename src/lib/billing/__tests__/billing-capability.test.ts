@@ -233,7 +233,30 @@ describe("BillingCapability", () => {
       start_date: "2026-09-30",
       end_date: "2026-09-01",
     });
-    expect(result).toMatchObject({ ok: false, status: 422, code: "billing_invalid_range" });
+    expect(result).toMatchObject({
+      ok: false,
+      status: 422,
+      code: "billing_invalid_range",
+      message: "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.",
+      field: "start_date",
+    });
+  });
+
+  it("parses a period with CreatePeriodBody, keeping its codes and its order of checks", async () => {
+    const create = vi.fn();
+    const { capability } = setup({ createBillingPeriod: create });
+    expect(await capability.createPeriod({ microgrid_id: "{" + MG_ID + "}", start_date: "2026-09-01", end_date: "2026-09-30" }))
+      .toMatchObject({ status: 400, code: "billing_invalid_microgrid", message: "microgrid_id must be a valid UUID.", field: "microgrid_id" });
+    expect(await capability.createPeriod({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30", timezone: "UTC" }))
+      .toMatchObject({ status: 400, code: "billing_invalid_period", message: "Unknown field: timezone" });
+    expect(await capability.createPeriod(null)).toMatchObject({ status: 400, code: "billing_invalid_period" });
+    expect(await capability.createPeriod({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-02-30" }))
+      .toMatchObject({ status: 422, code: "billing_invalid_range", field: "end_date" });
+    expect(create).not.toHaveBeenCalled();
+    // A fault in the dates still answers only after the scope check.
+    const other = setup({ getMicrogridOrganization: async () => ({ microgridId: MG_ID, communityId: "comm-1", orgId: "550e8400-e29b-41d4-a716-446655440099" }) });
+    expect(await other.capability.createPeriod({ microgrid_id: MG_ID, start_date: "x", end_date: "y" }))
+      .toMatchObject({ status: 403, code: "billing_scope_mismatch" });
   });
 
   it("answers 428 with the review when no confirmation is sent, and writes nothing", async () => {
@@ -488,9 +511,28 @@ describe("BillingCapability", () => {
       ok: false,
       status: 400,
       code: "billing_invalid_body",
+      message: `Tenant ${HH} cannot be in both manualReadings and revertToEdgeTenantIds`,
       field: "revertToEdgeTenantIds",
     });
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("parses generation with GenerateBillsBody, seeds included in preview", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateBills({ billingPeriodId: PERIOD_ID, extra: 1 })).toMatchObject({
+      status: 400,
+      code: "billing_invalid_body",
+      message: "Unknown field: extra",
+    });
+    expect(await capability.previewBills(null)).toMatchObject({
+      status: 400,
+      code: "billing_invalid_body",
+      message: "Body must be an object",
+    });
+    const seed = { deviceId: MG_ID, dialReadingKwh: 10, readAt: "2026-08-20", startKwh: 4 };
+    expect(await capability.previewBills({ billingPeriodId: PERIOD_ID, seedReadings: [seed] })).toMatchObject({ ok: true });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview", seedReadings: [seed] }));
   });
 
   it("records manual paid/unpaid with trimmed notes", async () => {

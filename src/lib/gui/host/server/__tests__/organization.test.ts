@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { pickOrganization, selectOrganization, visibleOrganizations } from "../organization";
-import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient } from "./host-fakes";
+import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";
 
 const ORG_C = "e7100000-0000-4000-8000-000000000003";
 const ORGS = [
@@ -32,6 +32,26 @@ describe("visibleOrganizations", () => {
   it("refuses a context hostContext did not issue", async () => {
     const copy = { ...contextFor([superAdmin()]) };
     await expect(visibleOrganizations(copy)).rejects.toThrow(/did not issue/);
+  });
+
+  it("shows a person whose rows are all tenant rows no organization, reading nothing, and does not refuse", async () => {
+    // Even if row-level security answered with organizations, as it does
+    // not for a tenant, none would be shown.
+    const { client } = tableClient({ organizations: { data: ORGS } });
+    const newClient = vi.fn(async () => client);
+    const ctx = contextFor([tenantOf("e7400000-0000-4000-8000-00000000000a")], newClient);
+    await expect(visibleOrganizations(ctx)).resolves.toEqual([]);
+    await expect(selectOrganization(ctx, { requested: ORG_A, preferred: ORG_B })).resolves.toEqual({
+      organizationId: null,
+      organizations: [],
+    });
+    expect(newClient).not.toHaveBeenCalled();
+  });
+
+  it("counts only the staff rows of a person who also rents", async () => {
+    const { client } = tableClient({ organizations: { data: ORGS } });
+    const ctx = contextFor([tenantOf("e7400000-0000-4000-8000-00000000000a"), managerOf(ORG_A)], async () => client);
+    await expect(visibleOrganizations(ctx)).resolves.toEqual([{ id: ORG_A, name: "Org A" }]);
   });
 });
 

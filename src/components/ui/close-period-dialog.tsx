@@ -1,309 +1,336 @@
 "use client";
 
-// ClosePeriodDialog — Radix Dialog wrapping the close-period flow.
+// ClosePeriodDialog — the legacy billing page's Close period flow, framing
+// the host's confirmation step (#201).
 //
-// Phases (internal state):
-//   2   = confirm   — totals grid + grand total + checkbox
-//                     ("I have copied the values for URA") + filled-primary
-//                     "Close period" button (disabled until checkbox ticked).
-//                     This is the open surface — no preceding "Review & close…"
-//                     ceremony; the totals are visible immediately so the
-//                     user can review and commit in a single gesture.
-//   2.5 = pending   — disabled "Closing…" button while the mutation runs.
-//   3   = closed    — green header + "Export CSV for URA" primary CTA.
-//   E   = error     — destructive inline banner with "Retry close".
+// The dialog shows exactly what the server will check. On open it posts the
+// close with no confirmation; the route answers 428 with the close review and
+// its `ceremony` (src/lib/billing/close-ceremony.ts): the totals, the
+// warnings, the acknowledgements to tick and the period name to type. The
+// host's ConfirmStep (src/lib/gui/host/client/confirm-step.tsx) renders it,
+// the same step a contributed close action gets, so every interface closes
+// the same way. Confirm posts `{ confirmation: { digest, acknowledged, typed } }`,
+// and fn_close_billing_period checks the digest and the acknowledgements in
+// the same transaction as the close.
 //
-// A11y commitments (handled via Radix Dialog primitives):
-//   • role="dialog" + aria-modal on the content panel.
-//   • Focus trap while open; Esc to close; focus returns to trigger on close.
-//   • Cancel renders BEFORE the confirm trigger in DOM order so screen-
-//     reader users reach the safe option first. Radix's default would land
-//     focus on the first focusable in DOM (the checkbox); we override that
-//     via onOpenAutoFocus + cancelRef to keep cancel-first focus order.
-//   • `aria-labelledby` references the dialog title; `aria-describedby`
-//     references the warning copy.
+// Phases:
+//   loading — the review is being fetched.
+//   review  — ConfirmStep. A 409 billing_period_totals_changed brings the new
+//             ceremony and starts the step again (ticks and typing cleared),
+//             with a note that the totals changed.
+//   blocked — the period cannot close as it is (a bill total that is not a
+//             whole number, or already closed); nothing to confirm.
+//   failed  — the review could not be loaded; Retry fetches it again.
+//   closed  — green header and "Export CSV for URA".
 //
-// Why multi-channel confirm over typed-phrase:
-//   The original typed "CLOSE 2026-03" phrase was shown on-screen, so the
-//   user just typed (or pasted) what they saw — friction illusory. A
-//   checkbox "I have copied the values for URA" + final "Close period"
-//   button is a deliberate two-gesture commit AND names the real-world
-//   precondition (the transcription must be done). Forks that want
-//   typed-phrase ceremony can swap the confirm row.
+// Decision 1 on #201 replaced the earlier checkbox-only confirm: the person
+// sees the totals, ticks each acknowledgement and types the period's name.
 //
-// Tone calibration:
-//   Closing a period is a final commit, not a destruction — destructive
-//   tone is reserved for delete flows. The rail and eyebrow render in
-//   primary tone; only the error-state banner and Retry button keep the
-//   destructive tokens (genuine failure state).
+// Tone: closing is a final commit, not a destruction, so the rail and the
+// step are neutral (primary). Destructive tokens are kept for delete flows.
 //
-// Un-billed warning (#167):
-//   When `unfilledTenantNames` is non-empty, the dialog renders a
-//   warning-toned banner above the totals grid listing the un-metered
-//   tenants whose `usage_kwh` is still NULL. Closing is permitted —
-//   Aaron may genuinely want to bill nothing for a tenant — but the
-//   gesture becomes more deliberate: the confirm button label flips to
-//   "Close anyway" and the checkbox copy gains an explicit acknowledgement
-//   of the un-billed count. Tone uses warning tokens, not destructive,
-//   per Design System rule 3 (this is a soft block, not a failure state).
+// A11y: Radix gives role="dialog", aria-modal, the focus trap and Esc. Focus
+// starts on Cancel (ConfirmStep focuses its own Cancel; the other phases
+// focus theirs), so the safe option comes first.
 
 import * as React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
-import { Currency } from "@/components/format/currency";
-
-export type ClosePeriodSummaryRow = {
-  label: string;
-  value: React.ReactNode;
-};
+import { ConfirmStep } from "@/lib/gui/host/client/confirm-step";
+import type { Ceremony } from "@/lib/gui/contract";
 
 export interface ClosePeriodDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** e.g. "March 2026" */
-  periodLabel: string;
-  summaryRows: ClosePeriodSummaryRow[];
-  /** e.g. 4_216_800 — rendered with <Currency>. */
-  grandTotal: number;
-  /** Called when the user confirms. Return a promise; the dialog shows
-   *  pending state while it resolves and error state on reject. */
-  onConfirm: () => Promise<void>;
+  periodId: string;
+  /** Called once the period is closed, for example to refresh the page. */
+  onClosed: () => void;
   /** Called when the user clicks "Export CSV for URA" in the closed state. */
   onExportCsv?: () => void;
-  /** Display names of un-metered tenants whose `usage_kwh` is still NULL.
-   *  When non-empty, the dialog renders a warning banner above the totals
-   *  grid, flips the confirm button label to "Close anyway", and appends
-   *  an acknowledgement of the un-billed count to the checkbox copy.
-   *  Default: `[]` (no banner, original "Close period" behavior). */
-  unfilledTenantNames?: string[];
+  /**
+   * Sends a body to the close route and reads its answer. Defaults to the
+   * real request; the component gallery and tests pass their own.
+   */
+  post?: (periodId: string, body: unknown) => Promise<CloseAnswer>;
 }
 
-type Phase = 2 | 2.5 | 3 | "E";
+export type CloseAnswer = {
+  ok: boolean;
+  status: number;
+  code?: string;
+  message?: string;
+  ceremony?: Ceremony;
+};
+
+type State =
+  | { phase: "loading" }
+  | { phase: "review"; ceremony: Ceremony; round: number; busy: boolean; error: string | null }
+  | { phase: "blocked"; ceremony: Ceremony | null; message: string }
+  | { phase: "failed"; message: string }
+  | { phase: "closed"; name: string };
+
+const TOTALS_CHANGED = "The totals changed after you reviewed them. Review the new totals and confirm again.";
+
+export async function postClose(periodId: string, body: unknown): Promise<CloseAnswer> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/billing-periods/${periodId}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return { ok: false, status: 0, message: "Network error." };
+  }
+  const json = (await res.json().catch(() => ({}))) as {
+    code?: unknown;
+    message?: unknown;
+    error?: unknown;
+    ceremony?: unknown;
+  };
+  const text = (v: unknown) => (typeof v === "string" ? v : undefined);
+  const ceremony =
+    json.ceremony && typeof json.ceremony === "object" && (json.ceremony as Ceremony).type === "ceremony"
+      ? (json.ceremony as Ceremony)
+      : undefined;
+  return {
+    ok: res.ok,
+    status: res.status,
+    code: text(json.code),
+    message: text(json.message) ?? text(json.error),
+    ceremony,
+  };
+}
+
+/** Why the period cannot close as it is, or null when the answer is something else. */
+function blockedBy(answer: CloseAnswer): string | null {
+  if (answer.code === "billing_close_fractional_totals") {
+    return answer.message ?? "Regenerate the bills whose totals are not whole numbers before closing.";
+  }
+  if (answer.code === "billing_period_closed") return "This period is already closed.";
+  return null;
+}
+
+const BUTTON =
+  "inline-flex min-h-8 items-center rounded-md px-3.5 text-dense font-medium pointer-coarse:min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export function ClosePeriodDialog({
   open,
   onOpenChange,
-  periodLabel,
-  summaryRows,
-  grandTotal,
-  onConfirm,
+  periodId,
+  onClosed,
   onExportCsv,
-  unfilledTenantNames = [],
+  post = postClose,
 }: ClosePeriodDialogProps) {
-  const [phase, setPhase] = React.useState<Phase>(2);
-  const [confirmed, setConfirmed] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [state, setState] = React.useState<State>({ phase: "loading" });
+  // The record of the step: what was ticked and typed, from real input only
+  // (ConfirmStep hands over a tick or a keystroke only when it is trusted).
+  // This, not anything else on the page, is what is sent.
+  const record = React.useRef<{ ticked: Set<string>; typed: string }>({ ticked: new Set(), typed: "" });
   const cancelRef = React.useRef<HTMLButtonElement>(null);
+  const live = React.useRef(0);
 
-  // Reset phase whenever the dialog is opened (don't carry state between openings).
+  const load = React.useCallback(async () => {
+    const call = ++live.current;
+    setState({ phase: "loading" });
+    const answer = await post(periodId, {});
+    if (call !== live.current) return;
+    record.current = { ticked: new Set(), typed: "" };
+    if (answer.status === 428 && answer.ceremony) {
+      setState({ phase: "review", ceremony: answer.ceremony, round: 0, busy: false, error: null });
+      return;
+    }
+    const blocked = blockedBy(answer);
+    if (blocked) {
+      setState({ phase: "blocked", ceremony: answer.ceremony ?? null, message: blocked });
+      return;
+    }
+    setState({ phase: "failed", message: answer.message ?? "Could not load the period's totals." });
+  }, [periodId, post]);
+
+  // Every opening starts from the server's current review.
   React.useEffect(() => {
-    if (open) {
-      setPhase(2);
-      setConfirmed(false);
-      setError(null);
-    }
-  }, [open]);
+    if (open) void load();
+    else live.current++;
+  }, [open, load]);
 
-  const handleClose = async () => {
-    setPhase(2.5);
-    setError(null);
-    try {
-      await onConfirm();
-      setPhase(3);
-    } catch (err) {
-      setPhase("E");
-      setError(err instanceof Error ? err.message : "Network error");
+  async function confirm() {
+    if (state.phase !== "review" || state.busy) return;
+    const { ceremony } = state;
+    setState({ ...state, busy: true, error: null });
+    const call = ++live.current;
+    const answer = await post(periodId, {
+      confirmation: {
+        digest: ceremony.digest,
+        acknowledged: [...record.current.ticked],
+        typed: record.current.typed.trim(),
+      },
+    });
+    // A close that went through is reported whatever happened to the
+    // dialog meanwhile, so the page refreshes; only the dialog's own state
+    // is left alone when it has been closed or reopened since.
+    if (answer.ok) {
+      onClosed();
+      if (call === live.current) setState({ phase: "closed", name: ceremony.typed ?? "" });
+      return;
     }
+    if (call !== live.current) return;
+    if (answer.code === "billing_period_totals_changed" && answer.ceremony) {
+      record.current = { ticked: new Set(), typed: "" };
+      setState({ phase: "review", ceremony: answer.ceremony, round: state.round + 1, busy: false, error: TOTALS_CHANGED });
+      return;
+    }
+    const blocked = blockedBy(answer);
+    if (blocked) {
+      setState({ phase: "blocked", ceremony: answer.ceremony ?? ceremony, message: blocked });
+      return;
+    }
+    setState({ ...state, busy: false, error: answer.message ?? "Could not close the period." });
+  }
+
+  // While a close is being sent the dialog stays open, so its answer is shown:
+  // Cancel, Esc and a press outside do nothing until it arrives.
+  const sending = state.phase === "review" && state.busy;
+  const dismiss = (next: boolean) => {
+    if (!next && sending) return;
+    onOpenChange(next);
   };
 
-  const title =
-    phase === 3
-      ? `Closed: ${periodLabel}`
-      : `Close ${periodLabel} billing period?`;
-
-  const description =
-    phase === 3
-      ? "This period is now read-only. Export the CSV for your URA filing."
-      : "Bills become final. This period will be filed with URA — values copied after this are the values you report.";
-
-  // #167 — un-billed warning derivations. Only relevant in the pre-close
-  // phases (2 / 2.5 / E); the closed surface intentionally drops the
-  // banner since the period is now committed and listing the un-billed
-  // tenants after-the-fact would be misleading.
-  const unfilledCount = unfilledTenantNames.length;
-  const hasUnfilled = unfilledCount > 0 && phase !== 3;
-  const unfilledTenantsWord = unfilledCount === 1 ? "tenant" : "tenants";
-  const unfilledNamesPreview = unfilledTenantNames.slice(0, 5).join(", ");
-  const unfilledNamesOverflow = unfilledCount > 5 ? unfilledCount - 5 : 0;
-  const confirmButtonLabel = hasUnfilled ? "Close anyway" : "Close period";
+  const name =
+    state.phase === "review" ? state.ceremony.typed : state.phase === "blocked" ? state.ceremony?.typed : undefined;
+  const closed = state.phase === "closed";
+  const title = closed ? `Closed: ${state.name}` : name ? `Close ${name}?` : "Close billing period?";
+  // The step's own statement says bills become final, so the review phase
+  // keeps only the URA note here rather than saying it twice.
+  const description = closed
+    ? "This period is now read-only. Export the CSV for your URA filing."
+    : state.phase === "review"
+      ? "This period will be filed with URA, so the values you copy after this are the values you report."
+      : "Bills become final. This period will be filed with URA, so the values you copy after this are the values you report.";
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={dismiss}>
       <Dialog.Portal>
         <DialogOverlay />
         <DialogPanel
-          // Cancel-first focus order: when the dialog opens, Radix tries to
-          // focus the first focusable element inside (the checkbox in the
-          // collapsed surface). We explicitly forward initial focus to the
-          // Cancel button below via onOpenAutoFocus.
+          // ConfirmStep focuses its own Cancel; the other phases focus theirs.
           onOpenAutoFocus={(e) => {
             e.preventDefault();
             cancelRef.current?.focus();
           }}
+          onEscapeKeyDown={(e) => {
+            if (sending) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
+            if (sending) e.preventDefault();
+          }}
           aria-describedby="close-period-desc"
           className="w-[480px]"
         >
-          {/* primary top-rail — 6px, token color (commit moment, not destruction) */}
+          {/* primary top-rail: a commit moment, not a destruction */}
           <div aria-hidden="true" className="h-[6px] bg-primary" />
 
-          <div
-            className={cn(
-              "px-6 pb-2 pt-5",
-              phase === 3 && "bg-success-muted",
-            )}
-          >
+          <div className={cn("px-6 pb-2 pt-5", closed && "bg-success-muted")}>
             <span
               className={cn(
                 "text-caption font-semibold uppercase tracking-wide",
-                phase === 3 ? "text-success-fg" : "text-primary",
+                closed ? "text-success-fg" : "text-primary"
               )}
             >
-              {phase === 3 ? "Closed" : "Final review"}
+              {closed ? "Closed" : "Final review"}
             </span>
-            <Dialog.Title className="mt-1.5 text-xl font-semibold tracking-tight">
-              {title}
-            </Dialog.Title>
-            <Dialog.Description
-              id="close-period-desc"
-              className="mt-1 text-dense leading-relaxed text-muted-foreground"
-            >
+            <Dialog.Title className="mt-1.5 text-xl font-semibold tracking-tight">{title}</Dialog.Title>
+            <Dialog.Description id="close-period-desc" className="mt-1 text-dense leading-relaxed text-muted-foreground">
               {description}
             </Dialog.Description>
           </div>
 
-          {hasUnfilled && (
-            <div className="px-6 pt-3">
-              <div
-                data-testid="close-period-unfilled-banner"
-                role="alert"
-                className="rounded-md bg-warning-muted px-3 py-2.5 text-dense text-warning-fg"
-              >
-                <div className="font-semibold">
-                  {unfilledCount} {unfilledTenantsWord} still un-billed
-                </div>
-                <div className="mt-0.5">
-                  {unfilledNamesPreview}
-                  {unfilledNamesOverflow > 0 ? ` + ${unfilledNamesOverflow} more` : ""}
-                </div>
-              </div>
-            </div>
+          {state.phase === "review" && (
+            <ConfirmStep
+              key={state.round}
+              level="ceremony"
+              title="Close period"
+              tone="neutral"
+              ceremony={state.ceremony}
+              busy={state.busy}
+              error={state.error}
+              onConfirm={() => void confirm()}
+              onTick={(id, _event, box) => {
+                if (box.checked) record.current.ticked.add(id);
+                else record.current.ticked.delete(id);
+              }}
+              onType={(_event, input) => {
+                record.current.typed = input.value;
+              }}
+              onCancel={() => dismiss(false)}
+            />
           )}
 
-          <div className="grid grid-cols-2 gap-3 px-6 pt-3">
-            {summaryRows.map((r, i) => (
-              <div key={i} className="rounded-md bg-muted px-2.5 py-2">
-                <div className="text-caption font-semibold uppercase tracking-wide text-muted-foreground">
-                  {r.label}
-                </div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums">
-                  {r.value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-2 flex items-center justify-between border-t border-dashed border-border px-6 pb-1 pt-2">
-            <div className="text-caption text-muted-foreground">Grand total</div>
-            <Currency value={grandTotal} className="text-headline font-semibold" />
-          </div>
-
-          {phase === 2 && (
-            <div className="px-6 pb-1 pt-3">
-              <label className="flex cursor-pointer items-start gap-2 text-dense">
-                <input
-                  type="checkbox"
-                  checked={confirmed}
-                  onChange={(e) => setConfirmed(e.target.checked)}
-                  className="mt-0.5 accent-primary"
-                />
-                <span>
-                  I have copied the tier values into URA&apos;s portal and confirm these
-                  totals are what I will file.
-                  {hasUnfilled
-                    ? ` (including ${unfilledCount} un-billed ${unfilledTenantsWord})`
-                    : ""}
-                </span>
-              </label>
-            </div>
+          {state.phase === "loading" && (
+            <p className="px-6 pt-3 text-dense text-muted-foreground" role="status">
+              Loading the period&apos;s totals…
+            </p>
           )}
 
-          {phase === "E" && (
-            <div className="px-6 pt-3">
-              <div className="rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
-                <b>Couldn&apos;t close period.</b> {error ?? "Network error"}. Your draft is
-                unchanged.
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="mt-3">
-            {/* Under 600px the status line takes its own row so Cancel and
-                the confirm button stay side by side beneath it. */}
-            <div className="mr-auto text-caption text-muted-foreground max-[600px]:basis-full">
-              {phase === 3 ? (
-                <span className="inline-flex items-center gap-1 font-semibold text-success-fg">
-                  ✓ Closed · read-only
-                </span>
-              ) : phase === 2.5 ? (
-                "Closing…"
-              ) : (
-                "You can still generate again before closing."
+          {state.phase === "blocked" && (
+            <div className="flex flex-col gap-3 px-6 pt-3 text-dense">
+              <p role="alert" className="rounded-md bg-warning-muted px-3 py-2.5 text-warning-fg">
+                {state.message}
+              </p>
+              {state.ceremony && state.ceremony.facts.length > 0 && (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+                  {state.ceremony.facts.map((fact, i) => (
+                    <div key={i} className="contents">
+                      <dt className="text-muted-foreground">{fact.label}</dt>
+                      <dd>{fact.value.text}</dd>
+                    </div>
+                  ))}
+                </dl>
               )}
             </div>
-            {/* Cancel renders first — a11y focus-first order. */}
-            <Dialog.Close asChild>
-              <button
-                ref={cancelRef}
-                className="inline-flex h-8 items-center rounded-md px-3.5 text-dense font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Cancel
-              </button>
-            </Dialog.Close>
-            {phase === 2 && (
-              <button
-                onClick={handleClose}
-                disabled={!confirmed}
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {confirmButtonLabel}
-              </button>
-            )}
-            {phase === 2.5 && (
-              <button
-                disabled
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground opacity-60 cursor-not-allowed"
-              >
-                Closing…
-              </button>
-            )}
-            {phase === 3 && (
-              <button
-                onClick={onExportCsv}
-                className="inline-flex h-8 items-center rounded-md border border-primary bg-primary px-3.5 text-dense font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Export CSV for URA
-              </button>
-            )}
-            {phase === "E" && (
-              <button
-                onClick={handleClose}
-                className="inline-flex h-8 items-center rounded-md border border-destructive bg-destructive px-3.5 text-dense font-medium text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                Retry close
-              </button>
-            )}
-          </DialogFooter>
+          )}
+
+          {state.phase === "failed" && (
+            <div className="px-6 pt-3">
+              <p role="alert" className="rounded-md bg-destructive-muted px-3 py-2.5 text-dense text-destructive-fg">
+                <b>Couldn&apos;t load the period&apos;s totals.</b> {state.message} Your draft is unchanged.
+              </p>
+            </div>
+          )}
+
+          {state.phase !== "review" && (
+            <DialogFooter className="mt-3">
+              {closed && (
+                <div className="mr-auto text-caption max-[600px]:basis-full">
+                  <span className="inline-flex items-center gap-1 font-semibold text-success-fg">✓ Closed · read-only</span>
+                </div>
+              )}
+              <Dialog.Close asChild>
+                <button ref={cancelRef} type="button" className={cn(BUTTON, "text-foreground hover:bg-muted")}>
+                  {closed ? "Done" : "Cancel"}
+                </button>
+              </Dialog.Close>
+              {state.phase === "failed" && (
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  className={cn(BUTTON, "border border-primary bg-primary text-primary-foreground")}
+                >
+                  Retry
+                </button>
+              )}
+              {closed && onExportCsv && (
+                <button
+                  type="button"
+                  onClick={onExportCsv}
+                  className={cn(BUTTON, "border border-primary bg-primary text-primary-foreground")}
+                >
+                  Export CSV for URA
+                </button>
+              )}
+            </DialogFooter>
+          )}
         </DialogPanel>
       </Dialog.Portal>
     </Dialog.Root>

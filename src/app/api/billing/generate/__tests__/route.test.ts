@@ -3,7 +3,8 @@
  *
  * Coverage:
  *   - 401 unauthorized when supabase.auth.getUser() returns no user.
- *   - 400 invalid_body for malformed manualReadings.
+ *   - 400 invalid_body (parseJsonBody with GenerateBillsBody) for malformed
+ *     bodies; the messages themselves are pinned in schemas-periods.test.ts.
  *   - Bulk path delegates to fn_record_line_item_with_audit (one RPC call
  *     per processed tenant; `mode='write'`).
  *   - manualReadings override path sets reading_source='manual' on the RPC
@@ -145,8 +146,29 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
     const { POST } = await import("../route");
     const res = await POST(makePostRequest({ billingPeriodId: "not-a-uuid" }));
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toBe("invalid_body");
+    expect(await res.json()).toEqual({
+      error: "billingPeriodId must be a UUID string",
+      field: "billingPeriodId",
+      code: "invalid_body",
+    });
+  });
+
+  it("400 invalid_body before the session check", async () => {
+    mockUserOverride = null;
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest({ billingPeriodId: PERIOD_ID, extra: true }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: extra", code: "invalid_body" });
+    expect(lastCapabilityCall).toBeNull();
+  });
+
+  it("400 invalid_body for a body that is not JSON, or not an object", async () => {
+    const { POST } = await import("../route");
+    expect(await (await POST(makePostRequest("{"))).json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
+    expect(await (await POST(makePostRequest([PERIOD_ID]))).json()).toEqual({
+      error: "Body must be an object",
+      code: "invalid_body",
+    });
   });
 
   it("400 invalid_body when manualReadings.endKwh < startKwh", async () => {
@@ -160,8 +182,11 @@ describe("POST /api/billing/generate (#173 BC1, Release 3 capability routing)", 
       })
     );
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toBe("invalid_body");
+    expect(await res.json()).toEqual({
+      error: "manualReadings[0].endKwh must be >= startKwh",
+      field: "manualReadings",
+      code: "invalid_body",
+    });
   });
 
   it("400 invalid_body when manualReadings.startKwh negative", async () => {
