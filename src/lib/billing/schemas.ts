@@ -507,7 +507,10 @@ export const RegenerateBillBody = z.strictObject(
     // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
     // this route refuses a paid bill without it (POST /api/billing/generate
     // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
-    // the form. Version 2 added it.
+    // the form. Version 2 added it. It takes no typed name: the ceremony
+    // asks for none (prepareRegenerateBill), so the host sends none, and a
+    // body carrying one is refused as an unknown key. If the ceremony comes
+    // to ask for a name, add typed here and check it in the route.
     confirmation: z
       .strictObject(
         {
@@ -516,7 +519,6 @@ export const RegenerateBillBody = z.strictObject(
               error: REGENERATE_CONFIRMATION,
             })
             .max(20, { error: REGENERATE_CONFIRMATION }),
-          typed: z.string({ error: REGENERATE_CONFIRMATION }).max(200, { error: REGENERATE_CONFIRMATION }).optional(),
         },
         { error: REGENERATE_CONFIRMATION }
       )
