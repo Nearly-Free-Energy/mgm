@@ -57,7 +57,8 @@ export function chooseTenantUnit(roles: readonly RoleRow[], requested: readonly 
  * Where a person whose rows are all tenant rows starts (RFC mgm#197 § 4):
  * the tenant app's home, the page of the `tenant.home` view in the catalog
  * (TENANT_APP_PLUGIN in @/lib/plugins/bundled). The (gui) layout sends them
- * here from `/`, and the tenant manifest points each unit here. If the home
+ * here from `/` and from every other page that is not a tenant page
+ * (isTenantPage in @/lib/gui/host/server/tenant-pages), and the tenant manifest points each unit here. If the home
  * page moves, change this; tenant-units.test.ts fails while it names no
  * tenant-app page a view serves.
  */

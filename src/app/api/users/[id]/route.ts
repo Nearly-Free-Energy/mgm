@@ -33,8 +33,8 @@ const UUID_RE =
  * (`fn_tenant_access_grant` / `fn_tenant_access_revoke`), never from the
  * Users page, so it stays: removing someone's staff access leaves their
  * home. Afterwards the person is a tenant like any other if they hold
- * tenant rows (given further units, off the Users page, sent from `/` as a
- * tenant). "Not tenant" is staff as `staffRoles` (@/lib/auth/access) counts
+ * tenant rows (given further units, off the Users page, kept to tenant
+ * pages by the (gui) layout). "Not tenant" is staff as `staffRoles` (@/lib/auth/access) counts
  * it; if a second role that is not staff is added, revisit both.
  *
  * Errors:

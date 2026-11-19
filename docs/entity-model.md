@@ -131,7 +131,7 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   inviter that the address is a tenant's. Once their staff role is removed,
   by the Users page or any other path, they are exactly a tenant who never
   had one: their tenant rows untouched, given further units like any
-  tenant, off the Users page, and sent from `/` as a tenant. Their session
+  tenant, off the Users page, and kept to tenant pages. Their session
   is not ended; only `fn_tenant_access_revoke` ends sessions, when it
   removes a person's last row (`DELETE /api/users/[id]` ends none). The
   Users page lists current staff through their own rows, and an account
