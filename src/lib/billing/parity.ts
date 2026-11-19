@@ -492,7 +492,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Typed: it records an amount from outside MGM, possibly negative, and marks the bill paid. The person types the tenant's name, which the capability checks (428 without it or with another), so the legacy dialog asks for it too; prepare names the amount that settles the bill. The kit form shows the Resolution choice with its raw values, prefilled record_external.",
+    note: "Typed: it records an amount from outside MGM, possibly negative, and marks the bill paid. The person types the tenant's name, which the capability checks (428 without it or with another), so the legacy dialog asks for it too; prepare names the amount that settles the bill. The kit form shows the Resolution choice with its raw values, prefilled record_external. The route now refuses a reference over 200 characters or notes over 500 (ReconcileAttemptBody), where it used to cut notes to 500 and save them; the legacy dialog caps both inputs at those limits.",
   },
   {
     id: "accept-receipts",
@@ -512,7 +512,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "payments.bill-attempts",
     },
     pr: ATTEMPTS,
-    note: "Offered on every attempt that needs reconciliation, unavailable with the reason when the received total is not exactly the bill, a checkout's outcome is unknown or receipts are in several currencies (available() mirrors fn_payment_reconcile). The kit form also shows the optional amount, reference and notes, prefilled accept_exact; the capability refuses an amount.",
+    note: "Offered on every attempt that needs reconciliation, unavailable with the reason when the received total is not exactly the bill, a checkout's outcome is unknown or receipts are in several currencies (available() mirrors fn_payment_reconcile). The kit form also shows the optional amount, reference and notes, prefilled accept_exact; the capability refuses an amount. The same reference and notes limits apply as to record-adjustment.",
   },
 
   {

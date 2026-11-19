@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
+import { RECONCILE_NOTES_MAX, RECONCILE_REFERENCE_MAX } from "@/lib/payments/reconcile-limits";
 import type { PaymentAttempt, PaymentReceipt } from "@/lib/payments/repository";
 
 /**
@@ -62,8 +63,8 @@ export function PaymentHistory({ lineItemId, tenantName }: { lineItemId: string;
    {attempt.status === "needs_reconciliation" && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(attempt, "record_external"); }}>
     <p>Record only an externally completed collection or refund. MGM does not execute refunds here.</p>
     <label className="block">External amount (negative for refund)<input className="block rounded border p-2" type="number" step="any" required value={externalAmount} onChange={event => setAmount(event.target.value)} /></label>
-    <label className="block">External reference<input className="block rounded border p-2" required value={reference} onChange={event => setReference(event.target.value)} /></label>
-    <label className="block">Notes<textarea className="block rounded border p-2" required value={notes} onChange={event => setNotes(event.target.value)} /></label>
+    <label className="block">External reference<input className="block rounded border p-2" required maxLength={RECONCILE_REFERENCE_MAX} value={reference} onChange={event => setReference(event.target.value)} /></label>
+    <label className="block">Notes<textarea className="block rounded border p-2" required maxLength={RECONCILE_NOTES_MAX} value={notes} onChange={event => setNotes(event.target.value)} /></label>
     <label className="block">Type {tenantName.trim()} to confirm<input className="block rounded border p-2" required autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} /></label>
     <button disabled={busy} className="rounded border p-2">Record completed adjustment</button><button type="button" disabled={busy} className="ml-2 rounded border p-2" onClick={() => act(attempt, "accept_exact")}>Accept exact receipts</button>
    </form>}

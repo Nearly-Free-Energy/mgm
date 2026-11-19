@@ -20,6 +20,7 @@
  * boundary.test.ts's zod entry, which allows the routes to load it.
  */
 import { z } from "zod";
+import { RECONCILE_NOTES_MAX, RECONCILE_REFERENCE_MAX } from "./reconcile-limits";
 
 const bodyError = (issue: { code: string; keys?: string[] }) =>
   issue.code === "unrecognized_keys"
@@ -50,7 +51,12 @@ const CONFIRMATION = "confirmation must be { acknowledged: string[], typed?: str
  *   tenant's name typed in `confirmation` (the host's Confirmation,
  *   src/lib/gui/contract.ts, sent with a typed action).
  *
- * `typed` has no length limit: the capability compares it with
+ * A reference over RECONCILE_REFERENCE_MAX characters or notes over
+ * RECONCILE_NOTES_MAX (./reconcile-limits.ts), after trimming, are refused.
+ * Before this schema the route took any reference and cut notes to 500
+ * characters (PaymentsCapability.reconcile still cuts them, for callers
+ * other than the route); refusing says so instead of saving less than was
+ * typed. `typed` has no length limit: the capability compares it with
  * tenants.display_name, which has none either (TEXT); if display_name gets
  * a limit, cap typed at it. There is no digest, because prepare returns
  * none; if it comes to, add one with a version bump.
@@ -68,13 +74,13 @@ export const ReconcileAttemptBody = z.strictObject(
     externalReference: z
       .string({ error: "externalReference must be a string." })
       .trim()
-      .max(200, { error: "externalReference must be 200 characters or fewer." })
+      .max(RECONCILE_REFERENCE_MAX, { error: `externalReference must be ${RECONCILE_REFERENCE_MAX} characters or fewer.` })
       .optional()
       .meta({ title: "External reference" }),
     notes: z
       .string({ error: "notes must be a string." })
       .trim()
-      .max(500, { error: "notes must be 500 characters or fewer." })
+      .max(RECONCILE_NOTES_MAX, { error: `notes must be ${RECONCILE_NOTES_MAX} characters or fewer.` })
       .optional()
       .meta({ title: "Notes" }),
     confirmation: z

@@ -138,9 +138,11 @@ describe("ReconcileAttemptBody", () => {
 });
 
 describe("the schemas module", () => {
-  it("imports only zod at run time, so it stays client-safe", () => {
-    const source = readFileSync(path.join(__dirname, "../schemas.ts"), "utf8");
-    const runtime = [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
-    expect(runtime).toEqual(["zod"]);
+  const runtimeImports = (file: string) =>
+    [...readFileSync(path.join(__dirname, file), "utf8").matchAll(/^import\s+(?!type\b)[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+
+  it("imports only zod and its limits at run time, so it stays client-safe", () => {
+    expect(runtimeImports("../schemas.ts")).toEqual(["zod", "./reconcile-limits"]);
+    expect(runtimeImports("../reconcile-limits.ts")).toEqual([]);
   });
 });
