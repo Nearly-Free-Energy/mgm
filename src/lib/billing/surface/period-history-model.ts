@@ -302,10 +302,12 @@ export type PeriodHistoryInput = {
   entries: readonly BillingAuditLogEntry[];
   /**
    * The tenant filter, when the request names one: its id when it is a
-   * UUID (null when it is not, so nothing echoes it), and its name when it
-   * is a tenant of this period's microgrid.
+   * UUID (null when it is not, so nothing echoes it), its name when it is a
+   * tenant of this period's microgrid, and whether it can match any entry
+   * at all: false when it names no tenant of this microgrid with a bill in
+   * this period, so that no page of it, whatever its cursor, has entries.
    */
-  filter: null | { tenantId: string | null; tenantName: string | null };
+  filter: null | { tenantId: string | null; tenantName: string | null; canMatch: boolean };
   /** This page's cursor, when it is not the first. */
   before: string | null;
   /** The next page's cursor, when there are more. */
@@ -334,10 +336,12 @@ export function buildPeriodHistoryModel(i: PeriodHistoryInput): LoadedModel<"col
   // Clipped as the cells are: tenants.display_name has no length limit.
   const tenantLabel = filter ? clipText(filter.tenantName ?? "unknown tenant") : null;
   const tenantId = filter?.tenantId ?? null;
-  // A filter that is not a UUID matches nothing on any page, and the latest
-  // page of it could only be linked by echoing it: such a page is the first,
-  // whatever its cursor, so Latest changes never repeats Show all.
-  const later = i.before !== null && !(filter && tenantId === null);
+  // A filter that can match nothing (not a UUID, or no bill of this
+  // microgrid's in this period) has no entries on any page: such a page is
+  // the first, whatever its cursor, so it never says an earlier page had
+  // entries and never offers Latest changes to a page as empty as itself
+  // (nor, for a value that is not a UUID, echoes it).
+  const later = i.before !== null && !(filter && !filter.canMatch);
 
   const rows: Row[] = i.entries.map((entry) => {
     const h = humanizeHistoryEntry(entry, fmt, microgrid.currency);

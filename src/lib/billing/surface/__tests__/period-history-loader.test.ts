@@ -311,6 +311,28 @@ describe("loadPeriodHistory: the tenant filter", () => {
     expect(JSON.stringify(model)).not.toContain("not-a-uuid");
   });
 
+  it("answers a tenant of another microgrid, with a valid cursor, as its first page", async () => {
+    const elsewhere = "e7c00000-0000-4000-8000-0000000000c9";
+    tables.tenants.push({ id: elsewhere, microgrid_id: "e7c00000-0000-4000-8000-0000000000a9", display_name: "Unit 9" });
+    const before = encodeCursor({ source: "a", id: uuid(3), at: "2026-10-31T21:00:00+00:00" });
+    const model = await ok(request({ tenant_id: elsewhere, before }));
+    expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+      ["billing.back-to-period", `/microgrids/${MG}/billing/${PERIOD}`],
+      ["billing.history-show-all", `/microgrids/${MG}/billing/${PERIOD}/history`],
+    ]);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for unknown tenant", text: "Other tenants on this period may have entries." });
+    expect(reads.some((r) => r[1] === "billing_audit_log" || r[1] === "payment_events")).toBe(false);
+  });
+
+  it("answers a tenant with no bill on the period, with a valid cursor, as its first page", async () => {
+    tables.billing_line_items = [];
+    const before = encodeCursor({ source: "a", id: uuid(3), at: "2026-10-31T21:00:00+00:00" });
+    const model = await ok(request({ tenant_id: T1, before }));
+    expect(model.links!.map((l) => l.id)).toEqual(["billing.back-to-period", "billing.history-show-all"]);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for Unit 1", text: "Other tenants on this period may have entries." });
+    expect(reads.some((r) => r[1] === "billing_audit_log" || r[1] === "payment_events")).toBe(false);
+  });
+
   it("says a filtered later page with nothing left has no earlier changes", async () => {
     // Every entry of tenant 1's bill is newer than this cursor.
     const before = encodeCursor({ source: "a", id: uuid(1), at: "2026-01-01T00:00:00+00:00" });
