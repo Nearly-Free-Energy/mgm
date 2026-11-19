@@ -327,6 +327,7 @@ describe("getRouteOwner", () => {
     ["/microgrids/[id]/operations", METERING_PLUGIN_NAME],
     ["/microgrids/[id]/billing/[periodId]/history", BILLING_PLUGIN_NAME],
     ["/microgrids/[id]/billing/[periodId]/close", BILLING_PLUGIN_NAME],
+    ["/microgrids/[id]/billing/[periodId]/send", BILLING_PLUGIN_NAME],
     ["/microgrids/[id]/setup/rates", BILLING_PLUGIN_NAME],
     ["/microgrids/[id]/setup/edges/shared", METERING_PLUGIN_NAME],
     ["/microgrids/[id]/setup/tenants", COMMUNITY_MANAGEMENT_PLUGIN_NAME],

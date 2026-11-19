@@ -101,6 +101,7 @@ describe("MGM root runtime", () => {
       "billing billing.period-review",
       "billing billing.period-history",
       "billing billing.close-checklist",
+      "billing billing.send-queue",
       "billing billing.savings",
       "tenant-app tenant.home",
     ]);

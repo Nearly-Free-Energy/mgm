@@ -11,7 +11,9 @@ import "server-only";
  * from the review's View history links; a draft period's close checklist as
  * the `billing.close-checklist` view, reached from the review's Close period
  * link, with the close itself (`billing.close-period`, the server's close
- * ceremony); and the savings as the `billing.savings`
+ * ceremony); a period's bills with each one's stable payment link, to copy
+ * and send, as the `billing.send-queue` view, reached from the review's Send
+ * bills link; and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
@@ -20,9 +22,10 @@ import "server-only";
  * catalog gives those pages no servedBy, so the views are reached through
  * GET /api/gui/view until
  * #201's "Serve the billing pages through the GUI host" moves the pages and
- * the nav entry to the views. `billing.close-checklist` is a new page
- * (…/[periodId]/close) with no page.tsx, so the catalog marks it
- * `servedBy: "view"` and the host's catch-all serves it now.
+ * the nav entry to the views. `billing.close-checklist` and
+ * `billing.send-queue` are new pages (…/[periodId]/close and
+ * …/[periodId]/send) with no page.tsx, so the catalog marks them
+ * `servedBy: "view"` and the host's catch-all serves them now.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -67,6 +70,10 @@ import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
 import { PERIOD_REVIEW_EXAMPLES } from "./surface/period-review-examples";
 import { PeriodReviewExt } from "./surface/period-review-ext";
+import { loadSendQueue } from "./surface/send-queue";
+import { SEND_QUEUE_EXAMPLES } from "./surface/send-queue-examples";
+import { SendQueueExt } from "./surface/send-queue-ext";
+import { SEND_QUEUE_EXT_SCHEMA, SEND_QUEUE_KEYS } from "./surface/send-queue-model";
 import {
   CANCEL_PAYMENT_LINK_ACTION,
   GENERATE_BILLS_ACTION,
@@ -187,6 +194,32 @@ export const BILLING_SURFACE: Contribution = {
       declares: { keys: CLOSE_CHECKLIST_STEPS },
       examples: CLOSE_CHECKLIST_EXAMPLES,
       load: loadCloseChecklist,
+    },
+    {
+      id: "billing.send-queue",
+      kind: "collection",
+      path: "/microgrids/[id]/billing/[periodId]/send",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      entity: "periodId",
+      // No `agent`: never read by an assistant. Each link lets whoever holds
+      // it start a checkout for the bill, since the line-item id is the
+      // link's only access token (src/app/api/billing-line-items/[lineItemId]/pay/route.ts);
+      // if links stop being bearer links, revisit.
+      // Read through the person's own client, with the community's payment
+      // readiness from the Payments capability (./surface/send-queue.ts);
+      // still loads while billing is off, with the gate's notice. The
+      // refresh replaces the legacy page's 30-second paid-bill poll here too.
+      // No actions: handing out a stable link writes nothing, so there is
+      // nothing to generate (parity.ts, payment-link).
+      cost: "db",
+      live: { refreshSeconds: 30, staleAfterSeconds: 120 },
+      declares: { keys: SEND_QUEUE_KEYS },
+      // Each bill's link again, and the readiness note in full, for a GUI
+      // that offers the link to copy (Gridtop's, in
+      // src/gui/gridtop/renderers/send-queue).
+      ext: { schema: SEND_QUEUE_EXT_SCHEMA, zod: SendQueueExt },
+      examples: SEND_QUEUE_EXAMPLES,
+      load: loadSendQueue,
     },
     {
       id: "billing.savings",
