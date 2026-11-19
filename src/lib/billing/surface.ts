@@ -5,8 +5,9 @@ import "server-only";
  * its pages, which are served outside the GUI contract (`legacy: true`), with
  * the labels the current chrome uses; a microgrid's billing periods as the
  * `billing.periods` view, with creating a period and deleting a draft; one
- * period's bills as the `billing.period-review` view, with generating them
- * and the actions on each bill; and the savings as the `billing.savings`
+ * period's bills as the `billing.period-review` view, with the actions on
+ * each bill (generating them is contributed but offered nowhere yet, below);
+ * and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
@@ -199,11 +200,15 @@ export const BILLING_SURFACE: Contribution = {
     // All human-only (no assistant proposes a billing write yet) and money:
     // each changes what a tenant is billed or what they owe.
     //
-    // Generating a period's bills. `targeted: false`: the kit cannot render
-    // GenerateBillsBody's arrays (its form is NO_FORM until a GUI registers
-    // one), and it is refined, so a loader's prefill would be dropped. The
-    // legacy page's pre-flight panel still serves Generate; a GUI's own form
-    // for billing.generate-bills (GuiPlugin.forms) replaces it.
+    // Generating a period's bills. Contributed, but no view offers it: the
+    // kit cannot render GenerateBillsBody's tenant arrays (its form is
+    // NO_FORM) and no GUI registers a form for billing.generate-bills
+    // (GuiPlugin.forms), so no interface could submit it. The legacy page's
+    // pre-flight panel still serves Generate, and parity.test.ts keeps the
+    // row pending until a form exists; then the period review offers it
+    // (GENERATE_BILLS_ACTION in ./surface/period-review-model.ts).
+    // `targeted: false`: GenerateBillsBody is refined, so a loader's prefill
+    // would be dropped, and appended elsewhere it would open with no form.
     {
       ...GENERATE_BILLS_ACTION,
       target: "billingPeriod",

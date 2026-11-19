@@ -1,7 +1,7 @@
 /**
  * The `billing.period-review` model: the legacy period page's table as a
  * collection, one row per bill of a readable tenant, totals over every bill,
- * the period's links and Generate, and each bill's actions and links.
+ * the period's links, and each bill's actions and links. Generate is not offered.
  */
 import { describe, expect, it } from "vitest";
 import type { LinkRef } from "@/lib/gui/contract";
@@ -260,11 +260,12 @@ describe("buildPeriodReviewModel: the period", () => {
     expect(oneDay).not.toHaveProperty("subtitle");
   });
 
-  it("offers Generate on a draft, as Refresh readings once there are bills, with no prefill", () => {
-    expect(build({ bills: [] }).actions).toEqual([{ action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD } }]);
-    expect(build().actions).toEqual([{ action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD }, label: "Refresh readings" }]);
-    const closed = build({ period: { ...input().period, status: "closed" } });
-    expect(closed.actions).toEqual([]);
+  it("does not offer Generate anywhere, since no interface can submit it until a form exists", () => {
+    for (const model of [build({ bills: [] }), build(), build({ period: { ...input().period, status: "closed" } })]) {
+      expect(model.actions).toEqual([]);
+      expect(model.body.empty).not.toHaveProperty("action");
+      expect(JSON.stringify(model)).not.toContain(GENERATE_BILLS_ACTION.id);
+    }
   });
 
   it("links the history always, and the CSV export only when there are bills", () => {
@@ -285,15 +286,8 @@ describe("buildPeriodReviewModel: the period", () => {
   it.each([
     ["no tenants, a draft", { tenants: [], bills: [] }, { title: "No tenants configured for this microgrid." }],
     ["no tenants, closed", { tenants: [], bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No tenants configured for this microgrid." }],
-    [
-      "tenants and no bills, a draft",
-      { bills: [] },
-      {
-        title: "No billing data yet.",
-        text: "Generate bills to fetch meter readings and calculate costs.",
-        action: { action: GENERATE_BILLS_ACTION.id, params: { billingPeriodId: PERIOD } },
-      },
-    ],
+    // The legacy page adds Generate here; with no form for it, nothing asks for it.
+    ["tenants and no bills, a draft", { bills: [] }, { title: "No billing data yet." }],
     ["tenants and no bills, closed", { bills: [], period: { ...input().period, status: "closed" as const } }, { title: "No billing data yet." }],
   ])("shows the legacy empty state for %s", (_label, o, empty) => {
     const model = build(o);

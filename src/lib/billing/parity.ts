@@ -207,8 +207,9 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       form: "GenerateBillsBody",
       view: "billing.period-review",
     },
-    pr: REVIEW,
-    note: "Contributed with no prepare and no prefill (GenerateBillsBody is refined) and `targeted: false`. The kit cannot render its arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; the route answers 200 with per-tenant errors[], which only such a form can show.",
+    // Waits for a GUI's form, which no #201 pull request names yet.
+    pr: "unscheduled",
+    note: "Pending: contributed with no prepare and no prefill (GenerateBillsBody is refined) and `targeted: false`, but offered by no view, since no interface can submit it. The kit cannot render its tenant arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; parity.test.ts keeps an action without a form pending. The route answers 200 with per-tenant errors[], which only such a form can show. Once one exists, the period review offers it as its header action and its empty state's call to action.",
   },
   {
     id: "regenerate-bill",

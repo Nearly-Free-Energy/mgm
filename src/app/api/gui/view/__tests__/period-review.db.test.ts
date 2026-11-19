@@ -226,7 +226,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(rows[0].related).toEqual([expect.objectContaining({ kind: "tenant", id: tenant(1), href: `/microgrids/${MICROGRID}/setup/tenants/${tenant(1)}` })]);
     expect(model.body.totals.usage).toMatchObject({ t: "energy", v: 210 });
     expect(model.body.totals.total).toMatchObject({ t: "money", v: 122500, currency: "UGX" });
-    expect(model.actions).toMatchObject([{ action: "billing.generate-bills", params: { billingPeriodId: DRAFT }, enabled: true, label: "Refresh readings" }]);
+    // Generate is not offered until an interface has a form for it (parity.test.ts).
+    expect(model.actions).toEqual([]);
     expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.export-csv"]);
     expect(rows[0].links.map((l) => l.id)).toEqual(["billing.download-bill", "billing.view-history"]);
 
@@ -252,7 +253,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(rows[2].actions.map((a) => a.action)).toContain("billing.mark-failed");
   });
 
-  it("offers neither Generate nor a usage correction on a closed period", async () => {
+  it("offers no usage correction on a closed period, and regenerates its bills one at a time", async () => {
     caller = manager;
     const res = await view(`/microgrids/${MICROGRID}/billing/${CLOSED}`);
     expect(res.status).toBe(200);
@@ -285,10 +286,9 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
       expect(res.status).toBe(200);
       const model = await res.json();
       expect(model.notice).toMatchObject({ tone: "warning", text: expect.stringContaining("Billing is disabled") });
-      expect(model.actions).toMatchObject([{ action: "billing.generate-bills", enabled: false, reason: model.notice.text }]);
       const actions = (model.body.rows as Row[]).flatMap((r) => r.actions);
       expect(actions.length).toBeGreaterThan(0);
-      for (const a of actions) expect(a.enabled).toBe(false);
+      for (const a of actions) expect(a).toMatchObject({ enabled: false, reason: model.notice.text });
     } finally {
       await setBilling(true);
     }

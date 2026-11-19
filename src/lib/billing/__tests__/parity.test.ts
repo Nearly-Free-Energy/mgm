@@ -10,7 +10,12 @@
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
- *    method, target, risk, confirmation and schema.
+ *    method, target, risk, confirmation and schema, and an interface can
+ *    submit it: the kit renders a form for the input a person fills
+ *    (fieldsOf in src/lib/gui/kit/action-form.tsx is not null), or an
+ *    installed GUI registers its own form for the action (GuiPlugin.forms).
+ *    An action the host can only answer with NO_FORM stays pending, however
+ *    it is contributed.
  *  - link: an example of the row's view carries an href the row fits (a
  *    LinkRef with `download` for a download row); the view existing is not
  *    enough.
@@ -25,8 +30,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { INSTALLED_GUIS } from "@/gui/installed";
+import type { Json } from "@/lib/gui/contract";
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { DATA_KEYS } from "@/lib/gui/host/server/parse";
+import { fieldsOf } from "@/lib/gui/kit/action-form";
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
 import * as schemas from "../schemas";
@@ -42,6 +51,10 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
+  // Waits for a form: contributed, but the kit cannot render
+  // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
+  // so no interface could submit it (see `submittable` below).
+  "generate-bills",
   // Draw period review as a copy table in Gridtop
   "copy-cells",
   // Contribute a period's history
@@ -116,6 +129,35 @@ function contributedAction(a: ParityAction): ActionDef | undefined {
   return SURFACES[a.plugin].actions?.find((d) => d.id === a.action);
 }
 
+/**
+ * The JSON Schema of what a person fills for `def`: its input with the bound
+ * fields and `confirmation` removed, as the host prepares it for the kit
+ * (inputSpec in src/lib/gui/host/server/prepare.ts). If the host comes to
+ * hide other fields, revisit.
+ */
+function personInput(def: ActionDef): Json {
+  const schema = JSON.parse(JSON.stringify(z.toJSONSchema(def.input, { io: "input" }))) as Record<string, Json>;
+  const hidden = new Set([...Object.keys(def.bind.path ?? {}), ...Object.keys(def.bind.body ?? {}), "confirmation"]);
+  if (schema.properties !== null && typeof schema.properties === "object" && !Array.isArray(schema.properties)) {
+    schema.properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !hidden.has(k)));
+  }
+  if (Array.isArray(schema.required)) schema.required = schema.required.filter((k) => !hidden.has(k as string));
+  return schema as Json;
+}
+
+/**
+ * Whether an interface can submit `def`: the kit's form renders its input
+ * (an input with no fields to fill renders as none), or an installed GUI
+ * registers a form for it that reads its input version, at a level the host
+ * hands a GUI's form (none and confirm, as ActionHost in
+ * src/lib/gui/host/client/action-host.tsx decides).
+ */
+function submittable(def: ActionDef): boolean {
+  if (fieldsOf(personInput(def)) !== null) return true;
+  if (def.confirm !== "none" && def.confirm !== "confirm") return false;
+  return Object.values(INSTALLED_GUIS).some((gui) => gui.forms?.[def.id]?.reads.includes(def.inputVersion) === true);
+}
+
 function contributedView(id: string): boolean {
   return Object.values(SURFACES).some((s) => s.views?.some((v) => v.id === id));
 }
@@ -163,8 +205,10 @@ function contributedNav(id: string): boolean {
 function isContributed(r: ParityRow): boolean {
   const by = r.replacedBy;
   switch (by.kind) {
-    case "action":
-      return contributedAction(by) !== undefined;
+    case "action": {
+      const def = contributedAction(by);
+      return def !== undefined && submittable(def);
+    }
     case "link":
       return contributedLink(by);
     case "view":
@@ -240,6 +284,10 @@ describe("parity with the contributed actions and views", () => {
       if (!PENDING.has(id)) expect(contributedView(by.view), `${id}'s view ${by.view}`).toBe(true);
       return;
     }
+    if (by.kind === "action" && contributedAction(by) && !submittable(contributedAction(by)!)) {
+      expect(PENDING.has(id), `${id} is contributed, but no interface can submit it (no kit form, no GUI form): keep it in PENDING`).toBe(true);
+      return;
+    }
     if (!isContributed(row)) {
       expect(PENDING.has(id), `${id} is not contributed: contribute it, or list it in PENDING`).toBe(true);
       return;
@@ -255,6 +303,25 @@ describe("parity with the contributed actions and views", () => {
       target: by.target,
     });
     if (by.form) expect(def.input, `${id}'s input is ${by.form}`).toBe((schemas as Record<string, unknown>)[by.form]);
+  });
+
+  it("does not count an action as contributed while no interface can submit it", () => {
+    const generate = contributedAction({ ...BILLING_PARITY.find((r) => r.id === "generate-bills")!.replacedBy } as ParityAction);
+    expect(generate, "billing.generate-bills is contributed").toBeDefined();
+    // Its tenant arrays are arrays of strings, which the kit cannot render, and no GUI registers a form for it.
+    expect(fieldsOf(personInput(generate!))).toBeNull();
+    expect(submittable(generate!)).toBe(false);
+    expect(isContributed(BILLING_PARITY.find((r) => r.id === "generate-bills")!)).toBe(false);
+    // The same action with a flat input the kit renders could be submitted.
+    const flat = { ...generate!, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
+    expect(submittable(flat)).toBe(true);
+  });
+
+  it("clears no action row that no interface can submit", () => {
+    for (const row of BILLING_PARITY.filter(ofKind("action")).filter((r) => !PENDING.has(r.id))) {
+      const def = contributedAction(row.replacedBy);
+      expect(def && submittable(def), `${row.id} can be submitted`).toBe(true);
+    }
   });
 
   it("does not count a link as contributed because its view exists", () => {
