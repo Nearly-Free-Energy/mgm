@@ -20,7 +20,14 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   { readings: "manual", start_kwh, end_kwh, reason? } — the readings given
  *   and, for a paid bill, confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] }:
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
- *   route is the authority on it (ADR-006).
+ *   route refuses a paid bill without it, and a refunded bill outright, but
+ *   only on its own requests: POST /api/billing/generate, which the legacy
+ *   Regenerate dialogs and Refresh Readings call, rewrites a paid or
+ *   refunded bill with no acknowledgement (generate.ts keeps the payment
+ *   columns and refuses no payment status). There the paid-bill warning is
+ *   the legacy dialog's own, on the client with POST
+ *   /api/billing/regenerate-preview, and nothing on the server asks for it.
+ *   If generation comes to refuse paid bills itself, say so here.
  *
  * Responses:
  *   200 → { lineItemId, totalAmount, previousTotalAmount, message } —
@@ -38,7 +45,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   500 → { error, reason: "unknown_error" }
  *   and the capability's own refusals (plugin gate, organization scope).
  *
- * The legacy dialogs still call POST /api/billing/generate.
+ * The legacy dialogs still call POST /api/billing/generate, which checks no
+ * payment status (above).
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -472,9 +472,11 @@ export const LineItemPaymentStatusBody = z.strictObject(
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
 
 /**
- * The acknowledgement regenerating a paid bill needs: billing.regenerate-bill's
- * prepare offers it (src/lib/billing/surface/period-review.ts), and the
- * regenerate route refuses a paid bill without it.
+ * The acknowledgement regenerating a paid bill needs on the regenerate route:
+ * billing.regenerate-bill's prepare offers it
+ * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
+ * bill without it. POST /api/billing/generate asks for none and rewrites a
+ * paid bill as well; the legacy dialogs that call it warn on the client only.
  */
 export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
 
@@ -503,8 +505,9 @@ export const RegenerateBillBody = z.strictObject(
     // The host's Confirmation (src/lib/gui/contract.ts), sent with a
     // ceremony action: billing.regenerate-bill asks a paid bill's
     // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
-    // the route refuses a paid bill without it. The host hides it from the
-    // form. Version 2 added it.
+    // this route refuses a paid bill without it (POST /api/billing/generate
+    // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
+    // the form. Version 2 added it.
     confirmation: z
       .strictObject(
         {
