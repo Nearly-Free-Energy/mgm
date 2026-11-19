@@ -122,9 +122,10 @@ beforeAll(async () => {
       {
         id: SCHEDULE,
         microgrid_id: MICROGRID,
+        // Whole kWh from 1, bounds inclusive, as the tariff routes take them.
         tiers: [
-          { label: "Lifeline", min_kwh: 0, max_kwh: 15, rate_per_kwh: 250 },
-          { label: "Standard", min_kwh: 15, max_kwh: null, rate_per_kwh: 750 },
+          { label: "Lifeline", min_kwh: 1, max_kwh: 15, rate_per_kwh: 250 },
+          { label: "Standard", min_kwh: 16, max_kwh: null, rate_per_kwh: 750 },
         ],
         service_charge: 0,
         tax_rate: 0,

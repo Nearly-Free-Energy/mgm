@@ -125,9 +125,13 @@ beforeAll(async () => {
       {
         id: SCHEDULE,
         microgrid_id: MICROGRID,
+        // As the tariff routes take tiers (tariffsTierFault in src/lib/billing/schemas.ts):
+        // whole kWh from 1, each tier's bounds inclusive, each min one more than the
+        // previous max. calculateTieredCost gives a tier max - min + 1 kWh, so
+        // Lifeline holds 15 kWh, as the stored breakdowns below have it.
         tiers: [
-          { label: "Lifeline", min_kwh: 0, max_kwh: 15, rate_per_kwh: 250 },
-          { label: "Standard", min_kwh: 15, max_kwh: null, rate_per_kwh: 750 },
+          { label: "Lifeline", min_kwh: 1, max_kwh: 15, rate_per_kwh: 250 },
+          { label: "Standard", min_kwh: 16, max_kwh: null, rate_per_kwh: 750 },
         ],
         service_charge: 0,
         tax_rate: 0,
@@ -165,16 +169,16 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
 
     const res = await regenerate(bill(1), { readings: "manual", start_kwh: 100, end_kwh: 160, reason: "dial photo" });
     expect(res.status).toBe(200);
-    // 60 kWh: the first tier holds 0 to 15 inclusive (16 kWh) at 250, the other 44 at 750.
+    // 60 kWh: 15 at 250 (3,750) and 45 at 750 (33,750).
     expect(await res.json()).toMatchObject({
       lineItemId: bill(1),
-      totalAmount: 37000,
+      totalAmount: 37500,
       previousTotalAmount: 30000,
-      message: expect.stringMatching(/^Regenerated the bill\. Its total was .*30,000 and is now .*37,000\.$/),
+      message: expect.stringMatching(/^Regenerated the bill\. Its total was .*30,000 and is now .*37,500\.$/),
     });
 
     const after = await bills();
-    expect(after.get(bill(1))).toMatchObject({ start_kwh: 100, end_kwh: 160, usage_kwh: 60, total_amount: 37000, reading_source: "manual", payment_status: "unpaid" });
+    expect(after.get(bill(1))).toMatchObject({ start_kwh: 100, end_kwh: 160, usage_kwh: 60, total_amount: 37500, reading_source: "manual", payment_status: "unpaid" });
     for (const n of [2, 3, 4]) expect(after.get(bill(n)), `bill ${n} is unchanged`).toEqual(before.get(bill(n)));
 
     // One audit row was added, for that bill.
@@ -182,7 +186,7 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
     expect(auditAfter).toHaveLength(auditBefore.length + 1);
     const mine = auditAfter.filter((a) => a.billing_line_item_id === bill(1));
     expect(mine).toEqual([expect.objectContaining({ event_type: "line_item_regenerated" })]);
-    expect(mine[0].details).toMatchObject({ previous_total_amount: 30000, new_total_amount: 37000, manual_reason: "dial photo" });
+    expect(mine[0].details).toMatchObject({ previous_total_amount: 30000, new_total_amount: 37500, manual_reason: "dial photo" });
   });
 
   it("finds nothing for another organization's manager, and writes nothing", async () => {
@@ -220,7 +224,7 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
       confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] },
     });
     expect(res.status).toBe(200);
-    // 70 kWh: 16 at 250 and 54 at 750. The payment record is kept.
-    expect((await bills()).get(bill(4))).toMatchObject({ usage_kwh: 70, total_amount: 44500, payment_status: "paid" });
+    // 70 kWh: 15 at 250 (3,750) and 55 at 750 (41,250). The payment record is kept.
+    expect((await bills()).get(bill(4))).toMatchObject({ usage_kwh: 70, total_amount: 45000, payment_status: "paid" });
   });
 });
