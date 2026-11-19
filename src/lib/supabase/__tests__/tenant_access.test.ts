@@ -27,7 +27,9 @@
  * and every other staff table gets one row of the organization's (payment
  * rows on A's bill), so the catalog sweep has something a tenant could
  * wrongly see in each. A second organization exists for the
- * cross-organization manager.
+ * cross-organization manager, with one tenant, OTHER, on its microgrid and
+ * edge, whose meter is DEVICE_OTHER, so one person can rent units in two
+ * organizations.
  *
  * Users:
  *   tenantOnly   — a tenant row for A and nothing else
@@ -48,6 +50,8 @@
  *   fresh        — no rows; given access to B
  *   rejoined     — tenant of B, made org manager and removed through the
  *                  Users page's own query, given A, then revoked from both
+ *   twoUnits     — no rows; given A and OTHER, each by its organization's
+ *                  manager, then loses OTHER
  * Within that block the tests run in order and share these accounts, so
  * each one's expectations depend on what the tests above it did.
  *
@@ -94,13 +98,16 @@ const F = {
   microgrid: "7e4a0000-0000-4000-8002-000000000001",
   otherMicrogrid: "7e4a0000-0000-4000-8002-000000000002",
   edge: "7e4a0000-0000-4000-8003-000000000001",
+  otherEdge: "7e4a0000-0000-4000-8003-000000000002",
   deviceA: "7e4a0000-0000-4000-8004-000000000001",
   deviceMoved: "7e4a0000-0000-4000-8004-000000000002",
   deviceB: "7e4a0000-0000-4000-8004-000000000003",
   deviceShared: "7e4a0000-0000-4000-8004-000000000004",
+  deviceOther: "7e4a0000-0000-4000-8004-000000000005",
   tenantA: "7e4a0000-0000-4000-8005-000000000001",
   tenantB: "7e4a0000-0000-4000-8005-000000000002",
   tenantC: "7e4a0000-0000-4000-8005-000000000003",
+  tenantOther: "7e4a0000-0000-4000-8005-000000000004",
   period: "7e4a0000-0000-4000-8006-000000000001",
   lineItem: "7e4a0000-0000-4000-8007-000000000001",
   merchant: "7e4a0000-0000-4000-8008-000000000001",
@@ -127,6 +134,7 @@ const EMAIL = {
   madeStaff: "tenant-access-made-staff@test.local",
   fresh: "tenant-access-fresh@test.local",
   rejoined: "tenant-access-rejoined@test.local",
+  twoUnits: "tenant-access-two-units@test.local",
 };
 const ALL_EMAILS = Object.values(EMAIL);
 const ORG_IDS = [F.org, F.otherOrg];
@@ -375,23 +383,28 @@ beforeAll(async () => {
   ]);
   await insert(svc, "edges", [
     { id: F.edge, microgrid_id: F.microgrid, name: "Tenant access edge", openems_edge_id: "tenant-access-edge" },
+    { id: F.otherEdge, microgrid_id: F.otherMicrogrid, name: "Tenant access other edge", openems_edge_id: "tenant-access-other-edge" },
   ]);
   await insert(svc, "devices", [
     { id: F.deviceA, edge_id: F.edge, name: "Meter A", device_type: "consumption_meter", openems_component_id: "meter10" },
     { id: F.deviceMoved, edge_id: F.edge, name: "Meter moved", device_type: "consumption_meter", openems_component_id: "meter11" },
     { id: F.deviceB, edge_id: F.edge, name: "Meter B", device_type: "consumption_meter", openems_component_id: "meter12" },
     { id: F.deviceShared, edge_id: F.edge, name: "Shared meter", device_type: "consumption_meter", openems_component_id: "meter13" },
+    { id: F.deviceOther, edge_id: F.otherEdge, name: "Meter other", device_type: "consumption_meter", openems_component_id: "meter10" },
   ]);
   await insert(svc, "tenants", [
     { id: F.tenantA, microgrid_id: F.microgrid, display_name: "Unit A", unit_label: "A1", primary_phone: "+256700000101", geography_notes: "staff note" },
     { id: F.tenantB, microgrid_id: F.microgrid, display_name: "Unit B", unit_label: "B1", primary_phone: "+256700000102" },
     { id: F.tenantC, microgrid_id: F.microgrid, display_name: "Unit C", unit_label: "C1", primary_phone: "+256700000103" },
+    // The same display name as A: one person's units carry their own name.
+    { id: F.tenantOther, microgrid_id: F.otherMicrogrid, display_name: "Unit A", unit_label: "O1", primary_phone: "+256700000104" },
   ]);
   await insert(svc, "tenant_devices", [
     { tenant_id: F.tenantA, device_id: F.deviceA, role: "primary_consumption_meter", effective_from: "2026-04-01" },
     { tenant_id: F.tenantA, device_id: F.deviceMoved, role: "primary_consumption_meter", effective_from: "2026-01-01", effective_to: "2026-04-01" },
     { tenant_id: F.tenantB, device_id: F.deviceMoved, role: "primary_consumption_meter", effective_from: "2026-04-01" },
     { tenant_id: F.tenantB, device_id: F.deviceB, role: "secondary_meter", effective_from: "2026-01-01" },
+    { tenant_id: F.tenantOther, device_id: F.deviceOther, role: "primary_consumption_meter", effective_from: "2026-01-01" },
   ]);
   await insert(svc, "meter_readings", [
     { device_id: F.deviceA, reading_kwh: 12.5, read_at: "2026-05-01T00:00:00Z" },
@@ -1528,6 +1541,78 @@ desc("staff_access_accounts, the tenant grant and the Users page", () => {
     expect(await listed([rejoined.userId])).toEqual([
       { user_id: rejoined.userId, role: null, ems_operator_count: 0 },
     ]);
+  });
+});
+
+// ── Several units (PR 2) ──────────────────────────────────────────────────
+
+desc("a tenant with units in two organizations", () => {
+  let twoUnits: TestUser;
+
+  beforeAll(async () => {
+    twoUnits = await createTestUser({ email: EMAIL.twoUnits, role: null });
+  }, 60_000);
+
+  const grant = async (tenantId: string, actor: string) => {
+    const svc = await serviceClient();
+    return svc.rpc("fn_tenant_access_grant", { _tenant_id: tenantId, _user_id: twoUnits.userId, _actor: actor });
+  };
+
+  it("is given a unit by each organization's own manager, and by neither for the other's", async () => {
+    expectCode((await grant(F.tenantOther, manager.userId)).error, "42501");
+    expectCode((await grant(F.tenantA, otherManager.userId)).error, "42501");
+    expect((await grant(F.tenantA, manager.userId)).error).toBeNull();
+    expect((await grant(F.tenantOther, otherManager.userId)).error).toBeNull();
+  });
+
+  it("reads both units, their meter assignments and their meters, and nothing else", async () => {
+    const tenants = await twoUnits.client.from("tenants").select("id");
+    expect((tenants.data ?? []).map((r) => r.id).sort()).toEqual([F.tenantA, F.tenantOther].sort());
+    const links = await twoUnits.client.from("tenant_devices").select("tenant_id, device_id");
+    expect((links.data ?? []).map((r) => `${r.tenant_id}:${r.device_id}`).sort()).toEqual(
+      [`${F.tenantA}:${F.deviceA}`, `${F.tenantA}:${F.deviceMoved}`, `${F.tenantOther}:${F.deviceOther}`].sort(),
+    );
+    const devices = await twoUnits.client.from("devices").select("id");
+    expect((devices.data ?? []).map((r) => r.id).sort()).toEqual([F.deviceA, F.deviceMoved, F.deviceOther].sort());
+  });
+
+  it("fn_tenant_home answers each unit with its own organization", async () => {
+    for (const [unit, organization, microgrid] of [
+      [F.tenantA, F.org, F.microgrid],
+      [F.tenantOther, F.otherOrg, F.otherMicrogrid],
+    ] as const) {
+      const { data, error } = await twoUnits.client.rpc("fn_tenant_home", { _tenant_id: unit });
+      expect(error).toBeNull();
+      expect(data).toEqual([expect.objectContaining({ tenant_id: unit, organization_id: organization, microgrid_id: microgrid })]);
+    }
+  });
+
+  it("the tenant app's meter read lists each unit's own meter only", async () => {
+    const repository = createSupabaseTenantAppRepository(twoUnits.client);
+    expect((await repository.listMetersInForce(F.tenantA, "2026-05-01")).map((m) => m.deviceId)).toEqual([F.deviceA]);
+    expect((await repository.listMetersInForce(F.tenantOther, "2026-05-01")).map((m) => m.deviceId)).toEqual([
+      F.deviceOther,
+    ]);
+  });
+
+  it("losing one unit keeps the other and the person's sessions", async () => {
+    addSession(twoUnits.userId);
+    const listed = await otherManager.client.rpc("fn_tenant_access_list", { _tenant_id: F.tenantOther });
+    expect(listed.error).toBeNull();
+    const access = (listed.data as { access_id: string; email: string }[]).find((r) => r.email === EMAIL.twoUnits);
+    expect(access).toBeDefined();
+    const { data, error } = await otherManager.client.rpc("fn_tenant_access_revoke", {
+      _tenant_id: F.tenantOther,
+      _access_id: access!.access_id,
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(false);
+    expect(sessionCount(twoUnits.userId)).toEqual({ sessions: 1, tokens: 1 });
+
+    const tenants = await twoUnits.client.from("tenants").select("id");
+    expect((tenants.data ?? []).map((r) => r.id)).toEqual([F.tenantA]);
+    const home = await twoUnits.client.rpc("fn_tenant_home", { _tenant_id: F.tenantOther });
+    expect(home.data).toEqual([]);
   });
 });
 

@@ -353,12 +353,13 @@ describe("buildManifest for a person who holds units", () => {
     expect(outcome.manifest.user).toEqual({ name: "Grace Namata", email: "host@test.local" });
     expect(outcome.manifest.org).toEqual({
       id: UNIT_A,
-      name: "Grace Namata",
+      // The unit label; "Grace Namata" is the tenant's own name.
+      name: "Unit 4",
       href: "/my",
       timezone: "Africa/Kampala",
       nav: [expect.objectContaining({ id: "tenant.home", href: "/my" })],
       status: [],
-      places: [{ kind: "tenant", id: UNIT_A, label: "Grace Namata", href: "/my" }],
+      places: [{ kind: "tenant", id: UNIT_A, label: "Unit 4", href: "/my" }],
     });
     expect(outcome.manifest.orgs).toEqual([]);
     // The unit through fn_tenant_home on the person's own session; no
@@ -392,16 +393,17 @@ describe("buildManifest for a person who holds units", () => {
     if (!named.ok) return;
     expect(named.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9", href: `/my?unit=${UNIT_B}`, timezone: "Africa/Nairobi" });
     expect(named.manifest.org.places).toEqual([
-      { kind: "tenant", id: UNIT_A, label: "Grace Namata", href: `/my?unit=${UNIT_A}` },
       { kind: "tenant", id: UNIT_B, label: "Shop 9", href: `/my?unit=${UNIT_B}` },
+      { kind: "tenant", id: UNIT_A, label: "Unit 4", href: `/my?unit=${UNIT_A}` },
     ]);
     // Each unit's organization's gate, once each.
     expect(new Set(checkGate.mock.calls.map(([, r]) => r.target.id))).toEqual(new Set([ORG_A, ORG_B]));
 
     const preferred = await buildManifest(ctx, { gui: "gridtop", path: "/my", preferred: UNIT_B });
     expect(preferred.ok && preferred.manifest.org.id).toBe(UNIT_B);
-    const first = await buildManifest(ctx, { gui: "gridtop", path: "/my", preferred: ORG_A, requested: UNIT_B });
-    expect(first.ok && first.manifest.org.id).toBe(UNIT_A);
+    // The first by label ("Shop 9" before "Unit 4"); neither organization hint names a unit.
+    const first = await buildManifest(ctx, { gui: "gridtop", path: "/my", preferred: ORG_A, requested: UNIT_A });
+    expect(first.ok && first.manifest.org.id).toBe(UNIT_B);
   });
 
   it("shows the tenant entry when the tenant app is on for any of the person's units", async () => {
@@ -441,6 +443,40 @@ describe("buildManifest for a person who holds units", () => {
     );
     const outcome = await buildManifest(contextFor([managerOf(ORG_B), tenantOf(UNIT_A)], async () => client), { gui: "gridtop" });
     expect(outcome.ok && outcome.manifest.org.nav.map((n) => n.id)).toEqual(["billing.periods", "org.users"]);
+  });
+
+  it("tells apart two units that share the tenant's name, in places and in the context", async () => {
+    // One person's two units, each named only by the tenant's own name.
+    const { client } = tableClient(
+      { user_profiles: { data: [] } },
+      tenantHomes([
+        { id: UNIT_A, name: "Grace Namata", orgId: ORG_A, microgrid: "Kasana East" },
+        { id: UNIT_B, name: "Grace Namata", orgId: ORG_B, microgrid: "Kiwumu" },
+      ]),
+    );
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), {
+      gui: "gridtop",
+      path: `/my?unit=${UNIT_B}`,
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.manifest.org.name).toBe("Grace Namata · Kiwumu");
+    expect(outcome.manifest.org.places.map((p) => p.label)).toEqual(["Grace Namata · Kasana East", "Grace Namata · Kiwumu"]);
+  });
+
+  it("builds a tenant-only person's manifest from the units that can be read when one cannot", async () => {
+    const { client } = tableClient(
+      { user_profiles: { data: [] } },
+      {
+        fn_tenant_home: (args: Record<string, unknown>) =>
+          args._tenant_id === UNIT_A ? { data: null, error: { message: "unavailable" } } : HOMES.fn_tenant_home(args),
+      },
+    );
+    const outcome = await buildManifest(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client), { gui: "gridtop" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.manifest.org).toMatchObject({ id: UNIT_B, name: "Shop 9" });
+    expect(outcome.manifest.org.places.map((p) => p.id)).toEqual([UNIT_B]);
   });
 
   it("fails a tenant-only person's manifest when a unit cannot be read", async () => {

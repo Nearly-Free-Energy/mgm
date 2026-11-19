@@ -242,6 +242,15 @@ view that is not a tenant view. A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
 off for the unit's organization shows the "not in this release" page.
 
+A person may rent any number of units, in any organizations, and nothing in
+the host holds them to one. Each unit is named by its unit label, else the
+tenant's display name (the tenant's own name, which their units share), with
+its microgrid added where two of their units would read alike
+(`src/lib/gui/host/server/units.ts`); a unit that cannot be read is left out
+rather than failing the others. Choosing another unit changes only `?unit=`,
+so `HostKitProvider` rebuilds the manifest for it, as it does for `?org=`,
+and the shell's context, clock and remembered unit follow.
+
 ## The gate
 
 Every released API route enters the runtime. Routes that use a capability go

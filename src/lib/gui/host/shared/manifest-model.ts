@@ -251,7 +251,12 @@ export interface TenantManifestInput {
   now: Date;
   gui: string;
   user: { name: string | null; email?: string | null };
-  /** The person's units, in the order to show them; at least one. */
+  /**
+   * The person's units, in the order to show them; at least one. `label`
+   * is what the shell calls each (HostUnit.label in ../server/units.ts):
+   * distinct between the person's units unless two share both their name
+   * and their microgrid.
+   */
   units: readonly { id: string; label: string; timezone: string | null }[];
   /** The unit the page is about, one of `units`; else the first is. */
   current: string | null;

@@ -43,6 +43,7 @@ import { NOT_RELEASED, UNIT_REQUIRED } from "../view";
 import { tableClient, tenantHomes, tenantOf } from "./host-fakes";
 
 const ORG = "e7300000-0000-4000-8000-000000000001";
+const OTHER_ORG = "e7300000-0000-4000-8000-000000000002";
 const COMMUNITY = "e7300000-0000-4000-8001-000000000001";
 const MICROGRID = "e7300000-0000-4000-8002-000000000001";
 
@@ -204,11 +205,41 @@ describe("renderView for a tenant view (RFC mgm#197 § 4)", () => {
     const picker = tree.props?.children as Node;
     expect(picker.type).toBe(UnitPicker);
     expect(picker.props?.choices).toEqual([
-      { label: "Grace Namata", detail: "Unit 4 · Kasana East", href: `/my?month=2026-11&unit=${UNIT_A}` },
       { label: "Shop 9", detail: "Kasana West", href: `/my?month=2026-11&unit=${UNIT_B}` },
+      { label: "Unit 4", detail: "Kasana East", href: `/my?month=2026-11&unit=${UNIT_A}` },
     ]);
     // Each unit through fn_tenant_home, on the person's own session.
     expect(calls.map((c) => c.table)).toEqual(["rpc:fn_tenant_home", "rpc:fn_tenant_home"]);
+  });
+
+  it("names units that share the tenant's name by unit label, with their microgrid beneath", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    homes([
+      { id: UNIT_A, name: "Grace Namata", unitLabel: "Shop 9", orgId: ORG, microgrid: "Kasana East" },
+      { id: UNIT_B, name: "Grace Namata", unitLabel: "Flat 2", orgId: OTHER_ORG, microgrid: "Kiwumu" },
+    ]);
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect((tree.props?.children as Node).props?.choices).toEqual([
+      { label: "Flat 2", detail: "Kiwumu", href: `/my?unit=${UNIT_B}` },
+      { label: "Shop 9", detail: "Kasana East", href: `/my?unit=${UNIT_A}` },
+    ]);
+  });
+
+  it("leaves out of the picker a unit that cannot be read", async () => {
+    mocks.dispatchView.mockResolvedValue(UNIT_REQUIRED);
+    const homesOf = tenantHomes([{ id: UNIT_B, name: "Shop 9", orgId: ORG, microgrid: "Kasana West" }]);
+    const made = tableClient(
+      {},
+      {
+        fn_tenant_home: (args: Record<string, unknown>) =>
+          args._tenant_id === UNIT_A ? { data: null, error: { message: "unavailable" } } : homesOf.fn_tenant_home(args),
+      },
+    );
+    vi.mocked(createClient).mockResolvedValue(made.client as Awaited<ReturnType<typeof createClient>>);
+    const tree = (await renderView({ path: ["my"], search: {}, access: TENANT, gui: GUI })) as Node;
+    expect((tree.props?.children as Node).props?.choices).toEqual([
+      { label: "Shop 9", detail: "Kasana West", href: `/my?unit=${UNIT_B}` },
+    ]);
   });
 
   it("answers not found when none of the person's units answers any more", async () => {

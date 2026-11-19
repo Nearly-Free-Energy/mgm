@@ -84,15 +84,17 @@ async function loadPageView(
 
 /**
  * The picker for a tenant view opened without a unit by a person with
- * several (UNIT_REQUIRED): each of their units, linking to `href` for it.
- * Not found when none can be read any more.
+ * several (UNIT_REQUIRED): each of their units, linking to `href` for it,
+ * named as the shell names it (unitName in ./units.ts) with its microgrid
+ * beneath. A unit that cannot be read is left out (readTenantUnits); not
+ * found when none can be read any more.
  */
 async function unitPicker(ctx: HostContext, href: string): Promise<ReactNode> {
   const units = await readTenantUnits(ctx);
   if (units.length === 0) notFound();
   const choices = units.map((unit) => ({
-    label: unit.label,
-    detail: [unit.unitLabel, unit.microgridName].filter(Boolean).join(" · ") || null,
+    label: unit.name,
+    detail: unit.microgridName || null,
     href: withUnit(href, unit.tenantId),
   }));
   return (

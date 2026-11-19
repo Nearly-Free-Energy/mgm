@@ -200,13 +200,14 @@ describe.skipIf(shouldSkip())("buildManifest for a person who holds a unit, agai
     if (!off.ok) return;
     expect(off.manifest.org).toEqual({
       id: F.tenantA,
-      name: "GUI Manifest Tenant",
+      // The unit label; the display name is the tenant's own.
+      name: "Unit 4",
       href: "/my",
       timezone: "UTC",
       // The tenant app is off for an organization that never turned it on.
       nav: [],
       status: [],
-      places: [{ kind: "tenant", id: F.tenantA, label: "GUI Manifest Tenant", href: "/my" }],
+      places: [{ kind: "tenant", id: F.tenantA, label: "Unit 4", href: "/my" }],
     });
     expect(off.manifest.orgs).toEqual([]);
 

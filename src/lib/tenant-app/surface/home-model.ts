@@ -19,6 +19,16 @@ export const TENANT_METER_PREFIX = "meter.";
 /** Every other key the view emits; `meters` stands for "no meter today". */
 export const TENANT_HOME_KEYS = ["unit", "microgrid", "today", "meters"] as const;
 
+/**
+ * What the view calls the unit: its unit label, else the tenant's display
+ * name, which is the tenant's own name and the same for every unit they
+ * rent. The GUI host names units the same way in the shell (unitName in
+ * @/lib/gui/host/server/units); change both together.
+ */
+function unitTitle(tenant: TenantHome["tenant"]): string {
+  return tenant.unitLabel?.trim() || tenant.displayName.trim() || "Your unit";
+}
+
 export function buildTenantHomeModel(home: TenantHome, fmt: Fmt): LoadedModel<"record"> {
   const meters = home.meters.map((meter) => ({
     key: `${TENANT_METER_PREFIX}${meter.deviceId}`,
@@ -28,8 +38,8 @@ export function buildTenantHomeModel(home: TenantHome, fmt: Fmt): LoadedModel<"r
     value: fmt.text(statusEntry("tenantDeviceRole", meter.role)?.label ?? meter.role),
   }));
   return {
-    title: home.tenant.displayName,
-    entity: { kind: "tenant", id: home.tenant.id, label: home.tenant.displayName },
+    title: unitTitle(home.tenant),
+    entity: { kind: "tenant", id: home.tenant.id, label: unitTitle(home.tenant) },
     actions: [],
     body: {
       sections: [

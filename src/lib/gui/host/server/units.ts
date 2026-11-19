@@ -15,6 +15,12 @@ import "server-only";
  * access removed, or the unit deleted, since the role rows were read) is
  * left out. This shows; it authorizes nothing: every tenant view's loader
  * authorizes its unit again through composeTenantApp.
+ *
+ * A person may rent several units, in several organizations. Their units
+ * usually share `tenants.display_name`, which is the tenant's own name, so
+ * a unit is named by its unit label first (unitName), and where two of the
+ * person's units would still read the same, by its microgrid too. One unit
+ * that cannot be read is left out rather than failing the others.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tenantUnitIds } from "../shared/tenant-units";
@@ -22,7 +28,13 @@ import { requireIssued, type HostContext } from "./access";
 
 export type HostUnit = Readonly<{
   tenantId: string;
-  /** The tenant's display name, as the tenant.home view titles itself. */
+  /** unitName: the unit label, else the tenant's display name, else "Your unit". */
+  name: string;
+  /**
+   * What the shell calls the unit (places, context, picker): `name`, with
+   * the microgrid added when another of the person's units has the same
+   * name, so no two read alike unless they share both.
+   */
   label: string;
   unitLabel: string | null;
   microgridName: string;
@@ -39,7 +51,20 @@ type HomeRow = {
   organization_id: string;
 };
 
-async function readUnit(supabase: SupabaseClient, tenantId: string): Promise<HostUnit | null> {
+/**
+ * What a unit is called: its unit label ("Shop 9"), else the tenant's
+ * display name, else "Your unit". The unit label comes first because the
+ * display name is the tenant's own name, which one person's units share.
+ * The tenant.home view titles itself the same way (tenant-app
+ * surface/home-model.ts); change both together.
+ */
+export function unitName(unit: { unitLabel: string | null; displayName: string | null }): string {
+  return unit.unitLabel?.trim() || unit.displayName?.trim() || "Your unit";
+}
+
+type ReadUnit = Omit<HostUnit, "label">;
+
+async function readUnit(supabase: SupabaseClient, tenantId: string): Promise<ReadUnit | null> {
   const { data, error } = await supabase.rpc("fn_tenant_home", { _tenant_id: tenantId });
   if (error) throw new Error("GUI host: a unit could not be read");
   const row = (Array.isArray(data) ? data[0] : null) as HomeRow | null | undefined;
@@ -47,7 +72,7 @@ async function readUnit(supabase: SupabaseClient, tenantId: string): Promise<Hos
   const unitLabel = row.unit_label?.trim() || null;
   return {
     tenantId,
-    label: row.display_name?.trim() || unitLabel || "Your unit",
+    name: unitName({ unitLabel, displayName: row.display_name }),
     unitLabel,
     microgridName: row.microgrid_name ?? "",
     timezone: row.timezone || null,
@@ -55,18 +80,37 @@ async function readUnit(supabase: SupabaseClient, tenantId: string): Promise<Hos
   };
 }
 
+/** Each unit's label: its name, with its microgrid where another unit has the same name. */
+function labelled(units: readonly ReadUnit[]): HostUnit[] {
+  const named = new Map<string, number>();
+  for (const unit of units) named.set(unit.name.toLowerCase(), (named.get(unit.name.toLowerCase()) ?? 0) + 1);
+  return units.map((unit) => ({
+    ...unit,
+    label:
+      (named.get(unit.name.toLowerCase()) ?? 0) > 1 && unit.microgridName
+        ? `${unit.name} · ${unit.microgridName}`
+        : unit.name,
+  }));
+}
+
 /**
  * The person's units, by label and then id. None, with nothing read, for a
- * person with no tenant row. Throws when a unit cannot be read; callers
- * decide whether that fails the page.
+ * person with no tenant row. A unit whose read fails is left out, so one
+ * unit cannot take the others with it; only when reads failed and no unit
+ * could be read does it throw, and callers decide whether that fails the
+ * page.
  */
 export async function readTenantUnits(ctx: HostContext): Promise<HostUnit[]> {
   requireIssued(ctx);
   const ids = tenantUnitIds(ctx.access.roles);
   if (ids.length === 0) return [];
   const supabase = await ctx.newClient();
-  const units = await Promise.all(ids.map((id) => readUnit(supabase, id)));
-  return units
-    .filter((unit): unit is HostUnit => unit !== null)
-    .sort((a, b) => a.label.localeCompare(b.label) || a.tenantId.localeCompare(b.tenantId));
+  const reads = await Promise.allSettled(ids.map((id) => readUnit(supabase, id)));
+  const units = reads.flatMap((read) => (read.status === "fulfilled" && read.value ? [read.value] : []));
+  const failed = reads.filter((read) => read.status === "rejected").length;
+  if (failed > 0) {
+    if (units.length === 0) throw new Error("GUI host: a unit could not be read");
+    console.error(`[gui] units: ${failed} of ${ids.length} units could not be read`);
+  }
+  return labelled(units).sort((a, b) => a.label.localeCompare(b.label) || a.tenantId.localeCompare(b.tenantId));
 }

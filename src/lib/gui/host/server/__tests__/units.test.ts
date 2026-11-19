@@ -17,9 +17,10 @@ describe("readTenantUnits", () => {
     );
     const newClient = vi.fn(async () => client);
     const units = await readTenantUnits(contextFor([tenantOf(UNIT_A), managerOf(ORG_A), tenantOf(UNIT_B.toUpperCase())], newClient));
+    // Named by unit label first ("Unit 4"), then the display name ("Shop 9").
     expect(units).toEqual([
-      { tenantId: UNIT_B, label: "Grace Namata", unitLabel: "Unit 4", microgridName: "Kiwumu", timezone: "Africa/Kampala", organizationId: ORG_B },
-      { tenantId: UNIT_A, label: "Shop 9", unitLabel: null, microgridName: "Kasana East", timezone: "Africa/Kampala", organizationId: ORG_A },
+      { tenantId: UNIT_A, name: "Shop 9", label: "Shop 9", unitLabel: null, microgridName: "Kasana East", timezone: "Africa/Kampala", organizationId: ORG_A },
+      { tenantId: UNIT_B, name: "Unit 4", label: "Unit 4", unitLabel: "Unit 4", microgridName: "Kiwumu", timezone: "Africa/Kampala", organizationId: ORG_B },
     ]);
     expect(newClient).toHaveBeenCalledTimes(1);
     // Nothing but the function, which is a tenant's only view of a microgrid or organization.
@@ -41,7 +42,43 @@ describe("readTenantUnits", () => {
     expect(newClient).not.toHaveBeenCalled();
   });
 
-  it("throws when a unit cannot be read, without the database's text", async () => {
+  it("tells apart units that share the tenant's name: unit label first, then the microgrid", async () => {
+    const { client } = tableClient(
+      {},
+      tenantHomes([
+        { id: UNIT_A, name: "Grace Namata", orgId: ORG_A, microgrid: "Kasana East" },
+        { id: UNIT_B, name: "Grace Namata", orgId: ORG_B, microgrid: "Kiwumu" },
+        { id: UNIT_GONE, name: "Grace Namata", unitLabel: "Shop 9", orgId: ORG_B, microgrid: "Kiwumu" },
+      ]),
+    );
+    const units = await readTenantUnits(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B), tenantOf(UNIT_GONE)], async () => client));
+    expect(units.map((u) => [u.tenantId, u.name, u.label])).toEqual([
+      [UNIT_A, "Grace Namata", "Grace Namata · Kasana East"],
+      [UNIT_B, "Grace Namata", "Grace Namata · Kiwumu"],
+      [UNIT_GONE, "Shop 9", "Shop 9"],
+    ]);
+  });
+
+  it("leaves out a unit that cannot be read and returns the others", async () => {
+    const homes = tenantHomes([{ id: UNIT_B, name: "Shop 9", orgId: ORG_B }]);
+    const { client } = tableClient(
+      {},
+      {
+        fn_tenant_home: (args: Record<string, unknown>) =>
+          args._tenant_id === UNIT_A ? { data: null, error: { message: "unavailable" } } : homes.fn_tenant_home(args),
+      },
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const units = await readTenantUnits(contextFor([tenantOf(UNIT_A), tenantOf(UNIT_B)], async () => client));
+      expect(units.map((u) => u.tenantId)).toEqual([UNIT_B]);
+      expect(error).toHaveBeenCalledWith("[gui] units: 1 of 2 units could not be read");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("throws when a unit cannot be read and no other can, without the database's text", async () => {
     const { client } = tableClient({}, { fn_tenant_home: () => ({ data: null, error: { message: "secret detail" } }) });
     const error = await readTenantUnits(contextFor([tenantOf(UNIT_A)], async () => client)).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);

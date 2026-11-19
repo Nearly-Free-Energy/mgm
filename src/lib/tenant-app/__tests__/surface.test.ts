@@ -86,8 +86,9 @@ describe("TENANT_APP_SURFACE", () => {
 describe("the tenant.home model and examples", () => {
   it("shows the unit, its microgrid, today and each meter by its role", () => {
     expect(buildTenantHomeModel(HOME, fmt)).toEqual({
-      title: "Nakato Grace",
-      entity: { kind: "tenant", id: UNIT, label: "Nakato Grace" },
+      // The unit label, not the tenant's own name, which their units share.
+      title: "Unit 4",
+      entity: { kind: "tenant", id: UNIT, label: "Unit 4" },
       actions: [],
       body: {
         sections: [
