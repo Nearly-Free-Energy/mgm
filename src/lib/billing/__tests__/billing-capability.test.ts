@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BillingCapability } from "../capability";
 import { parseCloseReview, type CloseReview } from "../close";
+import { PERIOD_KEPT_CLOSED_MESSAGE, PERIOD_KEPT_PAYMENTS_MESSAGE } from "../period-delete";
 import type {
   BillingGeneration,
   BillingRepository,
@@ -40,6 +41,9 @@ function review(overrides: Partial<typeof REVIEW_ROW> = {}): CloseReview {
   if (!parsed) throw new Error("review fixture does not parse");
   return parsed;
 }
+
+/** A delete of the September period as the host sends it. */
+const TYPED = { confirmation: { acknowledged: [], typed: "September 2026" } };
 
 /** A confirmation of REVIEW_ROW as the host sends it. */
 const CONFIRMED = {
@@ -120,6 +124,18 @@ function stubRepo(overrides: Partial<BillingRepository> = {}): BillingRepository
       error: null,
     }),
     recordManualPayment: async () => ({ updated: { id: ITEM_ID }, error: null }),
+    getBillingPeriod: async (id: string) =>
+      id === PERIOD_ID
+        ? {
+            id: PERIOD_ID,
+            microgrid_id: MG_ID,
+            start_date: "2026-09-01",
+            end_date: "2026-09-30",
+            status: "draft",
+            timezone: "Africa/Kampala",
+          }
+        : null,
+    deleteBillingPeriod: async () => ({ deleted: true, error: null }),
     ...overrides,
   };
 }
@@ -561,6 +577,158 @@ describe("BillingCapability", () => {
   });
 });
 
+describe("BillingCapability.deletePeriod (#201)", () => {
+  const SEPTEMBER = {
+    id: PERIOD_ID,
+    microgrid_id: MG_ID,
+    start_date: "2026-09-01",
+    end_date: "2026-09-30",
+    status: "draft" as const,
+    timezone: "Africa/Kampala",
+  };
+
+  it("deletes a draft against its typed name and names the list to return to", async () => {
+    const remove = vi.fn(async () => ({ deleted: true, error: null }));
+    const { capability } = setup({ deleteBillingPeriod: remove });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toEqual({
+      ok: true,
+      data: { periodId: PERIOD_ID, microgridId: MG_ID, name: "September 2026" },
+    });
+    expect(remove).toHaveBeenCalledWith(PERIOD_ID);
+  });
+
+  it("matches the typed name whatever its case and spacing", async () => {
+    const { capability } = setup();
+    const result = await capability.deletePeriod(PERIOD_ID, { confirmation: { acknowledged: [], typed: "  september   2026 " } });
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("400 for an id that is not a UUID, before any read", async () => {
+    const lookup = vi.fn();
+    const { capability } = setup({ getPeriodOrganization: lookup });
+    expect(await capability.deletePeriod("nope", TYPED)).toMatchObject({ ok: false, status: 400, code: "billing_invalid_period" });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("403 for a period in another organization, or one the caller cannot see", async () => {
+    const remove = vi.fn();
+    const other = setup({
+      getPeriodOrganization: async () => ({ periodId: PERIOD_ID, microgridId: MG_ID, orgId: "550e8400-e29b-41d4-a716-446655440099" }),
+      deleteBillingPeriod: remove,
+    });
+    expect(await other.capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 403, code: "billing_scope_mismatch" });
+    const hidden = setup({ getPeriodOrganization: async () => null, deleteBillingPeriod: remove });
+    expect(await hidden.capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 403, code: "billing_scope_mismatch" });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("409 while billing is disabled", async () => {
+    const remove = vi.fn();
+    const { capability } = setup({ isPluginEnabled: async () => false, deleteBillingPeriod: remove });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 409, code: "billing_disabled" });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an unknown field", { confirmed: true }, undefined],
+    ["a digest", { confirmation: { digest: "v1:x", acknowledged: [], typed: "September 2026" } }, "confirmation"],
+    ["no acknowledgements", { confirmation: { typed: "September 2026" } }, "confirmation"],
+  ])("400 for %s", async (_label, input, field) => {
+    const { capability } = setup();
+    const result = await capability.deletePeriod(PERIOD_ID, input);
+    expect(result).toMatchObject({ ok: false, status: 400, code: "billing_invalid_body" });
+    expect((result as { field?: string }).field).toBe(field);
+  });
+
+  it("404 when the period is gone by the time it is read", async () => {
+    const { capability } = setup({ getBillingPeriod: async () => null });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 404, code: "billing_period_not_found" });
+  });
+
+  it("503 when the period cannot be read", async () => {
+    const { capability } = setup({
+      getBillingPeriod: async () => {
+        throw new Error("timeout");
+      },
+    });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 503, code: "billing_unavailable" });
+  });
+
+  it("409 for a closed period before asking for its name", async () => {
+    const remove = vi.fn();
+    const { capability } = setup({ getBillingPeriod: async () => ({ ...SEPTEMBER, status: "closed" }), deleteBillingPeriod: remove });
+    expect(await capability.deletePeriod(PERIOD_ID, {})).toEqual({
+      ok: false,
+      status: 409,
+      code: "billing_period_kept",
+      message: PERIOD_KEPT_CLOSED_MESSAGE,
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("428 naming the period when no confirmation is sent, and deletes nothing", async () => {
+    const remove = vi.fn();
+    const { capability } = setup({ deleteBillingPeriod: remove });
+    expect(await capability.deletePeriod(PERIOD_ID, {})).toEqual({
+      ok: false,
+      status: 428,
+      code: "billing_delete_confirmation_required",
+      message: "Type the period's name, September 2026, to delete it.",
+    });
+    expect(await capability.deletePeriod(PERIOD_ID)).toMatchObject({ status: 428 });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the wrong name", { acknowledged: [], typed: "October 2026" }],
+    ["no name", { acknowledged: [] }],
+  ])("428 on the confirmation field for %s", async (_label, confirmation) => {
+    const remove = vi.fn();
+    const { capability } = setup({ deleteBillingPeriod: remove });
+    expect(await capability.deletePeriod(PERIOD_ID, { confirmation })).toEqual({
+      ok: false,
+      status: 428,
+      code: "billing_delete_name_mismatch",
+      message: "Type the period's name, September 2026, to delete it.",
+      field: "confirmation",
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ code: "23514", message: "billing_period_kept: closed", details: "closed" }, 409, "billing_period_kept", PERIOD_KEPT_CLOSED_MESSAGE],
+    [
+      { code: "23514", message: "billing_period_kept: payments", details: "payment_activity" },
+      409,
+      "billing_period_kept",
+      PERIOD_KEPT_PAYMENTS_MESSAGE,
+    ],
+    [
+      { code: "23503", message: "violates foreign key constraint", details: null },
+      409,
+      "billing_period_referenced",
+      "This period has imported pilot data and cannot be deleted.",
+    ],
+    [{ code: "42501", message: "permission denied", details: null }, 403, "billing_forbidden", "Not authorized to delete this billing period."],
+    [{ code: "XX000", message: "boom", details: null }, 500, "billing_unavailable", "Could not delete the billing period."],
+  ])("maps the database's refusal %j", async (error, status, code, message) => {
+    const { capability } = setup({ deleteBillingPeriod: async () => ({ deleted: false, error }) });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toEqual({ ok: false, status, code, message });
+  });
+
+  it("404 when row-level security lets no row be deleted", async () => {
+    const { capability } = setup({ deleteBillingPeriod: async () => ({ deleted: false, error: null }) });
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, status: 404, code: "billing_period_not_found" });
+  });
+
+  it("answers inactive after disposal", async () => {
+    const remove = vi.fn();
+    const { capability } = setup({ deleteBillingPeriod: remove }, {}, () => false);
+    expect(await capability.deletePeriod(PERIOD_ID, TYPED)).toMatchObject({ ok: false, code: "billing_composition_disposed" });
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * Every write re-reads plugin state just before it writes. The lookups that
  * resolve the organization run first; anything else on the repository or the
@@ -583,6 +751,7 @@ const WRITES: { method: string; run: (capability: BillingCapability) => Promise<
       c.createPeriod({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" }),
   },
   { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, CONFIRMED) },
+  { method: "deletePeriod", run: (c) => c.deletePeriod(PERIOD_ID, TYPED) },
   { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
   { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },
 ];

@@ -84,8 +84,10 @@ describe("POST /api/billing-periods (issue #5)", () => {
       post({ microgrid_id: MG_ID, start_date: "2026-09-01", end_date: "2026-09-30" })
     );
     expect(res.status).toBe(201);
-    const json = (await res.json()) as { period: { timezone: string } };
+    const json = (await res.json()) as { period: { timezone: string }; href: string };
     expect(json.period.timezone).toBe("Africa/Kampala");
+    // The GUI kit opens the new period, as the legacy list does.
+    expect(json.href).toBe(`/microgrids/${MG_ID}/billing/${PERIOD_ID}`);
   });
 
   it("maps composition failures (e.g. billing disabled)", async () => {

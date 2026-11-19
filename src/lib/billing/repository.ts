@@ -41,7 +41,8 @@ export function billingFailure(
   return { ok: false, ...error };
 }
 
-export type RepositoryError = { code?: string; message: string };
+/** `details` is PostgREST's DETAIL, such as the delete guard's `closed` or `payment_activity` (./period-delete.ts). */
+export type RepositoryError = { code?: string; message: string; details?: string | null };
 
 export type TierInput = {
   label?: string;
@@ -164,6 +165,14 @@ export interface BillingRepository {
     notes: string | null;
     actorUserId: string;
   }): Promise<{ updated: unknown; error: RepositoryError | null }>;
+  /** Null when the period is not visible to the caller; rejects when it cannot be read. */
+  getBillingPeriod(periodId: string): Promise<BillingPeriodRow | null>;
+  /**
+   * Deletes the period. `deleted` is false when no row was removed, as when
+   * row-level security hides it; fn_billing_period_before_delete_guard
+   * refuses a closed period or one with payment activity with an error.
+   */
+  deleteBillingPeriod(periodId: string): Promise<{ deleted: boolean; error: RepositoryError | null }>;
 }
 
 export interface BillingCapabilityContract {
@@ -183,4 +192,9 @@ export interface BillingCapabilityContract {
     lineItemId: string,
     input: unknown
   ): Promise<BillingResult<unknown>>;
+  /** Deletes a draft period, against the name the person typed (DeletePeriodBody). */
+  deletePeriod(
+    periodId: string,
+    input?: unknown
+  ): Promise<BillingResult<{ periodId: string; microgridId: string; name: string }>>;
 }

@@ -91,6 +91,11 @@ export type CanaryIds = {
   /** One synthetic edge and one real one, which the synthetic source refuses. */
   mixedMicrogridId: string;
   /**
+   * A draft billing period on the Basic path's microgrid: a draft, so a
+   * delete's available() passes and its prepare runs.
+   */
+  billingPeriodId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. The units
    * have no meter assigned, so the microgrids' house meters, and with them
@@ -117,9 +122,11 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * Each microgrid has an edge with a battery and a grid meter, so a view that
  * reads the site reaches its metering source: the edges of the synthetic
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
- * one, and the mixed microgrid has one edge of each. The organization also
- * gets an email sender (RFC #186) whose password is a canary, a tenant unit
- * on each microgrid (`unitIds`) and the tenant app turned on.
+ * one, and the mixed microgrid has one edge of each. The Basic path's
+ * microgrid also gets a draft billing period with no bills, which the
+ * organization's delete removes with it. The organization also gets an email
+ * sender (RFC #186) whose password is a canary, a tenant unit on each
+ * microgrid (`unitIds`) and the tenant app turned on.
  */
 export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise<Canary[]> {
   const canaries: Canary[] = [];
@@ -164,6 +171,17 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       }
     }
   }
+  site.push([
+    "billing_periods",
+    {
+      id: ids.billingPeriodId,
+      microgrid_id: ids.microgridIds.basic,
+      start_date: "2026-10-01",
+      end_date: "2026-10-31",
+      status: "draft",
+      timezone: "Africa/Kampala",
+    },
+  ]);
   rows.push([
     "payment_merchant_accounts",
     {
@@ -251,6 +269,7 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     organization: [ids.orgId],
     community: [ids.communityId],
     microgrid: canaryMicrogrids(ids),
+    billingPeriod: [ids.billingPeriodId],
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {

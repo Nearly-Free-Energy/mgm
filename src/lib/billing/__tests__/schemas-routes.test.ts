@@ -18,6 +18,7 @@ const PAIRS: [route: string, method: string, schema: string][] = [
   ["src/app/api/microgrids/[id]/grid-tariffs/route.ts", "POST", "AddGridTariffBody"],
   ["src/app/api/microgrids/[id]/savings-settings/route.ts", "PUT", "SaveSavingsSettingsBody"],
   ["src/app/api/billing-periods/[periodId]/close/route.ts", "POST", "ClosePeriodBody"],
+  ["src/app/api/billing-periods/[periodId]/route.ts", "DELETE", "DeletePeriodBody"],
   ["src/app/api/billing-periods/route.ts", "POST", "CreatePeriodBody"],
   ["src/app/api/billing/generate/route.ts", "POST", "GenerateBillsBody"],
   ["src/app/api/billing/regenerate-preview/route.ts", "POST", "PreviewBillsBody"],

@@ -88,6 +88,7 @@ const IDS: CanaryIds = {
   },
   syntheticMicrogridId: "e7400000-0000-4000-8002-000000000005",
   mixedMicrogridId: "e7400000-0000-4000-8002-000000000006",
+  billingPeriodId: "e7400000-0000-4000-8007-000000000001",
   unitIds: [1, 2, 3, 4, 5, 6].map((n) => `e7400000-0000-4000-8003-00000000000${n}`),
 };
 const MICROGRIDS = canaryMicrogrids(IDS);

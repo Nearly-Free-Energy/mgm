@@ -72,7 +72,12 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("billing's savings actions", () => {
   it("are the settings and tariff writes on #102's routes, parsed with #165's schemas", () => {
-    expect(actions.map((a) => a.id)).toEqual(["billing.savings-settings", "billing.grid-tariff-add"]);
+    expect(actions.map((a) => a.id)).toEqual([
+      "billing.create-period",
+      "billing.delete-period",
+      "billing.savings-settings",
+      "billing.grid-tariff-add",
+    ]);
     expect(SETTINGS).toMatchObject({
       target: "microgrid",
       method: "PUT",
@@ -100,7 +105,9 @@ describe("billing's savings actions", () => {
   });
 
   it("contribute no delete: removing a tariff version stays on the Rates page", () => {
-    expect(actions.filter((a) => a.method === "DELETE" || a.path.includes("[tariffId]"))).toEqual([]);
+    // The one DELETE billing contributes is a draft period's (periods-actions.test.ts).
+    expect(actions.filter((a) => a.method === "DELETE").map((a) => a.id)).toEqual(["billing.delete-period"]);
+    expect(actions.filter((a) => a.path.includes("tariff") && (a.method === "DELETE" || a.path.includes("[tariffId]")))).toEqual([]);
   });
 
   it("are prepared with the whole body as the form, and no confirmation step for the settings", async () => {

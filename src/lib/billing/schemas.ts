@@ -133,6 +133,36 @@ export const ClosePeriodBody = z.strictObject(
 );
 export const CLOSE_PERIOD_BODY_VERSION = 1;
 
+const DELETE_CONFIRMATION = "confirmation needs the period's name, typed";
+
+/**
+ * DELETE /api/billing-periods/[periodId]. The period comes from the path.
+ * `confirmation` is the host's Confirmation (src/lib/gui/contract.ts) for a
+ * typed action: the period name the person typed (periodName in ./close).
+ * Without it the route answers 428. No digest: billing.delete-period's
+ * prepare returns none (./surface/periods.ts). If it ever does, add `digest`
+ * here and bump the version.
+ */
+export const DeletePeriodBody = z.strictObject(
+  {
+    confirmation: z
+      .strictObject(
+        {
+          acknowledged: z
+            .array(z.string({ error: DELETE_CONFIRMATION }).max(64, { error: DELETE_CONFIRMATION }), {
+              error: DELETE_CONFIRMATION,
+            })
+            .max(20, { error: DELETE_CONFIRMATION }),
+          typed: z.string({ error: DELETE_CONFIRMATION }).max(200, { error: DELETE_CONFIRMATION }).optional(),
+        },
+        { error: DELETE_CONFIRMATION }
+      )
+      .optional(),
+  },
+  { error: bodyError }
+);
+export const DELETE_PERIOD_BODY_VERSION = 1;
+
 // ── Billing periods and bill generation ──
 
 const PERIODS_RANGE = "start_date and end_date must be YYYY-MM-DD with start_date <= end_date.";

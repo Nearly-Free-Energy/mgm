@@ -42,10 +42,6 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Contribute billing periods and period creation as a view
-  "create-period",
-  "open-period",
-  "delete-period",
   // Contribute period review, with targeted actions for each bill
   "generate-bills",
   "regenerate-bill",
