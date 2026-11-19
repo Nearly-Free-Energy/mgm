@@ -35,6 +35,7 @@ vi.mock("@/lib/supabase/server", () => ({
 import { invoke } from "@/lib/gui/host/client/invoke";
 import type { PreparedAction } from "@/lib/gui/host/server/prepare";
 import { POST as closeRoute } from "@/app/api/billing-periods/[periodId]/close/route";
+import { CLOSE_REFUSAL_COPY } from "@/lib/billing/close";
 import { POST as prepareRoute } from "../../prepare/route";
 import { GET } from "../route";
 
@@ -370,7 +371,13 @@ describe.skipIf(shouldSkip())("closing a period through the GUI host", () => {
     const svc = await serviceClient();
     const { error } = await svc.from("billing_line_items").update({ total_amount: 3000 }).eq("id", bill(31));
     if (error) throw new Error(`[close-checklist.db] update: ${error.message}`);
-    expect(await send(stale, confirmationFor(stale.ceremony))).toMatchObject({ ok: false, status: 409, code: "billing_period_totals_changed" });
+    // What the host shows over its old step: go back to Close period, whose prepare reads the new totals.
+    expect(await send(stale, confirmationFor(stale.ceremony))).toMatchObject({
+      ok: false,
+      status: 409,
+      code: "billing_period_totals_changed",
+      message: CLOSE_REFUSAL_COPY.totalsChanged,
+    });
     expect(await status(READY)).toBe("draft");
 
     const fresh = await prepared(READY);

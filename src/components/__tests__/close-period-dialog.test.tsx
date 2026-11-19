@@ -6,6 +6,7 @@
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLOSE_REFUSAL_COPY } from "@/lib/billing/close";
 import type { Ceremony } from "@/lib/gui/contract";
 import { ClosePeriodDialog, type CloseAnswer } from "../ui/close-period-dialog";
 
@@ -148,13 +149,15 @@ describe("ClosePeriodDialog — closing", () => {
     const changed = ceremony({ digest: "v1:second", facts: [{ label: "Bills", value: { t: "number", v: 13, text: "13" } }] });
     const { post } = mount([
       review(),
-      { ok: false, status: 409, code: "billing_period_totals_changed", ceremony: changed },
+      { ok: false, status: 409, code: "billing_period_totals_changed", message: CLOSE_REFUSAL_COPY.totalsChanged, ceremony: changed },
       closed,
     ]);
     await screen.findByRole("heading", { name: "Close October 2026?" });
     confirmAll();
     fireEvent.click(confirmButton());
     await screen.findByText(/The totals changed after you reviewed them/);
+    // The new totals are in place, so not the route's sentence, which sends the GUI host's person back to Close period.
+    expect(screen.queryByText(CLOSE_REFUSAL_COPY.totalsChanged)).toBeNull();
     expect(screen.getByText("13")).toBeTruthy();
     for (const box of screen.getAllByRole("checkbox")) expect((box as HTMLInputElement).checked).toBe(false);
     expect(typedBox().value).toBe("");
@@ -164,6 +167,14 @@ describe("ClosePeriodDialog — closing", () => {
     fireEvent.click(confirmButton());
     await screen.findByRole("heading", { name: "Closed: October 2026" });
     expect((post.mock.calls[2][1] as { confirmation: { digest: string } }).confirmation.digest).toBe("v1:second");
+  });
+
+  it("when the totals changed and the new review could not be read, shows the route's sentence", async () => {
+    mount([review(), { ok: false, status: 409, code: "billing_period_totals_changed", message: CLOSE_REFUSAL_COPY.totalsChanged }]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await screen.findByText(CLOSE_REFUSAL_COPY.totalsChanged);
   });
 
   it("stays open while the close is sending, and reports a close that went through", async () => {
