@@ -447,9 +447,11 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
  * (prepareGenerateFromMeters in ./period-review.ts): the bill engine's
  * choices with guardExistingBills (src/lib/billing/generate.ts), in its
  * order. A manual bill is kept; an invoiced, paid or refunded one left; any
- * other tenant is read from its meter if meterCoverage says so, and is not
- * billed otherwise. It cannot foresee a meter with no data for the period.
- * If the engine's choices change, change this with them.
+ * other tenant is read from its meter if meterCoverage says so. Otherwise a
+ * tenant with no bill is not billed, and one with a bill keeps it as it is,
+ * not refreshed (the engine writes nothing for them and says `hadBill`). It
+ * cannot foresee a meter with no data for the period. If the engine's
+ * choices change, change this with them.
  */
 export type GenerateReadiness = {
   /** Tenants whose meter is read. */
@@ -460,9 +462,14 @@ export type GenerateReadiness = {
   kept: number;
   /** Invoiced, paid or refunded bills, left as they are. */
   left: number;
-  /** Tenants with no bill to keep and no meter to read for the period, in the order given. */
-  notRead: { tenantName: string; reason: "no_meter" | "assignment_gap" }[];
+  /** Tenants with no bill and no meter to read for the period, in the order given: not billed. */
+  notBilled: NotRead[];
+  /** Tenants with a bill (not manual, paid, invoiced or refunded) and no meter to read: their bill is left as it is. */
+  notRefreshed: NotRead[];
 };
+
+/** Why a tenant's meter is not read: meterCoverage's answer, which the run's result words the same way. */
+export type NotRead = { tenantName: string; reason: "no_meter" | "assignment_gap" };
 
 export function generateReadiness(
   period: { start_date: string; end_date: string },
@@ -470,7 +477,7 @@ export function generateReadiness(
   bills: readonly { tenant_id: string; reading_source: string | null; payment_status: string; invoice_number: string | null }[],
 ): GenerateReadiness {
   const billByTenant = new Map(bills.map((b) => [b.tenant_id, b]));
-  const out: GenerateReadiness = { fromMeters: 0, refresh: 0, kept: 0, left: 0, notRead: [] };
+  const out: GenerateReadiness = { fromMeters: 0, refresh: 0, kept: 0, left: 0, notBilled: [], notRefreshed: [] };
   for (const t of tenants) {
     const bill = billByTenant.get(t.id);
     if (bill?.reading_source === "manual") {
@@ -486,7 +493,7 @@ export function generateReadiness(
       out.fromMeters++;
       if (bill) out.refresh++;
     } else {
-      out.notRead.push({ tenantName: t.display_name, reason: coverage });
+      (bill ? out.notRefreshed : out.notBilled).push({ tenantName: t.display_name, reason: coverage });
     }
   }
   return out;

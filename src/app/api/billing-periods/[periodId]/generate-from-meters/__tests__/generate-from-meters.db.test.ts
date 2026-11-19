@@ -11,10 +11,12 @@
  * with new figures, writes nothing for one that already has them, keeps a
  * manual bill, leaves paid, invoiced and refunded bills as they are, and
  * gives no bill to a tenant with no meter, an assignment gap or no meter
- * data; one audit row per bill written. A second run writes nothing. A bill
- * paid between the run's read and its write is left as paid. A closed
- * period, billing turned off, another organization's manager, a tenant-only
- * account and no session are all refused, with nothing written.
+ * data, while a tenant with a bill and no meter keeps that bill; one audit
+ * row per bill written. A second run writes nothing. A bill paid between
+ * the run's read and its write is left as paid. A closed period, a
+ * microgrid with no rate schedule, a period whose meters have no data,
+ * billing turned off, another organization's manager, a tenant-only account
+ * and no session are all refused, with nothing written.
  *
  * Self-fixturing. Requires a running local Supabase (same harness as
  * rls.test.ts).
@@ -72,6 +74,8 @@ const OTHER_ORG = "e7a10000-0000-4000-8000-000000000002";
 const COMMUNITY = "e7a10000-0000-4000-8001-000000000001";
 const OTHER_COMMUNITY = "e7a10000-0000-4000-8001-000000000002";
 const MICROGRID = "e7a10000-0000-4000-8002-000000000001";
+/** A microgrid with no rate schedule. */
+const UNPRICED = "e7a10000-0000-4000-8002-000000000002";
 const EDGE = "e7a10000-0000-4000-8009-000000000001";
 const SCHEDULE = "e7a10000-0000-4000-8006-000000000001";
 /** October: the period generated. */
@@ -80,6 +84,10 @@ const DRAFT = "e7a10000-0000-4000-8003-000000000001";
 const CLOSED = "e7a10000-0000-4000-8003-000000000002";
 /** November: for the bill paid while the run writes. */
 const RACE = "e7a10000-0000-4000-8003-000000000003";
+/** December: no meter has data for it. */
+const NO_DATA = "e7a10000-0000-4000-8003-000000000004";
+/** October on the microgrid with no rate schedule. */
+const NO_TARIFF = "e7a10000-0000-4000-8003-000000000005";
 const tenant = (n: number) => `e7a10000-0000-4000-8004-${String(n).padStart(12, "0")}`;
 const device = (n: number) => `e7a10000-0000-4000-8007-${String(n).padStart(12, "0")}`;
 const bill = (n: number, period = 0) => `e7a10000-0000-4000-8005-${String(period * 100 + n).padStart(12, "0")}`;
@@ -100,7 +108,9 @@ const reads: string[][] = [];
  * bill, no earlier reading; 3 metered, an unpaid edge bill of other figures;
  * 4 metered, an unpaid edge bill with the meter's figures; 5 a manual bill;
  * 6 a paid bill; 7 an invoiced bill; 8 a refunded bill; 9 no meter; 10 a
- * meter assigned only after the period began; 11 a meter with no data.
+ * meter assigned only after the period began; 11 a meter with no data; 12
+ * no meter and an unpaid edge bill. 20 is on the microgrid with no rate
+ * schedule.
  */
 const METERED = [1, 2, 3, 4, 5, 6, 7, 8, 11];
 const USAGE = 40;
@@ -221,7 +231,13 @@ beforeAll(async () => {
         { id: OTHER_COMMUNITY, org_id: OTHER_ORG, name: "Generate Meters DB Other Community" },
       ],
     ],
-    ["microgrids", { id: MICROGRID, community_id: COMMUNITY, name: "Generate site", currency: "UGX", timezone: "Africa/Kampala" }],
+    [
+      "microgrids",
+      [
+        { id: MICROGRID, community_id: COMMUNITY, name: "Generate site", currency: "UGX", timezone: "Africa/Kampala" },
+        { id: UNPRICED, community_id: COMMUNITY, name: "Unpriced site", currency: "UGX", timezone: "Africa/Kampala" },
+      ],
+    ],
     [
       "rate_schedules",
       {
@@ -242,7 +258,10 @@ beforeAll(async () => {
     ],
     [
       "tenants",
-      Array.from({ length: 11 }, (_, i) => i + 1).map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+2567000009${String(n).padStart(2, "0")}` })),
+      [
+        ...Array.from({ length: 12 }, (_, i) => i + 1).map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+2567000009${String(n).padStart(2, "0")}` })),
+        { id: tenant(20), microgrid_id: UNPRICED, display_name: "Unit 20", primary_phone: "+256700000920" },
+      ],
     ],
     [
       "tenant_devices",
@@ -257,6 +276,8 @@ beforeAll(async () => {
         { id: DRAFT, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: CLOSED, microgrid_id: MICROGRID, start_date: "2026-09-01", end_date: "2026-09-30", timezone: "Africa/Kampala", status: "closed", closed_at: closedAt, rate_schedule_id: SCHEDULE },
         { id: RACE, microgrid_id: MICROGRID, start_date: "2026-11-01", end_date: "2026-11-30", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: NO_DATA, microgrid_id: MICROGRID, start_date: "2026-12-01", end_date: "2026-12-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: NO_TARIFF, microgrid_id: UNPRICED, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: null },
       ],
     ],
     [
@@ -270,6 +291,7 @@ beforeAll(async () => {
         row(6, { payment_status: "paid", paid_at: closedAt }),
         row(7, { invoice_number: "GMD-2025-00001" }),
         row(8, { payment_status: "refunded", paid_at: closedAt }),
+        row(12, { device_id: null }),
         // November's: unit 3, paid while the run writes.
         row(3, { id: bill(3, 11), billing_period_id: RACE }),
       ],
@@ -284,14 +306,14 @@ beforeAll(async () => {
   tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: tenant(1) });
   await setBilling(true);
 
-  // This microgrid's meters: 40 kWh each, and no data for unit 11's.
+  // This microgrid's meters: 40 kWh each, and no data for unit 11's, nor for any in December.
   const runtime = await getMgmRuntime();
   unregister = runtime.meteringProviders.register(
     PROVIDER,
     () => ({
       getReadings: async ({ devices, startDate, endDate }) => {
         reads.push(devices.map((d) => d.id).sort());
-        return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(11) ? null : USAGE, startDate, endDate }));
+        return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(11) || startDate.startsWith("2026-12") ? null : USAGE, startDate, endDate }));
       },
     }),
     { supports: async (_client, microgridId) => microgridId === MICROGRID },
@@ -320,9 +342,16 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
       "Of these, already billed": "2",
       "Kept, entered by hand": "1",
       "Left as they are: paid, invoiced or refunded": "3",
-      "Not billed: no meter for the period": "2",
+      "Not billed: no meter for the period": "1",
+      "Not billed: a meter assignment gap": "1",
+      "Bill left as it is, not refreshed: no meter for the period": "1",
     });
-    expect(prepared.ceremony!.warnings[0]).toBe("No meter for this period, so not billed: Unit 10, Unit 9.");
+    // Each by the reason the result gives, and a bill with no meter is left, not unbilled.
+    expect(prepared.ceremony!.warnings.slice(0, 3)).toEqual([
+      "No meter for this period, so not billed: Unit 9.",
+      "A meter assignment gap in this period (no one meter assigned for all of it), so not billed: Unit 10.",
+      "No meter for this period, so their bills are left as they are, not refreshed: Unit 12.",
+    ]);
     expect(reads).toEqual([]);
     expect(await bills()).toEqual(before);
   });
@@ -337,7 +366,7 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
       type: "result",
       ok: true,
       message:
-        "Generated 3 bills from meter data; 1 was already up to date. Not billed from meters: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded.",
+        "Generated 3 bills from meter data; 1 already up to date. Not billed: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 1 not refreshed.",
     });
     // Only the meters of tenants it may bill were read.
     expect(reads.at(-1)).toEqual([1, 2, 3, 4, 11].map(device).sort());
@@ -348,8 +377,8 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     expect(after.get(tenant(2))).toMatchObject({ start_kwh: null, end_kwh: null, usage_kwh: USAGE, total_amount: TOTAL_40 });
     // An unpaid edge bill rewritten with the meter's figures.
     expect(after.get(tenant(3))).toMatchObject({ id: bill(3), usage_kwh: USAGE, total_amount: TOTAL_40, payment_status: "unpaid" });
-    // Kept, left or already up to date: as they were.
-    for (const n of [4, 5, 6, 7, 8]) expect(after.get(tenant(n)), `unit ${n}`).toEqual(before.get(tenant(n)));
+    // Kept, left, already up to date or with no meter to read: as they were.
+    for (const n of [4, 5, 6, 7, 8, 12]) expect(after.get(tenant(n)), `unit ${n}`).toEqual(before.get(tenant(n)));
     // No meter, an assignment gap, no meter data: no bill, and no zero placeholder.
     for (const n of [9, 10, 11]) expect(after.has(tenant(n)), `unit ${n}`).toBe(false);
 
@@ -366,9 +395,18 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     const res = await generate(DRAFT);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ generated: 0, unchanged: 4, kept: 1, left: 3, changed: 0, notBilled: { noMeter: 1, meterAssignment: 1, noReading: 1, failed: 0 } });
+    expect(body).toMatchObject({
+      generated: 0,
+      unchanged: 4,
+      kept: 1,
+      left: 3,
+      changed: 0,
+      notRefreshed: 1,
+      notBilled: { noMeter: 1, meterAssignment: 1, noReading: 1, failed: 0 },
+    });
+    expect(body.tenants).toContainEqual({ tenantId: tenant(12), tenantName: "Unit 12", outcome: "left", code: "unmetered_no_manual" });
     expect(body.message).toBe(
-      "Nothing changed: 4 bills already have the latest meter figures. Not billed from meters: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded.",
+      "Nothing changed: 4 bills already have the latest meter figures. Not billed: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 1 not refreshed.",
     );
     expect(await bills()).toEqual(before);
     expect(await auditRows()).toHaveLength(auditBefore.length);
@@ -412,6 +450,34 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.closed, reason: "period_closed" });
     expect(await bills(CLOSED)).toEqual(before);
+  });
+
+  it("refuses a microgrid with no rate schedule as no_tariff, through the real engine, and writes nothing", async () => {
+    caller = manager;
+    const auditBefore = await auditRows(NO_TARIFF);
+    const res = await generate(NO_TARIFF);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.noTariff, reason: "no_tariff" });
+    expect((await bills(NO_TARIFF)).size).toBe(0);
+    expect(await auditRows(NO_TARIFF)).toHaveLength(auditBefore.length);
+  });
+
+  it("answers 409 nothing_generated with the summary when no meter has data, and writes nothing", async () => {
+    caller = manager;
+    const res = await generate(NO_DATA);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      reason: "nothing_generated",
+      generated: 0,
+      unchanged: 0,
+      notRefreshed: 0,
+      notBilled: { noMeter: 2, meterAssignment: 0, noReading: 10, failed: 0 },
+    });
+    expect(body.error).toBe("No bill was generated. Not billed: 2 with no meter, 10 with no meter data.");
+    expect(body.message).toBe(body.error);
+    expect((await bills(NO_DATA)).size).toBe(0);
+    expect(await auditRows(NO_DATA)).toHaveLength(0);
   });
 
   it("refuses while billing is off, in prepare and on the route, and writes nothing", async () => {

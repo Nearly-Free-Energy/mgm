@@ -208,7 +208,7 @@ describe("POST /api/billing-periods/[periodId]/generate-from-meters", () => {
     expect(body.tenants).toHaveLength(1206);
     expect(body.tenants.at(-1)).toEqual({ tenantId: expect.any(String), tenantName: expect.any(String), outcome: "not_billed", code: "line_item_write_failed" });
     expect(body.message).toBe(
-      "Generated 1.200 bills from meter data; 1 was already up to date. Not billed from meters: 1 with no meter, 1 with no meter data, 1 not saved. Left as they were: 1 entered by hand, 1 paid, invoiced or refunded.",
+      "Generated 1.200 bills from meter data; 1 already up to date. Not billed: 1 with no meter, 1 with no meter data, 1 not saved. Left as they were: 1 entered by hand, 1 paid, invoiced or refunded.",
     );
     expect(JSON.stringify(body)).not.toContain("secret_table");
     expect(generateFromMeters).toHaveBeenCalledWith(PERIOD);
@@ -229,11 +229,23 @@ describe("POST /api/billing-periods/[periodId]/generate-from-meters", () => {
     const body = await res.json();
     expect(body).toMatchObject({
       reason: "nothing_generated",
-      error: "No bill was generated. Not billed from meters: 1 with no meter, 1 with no meter data. Left as they were: 1 entered by hand.",
+      error: "No bill was generated. Not billed: 1 with no meter, 1 with no meter data. Left as they were: 1 entered by hand.",
       generated: 0,
       notBilled: { noMeter: 1, noReading: 1 },
     });
     expect(body.message).toBe(body.error);
+  });
+
+  it("answers 409 nothing_generated when the only bills left were not refreshed, and says they were left", async () => {
+    generateResult = ok({ ...error("unmetered_no_manual"), hadBill: true });
+    const res = await post({});
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      reason: "nothing_generated",
+      error: "No bill was generated. Left as they were: 1 not refreshed.",
+      notRefreshed: 1,
+      notBilled: { noMeter: 0 },
+    });
   });
 
   it("answers 409 nothing_to_read for a microgrid with no tenants", async () => {

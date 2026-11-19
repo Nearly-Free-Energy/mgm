@@ -233,6 +233,13 @@ export type ErrorTenantResult = {
   tenantName: string;
   error: string;
   code: GenerationErrorCode;
+  /**
+   * Set only by a guarded whole-period run (`guardExistingBills`), when the
+   * tenant had a bill as the run read it. An error writes nothing, so that
+   * bill is left as it was: a tenant whose meter could not be read keeps
+   * the bill it had, rather than going unbilled.
+   */
+  hadBill?: true;
 };
 
 export type TenantResult =
@@ -319,8 +326,20 @@ export type RunGenerationParams = {
    *    or its period changed since, and not written at all (`unchanged`, no
    *    audit row) when its figures are already the ones computed, so a
    *    second run writes nothing;
+   *  - an existing bill whose meter cannot be read (no meter, an assignment
+   *    gap, no data) is not written: its error carries `hadBill`;
    *  - a tenant with no bill gets one through fn_record_line_item_with_audit,
-   *    as on POST /api/billing/generate.
+   *    as on POST /api/billing/generate. That insert is not guarded, and
+   *    cannot be without a migration that gives it an expected "no bill"
+   *    state checked under the period's lock: it checks no period status,
+   *    so a close landing after the check above is not caught, and it
+   *    upserts, so a bill another write inserted for that tenant after this
+   *    run read the period's bills (a manual reading on POST
+   *    /api/billing/generate, or a second run overlapping this one) is
+   *    overwritten with this run's figures and logged as regenerated. Runs
+   *    one after another are not affected; the parity note (generate-bills
+   *    in ./parity.ts) lists both as known gaps. If such a migration lands,
+   *    use it here and drop this.
    * POST /api/billing/generate leaves it unset and checks none of this.
    */
   guardExistingBills?: boolean;
@@ -1233,6 +1252,14 @@ export async function runGenerationFor(
       previousPaymentStatus: prior?.payment_status ?? null,
       previousReadingSource: prior?.reading_source ?? null,
     });
+  }
+
+  // A guarded run says which tenants it did not bill already had a bill,
+  // which stays as it was read (ErrorTenantResult.hadBill).
+  if (guardExistingBills) {
+    for (const r of results) {
+      if (r.kind === "error" && existingByTenant.has(r.tenantId)) r.hadBill = true;
+    }
   }
 
   return { results };

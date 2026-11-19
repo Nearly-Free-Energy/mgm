@@ -19,7 +19,7 @@ import "server-only";
  * A refusal carries fixed copy, never a database message.
  */
 import type { Ceremony } from "@/lib/gui/contract";
-import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
+import type { Fmt, Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
 import { tenantNames } from "../close";
@@ -33,6 +33,7 @@ import {
   PERIOD_REVIEW_MAX_TIERS,
   periodLabel,
   SUPER_ADMIN_ONLY_STATUSES,
+  type NotRead,
   type ReviewBill,
   type ReviewTenant,
 } from "./period-review-model";
@@ -438,7 +439,8 @@ export async function prepareGenerateFromMeters(
     ...(r.refresh > 0 ? [{ label: "Of these, already billed", value: count(r.refresh) }] : []),
     ...(r.kept > 0 ? [{ label: "Kept, entered by hand", value: count(r.kept) }] : []),
     ...(r.left > 0 ? [{ label: "Left as they are: paid, invoiced or refunded", value: count(r.left) }] : []),
-    ...(r.notRead.length > 0 ? [{ label: "Not billed: no meter for the period", value: count(r.notRead.length) }] : []),
+    ...notReadFacts(req.fmt, "Not billed", r.notBilled),
+    ...notReadFacts(req.fmt, "Bill left as it is, not refreshed", r.notRefreshed),
   ];
   return {
     ok: true,
@@ -448,13 +450,43 @@ export async function prepareGenerateFromMeters(
         "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are.",
       facts,
       warnings: [
-        ...(r.notRead.length > 0 ? [`No meter for this period, so not billed: ${tenantNames(r.notRead)}.`] : []),
-        "A tenant whose meter has no data for the period is not billed; the result says how many.",
+        ...notReadWarnings("so not billed", r.notBilled),
+        ...notReadWarnings("so their bills are left as they are, not refreshed", r.notRefreshed),
+        "A tenant whose meter has no data for the period is not billed, and a bill they already have is left as it is; the result says how many.",
         "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
       ],
       acknowledgements: [],
     },
   };
+}
+
+/**
+ * Why a tenant's meter is not read, as the run's result words it
+ * (summarizeGenerateFromMeters: "with no meter", "with a meter assignment
+ * gap"), so the confirmation and the result name the same problem.
+ */
+const NOT_READ_REASON = {
+  no_meter: { fact: "no meter for the period", warning: "No meter for this period" },
+  assignment_gap: {
+    fact: "a meter assignment gap",
+    warning: "A meter assignment gap in this period (no one meter assigned for all of it)",
+  },
+} as const satisfies Record<NotRead["reason"], { fact: string; warning: string }>;
+
+const REASONS = Object.keys(NOT_READ_REASON) as NotRead["reason"][];
+
+function notReadFacts(fmt: Fmt, label: string, list: readonly NotRead[]) {
+  return REASONS.flatMap((reason) => {
+    const n = list.filter((t) => t.reason === reason).length;
+    return n > 0 ? [{ label: `${label}: ${NOT_READ_REASON[reason].fact}`, value: fmt.number(n) }] : [];
+  });
+}
+
+function notReadWarnings(outcome: string, list: readonly NotRead[]): string[] {
+  return REASONS.flatMap((reason) => {
+    const named = list.filter((t) => t.reason === reason);
+    return named.length > 0 ? [`${NOT_READ_REASON[reason].warning}, ${outcome}: ${tenantNames(named)}.`] : [];
+  });
 }
 
 /** The paid bill's acknowledgement: the legacy dialog's warning (src/components/billing/regenerate-row-dialog.tsx). */

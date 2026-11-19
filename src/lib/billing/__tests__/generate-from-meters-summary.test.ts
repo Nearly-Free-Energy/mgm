@@ -17,6 +17,8 @@ const written = (): TenantResult =>
 const unchanged = (): TenantResult => ({ kind: "unchanged", tenantId: id(), tenantName: "Unit", lineItemId: "b", totalAmount: 1 });
 const kept = (): TenantResult => ({ kind: "kept", tenantId: id(), tenantName: "Unit", readingSource: "manual" });
 const error = (code: GenerationErrorCode, text = "x"): TenantResult => ({ kind: "error", tenantId: id(), tenantName: "Unit", code, error: text });
+/** A guarded run's error for a tenant that had a bill, which is left as it was. */
+const hadBill = (code: GenerationErrorCode): TenantResult => ({ kind: "error", tenantId: id(), tenantName: "Unit", code, error: "x", hadBill: true });
 const times = (n: number, f: () => TenantResult) => Array.from({ length: n }, f);
 
 describe("summarizeGenerateFromMeters", () => {
@@ -56,8 +58,25 @@ describe("summarizeGenerateFromMeters", () => {
       ...Array(5).fill("not_billed"),
     ]);
     expect(s.message).toBe(
-      "Generated 3 bills from meter data; 2 were already up to date. Not billed from meters: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data, 2 not saved. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 2 changed meanwhile.",
+      "Generated 3 bills from meter data; 2 already up to date. Not billed: 1 with no meter, 1 with a meter assignment gap, 1 with no meter data, 2 not saved. Left as they were: 1 entered by hand, 3 paid, invoiced or refunded, 2 changed meanwhile.",
     );
+  });
+
+  it("counts a tenant whose bill the run did not read as left, not as not billed", () => {
+    const s = summarizeGenerateFromMeters(
+      [hadBill("unmetered_no_manual"), hadBill("meter_assignment_continuity"), hadBill("no_meter_reading"), hadBill("line_item_write_failed"), hadBill("paid")],
+      fmt,
+    );
+    expect(s).toMatchObject({ notRefreshed: 4, left: 1, notBilled: { noMeter: 0, meterAssignment: 0, noReading: 0, failed: 0 } });
+    expect(notBilledCount(s)).toBe(0);
+    expect(s.tenants.map((t) => [t.outcome, t.code])).toEqual([
+      ["left", "unmetered_no_manual"],
+      ["left", "meter_assignment_continuity"],
+      ["left", "no_meter_reading"],
+      ["left", "line_item_write_failed"],
+      ["left", "paid"],
+    ]);
+    expect(s.message).toBe("No bill was generated. Left as they were: 1 paid, invoiced or refunded, 4 not refreshed.");
   });
 
   it("passes on each tenant's code, never its error text", () => {
@@ -68,11 +87,12 @@ describe("summarizeGenerateFromMeters", () => {
 
   it.each([
     [[written()], "Generated 1 bill from meter data."],
-    [[written(), unchanged()], "Generated 1 bill from meter data; 1 was already up to date."],
+    [[written(), unchanged()], "Generated 1 bill from meter data; 1 already up to date."],
     [[unchanged(), unchanged()], "Nothing changed: every bill already has the latest meter figures."],
     [[unchanged(), kept()], "Nothing changed: 1 bill already has the latest meter figures. Left as they were: 1 entered by hand."],
     [[kept(), error("paid")], "No bill was generated. Left as they were: 1 entered by hand, 1 paid, invoiced or refunded."],
-    [[error("unmetered_no_manual"), error("unmetered_no_manual")], "No bill was generated. Not billed from meters: 2 with no meter."],
+    [[error("unmetered_no_manual"), error("unmetered_no_manual")], "No bill was generated. Not billed: 2 with no meter."],
+    [[unchanged(), hadBill("unmetered_no_manual")], "Nothing changed: 1 bill already has the latest meter figures. Left as they were: 1 not refreshed."],
   ])("says %j as %j", (results, message) => {
     expect(summarizeGenerateFromMeters(results, fmt).message).toBe(message);
   });
@@ -84,9 +104,15 @@ describe("summarizeGenerateFromMeters", () => {
 
   it("stays within the host's 300 characters with every clause at a thousand tenants", () => {
     const codes: GenerationErrorCode[] = ["paid", "bill_changed", "unmetered_no_manual", "meter_assignment_continuity", "no_meter_reading", "tariff_changed"];
-    const results = [...times(1000, written), ...times(1000, unchanged), ...times(1000, kept), ...codes.flatMap((c) => times(1000, () => error(c)))];
+    const results = [
+      ...times(1000, written),
+      ...times(1000, unchanged),
+      ...times(1000, kept),
+      ...codes.flatMap((c) => times(1000, () => error(c))),
+      ...times(1000, () => hadBill("no_meter_reading")),
+    ];
     const { message } = summarizeGenerateFromMeters(results, fmt);
-    expect(message).toContain("1,000 changed meanwhile");
+    expect(message).toContain("1,000 changed meanwhile, 1,000 not refreshed");
     expect(message.length).toBeLessThanOrEqual(300);
   });
 });

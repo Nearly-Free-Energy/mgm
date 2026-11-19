@@ -391,11 +391,13 @@ describe("preparing the period review's actions", () => {
         { label: "Of these, already billed", value: expect.objectContaining({ v: 1 }) },
         { label: "Kept, entered by hand", value: expect.objectContaining({ v: 1 }) },
         { label: "Left as they are: paid, invoiced or refunded", value: expect.objectContaining({ v: 1 }) },
-        { label: "Not billed: no meter for the period", value: expect.objectContaining({ v: 2 }) },
+        { label: "Not billed: no meter for the period", value: expect.objectContaining({ v: 1 }) },
+        { label: "Not billed: a meter assignment gap", value: expect.objectContaining({ v: 1 }) },
       ],
       warnings: [
-        "No meter for this period, so not billed: Unit 5, Unit 6.",
-        "A tenant whose meter has no data for the period is not billed; the result says how many.",
+        "No meter for this period, so not billed: Unit 5.",
+        "A meter assignment gap in this period (no one meter assigned for all of it), so not billed: Unit 6.",
+        "A tenant whose meter has no data for the period is not billed, and a bill they already have is left as it is; the result says how many.",
         "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
       ],
       acknowledgements: [],
@@ -668,6 +670,30 @@ describe("billing.generate-from-meters' prepare", () => {
     expect(out.model.warnings[0]).toBe("No meter for this period, so not billed: Unit 11, Unit 12, Unit 13, Unit 14, Unit 15 and 2 more.");
     // With no bill, nothing is already billed, kept or left: those facts are left out.
     expect(out.model.facts.map((f) => f.label)).toEqual(["Period", "Read from meters", "Not billed: no meter for the period"]);
+  });
+
+  it("says a bill whose meter cannot be read is left as it is, not that its tenant is not billed, by the reason the result gives", async () => {
+    const tenants = [
+      genTenant(1, [link()]),
+      genTenant(5, []),
+      // A meter replaced mid-period: two links, neither covering all of it.
+      genTenant(6, [link({ effective_to: "2026-10-15" }), link({ effective_from: "2026-10-15" })]),
+      genTenant(7, []),
+    ];
+    const out = await prepareGenerate(generateTables({ tenants, bills: [genBill(5), genBill(6)] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.facts.map((f) => [f.label, f.value.text])).toEqual([
+      ["Period", expect.any(String)],
+      ["Read from meters", "1"],
+      ["Not billed: no meter for the period", "1"],
+      ["Bill left as it is, not refreshed: no meter for the period", "1"],
+      ["Bill left as it is, not refreshed: a meter assignment gap", "1"],
+    ]);
+    expect(out.model.warnings.slice(0, 3)).toEqual([
+      "No meter for this period, so not billed: Unit 7.",
+      "No meter for this period, so their bills are left as they are, not refreshed: Unit 5.",
+      "A meter assignment gap in this period (no one meter assigned for all of it), so their bills are left as they are, not refreshed: Unit 6.",
+    ]);
   });
 
   it("says nothing of tenants with no meter when every tenant has one", async () => {

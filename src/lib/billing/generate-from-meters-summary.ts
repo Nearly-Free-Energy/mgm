@@ -7,8 +7,9 @@
  * database's message ("Failed to write line item: …"); it passes on only
  * the code. The message stays within the 300 characters the GUI host keeps
  * of an action's result (invoke.ts): every clause is a count and a fixed
- * phrase, so at the period review's 500 rows (PERIOD_REVIEW_MAX_ROWS) it
- * is well under; if a clause gains a name or a sentence, test the longest.
+ * phrase, and with every clause present at a thousand tenants each it is
+ * just under (the summary test checks it); if a clause or phrase grows, or
+ * gains a name or a sentence, test the longest.
  */
 import type { Fmt } from "@/lib/gui/surface";
 import type { GenerationErrorCode, TenantResult } from "./generate";
@@ -26,6 +27,13 @@ export type GenerateFromMetersCounts = {
   left: number;
   /** Bills that changed, or a period that closed, while the run wrote. */
   changed: number;
+  /**
+   * Tenants with a bill the run could not read from a meter (no meter, an
+   * assignment gap, no data) or not save: the bill they had is left as it
+   * was (ErrorTenantResult.hadBill), so they are not counted as not billed.
+   */
+  notRefreshed: number;
+  /** Tenants with no bill that the run did not bill, by why. */
   notBilled: { noMeter: number; meterAssignment: number; noReading: number; failed: number };
 };
 
@@ -58,6 +66,7 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
     kept: 0,
     left: 0,
     changed: 0,
+    notRefreshed: 0,
     notBilled: { noMeter: 0, meterAssignment: 0, noReading: 0, failed: 0 },
   };
   const tenants: GenerateFromMetersSummary["tenants"] = [];
@@ -78,8 +87,10 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
       case "error": {
         const bucket = ERROR_BUCKET[r.code] ?? "failed";
         if (bucket === "left" || bucket === "changed") counts[bucket]++;
+        else if (r.hadBill) counts.notRefreshed++;
         else counts.notBilled[bucket]++;
-        tenants.push({ tenantId: r.tenantId, tenantName: r.tenantName, outcome: bucket === "left" || bucket === "changed" ? "left" : "not_billed", code: r.code });
+        const outcome = bucket === "left" || bucket === "changed" || r.hadBill ? "left" : "not_billed";
+        tenants.push({ tenantId: r.tenantId, tenantName: r.tenantName, outcome, code: r.code });
         break;
       }
       // A preview never reaches a write's summary.
@@ -90,18 +101,18 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
   return { ...counts, tenants, message: messageFor(counts, fmt) };
 }
 
-/** The number of tenants a run did not bill from meter data. */
+/** The number of tenants with no bill that a run did not bill from meter data. */
 export const notBilledCount = (c: GenerateFromMetersCounts) =>
   c.notBilled.noMeter + c.notBilled.meterAssignment + c.notBilled.noReading + c.notBilled.failed;
 
 function messageFor(c: GenerateFromMetersCounts, fmt: Fmt): string {
   const n = (v: number) => fmt.number(v).text;
   const sentences: string[] = [];
-  const others = notBilledCount(c) + c.kept + c.left + c.changed;
+  const others = notBilledCount(c) + c.kept + c.left + c.changed + c.notRefreshed;
   if (c.generated > 0) {
     sentences.push(
       `Generated ${plural(fmt, c.generated, "bill", "bills")} from meter data` +
-        (c.unchanged > 0 ? `; ${n(c.unchanged)} ${c.unchanged === 1 ? "was" : "were"} already up to date.` : "."),
+        (c.unchanged > 0 ? `; ${n(c.unchanged)} already up to date.` : "."),
     );
   } else if (c.unchanged > 0) {
     sentences.push(
@@ -119,11 +130,12 @@ function messageFor(c: GenerateFromMetersCounts, fmt: Fmt): string {
     [c.notBilled.failed, "not saved"],
   ] as const;
   const nb = notBilled.filter(([count]) => count > 0).map(([count, phrase]) => `${n(count)} ${phrase}`);
-  if (nb.length > 0) sentences.push(`Not billed from meters: ${nb.join(", ")}.`);
+  if (nb.length > 0) sentences.push(`Not billed: ${nb.join(", ")}.`);
   const left = [
     [c.kept, "entered by hand"],
     [c.left, "paid, invoiced or refunded"],
     [c.changed, "changed meanwhile"],
+    [c.notRefreshed, "not refreshed"],
   ] as const;
   const lf = left.filter(([count]) => count > 0).map(([count, phrase]) => `${n(count)} ${phrase}`);
   if (lf.length > 0) sentences.push(`Left as they were: ${lf.join(", ")}.`);

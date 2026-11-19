@@ -15,7 +15,8 @@
  *     are already the ones computed;
  *   - inserts a tenant's first bill through fn_record_line_item_with_audit;
  *   - reports tenants with no meter, an assignment gap or no meter data with
- *     their codes, as any run does.
+ *     their codes, as any run does, and says (`hadBill`) which of them had a
+ *     bill, which it leaves as it is.
  *
  * Harness: a mocked Supabase client, as in generate-expected-bill.test.ts.
  * The database side is generate-from-meters.db.test.ts.
@@ -250,13 +251,36 @@ describe("runGenerationFor with guardExistingBills", () => {
     expect(by.get(tenant(2))).toMatchObject({ kind: "written", previousTotalAmount: 3000 });
     expect(by.get(tenant(3))).toEqual({ kind: "unchanged", tenantId: tenant(3), tenantName: "Unit 3", lineItemId: bill(3), totalAmount: 4200 });
     expect(by.get(tenant(4))).toMatchObject({ kind: "kept" });
-    expect(by.get(tenant(5))).toEqual({ kind: "error", tenantId: tenant(5), tenantName: "Unit 5", code: "paid", error: REGENERATE_REFUSAL_COPY.paid });
-    expect(by.get(tenant(6))).toEqual({ kind: "error", tenantId: tenant(6), tenantName: "Unit 6", code: "invoiced", error: REGENERATE_REFUSAL_COPY.invoiced });
-    expect(by.get(tenant(7))).toEqual({ kind: "error", tenantId: tenant(7), tenantName: "Unit 7", code: "refunded", error: REGENERATE_REFUSAL_COPY.refunded });
-    expect(by.get(tenant(8))).toMatchObject({ kind: "error", code: "unmetered_no_manual" });
-    expect(by.get(tenant(9))).toMatchObject({ kind: "error", code: "meter_assignment_continuity" });
-    expect(by.get(tenant(10))).toMatchObject({ kind: "error", code: "no_meter_reading" });
+    expect(by.get(tenant(5))).toEqual({ kind: "error", tenantId: tenant(5), tenantName: "Unit 5", code: "paid", error: REGENERATE_REFUSAL_COPY.paid, hadBill: true });
+    expect(by.get(tenant(6))).toEqual({ kind: "error", tenantId: tenant(6), tenantName: "Unit 6", code: "invoiced", error: REGENERATE_REFUSAL_COPY.invoiced, hadBill: true });
+    expect(by.get(tenant(7))).toEqual({ kind: "error", tenantId: tenant(7), tenantName: "Unit 7", code: "refunded", error: REGENERATE_REFUSAL_COPY.refunded, hadBill: true });
+    // No bill to keep: not billed.
+    for (const [n, code] of [
+      [8, "unmetered_no_manual"],
+      [9, "meter_assignment_continuity"],
+      [10, "no_meter_reading"],
+    ] as const) {
+      expect(by.get(tenant(n))).toMatchObject({ kind: "error", code });
+      expect(by.get(tenant(n))).not.toHaveProperty("hadBill");
+    }
     expect(by.size).toBe(10);
+  });
+
+  it("leaves a bill whose meter cannot be read as it is, and says the tenant had one", async () => {
+    const h = harness({ bills: [...BILLS, edgeBill(8, { device_id: null }), edgeBill(9), edgeBill(10)] });
+    const by = await results(h);
+    expect(by.get(tenant(8))).toMatchObject({ kind: "error", code: "unmetered_no_manual", hadBill: true });
+    expect(by.get(tenant(9))).toMatchObject({ kind: "error", code: "meter_assignment_continuity", hadBill: true });
+    expect(by.get(tenant(10))).toMatchObject({ kind: "error", code: "no_meter_reading", hadBill: true });
+    // Nothing written for them: only unit 1's first bill and unit 2's new figures.
+    expect(writes(h.rpc).map((x) => x.args._tenant_id)).toEqual([tenant(1), tenant(2)]);
+  });
+
+  it("says nothing of a bill on a run that does not guard existing bills", async () => {
+    const h = harness({ bills: [...BILLS, edgeBill(8, { device_id: null })] });
+    const by = await results(h, { guardExistingBills: false });
+    expect(by.get(tenant(8))).toMatchObject({ kind: "error", code: "unmetered_no_manual" });
+    expect(by.get(tenant(8))).not.toHaveProperty("hadBill");
   });
 
   it("inserts a first bill through fn_record_line_item_with_audit and rewrites an existing one only as it was read", async () => {
@@ -294,7 +318,7 @@ describe("runGenerationFor with guardExistingBills", () => {
   ])("reports the conditional write's refusal %j as fixed copy, and writes the other bills", async (message, code, error) => {
     const h = harness({ writeError: (name) => (name === "fn_regenerate_bill_with_audit" ? { code: "23514", message } : null) });
     const by = await results(h);
-    expect(by.get(tenant(2))).toEqual({ kind: "error", tenantId: tenant(2), tenantName: "Unit 2", code, error });
+    expect(by.get(tenant(2))).toEqual({ kind: "error", tenantId: tenant(2), tenantName: "Unit 2", code, error, hadBill: true });
     expect(by.get(tenant(1))).toMatchObject({ kind: "written" });
   });
 

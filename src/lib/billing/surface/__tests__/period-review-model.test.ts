@@ -577,7 +577,7 @@ describe("generateReadiness", () => {
     ...o,
   });
 
-  it("decides each tenant as the engine does with guardExistingBills: kept, left, read from its meter, or not read", () => {
+  it("decides each tenant as the engine does with guardExistingBills: kept, left, read from its meter, not billed, or its bill not refreshed", () => {
     const r = generateReadiness(
       PERIOD_DATES,
       [
@@ -593,6 +593,12 @@ describe("generateReadiness", () => {
         // A manual bill is kept, whatever its meter or payment.
         t(10, []),
         t(11, [covering]),
+        // A bill whose meter cannot be read stays as it is: no meter, or a meter replaced mid-period.
+        t(12, []),
+        t(13, [
+          { ...covering, effective_to: "2026-10-15" },
+          { ...covering, effective_from: "2026-10-15" },
+        ]),
       ],
       [
         b(2),
@@ -602,6 +608,8 @@ describe("generateReadiness", () => {
         b(6, { payment_status: "refunded" }),
         b(10, { reading_source: "manual", payment_status: "paid" }),
         b(11, { reading_source: null, payment_status: "link_generated" }),
+        b(12),
+        b(13),
       ],
     );
     expect(r).toEqual({
@@ -609,10 +617,14 @@ describe("generateReadiness", () => {
       refresh: 2,
       kept: 2,
       left: 3,
-      notRead: [
+      notBilled: [
         { tenantName: "Unit 7", reason: "no_meter" },
         { tenantName: "Unit 8", reason: "assignment_gap" },
         { tenantName: "Unit 9", reason: "no_meter" },
+      ],
+      notRefreshed: [
+        { tenantName: "Unit 12", reason: "no_meter" },
+        { tenantName: "Unit 13", reason: "assignment_gap" },
       ],
     });
   });

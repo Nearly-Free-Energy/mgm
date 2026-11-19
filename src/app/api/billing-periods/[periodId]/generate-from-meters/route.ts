@@ -20,13 +20,19 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * existing bill only as it was read (guardExistingBills in
  * src/lib/billing/generate.ts): a bill paid, invoiced or regenerated
  * meanwhile is left too, and a second run writes nothing it does not need.
- * A tenant with no meter for the period, or no meter data, gets no bill
- * (#293): the result counts them.
+ * A tenant with no meter for the period, a meter assignment gap or no meter
+ * data gets no bill (#293), and keeps the bill they had if they had one:
+ * the result counts both. A tenant's first bill is inserted unguarded, as
+ * on POST /api/billing/generate, so a bill inserted for that tenant by
+ * another write while this run reads the meters (a manual reading, or an
+ * overlapping run) is overwritten, and a close landing in that time does
+ * not stop the insert; guardExistingBills says why, and the parity note
+ * (generate-bills in src/lib/billing/parity.ts) lists both.
  *
  * Body (GenerateFromMetersBody): `{}`. The period is the path's.
  *
  * Responses:
- *   200 → { generated, unchanged, kept, left, changed,
+ *   200 → { generated, unchanged, kept, left, changed, notRefreshed,
  *           notBilled: { noMeter, meterAssignment, noReading, failed },
  *           tenants: [{ tenantId, tenantName, outcome, code? }], message }
  *         — counts by outcome (generate-from-meters-summary.ts); `code` is the
@@ -41,8 +47,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   409 → { error, reason: "period_closed" } (nothing read or written);
  *         { error, reason: "no_tariff" } (no rate schedule to pin);
  *         { error, reason: "nothing_generated", …the 200 body } when no
- *         tenant was billed or found up to date and some were not billed:
- *         nothing was written, and `error` is the summary;
+ *         tenant was billed or found up to date and some were not billed,
+ *         or had a bill not refreshed: nothing was written,
+ *         and `error` is the summary;
  *         { error, reason: "nothing_to_read" } (no tenants)
  *   503 → { error, reason: "metering_unavailable" } (the metering source
  *         failed; nothing was written)
@@ -133,9 +140,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (result.data.results.length === 0) return refuse(409, GENERATE_FROM_METERS_COPY.nothingToRead, "nothing_to_read");
     const summary = summarizeGenerateFromMeters(result.data.results, createFmt({ locale: formatLocale(request.headers.get("accept-language")) }));
-    // Nothing written and nothing up to date, with tenants not billed: an
-    // answer a GUI that shows only failures still shows.
-    if (summary.generated === 0 && summary.unchanged === 0 && notBilledCount(summary) > 0) {
+    // Nothing written and nothing up to date, with tenants not billed or
+    // bills not refreshed: an answer a GUI that shows only failures still shows.
+    if (summary.generated === 0 && summary.unchanged === 0 && notBilledCount(summary) + summary.notRefreshed > 0) {
       return NextResponse.json({ ...summary, error: summary.message, reason: "nothing_generated" }, { status: 409 });
     }
     return NextResponse.json(summary);
