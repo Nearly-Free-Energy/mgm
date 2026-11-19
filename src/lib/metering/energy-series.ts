@@ -15,8 +15,16 @@ import { isSupportedTimezone } from "@/lib/validation/timezone";
 import { MeteringError } from "./errors";
 import type { DeviceEnergySeriesRequest } from "./types";
 
-/** The longest range, in whole local days, each resolution may be asked for. */
-export const ENERGY_SERIES_MAX_DAYS = { day: 62, hour: 7 } as const;
+/**
+ * The longest range, in whole local days, each resolution may be asked for.
+ * A month at most per day: the tenant usage asks for one month, and the
+ * OpenEMS provider reads days from hours over the request plus a day each
+ * side (getOpenEmsEnergySeries), so 31 days is 33 days of hourly buckets,
+ * about 800 a channel, in one backend call. On NFE's backend that read took
+ * about 1.5 s for two meters (19 November 2026). If a caller needs more,
+ * or a provider reads it differently, revisit.
+ */
+export const ENERGY_SERIES_MAX_DAYS = { day: 31, hour: 7 } as const;
 
 export type EnergySeriesAxis = {
   /** Bucket starts, epoch ms, ascending: local midnights, or local hour starts. */

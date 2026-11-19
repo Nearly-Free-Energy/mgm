@@ -12,16 +12,18 @@ import {
   localHourStarts,
   startOfDayInZone,
 } from "@/lib/timezone/day-key";
-import type {
-  PrimaryElsewhereSpan,
-  TenantMeter,
-  TenantUsageBucket,
-  TenantUsageDay,
-  TenantUsageMonth,
-  TenantUsageProblem,
-  TenantUsageReadInfo,
-  TenantUsageSeries,
-  TenantUsageTotal,
+import {
+  USAGE_DEVICE_TYPE,
+  USAGE_METER_ROLE,
+  type PrimaryElsewhereSpan,
+  type TenantMeter,
+  type TenantUsageBucket,
+  type TenantUsageDay,
+  type TenantUsageMonth,
+  type TenantUsageProblem,
+  type TenantUsageReadInfo,
+  type TenantUsageSeries,
+  type TenantUsageTotal,
 } from "./types";
 
 /** The earliest month the views show; anything before it reads as the current month. */
@@ -74,11 +76,14 @@ export function datesOfMonth(month: string): string[] {
 /**
  * The device ids in force on `date`: a link covers its days from
  * `effectiveFrom` up to, not including, `effectiveTo` (null: still in force),
- * half-open as billing reads it. A device linked twice counts once.
+ * half-open as billing reads it. A device linked twice counts once. Only a
+ * primary consumption meter link counts (USAGE_METER_ROLE): the repository
+ * reads no other, and this keeps the rule if a caller ever passes one.
  */
 export function metersOn(assignments: readonly TenantMeter[], date: string): Set<string> {
   const ids = new Set<string>();
   for (const link of assignments) {
+    if (link.role !== USAGE_METER_ROLE || link.deviceType !== USAGE_DEVICE_TYPE) continue;
     if (link.effectiveFrom <= date && (link.effectiveTo === null || date < link.effectiveTo)) {
       ids.add(link.deviceId);
     }

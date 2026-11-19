@@ -73,8 +73,9 @@ export const FixtureMeteringPlugin = {
         () =>
           new FixtureMeteringProvider([], {
             siteSamples: (request) => generateSiteSamples(request),
-            // Today reads as far as the moment it is asked for, as a real meter's.
-            energySeries: (request) => generateDeviceEnergySeries(request, { nowMs: Date.now() }),
+            // Today reads as far as the moment it is asked for, as a real
+            // meter's: the caller's clock when the request carries one.
+            energySeries: (request) => generateDeviceEnergySeries(request, { nowMs: request.nowMs ?? Date.now() }),
           }),
         { supports: syntheticSupports }
       )
