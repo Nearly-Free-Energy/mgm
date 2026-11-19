@@ -12,7 +12,7 @@ import {
 // configuration whose logo is an object in the invoice-logos bucket, three
 // microgrids, three tenants on the first, a tariff and a draft October 2026
 // billing period on the first with bills for two of its tenants (one with no
-// usage), a default sandbox Pesapal account for the organization, so the
+// usage), so the periods list shows it and its history opens, a default sandbox Pesapal account for the organization, so the
 // period's send queue shows a payment link, an online payment attempt on the
 // first bill held for reconciliation, so the period's payments show one with
 // its actions (the account stores no credential, so nothing could contact a

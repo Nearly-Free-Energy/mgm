@@ -472,7 +472,13 @@ in `pages`. A page is its path as spelled under `src/app`, with route-group
 folders left out, and the entity kind (one of `CORE_ENTITY_KINDS`) of each
 bracketed segment: `/microgrids/[id]/billing/[periodId]` is a microgrid and a
 billing period. A page carries `servedBy: "view"` once a contributed GUI view
-serves it instead of a `page.tsx`.
+serves it instead of a `page.tsx`. A page that switches to a view deletes its
+`page.tsx` in the same commit (`catalog-pages.test.ts` fails otherwise), and
+the host's catch-all (`src/app/(gui)/[...path]/page.tsx`) then serves it
+outside any segment layout, such as `microgrids/[id]/layout.tsx`: the page
+loses that layout's header, tabs and notices, and shows the GUI's own dock
+and trail instead. A billing screen's page switches only once no row of
+that screen in `src/lib/billing/parity.ts` is pending (`parity.test.ts`).
 
 `getRouteOwner` reads page paths as ownership prefixes beside `routes`, so
 `/microgrids/[id]/operations` belongs to metering and `…/setup/rates` to
