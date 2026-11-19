@@ -3,8 +3,8 @@
 /**
  * The bills as a copy table, from 600 px up: one row per bill, the model's
  * columns in its order, and each bill's controls at the end of its row.
- * Pressing a figure copies it, as the CSV writes it (the ext's figure), not
- * as it is shown.
+ * Pressing a figure copies it as a plain number (the ext's figure), not as
+ * it is shown.
  *
  * The table's scroll box is one stop in the tab order. Inside it a cursor
  * moves over the figures a person copies, skipping empty cells: the arrow

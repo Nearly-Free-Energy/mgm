@@ -131,7 +131,7 @@ export const BILLING_SURFACE: Contribution = {
       cost: "db",
       live: { refreshSeconds: 30, staleAfterSeconds: 120 },
       declares: { keys: PERIOD_REVIEW_KEYS, prefixes: PERIOD_REVIEW_PREFIXES },
-      // The figures a person copies, as the CSV writes them, for a GUI that
+      // The figures a person copies, as plain numbers, for a GUI that
       // draws the bills as a copy table (Gridtop's, in
       // src/gui/gridtop/renderers/period-review).
       ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, zod: PeriodReviewExt },

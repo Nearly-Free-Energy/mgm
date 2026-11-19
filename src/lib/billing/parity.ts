@@ -519,7 +519,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "copy", view: "billing.period-review", what: "each cell's bare figure, and each total" },
     pr: GRIDTOP,
-    note: "Copies the figures as the CSV export writes them (3-dp kWh, the currency's minor unit), from the billing.period-review@1 ext; the shown kWh stays at 1 dp until the model's precision follow-up.",
+    note: "Copies the figures from the billing.period-review@1 ext: kWh to 3 dp as the CSV export writes it, and money in the currency's minor unit, which matches the CSV (csv-export.ts rounds every amount to a whole number) only for a currency with none, such as UGX; if the CSV's rounding changes, revisit. the shown kWh stays at 1 dp until the model's precision follow-up.",
   },
   {
     id: "copy-payment-link",

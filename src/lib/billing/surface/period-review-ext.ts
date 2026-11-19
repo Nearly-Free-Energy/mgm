@@ -1,9 +1,11 @@
 /**
  * The `billing.period-review@1` ext: the figures a person copies from the
  * period's bills, for a renderer that draws them as a copy table. Each is a
- * plain machine number (no grouping, a "." decimal point, no unit), as the
- * CSV export writes it; the layout comes from the model's columns, not from
- * here.
+ * plain machine number (no grouping, a "." decimal point, no unit): kWh to 3
+ * decimals as the CSV export writes it, and money in the currency's minor
+ * unit, which matches the CSV only for a currency with none, such as UGX
+ * (copyFigure in ./period-review-model.ts says why). The layout comes from
+ * the model's columns, not from here.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)

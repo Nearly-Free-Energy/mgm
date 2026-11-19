@@ -254,7 +254,7 @@ describe("buildPeriodReviewModel: the copy figures (ext)", () => {
     ]);
   });
 
-  it("writes each figure as the CSV does: 3-dp kWh, the currency's minor unit, no grouping", () => {
+  it("writes each figure plainly: 3-dp kWh as the CSV does, money in the currency's minor unit, no grouping", () => {
     const model = build({
       bills: [
         bill(1, A, {
@@ -277,7 +277,7 @@ describe("buildPeriodReviewModel: the copy figures (ext)", () => {
     expect(model.body.rows[0].cells.total.text).toBe("55,875");
     expect(figure(model, 0, "total")).toBe("55875");
     expect(figure(model, 0, "tier.2.amount")).toBe("26438");
-    // A currency with a minor unit keeps it.
+    // A currency with a minor unit keeps it, where the CSV export rounds to a whole number.
     const usd = build({ microgrid: { id: MG, name: "North", currency: "USD" }, bills: [bill(1, A, { total_amount: 12.34 })] });
     expect(figure(usd, 0, "total")).toBe("12.34");
     expect(figure(usd, 0, "tier.1.amount")).toBe("3750.00");

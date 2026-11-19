@@ -186,7 +186,7 @@ describe("Gridtop's period-review renderer: drawing", () => {
 });
 
 describe("Gridtop's period-review renderer: copying", () => {
-  it("copies the figure as the CSV writes it from a table cell, and says what it copied", async () => {
+  it("copies the ext's plain figure from a table cell, and says what it copied", async () => {
     const writeText = clipboard();
     await draw(draftModel());
     const cell = within(tableRow(0)).getByText("55,875").closest("td")!;
