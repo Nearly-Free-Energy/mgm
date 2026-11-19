@@ -103,6 +103,17 @@ const unconfigured = () =>
     note: { tone: "warning", text: NOT_SET_UP },
   });
 const noBills = () => model({ rows: [] });
+/** The model of three bills with the ext's rows replaced outright, so they need not follow the model's. */
+function withExtRows(extRows: { id: string; url: string | null }[]): ModelOf<"collection"> {
+  const m = model();
+  return { ...m, ext: { schema: "billing.send-queue@1", data: { rows: extRows, note: null } } };
+}
+/** The ext rows model() builds for ROWS, each valid against its own row. */
+const EXT_ROWS = [
+  { id: billId(0), url: urlOf(0) },
+  { id: billId(1), url: urlOf(1) },
+  { id: billId(2), url: null },
+];
 const billingOff = () => ({ ...model(), notice: { tone: "warning" as const, text: BILLING_OFF } });
 
 let unmount: (() => void) | null = null;
@@ -149,12 +160,18 @@ describe("Gridtop's send-queue renderer: choosing it", () => {
 
   it("reads the links and note as the server sends them", () => {
     expect(readSendQueueExt(model())).toEqual({ urls: [urlOf(0), urlOf(1), null], note: null });
+    // The rows the refusals below start from are themselves read.
+    expect(readSendQueueExt(withExtRows(EXT_ROWS))).toEqual({ urls: [urlOf(0), urlOf(1), null], note: null });
     expect(readSendQueueExt(unconfigured())).toEqual({ urls: [null, null, null], note: { tone: "warning", text: NOT_SET_UP } });
     expect(readSendQueueExt(noBills())).toEqual({ urls: [], note: null });
   });
 
   it.each([
-    ["rows that do not line up", model({ urls: [urlOf(0), urlOf(1)] })],
+    ["an ext row with no url at all", model({ urls: [urlOf(0), urlOf(1)] })],
+    // Each of the next three is valid row by row as far as it goes, so only the length or id check refuses it.
+    ["an ext with fewer rows than the model", withExtRows(EXT_ROWS.slice(0, 2))],
+    ["an ext with more rows than the model", withExtRows([...EXT_ROWS, { id: billId(3), url: null }])],
+    ["an ext row with another bill's id", withExtRows([EXT_ROWS[0], EXT_ROWS[1], { id: billId(9), url: null }])],
     ["a url the link cell does not show", model({ urls: [urlOf(1), urlOf(1), null] })],
     ["a link cell with no url", model({ urls: [null, urlOf(1), null] })],
     ["a url that is not http", model({ urls: ["javascript:alert(1)", urlOf(1), null] })],
