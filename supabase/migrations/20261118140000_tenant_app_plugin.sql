@@ -23,10 +23,11 @@
 --     trigger on user_roles writes it, and this file backfills it. Only
 --     fn_list_visible_users reads it, and only for accounts with no rows.
 --     It has no effect on what a person may do.
---  4. fn_tenant_access_grant keeps 20261118100100's body: tenant access does
---     not depend on organization roles, so the grant decides only the
---     actor's authority, the unit and the account. A person may hold both,
---     and a person whose staff rows are removed is a tenant like any other.
+--  4. fn_tenant_access_grant keeps 20261118100100's body, and takes a row
+--     lock on the account before it adds the row: tenant access does not
+--     depend on organization roles, so the grant decides only the actor's
+--     authority, the unit and the account. A person may hold both, and a
+--     person whose staff rows are removed is a tenant like any other.
 --  5. fn_list_visible_users also lists anyone holding an ems_operator row,
 --     and an account with no rows that has held a staff row (PR 1 review),
 --     so a staff account whose rows are all gone stays on the Users page
@@ -304,16 +305,16 @@ INSERT INTO public.staff_access_accounts (user_id)
 
 -- ── 4. The tenant grant does not look at staff rows ─────────────────────
 --
--- Re-issued with the body of 20261118100100, unchanged, so a database that
--- ran an earlier draft of this file, which refused staff accounts here,
--- converges on it. Tenant access is a person's access to the units they
--- rent, and does not depend on organization roles: the grant decides only
--- whether the actor may manage access to the unit, whether the unit exists
--- and whether the account does. So a person may hold both, a manager who
--- rents may be given the unit on the same address, and a person whose
--- staff rows are removed (DELETE /api/users/[id], an organization's
--- deletion, the service role) is a tenant like any other, given further
--- units in the same way.
+-- Re-issued with the body of 20261118100100 and one addition, the row lock
+-- marked below, so a database that ran an earlier draft of this file, which
+-- refused staff accounts here, converges on it. Tenant access is a person's
+-- access to the units they rent, and does not depend on organization roles:
+-- the grant decides only whether the actor may manage access to the unit,
+-- whether the unit exists and whether the account does. So a person may
+-- hold both, a manager who rents may be given the unit on the same
+-- address, and a person whose staff rows are removed (DELETE
+-- /api/users/[id], an organization's deletion, the service role) is a
+-- tenant like any other, given further units in the same way.
 --
 -- The PR 1 review's concern, that a staff account could vanish from the
 -- Users page as a former tenant, is met by section 5 rather than by
@@ -356,6 +357,18 @@ BEGIN
     RAISE EXCEPTION 'User not found.'
       USING ERRCODE = 'P0002';
   END IF;
+
+  -- Added by this file: lock the account's auth.users row, FOR NO KEY
+  -- UPDATE, before adding its row, so this grant and any other change to
+  -- the same account's user_roles rows that takes the same lock first (a
+  -- role change, an invitation) run one after the other rather than each
+  -- deciding from rows the other is about to change. The lock is held until
+  -- the transaction ends. It does not block a foreign key check against
+  -- auth.users (FOR KEY SHARE), so a row inserted for the account without
+  -- taking the lock does not wait on it. If the functions that change role
+  -- rows lock the account another way, take their lock here instead.
+  -- tenant_access.test.ts checks that a grant waits on this lock.
+  PERFORM 1 FROM auth.users WHERE id = _user_id FOR NO KEY UPDATE;
 
   INSERT INTO user_roles (user_id, role, scope_type, scope_id)
     VALUES (_user_id, 'tenant', 'tenant', _tenant_id)

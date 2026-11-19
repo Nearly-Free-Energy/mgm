@@ -52,6 +52,8 @@
  *                  Users page's own query, given A, then revoked from both
  *   twoUnits     — no rows; given A and OTHER, each by its organization's
  *                  manager, then loses OTHER
+ *   locked       — no rows; given B while its auth.users row is locked,
+ *                  then revoked
  * Within that block the tests run in order and share these accounts, so
  * each one's expectations depend on what the tests above it did.
  *
@@ -74,6 +76,7 @@ import {
   cleanupTestData,
   createTestUser,
   LOCAL_SUPABASE_URL,
+  raceAgainstHeldTransaction,
   runAsDatabaseOwner,
   serviceClient,
   shouldSkip,
@@ -135,6 +138,7 @@ const EMAIL = {
   fresh: "tenant-access-fresh@test.local",
   rejoined: "tenant-access-rejoined@test.local",
   twoUnits: "tenant-access-two-units@test.local",
+  locked: "tenant-access-locked@test.local",
 };
 const ALL_EMAILS = Object.values(EMAIL);
 const ORG_IDS = [F.org, F.otherOrg];
@@ -1731,4 +1735,32 @@ desc("anon is denied every new or re-issued function", () => {
       { name: "public.staff_access_accounts", anon: false, authenticated: false, rls: true },
     ]);
   });
+});
+
+// ── The grant's row lock (PR 2 review) ────────────────────────────────────
+
+desc("fn_tenant_access_grant locks the account", () => {
+  it("waits for a transaction holding the account's auth.users row, then grants", async () => {
+    // The holder takes the lock the grant takes (FOR NO KEY UPDATE) and
+    // commits only once another backend waits on it. The grant's foreign key
+    // check takes only FOR KEY SHARE, which does not wait on it, so the grant
+    // waits only because it takes the lock itself; without it, the holder
+    // fails after 30 seconds with "nothing waited on this transaction".
+    const locked = await createTestUser({ email: EMAIL.locked, role: null });
+    const svc = await serviceClient();
+    const race = await raceAgainstHeldTransaction(
+      `  PERFORM 1 FROM auth.users WHERE id = '${locked.userId}' FOR NO KEY UPDATE;`,
+      () => svc.rpc("fn_tenant_access_grant", { _tenant_id: F.tenantB, _user_id: locked.userId, _actor: manager.userId }),
+    );
+    expect(race.holder.ok, race.holder.output).toBe(true);
+    expect(race.contender.error).toBeNull();
+    expect(race.contender.data).toBe(await accessIdOf(F.tenantB, EMAIL.locked));
+
+    // Leave tenant B's access as the tests above left it.
+    const revoked = await manager.client.rpc("fn_tenant_access_revoke", {
+      _tenant_id: F.tenantB,
+      _access_id: race.contender.data,
+    });
+    expect(revoked.error).toBeNull();
+  }, 60_000);
 });
