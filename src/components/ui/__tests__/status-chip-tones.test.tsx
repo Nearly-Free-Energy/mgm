@@ -14,6 +14,7 @@ const EXPECTED: Record<StatusKind, string> = {
   billingPeriod: "draft=warn* closed=success*",
   paymentAttempt:
     "pending=neutral confirmation_pending=warn verified=success failed=alert* reversed=warn needs_reconciliation=warn* resolved=success",
+  paymentReadiness: "ready=success sandbox=warn disabled=neutral unconfigured=warn* connection_error=alert* unchecked=neutral",
   edge: "online=success* degraded=warn* offline=alert* stale=success* unknown=neutral*",
   edgeSource: "openems=brand modbus_direct=neutral mqtt=neutral rest_api=neutral",
   tenant: "active=success* inactive=neutral* disputed=alert*",

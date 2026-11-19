@@ -58,10 +58,6 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Contribute a bill's payment attempts, not built there yet: the link to
-  // the community's Payment page waits for payments to contribute that page,
-  // or a view attached to the send queue (parity.ts).
-  "payment-setup",
   // Unscheduled: the host hides a disabled plugin's tab and disables its
   // actions, which the routes accept while Payments is off (parity.ts).
   "payments-while-off",

@@ -89,7 +89,13 @@ export const SEND_QUEUE_COPY = {
   unconfigured: "No payment provider is configured.",
   connectionError:
     "The community's payment account cannot take payments: it is disabled, missing, or failed its last connection test. There are no links to send.",
-  /** The legacy banner's advice to a super admin, who can connect a provider; its link is payments' page (parity.ts, payment-setup). */
+  /**
+   * The legacy banner's advice to a super admin, who can connect a provider.
+   * Its link is payments' page, which this view may not carry: payments'
+   * payment-setup section, attached to this view, carries it (parity.ts,
+   * payment-setup). If that section stops being attached here, this note
+   * names a page nothing on it links.
+   */
   superAdminFix: "Connect a payment provider on the community's Payment page to send payment links.",
   /** The legacy banner's advice to anyone else. */
   askSuperAdmin: "Ask a super admin to configure Payment for this community.",

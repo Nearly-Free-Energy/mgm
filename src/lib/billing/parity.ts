@@ -411,9 +411,14 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Go to Payment tab, in the banner shown when online payments are not set up",
     legacy: "src/components/BillingTable.tsx",
-    replacedBy: { kind: "link", view: "payments.community-payment", href: "/communities/[id]/payment" },
+    replacedBy: {
+      kind: "link",
+      view: "payments.payment-setup",
+      href: "/communities/[id]/payment",
+      via: { link: "payments.community-payment" },
+    },
     pr: ATTEMPTS,
-    note: "Decided in review of the send queue (#216): the payments plugin contributes it with a bill's payment attempts, either as its view of the community's Payment page (payments.community-payment) carrying this link, or as a view of its own attached to billing.send-queue that carries the setup link. The bill attempts pull request has not built it yet, and found two obstacles: the banner's main case is Payments off, when a payments tab is hidden, and an attached view is given only its parent's path segments, which on the send queue name no community. Until then the send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but cannot link the page: it is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. If the attached view is the one built, its id replaces payments.community-payment here.",
+    note: "Decided in review of the send queue (#216) and built with a bill's payment attempts: payments contributes payments.payment-setup, a section of billing.send-queue showing the community's payment readiness, which carries the link to the community's Payment page. A section, not a tab, so the send queue lists it while Payments is off, with the gate's notice; its loader reads the community from the microgrid, since an attached view is given only its parent's path segments. As the legacy banner, it gives the link to a super admin and tells anyone else to ask one; turning payments on is advised to every role. The send queue keeps its own note, which explains why there are no links, without one.",
   },
   {
     id: "close-period",
