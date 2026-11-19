@@ -195,6 +195,8 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       endDate: "2026-09-30",
       resolution: "day",
       timezone: KAMPALA,
+      // The capability's clock, passed through to the provider.
+      nowMs: expect.any(Number),
     });
   });
 
@@ -310,6 +312,7 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
         endDate: "2026-10-31",
         resolution: "day",
         timezone: KAMPALA,
+        nowMs: expect.any(Number),
       });
       // B still sees M as its own use on the same days.
       const unitB = await usageMonth(tenantB, UNIT_B, "2026-10");
