@@ -66,7 +66,7 @@ export function createFmt({ locale }: { locale: string }): Fmt {
 
     energy(wh, o) {
       const v = wh / 1000;
-      const text = formatKwh(v, locale);
+      const text = formatKwh(v, locale, { digits: o?.digits });
       return { t: "energy", v, unit: "kWh", text: o?.bare ? text : `${text} kWh`, ...meta(o) };
     },
 
