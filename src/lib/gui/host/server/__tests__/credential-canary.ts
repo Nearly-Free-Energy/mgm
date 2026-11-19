@@ -104,6 +104,15 @@ export type CanaryIds = {
   /** The period's one bill: the tenant's, unpaid, entered by hand, with a starting reading. */
   lineItemId: string;
   /**
+   * An online payment attempt on the bill, through the canary merchant
+   * account, held for reconciliation with a tracking id and a verified
+   * receipt of the whole bill, so the bill attempts view lists it and both
+   * reconciliations reach their own steps
+   * (bill-attempts.db.test.ts checks that its checkout URL and failure
+   * message reach no output).
+   */
+  paymentAttemptId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. The units
    * have no meter assigned, so the microgrids' house meters, and with them
@@ -134,7 +143,10 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * microgrid also gets a tariff, a tenant with no meter and a draft billing
  * period pinned to that tariff: a draft with one unpaid bill and no recorded
  * payment, so delete's available() and prepare run, and every bill action
- * reaches its own steps. The organization's delete removes them with it.
+ * reaches its own steps; and an online payment attempt on that bill, held
+ * for reconciliation, so the payment attempt actions reach theirs. The
+ * organization's delete removes them with it (cleanupTestData purges an
+ * organization whose payment records the database keeps).
  * The organization also gets an email sender (RFC #186) whose password is a
  * canary, a tenant unit on each microgrid (`unitIds`) and the tenant app
  * turned on.
@@ -217,6 +229,39 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
       usage_kwh: 10,
       total_amount: 5000,
       reading_source: "manual",
+    },
+  ]);
+  // After the bill and the merchant account it refers to (rows go in before site).
+  site.push([
+    "payment_attempts",
+    {
+      id: ids.paymentAttemptId,
+      org_id: ids.orgId,
+      line_item_id: ids.lineItemId,
+      community_id: ids.communityId,
+      merchant_account_id: ids.merchantId,
+      merchant_account_version: 1,
+      amount: 5000,
+      currency: "UGX",
+      bill_revision_total: 5000,
+      merchant_reference: `MGM-${ids.paymentAttemptId}`,
+      provider_tracking_id: "canary-tracking-id",
+      status: "needs_reconciliation",
+      failure_code: "balance_mismatch",
+    },
+  ]);
+  // A verified receipt of the whole bill, so accepting exact receipts is available too.
+  site.push([
+    "payment_receipts",
+    {
+      org_id: ids.orgId,
+      attempt_id: ids.paymentAttemptId,
+      amount: 5000,
+      currency: "UGX",
+      provider: "pesapal",
+      provider_status: "completed",
+      provider_tracking_id: "canary-tracking-id",
+      raw_payload: {},
     },
   ]);
   rows.push([
@@ -316,11 +361,13 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     billingPeriod: [ids.billingPeriodId],
     lineItem: [ids.lineItemId],
     tenant: [ids.tenantId],
+    paymentAttempt: [ids.paymentAttemptId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {
     [ids.billingPeriodId]: { kind: "microgrid", id: ids.microgridIds.basic },
     [ids.lineItemId]: { kind: "billingPeriod", id: ids.billingPeriodId },
+    [ids.paymentAttemptId]: { kind: "lineItem", id: ids.lineItemId },
     [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
   };
   let combos: Record<string, string>[] = [{}];
