@@ -230,17 +230,21 @@ describe("buildPeriodReviewModel: totals", () => {
     expect(model.body.totals?.["tier.1.amount"]).toEqual(fmt.money(2502, "UGX", { bare: true }));
     expect(model.body.totals?.total).toEqual(fmt.money(sumMoney([1250.5, 1250.5], "UGX"), "UGX", { bare: true }));
 
-    // In a currency with cents, no float dust reaches the total: 0.1 + 0.2 is 0.3.
+    // In a currency with cents too: each row shows 0.01, so the total is
+    // 0.02; adding the floats would give 0.01. (0.1 + 0.2 would not do here:
+    // fmt.money rounds 0.30000000000000004 to the same 0.30.)
     const usd = build({
       microgrid: { id: MG, name: "North", currency: "USD" },
       tenants: [A, B],
       bills: [
-        bill(1, A, { total_amount: 0.1, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.1 }] }),
-        bill(2, B, { total_amount: 0.2, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.2 }] }),
+        bill(1, A, { total_amount: 0.005, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.005 }] }),
+        bill(2, B, { total_amount: 0.005, tier_breakdown: [{ label: "Lifeline", kwh: 1, amount: 0.005 }] }),
       ],
     });
-    expect(usd.body.totals?.total).toEqual(fmt.money(0.3, "USD", { bare: true }));
-    expect(usd.body.totals?.["tier.1.amount"]).toEqual(fmt.money(0.3, "USD", { bare: true }));
+    expect(usd.body.rows.map((r) => r.cells.total)).toEqual([fmt.money(0.01, "USD", { bare: true }), fmt.money(0.01, "USD", { bare: true })]);
+    expect(usd.body.totals?.total).toEqual(fmt.money(0.02, "USD", { bare: true }));
+    expect(usd.body.totals?.["tier.1.amount"]).toEqual(fmt.money(0.02, "USD", { bare: true }));
+    expect(fmt.money(0.005 + 0.005, "USD", { bare: true })).not.toEqual(fmt.money(0.02, "USD", { bare: true }));
   });
 
   it("has no totals with no bills", () => {
