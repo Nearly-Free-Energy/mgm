@@ -17,7 +17,7 @@
  * chunks again (about 650 first-load bytes when measured for the site-day
  * renderer). If a shared import is added, measure the budgets again.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import type { GuiKit, ModelOf, SyncNode, ViewProps } from "@/lib/gui/contract";
 import { BillCards } from "./cards";
 import { ActionControl, ControlList, TONE } from "./controls";
@@ -30,6 +30,25 @@ type Props = ViewProps & { kit: GuiKit };
 
 /** Appended to an announcement that repeats the last one. */
 export const REPEAT = "\u00a0";
+
+type Speaker = { say(message: string): void };
+
+/**
+ * The live region, with its own state, so an announcement (each move of the
+ * table's cursor) redraws this paragraph rather than the bills.
+ */
+function LiveRegion({ speaker }: { speaker: Ref<Speaker> }) {
+  const [said, setSaid] = useState("");
+  // A message equal to the last one would leave the live region unchanged,
+  // and a screen reader silent, so a repeat alternates a trailing no-break
+  // space, which changes the text without changing what is read.
+  useImperativeHandle(speaker, () => ({ say: (message) => setSaid((last) => (last === message ? `${message}${REPEAT}` : message)) }), []);
+  return (
+    <p aria-live="polite" className="gt:sr-only">
+      {said}
+    </p>
+  );
+}
 
 /** The empty state, which owns the action it offers. */
 function Empty({ empty, kit }: { empty: ModelOf<"collection">["body"]["empty"]; kit: GuiKit }) {
@@ -52,13 +71,11 @@ function Empty({ empty, kit }: { empty: ModelOf<"collection">["body"]["empty"]; 
 function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
   const live = kit.useLive(model);
   const m = live.model;
-  const [said, setSaid] = useState("");
-  // A message equal to the last one would leave the live region unchanged,
-  // and a screen reader silent, so a repeat alternates a trailing no-break
-  // space, which changes the text without changing what is read.
-  const announce = useCallback((message: string) => setSaid((last) => (last === message ? `${message}${REPEAT}` : message)), []);
+  const speaker = useRef<Speaker>(null);
+  const announce = useCallback((message: string) => speaker.current?.say(message), []);
   const copier = useCopier(announce);
-  const figures = readPeriodReviewExt(m);
+  // Read once per model, not on every redraw: at the caps it checks 22,000 figures.
+  const figures = useMemo(() => readPeriodReviewExt(m), [m]);
   // A refresh that brings figures this renderer cannot read: the kit's view
   // draws that model, without polling again, since this one still does.
   if (!figures || m.kind !== "collection") return <kit.KitView model={{ ...m, live: undefined }} />;
@@ -86,6 +103,7 @@ function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
         <Empty empty={empty} kit={kit} />
       ) : (
         <>
+          <h2 className="gt:sr-only">Bills</h2>
           <div className="gt:hidden gt:medium:block">
             <CopyTable model={m} figures={figures} live={live} kit={kit} copier={copier} announce={announce} />
           </div>
@@ -100,9 +118,7 @@ function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
           <Totals model={m} figures={figures} live={live} kit={kit} copier={copier} />
         </>
       )}
-      <p aria-live="polite" className="gt:sr-only">
-        {said}
-      </p>
+      <LiveRegion speaker={speaker} />
     </article>
   );
 }

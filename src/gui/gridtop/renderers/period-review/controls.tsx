@@ -194,6 +194,10 @@ export function RowControls({ row, tenant, kit, tabIndex }: { row: RowOf<ActionR
         className="gt:inline-flex gt:cursor-pointer gt:items-center gt:rounded-md gt:px-2 gt:text-dense gt:font-medium gt:text-primary gt:h-8 gt:pointer-coarse:min-h-11 gt:pointer-coarse:min-w-11 gt:focus-visible:outline-2 gt:focus-visible:outline-ring"
       >
         Actions
+        {/* inline-flex drops the browser's disclosure marker, so the summary draws its own. */}
+        <span aria-hidden="true" className="gt:ml-1">
+          ▾
+        </span>
       </summary>
       <div className="gt:mt-2 gt:mb-1">
         <ControlList actions={row.actions} links={links} kit={kit} label={`Actions for ${tenant}`} />
