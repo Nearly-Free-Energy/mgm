@@ -106,6 +106,8 @@ export interface BillingGeneration {
     actorUserId: string;
     /** A per-bill regeneration's bill as read (RunGenerationParams.expectedBill). */
     expectedBill?: ExpectedBill;
+    /** A whole-period run from meter data (RunGenerationParams.guardExistingBills). */
+    guardExistingBills?: boolean;
   }): Promise<GenerationOutput | GenerationFatal>;
 }
 
@@ -197,6 +199,14 @@ export interface BillingCapabilityContract {
    * /api/billing/generate cannot send it.
    */
   generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
+  /**
+   * Generates every bill of a draft period from meter data
+   * (RunGenerationParams.guardExistingBills): manual bills are kept, and
+   * invoiced, paid and refunded bills left as they are; any other existing
+   * bill is changed only as it was read. POST
+   * /api/billing-periods/[periodId]/generate-from-meters calls it.
+   */
+  generateFromMeters(periodId: string): Promise<BillingResult<GenerationOutput>>;
   recordManualPayment(
     lineItemId: string,
     input: unknown
