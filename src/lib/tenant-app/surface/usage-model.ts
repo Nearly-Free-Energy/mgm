@@ -41,11 +41,14 @@ export const TENANT_USAGE_DAY_KEYS = ["hour", "usage", "note"] as const;
 
 /**
  * Why a view has no figures, in fixed copy: never the metering source's
- * message, which can carry an outside system's text.
+ * message, which can carry an outside system's text. Only the problems that
+ * another try can clear suggest one: each try is one of the unit's limited
+ * reads.
  */
 export const TENANT_USAGE_PROBLEMS = {
   unavailable: { title: "No data", message: "Your meter readings could not be read right now. Try again in a minute." },
   limited: { title: "No data", message: "Your use has been asked for many times in the last minute. Try again in a minute." },
+  "not-offered": { title: "No data", message: "Your meter readings are not available here." },
 } as const satisfies Record<TenantUsageProblem, { title: string; message: string }>;
 
 /** Which unit the hrefs name. */

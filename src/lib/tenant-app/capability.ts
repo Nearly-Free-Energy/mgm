@@ -25,6 +25,7 @@ import {
   type TenantUsageDay,
   type TenantUsageMonth,
   type TenantUsageSeries,
+  type TenantUsageSeriesResult,
   type TenantUsageSource,
 } from "./types";
 import {
@@ -56,8 +57,11 @@ function zoneOf(unit: TenantUnit): string {
 /** What one usage read keeps: the clipped, summed figures, never a meter's own series. */
 type SummedFigures = { values: Record<string, number | null>; synthetic: boolean };
 
+/** Why the usage source gave no series. */
+type SourceRefusal = Extract<TenantUsageSeriesResult, { ok: false }>["reason"];
+
 /** A throttled read as the figures the calendar is built from. */
-function figuresOf(outcome: UsageReadOutcome<SummedFigures>): UsageFigures {
+function figuresOf(outcome: UsageReadOutcome<SummedFigures, SourceRefusal>): UsageFigures {
   switch (outcome.from) {
     case "backend":
     case "cache":
@@ -72,21 +76,29 @@ function figuresOf(outcome: UsageReadOutcome<SummedFigures>): UsageFigures {
     case "limited":
       return { kind: "problem", problem: "limited" };
     case "failed":
-      return { kind: "problem", problem: "unavailable" };
+      // Metering off, or a provider with no series: another try reads the
+      // same. Anything else, a throw included, may pass next time.
+      return {
+        kind: "problem",
+        problem:
+          outcome.failure === "metering-off" || outcome.failure === "unsupported" ? "not-offered" : "unavailable",
+      };
   }
 }
 
 /**
- * The bucket index of each local day of `series`. A day the source returned
- * twice has no index, so it reads as no data rather than as either figure.
+ * The bucket index of each key. A key the source returned twice has no
+ * index, so its bucket reads as no data rather than as either figure.
  */
-function dayIndexOf(series: TenantUsageSeries, timezone: string): Map<string, number | undefined> {
-  const index = new Map<string, number | undefined>();
-  series.buckets.forEach((start, i) => {
-    const date = dayKeyInZone(start, timezone);
-    index.set(date, index.has(date) ? undefined : i);
-  });
+function uniqueIndexOf<K>(keys: readonly K[]): Map<K, number | undefined> {
+  const index = new Map<K, number | undefined>();
+  keys.forEach((key, i) => index.set(key, index.has(key) ? undefined : i));
   return index;
+}
+
+/** The bucket index of each local day of `series`; a day returned twice has none. */
+function dayIndexOf(series: TenantUsageSeries, timezone: string): Map<string, number | undefined> {
+  return uniqueIndexOf(series.buckets.map((start) => dayKeyInZone(start, timezone)));
 }
 
 const meterLinksUnavailable = () =>
@@ -191,7 +203,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     let figures: UsageFigures = { kind: "none" };
     if (inForce.length > 0) {
       const devices = new Set(inForce.flatMap((date) => [...metersOn(links, date)]));
-      const outcome = await readThrottled<SummedFigures>(
+      const outcome = await readThrottled<SummedFigures, SourceRefusal>(
         unit.tenantId,
         `month|${month}|${today}|${timezone}|${assignmentsKey(links)}`,
         nowMs,
@@ -203,7 +215,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             resolution: "day",
             timezone,
           });
-          if (!result.ok) return { ok: false };
+          if (!result.ok) return { ok: false, failure: result.reason };
           // Built here, from the buckets' own days, so a source that returns
           // fewer buckets gives no data, never a figure on the wrong day.
           const index = dayIndexOf(result.series, timezone);
@@ -256,7 +268,7 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
     const devices = metersOn(links, date);
     let figures: UsageFigures = { kind: "none" };
     if (devices.size > 0) {
-      const outcome = await readThrottled<SummedFigures>(
+      const outcome = await readThrottled<SummedFigures, SourceRefusal>(
         unit.tenantId,
         `day|${date}|${today}|${timezone}|${assignmentsKey(links)}`,
         nowMs,
@@ -268,9 +280,10 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
             resolution: "hour",
             timezone,
           });
-          if (!result.ok) return { ok: false };
-          // Matched by instant, not position, so a missing hour shifts none.
-          const index = new Map(result.series.buckets.map((start, i) => [start, i]));
+          if (!result.ok) return { ok: false, failure: result.reason };
+          // Matched by instant, not position, so a missing hour shifts none;
+          // an hour returned twice reads as no data, as a day does.
+          const index = uniqueIndexOf(result.series.buckets);
           const values: Record<string, number | null> = {};
           for (const start of localHourStarts(date, timezone)) {
             values[String(start)] = sumMeters(result.series, devices, index.get(start));

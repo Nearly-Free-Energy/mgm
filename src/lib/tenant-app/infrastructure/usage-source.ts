@@ -111,7 +111,13 @@ export function createTenantUsageSource(options: {
         logFailure(error);
         return { ok: false, reason: "unavailable" };
       }
-      if (!gate.ok) return { ok: false, reason: "metering-off" };
+      if (!gate.ok) {
+        // 409 is the refusal: metering is off. A 503 is the gate failing
+        // to read the plugin state, which may pass on the next try.
+        if (gate.status === 409) return { ok: false, reason: "metering-off" };
+        console.error("[tenant-app] usage read failed", { code: gate.code, status: gate.status });
+        return { ok: false, reason: "unavailable" };
+      }
 
       try {
         // The device rows through the tenant's own row-level access: a device

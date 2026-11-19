@@ -69,6 +69,17 @@ describe("readThrottled", () => {
     expect(await readThrottled("unit", "last", T0 + 3, reader("x"))).toEqual({ from: "limited" });
   });
 
+  it("passes a failed read's failure back, still uncached and counted, and none for a throw", async () => {
+    const refused = vi.fn(async () => ({ ok: false, failure: "metering-off" }) as const);
+    expect(await readThrottled("unit", "k", T0, refused)).toStrictEqual({ from: "failed", failure: "metering-off" });
+    expect(await readThrottled("unit", "k", T0 + 1, refused)).toStrictEqual({ from: "failed", failure: "metering-off" });
+    expect(refused).toHaveBeenCalledTimes(2);
+    expect(await readThrottled("unit", "t", T0 + 2, reader("throw"))).toStrictEqual({ from: "failed", failure: undefined });
+    for (let i = 0; i < 3; i++) await readThrottled("unit", `other-${i}`, T0 + 3, reader("x"));
+    expect(await readThrottled("unit", "k", T0 + 4, refused)).toEqual({ from: "limited" });
+    expect(refused).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps entries apart by unit and by key", async () => {
     await readThrottled("unit-a", "month|2026-11", T0, reader("a-nov"));
     await readThrottled("unit-a", "month|2026-10", T0, reader("a-oct"));

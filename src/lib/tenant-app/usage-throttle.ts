@@ -39,13 +39,13 @@ type CacheEntry = { value: unknown; readAt: number };
 /** By `${tenantId}|${key}`, oldest read first: a new read of a key moves it to the end. */
 const cache = new Map<string, CacheEntry>();
 
-export type UsageReadOutcome<T> =
+export type UsageReadOutcome<T, F = never> =
   /** `readAt` is when the backend was read, which a cache or stale hit puts before now. */
   | { from: "backend" | "cache" | "stale"; value: T; readAt: number }
   /** Over the limit, with no read kept. */
   | { from: "limited" }
-  /** The read failed (or threw). */
-  | { from: "failed" };
+  /** The read failed, with the failure it gave, or threw (`failure` undefined). */
+  | { from: "failed"; failure: F | undefined };
 
 /**
  * One usage read for a unit, at most once per USAGE_FRESH_MS per key, and at
@@ -55,18 +55,18 @@ export type UsageReadOutcome<T> =
  * check of its own, and a revoked tenant, an ended session or a turned-off
  * tenant app gets no cached figure only because the composer refuses them
  * before this runs. A failed read is counted against the limit and never
- * cached.
+ * cached, whatever its failure; the failure is passed back as it is.
  *
  * Order: a fresh entry → "cache"; over the limit → a kept entry (younger
  * than USAGE_KEEP_MS) as "stale", else "limited"; otherwise read → "backend"
  * (stored) or "failed".
  */
-export async function readThrottled<T>(
+export async function readThrottled<T, F = never>(
   tenantId: string,
   key: string,
   nowMs: number,
-  read: () => Promise<{ ok: true; value: T } | { ok: false }>
-): Promise<UsageReadOutcome<T>> {
+  read: () => Promise<{ ok: true; value: T } | { ok: false; failure?: F }>
+): Promise<UsageReadOutcome<T, F>> {
   const cacheKey = `${tenantId}|${key}`;
   let entry = cache.get(cacheKey);
   if (entry && nowMs - entry.readAt >= USAGE_KEEP_MS) {
@@ -82,13 +82,13 @@ export async function readThrottled<T>(
     return { from: "limited" };
   }
 
-  let result: { ok: true; value: T } | { ok: false };
+  let result: { ok: true; value: T } | { ok: false; failure?: F };
   try {
     result = await read();
   } catch {
     result = { ok: false };
   }
-  if (!result.ok) return { from: "failed" };
+  if (!result.ok) return { from: "failed", failure: result.failure };
 
   cache.delete(cacheKey);
   cache.set(cacheKey, { value: result.value, readAt: nowMs });

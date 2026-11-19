@@ -430,13 +430,17 @@ describe("states from the read time", () => {
 });
 
 describe("the read's failures and limits as the tenant sees them", () => {
-  it.each(["unavailable", "metering-off", "unsupported"] as const)(
-    "shows every past day with a meter as no data when the source answers %s",
-    async (reason) => {
+  it.each([
+    ["unavailable", "unavailable"],
+    ["metering-off", "not-offered"],
+    ["unsupported", "not-offered"],
+  ] as const)(
+    "shows every past day with a meter as no data when the source answers %s, as problem %s",
+    async (reason, problem) => {
       const source: TenantUsageSource = { readSeries: async () => ({ ok: false, reason }) };
       const shown = await month(capabilityFor(UNIT_A, [link("p", "2026-11-10", null)], source).capability);
 
-      expect(shown.read).toEqual({ readAt: null, stale: false, synthetic: false, problem: "unavailable" });
+      expect(shown.read).toEqual({ readAt: null, stale: false, synthetic: false, problem });
       for (const date of datesBetween("2026-11-01", "2026-11-09")) expect(stateOf(shown, date).state).toBe("no-meter");
       for (const date of datesBetween("2026-11-10", "2026-11-18")) {
         expect(stateOf(shown, date)).toEqual({ date, state: "no-data", kwh: null });
@@ -444,6 +448,40 @@ describe("the read's failures and limits as the tenant sees them", () => {
       expect(shown.total).toEqual({ kwh: null, withoutData: 9 });
     }
   );
+
+  it.each([["metering-off"], ["unsupported"]] as const)(
+    "counts a %s answer against the limit and never caches it, as any failed read",
+    async (reason) => {
+      let answer: TenantUsageSeriesResult = { ok: false, reason };
+      const readSeries = vi.fn(async () => answer);
+      const { capability } = capabilityFor(UNIT_A, [link("p", "2026-11-01", null)], { readSeries });
+
+      for (let i = 0; i < 6; i++) {
+        expect((await day(capability, { date: "2026-11-17" })).read.problem).toBe("not-offered");
+      }
+      answer = { ok: true, series: { buckets: [], kwh: { p: [] }, synthetic: false } };
+      expect((await day(capability, { date: "2026-11-17" })).read.problem).toBe("limited");
+      expect(readSeries).toHaveBeenCalledTimes(6);
+    }
+  );
+
+  it("shows an hour the source returned twice as no data, never either figure, and no total", async () => {
+    const hours = localHourStarts("2026-11-17", KAMPALA);
+    const source: TenantUsageSource = {
+      async readSeries(): Promise<TenantUsageSeriesResult> {
+        // 05:00 comes back twice, with two figures.
+        const buckets = [...hours.slice(0, 6), hours[5], ...hours.slice(6)];
+        const p = buckets.map((_, i) => (i === 6 ? 9 : 0.5));
+        return { ok: true, series: { buckets, kwh: { p }, synthetic: false } };
+      },
+    };
+    const shown = await day(capabilityFor(UNIT_A, [link("p", "2026-11-01", null)], source).capability, { date: "2026-11-17" });
+
+    expect(shown.hours[5]).toEqual({ start: hours[5], state: "no-data", kwh: null });
+    expect(shown.hours[4]).toEqual({ start: hours[4], state: "data", kwh: 0.5 });
+    expect(shown.hours[6]).toEqual({ start: hours[6], state: "data", kwh: 0.5 });
+    expect(shown.total).toEqual({ kwh: null, withoutData: 1 });
+  });
 
   it("shows no data when the source throws", async () => {
     const source: TenantUsageSource = {

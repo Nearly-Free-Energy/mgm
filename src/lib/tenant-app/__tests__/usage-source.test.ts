@@ -214,16 +214,16 @@ describe("createTenantUsageSource", () => {
     expect(reads).toEqual(["tenant:devices", "service:edges"]);
   });
 
-  it.each([
-    ["off", { ok: false, status: 409, code: "metering_disabled", message: "Metering is disabled." }],
-    ["unreadable", { ok: false, status: 503, code: "metering_gate_unavailable", message: "Retry." }],
-  ])("reads nothing while the metering gate says %s", async (_label, decision) => {
-    mocks.checkGate.mockResolvedValue(decision);
+  it("reads nothing while the metering gate says metering is off, and logs nothing", async () => {
+    mocks.checkGate.mockResolvedValue({
+      ok: false, status: 409, code: "metering_disabled", message: "Metering is disabled.",
+    });
     const { source } = setup({ devices: [{ id: "d1", edge_id: "e1", openems_component_id: "meter1" }] });
 
     expect(await source.readSeries(request(["d1"]))).toEqual({ ok: false, reason: "metering-off" });
     expect(mocks.createServiceClient).not.toHaveBeenCalled();
     expect(log).toEqual([]);
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it("reads nothing when the gate cannot be asked", async () => {
@@ -232,6 +232,22 @@ describe("createTenantUsageSource", () => {
 
     expect(await source.readSeries(request(["d1"]))).toEqual({ ok: false, reason: "unavailable" });
     expect(mocks.createServiceClient).not.toHaveBeenCalled();
+  });
+
+  it("reads nothing when the gate cannot read the plugin state (503): unavailable, not off, logged by code and status", async () => {
+    mocks.checkGate.mockResolvedValue({
+      ok: false, status: 503, code: "metering_gate_unavailable", message: "Could not verify. Retry the request.",
+    });
+    const { source } = setup({ devices: [{ id: "d1", edge_id: "e1", openems_component_id: "meter1" }] });
+
+    expect(await source.readSeries(request(["d1"]))).toEqual({ ok: false, reason: "unavailable" });
+    expect(mocks.createServiceClient).not.toHaveBeenCalled();
+    expect(log).toEqual([]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", {
+      code: "metering_gate_unavailable",
+      status: 503,
+    });
   });
 
   it("reads nothing, not even the gate, for no devices", async () => {

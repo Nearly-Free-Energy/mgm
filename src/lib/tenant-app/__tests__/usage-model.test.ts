@@ -173,6 +173,7 @@ describe("the month model", () => {
   it.each([
     ["unavailable", TENANT_USAGE_PROBLEMS.unavailable],
     ["limited", TENANT_USAGE_PROBLEMS.limited],
+    ["not-offered", TENANT_USAGE_PROBLEMS["not-offered"]],
   ] as const)("on a %s read shows every day with a meter as No data, says why, and has no total", (kind, copy) => {
     const { model, ext } = month("2026-11", { kind: "problem", problem: kind });
     expect(model.subtitle).toBe(`Unit 4 · ${copy.message}`);
@@ -180,6 +181,16 @@ describe("the month model", () => {
     expect(model.body.totals).toEqual({ usage: { t: "text", text: "No data" } });
     expect(ext.problem).toEqual({ kind, ...copy });
     expect(ext.total).toEqual({ kwh: null, text: "No data", note: "", withoutData: 18 });
+  });
+
+  it("suggests another try only for a problem another try can clear", () => {
+    expect(TENANT_USAGE_PROBLEMS.unavailable.message).toContain("Try again");
+    expect(TENANT_USAGE_PROBLEMS.limited.message).toContain("Try again");
+    expect(TENANT_USAGE_PROBLEMS["not-offered"]).toEqual({
+      title: "No data",
+      message: "Your meter readings are not available here.",
+    });
+    expect(TENANT_USAGE_PROBLEMS["not-offered"].message).not.toMatch(/try|again|minute/i);
   });
 
   it("names the read time of kept figures in the unit's zone", () => {

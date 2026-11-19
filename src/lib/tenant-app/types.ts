@@ -111,8 +111,14 @@ export type TenantUsageState =
 
 export type TenantUsageBucket = { state: TenantUsageState; kwh: number | null };
 
-/** Why a read shows no figures at all. */
-export type TenantUsageProblem = "unavailable" | "limited";
+/**
+ * Why a read shows no figures at all: `unavailable`, a read that failed and
+ * may pass on another try; `limited`, the unit is over its read limit;
+ * `not-offered`, nothing to read for this unit (metering is off for its
+ * organization, or its microgrid's provider gives no usage series), which no
+ * retry changes.
+ */
+export type TenantUsageProblem = "unavailable" | "limited" | "not-offered";
 
 export type TenantUsageReadInfo = {
   /** When the metering source was read, epoch ms; null when nothing was read. */

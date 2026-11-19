@@ -31,7 +31,7 @@ const instant = z.iso.datetime({ offset: true });
 const state = z.enum(["data", "partial", "no-data", "no-meter", "future"]);
 /** Why the view shows no figures: the copy is TENANT_USAGE_PROBLEMS' (./usage-model.ts). */
 const problem = z
-  .strictObject({ kind: z.enum(["unavailable", "limited"]), title: label(40), message: label(200) })
+  .strictObject({ kind: z.enum(["unavailable", "limited", "not-offered"]), title: label(40), message: label(200) })
   .nullable();
 const total = (buckets: number) =>
   z.strictObject({
