@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { composeBilling, type BillingResult } from "@/lib/billing/compose";
-import { REGENERATE_PAID_ACKNOWLEDGEMENT, RegenerateBillBody } from "@/lib/billing/schemas";
+import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY, RegenerateBillBody } from "@/lib/billing/schemas";
 import { createFmt } from "@/lib/gui/fmt";
 import { formatLocale } from "@/lib/locale";
 import { parseJsonBody } from "@/lib/validation/parse-body";
@@ -20,14 +20,17 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   { readings: "manual", start_kwh, end_kwh, reason? } — the readings given
  *   and, for a paid bill, confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] }:
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
- *   route refuses a paid bill without it, and a refunded bill outright, but
- *   only on its own requests: POST /api/billing/generate, which the legacy
- *   Regenerate dialogs and Refresh Readings call, rewrites a paid or
- *   refunded bill with no acknowledgement (generate.ts keeps the payment
- *   columns and refuses no payment status). There the paid-bill warning is
- *   the legacy dialog's own, on the client with POST
+ *   route refuses a paid bill without it, and a refunded bill, an invoiced
+ *   bill and a bill in a closed period outright, but only on its own
+ *   requests: POST /api/billing/generate, which the legacy Regenerate
+ *   dialogs and Refresh Readings call, rewrites any of them with no
+ *   acknowledgement (generate.ts keeps the payment columns and refuses no
+ *   payment status, invoice number or closed period; on a closed period
+ *   that is the legacy menu's "Logged as audit revision", and the database
+ *   lets that audited write change a closed bill's amount). There the
+ *   paid-bill warning is the legacy dialog's own, on the client with POST
  *   /api/billing/regenerate-preview, and nothing on the server asks for it.
- *   If generation comes to refuse paid bills itself, say so here.
+ *   If generation comes to refuse any of these itself, say so here.
  *
  * Responses:
  *   200 → { lineItemId, totalAmount, previousTotalAmount, message } — both
@@ -39,16 +42,19 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         mode does not take or lacks); { error, reason: "bad_request" } (id)
  *   401 → { error: "unauthorized" }
  *   404 → { error, reason: "not_found" } (bill, period or microgrid hidden by RLS)
- *   409 → { error, reason: "refunded" }, or { error, reason: <generation code> }
- *         when generation refused this tenant (GenerationErrorCode)
+ *   409 → { error, reason: "period_closed" | "invoiced" | "refunded" }
+ *         (REGENERATE_REFUSAL_COPY: a bill in a closed period, a bill with
+ *         an invoice number, a refunded bill; nothing is written), or
+ *         { error, reason: <generation code> } when generation refused this
+ *         tenant (GenerationErrorCode)
  *   428 → { error, reason: "paid_acknowledgement_required" } (a paid bill
  *         without the acknowledgement; nothing is written)
  *   500 → { error, reason: "unknown_error" } (the bill, its period or its
  *         microgrid could not be read, or nothing was written)
  *   and the capability's own refusals (plugin gate, organization scope).
  *
- * The legacy dialogs still call POST /api/billing/generate, which checks no
- * payment status (above).
+ * The legacy dialogs still call POST /api/billing/generate, which checks none
+ * of these (above).
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,6 +68,12 @@ function mapError(error: Extract<BillingResult<never>, { ok: false }>) {
 const invalid = (error: string, field: string) =>
   NextResponse.json({ error, field, code: "invalid_body" }, { status: 400 });
 const notFound = () => NextResponse.json({ error: "Billing line item not found.", reason: "not_found" }, { status: 404 });
+const CONFLICTS = {
+  period_closed: REGENERATE_REFUSAL_COPY.closed,
+  invoiced: REGENERATE_REFUSAL_COPY.invoiced,
+  refunded: REGENERATE_REFUSAL_COPY.refunded,
+} as const;
+const conflict = (reason: keyof typeof CONFLICTS) => NextResponse.json({ error: CONFLICTS[reason], reason }, { status: 409 });
 /** A read that failed, with fixed copy: never the database's message. */
 const readFailed = (error: string) => NextResponse.json({ error, reason: "unknown_error" }, { status: 500 });
 
@@ -71,6 +83,7 @@ type BillRow = {
   billing_period_id: string;
   reading_source: "edge" | "manual" | null;
   payment_status: string;
+  invoice_number: string | null;
 };
 
 export async function POST(
@@ -107,7 +120,7 @@ export async function POST(
   // Read through the person's own client: a bill RLS hides is a 404.
   const { data: bill, error: billError } = await supabase
     .from("billing_line_items")
-    .select("id, tenant_id, billing_period_id, reading_source, payment_status")
+    .select("id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number")
     .eq("id", lineItemId)
     .maybeSingle<BillRow>();
   if (billError) return readFailed("Failed to look up billing line item.");
@@ -117,9 +130,9 @@ export async function POST(
   // read is not a missing row: it answers 500, as the bill's own read does.
   const { data: period, error: periodError } = await supabase
     .from("billing_periods")
-    .select("id, microgrid_id")
+    .select("id, microgrid_id, status")
     .eq("id", bill.billing_period_id)
-    .maybeSingle<{ id: string; microgrid_id: string }>();
+    .maybeSingle<{ id: string; microgrid_id: string; status: string }>();
   if (periodError) return readFailed("Failed to look up the bill's billing period.");
   if (!period) return notFound();
   const { data: microgrid, error: microgridError } = await supabase
@@ -137,10 +150,12 @@ export async function POST(
   if (!composed.ok) return mapError(composed);
 
   try {
-    // Refunding then re-billing reads as data corruption; the legacy menu hides it too.
-    if (bill.payment_status === "refunded") {
-      return NextResponse.json({ error: "A refunded bill cannot be regenerated.", reason: "refunded" }, { status: 409 });
-    }
+    // What this route refuses, in this order (REGENERATE_REFUSAL_COPY has
+    // why). billing.regenerate-bill's availability and prepare explain the
+    // same refusals in the same order (src/lib/billing/surface/period-review.ts).
+    if (period.status !== "draft") return conflict("period_closed");
+    if (bill.invoice_number !== null) return conflict("invoiced");
+    if (bill.payment_status === "refunded") return conflict("refunded");
     // Regenerating a paid bill changes what was paid for: the person ticks
     // that they know it is paid, as billing.regenerate-bill's prepare asks.
     if (bill.payment_status === "paid" && !parsed.confirmation?.acknowledged.includes(REGENERATE_PAID_ACKNOWLEDGEMENT)) {

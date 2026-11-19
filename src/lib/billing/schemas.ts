@@ -480,6 +480,26 @@ export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
  */
 export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
 
+/**
+ * Why the regenerate route refuses a bill, as fixed copy: the route answers
+ * with it and billing.regenerate-bill's availability and prepare explain the
+ * same refusal before it happens (src/lib/billing/surface/period-review.ts).
+ *  - closed: the period's totals were reviewed and closed; regenerating
+ *    would change money a closed period was closed with.
+ *  - invoiced: the bill has an invoice number (allocated the first time its
+ *    PDF is downloaded, GET /api/billing-line-items/[lineItemId]/pdf), and a
+ *    regenerated bill would carry new figures under the number already
+ *    issued.
+ *  - refunded: refunding then re-billing reads as data corruption.
+ * POST /api/billing/generate, which the legacy dialogs call, refuses none of
+ * these: if it comes to, say so here.
+ */
+export const REGENERATE_REFUSAL_COPY = {
+  closed: "Bills in a closed period cannot be regenerated.",
+  invoiced: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
+  refunded: "A refunded bill cannot be regenerated.",
+} as const;
+
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 
 /**

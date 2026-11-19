@@ -15,14 +15,21 @@ const MICROGRID = "660e8400-e29b-41d4-a716-446655440000";
 const ORG = "550e8400-e29b-41d4-a716-446655440000";
 const TENANT = "660e8400-e29b-41d4-a716-446655442001";
 
-type Bill = { id: string; tenant_id: string; billing_period_id: string; reading_source: string | null; payment_status: string };
+type Bill = {
+  id: string;
+  tenant_id: string;
+  billing_period_id: string;
+  reading_source: string | null;
+  payment_status: string;
+  invoice_number: string | null;
+};
 
 let user: { id: string } | null;
 let bill: Bill | null;
 let billError: { message: string } | null;
 let periodError: { message: string } | null;
 let microgridError: { message: string } | null;
-let period: { id: string; microgrid_id: string } | null;
+let period: { id: string; microgrid_id: string; status: string } | null;
 let microgrid: { id: string; currency?: string | null; communities: { org_id: string } } | null;
 let composeResult: { ok: false; status: number; code: string; message: string } | null;
 let generateResult: unknown;
@@ -56,7 +63,7 @@ vi.mock("@/lib/billing/compose", () => ({
   }),
 }));
 
-import { REGENERATE_PAID_ACKNOWLEDGEMENT } from "@/lib/billing/schemas";
+import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "@/lib/billing/schemas";
 import { createFmt } from "@/lib/gui/fmt";
 import { POST } from "../route";
 
@@ -85,11 +92,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   reads.length = 0;
   user = { id: "11111111-1111-4111-8111-111111111111" };
-  bill = { id: LINE_ITEM, tenant_id: TENANT, billing_period_id: PERIOD, reading_source: "edge", payment_status: "unpaid" };
+  bill = { id: LINE_ITEM, tenant_id: TENANT, billing_period_id: PERIOD, reading_source: "edge", payment_status: "unpaid", invoice_number: null };
   billError = null;
   periodError = null;
   microgridError = null;
-  period = { id: PERIOD, microgrid_id: MICROGRID };
+  period = { id: PERIOD, microgrid_id: MICROGRID, status: "draft" };
   microgrid = { id: MICROGRID, communities: { org_id: ORG } };
   composeResult = null;
   generateResult = written();
@@ -166,7 +173,11 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
 
   it("reads the bill through the person's client, with the columns it needs", async () => {
     await post({ readings: "edge" });
-    expect(reads[0]).toEqual(["billing_line_items", "id, tenant_id, billing_period_id, reading_source, payment_status"]);
+    expect(reads).toEqual([
+      ["billing_line_items", "id, tenant_id, billing_period_id, reading_source, payment_status, invoice_number"],
+      ["billing_periods", "id, microgrid_id, status"],
+      ["microgrids", "id, currency, communities!inner(org_id)"],
+    ]);
   });
 
   it("answers the capability's refusal when composing fails (the plugin gate)", async () => {
@@ -181,9 +192,47 @@ describe("POST /api/billing-line-items/[lineItemId]/regenerate", () => {
     bill!.payment_status = "refunded";
     const res = await post({ readings: "edge" });
     expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: "A refunded bill cannot be regenerated.", reason: "refunded" });
+    expect(await res.json()).toEqual({ error: REGENERATE_REFUSAL_COPY.refunded, reason: "refunded" });
+    expect(REGENERATE_REFUSAL_COPY.refunded).toBe("A refunded bill cannot be regenerated.");
     expect(generateBills).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["unpaid", "paid", "link_generated"])("409 for a %s bill in a closed period, acknowledged or not, and writes nothing", async (status) => {
+    period!.status = "closed";
+    bill!.payment_status = status;
+    for (const body of [{ readings: "edge" }, { readings: "manual", start_kwh: 10, end_kwh: 20, ...acknowledged }]) {
+      const res = await post(body);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: "Bills in a closed period cannot be regenerated.", reason: "period_closed" });
+    }
+    expect(generateBills).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["unpaid", "paid", "failed"])("409 for an invoiced %s bill, acknowledged or not, and writes nothing", async (status) => {
+    bill!.invoice_number = "EXS-2026-00001";
+    bill!.payment_status = status;
+    for (const body of [{ readings: "edge" }, { readings: "edge", ...acknowledged }]) {
+      const res = await post(body);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: "This bill has been invoiced, so it cannot be regenerated: its invoice number is already issued.",
+        reason: "invoiced",
+      });
+    }
+    expect(generateBills).not.toHaveBeenCalled();
+  });
+
+  it("refuses in order: a closed period, then an invoice number, then a refund", async () => {
+    period!.status = "closed";
+    bill!.invoice_number = "EXS-2026-00001";
+    bill!.payment_status = "refunded";
+    expect((await (await post({ readings: "edge" })).json()).reason).toBe("period_closed");
+    period!.status = "draft";
+    expect((await (await post({ readings: "edge" })).json()).reason).toBe("invoiced");
+    bill!.invoice_number = null;
+    expect((await (await post({ readings: "edge" })).json()).reason).toBe("refunded");
   });
 
   it("regenerates an edge bill from the meter for its one tenant", async () => {

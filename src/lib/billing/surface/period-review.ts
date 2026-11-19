@@ -22,7 +22,7 @@ import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
 import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
-import { REGENERATE_PAID_ACKNOWLEDGEMENT } from "../schemas";
+import { REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "../schemas";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
@@ -55,7 +55,10 @@ export const PERIOD_REVIEW_REFUSALS = {
 export const BILL_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This bill could not be found." },
   unavailable: { ok: false, status: 503, message: "Could not check this bill right now. Try again shortly." },
-  refunded: { ok: false, status: 409, message: "A refunded bill cannot be regenerated." },
+  // The regenerate route's copy (REGENERATE_REFUSAL_COPY).
+  refunded: { ok: false, status: 409, message: REGENERATE_REFUSAL_COPY.refunded },
+  closed: { ok: false, status: 409, message: REGENERATE_REFUSAL_COPY.closed },
+  invoiced: { ok: false, status: 409, message: REGENERATE_REFUSAL_COPY.invoiced },
   // The payment-status route's copy (src/app/api/billing-line-items/[lineItemId]/payment-status/route.ts).
   superAdmin: {
     ok: false,
@@ -67,7 +70,7 @@ export const BILL_REFUSALS = {
 } as const satisfies Record<string, Refusal>;
 
 /** generate-bills' reason on a closed period. */
-export const GENERATE_CLOSED_REASON = "Bills on a closed period are regenerated one bill at a time.";
+export const GENERATE_CLOSED_REASON = "Bills cannot be generated in a closed period.";
 
 /**
  * record-usage's reasons: the usage route's own copy
@@ -250,16 +253,38 @@ export async function generateBillsAvailable(req: SurfaceRequest, ids: string[])
   );
 }
 
-/** regenerate-bill: any bill but a refunded one. */
+/**
+ * Why the regenerate route would refuse this bill, in its order
+ * (src/app/api/billing-line-items/[lineItemId]/regenerate/route.ts), or null.
+ * The paid-bill acknowledgement is not a refusal: prepare asks for it.
+ */
+function regenerateRefusal(bill: { payment_status: string; invoice_number: string | null }, periodStatus: string): Refusal | null {
+  if (periodStatus !== "draft") return BILL_REFUSALS.closed;
+  if (bill.invoice_number !== null) return BILL_REFUSALS.invoiced;
+  if (bill.payment_status === "refunded") return BILL_REFUSALS.refunded;
+  return null;
+}
+
+/** regenerate-bill: a bill in a draft, not invoiced and not refunded. */
 export async function regenerateBillAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
-  const { data, error } = await req.supabase.from("billing_line_items").select("id, payment_status").in("id", ids);
+  const { data, error } = await req.supabase
+    .from("billing_line_items")
+    .select("id, payment_status, invoice_number, billing_periods(status)")
+    .in("id", ids);
   if (error) throw new Error("billing.regenerate-bill: availability not read");
-  const status = new Map(((data ?? []) as { id: string; payment_status: string }[]).map((b) => [b.id, b.payment_status]));
+  type Row = {
+    id: string;
+    payment_status: string;
+    invoice_number: string | null;
+    billing_periods: { status: string } | { status: string }[] | null;
+  };
+  const byId = new Map(((data ?? []) as Row[]).map((b) => [b.id, b]));
   return Object.fromEntries(
     ids.map((id): [string, true | string] => {
-      const s = status.get(id);
-      if (s === undefined) return [id, BILL_REFUSALS.notFound.message];
-      return [id, s === "refunded" ? BILL_REFUSALS.refunded.message : true];
+      const bill = byId.get(id);
+      const period = one(bill?.billing_periods);
+      if (!bill || !period) return [id, BILL_REFUSALS.notFound.message];
+      return [id, regenerateRefusal({ payment_status: bill.payment_status, invoice_number: bill.invoice_number ?? null }, period.status)?.message ?? true];
     }),
   );
 }
@@ -319,6 +344,7 @@ type BillForPrepare = {
   id: string;
   total_amount: number | string;
   payment_status: PaymentStatus;
+  invoice_number?: string | null;
   tenants: { display_name: string } | { display_name: string }[] | null;
   billing_periods:
     | { start_date: string; end_date: string; status?: string; microgrids: { currency: string | null } | { currency: string | null }[] | null }
@@ -347,10 +373,11 @@ export const REGENERATE_PAID_LABEL =
 
 /**
  * billing.regenerate-bill's confirmation: whose bill, its current total and
- * payment status; for a paid bill, the legacy dialog's warning as an
+ * payment status, and for a paid bill the legacy dialog's warning as an
  * acknowledgement to tick, which the route requires
- * (REGENERATE_PAID_ACKNOWLEDGEMENT); and a closed period's warning. It
- * shows no new total: the read-only preview re-pins a draft period's tariff,
+ * (REGENERATE_PAID_ACKNOWLEDGEMENT). A bill in a closed period, an invoiced
+ * bill and a refunded one are refused, as the route refuses them. It shows
+ * no new total: the read-only preview re-pins a draft period's tariff,
  * which a prepare must not do. The route answers with the previous and new
  * totals, which the host shows as the action's result.
  */
@@ -361,13 +388,12 @@ export async function prepareRegenerateBill(
   const read = await readBill(
     req,
     input.params.lineItemId,
-    "id, total_amount, payment_status, tenants(display_name), billing_periods(start_date, end_date, status, microgrids(currency))",
+    "id, total_amount, payment_status, invoice_number, tenants(display_name), billing_periods(start_date, end_date, status, microgrids(currency))",
   );
   if (!read.ok) return read;
   const { bill, period, currency, facts } = read;
-  if (bill.payment_status === "refunded") return BILL_REFUSALS.refunded;
-  const warnings: string[] = [];
-  if (period.status === "closed") warnings.push("Regenerating writes an audit-log revision; the period stays closed.");
+  const refused = regenerateRefusal({ payment_status: bill.payment_status, invoice_number: bill.invoice_number ?? null }, period.status ?? "");
+  if (refused) return refused;
   const acknowledgements = bill.payment_status === "paid" ? [{ id: REGENERATE_PAID_ACKNOWLEDGEMENT, label: REGENERATE_PAID_LABEL }] : [];
   return {
     ok: true,
@@ -379,7 +405,7 @@ export async function prepareRegenerateBill(
         { label: "Current total", value: req.fmt.money(Number(bill.total_amount), currency) },
         { label: "Payment", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
       ],
-      warnings,
+      warnings: [],
       acknowledgements,
     },
   };

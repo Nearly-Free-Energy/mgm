@@ -22,6 +22,7 @@ import {
   LineItemUsageBody,
   REGENERATE_BILL_BODY_VERSION,
   REGENERATE_PAID_ACKNOWLEDGEMENT,
+  REGENERATE_REFUSAL_COPY,
   RegenerateBillBody,
 } from "../../schemas";
 
@@ -252,17 +253,48 @@ describe("availability", () => {
     expect(calls).toEqual([{ table: "billing_periods", ops: [["select", ["id, status"]], ["in", ["id", [PERIOD, CLOSED, GONE]]]] }]);
   });
 
-  it("offers regenerating any bill but a refunded one", async () => {
-    const REFUNDED = "e7100000-0000-4000-8005-0000000000c2";
+  it("offers regenerating a bill in a draft that is neither invoiced nor refunded, in one read", async () => {
+    const id = (n: number) => `e7100000-0000-4000-8005-0000000000c${n}`;
+    const draft = { status: "draft" };
+    const closed = { status: "closed" };
     const { client, calls } = tableClient({
-      billing_line_items: { data: [{ id: BILL, payment_status: "paid" }, { id: REFUNDED, payment_status: "refunded" }] },
+      billing_line_items: {
+        data: [
+          { id: BILL, payment_status: "paid", invoice_number: null, billing_periods: draft },
+          { id: id(1), payment_status: "unpaid", invoice_number: null, billing_periods: [draft] },
+          { id: id(2), payment_status: "refunded", invoice_number: null, billing_periods: draft },
+          { id: id(3), payment_status: "unpaid", invoice_number: "EXS-2026-00001", billing_periods: draft },
+          { id: id(4), payment_status: "unpaid", invoice_number: null, billing_periods: closed },
+          // A closed period's reason comes first, then an invoice number's, then a refund's: the route's order.
+          { id: id(5), payment_status: "refunded", invoice_number: "EXS-2026-00002", billing_periods: closed },
+          { id: id(6), payment_status: "refunded", invoice_number: "EXS-2026-00003", billing_periods: draft },
+          // A bill whose period row-level security hides is not found.
+          { id: id(7), payment_status: "unpaid", invoice_number: null, billing_periods: null },
+        ],
+      },
     });
-    expect(await regenerateBillAvailable(req(client), [BILL, REFUNDED, GONE])).toEqual({
+    const ids = [BILL, ...[1, 2, 3, 4, 5, 6, 7].map(id), GONE];
+    expect(await regenerateBillAvailable(req(client), ids)).toEqual({
       [BILL]: true,
-      [REFUNDED]: BILL_REFUSALS.refunded.message,
+      [id(1)]: true,
+      [id(2)]: BILL_REFUSALS.refunded.message,
+      [id(3)]: BILL_REFUSALS.invoiced.message,
+      [id(4)]: BILL_REFUSALS.closed.message,
+      [id(5)]: BILL_REFUSALS.closed.message,
+      [id(6)]: BILL_REFUSALS.invoiced.message,
+      [id(7)]: BILL_REFUSALS.notFound.message,
       [GONE]: BILL_REFUSALS.notFound.message,
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toEqual([
+      {
+        table: "billing_line_items",
+        ops: [["select", ["id, payment_status, invoice_number, billing_periods(status)"]], ["in", ["id", ids]]],
+      },
+    ]);
+    // The route's copy.
+    expect(BILL_REFUSALS.closed.message).toBe(REGENERATE_REFUSAL_COPY.closed);
+    expect(BILL_REFUSALS.invoiced.message).toBe(REGENERATE_REFUSAL_COPY.invoiced);
+    expect(BILL_REFUSALS.refunded.message).toBe(REGENERATE_REFUSAL_COPY.refunded);
   });
 
   it("offers a usage correction where the usage route accepts one, with its copy, in two reads", async () => {
@@ -389,14 +421,14 @@ describe("preparing the period review's actions", () => {
     expect(RegenerateBillBody.parse(body)).toEqual({ readings: "edge", confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] } });
   });
 
-  it("warns before regenerating a bill in a closed period, and asks a paid one there to be acknowledged too", async () => {
-    const closed = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({}, { status: "closed" })] }).client);
-    if (!closed.ok) throw new Error(closed.message);
-    expect(closed.value.ceremony).toMatchObject({ warnings: ["Regenerating writes an audit-log revision; the period stays closed."], acknowledgements: [] });
-    const paid = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({ payment_status: "paid" }, { status: "closed" })] }).client);
-    if (!paid.ok) throw new Error(paid.message);
-    expect(paid.value.ceremony?.warnings).toEqual(["Regenerating writes an audit-log revision; the period stays closed."]);
-    expect(paid.value.ceremony?.acknowledgements.map((a) => a.id)).toEqual([REGENERATE_PAID_ACKNOWLEDGEMENT]);
+  it.each(["unpaid", "paid"])("refuses to regenerate a %s bill in a closed period, as the route does", async (payment_status) => {
+    const out = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({ payment_status }, { status: "closed" })] }).client);
+    expect(out).toMatchObject({ ok: false, status: 409, message: BILL_REFUSALS.closed.message });
+  });
+
+  it.each(["unpaid", "paid"])("refuses to regenerate an invoiced %s bill, as the route does", async (payment_status) => {
+    const out = await prepare(onBill(REGENERATE.id), tables({ bill: [billRow({ payment_status, invoice_number: "EXS-2026-00001" })] }).client);
+    expect(out).toMatchObject({ ok: false, status: 409, message: BILL_REFUSALS.invoiced.message });
   });
 
   it("refuses to regenerate a refunded bill", async () => {

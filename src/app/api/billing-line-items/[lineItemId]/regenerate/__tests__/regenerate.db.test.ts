@@ -4,9 +4,10 @@
  * composes billing for the bill's organization and regenerates that one
  * bill through the capability's audit-aware write. In a period with several
  * bills only the one asked for changes, and its audit row is written;
- * another organization's manager finds nothing (404); a refunded bill is
- * refused (409); and a paid bill is refused without the acknowledgement its
- * prepare asks for (428), with nothing written.
+ * another organization's manager finds nothing (404); a refunded bill, a
+ * bill in a closed period and an invoiced bill are refused (409); and a paid
+ * bill is refused without the acknowledgement its prepare asks for (428),
+ * with nothing written.
  *
  * Manual readings throughout, so no metering provider is read.
  *
@@ -42,6 +43,7 @@ const OTHER_COMMUNITY = "e7900000-0000-4000-8001-000000000002";
 const MICROGRID = "e7900000-0000-4000-8002-000000000001";
 const SCHEDULE = "e7900000-0000-4000-8006-000000000001";
 const DRAFT = "e7900000-0000-4000-8003-000000000001";
+const CLOSED = "e7900000-0000-4000-8003-000000000002";
 const tenant = (n: number) => `e7900000-0000-4000-8004-00000000000${n}`;
 const bill = (n: number) => `e7900000-0000-4000-8005-00000000000${n}`;
 const EMAIL = "regenerate-db-manager@test.local";
@@ -82,24 +84,25 @@ const row = (n: number, o: Record<string, unknown> = {}) => ({
   reading_source: "manual",
   payment_status: "unpaid",
   paid_at: null,
+  invoice_number: null,
   ...o,
 });
 
 type BillRow = { id: string; start_kwh: number; end_kwh: number; usage_kwh: number; total_amount: number; payment_status: string; reading_source: string };
 
-async function bills(): Promise<Map<string, BillRow>> {
+async function bills(periodId = DRAFT): Promise<Map<string, BillRow>> {
   const svc = await serviceClient();
   const { data, error } = await svc
     .from("billing_line_items")
     .select("id, start_kwh, end_kwh, usage_kwh, total_amount, payment_status, reading_source")
-    .eq("billing_period_id", DRAFT);
+    .eq("billing_period_id", periodId);
   if (error) throw new Error(`[regenerate.db] bills: ${error.message}`);
   return new Map(((data ?? []) as BillRow[]).map((b) => [b.id, { ...b, start_kwh: Number(b.start_kwh), end_kwh: Number(b.end_kwh), usage_kwh: Number(b.usage_kwh), total_amount: Number(b.total_amount) }]));
 }
 
-async function auditRows(): Promise<{ billing_line_item_id: string | null; event_type: string; details: Record<string, unknown> }[]> {
+async function auditRows(periodId = DRAFT): Promise<{ billing_line_item_id: string | null; event_type: string; details: Record<string, unknown> }[]> {
   const svc = await serviceClient();
-  const { data, error } = await svc.from("billing_audit_log").select("billing_line_item_id, event_type, details").eq("billing_period_id", DRAFT);
+  const { data, error } = await svc.from("billing_audit_log").select("billing_line_item_id, event_type, details").eq("billing_period_id", periodId);
   if (error) throw new Error(`[regenerate.db] billing_audit_log: ${error.message}`);
   return (data ?? []) as { billing_line_item_id: string | null; event_type: string; details: Record<string, unknown> }[];
 }
@@ -137,14 +140,34 @@ beforeAll(async () => {
         tax_rate: 0,
       },
     ],
-    ["tenants", [1, 2, 3, 4].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
+    ["tenants", [1, 2, 3, 4, 5, 6].map((n) => ({ id: tenant(n), microgrid_id: MICROGRID, display_name: `Unit ${n}`, primary_phone: `+25670000090${n}` }))],
     [
       "billing_periods",
-      { id: DRAFT, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", rate_schedule_id: SCHEDULE },
+      [
+        { id: DRAFT, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", rate_schedule_id: SCHEDULE },
+        {
+          id: CLOSED,
+          microgrid_id: MICROGRID,
+          start_date: "2026-09-01",
+          end_date: "2026-09-30",
+          timezone: "Africa/Kampala",
+          status: "closed",
+          closed_at: paidAt,
+          rate_schedule_id: SCHEDULE,
+        },
+      ],
     ],
     [
       "billing_line_items",
-      [row(1), row(2), row(3, { payment_status: "refunded", paid_at: paidAt }), row(4, { payment_status: "paid", paid_at: paidAt })],
+      [
+        row(1),
+        row(2),
+        row(3, { payment_status: "refunded", paid_at: paidAt }),
+        row(4, { payment_status: "paid", paid_at: paidAt }),
+        row(5, { billing_period_id: CLOSED }),
+        // Invoiced: its PDF was downloaded, which allocates the number.
+        row(6, { invoice_number: "RGN-2026-00001" }),
+      ],
     ],
   ];
   for (const [table, value] of rows) {
@@ -179,7 +202,7 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
 
     const after = await bills();
     expect(after.get(bill(1))).toMatchObject({ start_kwh: 100, end_kwh: 160, usage_kwh: 60, total_amount: 37500, reading_source: "manual", payment_status: "unpaid" });
-    for (const n of [2, 3, 4]) expect(after.get(bill(n)), `bill ${n} is unchanged`).toEqual(before.get(bill(n)));
+    for (const n of [2, 3, 4, 6]) expect(after.get(bill(n)), `bill ${n} is unchanged`).toEqual(before.get(bill(n)));
 
     // One audit row was added, for that bill.
     const auditAfter = await auditRows();
@@ -205,6 +228,28 @@ describe.skipIf(shouldSkip())("POST /api/billing-line-items/[lineItemId]/regener
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "A refunded bill cannot be regenerated.", reason: "refunded" });
     expect(await bills()).toEqual(before);
+  });
+
+  it("refuses a bill in a closed period, and writes nothing", async () => {
+    caller = manager;
+    const before = await bills(CLOSED);
+    const auditBefore = await auditRows(CLOSED);
+    const res = await regenerate(bill(5), { readings: "manual", start_kwh: 100, end_kwh: 170 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Bills in a closed period cannot be regenerated.", reason: "period_closed" });
+    expect(await bills(CLOSED)).toEqual(before);
+    expect(await auditRows(CLOSED)).toHaveLength(auditBefore.length);
+  });
+
+  it("refuses an invoiced bill, and writes nothing", async () => {
+    caller = manager;
+    const before = await bills();
+    const auditBefore = await auditRows();
+    const res = await regenerate(bill(6), { readings: "manual", start_kwh: 100, end_kwh: 170 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ reason: "invoiced" });
+    expect(await bills()).toEqual(before);
+    expect(await auditRows()).toHaveLength(auditBefore.length);
   });
 
   it("refuses a paid bill without the acknowledgement, and regenerates it with one", async () => {
