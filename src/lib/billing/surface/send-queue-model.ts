@@ -18,7 +18,14 @@
  *
  * The link is the row's `link` cell, as text a person can select, and the
  * `billing.send-queue@1` ext (./send-queue-ext.ts) carries it again for a
- * renderer that offers to copy it, with the note on readiness in full.
+ * renderer that offers to copy it, with the note on readiness in full and
+ * the line that says nothing is sent from the page.
+ *
+ * Nothing on this view sends anything: the manager copies each link and
+ * shares it, so the view is titled for its links and says so at the top
+ * (SEND_QUEUE_COPY.intro). The view id and its path (…/send) keep the name
+ * they were released under. If the view comes to send a link itself, revisit
+ * the title, the intro and the period review's link to it.
  *
  * Tenants' email addresses and phone numbers never enter the model: the
  * loader passes only whether a tenant has one.
@@ -51,7 +58,10 @@ export const SEND_QUEUE_EXT_SCHEMA = "billing.send-queue@1" as const;
  * revisit SEND_QUEUE_COPY.
  *
  * The rest are the loader's. "unchecked" is a readiness that could not be
- * read; "not_needed" a period with no bills, where readiness is not read
+ * read, getReadiness's refusal when it cannot read a plugin's state
+ * included (never "disabled": nobody said payments are off); its copy says
+ * to try again rather than whom to ask, since nothing needs configuring.
+ * "not_needed" is a period with no bills, where readiness is not read
  * because there is nothing to send, so nothing is said about it; and
  * "no_address" an installation with no public address (MGM_APP_URL) to
  * build links from.
@@ -68,6 +78,8 @@ export type SendReadiness =
 
 /** The fixed notes, per bill and on readiness. */
 export const SEND_QUEUE_COPY = {
+  /** The line at the top of the page: the view only lists links. */
+  intro: "Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.",
   paid: "Paid: no link to send.",
   refunded: "Refunded: no link to send.",
   zero: "Nothing to collect.",
@@ -143,6 +155,16 @@ export const linksOffered = (readiness: SendReadiness): boolean => readiness ===
  * the contact as present or not, without trimming): the link would only
  * lead the tenant to that refusal. If ensureCheckout stops refusing these,
  * or refuses something else a bill's own fields show, revisit.
+ *
+ * Not mirrored: ensureCheckout's refusals that read the bill's payment
+ * attempts (one needing reconciliation, isBlockedForNewCheckout, or a
+ * receipt already recorded), so such a bill still gets a link that ends in
+ * a 409. The attempts are payments' records; the only read of them a
+ * billing loader may call is listHistory (LOADER_READS in
+ * gui-surface.test.ts), one bill at a time with several queries each, on
+ * every 30-second refresh. #201's "Contribute a bill's payment attempts"
+ * owns them, and can give the queue a read of which bills checkout would
+ * refuse, or attach its view; once it does, mirror them here.
  */
 export function billNote(bill: SendBill, tenant: SendTenant): string | null {
   if (bill.payment_status === "paid") return SEND_QUEUE_COPY.paid;
@@ -173,6 +195,9 @@ export function readinessNote(readiness: SendReadiness, superAdmin: boolean): Se
       return { tone: "warning", text: SEND_QUEUE_COPY.noAddress };
   }
 }
+
+/** The view's title: the period's links, never a promise to send them. */
+export const sendQueueTitle = (period: string) => `${period} payment links`;
 
 export function buildSendQueueModel(i: SendQueueInput): LoadedModel<"collection"> {
   const { microgrid, period, fmt } = i;
@@ -224,16 +249,17 @@ export function buildSendQueueModel(i: SendQueueInput): LoadedModel<"collection"
   const empty: LoadedModel<"collection">["body"]["empty"] =
     i.tenants.length === 0
       ? { title: "No tenants configured for this microgrid." }
-      : { title: "No bills to send yet.", text: "Generate this period's bills on the period page first." };
+      : { title: "No bills yet.", text: "Generate this period's bills on the period page first." };
 
   const ext: SendQueueExtData = {
+    intro: SEND_QUEUE_COPY.intro,
     rows: rows.map((row, n) => ({ id: row.id, url: urls[n] })),
     note: readinessNote(i.readiness, i.superAdmin),
   };
 
   const subtitle = isSilent(i.readiness) ? period.timezone : SEND_QUEUE_SUBTITLES[i.readiness];
   return {
-    title: `Send ${periodName(period.start_date, period.end_date) ?? label} bills`,
+    title: sendQueueTitle(periodName(period.start_date, period.end_date) ?? label),
     ...(subtitle ? { subtitle } : {}),
     entity: { kind: "billingPeriod", id: period.id, label },
     actions: [],

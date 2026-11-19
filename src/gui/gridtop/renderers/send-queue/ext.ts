@@ -1,6 +1,7 @@
 /**
- * The part of the `billing.send-queue@1` ext this renderer reads: each
- * row's payment link and the readiness note. The host has already parsed
+ * The part of the `billing.send-queue@1` ext this renderer reads: the line
+ * saying nothing is sent from the page, each row's payment link and the
+ * readiness note. The host has already parsed
  * the ext strictly against its schema (SendQueueExt in
  * src/lib/billing/surface/send-queue-ext.ts, which a GUI package may not
  * import; billing registers it as the view's ext.zod in
@@ -19,6 +20,8 @@ export const SEND_QUEUE_EXT = "billing.send-queue@1";
 export const LINK_KEY = "link";
 
 export type SendQueueLinks = {
+  /** Shown at the top: nothing is sent from the page. */
+  intro: string;
   /** One per model row, in the same order: the link to copy, or null. */
   urls: (string | null)[];
   note: { tone: Extract<Tone, "info" | "warning">; text: string } | null;
@@ -30,7 +33,7 @@ const isObject = (v: Json | undefined): v is { [key: string]: Json } => typeof v
 export function readSendQueueExt(model: ViewModel): SendQueueLinks | null {
   if (model.kind !== "collection" || model.ext?.schema !== SEND_QUEUE_EXT) return null;
   const d = model.ext.data;
-  if (!isObject(d) || !Array.isArray(d.rows)) return null;
+  if (!isObject(d) || !Array.isArray(d.rows) || typeof d.intro !== "string") return null;
   const { rows } = model.body;
   if (d.rows.length !== rows.length) return null;
   const urls: (string | null)[] = [];
@@ -48,5 +51,5 @@ export function readSendQueueExt(model: ViewModel): SendQueueLinks | null {
     if (!isObject(d.note) || typeof d.note.text !== "string" || (d.note.tone !== "info" && d.note.tone !== "warning")) return null;
     note = { tone: d.note.tone, text: d.note.text };
   }
-  return { urls, note };
+  return { intro: d.intro, urls, note };
 }

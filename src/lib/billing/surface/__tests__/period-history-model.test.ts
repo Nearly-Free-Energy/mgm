@@ -198,7 +198,7 @@ describe("humanizeHistoryEntry", () => {
   it("clips a long tenant name in the filter's subtitle and empty state, so the model still parses", () => {
     // tenants.display_name has no length limit.
     const long = "n".repeat(5000);
-    const filter = { tenantId: TENANT, tenantName: long };
+    const filter = { tenantId: TENANT, tenantName: long, canMatch: true };
     for (const model of [build({ filter }), build({ filter, entries: [entry({ eventType: "line_item_generated", tenantName: long })] })]) {
       expect(strictParseModel(view, model)).toMatchObject({ ok: true });
       expect(model.subtitle).toContain("n".repeat(PERIOD_HISTORY_NOTE_MAX - 1) + "…");
@@ -247,7 +247,7 @@ describe("buildPeriodHistoryModel: the period and links", () => {
   });
 
   it("offers Show all and names the tenant while filtered", () => {
-    const model = build({ filter: { tenantId: TENANT, tenantName: "Unit 1" } });
+    const model = build({ filter: { tenantId: TENANT, tenantName: "Unit 1", canMatch: true } });
     expect(model.subtitle).toMatch(/ · Showing changes for Unit 1$/);
     expect(model.links).toEqual([
       { id: BACK_TO_PERIOD_LINK, label: "Back to period", href: `/microgrids/${MG}/billing/${PERIOD}` },
@@ -258,7 +258,7 @@ describe("buildPeriodHistoryModel: the period and links", () => {
   it("offers Latest changes on a later page only, keeping a valid tenant", () => {
     const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
     expect(build().links!.map((l) => l.id)).not.toContain(HISTORY_LATEST_LINK);
-    const later = build({ before, filter: { tenantId: TENANT, tenantName: "Unit 1" } });
+    const later = build({ before, filter: { tenantId: TENANT, tenantName: "Unit 1", canMatch: true } });
     expect(later.links!.find((l) => l.id === HISTORY_LATEST_LINK)).toEqual({
       id: HISTORY_LATEST_LINK,
       label: "Latest changes",
@@ -267,7 +267,7 @@ describe("buildPeriodHistoryModel: the period and links", () => {
   });
 
   it("never echoes a tenant id that is not a UUID", () => {
-    const model = build({ filter: { tenantId: null, tenantName: null }, entries: [], before: "a~x~y" });
+    const model = build({ filter: { tenantId: null, tenantName: null, canMatch: false }, entries: [], before: "a~x~y" });
     expect(model.subtitle).toMatch(/ · Showing changes for unknown tenant$/);
     expect(JSON.stringify(model)).not.toContain("tenant_id=");
     for (const href of hrefs(model)) expect(href).not.toContain("tenant_id");
@@ -278,17 +278,71 @@ describe("buildPeriodHistoryModel: the period and links", () => {
       title: "No changes recorded yet",
       text: "This period has no events. As you generate bills, close the period, or take payments, entries will appear here.",
     });
-    expect(build({ entries: [], filter: { tenantId: TENANT, tenantName: "Unit 1" } }).body.empty).toEqual({
+    expect(build({ entries: [], filter: { tenantId: TENANT, tenantName: "Unit 1", canMatch: true } }).body.empty).toEqual({
       title: "No changes recorded for Unit 1",
       text: "Other tenants on this period may have entries.",
     });
-    expect(build({ entries: [], filter: { tenantId: TENANT, tenantName: null } }).body.empty.title).toBe("No changes recorded for unknown tenant");
+    expect(build({ entries: [], filter: { tenantId: TENANT, tenantName: null, canMatch: true } }).body.empty.title).toBe("No changes recorded for unknown tenant");
     expect(build({ entries: [], before: "a~x~y" }).body.empty).toEqual({ title: "No earlier changes recorded" });
+  });
+
+  it("says a filtered later page that comes back empty has no earlier changes, not none at all", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    expect(build({ entries: [], before, filter: { tenantId: TENANT, tenantName: "Unit 1", canMatch: true } }).body.empty).toEqual({
+      title: "No earlier changes recorded for Unit 1",
+    });
+    expect(build({ entries: [], before, filter: { tenantId: TENANT, tenantName: null, canMatch: true } }).body.empty).toEqual({
+      title: "No earlier changes recorded for unknown tenant",
+    });
+  });
+
+  it("treats a page filtered by a tenant id that is not a UUID as the first, whatever its cursor", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    const model = build({ entries: [], before, filter: { tenantId: null, tenantName: null, canMatch: false } });
+    // Show all and Latest changes would both be the unfiltered history: only Show all is offered.
+    expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+      [BACK_TO_PERIOD_LINK, `/microgrids/${MG}/billing/${PERIOD}`],
+      [HISTORY_SHOW_ALL_LINK, `/microgrids/${MG}/billing/${PERIOD}/history`],
+    ]);
+    expect(new Set(model.links!.map((l) => l.href)).size).toBe(model.links!.length);
+    expect(model.body.empty).toEqual({ title: "No changes recorded for unknown tenant", text: "Other tenants on this period may have entries." });
+  });
+
+  it("treats a page filtered by a tenant that can match nothing as the first, whatever its cursor", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    // A tenant of another microgrid (no name) and a tenant of this one with no bill in the period.
+    for (const [tenantName, label] of [
+      [null, "unknown tenant"],
+      ["Unit 1", "Unit 1"],
+    ] as const) {
+      const model = build({ entries: [], before, filter: { tenantId: TENANT, tenantName, canMatch: false } });
+      expect(model.links!.map((l) => [l.id, l.href])).toEqual([
+        [BACK_TO_PERIOD_LINK, `/microgrids/${MG}/billing/${PERIOD}`],
+        [HISTORY_SHOW_ALL_LINK, `/microgrids/${MG}/billing/${PERIOD}/history`],
+      ]);
+      expect(model.body.empty).toEqual({ title: `No changes recorded for ${label}`, text: "Other tenants on this period may have entries." });
+    }
+  });
+
+  it("never offers two of its own links to the same place", () => {
+    const before = encodeCursor({ source: "a", id: uuid(9), at: "2026-10-31T21:00:00+00:00" });
+    for (const filter of [
+      null,
+      { tenantId: TENANT, tenantName: "Unit 1", canMatch: true },
+      { tenantId: TENANT, tenantName: null, canMatch: true },
+      { tenantId: TENANT, tenantName: null, canMatch: false },
+      { tenantId: null, tenantName: null, canMatch: false },
+    ]) {
+      for (const b of [null, before]) {
+        const hrefs = build({ filter, before: b }).links!.map((l) => l.href);
+        expect(new Set(hrefs).size, JSON.stringify({ filter, before: b })).toBe(hrefs.length);
+      }
+    }
   });
 
   it("links the next page with both parameters, encoded", () => {
     const next = encodeCursor({ source: "p", id: uuid(3), at: "2026-10-31T21:00:00.5+03:00" });
-    const model = build({ next, filter: { tenantId: TENANT, tenantName: "Unit 1" } });
+    const model = build({ next, filter: { tenantId: TENANT, tenantName: "Unit 1", canMatch: true } });
     expect(model.body.next).toMatch(new RegExp(`^/microgrids/${MG}/billing/${PERIOD}/history\\?tenant_id=${TENANT}&before=[^&#]+$`));
     // The cursor's "+" and ":" are encoded, so the offset survives the URL.
     expect(model.body.next).not.toContain("+03:00");

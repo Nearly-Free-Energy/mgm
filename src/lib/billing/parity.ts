@@ -83,6 +83,13 @@ export type ParityLink = {
   /** A page under src/app/(gui) or a GET route under src/app/api. */
   href: string;
   download?: true;
+  /**
+   * What in the view's model carries it: the LinkRef with this id (in the
+   * model's links or a row's), a row's own href ("row"), or an EntityRef's
+   * href ("entity"). Never the host's trail, which links every view's
+   * parents. Unset while nothing is decided: the row stays pending.
+   */
+  via?: { link: string } | "row" | "entity";
 };
 
 /**
@@ -155,7 +162,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "periods",
     control: "A period in the period picker; View on a period row",
     legacy: "src/components/BillingPeriodList.tsx, src/components/ui/period-picker.tsx",
-    replacedBy: { kind: "link", view: "billing.periods", href: "/microgrids/[id]/billing/[periodId]" },
+    replacedBy: { kind: "link", view: "billing.periods", href: "/microgrids/[id]/billing/[periodId]", via: "row" },
     pr: PERIODS,
   },
   {
@@ -363,6 +370,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
       href: "/api/billing-line-items/[lineItemId]/pdf",
       download: true,
+      via: { link: "billing.download-bill" },
     },
     pr: REVIEW,
     note: "The GET allocates an invoice number on a bill's first download (the pdf route), so this link writes once, as the legacy menu's download does.",
@@ -377,6 +385,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
       href: "/api/billing-periods/[periodId]/export-csv",
       download: true,
+      via: { link: "billing.export-csv" },
     },
     pr: REVIEW,
   },
@@ -385,7 +394,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "View history in the period header; row menu View history (filtered to the tenant)",
     legacy: "src/components/BillingTable.tsx, src/components/billing/row-actions-menu.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/billing/[periodId]/history" },
+    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.view-history" } },
     pr: REVIEW,
   },
   {
@@ -393,7 +402,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Row menu View tenant",
     legacy: "src/components/billing/row-actions-menu.tsx",
-    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/setup/tenants/[tenantId]" },
+    replacedBy: { kind: "link", view: "billing.period-review", href: "/microgrids/[id]/setup/tenants/[tenantId]", via: "entity" },
     pr: REVIEW,
     note: "Carried as each row's tenant EntityRef (the tenant cell and row.related), with the href the host gives a tenant, not as a LinkRef: the page is community management's, and a view may link only to its own plugin's pages (gui-surface.test.ts check 7).",
   },
@@ -403,8 +412,8 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     control: "Go to Payment tab, in the banner shown when online payments are not set up",
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "link", view: "payments.community-payment", href: "/communities/[id]/payment" },
-    pr: "unscheduled",
-    note: "The send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but the Payment page is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. It waits for payments to contribute that page as a view (payments.community-payment, which does not exist yet), or a view attached to billing.send-queue that carries the link. The bill attempts pull request left it: the banner's main case is Payments off, when a payments tab is hidden, and an attached view is given only its parent's path segments, which on the send queue name no community.",
+    pr: ATTEMPTS,
+    note: "Decided in review of the send queue (#216): the payments plugin contributes it with a bill's payment attempts, either as its view of the community's Payment page (payments.community-payment) carrying this link, or as a view of its own attached to billing.send-queue that carries the setup link. The bill attempts pull request has not built it yet, and found two obstacles: the banner's main case is Payments off, when a payments tab is hidden, and an attached view is given only its parent's path segments, which on the send queue name no community. Until then the send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but cannot link the page: it is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. If the attached view is the one built, its id replaces payments.community-payment here.",
   },
   {
     id: "close-period",
@@ -522,7 +531,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/BillingTable.tsx",
     replacedBy: { kind: "copy", view: "billing.period-review", what: "each cell's bare figure, and each total" },
     pr: GRIDTOP,
-    note: "Copies the figures from the billing.period-review@1 ext: kWh to 3 dp as the CSV export writes it, and money in the currency's minor unit, which matches the CSV (csv-export.ts rounds every amount to a whole number) only for a currency with none, such as UGX; if the CSV's rounding changes, revisit. the shown kWh stays at 1 dp until the model's precision follow-up.",
+    note: "Copies the figures from the billing.period-review@1 ext: kWh to 3 dp as the CSV export writes it, and money in the currency's minor unit, which matches the CSV (csv-export.ts rounds every amount to a whole number) only for a currency with none, such as UGX; if the CSV's rounding changes, revisit. A bill's readings and usage are shown to 3 dp, as legacy shows them (`digits` on Fmt.energy); the totals to 1 dp, as legacy's grand total row.",
   },
   {
     id: "copy-payment-link",
@@ -540,17 +549,17 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-history",
     control: "Back to period",
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
-    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]" },
+    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]", via: { link: "billing.back-to-period" } },
     pr: HISTORY,
-    note: "LinkRef billing.back-to-period; the host's trail also links the period.",
+    note: "The host's trail also links the period; it does not count.",
   },
   {
     id: "history-show-all",
     screen: "period-history",
     control: "Show all, when the history is filtered to one tenant",
     legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
-    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history" },
+    replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.history-show-all" } },
     pr: HISTORY,
-    note: "LinkRef billing.history-show-all, offered while the view is filtered by tenant_id.",
+    note: "Offered while the view is filtered by tenant_id. Latest changes (billing.history-latest), on a later page, has the same path and does not count.",
   },
 ];

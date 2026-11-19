@@ -203,7 +203,7 @@ describe("buildSendQueueModel: readiness", () => {
 describe("buildSendQueueModel: the period", () => {
   it("titles the period by name, with its links and no actions", () => {
     const model = build();
-    expect(model.title).toBe("Send October 2026 bills");
+    expect(model.title).toBe("October 2026 payment links");
     expect(model.entity).toEqual({ kind: "billingPeriod", id: PERIOD, label: "1 Oct 2026 – 31 Oct 2026" });
     expect(model.actions).toEqual([]);
     expect(model.links).toEqual([
@@ -212,14 +212,23 @@ describe("buildSendQueueModel: the period", () => {
     ]);
   });
 
+  it("promises no send: the title names the links, and the ext says nothing is sent from the page", () => {
+    const model = build();
+    expect(model.title).not.toMatch(/\bsend/i);
+    expect(SendQueueExt.parse(model.ext!.data).intro).toBe("Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.");
+    // Whatever the readiness, and with no bills.
+    for (const readiness of READINESS) expect(SendQueueExt.parse(build({ readiness }).ext!.data).intro).toBe(SEND_QUEUE_COPY.intro);
+    expect(SendQueueExt.parse(build({ bills: [] }).ext!.data).intro).toBe(SEND_QUEUE_COPY.intro);
+  });
+
   it("names a one-day period by its day", () => {
-    expect(build({ period: { ...input().period, start_date: "2026-10-05", end_date: "2026-10-05" } }).title).toBe("Send 5 October 2026 bills");
+    expect(build({ period: { ...input().period, start_date: "2026-10-05", end_date: "2026-10-05" } }).title).toBe("5 October 2026 payment links");
   });
 
   it("shows an empty state with no bills and with no tenants", () => {
     expect(build({ bills: [] }).body).toMatchObject({
       rows: [],
-      empty: { title: "No bills to send yet.", text: "Generate this period's bills on the period page first." },
+      empty: { title: "No bills yet.", text: "Generate this period's bills on the period page first." },
     });
     expect(build({ tenants: [], bills: [] }).body.empty).toEqual({ title: "No tenants configured for this microgrid." });
   });

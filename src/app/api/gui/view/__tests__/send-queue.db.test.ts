@@ -72,11 +72,11 @@ type Model = {
   title: string;
   subtitle?: string;
   notice?: { text: string };
-  links: { id: string; href: string }[];
+  links: { id: string; label?: string; href: string }[];
   trail: { label: string }[];
   actions: unknown[];
   body: { rows: Row[]; empty: { title: string } };
-  ext: { schema: string; data: { rows: { id: string; url: string | null }[]; note: { tone: string; text: string } | null } };
+  ext: { schema: string; data: { intro: string; rows: { id: string; url: string | null }[]; note: { tone: string; text: string } | null } };
 };
 const loaded = async (path: string): Promise<Model> => {
   const res = await view(path);
@@ -243,7 +243,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
       view: "billing.send-queue",
       kind: "collection",
       org: ORG,
-      title: "Send October 2026 bills",
+      title: "October 2026 payment links",
       subtitle: "Africa/Kampala",
       entity: { kind: "billingPeriod", id: DRAFT },
       live: { refreshSeconds: 30, staleAfterSeconds: 120 },
@@ -265,6 +265,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
     expect(model.ext.schema).toBe("billing.send-queue@1");
     expect(model.ext.data.rows).toEqual(rows.map((r) => ({ id: r.id, url: r.cells.link.t === "text" ? r.cells.link.text : null })));
     expect(model.ext.data.note).toBeNull();
+    // And says that nothing is sent from the page.
+    expect(model.ext.data.intro).toBe("Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.");
     // No actions anywhere; each bill's PDF; the period's own links; the trail.
     expect(model.actions).toEqual([]);
     expect(rows.every((r) => r.actions.length === 0)).toBe(true);
@@ -281,7 +283,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
   it("links a closed period's unpaid bill too", async () => {
     caller = manager;
     const model = await loaded(href(CLOSED));
-    expect(model.title).toBe("Send September 2026 bills");
+    expect(model.title).toBe("September 2026 payment links");
     expect(model.body.rows.map((r) => r.cells.link)).toEqual([{ t: "text", text: link(bill(11)) }]);
   });
 
@@ -354,7 +356,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
     caller = manager;
     const model = await loaded(href(EMPTY));
     expect(model.body.rows).toEqual([]);
-    expect(model.body.empty.title).toBe("No bills to send yet.");
+    expect(model.body.empty.title).toBe("No bills yet.");
     // Readiness is not read with nothing to send, and the queue does not claim it could not be.
     expect(model.subtitle).toBe("Africa/Kampala");
     expect(model.ext.data.note).toBeNull();
@@ -395,10 +397,10 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's send queue", () => 
     }
   });
 
-  it("is linked from the period review as Send bills", async () => {
+  it("is linked from the period review as Payment links", async () => {
     caller = manager;
     const review = await loaded(`/microgrids/${MICROGRID}/billing/${DRAFT}`);
-    expect(review.links.find((l) => l.id === "billing.send-queue")).toMatchObject({ href: href(DRAFT) });
+    expect(review.links.find((l) => l.id === "billing.send-queue")).toMatchObject({ label: "Payment links", href: href(DRAFT) });
   });
 
   it("called nothing but the local Supabase", () => {

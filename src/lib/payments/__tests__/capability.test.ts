@@ -104,6 +104,61 @@ describe("PaymentsCapability access gates", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
+  // docs/payments-rollout.md tells operators what a link preview's checkout
+  // does once the bill's total changes. The attempt below is the state
+  // `fn_payment_bill_revision` (20261010202643_payments_integrity.sql) leaves
+  // an open checkout in; if that trigger stops flagging open checkouts, or
+  // ensureCheckout stops refusing on them, revisit that paragraph.
+  it("refuses a checkout after the total changes under one a link preview opened", async () => {
+    const repo = baseRepo({
+      loadBillSnapshot: async () => ({
+        lineItemId: LINE_ITEM,
+        orgId: ORG,
+        communityId: COMMUNITY,
+        totalAmount: 5500,
+        currency: "UGX",
+        updatedAt: "2026-11-19T10:00:00.000Z",
+        paymentStatus: "unpaid",
+        periodStatus: "draft",
+        contactEmail: "aaron@example.com",
+        contactPhone: null,
+        contactFirstName: "Aaron",
+        contactLastName: "NFE",
+        periodLabel: "2026-09-01 – 2026-09-30",
+      }),
+      listAttemptsForLineItem: async () => [
+        {
+          id: "66666666-6666-6666-6666-666666666666",
+          org_id: ORG,
+          line_item_id: LINE_ITEM,
+          community_id: COMMUNITY,
+          merchant_account_id: "acc-1",
+          merchant_account_version: 1,
+          amount: 5000,
+          currency: "UGX",
+          bill_revision_total: 5000,
+          bill_revision_updated_at: "2026-11-18T10:00:00.000Z",
+          merchant_reference: "INV-X-2",
+          provider_tracking_id: "TRACK-2",
+          provider: "pesapal",
+          status: "needs_reconciliation",
+          checkout_url: "https://pay.example/checkout/2",
+          failure_code: "bill_revised",
+          failure_message: "Bill amount changed after checkout was created",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    const factory = providers();
+    const forAccount = vi.spyOn(factory, "forAccount");
+    const cap = new PaymentsCapability(repo, scope(), factory, () => true, (p) => p);
+    const createSpy = vi.spyOn(repo, "createAttempt");
+    const checkout = await cap.ensureCheckout(LINE_ITEM);
+    expect(checkout).toMatchObject({ ok: false, status: 409, code: "payments_needs_reconciliation" });
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(forAccount).not.toHaveBeenCalled();
+  });
+
   it("errors instead of falling back on a broken override", async () => {
     const repo = baseRepo({
       resolveMerchantAccount: async () => ({

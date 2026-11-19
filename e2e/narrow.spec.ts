@@ -83,7 +83,8 @@ test("a period's send queue renders at 360 px", async ({ page }) => {
   // opened or copied here (copying is covered by the renderer's unit test).
   const watch = await watchPage(page);
   await page.goto(`/microgrids/${microgridId}/billing/${periodId}/send`);
-  await expect(page.getByRole("heading", { name: "Send October 2026 bills" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "October 2026 payment links" })).toBeVisible();
+  await expect(page.getByText("Nothing is sent from this page. Copy each bill's link and share it with its tenant yourself.")).toBeVisible();
   for (const n of [1, 2]) await expect(page.getByText(`Smoke tenant ${n} with a long display name`, { exact: true })).toBeVisible();
   await expect(page.getByText("Payment links use a sandbox account: payments made through them are tests.")).toBeVisible();
   // The bill with usage has a link to copy; the zero bill has nothing to collect.

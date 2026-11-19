@@ -40,6 +40,7 @@ import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { composePayments, defaultAppUrl } from "@/lib/payments/compose";
 import { stablePaymentLinkPath } from "@/lib/payments/payment-link";
 import type { PaymentStatus } from "@/lib/payments/state";
+import { microgridPublicColumns } from "@/lib/types/microgrid-columns";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import { PERIOD_REVIEW_REFUSALS } from "./period-review";
 import { PERIOD_REVIEW_MAX_ROWS } from "./period-review-model";
@@ -49,7 +50,7 @@ type Refusal = Extract<Loaded<never>, { ok: false }>;
 
 export const SEND_QUEUE_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This billing period could not be found." },
-  unavailable: { ok: false, status: 503, message: "Could not load this period's bills to send right now. Try again shortly." },
+  unavailable: { ok: false, status: 503, message: "Could not load this period's payment links right now. Try again shortly." },
   // The period review's copy: the legacy period page shows no period
   // without a pinned tariff, and so offers none of its payment links.
   noTariff: PERIOD_REVIEW_REFUSALS.noTariff,
@@ -103,7 +104,7 @@ export async function loadSendQueue(req: SurfaceRequest): Promise<Loaded<LoadedM
       .eq("id", req.params.periodId)
       .eq("microgrid_id", microgridId)
       .maybeSingle<PeriodRow>(),
-    req.supabase.from("microgrids").select("id, name, currency, community_id").eq("id", microgridId).maybeSingle<MicrogridRow>(),
+    req.supabase.from("microgrids").select(microgridPublicColumns("id", "name", "currency", "community_id")).eq("id", microgridId).maybeSingle<MicrogridRow>(),
   ]);
   if (periodRes.error || microgridRes.error) return SEND_QUEUE_REFUSALS.unavailable;
   const period = periodRes.data;
