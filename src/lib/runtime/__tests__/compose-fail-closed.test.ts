@@ -14,7 +14,11 @@
  *
  * The payments composers and `composeBillingReview` read no plugin state at
  * compose time, so only the load failure applies to them; if one starts to,
- * add it to COMPOSERS.
+ * add it to COMPOSERS. `composeTenantApp` is not here either: it asks the
+ * gate itself (`checkGate`) rather than repeating its policy, and has no
+ * write to re-check, so src/lib/tenant-app/__tests__/compose.test.ts compares
+ * its refusals with the gate's and covers its load failure. If it starts
+ * reading plugin state another way, add it to COMPOSERS.
  *
  * The plugin-state reads run for real, through supabase-js, against a fetch
  * that answers as each case says. That matters for the 503: supabase-js

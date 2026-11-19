@@ -83,6 +83,7 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
   composeCommunityManagement: ["community-management"],
   composeMetering: ["metering"],
   composeBilling: ["billing"],
+  composeTenantApp: ["tenant-app"],
 };
 // Only composers that refuse a disabled plugin belong above, because a call
 // to one counts as gating the route. This is the rule in

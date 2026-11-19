@@ -10,7 +10,7 @@ import { ORGANIZATION_DIRECTORY_SURFACE } from "@/lib/organization-directory/sur
 import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { MGM_BUNDLED_PLUGINS, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { Manifest, NavEntry } from "../../../contract";
-import { buildManifestModel, type ManifestInput } from "../../shared/manifest-model";
+import { buildManifestModel, buildTenantManifestModel, type ManifestInput } from "../../shared/manifest-model";
 
 const mocks = vi.hoisted(() => ({
   getManifest: vi.fn(),
@@ -24,8 +24,9 @@ vi.mock("next/headers", () => ({
   }),
 }));
 vi.mock("../manifest", () => ({ getManifest: mocks.getManifest }));
-// Pages that need a community and a microgrid, in either order, which no released page does yet.
-const PAIR_ROUTES = [/^\/communities\/[^/]+\/microgrids\/[^/]+$/, /^\/microgrids\/[^/]+\/communities\/[^/]+$/];
+// Pages that need a community and a microgrid, in either order, which no
+// released page does yet, and the tenant home, which RFC mgm#197's PR 5 releases.
+const PAIR_ROUTES = [/^\/communities\/[^/]+\/microgrids\/[^/]+$/, /^\/microgrids\/[^/]+\/communities\/[^/]+$/, /^\/my$/];
 vi.mock("@/lib/mgm/released-routes", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/mgm/released-routes")>();
   return { isReleasedRoute: (path: string) => PAIR_ROUTES.some((r) => r.test(path)) || actual.isReleasedRoute(path) };
@@ -59,6 +60,8 @@ function manifest(o: Partial<Pick<ManifestInput, "communities" | "microgrids" | 
     gui: "gridtop",
     user: { name: null, email: "manager@example.test" },
     superAdmin: o.superAdmin ?? false,
+    staff: true,
+    tenant: false,
     org: { id: ORG, name: "Org One" },
     orgs: [{ id: ORG, name: "Org One" }],
     gate: o.gate ?? ALL_ON,
@@ -277,6 +280,40 @@ describe("goTarget", () => {
     expect(goTarget(m, "test.entry")).toMatchObject({ kind: "none" });
     const plain = withEntry(manifest(), { href: "/unreleased", needs: [] });
     expect(goTarget(plain, "test.entry")).toEqual({ kind: "not-found" });
+  });
+});
+
+describe("goTarget in a tenant manifest (RFC mgm#197 § 4)", () => {
+  const UNIT_A = "e7400000-0000-4000-8000-00000000000a";
+  const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
+  const tenantHome = {
+    plugin: "tenant-app" as const,
+    def: { id: "tenant.home" as const, title: "My home", icon: "tenants" as const, group: "operate" as const, order: 80, view: "tenant.home" as const, audience: "tenant" as const },
+  };
+  const tenantManifest = (units: string[]) =>
+    buildTenantManifestModel({
+      release: null,
+      locale: "en",
+      now: new Date(0),
+      gui: "gridtop",
+      user: { name: null, email: "tenant@example.test" },
+      units: units.map((id, i) => ({ id, label: `Unit ${i + 1}`, timezone: null })),
+      current: null,
+      tenantGate: ALL_ON,
+      nav: [...(SURFACES.flatMap((s) => (s.nav ?? []).map((def) => ({ plugin: s.plugin, def }))) as ManifestInput["nav"]), tenantHome],
+      views: [{ plugin: "tenant-app", def: { id: "tenant.home", path: "/my", params: {} } }],
+    });
+
+  it("sends a tenant to their home, which asks a person with two units to choose, with no ?org= kept", () => {
+    expect(goTarget(tenantManifest([UNIT_A]), "tenant.home")).toEqual({ kind: "redirect", href: "/my" });
+    expect(goTarget(tenantManifest([UNIT_A, UNIT_B]), "tenant.home", UNIT_A)).toEqual({ kind: "redirect", href: "/my" });
+  });
+
+  it("answers not found for every staff entry", () => {
+    const m = tenantManifest([UNIT_A]);
+    for (const id of ["org.today", "billing.periods", "metering.operations", "community.microgrids", "org.users"]) {
+      expect(goTarget(m, id), id).toEqual({ kind: "not-found" });
+    }
   });
 });
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { Contribution } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
+import { TENANT_APP_SURFACE } from "@/lib/tenant-app/surface";
 import {
   SurfaceContributionError,
   contributionSchema,
@@ -231,6 +232,59 @@ describe("parseContribution", () => {
   it.each(cases)("refuses %s", (_rule, change, path, message) => {
     const isSms = path[0] === "entities";
     const error = refusal(change, CATALOG, isSms ? SMS_SURFACE : BILLING_SURFACE);
+    expect(error.issues).toContainEqual(expect.objectContaining(message === undefined ? { path } : { path, message }));
+  });
+});
+
+describe("tenant views and the tenant audience", () => {
+  it("accepts the tenant app's contribution, and an explicit staff audience", () => {
+    expect(parseContribution(TENANT_APP_SURFACE, CATALOG).alias).toBe("tenant");
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.nav[0].audience = "staff";
+    expect(() => parseContribution(c, CATALOG)).not.toThrow();
+  });
+
+  const legacyMy = { id: "tenant.legacy", title: "Mine", icon: "tenants", group: "operate", order: 1, href: "/my", needs: [], legacy: true };
+  // [rule, change, path, message (exact; omitted where zod writes it)]
+  const cases: [string, (c: Draft) => void, PropertyKey[], string?][] = [
+    [
+      "a tenant view with a path segment",
+      (c) => Object.assign(c.views[0], { path: "/my/[id]", params: { id: "tenant" } }),
+      ["views", 0, "params"],
+      "a tenant view's path has no segments: its unit is the caller's",
+    ],
+    [
+      "an attached tenant view",
+      (c) => (c.views[0].attach = { to: "tenant", order: 1, hint: "tab" }),
+      ["views", 0, "attach"],
+      "a tenant view is never attached to another view",
+    ],
+    ["a tenant view an assistant may read", (c) => (c.views[0].agent = "read"), ["views", 0, "agent"], "a tenant view cannot be read by an assistant"],
+    [
+      "a staff entry, by default, for a tenant view",
+      (c) => delete c.nav[0].audience,
+      ["nav", 0, "audience"],
+      "a nav entry that leads to a tenant view is for the tenant audience",
+    ],
+    [
+      "a super-admin entry for a tenant view",
+      (c) => (c.nav[0].audience = "super-admin"),
+      ["nav", 0, "audience"],
+      "a nav entry that leads to a tenant view is for the tenant audience",
+    ],
+    [
+      "a staff legacy entry on a tenant view's path",
+      (c) => c.nav.push(legacyMy),
+      ["nav", 1, "audience"],
+      "a nav entry that leads to a tenant view is for the tenant audience",
+    ],
+    ["a tenant entry for a view that is not a tenant view", (c) => delete c.views[0].scope, ["nav", 0, "audience"], "a tenant nav entry names a tenant view"],
+    ["a tenant entry on a legacy href", (c) => (c.nav[0] = { ...legacyMy, audience: "tenant" }), ["nav", 0, "audience"], "a tenant nav entry names a tenant view"],
+    ["an audience outside the enum", (c) => (c.nav[0].audience = "tenants"), ["nav", 0, "audience"]],
+  ];
+
+  it.each(cases)("refuses %s", (_rule, change, path, message) => {
+    const error = refusal(change, CATALOG, TENANT_APP_SURFACE);
     expect(error.issues).toContainEqual(expect.objectContaining(message === undefined ? { path } : { path, message }));
   });
 });

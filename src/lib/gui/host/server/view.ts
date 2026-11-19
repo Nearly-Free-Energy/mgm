@@ -7,17 +7,20 @@ import "server-only";
  * plugin gate (./gate-state.ts), the loader runs on its own client of the
  * person's session (./access.ts), and what it returns is strictly parsed
  * (./parse.ts) before actions are resolved (./merge.ts) and host fields
- * are filled.
+ * are filled. A tenant view (scope "tenant") is about one of the person's
+ * own units instead, and is served by dispatchTenantView.
  *
  * A refusal carries a status, a code and fixed copy. Nothing a loader
  * returned or threw reaches it, except a loader's own refusal message.
  */
+import { rolesIncludeStaff } from "@/lib/auth/access";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { GateDecision } from "@/lib/runtime/gate";
 import type { EntityKind, Href, ModelBase, ViewKind, ViewModel } from "../../contract";
-import type { Loaded, LoadedModel } from "../../surface";
+import type { Loaded, LoadedModel, ViewDef } from "../../surface";
 import { fillPath } from "../shared/merge-actions";
-import { installationRequest, requireIssued, surfaceRequest, type HostContext } from "./access";
+import { chooseTenantUnit, TENANT_UNIT_PARAM } from "../shared/tenant-units";
+import { installationRequest, requireIssued, surfaceRequest, tenantRequest, type HostContext } from "./access";
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate, type PluginGate } from "./gate-state";
 import { isPageHref, parseHref } from "./hrefs";
@@ -35,6 +38,18 @@ const fail = (status: number, code: string, message: string): HostFailure => ({ 
 const NOT_FOUND = fail(404, "gui_not_found", "This page could not be found.");
 const OUTPUT_INVALID = fail(500, "gui_output_invalid", "This view could not be shown.");
 const VIEW_FAILED = fail(500, "gui_view_failed", "This view could not be loaded.");
+/**
+ * A tenant view asked for by a person with several units, naming none. The
+ * page answers it with a choice of their units; the code is what tells it so.
+ */
+export const UNIT_REQUIRED = fail(400, "gui_unit_required", "Choose which of your units to show.");
+/**
+ * A tenant view whose plugin is off for the unit's organization. RFC mgm#197
+ * § 3 shows such a tenant the page an unreleased path gets, not a setting
+ * they cannot change, so the status is that page's 404 (src/middleware.ts)
+ * and the code tells the page to draw it.
+ */
+export const NOT_RELEASED = fail(404, "gui_not_released", "This page is not part of the MGM release installed here.");
 
 /** The notice on a model with generated figures, unless the gate's notice is shown. */
 export const SYNTHETIC_NOTICE = {
@@ -101,6 +116,24 @@ function clampLive(def: RegisteredView["def"]): ModelBase<ViewKind, unknown, unk
   if (!def.live) return undefined;
   const refreshSeconds = Math.max(def.live.refreshSeconds, MIN_REFRESH_SECONDS[def.cost]);
   return { refreshSeconds, staleAfterSeconds: Math.max(def.live.staleAfterSeconds, refreshSeconds) };
+}
+
+/**
+ * What a loader returned, as its refusal or its strictly parsed model. A
+ * malformed refusal or model is OUTPUT_INVALID, and a refusal's own message
+ * is the only text of the loader's that reaches the person.
+ */
+function checkLoaded(def: ViewDef, loaded: unknown): HostOutcome<LoadedModel<ViewKind>> {
+  if (loaded === null || typeof loaded !== "object") return OUTPUT_INVALID;
+  const out = loaded as Loaded<LoadedModel<ViewKind>>;
+  if (out.ok === false) {
+    if (!LOADER_STATUSES.has(out.status) || typeof out.message !== "string") return OUTPUT_INVALID;
+    const code = out.status === 404 ? "gui_not_found" : "gui_view_refused";
+    return fail(out.status, code, out.message.slice(0, MAX_MESSAGE));
+  }
+  if (out.ok !== true) return OUTPUT_INVALID;
+  const model = strictParseModel(def, out.model);
+  return model.ok ? model : OUTPUT_INVALID;
 }
 
 async function decide(gate: PluginGate | null, plugin: RegisteredView["plugin"]): Promise<GateDecision> {
@@ -198,6 +231,80 @@ async function embedViews<B>(ctx: HostContext, kind: ViewKind, body: B, org: str
 }
 
 /**
+ * A tenant view (RFC mgm#197 § 4) for `ctx`'s person: about one unit they
+ * rent, chosen among their own tenant rows by the `unit` parameter, or their
+ * only unit. A unit that is not theirs, and a person with no unit, get the
+ * same 404 as a page that does not exist; a person with several units who
+ * names none gets UNIT_REQUIRED, so the host can offer a choice.
+ *
+ * The host reads nothing of an organization for it: no segments resolve, no
+ * organization is chosen and the host asks no gate, since a tenant reaches
+ * neither organizations nor the gate's staff reads. The loader composes
+ * through composeTenantApp, which authorizes the unit with the caller's own
+ * session and refuses while the tenant app is off for the unit's organization
+ * (a 409 the loader passes on, which this answers with NOT_RELEASED); if a
+ * tenant view's loader ever reads without that composer, this function must
+ * ask the gate. The model has no organization, trail,
+ * attached views or actions: every action is a staff route, so none is
+ * offered, whether the loader links it or another plugin targets the view's
+ * entity. It is never loaded inside another view.
+ */
+async function dispatchTenantView(
+  ctx: HostContext,
+  view: RegisteredView,
+  def: Extract<ViewDef, { scope: "tenant" }>,
+  search: URLSearchParams,
+  depth: 0 | 1,
+): Promise<HostOutcome<ViewModel>> {
+  if (depth !== 0) return NOT_FOUND;
+  const unit = chooseTenantUnit(ctx.access.roles, search.getAll(TENANT_UNIT_PARAM));
+  if (!unit.ok) return unit.reason === "choose" ? UNIT_REQUIRED : NOT_FOUND;
+
+  let loaded: unknown;
+  try {
+    loaded = await def.load(await tenantRequest(ctx, unit.tenantId, querySearch(def.query, search)));
+  } catch {
+    console.error(`[gui] view ${def.id}: loader failed`);
+    return VIEW_FAILED;
+  }
+  const model = checkLoaded(def, loaded);
+  // A tenant view's 409 is composeTenantApp's: the plugin gate's refusal of
+  // the tenant app for the unit's organization. If a tenant loader starts
+  // answering 409 for anything else, give that its own status.
+  if (!model.ok) return model.status === 409 ? NOT_RELEASED : model;
+
+  try {
+    const merged = await resolveActions(model.value, {
+      view,
+      actions: new Map(),
+      scope: {},
+      ctx,
+      organizationId: null,
+      gate: null,
+    });
+    const { links, ...rest } = merged;
+    const live = clampLive(def);
+    const out = {
+      ...rest,
+      type: "view",
+      view: def.id,
+      kind: def.kind,
+      org: null,
+      trail: [],
+      links: links ?? [],
+      attached: [],
+      ...(hasSynthetic(merged.body) ? { notice: { ...SYNTHETIC_NOTICE } } : {}),
+      ...(live ? { live } : {}),
+    };
+    const checked = parseOrFail(viewModelSchema, out, `view ${def.id}`);
+    return checked.ok ? { ok: true, value: checked.value as ViewModel } : OUTPUT_INVALID;
+  } catch {
+    console.error(`[gui] view ${def.id}: could not be completed`);
+    return VIEW_FAILED;
+  }
+}
+
+/**
  * The view an href names, loaded for `ctx`'s person. `depth` 1 is a view
  * loaded inside another: it lists no attached views and embeds no views.
  * `within` is the enclosing view's organization: the view loads there or
@@ -218,6 +325,11 @@ export async function dispatchView(
   if (!match) return NOT_FOUND;
   const { view } = match;
   const def = view.def;
+  if (def.scope === "tenant") return dispatchTenantView(ctx, view, def, parsed.search, depth);
+  // Every other view is staff's: about an organization, or the whole
+  // installation. A person with only tenant rows (RFC mgm#197) gets the
+  // answer a page that does not exist gets, before any read.
+  if (!rolesIncludeStaff(ctx.access.roles)) return NOT_FOUND;
 
   const segments = Object.entries(def.params).map(([name, kind]) => {
     const id = match.values[name];
@@ -247,26 +359,18 @@ export async function dispatchView(
   const notice = decision.ok ? undefined : { tone: "warning" as const, text: decision.message };
 
   const search = querySearch(def.query, parsed.search);
-  let loaded: Loaded<LoadedModel<ViewKind>>;
+  let loaded: unknown;
   try {
-    loaded = (
+    loaded =
       def.scope === "installation"
         ? await def.load(await installationRequest(ctx, params, search))
-        : await def.load(await surfaceRequest(ctx, organizationId!, params, search))
-    ) as Loaded<LoadedModel<ViewKind>>;
+        : await def.load(await surfaceRequest(ctx, organizationId!, params, search));
   } catch {
     console.error(`[gui] view ${def.id}: loader failed`);
     return VIEW_FAILED;
   }
-  if (loaded === null || typeof loaded !== "object") return OUTPUT_INVALID;
-  if (loaded.ok === false) {
-    if (!LOADER_STATUSES.has(loaded.status) || typeof loaded.message !== "string") return OUTPUT_INVALID;
-    const code = loaded.status === 404 ? "gui_not_found" : "gui_view_refused";
-    return fail(loaded.status, code, loaded.message.slice(0, MAX_MESSAGE));
-  }
-  if (loaded.ok !== true) return OUTPUT_INVALID;
-  const model = strictParseModel(def, loaded.model);
-  if (!model.ok) return OUTPUT_INVALID;
+  const model = checkLoaded(def, loaded);
+  if (!model.ok) return model;
 
   try {
     const entityKind = def.entity === undefined ? undefined : def.params[def.entity];

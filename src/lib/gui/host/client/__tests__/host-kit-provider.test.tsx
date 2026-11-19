@@ -310,4 +310,75 @@ describe("HostKitProvider", () => {
       expect(runtime.refresh).toHaveBeenCalledTimes(3);
     });
   });
+
+  describe("with a tenant manifest of two units", () => {
+    const UNIT_A = "00000000-0000-4000-8000-0000000000a1";
+    const UNIT_B = "00000000-0000-4000-8000-0000000000a2";
+    /** The tenant manifest the server builds with `id` as the current unit. */
+    function showing(id: string): Manifest {
+      const m = manifest();
+      const units = [
+        { id: UNIT_A, label: "Shop 9", timezone: "Africa/Kampala" },
+        { id: UNIT_B, label: "Flat 2", timezone: "Africa/Nairobi" },
+      ];
+      const unit = units.find((u) => u.id === id)!;
+      m.orgs = [];
+      m.org = {
+        ...m.org,
+        id,
+        name: unit.label,
+        href: `/my?unit=${id}`,
+        timezone: unit.timezone,
+        nav: [],
+        status: [],
+        places: units.map((u) => ({ kind: "tenant", id: u.id, label: u.label, href: `/my?unit=${u.id}` })),
+      };
+      return m;
+    }
+    const query = (unit: string) => new URLSearchParams({ unit });
+
+    it("rebuilds the manifest when the picker's soft navigation changes ?unit= to another unit", () => {
+      const runtime = recordingRuntime();
+      next.searchParams = query(UNIT_A);
+      const { rerender } = render(tree(runtime, "/my", showing(UNIT_A)));
+      expect(runtime.refresh).not.toHaveBeenCalled();
+      expect(document.cookie).toBe(`mgm-org=${UNIT_A}`);
+
+      next.searchParams = query(UNIT_B);
+      rerender(tree(runtime, "/my", showing(UNIT_A)));
+      expect(runtime.refresh).toHaveBeenCalledTimes(1);
+
+      // The rebuilt manifest names unit B: its context, clock and cookie follow.
+      rerender(tree(runtime, "/my", showing(UNIT_B)));
+      expect(runtime.refresh).toHaveBeenCalledTimes(1);
+      expect(seen.at(-1)?.org).toMatchObject({ id: UNIT_B, name: "Flat 2", timezone: "Africa/Nairobi" });
+      expect(document.cookie).toBe(`mgm-org=${UNIT_B}`);
+
+      // And back, compared in lower case as chooseTenantUnit compares it.
+      next.searchParams = query(UNIT_A.toUpperCase());
+      rerender(tree(runtime, "/my", showing(UNIT_B)));
+      expect(runtime.refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not rebuild for the current unit, a unit not among its places, or two units at once", () => {
+      const runtime = recordingRuntime();
+      next.searchParams = query(UNIT_A);
+      const { rerender } = render(tree(runtime, "/my", showing(UNIT_A)));
+      next.searchParams = query("00000000-0000-4000-8000-0000000000ff");
+      rerender(tree(runtime, "/my", showing(UNIT_A)));
+      next.searchParams = new URLSearchParams([
+        ["unit", UNIT_B],
+        ["unit", UNIT_A],
+      ]);
+      rerender(tree(runtime, "/my", showing(UNIT_A)));
+      expect(runtime.refresh).not.toHaveBeenCalled();
+    });
+
+    it("ignores ?unit= in a staff manifest, whose places are no units", () => {
+      const runtime = recordingRuntime();
+      next.searchParams = query(MG);
+      render(tree(runtime, "/", withNav()));
+      expect(runtime.refresh).not.toHaveBeenCalled();
+    });
+  });
 });

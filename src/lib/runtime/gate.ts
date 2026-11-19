@@ -81,11 +81,18 @@ const DISABLED_MESSAGES: Partial<Record<MgmPluginName, string>> = {
     "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.",
   pesapal:
     "The Pesapal provider is disabled for this organization. Enable it in Settings → Plugins; history is preserved.",
+  // Read by tenants as well as staff (composeTenantApp), so it names who
+  // turns it on rather than telling the reader to.
+  "tenant-app":
+    "The tenant app is not turned on for this organization. An organization manager turns it on in Settings → Plugins; tenant access is preserved.",
 };
 
-/** Error-code prefix per plugin, e.g. `billing_disabled`. */
+/**
+ * Error-code prefix per plugin: its name with hyphens as underscores, e.g.
+ * `billing_disabled`, `community_management_disabled`, `tenant_app_disabled`.
+ */
 function codePrefix(plugin: MgmPluginName): string {
-  return plugin === "community-management" ? "community_management" : plugin;
+  return plugin.replaceAll("-", "_");
 }
 
 type Embedded<T> = T | T[] | null | undefined;

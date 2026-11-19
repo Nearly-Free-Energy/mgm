@@ -7,13 +7,21 @@
  * that the two enum values this file deliberately does NOT declare stay
  * undeclared.
  *
+ * Staff is not a role (user_role has no staff value): it means holding a
+ * user_roles row whose role is not tenant, now. staff_access_accounts
+ * records history: accounts that have ever held such a row. This is the
+ * definition the rest of the code and docs point to; in application code it
+ * is `staffRoles` / `rolesIncludeStaff` (@/lib/auth/access).
+ *
  * Three roles are in use. The two staff roles, `super_admin` and
  * `org_manager`, are both at `scope_type = 'org'`. `tenant` (RFC mgm#197) is
- * at `scope_type = 'tenant'`, one row per unit a person rents; it is granted
- * from the tenant record (`fn_tenant_access_grant`), never from the Users
- * page, and it is not staff. A person may hold a staff row and tenant rows at
- * once, so "has a role row" does not mean "is staff": staff checks filter on
- * the staff roles or the org scope. The CHECK
+ * at `scope_type = 'tenant'`, one row per unit a person rents, in any number
+ * of organizations; it is granted from the tenant record
+ * (`fn_tenant_access_grant`), never from the Users page, and it is not
+ * staff. Tenant access does not depend on staff rows: a person may hold a
+ * staff row and tenant rows at once, and keeps their tenant rows when their
+ * staff rows are removed. So "has a role row" does not mean "is staff":
+ * staff checks filter on the staff roles or the org scope. The CHECK
  * `user_roles_role_scope_type_consistent` (migration 20261118100100) pins
  * each role to its scope type; if it stops doing so, filtering on the scope
  * type stops being enough.

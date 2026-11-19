@@ -1,7 +1,9 @@
+import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
   getCurrentUserRoles,
   currentUserIsSuperAdmin,
+  rolesIncludeStaff,
 } from "@/lib/auth/access";
 import { SUPER_ADMIN, ORG_MANAGER } from "@/lib/roles";
 import type { UserVisibleRow, UserRoleRecord } from "@/lib/types/domain";
@@ -25,12 +27,18 @@ import { UsersPageClient } from "./users-page-client";
  * Status is derived from email_confirmed_at: NULL = "Invited", else
  * "Active". DO NOT use last_sign_in_at — it is NULL for any logged-out
  * confirmed user.
+ *
+ * A staff page: a person whose rows are all tenant rows (RFC mgm#197)
+ * manages no one, so it is not found for them, before the list is read.
+ * Their tenant rows count for nothing here, so a caller who is not a super
+ * admin is an org manager by their org-scoped rows alone.
  */
 export default async function SettingsUsersPage() {
   const supabase = await createClient();
 
-  const isSuperAdmin = await currentUserIsSuperAdmin(supabase);
   const roles: UserRoleRecord[] = await getCurrentUserRoles(supabase);
+  if (!rolesIncludeStaff(roles)) notFound();
+  const isSuperAdmin = await currentUserIsSuperAdmin(supabase);
 
   // Caller's org scopes (for the Invite dialog and revoke gating).
   const callerOrgIds: string[] = Array.from(

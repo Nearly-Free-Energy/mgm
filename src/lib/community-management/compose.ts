@@ -14,7 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import { COMMUNITY_MANAGEMENT_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { authorizeOrganization, openOrganizationScope } from "@/lib/runtime/scope";
-import "@/lib/runtime/services";
+import { requireOrganizationAudience } from "@/lib/runtime/services";
 import { CommunityManagementCapability } from "./capability";
 import { createSupabaseCommunityRepository } from "./infrastructure/supabase-repository";
 import "./scope";
@@ -40,6 +40,7 @@ export const CommunityManagementPlugin = {
   inject: ["mgmRequest"],
   apply(ctx: Context) {
     const request = ctx.mgmRequest;
+    requireOrganizationAudience(request, "Community management");
     if (!request.userId) {
       throw new Error("Community management requires an authenticated user");
     }

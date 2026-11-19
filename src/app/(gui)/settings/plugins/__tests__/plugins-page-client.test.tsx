@@ -63,4 +63,37 @@ describe("PluginsPageClient", () => {
     expect(html).toContain("was disabled");
     expect(html).toContain("Core — always enabled");
   });
+
+  it("says what a disabled tenant app means instead of the write-refusal note", () => {
+    const html = renderToStaticMarkup(
+      (
+        <PluginsPageClient
+          orgs={[
+            {
+              id: "org-1",
+              name: "Acme Energy",
+              plugins: [
+                {
+                  name: "tenant-app",
+                  displayName: "Tenant app",
+                  description: "tenant stuff",
+                  version: "0.1.0",
+                  enabled: false,
+                  core: false,
+                  dependencies: ["metering", "community-management"],
+                  disabledDependencies: [],
+                  ready: true,
+                  provides: [],
+                },
+              ],
+              audit: [],
+            },
+          ]}
+        />
+      ) as React.ReactElement
+    );
+
+    expect(html).toContain("tenants cannot open the tenant app");
+    expect(html).not.toContain("fail closed");
+  });
 });

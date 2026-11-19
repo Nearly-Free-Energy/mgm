@@ -3,8 +3,9 @@
  *
  * Client-safe: no server imports. Server routes and UI share these definitions
  * so Settings, navigation, and mutation gates cannot drift from each other.
- * Database state lives in `mgm_plugins`; a missing row means "enabled", which
- * keeps existing deployments working without a backfill.
+ * Database state lives in `mgm_plugins`. A missing row means the plugin's
+ * `defaultEnabled`, which is "enabled" for every plugin but the tenant app,
+ * so existing deployments keep working without a backfill.
  */
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_NAME =
@@ -15,6 +16,7 @@ export const METERING_PLUGIN_NAME = "metering" as const;
 export const BILLING_PLUGIN_NAME = "billing" as const;
 export const PAYMENTS_PLUGIN_NAME = "payments" as const;
 export const PESAPAL_PLUGIN_NAME = "pesapal" as const;
+export const TENANT_APP_PLUGIN_NAME = "tenant-app" as const;
 
 export type MgmPluginName =
   | typeof ORGANIZATION_DIRECTORY_PLUGIN_NAME
@@ -22,7 +24,8 @@ export type MgmPluginName =
   | typeof METERING_PLUGIN_NAME
   | typeof BILLING_PLUGIN_NAME
   | typeof PAYMENTS_PLUGIN_NAME
-  | typeof PESAPAL_PLUGIN_NAME;
+  | typeof PESAPAL_PLUGIN_NAME
+  | typeof TENANT_APP_PLUGIN_NAME;
 
 export const ORGANIZATION_DIRECTORY_PLUGIN_VERSION = "0.1.0";
 export const COMMUNITY_MANAGEMENT_PLUGIN_VERSION = "0.1.0";
@@ -30,6 +33,7 @@ export const METERING_PLUGIN_VERSION = "0.1.0";
 export const BILLING_PLUGIN_VERSION = "0.1.0";
 export const PAYMENTS_PLUGIN_VERSION = "0.1.0";
 export const PESAPAL_PLUGIN_VERSION = "0.1.0";
+export const TENANT_APP_PLUGIN_VERSION = "0.1.0";
 
 /**
  * The kinds of core record whose owning organization MGM can resolve. Kept
@@ -82,6 +86,18 @@ export interface BundledPlugin {
   dependencies: MgmPluginName[];
   /** Core plugins own the admin surface itself and cannot be disabled. */
   core: boolean;
+  /**
+   * Whether the plugin is on for an organization that has no `mgm_plugins`
+   * row for it. Absent means true. `false` makes the plugin off until an
+   * operator turns it on for each organization (the tenant app, RFC
+   * mgm#197 § 3). The database answers the same question in
+   * `mgm_plugin_enabled_for_org`, which lists these plugins by name; the
+   * gate, the GUI host and the composers read plugin state there, Settings →
+   * Plugins reads it here (resolvePluginStatuses). If a plugin's default
+   * changes, change that function's list in a new migration in the same
+   * commit: default-off-plugins.test.ts fails while the two lists differ.
+   */
+  defaultEnabled?: false;
   provides: string[];
   routes: string[];
   /**
@@ -351,6 +367,32 @@ export const PESAPAL_PLUGIN: BundledPlugin = {
   tables: [],
 };
 
+export const TENANT_APP_PLUGIN: BundledPlugin = {
+  name: TENANT_APP_PLUGIN_NAME,
+  alias: "tenant",
+  version: TENANT_APP_PLUGIN_VERSION,
+  displayName: "Tenant app",
+  description:
+    "A tenant's own view of their unit and its meters, for the tenants the organization gives access to. Off until it is turned on for the organization.",
+  dependencies: [METERING_PLUGIN_NAME, COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+  core: false,
+  // The only plugin that is off without a state row: an operator turns it
+  // on for the organizations whose tenants get the app (RFC mgm#197 § 3).
+  defaultEnabled: false,
+  // Read-only for tenants. It reads tenants and their meter assignments
+  // through the tenant's own row-level access and owns no API route: its
+  // views are read through /api/gui/view. Giving a tenant access is
+  // community management's (/api/tenants).
+  provides: ["tenant home"],
+  routes: [],
+  pages: [
+    // The tenant's home, as the tenant.home view. Its unit comes from the
+    // query, not the path, so the page has no bracketed segment.
+    { path: "/my", params: {}, servedBy: "view" },
+  ],
+  tables: [],
+};
+
 export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   ORGANIZATION_DIRECTORY_PLUGIN,
   COMMUNITY_MANAGEMENT_PLUGIN,
@@ -358,7 +400,21 @@ export const MGM_BUNDLED_PLUGINS: readonly BundledPlugin[] = [
   BILLING_PLUGIN,
   PAYMENTS_PLUGIN,
   PESAPAL_PLUGIN,
+  TENANT_APP_PLUGIN,
 ] as const;
+
+/** Whether `plugin` is on for an organization with no `mgm_plugins` row for it. */
+export function isEnabledByDefault(plugin: BundledPlugin): boolean {
+  return plugin.defaultEnabled ?? true;
+}
+
+/**
+ * The plugins that are off without a state row, by name. The database's
+ * `mgm_plugin_enabled_for_org` keeps the same list; see `defaultEnabled`.
+ */
+export const DEFAULT_OFF_PLUGIN_NAMES: readonly MgmPluginName[] = MGM_BUNDLED_PLUGINS.filter(
+  (plugin) => !isEnabledByDefault(plugin)
+).map((plugin) => plugin.name);
 
 export function getBundledPlugin(
   pluginName: string
@@ -398,7 +454,7 @@ export function resolvePluginStatuses(
   const enabledByName = new Map<MgmPluginName, boolean>(
     MGM_BUNDLED_PLUGINS.map((plugin) => [
       plugin.name,
-      states[plugin.name]?.enabled ?? true,
+      states[plugin.name]?.enabled ?? isEnabledByDefault(plugin),
     ])
   );
 
@@ -408,7 +464,7 @@ export function resolvePluginStatuses(
     );
     return {
       plugin,
-      enabled: enabledByName.get(plugin.name) ?? true,
+      enabled: enabledByName.get(plugin.name) ?? isEnabledByDefault(plugin),
       version: states[plugin.name]?.version?.trim()
         ? (states[plugin.name]?.version as string).trim()
         : plugin.version,
@@ -471,7 +527,7 @@ export function validatePluginToggle(input: {
   }
 
   const blockingDependents = getPluginDependents(plugin.name).filter(
-    (dependent) => statusByName.get(dependent.name)?.enabled ?? true
+    (dependent) => statusByName.get(dependent.name)?.enabled ?? isEnabledByDefault(dependent)
   );
   if (blockingDependents.length > 0) {
     const names = blockingDependents
