@@ -445,7 +445,10 @@ file hands neither the capability nor its composition on, whether by
 aliasing the composer, destructuring the result or passing it along, and
 reaches the capability no other way. It also checks that
 `capability-gating.test.ts` classifies the method as available while
-disabled, and that Payments or Pesapal owns the route. A route whose
+disabled, that Payments or Pesapal owns the route, and that the file
+consults no plugin gate (`gateRoute`, `checkGate`, the plugin-state helpers
+or their database function), since an exemption says the route accepts the
+write while its plugin is off and the GUI host relies on that. A route whose
 exemption is a plain reason may not reach the capability at all, under any
 import name or module path. A new payments write route fails the build until
 it calls `checkGate`/`gateRoute` itself or carries a `PaymentExemption`.

@@ -208,7 +208,8 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
   }
   // An action declaring whilePluginOff: "enabled" goes to a route that
   // accepts it while its plugin is off (a PaymentExemption in UNGATED_WRITES,
-  // which gui-surface.test.ts requires), so the gate's 409 does not refuse
+  // which gui-surface.test.ts requires, on a route file route-surface.test.ts
+  // holds to no gate call), so the gate's 409 does not refuse
   // it here; any other answer still does. Availability and its own prepare
   // still run. If the route starts gating, remove the field.
   if (!decision.ok && !(decision.status === 409 && def.whilePluginOff === "enabled")) {

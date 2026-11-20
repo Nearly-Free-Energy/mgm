@@ -204,7 +204,8 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
   // plugin is off, so its route must accept it then: only a PaymentExemption
   // route does, and route-surface.test.ts holds each of those to one method
   // capability-gating.test.ts says runs while off, on a Payments or Pesapal
-  // route. Checked again here so the message names the action.
+  // route whose file consults no plugin gate. Checked again here so the
+  // message names the action.
   if (a.whilePluginOff !== undefined) {
     if (typeof exemption !== "object") {
       problems.push("declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES");

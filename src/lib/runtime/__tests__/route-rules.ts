@@ -23,8 +23,10 @@ export function exemptionKey(method: string, route: string): string {
  * An exemption for a write route that reaches the Payments capability. Its
  * reason is not taken on trust: route-surface.test.ts's "holds each payment
  * exemption to the method it names" checks that the route file (all of it, not only the handler)
- * composes Payments, calls exactly `reaches` on the capability, and hands
- * neither the capability nor its composition on. What `reaches` may write or
+ * composes Payments, calls exactly `reaches` on the capability, hands
+ * neither the capability nor its composition on, and consults no plugin gate
+ * (the GUI host keeps an action declaring `whilePluginOff` enabled on the
+ * exemption's word that the route accepts it while off). What `reaches` may write or
  * ask the provider is pinned by capability-gating.test.ts, and what the
  * route does besides (no write and no outbound call outside the capability,
  * apart from the exceptions listed there) by check 4 of

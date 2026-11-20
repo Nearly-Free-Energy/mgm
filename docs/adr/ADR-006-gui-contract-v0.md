@@ -152,9 +152,13 @@ Worse, or to watch:
   registered, because the registration check reads no test data. The route
   stays the authority, so a declaration that slipped past CI could only
   show an action enabled that its route then refuses. If a route with a
-  `PaymentExemption` starts consulting the gate, or the exemption is
-  removed, its actions' `whilePluginOff` must go, and the test fails until
-  it does.
+  `PaymentExemption` starts consulting the gate, `route-surface.test.ts`
+  refuses the exemption while the route file names the gate; once the
+  exemption is removed, `gui-surface.test.ts` refuses its actions'
+  `whilePluginOff` until it goes. Only the route file is read for the gate:
+  a helper module that asks it is caught for the reconcile route by its
+  database test, which posts with Payments off, and for the other exempt
+  routes by review.
 - When this was recorded, the repository held the two contract files and
   their tests, and nothing imported them. The run-time checks in decision 3
   arrive with the code that reads contributions, each with its own tests.

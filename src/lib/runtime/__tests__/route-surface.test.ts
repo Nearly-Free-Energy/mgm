@@ -275,6 +275,41 @@ function capabilityReach(file: ts.SourceFile): string[] {
 }
 
 /**
+ * Where a route can ask whether a plugin is on: `gateRoute` and `checkGate`
+ * in src/lib/runtime/gate.ts, the gate itself (`MgmGate`), the GUI host's
+ * `pluginGate`, the plugin-state helpers in src/lib/plugins/state.ts, and the
+ * database function they all end in. If another module starts answering that
+ * question, add it and its exports here.
+ */
+const GATE_NAMES = new Set(["gateRoute", "checkGate", "MgmGate", "pluginGate", "unitPluginGate", "isPluginEnabledForOrg"]);
+const GATE_MODULE = /(?:^|\/)(?:runtime\/gate|plugins\/state|gui\/host\/server\/gate-state)(?:\.[cm]?[jt]s)?$/i;
+const GATE_FUNCTION = "mgm_plugin_enabled_for_org";
+
+/**
+ * How a route file could consult the plugin gate: one of `GATE_NAMES` or a
+ * plugin-state helper (`is…Enabled`) named anywhere, a module that answers
+ * it imported by any path that resolves to it, or the database function
+ * named in a string. Type-only imports load nothing and are skipped. Only
+ * the route file is read; a helper module it imports that asks the gate is
+ * not followed, which holds while the exempt routes import only the session,
+ * the composers, their schemas, body parsing and the line item's
+ * organization lookup. If one starts importing a module that asks the gate,
+ * follow its imports here.
+ */
+function gateReach(file: ts.SourceFile): string[] {
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
+    if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
+    if (ts.isIdentifier(node) && (GATE_NAMES.has(node.text) || /^is[A-Z]\w*Enabled$/.test(node.text))) found.push(node.text);
+    if (ts.isStringLiteralLike(node) && (GATE_MODULE.test(modulePath(node.text)) || node.text === GATE_FUNCTION)) found.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return unique(found);
+}
+
+/**
  * The capability methods a route calls, as `<x>.payments.<method>(`, and
  * every other use of the name `payments` that could hold the capability or
  * read it (aliased, destructured, indexed or handed on), after which it
@@ -426,6 +461,16 @@ function paymentExemptionProblems(exemption: string | PaymentExemption, text: st
   }
   const other = reach.filter((found) => !PAYMENT_COMPOSERS.has(found) && modulePath(found) !== COMPOSE_MODULE);
   if (other.length) problems.push(`reaches the capability other than through a composer (${other.join(", ")})`);
+  // A PaymentExemption says the route accepts the write while its plugin is
+  // off, and the GUI host keeps an action declaring `whilePluginOff` enabled
+  // on that word (gui-surface.test.ts). A route that asks the gate would
+  // refuse what the host offers: gate it and remove the exemption instead.
+  const asksGate = gateReach(file);
+  if (asksGate.length) {
+    problems.push(
+      `consults the plugin gate (${asksGate.join(", ")}); a PaymentExemption is for a route that accepts the write while its plugin is off, so remove the exemption`
+    );
+  }
   return problems;
 }
 
@@ -524,6 +569,30 @@ describe("MGM runtime route surface", () => {
     expect(check(IMPORTS + handler(CALL), exemption, "/api/billing-line-items/[id]/test")).toMatch(/is owned by billing/);
     expect(check(IMPORTS + handler("await composed.data.payments.handleNotification(raw);"), { ...exemption, reaches: "handleNotification" }, "/api/payments/ipn"))
       .toBe("");
+  });
+
+  it("refuses a payment exemption on a route that consults the plugin gate", () => {
+    const consults = /consults the plugin gate \(([^)]*)\); a PaymentExemption is for a route that accepts the write while its plugin is off/;
+    const GATE_IMPORT = 'import { gateRoute } from "@/lib/runtime/gate";\n';
+    const gated = (gate: string, imports = GATE_IMPORT) => problems(`${gate} ${CALL}`, exemption, imports);
+    // The gate asked before or after the composition, in either form.
+    expect(gated('const blocked = await gateRoute(supabase, { plugin: "payments", method: "POST", target: { kind: "organization", id: organizationId } }); if (blocked) return blocked;'))
+      .toMatch(consults);
+    expect(problems(`${CALL} const blocked = await gateRoute(supabase, request); if (blocked) return blocked;`, exemption, GATE_IMPORT))
+      .toMatch(consults);
+    expect(gated("const decision = await checkGate(supabase, request); if (!decision.ok) return gateResponse(decision);", 'import { checkGate, gateResponse } from "@/lib/runtime/gate";\n'))
+      .toMatch(/consults the plugin gate \(@\/lib\/runtime\/gate, checkGate\)/);
+    // The gate module under any binding or path, the plugin-state helpers, the database function.
+    expect(gated("const blocked = await g.gateRoute(supabase, request);", 'import * as g from "@/lib/runtime/./gate";\n')).toMatch(consults);
+    expect(gated("const blocked = await open(supabase, request);", 'import { gateRoute as open } from "@/lib/runtime/gate";\n')).toMatch(consults);
+    expect(gated("if (!(await isPaymentsEnabled(supabase, organizationId))) return off();", 'import { isPaymentsEnabled } from "@/lib/plugins/state";\n'))
+      .toMatch(/consults the plugin gate \(@\/lib\/plugins\/state, isPaymentsEnabled\)/);
+    expect(gated('const { data } = await supabase.rpc("mgm_plugin_enabled_for_org", { _org_id: organizationId }); if (!data) return off();', ""))
+      .toMatch(/consults the plugin gate \(mgm_plugin_enabled_for_org\)/);
+    // A sibling handler or a helper in the file shares the module, so it counts too.
+    expect(check(`${IMPORTS}${GATE_IMPORT}export async function GET() { return gateRoute(supabase, request); }\n${handler(CALL)}`)).toMatch(consults);
+    // A type-only import loads nothing, and the word "gate" alone is not the gate.
+    expect(problems(`${CALL} const gateway = "investigate";`, exemption, 'import type { GateDecision } from "@/lib/runtime/gate";\n')).toBe("");
   });
 
   it("checks all of an exempt route's file, whatever form its code takes", () => {
