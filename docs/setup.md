@@ -491,12 +491,18 @@ sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
 the invoice logo loads from its signed Supabase Storage URL, and runs
 Preview bill, checking that the popup is sent to a `blob:` URL holding a
-PDF. Every page fails on a page error, a console error or a content
-security policy violation, popups included. The headless Chromium it runs
+PDF. It opens a draft billing period's close checklist and its Close
+confirmation step (the totals, the acknowledgements and the name to type),
+checks that the step fits the screen and that its controls are 44 px
+targets, and leaves without confirming. Every page fails on a page error, a
+console error or a content security policy violation, popups included, and
+on any write to the app's API other than the invoice preview and the
+close's prepare step, neither of which writes. The headless Chromium it runs
 has no PDF viewer, so it sees the preview as a download; it cannot show
 that a desktop browser displays it. It creates its own organization,
 community (with an invoice logo in the `invoice-logos` bucket), microgrids,
-tenants and user in the local database and deletes them afterwards.
+tenants, tariff, billing period, bills and user in the local database and
+deletes them afterwards.
 Timings are printed, not enforced.
 
 ```bash

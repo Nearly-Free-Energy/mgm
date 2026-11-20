@@ -1,7 +1,8 @@
 import { defineConfig, type PlaywrightTestOptions } from "@playwright/test";
 
-// The browser smoke (e2e/): sign-in, home, a microgrid's tenants list
-// and a community's invoice branding page (logo and PDF preview) on a 360 px
+// The browser smoke (e2e/): sign-in, home, a microgrid's tenants list,
+// a community's invoice branding page (logo and PDF preview) and a billing
+// period's close checklist with its confirmation step on a 360 px
 // touch screen, against the production build (`npm run build`
 // first) and a local Supabase. docs/setup.md, "Browser smoke test".
 // Chromium only; CI installs it in its own step.

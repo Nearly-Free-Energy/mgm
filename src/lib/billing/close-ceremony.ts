@@ -12,34 +12,26 @@
  */
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Fmt } from "@/lib/gui/surface";
-import type { CloseReview } from "./close";
+import { tenantNames, type CloseReview } from "./close";
 
-/** Names shown in a warning before the rest are counted. */
-const NAMES_SHOWN = 5;
-
-function names(list: { tenantName: string }[]): string {
-  const shown = list.slice(0, NAMES_SHOWN).map((t) => t.tenantName).join(", ");
-  const more = list.length - NAMES_SHOWN;
-  return more > 0 ? `${shown} and ${more} more` : shown;
-}
-
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** "1 bill has", "2 bills have": a number with the singular or plural phrase after it. */
+export const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 export function closeCeremony(review: CloseReview, fmt: Fmt): Ceremony {
   const warnings: string[] = [];
   if (review.fractionalTotals.length > 0) {
     warnings.push(
-      `${count(review.fractionalTotals.length, "bill has", "bills have")} a total that is not a whole number: ${names(review.fractionalTotals)}. Regenerate ${review.fractionalTotals.length === 1 ? "it" : "them"} before closing.`
+      `${count(review.fractionalTotals.length, "bill has", "bills have")} a total that is not a whole number: ${tenantNames(review.fractionalTotals)}. Regenerate ${review.fractionalTotals.length === 1 ? "it" : "them"} before closing.`
     );
   }
   if (review.unbilled.length > 0) {
     warnings.push(
-      `${count(review.unbilled.length, "tenant has", "tenants have")} no bill in this period: ${names(review.unbilled)}.`
+      `${count(review.unbilled.length, "tenant has", "tenants have")} no bill in this period: ${tenantNames(review.unbilled)}.`
     );
   }
   if (review.unmetered.length > 0) {
     warnings.push(
-      `${count(review.unmetered.length, "bill has", "bills have")} no usage recorded: ${names(review.unmetered)}.`
+      `${count(review.unmetered.length, "bill has", "bills have")} no usage recorded: ${tenantNames(review.unmetered)}.`
     );
   }
   return {

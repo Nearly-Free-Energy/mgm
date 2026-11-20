@@ -8,7 +8,10 @@ import "server-only";
  * period's bills as the `billing.period-review` view, with the actions on
  * each bill (generating them is contributed but offered nowhere yet, below);
  * one period's audit history as the `billing.period-history` view, reached
- * from the review's View history links; and the savings as the `billing.savings`
+ * from the review's View history links; a draft period's close checklist as
+ * the `billing.close-checklist` view, reached from the review's Close period
+ * link, with the close itself (`billing.close-period`, the server's close
+ * ceremony); and the savings as the `billing.savings`
  * view, shown under the Operations day, with the writes that change what it
  * counts. A page that moves to a view keeps its nav id.
  *
@@ -17,13 +20,17 @@ import "server-only";
  * catalog gives those pages no servedBy, so the views are reached through
  * GET /api/gui/view until
  * #201's "Serve the billing pages through the GUI host" moves the pages and
- * the nav entry to the views.
+ * the nav entry to the views. `billing.close-checklist` is a new page
+ * (…/[periodId]/close) with no page.tsx, so the catalog marks it
+ * `servedBy: "view"` and the host's catch-all serves it now.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
   AddGridTariffBody,
+  CLOSE_PERIOD_BODY_VERSION,
+  ClosePeriodBody,
   CREATE_PERIOD_BODY_VERSION,
   CreatePeriodBody,
   DELETE_PERIOD_BODY_VERSION,
@@ -39,6 +46,9 @@ import {
   SAVE_SAVINGS_SETTINGS_BODY_VERSION,
   SaveSavingsSettingsBody,
 } from "./schemas";
+import { closePeriodAvailable, loadCloseChecklist, prepareClosePeriod } from "./surface/close-checklist";
+import { CLOSE_CHECKLIST_EXAMPLES } from "./surface/close-checklist-examples";
+import { CLOSE_CHECKLIST_STEPS, CLOSE_PERIOD_ACTION } from "./surface/close-checklist-model";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
 import {
   generateBillsAvailable,
@@ -163,6 +173,22 @@ export const BILLING_SURFACE: Contribution = {
       load: loadPeriodHistory,
     },
     {
+      id: "billing.close-checklist",
+      kind: "flow",
+      path: "/microgrids/[id]/billing/[periodId]/close",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      entity: "periodId",
+      // Read through the person's own client; still loads while billing is
+      // off, with the gate's notice and Close disabled. No refresh: the
+      // close's own confirmation reads the totals again.
+      cost: "db",
+      // The step ids. keysOf (src/lib/gui/host/server/contribution-schema.ts)
+      // checks no flow body today; if it comes to, these are what it finds.
+      declares: { keys: CLOSE_CHECKLIST_STEPS },
+      examples: CLOSE_CHECKLIST_EXAMPLES,
+      load: loadCloseChecklist,
+    },
+    {
       id: "billing.savings",
       kind: "metrics",
       path: "/microgrids/[id]/operations/savings",
@@ -224,6 +250,31 @@ export const BILLING_SURFACE: Contribution = {
       humanOnly: true,
       prepare: prepareDeletePeriod,
       available: deletePeriodAvailable,
+    },
+    // Closing a period, against the totals the person reviewed (#201). A
+    // ceremony: prepare returns the close route's own ceremony
+    // (closeCeremony over fn_billing_period_close_review), so the totals,
+    // warnings, acknowledgements, typed name and digest are the server's,
+    // and the route checks them again. The host sends the confirmation in
+    // ClosePeriodBody's `confirmation`, which no form shows.
+    // `targeted: false`: offered only on the close checklist's last step,
+    // after the steps that explain its warnings. Appended to another
+    // plugin's view of a period it would offer Close out of that context.
+    // Revisit when the billing pages are served through the GUI host.
+    {
+      ...CLOSE_PERIOD_ACTION,
+      target: "billingPeriod",
+      input: ClosePeriodBody,
+      inputVersion: CLOSE_PERIOD_BODY_VERSION,
+      method: "POST",
+      path: "/api/billing-periods/[periodId]/close",
+      bind: { path: { periodId: "billingPeriod" } },
+      risk: "money",
+      confirm: "ceremony",
+      humanOnly: true,
+      targeted: false,
+      prepare: prepareClosePeriod,
+      available: closePeriodAvailable,
     },
     // ── The period review's actions ──
     // All human-only (no assistant proposes a billing write yet) and money:

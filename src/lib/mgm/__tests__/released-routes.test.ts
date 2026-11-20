@@ -53,6 +53,7 @@ describe("isReleasedRoute", () => {
     "/microgrids/abc/billing",
     "/microgrids/abc/billing/period-1",
     "/microgrids/abc/billing/period-1/history",
+    "/microgrids/abc/billing/period-1/close",
     "/microgrids/abc/setup/rates",
     "/communities/abc/invoice",
     // Release 3 APIs.
@@ -114,6 +115,9 @@ describe("isReleasedRoute", () => {
     "/api/meter-readings",
     "/settings",
     "/admin",
+    "/microgrids/abc/billing/period-1/close/extra",
+    // The send queue is released with its view (#201).
+    "/microgrids/abc/billing/period-1/send",
     "/microgrids/mg-1/operations/extra",
     "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",

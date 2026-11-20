@@ -235,7 +235,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(model.ext.data.totals[model.ext.data.columns.indexOf("total")]).toBe("122500");
     // Generate is not offered until an interface has a form for it (parity.test.ts).
     expect(model.actions).toEqual([]);
-    expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.export-csv"]);
+    expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.close-checklist", "billing.export-csv"]);
     expect(rows[0].links.map((l) => l.id)).toEqual(["billing.download-bill", "billing.view-history"]);
 
     // The prefills survive the host's check against each input.
