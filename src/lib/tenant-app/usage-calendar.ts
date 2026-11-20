@@ -207,9 +207,10 @@ function valueOf(figures: UsageFigures, key: string): number | null | undefined 
 
 /** A month of the unit's use per local day, in `timezone`; `figures.values` keyed by date. */
 /**
- * A meter of the unit in force on `date` is also another unit's primary that
- * day (D12, decided on mgm#217, 19 November): the day's figure is then the
- * meter's whole use, shown to each unit as shared, never as its own.
+ * A meter of the unit in force on `date` is also the primary of another unit
+ * on the unit's own microgrid that day (D12, decided on mgm#217, 19
+ * November): the day's figure is then the meter's whole use, shown to each
+ * unit as shared, never as its own.
  */
 export function sharedOn(
   assignments: readonly TenantMeter[],

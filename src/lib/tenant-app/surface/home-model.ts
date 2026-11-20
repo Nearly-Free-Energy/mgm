@@ -26,9 +26,10 @@ export const TENANT_METER_PREFIX = "meter.";
 export const TENANT_HOME_KEYS = ["unit", "microgrid", "today", "month", "monthNote", "meters"] as const;
 
 /**
- * The label on use from a meter that is also another unit's primary (D12,
- * decided on mgm#217, 19 November): the figure is the meter's whole use,
- * shown to each unit and never as the unit's own. The month's days, the
+ * The label on use from a meter that is also the primary of another unit on
+ * the unit's own microgrid (D12, decided on mgm#217, 19 November): the
+ * figure is the meter's whole use, shown to each unit and never as the
+ * unit's own. The month's days, the
  * month's and the day's totals (./usage-model.ts), and the home's meter
  * carry it.
  */

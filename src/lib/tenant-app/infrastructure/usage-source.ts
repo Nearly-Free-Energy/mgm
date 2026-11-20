@@ -20,11 +20,12 @@
  *     device rows only, and only on the microgrid `fn_tenant_home` named;
  *   - provider selection, the EMS configuration and its decrypt: the service
  *     role, for that microgrid only;
- *   - other units' primary links of this unit's primary meters
- *     (listPrimaryElsewhere, for the shared-use label, D12): the service
- *     role, for the device ids the tenant's own client returned as this
- *     unit's primary consumption meter links, returning date spans cut to
- *     those links, never which unit holds them.
+ *   - the days the unit's primary meters are also the primary of another
+ *     unit on the unit's own microgrid (listPrimaryElsewhere, for the
+ *     shared-use label, D12): the tenant's client, through
+ *     fn_tenant_shared_meter_days, which refuses anyone but the unit's own
+ *     tenant, reads the unit's links itself and returns device ids and
+ *     dates, never which unit. The service role takes no part in it.
  *
  * So no microgrid, edge or device id is ever taken from a request (query,
  * path or body): the microgrid is the unit's, which authorizeTenant read, and
@@ -32,13 +33,14 @@
  * meters are read (USAGE_DEVICE_TYPE): a device of another type that
  * reaches readSeries has no row, so it reads as no data, never as a figure.
  * No service client is created for the metering provider before the
- * metering gate passes, or when no device is readable. The primary-links
+ * metering gate passes, or when no device is readable. The shared-days
  * read concerns MGM's own link rows, not the backend, so it runs without
  * that gate, on every usage view and the home of a unit with a meter: one
- * indexed query on each client. If it ever returns a tenant id, or takes
- * ids the tenant's own client did not return as this unit's primary links,
- * revisit it with CLAUDE.md "The tenant app's usage reads". Nothing the
- * backend says reaches the tenant:
+ * database call on the tenant's client. The tenant can make that call
+ * directly too, so it must never return more than the tenant may read. If
+ * it ever moves to the service role, or the function returns a tenant id
+ * or a count, or takes device ids, revisit it with CLAUDE.md "The tenant
+ * app's usage reads". Nothing the backend says reaches the tenant:
  * every failure is a reason, and the server log gets a code and a status,
  * never a message.
  *
@@ -60,7 +62,6 @@ import type { MeteringProviderFactories } from "@/lib/runtime/services";
 import { isCalendarDateKey } from "@/lib/timezone/day-key";
 import {
   USAGE_DEVICE_TYPE,
-  USAGE_METER_ROLE,
   type PrimaryElsewhereSpan,
   type TenantUnit,
   type TenantUsageSeriesRequest,
@@ -70,7 +71,7 @@ import {
 
 type DeviceRow = { id: string; edge_id: string | null; openems_component_id: string | null };
 type EdgeRow = { id: string; openems_edge_id: string | null };
-type PrimaryLinkRow = { device_id: string; effective_from: string; effective_to: string | null };
+type SharedDaysRow = { device_id: unknown; effective_from: unknown; effective_to: unknown };
 
 /** A failed step, logged by name and code only. */
 class UsageReadError extends Error {
@@ -95,8 +96,24 @@ function logFailure(error: unknown): void {
   }
 }
 
+/** A row of fn_tenant_shared_meter_days as a span; only these three fields are kept. */
+function toSpan(row: SharedDaysRow): PrimaryElsewhereSpan {
+  const { device_id, effective_from, effective_to } = row;
+  if (
+    typeof device_id !== "string" ||
+    typeof effective_from !== "string" ||
+    !isCalendarDateKey(effective_from) ||
+    typeof effective_to !== "string" ||
+    !isCalendarDateKey(effective_to)
+  ) {
+    // Fail closed: a span dropped would show shared use as the unit's own.
+    throw new UsageReadError("shared-days", "malformed");
+  }
+  return { deviceId: device_id, effectiveFrom: effective_from, effectiveTo: effective_to };
+}
+
 export function createTenantUsageSource(options: {
-  /** The tenant's own client: the metering gate and the device rows are read through it. */
+  /** The tenant's own client: the metering gate, the device rows and the shared-use days are read through it. */
   supabase: SupabaseClient;
   /** The unit authorizeTenant read; its microgrid is the only one read. */
   unit: TenantUnit;
@@ -221,60 +238,22 @@ export function createTenantUsageSource(options: {
       }
     },
 
-    async listPrimaryElsewhere({ deviceIds, fromDate, toDate }): Promise<PrimaryElsewhereSpan[]> {
+    async listPrimaryElsewhere({ fromDate, toDate }): Promise<PrimaryElsewhereSpan[]> {
       try {
-        if (!isCalendarDateKey(fromDate) || !isCalendarDateKey(toDate)) {
-          throw new UsageReadError("primary-links", "invalid_date");
+        if (!isCalendarDateKey(fromDate) || !isCalendarDateKey(toDate) || fromDate >= toDate) {
+          throw new UsageReadError("shared-days", "invalid_date");
         }
-        if (deviceIds.length === 0) return [];
-
-        // The tenant's own client first ("Tenants can read their own meter
-        // assignments"): which of these ids are this unit's primary
-        // consumption meters, and on which days of the range. Only those ids
-        // are asked about on the service role, and only those days answered.
-        const own = await supabase
-          .from("tenant_devices")
-          .select("device_id, effective_from, effective_to, devices!inner(device_type)")
-          .eq("tenant_id", unit.tenantId)
-          .eq("role", USAGE_METER_ROLE)
-          .eq("devices.device_type", USAGE_DEVICE_TYPE)
-          .in("device_id", deviceIds)
-          .lt("effective_from", toDate)
-          .or(`effective_to.is.null,effective_to.gt.${fromDate}`);
-        if (own.error) throw new UsageReadError("own-links", own.error.code);
-        const mine = ((own.data ?? []) as PrimaryLinkRow[]).filter((row) => deviceIds.includes(row.device_id));
-        const confirmed = [...new Set(mine.map((row) => row.device_id))].sort();
-        if (confirmed.length === 0) return [];
-
-        // Other units' primary links of those devices, on the service role: a
-        // tenant reads no other unit's links. Dates only, and the unit is
-        // never selected. Each span is cut to this unit's own links and to
-        // the range, so the answer is "shared on these days of yours". That
-        // still tells the tenant another unit holds the meter on those days,
-        // which D12 accepts; if it ever must not, the label goes with it.
-        const { createServiceClient } = await import("@/lib/supabase/service");
-        const rows = await createServiceClient()
-          .from("tenant_devices")
-          .select("device_id, effective_from, effective_to")
-          .in("device_id", confirmed)
-          .eq("role", USAGE_METER_ROLE)
-          .neq("tenant_id", unit.tenantId)
-          .lt("effective_from", toDate)
-          .or(`effective_to.is.null,effective_to.gt.${fromDate}`);
-        if (rows.error) throw new UsageReadError("primary-links", rows.error.code);
-        const spans: PrimaryElsewhereSpan[] = [];
-        for (const other of (rows.data ?? []) as PrimaryLinkRow[]) {
-          if (!confirmed.includes(other.device_id)) continue;
-          for (const link of mine) {
-            if (link.device_id !== other.device_id) continue;
-            const from = [fromDate, link.effective_from, other.effective_from].reduce((a, b) => (a > b ? a : b));
-            const to = [toDate, link.effective_to, other.effective_to]
-              .filter((date): date is string => date !== null)
-              .reduce((a, b) => (a < b ? a : b));
-            if (from < to) spans.push({ deviceId: other.device_id, effectiveFrom: from, effectiveTo: to });
-          }
-        }
-        return spans;
+        // The tenant's own client, never the service role: the function
+        // refuses anyone but the unit's own tenant, reads the unit's links
+        // itself and answers device ids and dates only (its migration,
+        // 20261120090000). The unit is the one authorizeTenant read.
+        const { data, error } = await supabase.rpc("fn_tenant_shared_meter_days", {
+          _tenant_id: unit.tenantId,
+          _from_date: fromDate,
+          _to_date: toDate,
+        });
+        if (error) throw new UsageReadError("shared-days", error.code);
+        return ((data ?? []) as SharedDaysRow[]).map(toSpan);
       } catch (error) {
         logFailure(error);
         throw error;
