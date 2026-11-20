@@ -131,10 +131,15 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       if (stopped) return;
       timer = setTimeout(() => (visible() ? load() : schedule()), wait(SIGNALS_REFRESH_MS));
     };
+    // An answer in which no source answered says nothing about what needs the
+    // person: a zero there is not "nothing to do" (ADR-006 decision 9's
+    // checked and unchecked). The tray shows it, with its note that sources
+    // did not answer; the badge stays as it was.
+    const nothingChecked = (signals: Signals) => signals.checked.length === 0 && signals.unchecked.length > 0;
     const show = (signals: Signals | null) => {
       setHeld({ org: organization, signals });
-      if (signals) setAppBadge(signals.count);
-      else clearAppBadge();
+      if (!signals) clearAppBadge();
+      else if (!nothingChecked(signals)) setAppBadge(signals.count);
     };
     const load = () => {
       if (stopped || isSignedOut()) return;
@@ -148,7 +153,8 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
           failures += 1;
           return schedule();
         }
-        failures = 0;
+        // Every source late (a slow database, say) backs off like a failed fetch.
+        failures = answer.kind === "signals" && nothingChecked(answer.signals) ? failures + 1 : 0;
         if (answer.kind === "signed-out") stopped = true;
         schedule();
         show(answer.kind === "signals" ? answer.signals : null);

@@ -198,6 +198,25 @@ describe("useSignalsFeed", () => {
     expect(badge.clear).not.toHaveBeenCalled();
   });
 
+  it("keeps the badge as it was, and backs off, when no source answered", async () => {
+    const late: Signals = { type: "signals", org: ORG, count: 0, top: [], checked: [], unchecked: ["billing.due", "metering.readings"] };
+    const fetch = fetchOf({ body: signals(4) }, { body: late }, { body: late });
+    render(<Probe org={ORG} fetch={fetch} />);
+    await settle();
+    expect(badge.set).toHaveBeenLastCalledWith(4);
+    act(() => feed().refresh());
+    await settle();
+    // The tray holds the answer, with its unchecked sources; the badge keeps 4.
+    expect(feed().signals).toEqual(late);
+    expect(badge.set).toHaveBeenCalledOnce();
+    expect(badge.clear).not.toHaveBeenCalled();
+    // Counted as a failure: the next fetch waits twice the cadence.
+    await advance(SIGNALS_REFRESH_MS);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await advance(SIGNALS_REFRESH_MS);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("doubles the wait after each failure in a row, up to the cap, and resets it on an answer", async () => {
     const fetch = fetchOf(
       ...Array.from({ length: 6 }, () => ({ status: 503 })),

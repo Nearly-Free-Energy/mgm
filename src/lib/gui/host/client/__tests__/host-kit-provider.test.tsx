@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { createElement, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT } from "@/components/ui/navigation-progress";
@@ -129,7 +129,7 @@ describe("HostKitProvider", () => {
     expect(seenProps.at(-1)!.signals).toEqual(signals);
   });
 
-  it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", () => {
+  it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", async () => {
     const fetch = vi.fn(async () => new Response("null", { status: 404 }));
     const tenant = withNav();
     tenant.orgs = [];
@@ -140,6 +140,10 @@ describe("HostKitProvider", () => {
         </HostKitProvider>
       </KitRuntimeProvider>
     );
+    // The feed's first fetch waits a turn (signals-feed.ts), so wait past it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     expect(fetch).not.toHaveBeenCalled();
     expect(seenProps.at(-1)!.signals).toBeNull();
   });
