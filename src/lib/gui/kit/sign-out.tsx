@@ -5,7 +5,7 @@
  * merely show the button do not carry it (decision 16 on #115).
  */
 import { useEffect, useId, useRef, useState } from "react";
-import { clearAppBadge } from "../host/client/app-badge";
+import { markSignedOut } from "../host/client/app-badge";
 import { useKitRuntime } from "../host/client/kit-runtime";
 import { ORG_COOKIE } from "../host/shared/org-cookie";
 
@@ -49,8 +49,9 @@ export async function signOutAndLeave(): Promise<void> {
     (await removedSession(() => auth.signOut())) || (await removedSession(() => auth.signOut({ scope: "local" })));
   if (!removed) throw new Error("Sign-out did not remove the session");
   document.cookie = `${ORG_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax`;
-  // The installed app's badge counted this person's signals.
-  clearAppBadge();
+  // The installed app's badge counted this person's signals; no answer still
+  // in flight may set it again before /login loads.
+  markSignedOut();
   // A full load, so nothing the client cached for this person survives.
   window.location.assign("/login");
 }

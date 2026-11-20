@@ -18,7 +18,7 @@ import "server-only";
  */
 import { z } from "zod";
 import { CORE_ENTITY_KINDS } from "@/lib/plugins/bundled";
-import type { Json, ViewKind, ViewModel } from "../../contract";
+import type { Json, Signals, ViewKind, ViewModel } from "../../contract";
 import { CARET_RANGE_RE } from "../shared/contract-range";
 import { OUT_HREF_PATTERNS, isSameOriginPath } from "../shared/href";
 
@@ -338,6 +338,8 @@ function modelOf<K extends ViewKind>(kind: K) {
       .strictObject({ refreshSeconds: z.number().positive(), staleAfterSeconds: z.number().positive() })
       .optional(),
     ext: extSchema.optional(),
+    // Defined below; read when a model is parsed, not when this schema is built.
+    signals: z.lazy((): z.ZodType<Signals> => signalsSchema).optional(),
   });
 }
 
@@ -356,7 +358,7 @@ export function modelSchema<K extends ViewKind>(kind: K): (typeof modelSchemas)[
 
 /**
  * What a loader returns for each kind (LoadedModel in ../../surface.ts). The
- * host fills type, view, kind, org, trail, attached and live, so a loader
+ * host fills type, view, kind, org, trail, attached, live and signals, so a loader
  * that supplies any of them is refused. A loader's notice is its own, which
  * the host shows after its own notices (shownNotice in ./view.ts).
  */

@@ -8,7 +8,8 @@ import "server-only";
  * person's session (./access.ts), and what it returns is strictly parsed
  * (./parse.ts) before actions are resolved (./merge.ts) and host fields
  * are filled. A view declaring `takesSignals` is handed the organization's
- * signals (organizationSignals in ./signals.ts) before its loader runs. A
+ * signals (organizationSignals in ./signals.ts) before its loader runs, and
+ * its model carries them for the shell's signals feed. A
  * tenant view (scope "tenant") is about one of the person's own units
  * instead, and is served by dispatchTenantView.
  *
@@ -468,6 +469,8 @@ export async function dispatchView(
       // The gate's notice, else the one on generated figures, then the loader's own.
       ...shownNotice(notice ?? (synthetic ? SYNTHETIC_NOTICE : undefined), own),
       ...(live ? { live } : {}),
+      // The shell's signals feed takes these instead of fetching them again.
+      ...(signals ? { signals } : {}),
     };
     const checked = parseOrFail(viewModelSchema, out, `view ${def.id}`);
     return checked.ok ? { ok: true, value: checked.value as ViewModel } : OUTPUT_INVALID;

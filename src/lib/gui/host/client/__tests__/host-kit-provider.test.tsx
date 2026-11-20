@@ -6,7 +6,8 @@ import type { Manifest, OverlayProps, Signals, ViewState } from "../../../contra
 import { HostKitProvider } from "../host-kit-provider";
 import { useView, type KitProvider } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
-import { initial, manifest, MG, ORG, recordingRuntime } from "./kit-test-utils";
+import { ViewBoundary } from "../view-boundary";
+import { initial, manifest, MG, model, ORG, recordingRuntime } from "./kit-test-utils";
 
 // The real KitProvider, recording the props HostKitProvider hands it.
 const seenProps = vi.hoisted(() => [] as ComponentProps<typeof KitProvider>[]);
@@ -106,8 +107,26 @@ describe("HostKitProvider", () => {
     expect(props.actions?.forms).toBe(forms);
     expect(typeof props.resolve).toBe("function");
     expect(typeof props.refreshSignals).toBe("function");
-    expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
+    expect(typeof props.seedSignals).toBe("function");
     await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
+    expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("takes the signals a published view's model carries instead of fetching them", async () => {
+    const signals: Signals = { type: "signals", org: ORG, count: 1, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json({ ...signals, count: 5 }));
+    const today = model({ view: "org.today", signals });
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial}>
+          <ViewBoundary initial={initial} model={today} />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(seenProps.at(-1)!.signals).toEqual(signals);
   });
 
   it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", () => {

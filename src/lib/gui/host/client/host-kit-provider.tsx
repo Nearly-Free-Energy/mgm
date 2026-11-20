@@ -37,8 +37,8 @@
  * is the current unit, which the tenant manifest reads the same way.
  *
  * It fetches the signals of the organization the manifest shows after the
- * first paint (./signals-feed.ts), hands them to KitProvider for
- * useSignals(), and sets the installed app's badge to their count. A tenant
+ * first paint (./signals-feed.ts), or takes them from a view's model that
+ * carries them, hands them to KitProvider for useSignals(), and sets the installed app's badge to their count. A tenant
  * manifest gets none, and its badge is cleared: the host builds a staff
  * manifest's `orgs` with the current organization in it and a tenant's with
  * none (buildManifestModel and buildTenantManifestModel,
@@ -71,7 +71,7 @@ function signalsOrganization(manifest: ComponentProps<typeof KitProvider>["manif
   return manifest && manifest.orgs.some((org) => org.id === manifest.org.id) ? manifest.org.id : null;
 }
 
-export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve" | "signals" | "refreshSignals">) {
+export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve" | "signals" | "refreshSignals" | "seedSignals">) {
   const { manifest } = props;
   const organization = manifest?.org.id ?? null;
   const runtime = useKitRuntime();
@@ -112,5 +112,5 @@ export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, 
     },
     [],
   );
-  return <KitProvider {...props} resolve={resolve} signals={feed.signals} refreshSignals={feed.refresh} />;
+  return <KitProvider {...props} resolve={resolve} signals={feed.signals} refreshSignals={feed.refresh} seedSignals={feed.seed} />;
 }

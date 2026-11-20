@@ -136,9 +136,11 @@ export function KitProvider(props: {
   signals?: Signals | null;
   /** Fetches the signals again; called after an action whose result says `signals: true`. */
   refreshSignals?: () => void;
+  /** Handed the signals a published view's model carries (a view that takes signals, such as Today). */
+  seedSignals?: (signals: Signals) => void;
   children: ReactNode;
 }) {
-  const { manifest, initial, resolve, actions, signals = null, refreshSignals, children } = props;
+  const { manifest, initial, resolve, actions, signals = null, refreshSignals, seedSignals, children } = props;
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
@@ -170,6 +172,13 @@ export function KitProvider(props: {
   useEffect(() => {
     if (unplaced) refreshOnce(`path:${pathname}`);
   }, [unplaced, pathname, refreshOnce]);
+
+  // A view that takes signals carries the ones the host collected for it, so
+  // the shell's feed need not fetch them again (./signals-feed.ts).
+  const modelSignals = boundary?.pathname === pathname ? boundary.model?.signals : undefined;
+  useEffect(() => {
+    if (modelSignals) seedSignals?.(modelSignals);
+  }, [modelSignals, seedSignals]);
 
   // The published model is left out of this value on purpose (BoundaryStore).
   const state = useMemo<KitState>(

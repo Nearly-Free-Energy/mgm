@@ -8,7 +8,7 @@
  * layout and its KitProvider.
  */
 import { useRouter } from "next/navigation";
-import { clearAppBadge } from "@/lib/gui/host/client/app-badge";
+import { markSignedOut } from "@/lib/gui/host/client/app-badge";
 import { createClient } from "@/lib/supabase/client";
 
 export function NoAccessLogout() {
@@ -16,8 +16,9 @@ export function NoAccessLogout() {
   const supabase = createClient();
 
   async function handleLogout() {
-    await supabase.auth.signOut();
-    clearAppBadge();
+    const { error } = await supabase.auth.signOut();
+    // Only once the session is gone; /login clears the badge as well.
+    if (!error) markSignedOut();
     router.push("/login");
     router.refresh();
   }

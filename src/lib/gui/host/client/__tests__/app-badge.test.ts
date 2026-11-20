@@ -58,3 +58,22 @@ describe("app badge", () => {
     expect(() => clearAppBadge()).not.toThrow();
   });
 });
+
+describe("app badge after sign-out", () => {
+  it("clears the badge on markSignedOut and sets it no more for the rest of the page's life", async () => {
+    vi.resetModules();
+    const fresh = await import("../app-badge");
+    const set = vi.fn(async () => {});
+    const clear = vi.fn(async () => {});
+    install({ setAppBadge: set, clearAppBadge: clear });
+    fresh.setAppBadge(2);
+    expect(fresh.isSignedOut()).toBe(false);
+    fresh.markSignedOut();
+    expect(fresh.isSignedOut()).toBe(true);
+    expect(clear).toHaveBeenCalledOnce();
+    fresh.setAppBadge(5);
+    expect(set.mock.calls).toEqual([[2]]);
+    fresh.clearAppBadge();
+    expect(clear).toHaveBeenCalledTimes(2);
+  });
+});

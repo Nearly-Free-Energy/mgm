@@ -173,12 +173,17 @@ read a stored credential, or to send data to another origin.
      (`src/lib/gui/host/client/signals-feed.ts`): again every five minutes
      while the page is visible, on focus or coming back into view when the
      last fetch is 30 s old, and after an action whose route answers
-     `signals: true`. `useSignals()` returns it, and the installed app's
-     badge shows its `count`, every signal as Today lists every signal,
-     where the browser supports the Badging API. A 401 or 403 clears both;
-     any other failure keeps what was shown. A tenant's manifest fetches
-     nothing, and the badge is cleared for it, on sign-out and when the
-     organization changes.
+     `signals: true`. A view that takes signals carries them in its model
+     (`signals`), and the shell takes those instead of fetching again.
+     `useSignals()` returns them, and the installed app's badge shows their
+     `count`, every signal as Today lists every signal, where the browser
+     supports the Badging API. A 401 clears both and stops fetching; a 403
+     clears both; any other failure keeps what was shown and doubles the
+     wait, up to 30 minutes. A tenant's manifest fetches nothing, and the
+     badge is cleared for it, when the organization changes, on sign-out
+     (after which the page sets it no more) and whenever /login shows.
+     The badge belongs to the installed app, not to a window: two windows
+     on different organizations show whichever fetched last.
 
 ## Consequences
 

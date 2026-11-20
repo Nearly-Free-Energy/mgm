@@ -250,6 +250,8 @@ export interface ModelBase<K extends ViewKind, A, V> {
   live?: { refreshSeconds: number; staleAfterSeconds: number };
   /** Extra data for a bespoke renderer that reads this exact version. */
   ext?: { schema: `${Id}@${number}`; data: Json };
+  /** The organization's signals the host collected for a view that takes them (Today); the shell counts them too. */
+  signals?: Signals;
 }
 export interface EmbeddedView {
   model: ViewModel;
