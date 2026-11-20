@@ -123,9 +123,8 @@ describe("the close refusals' copy", () => {
     expect(CLOSE_REFUSAL_COPY).toEqual({
       closed: "Billing period is already closed.",
       reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
-      // The GUI host shows its old step again after a refusal, so not "confirm again".
-      totalsChanged:
-        "The period's totals changed after you reviewed them. Close this dialog and choose Close period again to review the new totals.",
+      // Shown over the new totals, by the GUI host (which prepares the close again) and the legacy dialog.
+      totalsChanged: "The period's totals changed after you reviewed them. Review the new totals and confirm again.",
     });
   });
 });

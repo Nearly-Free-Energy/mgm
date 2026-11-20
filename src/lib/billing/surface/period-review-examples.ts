@@ -55,8 +55,6 @@ const TITLES: Record<string, string> = Object.fromEntries(
   ].map((a) => [a.id, a.title]),
 );
 
-/** The actions the host shows in the danger tone: typed or ceremony (merge-actions.ts). */
-const DANGER = new Set<string>([REGENERATE_BILL_ACTION.id, MARK_REFUNDED_ACTION.id]);
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const NOVEMBER = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30", status: "draft" as const, timezone: "Africa/Kampala" };
@@ -158,7 +156,7 @@ const resolve =
   (link: ActionLink): ActionRef => ({
     ...link,
     label: link.label ?? TITLES[link.action],
-    ...(DANGER.has(link.action) ? { tone: "danger" as const } : {}),
+    // No tone: none of this view's actions is a DELETE or destructive (actionTone in merge-actions.ts).
     ...(disabled ? { enabled: false, reason: BILLING_DISABLED } : { enabled: true }),
   });
 

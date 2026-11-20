@@ -155,9 +155,8 @@ describe("ClosePeriodDialog — closing", () => {
     await screen.findByRole("heading", { name: "Close October 2026?" });
     confirmAll();
     fireEvent.click(confirmButton());
-    await screen.findByText(/The totals changed after you reviewed them/);
-    // The new totals are in place, so not the route's sentence, which sends the GUI host's person back to Close period.
-    expect(screen.queryByText(CLOSE_REFUSAL_COPY.totalsChanged)).toBeNull();
+    // The route's sentence, over the new totals.
+    await screen.findByText(CLOSE_REFUSAL_COPY.totalsChanged);
     expect(screen.getByText("13")).toBeTruthy();
     for (const box of screen.getAllByRole("checkbox")) expect((box as HTMLInputElement).checked).toBe(false);
     expect(typedBox().value).toBe("");
@@ -169,12 +168,40 @@ describe("ClosePeriodDialog — closing", () => {
     expect((post.mock.calls[2][1] as { confirmation: { digest: string } }).confirmation.digest).toBe("v1:second");
   });
 
-  it("when the totals changed and the new review could not be read, shows the route's sentence", async () => {
-    mount([review(), { ok: false, status: 409, code: "billing_period_totals_changed", message: CLOSE_REFUSAL_COPY.totalsChanged }]);
+  it("when the totals changed and the 409 carries no review, loads the review again and shows the route's sentence over it", async () => {
+    const changed = ceremony({ digest: "v1:second", facts: [{ label: "Bills", value: { t: "number", v: 13, text: "13" } }] });
+    const { post } = mount([
+      review(),
+      { ok: false, status: 409, code: "billing_period_totals_changed", message: CLOSE_REFUSAL_COPY.totalsChanged },
+      review(changed),
+      closed,
+    ]);
     await screen.findByRole("heading", { name: "Close October 2026?" });
     confirmAll();
     fireEvent.click(confirmButton());
     await screen.findByText(CLOSE_REFUSAL_COPY.totalsChanged);
+    expect(post.mock.calls[2][1]).toEqual({});
+    expect(screen.getByText("13")).toBeTruthy();
+    for (const box of screen.getAllByRole("checkbox")) expect((box as HTMLInputElement).checked).toBe(false);
+    expect(typedBox().value).toBe("");
+
+    confirmAll();
+    fireEvent.click(confirmButton());
+    await screen.findByRole("heading", { name: "Closed: October 2026" });
+    expect((post.mock.calls[3][1] as { confirmation: { digest: string } }).confirmation.digest).toBe("v1:second");
+  });
+
+  it("when the totals changed and the review cannot be loaded again, offers Retry", async () => {
+    mount([
+      review(),
+      { ok: false, status: 409, code: "billing_period_totals_changed", message: CLOSE_REFUSAL_COPY.totalsChanged },
+      { ok: false, status: 503, code: "billing_close_review_unavailable", message: CLOSE_REFUSAL_COPY.reviewUnavailable },
+    ]);
+    await screen.findByRole("heading", { name: "Close October 2026?" });
+    confirmAll();
+    fireEvent.click(confirmButton());
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(CLOSE_REFUSAL_COPY.reviewUnavailable);
   });
 
   it("stays open while the close is sending, and reports a close that went through", async () => {
