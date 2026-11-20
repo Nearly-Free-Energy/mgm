@@ -107,6 +107,13 @@ describe("parseContribution", () => {
     expect(() => parseContribution(c, CATALOG)).not.toThrow();
   });
 
+  it("accepts an action that prepares again on codes its route answers", () => {
+    // That the route answers each code is checked in CI (gui-surface.test.ts), not here.
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.actions[2].prepareAgainOn = ["billing_period_totals_changed"];
+    expect(parseContribution(c, CATALOG).contribution.actions?.[2].prepareAgainOn).toEqual(["billing_period_totals_changed"]);
+  });
+
   it("accepts placeholder names with underscores", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     Object.assign(c.actions[2], { path: "/api/billing-periods/[period_id]/close", bind: { path: { period_id: "billingPeriod" } } });
@@ -199,6 +206,13 @@ describe("parseContribution", () => {
     ["a destructive action below typed", (c) => (c.actions[0].risk = "destructive"), ["actions", 0, "confirm"], "a destructive action needs typed or ceremony confirmation"],
     ["an external action without prepare", (c) => (c.actions[0].risk = "external"), ["actions", 0, "prepare"], "an external action needs prepare"],
     ["an external action without confirm", (c) => Object.assign(c.actions[0], { risk: "external", confirm: "none", prepare: fn }), ["actions", 0, "confirm"], "an external action needs at least confirm"],
+    // Preparing again
+    ["prepareAgainOn without prepare", (c) => (c.actions[0].prepareAgainOn = ["billing_changed"]), ["actions", 0, "prepareAgainOn"], "an action that prepares again needs prepare"],
+    ["prepareAgainOn at level none", (c) => Object.assign(c.actions[0], { confirm: "none", prepare: fn, prepareAgainOn: ["billing_changed"] }), ["actions", 0, "prepareAgainOn"], "an action that prepares again needs a confirmation step"],
+    ["a prepareAgainOn code listed twice", (c) => (c.actions[2].prepareAgainOn = ["billing_changed", "billing_changed"]), ["actions", 2, "prepareAgainOn"], "a code is listed twice"],
+    ["a prepareAgainOn code that is not lower-case", (c) => (c.actions[2].prepareAgainOn = ["Billing-Changed"]), ["actions", 2, "prepareAgainOn", 0], "Expected a lower-case code"],
+    ["an empty prepareAgainOn", (c) => (c.actions[2].prepareAgainOn = []), ["actions", 2, "prepareAgainOn"]],
+    ["more than eight prepareAgainOn codes", (c) => (c.actions[2].prepareAgainOn = Array.from({ length: 9 }, (_, i) => `billing_changed_${i}`)), ["actions", 2, "prepareAgainOn"]],
     // Segments and kinds
     ["a segment without a param", (c) => (c.views[0].params = {}), ["views", 0, "params"], 'params has no kind for the segment "id"'],
     ["a param that is not a segment", (c) => (c.views[0].params.periodId = "billingPeriod"), ["views", 0, "params", "periodId"], '"periodId" is not a segment of the path'],

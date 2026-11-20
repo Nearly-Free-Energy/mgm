@@ -10,7 +10,10 @@
  * or composes, or carries a PaymentExemption, and an action declaring
  * `whilePluginOff` is a Payments or Pesapal action whose own
  * `METHOD /api/route` carries a PaymentExemption naming a method that runs
- * while the plugin is off; 4. the route is released.
+ * while the plugin is off; 4. the route is released; 10. each code the
+ * action lists in `prepareAgainOn` is written as a string in its route file
+ * or in a source file under src/lib, outside a `prepareAgainOn` list, so a
+ * misspelt code is caught (the host prepares again only on an exact match).
  * Views: 5. each example, as a loader would return it, passes
  * strictParseModel; 6. no declared key or prefix, nor any name in its ext
  * schema, looks like a secret unless SECRET_LIKE_EXEMPTIONS says why; 7. each
@@ -113,6 +116,8 @@ interface Facts {
   gating?: ReadonlyMap<string, string>;
   /** The capability methods a surface module may call; LOADER_READS unless given. */
   reads?: Readonly<Record<string, readonly string[]>>;
+  /** Whether a string literal is written in a non-test source file under src/lib; libWrites unless given. */
+  writes?: (literal: string) => boolean;
 }
 
 /** The capability whose gating decides what runs while Payments or Pesapal is off. */
@@ -215,6 +220,14 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
     if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
   }
   if (!facts.released(a.path.replace(/\[[^\]]+\]/g, "0"))) problems.push("the route is not released");
+  // Check 10. The route answers the code, often from a capability module, so
+  // either place counts; a prepareAgainOn list itself does not.
+  for (const code of a.prepareAgainOn ?? []) {
+    const literal = `"${code}"`;
+    if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
+      problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
+    }
+  }
   return problems.map((p) => `${a.id} (${a.method} ${a.path}): ${p}`);
 }
 
@@ -481,6 +494,21 @@ function apiRoutes(dir = path.join(APP, "api")): RouteFile[] {
   });
 }
 
+const withoutPrepareAgainOn = (text: string) => text.replace(/prepareAgainOn\s*:\s*\[[^\]]*\]/g, "");
+
+let libText: string | undefined;
+/** The non-test source under src/lib, with every prepareAgainOn list removed, read once. */
+function libWrites(literal: string): boolean {
+  const read = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return entry.name === "__tests__" ? [] : read(full);
+      return entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [readFileSync(full, "utf8")] : [];
+    });
+  libText ??= read(path.join(REPO, "src/lib")).map(withoutPrepareAgainOn).join("\n");
+  return libText.includes(literal);
+}
+
 function repoFacts(schemas = new Map<string, Record<string, unknown>>()): Facts {
   return { apiRoutes: apiRoutes(), schemas: (module) => schemas.get(module), released: isReleasedRoute };
 }
@@ -695,6 +723,32 @@ describe("the GUI surface guard", () => {
     expect(check("payments", RECONCILE, { gating: refusing })).toEqual(["declares whilePluginOff, but reconcile refuses while the plugin is off"]);
     // Without the field, an exempt route needs nothing more.
     expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
+  });
+
+  it("refuses a prepareAgainOn code that neither the action's route nor src/lib writes", () => {
+    const route = "/api/billing-periods";
+    const text = (extra = "") =>
+      `import { parseJsonBody } from "@/lib/validation/parse-body";\nimport { Body } from "@/lib/billing/schemas";\nexport async function POST(request: Request) { await parseJsonBody(request, Body); ${extra} }`;
+    const check = (codes: string[], o: { route?: string; writes?: (literal: string) => boolean } = {}) =>
+      actionProblems("billing", { ...createPeriod, path: route, prepareAgainOn: codes } as ActionDef, {
+        apiRoutes: [{ route, text: o.route ?? text() }],
+        schemas: (m) => (m === "@/lib/billing/schemas" ? { Body: createPeriod.input } : undefined),
+        released: () => true,
+        writes: o.writes ?? (() => false),
+      }).map((p) => p.replace(/^.*?\): /, ""));
+
+    // Written in the route, or under src/lib (the close route answers its code from capability.ts).
+    expect(check(["acme_changed"], { route: text('return { code: "acme_changed" };') })).toEqual([]);
+    expect(check(["acme_changed"], { writes: (l) => l === '"acme_changed"' })).toEqual([]);
+    expect(libWrites('"billing_period_totals_changed"')).toBe(true);
+    // A misspelt code, and one written only in a prepareAgainOn list.
+    expect(check(["acme_chnaged"], { route: text('return { code: "acme_changed" };') })).toEqual([
+      'lists "acme_chnaged" in prepareAgainOn, which neither its route nor src/lib writes',
+    ]);
+    expect(check(["acme_changed"], { route: text('const d = { prepareAgainOn: ["acme_changed"] };') })).toEqual([
+      'lists "acme_changed" in prepareAgainOn, which neither its route nor src/lib writes',
+    ]);
+    expect(libWrites('"gui_never_written_anywhere_code"')).toBe(false);
   });
 
   it("allows attach.whilePluginOff only on a Payments view whose surface module calls nothing that refuses while off", () => {

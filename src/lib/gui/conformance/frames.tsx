@@ -57,6 +57,7 @@ function prepared(role: OverlayProps["role"], tone: OverlayProps["tone"]): Prepa
     bound: {},
     ceremony: role === "confirm" ? { type: "ceremony", statement: STATEMENT, facts: [], warnings: [], acknowledgements: [] } : null,
     tone,
+    prepareAgainOn: [],
   };
 }
 

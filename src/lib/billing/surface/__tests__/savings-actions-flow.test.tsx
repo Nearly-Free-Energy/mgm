@@ -58,6 +58,7 @@ function prepared(request: { action: string; params: Record<string, string>; bod
     bound: {},
     ceremony: null,
     tone: actionTone(def),
+    prepareAgainOn: [...(def.prepareAgainOn ?? [])],
     ...(prefill === undefined ? {} : { prefill }),
   };
 }

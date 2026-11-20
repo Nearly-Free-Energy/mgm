@@ -236,6 +236,18 @@ type ActionBase = {
    * write the route would refuse. If that exemption is removed, remove this.
    */
   whilePluginOff?: "enabled";
+  /**
+   * Codes of the route's 409 answers that mean what the person confirmed
+   * changed after prepare, such as the figures a ceremony's digest covers.
+   * On one, the host prepares the action again with the same ref and shows
+   * the new step, with the route's message as its note; it never sends on
+   * its own (ADR-006, decision 9). Needs `prepare` and a confirmation step.
+   * Each code must be one the route answers in its body's `code`:
+   * gui-surface.test.ts checks that it is written in the route or under
+   * src/lib, and the route stays the authority, checking the confirmation
+   * again on every write.
+   */
+  prepareAgainOn?: readonly string[];
 };
 type WriteMethod = "POST" | "PUT" | "PATCH";
 type LightLevel =

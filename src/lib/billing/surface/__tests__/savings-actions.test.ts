@@ -132,6 +132,7 @@ describe("billing's savings actions", () => {
         bound: {},
         ceremony: null,
         tone: "neutral",
+        prepareAgainOn: [],
       },
     });
     const tariff = await prepare({ action: TARIFF.id, params: { id: MG } });

@@ -53,6 +53,7 @@ function prepared(request: { action: string; params: Record<string, string>; bod
     bound: Object.fromEntries(bound.map((name) => [name, request.params[name]])),
     ceremony: null,
     tone: actionTone(def),
+    prepareAgainOn: [...(def.prepareAgainOn ?? [])],
     ...(prefill === undefined ? {} : { prefill }),
   };
 }

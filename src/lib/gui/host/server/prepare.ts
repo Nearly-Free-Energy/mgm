@@ -69,6 +69,8 @@ export const preparedActionSchema = z.strictObject({
   ceremony: ceremonySchema.nullable(),
   /** The tone of the form's footer, the confirmation step and the Overlay: actionTone of the action's definition. */
   tone: z.enum(["neutral", "danger"]),
+  /** The action's `prepareAgainOn`, or empty: the write's 409 codes on which the host prepares it again. */
+  prepareAgainOn: z.array(z.string()).max(8),
   prefill: jsonSchema.optional(),
 });
 export type PreparedAction = z.output<typeof preparedActionSchema>;
@@ -257,6 +259,7 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
     bound,
     ceremony: ceremony.value,
     tone: actionTone(def),
+    prepareAgainOn: [...(def.prepareAgainOn ?? [])],
     ...(prefill === undefined ? {} : { prefill }),
   };
   const parsed = parseOrFail(preparedActionSchema, out, `action ${def.id}`);

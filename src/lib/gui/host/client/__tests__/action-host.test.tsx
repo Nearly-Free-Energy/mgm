@@ -78,6 +78,7 @@ function prepared(over: PreparedOver = {}) {
     bound: { microgrid_id: MG },
     ceremony: null,
     tone: "neutral",
+    prepareAgainOn: [],
     ...rest,
   } as PreparedAction;
 }
@@ -91,11 +92,21 @@ function gate() {
   return { wait, open };
 }
 
-/** Mounts a KitProvider (which mounts the ActionHost) on a runtime whose fetch answers prepare and the write. */
-function mount(prepare: Reply, write: Reply = { body: {} }, slots: Parameters<typeof KitProvider>[0]["actions"] = {}) {
+/**
+ * Mounts a KitProvider (which mounts the ActionHost) on a runtime whose fetch
+ * answers prepare and the write. A list is answered in order, its last reply repeating.
+ */
+function mount(prepare: Reply | Reply[], write: Reply | Reply[] = { body: {} }, slots: Parameters<typeof KitProvider>[0]["actions"] = {}) {
+  const queue = (replies: Reply | Reply[]) => {
+    const list = Array.isArray(replies) ? replies : [replies];
+    let i = 0;
+    return () => list[Math.min(i++, list.length - 1)];
+  };
+  const nextPrepare = queue(prepare);
+  const nextWrite = queue(write);
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
     void init;
-    const reply = url === "/api/gui/prepare" ? prepare : write;
+    const reply = url === "/api/gui/prepare" ? nextPrepare() : nextWrite();
     await reply.wait;
     if (reply.fail) throw new TypeError("Failed to fetch");
     return Response.json(reply.body ?? {}, { status: reply.status ?? 200 });
@@ -110,7 +121,9 @@ function mount(prepare: Reply, write: Reply = { body: {} }, slots: Parameters<ty
   );
   const writes = () => fetch.mock.calls.filter(([url]) => url !== "/api/gui/prepare");
   const sent = (i = 0) => JSON.parse(String(writes()[i][1]!.body));
-  return { fetch, runtime, writes, sent, unmount };
+  /** The body of each prepare request, in order. */
+  const prepares = () => fetch.mock.calls.filter(([url]) => url === "/api/gui/prepare").map(([, init]) => JSON.parse(String(init!.body)));
+  return { fetch, runtime, writes, sent, prepares, unmount };
 }
 
 /** A bespoke form: shows its initial values and error, and submits `values`. */
@@ -1189,5 +1202,194 @@ describe("ActionHost's tone", () => {
     void act(ref());
     expect((await confirmButton()).className).toContain("bg-destructive");
     expect(new Set(tones)).toEqual(new Set(["danger"]));
+  });
+});
+
+describe("ActionHost when what was confirmed changed", () => {
+  const CHANGED = { code: "acme_changed", error: "The figures changed after you reviewed them. Review them and confirm again." };
+  const ceremonyOf = (total: string, digest: string) => ({
+    type: "ceremony" as const,
+    statement: "Close the books?",
+    facts: [{ label: "Total", value: { t: "text" as const, text: total } }],
+    warnings: [],
+    acknowledgements: [{ id: "a", label: "Sure" }],
+    typed: "Kasenge",
+    digest,
+  });
+  /** A ceremony action that prepares again on acme_changed. */
+  const closing = (total: string, digest: string, over: PreparedOver = {}) =>
+    prepared({ confirm: "ceremony", specConfirm: "ceremony", fields: false, ceremony: ceremonyOf(total, digest), prepareAgainOn: ["acme_changed"], ...over });
+  const confirmAll = async () => {
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Sure" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Kasenge" } });
+    fireEvent.click(await confirmButton());
+  };
+  const proposal = { by: "watcher" as const, at: "2026-11-10T12:00:00.000Z" };
+
+  it("prepares again, shows the new step with the route's note, and sends nothing on its own", async () => {
+    const { writes, prepares } = mount([{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2") }], { status: 409, body: CHANGED });
+    let settled = false;
+    void act(ref({ provenance: proposal })).then(() => (settled = true));
+    expect(await screen.findByText("UGX 100")).toBeTruthy();
+    await confirmAll();
+
+    expect(await screen.findByText("UGX 120")).toBeTruthy();
+    expect(screen.queryByText("UGX 100")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe(CHANGED.error);
+    // Asked again with the same ref: action, params and provenance.
+    expect(prepares()).toHaveLength(2);
+    expect(prepares()[1]).toEqual(prepares()[0]);
+    expect(prepares()[1]).toEqual({ action: "metering.rename", params: { microgrid_id: MG }, provenance: proposal });
+    // A new round: ticks and typing cleared, Confirm waiting for the person.
+    expect((screen.getByRole("checkbox", { name: "Sure" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("");
+    expect(((await confirmButton()) as HTMLButtonElement).disabled).toBe(true);
+    expect(writes()).toHaveLength(1);
+    expect(settled).toBe(false);
+  });
+
+  it("sends the new digest once the person confirms the new step", async () => {
+    const { writes, sent } = mount([{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2") }], [{ status: 409, body: CHANGED }, { body: {} }]);
+    const done = act(ref());
+    await confirmAll();
+    await screen.findByText("UGX 120");
+    // The ticks and typing of the first round do not carry over.
+    fireEvent.click(await confirmButton());
+    expect(writes()).toHaveLength(1);
+    await confirmAll();
+    await expect(done).resolves.toMatchObject({ ok: true });
+    expect(writes()).toHaveLength(2);
+    expect(sent(0).confirmation.digest).toBe("d1");
+    expect(sent(1)).toEqual({ microgrid_id: MG, confirmation: { digest: "d2", acknowledged: ["a"], typed: "Kasenge" } });
+  });
+
+  it("prepares again each time the write answers that it changed", async () => {
+    const { writes, sent, prepares } = mount(
+      [{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2") }, { body: closing("UGX 140", "d3") }],
+      { status: 409, body: CHANGED },
+    );
+    void act(ref());
+    await confirmAll();
+    await screen.findByText("UGX 120");
+    await confirmAll();
+    expect(await screen.findByText("UGX 140")).toBeTruthy();
+    expect(prepares()).toHaveLength(3);
+    expect(writes()).toHaveLength(2);
+    expect(sent(1).confirmation.digest).toBe("d2");
+  });
+
+  it.each([
+    ["a 409 with a code the action does not list", { status: 409, body: { code: "billing_disabled", error: "Billing is off." } }],
+    ["a listed code on a 428", { status: 428, body: { ...CHANGED, error: "Tick the box." } }],
+    ["a listed code on a 400", { status: 400, body: { ...CHANGED, error: "Not valid." } }],
+  ])("shows the same step again with the message after %s", async (_, reply) => {
+    const { writes, prepares } = mount({ body: closing("UGX 100", "d1") }, reply);
+    void act(ref());
+    await confirmAll();
+    expect((await screen.findByRole("alert")).textContent).toBe(reply.body.error);
+    expect(screen.getByText("UGX 100")).toBeTruthy();
+    expect(prepares()).toHaveLength(1);
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("shows the same step again when the action lists no codes", async () => {
+    const { prepares } = mount({ body: closing("UGX 100", "d1", { prepareAgainOn: [] }) }, { status: 409, body: CHANGED });
+    void act(ref());
+    await confirmAll();
+    expect((await screen.findByRole("alert")).textContent).toBe(CHANGED.error);
+    expect(prepares()).toHaveLength(1);
+  });
+
+  it("ends with the second prepare's refusal and refreshes the view", async () => {
+    const refused = { code: "gui_action_unavailable", error: "The period cannot be closed: a bill total is not whole." };
+    const { runtime, writes } = mount([{ body: closing("UGX 100", "d1") }, { status: 409, body: refused }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await expect(done).resolves.toMatchObject({ ok: false, status: 409, code: "gui_action_unavailable", message: refused.error });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull());
+    expect(runtime.refresh).toHaveBeenCalledOnce();
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("sends the person to sign in when the second prepare answers 401", async () => {
+    mount([{ body: closing("UGX 100", "d1") }, { status: 401, body: { error: "Sign in." } }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await expect(done).resolves.toMatchObject({ ok: false, status: 401 });
+    expect(assign).toHaveBeenCalledWith("/login");
+  });
+
+  it.each([
+    ["another action", (p: PreparedAction) => ({ ...p, spec: { ...p.spec, id: "metering.other" } })],
+    ["another route", (p: PreparedAction) => ({ ...p, path: `/api/microgrids/${MG}/other` })],
+    ["another method", (p: PreparedAction) => ({ ...p, method: "PUT" })],
+    ["other bound fields", (p: PreparedAction) => ({ ...p, bound: { microgrid_id: "00000000-0000-4000-8000-0000000000ff" } })],
+    ["a weaker level", (p: PreparedAction) => ({ ...p, confirm: "typed" })],
+  ])("swaps nothing in when the second prepare returns %s", async (_, change) => {
+    const { writes } = mount([{ body: closing("UGX 100", "d1") }, { body: change(closing("UGX 120", "d2")) }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await expect(done).resolves.toMatchObject({ ok: false, status: 409, code: "acme_changed", message: CHANGED.error });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull());
+    expect(screen.queryByText("UGX 120")).toBeNull();
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("resolves cancelled when the person cancels while it prepares again, and ignores the late answer", async () => {
+    const hold = gate();
+    const { writes, prepares } = mount([{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2"), wait: hold.wait }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await waitFor(() => expect(prepares()).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await expect(done).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    hold.open();
+    await flush(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(screen.queryByText("UGX 120")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull();
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("resolves cancelled when the host unmounts while it prepares again", async () => {
+    const hold = gate();
+    const { prepares, unmount } = mount([{ body: closing("UGX 100", "d1") }, { body: closing("UGX 120", "d2"), wait: hold.wait }], { status: 409, body: CHANGED });
+    const done = act(ref());
+    await confirmAll();
+    await waitFor(() => expect(prepares()).toHaveLength(2));
+    unmount();
+    await expect(done).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    hold.open();
+  });
+
+  it("prepares a form again from the values sent, without secrets, and starts the form from them", async () => {
+    const form = { "metering.rename": { reads: [1], Component: formSubmitting({ name: "Kasenge", pin: "1234" }) } };
+    const { writes, prepares } = mount(
+      [{ body: prepared({ prepareAgainOn: ["acme_changed"] }) }, { body: prepared({ prepareAgainOn: ["acme_changed"] }) }],
+      { status: 409, body: CHANGED },
+      { forms: form },
+    );
+    void act(ref());
+    fireEvent.click(await screen.findByRole("button", { name: "Submit form" }));
+    fireEvent.click(await confirmButton());
+    expect((await screen.findByTestId("error")).textContent).toBe(`undefined: ${CHANGED.error}`);
+    expect(prepares()[1]).toEqual({ action: "metering.rename", params: { microgrid_id: MG }, body: { name: "Kasenge" } });
+    expect(screen.getByTestId("initial").textContent).toBe('{"name":"Kasenge"}');
+    expect(writes()).toHaveLength(1);
+  });
+
+  it("keeps the one-step form only while the new ceremony stays plain", async () => {
+    const plain = { type: "ceremony" as const, statement: "Rename?", facts: [], warnings: [], acknowledgements: [] };
+    const { writes } = mount(
+      [{ body: prepared({ ceremony: plain, prepareAgainOn: ["acme_changed"] }) }, { body: prepared({ ceremony: { ...plain, warnings: ["Tenants will see it."] }, prepareAgainOn: ["acme_changed"] }) }],
+      { status: 409, body: CHANGED },
+    );
+    void act(ref());
+    fireEvent.change(await screen.findByRole("textbox", { name: "Name" }), { target: { value: "Kasenge" } });
+    fireEvent.click(await confirmButton());
+    // The new ceremony has a warning, so the form now leads to the separate step.
+    expect(await screen.findByRole("button", { name: "Continue" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Rename site" })).toBeNull();
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("Kasenge");
+    expect(writes()).toHaveLength(1);
   });
 });

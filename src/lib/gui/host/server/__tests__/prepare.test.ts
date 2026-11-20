@@ -133,6 +133,7 @@ describe("prepareAction", () => {
         bound: { microgrid_id: MG },
         ceremony: null,
         tone: "neutral",
+        prepareAgainOn: [],
       },
     });
     const input = out.ok ? (out.value.spec.input as { properties: Record<string, unknown> }) : null;
@@ -379,6 +380,11 @@ describe("prepareAction", () => {
       use(guarded("ceremony", async () => ({ ok: true, model: ceremony({ digest: "d1" }) })));
       const out = await prepare({ action: "metering.backend-delete", params });
       expect(out).toMatchObject({ ok: true, value: { confirm: "ceremony", method: "DELETE", ceremony: ceremony({ digest: "d1" }), tone: "danger" } });
+    });
+
+    it("passes on the codes on which the host prepares the action again", async () => {
+      use(action({ id: "metering.backend-close", confirm: "ceremony", risk: "money", method: "POST", humanOnly: true, prepare: async () => ({ ok: true, model: ceremony({ digest: "d1" }) }), prepareAgainOn: ["metering_backend_changed"] }));
+      expect(await prepare({ action: "metering.backend-close", params })).toMatchObject({ ok: true, value: { prepareAgainOn: ["metering_backend_changed"] } });
     });
 
     it("takes the tone from the action's risk and method, not its level", async () => {
