@@ -5,7 +5,8 @@
  * and portals the step into it, so the check sees what production renders.
  * The Overlay is wrapped only to count its onDismiss calls. The step is a
  * sentinel bespoke form (role "form") or the host's ConfirmStep with a plain
- * ceremony (role "confirm", tone "danger").
+ * ceremony (role "confirm", tone "danger"). The tone is the prepared
+ * action's, as the host takes it (action-host.tsx).
  */
 import { act, fireEvent, queryAllByRole, render, waitFor } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
@@ -39,7 +40,7 @@ const CASES = [
   { role: "confirm", tone: "danger" },
 ] as const;
 
-function prepared(role: OverlayProps["role"]): PreparedAction {
+function prepared(role: OverlayProps["role"], tone: OverlayProps["tone"]): PreparedAction {
   return {
     type: "prepared",
     spec: {
@@ -55,6 +56,8 @@ function prepared(role: OverlayProps["role"]): PreparedAction {
     path: "/api/acme/frame",
     bound: {},
     ceremony: role === "confirm" ? { type: "ceremony", statement: STATEMENT, facts: [], warnings: [], acknowledgements: [] } : null,
+    tone,
+    prepareAgainOn: [],
   };
 }
 
@@ -84,7 +87,7 @@ async function overlay(Overlay: SyncComponent<OverlayProps>, role: OverlayProps[
     ...recordingRuntime({ pathname: fixture.pathname }).runtime,
     act: hostAct,
     fetch: async (url: string) =>
-      url === "/api/gui/prepare" ? Response.json(prepared(role)) : Response.json(null, { status: 404 }),
+      url === "/api/gui/prepare" ? Response.json(prepared(role, tone)) : Response.json(null, { status: 404 }),
   };
   const ref: ActionRef = { action: ACTION, params: {}, label: TITLE, enabled: true, ...(tone === "danger" ? { tone } : {}) };
   const { unmount } = render(

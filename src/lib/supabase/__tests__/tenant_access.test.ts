@@ -1,7 +1,7 @@
 /**
  * tenant_access.test.ts — the tenant role against a real database
  * (RFC mgm#197, PR 1: migrations 20261118100000 and 20261118100100; PR 2:
- * 20261118140000).
+ * 20261118140000; the shared-use days, 20261120090000).
  *
  * A tenant is someone who rents a unit on a microgrid. Their access is a
  * user_roles row (user_id, 'tenant', 'tenant', tenants.id). This suite
@@ -838,6 +838,91 @@ desc("fn_tenant_home", () => {
   it("serves a manager who also rents for their own unit", async () => {
     const { data } = await dual.client.rpc("fn_tenant_home", { _tenant_id: F.tenantA });
     expect((data as unknown[]).length).toBe(1);
+  });
+});
+
+// ── fn_tenant_shared_meter_days ───────────────────────────────────────────
+
+desc("fn_tenant_shared_meter_days", () => {
+  const ask = (client: SupabaseClient, tenantId: string, toDate = "2026-05-01") =>
+    client.rpc("fn_tenant_shared_meter_days", { _tenant_id: tenantId, _from_date: "2026-03-01", _to_date: toDate });
+
+  it("refuses the unit's own tenant while the tenant app is off for its organization", async () => {
+    // The fixture has no tenant-app row for the organization, so it is off.
+    const { data, error } = await ask(tenantOnly.client, F.tenantA);
+    expectCode(error, "42501");
+    expect(data).toBeNull();
+  });
+
+  describe("with the tenant app on for the organization", () => {
+    beforeAll(async () => {
+      if (skip) return;
+      const svc = await serviceClient();
+      const { error } = await svc
+        .from("mgm_plugins")
+        .insert({ org_id: F.org, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true });
+      if (error) throw new Error(`[tenant_access] tenant-app on: ${error.message}`);
+    });
+
+    // "the tenant-app plugin's state" below expects no row for the organization.
+    afterAll(async () => {
+      if (skip) return;
+      const svc = await serviceClient();
+      const { error } = await svc.from("mgm_plugins").delete().eq("org_id", F.org).eq("plugin_name", TENANT_APP_PLUGIN_NAME);
+      if (error) throw new Error(`[tenant_access] tenant-app off: ${error.message}`);
+    });
+
+    it("answers the unit's own tenant, with no day where links only abut", async () => {
+      // DEVICE_MOVED was A's primary until 04-01 and is B's from 04-01:
+      // half-open links that abut share no day. This pins the boundary only
+      // together with the positive cases in usage.db.test.ts, which prove
+      // the function returns spans at all.
+      const { data, error } = await ask(tenantOnly.client, F.tenantA);
+      expect(error).toBeNull();
+      expect(data).toEqual([]);
+    });
+
+    it("answers a manager who also rents for their own unit", async () => {
+      const { error } = await ask(dual.client, F.tenantA);
+      expect(error).toBeNull();
+    });
+
+    it("refuses a manager of the organization who rents other units for a unit they do not rent", async () => {
+      const { data, error } = await ask(dual.client, F.tenantB);
+      expectCode(error, "42501");
+      expect(data).toBeNull();
+    });
+
+    it("refuses staff, another unit's tenant, an unknown unit and an account with no role", async () => {
+      for (const [label, client, tenant] of [
+        ["manager", manager.client, F.tenantA],
+        ["superAdmin", superAdmin.client, F.tenantA],
+        ["otherManager", otherManager.client, F.tenantA],
+        ["tenantOnly for B", tenantOnly.client, F.tenantB],
+        ["tenantOnly for OTHER", tenantOnly.client, F.tenantOther],
+        ["tenantOnly for an unknown unit", tenantOnly.client, F.unknown],
+        ["noRole", noRole.client, F.tenantA],
+      ] as const) {
+        const { data, error } = await ask(client, tenant);
+        expect(error?.code, label).toBe("42501");
+        expect(data, label).toBeNull();
+      }
+    });
+
+    it("rejects a range that does not end", async () => {
+      expectCode((await ask(tenantOnly.client, F.tenantA, "infinity")).error, "22023");
+    });
+  });
+
+  it("is a SECURITY DEFINER, STABLE function with a pinned search_path", () => {
+    const [row] = ownerRows<{ prosecdef: boolean; provolatile: string; config: string | null }>(
+      `SELECT prosecdef, provolatile, array_to_string(proconfig, ';') AS config
+         FROM pg_proc
+        WHERE oid = 'public.fn_tenant_shared_meter_days(uuid, date, date)'::regprocedure`,
+    );
+    expect(row.prosecdef).toBe(true);
+    expect(row.provolatile).toBe("s");
+    expect(row.config?.split(";")).toContain("search_path=public, pg_temp");
   });
 });
 
@@ -1746,6 +1831,7 @@ desc("anon is denied every new or re-issued function", () => {
     ["user_can_access_tenant", { _tenant_id: F.tenantA }],
     ["user_is_tenant_of_device", { _device_id: F.deviceA }],
     ["fn_tenant_home", { _tenant_id: F.tenantA }],
+    ["fn_tenant_shared_meter_days", { _tenant_id: F.tenantA, _from_date: "2026-11-01", _to_date: "2026-12-01" }],
     ["fn_tenant_access_grant", { _tenant_id: F.tenantA, _user_id: F.unknown, _actor: F.unknown }],
     ["fn_tenant_access_revoke", { _tenant_id: F.tenantA, _access_id: F.unknown }],
     ["fn_tenant_access_list", { _tenant_id: F.tenantA }],
@@ -1778,6 +1864,7 @@ desc("anon is denied every new or re-issued function", () => {
            'public.user_can_access_tenant(uuid)',
            'public.user_is_tenant_of_device(uuid)',
            'public.fn_tenant_home(uuid)',
+           'public.fn_tenant_shared_meter_days(uuid, date, date)',
            'public.fn_tenant_access_grant(uuid, uuid, uuid)',
            'public.fn_tenant_access_revoke(uuid, uuid)',
            'public.fn_tenant_access_list(uuid)',
@@ -1795,6 +1882,7 @@ desc("anon is denied every new or re-issued function", () => {
       { signature: "public.user_can_access_tenant(uuid)", ...both },
       { signature: "public.user_is_tenant_of_device(uuid)", ...both },
       { signature: "public.fn_tenant_home(uuid)", ...both },
+      { signature: "public.fn_tenant_shared_meter_days(uuid, date, date)", ...both },
       { signature: "public.fn_tenant_access_grant(uuid, uuid, uuid)", ...serviceOnly },
       { signature: "public.fn_tenant_access_revoke(uuid, uuid)", ...both },
       { signature: "public.fn_tenant_access_list(uuid)", ...both },

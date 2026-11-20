@@ -21,27 +21,6 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/microgrids/mg-1/billing",
 }));
 
-// Result of `from("billing_periods").delete().eq(...)`; the delete-period
-// tests override it per case.
-const deleteEqMock = vi.fn(
-  (): Promise<{ error: { code?: string; message: string; details?: string } | null }> =>
-    Promise.resolve({ error: null }),
-);
-
-// Mock Supabase client (BillingPeriodList calls createClient() on render)
-vi.mock("@/lib/supabase/client", () => ({
-  createClient: () => ({
-    from: () => ({
-      delete: () => ({ eq: () => deleteEqMock() }),
-      insert: () => ({
-        select: () => ({
-          single: () => Promise.resolve({ data: { id: "new-period" }, error: null }),
-        }),
-      }),
-    }),
-  }),
-}));
-
 // Import after mocks are set up
 import { BillingPeriodList } from "../BillingPeriodList";
 
@@ -477,10 +456,19 @@ describe("BillingPeriodList — default dates", () => {
 });
 
 describe("BillingPeriodList — delete period", () => {
+  // Deleting goes through DELETE /api/billing-periods/[periodId] (the billing
+  // capability, behind the plugin gate), with the period's name typed.
+  const fetchMock = vi.fn();
+
   beforeEach(() => {
     refreshSpy.mockClear();
-    deleteEqMock.mockReset();
-    deleteEqMock.mockResolvedValue({ error: null });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ deleted: PERIOD_2.id }) });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   function renderList(periods: BillingPeriod[]) {
@@ -497,9 +485,14 @@ describe("BillingPeriodList — delete period", () => {
     );
   }
 
-  function confirmDelete() {
+  function confirmButton() {
+    return within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+  }
+
+  function confirmDelete(typed = "March 2026") {
     fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
-    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    fireEvent.change(screen.getByLabelText(/Type the period's name to delete it/i), { target: { value: typed } });
+    fireEvent.click(confirmButton());
   }
 
   it("offers Delete only on the draft period's row", () => {
@@ -524,19 +517,36 @@ describe("BillingPeriodList — delete period", () => {
     ).toBeTruthy();
   });
 
-  it("refreshes the list after a successful delete", async () => {
+  it("keeps Delete disabled until the period's name is typed", () => {
+    renderList([PERIOD_2]);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    expect(confirmButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Type the period's name to delete it/i), { target: { value: "March" } });
+    expect(confirmButton().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(/Type the period's name to delete it/i), { target: { value: "March 2026" } });
+    expect(confirmButton().disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes through the route with the typed name, then refreshes the list", async () => {
     renderList([PERIOD_2]);
     confirmDelete();
     await waitFor(() => expect(refreshSpy).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/billing-periods/${PERIOD_2.id}`);
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirmation: { acknowledged: [], typed: "March 2026" } });
   });
 
-  it("explains a delete refused because the period has recorded payments", async () => {
-    deleteEqMock.mockResolvedValue({
-      error: {
-        code: "23514",
-        message: "billing_period_kept: a billing period with recorded payments cannot be deleted",
-        details: "payment_activity",
-      },
+  it("shows the route's message when the period has recorded payments", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: "billing_period_kept",
+        message: "This period has recorded payments, so it is kept with its payment records and cannot be deleted.",
+      }),
     });
     renderList([PERIOD_2]);
     confirmDelete();
@@ -546,18 +556,39 @@ describe("BillingPeriodList — delete period", () => {
     expect(refreshSpy).not.toHaveBeenCalled();
   });
 
-  it("explains a delete refused because the period was closed meanwhile", async () => {
-    deleteEqMock.mockResolvedValue({
-      error: {
-        code: "23514",
-        message: "billing_period_kept: a closed billing period cannot be deleted",
-        details: "closed",
-      },
+  it("shows the route's message when the period was closed meanwhile", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: "billing_period_kept",
+        message: "This period is closed, so it is kept as the billing record and cannot be deleted.",
+      }),
     });
     renderList([PERIOD_2]);
     confirmDelete();
     await waitFor(() =>
       expect(screen.getByText(/is closed, so it is kept as the billing record/i)).toBeTruthy(),
     );
+  });
+
+  it("shows the gate's message while billing is turned off", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: "billing_disabled", message: "Billing is disabled for this organization." }),
+    });
+    renderList([PERIOD_2]);
+    confirmDelete();
+    await waitFor(() => expect(screen.getByText(/Billing is disabled for this organization/i)).toBeTruthy());
+    expect(refreshSpy).not.toHaveBeenCalled();
+  });
+
+  it("says the delete failed when the request does not reach the route", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    renderList([PERIOD_2]);
+    confirmDelete();
+    await waitFor(() => expect(screen.getByText("Could not delete the period.")).toBeTruthy());
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 });

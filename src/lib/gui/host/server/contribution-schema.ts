@@ -330,6 +330,14 @@ const actionSchema = z
     // CI by gui-surface.test.ts, which can read UNGATED_WRITES; contribute()
     // reads no test data.
     whilePluginOff: z.literal("enabled").optional(),
+    // That each code is one the route answers is checked in CI by
+    // gui-surface.test.ts, which reads the source; contribute() reads none.
+    prepareAgainOn: z
+      .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, "Expected a lower-case code"))
+      .min(1)
+      .max(8)
+      .readonly()
+      .optional(),
     risk: z.enum(["write", "money", "external", "destructive"]),
     confirm: confirmSchema,
     humanOnly: z.boolean(),
@@ -344,6 +352,11 @@ const actionSchema = z
     const needsPrepare = prepared ? `a ${a.confirm} action` : a.risk === "external" ? "an external action" : null;
     if (needsPrepare && !a.prepare) add(ctx, ["prepare"], `${needsPrepare} needs prepare`);
     if (a.risk === "external" && a.confirm === "none") add(ctx, ["confirm"], "an external action needs at least confirm");
+    if (a.prepareAgainOn) {
+      if (!a.prepare) add(ctx, ["prepareAgainOn"], "an action that prepares again needs prepare");
+      if (a.confirm === "none") add(ctx, ["prepareAgainOn"], "an action that prepares again needs a confirmation step");
+      if (new Set(a.prepareAgainOn).size !== a.prepareAgainOn.length) add(ctx, ["prepareAgainOn"], "a code is listed twice");
+    }
     checkSegments(ctx, a.path, Object.keys(a.bind.path ?? {}), ["bind", "path"], "bind.path");
     try {
       z.toJSONSchema(a.input, { io: "input" });

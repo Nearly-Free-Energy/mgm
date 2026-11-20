@@ -48,7 +48,10 @@ export type GenerateFromMetersCounts = {
    * as well.
    */
   left: number;
-  /** Bills that changed, or a period that closed, while the run wrote. */
+  /**
+   * Bills that changed, a bill another write added for a tenant who had
+   * none, or a period that closed, while the run wrote.
+   */
   changed: number;
   /**
    * Tenants with a bill the run could not read from a meter (no meter, an
@@ -89,6 +92,12 @@ const ERROR_BUCKET: Partial<Record<GenerationErrorCode, "left" | "changed" | Not
   // closed period and trg_billing_period_stays_closed keeps it closed (if a
   // closed period can ever be reopened, revisit).
   period_closed: "changed",
+  // bill_exists: fn_record_first_line_item_with_audit found, at the insert,
+  // a bill another write added for a tenant who had none as the run read
+  // the period (a manual reading, a bill from readings, an overlapping
+  // run). That bill is left as it is, and a second run reads it like any
+  // other, so it counts with the bills that changed while the run wrote.
+  bill_exists: "changed",
   unmetered_no_manual: "noMeter",
   meter_assignment_continuity: "meterAssignment",
   no_meter_reading: "noReading",

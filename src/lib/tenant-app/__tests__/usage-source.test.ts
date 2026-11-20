@@ -71,6 +71,10 @@ function recordingClient(
       }
       return chain;
     },
+    rpc(fn: string, args: unknown) {
+      log.push([label, "rpc", fn, args]);
+      return Promise.resolve(answer(`rpc:${fn}`));
+    },
   } as unknown as SupabaseClient;
 }
 
@@ -84,12 +88,9 @@ function setup(options: {
   devicesError?: ReadError;
   edges?: Edge[];
   edgesError?: ReadError;
-  /** What the tenant's own `tenant_devices` read returns: the unit's primary links. */
-  ownLinks?: { device_id: string; effective_from: string; effective_to: string | null }[];
-  ownLinksError?: ReadError;
-  /** What the service role's `tenant_devices` read returns. */
-  primaryLinks?: Record<string, unknown>[];
-  primaryLinksError?: ReadError;
+  /** What fn_tenant_shared_meter_days answers the tenant's own client. */
+  sharedDays?: Record<string, unknown>[];
+  sharedDaysError?: ReadError;
   provider?: Partial<MeteringProvider> & { getDeviceEnergySeries?: MeteringProvider["getDeviceEnergySeries"] };
   select?: () => Promise<string>;
 }) {
@@ -97,16 +98,14 @@ function setup(options: {
   const tenant = recordingClient("tenant", (table) =>
     table === "devices"
       ? answer(options.devices, options.devicesError)
-      : table === "tenant_devices"
-        ? answer(options.ownLinks, options.ownLinksError)
+      : table === "rpc:fn_tenant_shared_meter_days"
+        ? answer(options.sharedDays, options.sharedDaysError)
         : { data: null, error: { message: `the tenant client read ${table}` } }
   );
   const service = recordingClient("service", (table) =>
     table === "edges"
       ? answer(options.edges, options.edgesError)
-      : table === "tenant_devices"
-        ? answer(options.primaryLinks, options.primaryLinksError)
-        : { data: null, error: { message: `the service client read ${table}` } }
+      : { data: null, error: { message: `the service client read ${table}` } }
   );
   mocks.createServiceClient.mockImplementation(() => {
     log.push(["createServiceClient"]);
@@ -441,110 +440,86 @@ describe("createTenantUsageSource", () => {
   });
 });
 
-describe("the days the unit's primary meters are also another unit's primary (D12)", () => {
+describe("the days the unit's primary meters are also the primary of another unit on its microgrid (D12)", () => {
   const range = { fromDate: "2026-11-01", toDate: "2026-12-01" };
-  const own = (device_id: string, effective_from: string, effective_to: string | null = null) => ({
+  const row = (device_id: unknown, effective_from: unknown, effective_to: unknown) => ({
     device_id,
     effective_from,
     effective_to,
   });
 
-  it("confirms the ids as the unit's primary links on the tenant's client, then reads other units' on the service role, cut to the unit's days and the range", async () => {
+  it("asks fn_tenant_shared_meter_days on the tenant's own client, for the unit authorizeTenant read and the range, and never builds a service client", async () => {
     const { source } = setup({
-      ownLinks: [own("p1", "2026-10-01"), own("p2", "2026-11-05", "2026-11-20")],
-      primaryLinks: [
-        { device_id: "p2", effective_from: "2026-10-15", effective_to: null },
-        { device_id: "p1", effective_from: "2026-11-03", effective_to: "2026-11-09" },
-        // Before the range: no day of it is shared.
-        { device_id: "p1", effective_from: "2026-09-01", effective_to: "2026-10-10" },
-      ],
+      sharedDays: [row("p1", "2026-11-03", "2026-11-09"), row("p2", "2026-11-05", "2026-11-20")],
     });
 
-    const spans = await source.listPrimaryElsewhere({ deviceIds: ["p2", "p1"], ...range });
+    const spans = await source.listPrimaryElsewhere(range);
 
     expect(log).toEqual([
       [
         "tenant",
-        "tenant_devices",
-        ["select", "device_id, effective_from, effective_to, devices!inner(device_type)"],
-        ["eq", "tenant_id", unit.tenantId],
-        ["eq", "role", "primary_consumption_meter"],
-        ["eq", "devices.device_type", "consumption_meter"],
-        ["in", "device_id", ["p2", "p1"]],
-        ["lt", "effective_from", "2026-12-01"],
-        ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
-      ],
-      ["createServiceClient"],
-      [
-        "service",
-        "tenant_devices",
-        ["select", "device_id, effective_from, effective_to"],
-        ["in", "device_id", ["p1", "p2"]],
-        ["eq", "role", "primary_consumption_meter"],
-        ["neq", "tenant_id", unit.tenantId],
-        ["lt", "effective_from", "2026-12-01"],
-        ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
+        "rpc",
+        "fn_tenant_shared_meter_days",
+        { _tenant_id: unit.tenantId, _from_date: "2026-11-01", _to_date: "2026-12-01" },
       ],
     ]);
-    // Dates only, and only days that are the unit's own: p2 from the unit's
-    // 5th to its 20th, though the other unit's link runs from October.
     expect(spans).toEqual([
-      { deviceId: "p2", effectiveFrom: "2026-11-05", effectiveTo: "2026-11-20" },
       { deviceId: "p1", effectiveFrom: "2026-11-03", effectiveTo: "2026-11-09" },
+      { deviceId: "p2", effectiveFrom: "2026-11-05", effectiveTo: "2026-11-20" },
     ]);
+    expect(mocks.createServiceClient).not.toHaveBeenCalled();
     expect(mocks.checkGate).not.toHaveBeenCalled();
   });
 
-  it("never asks the service role about an id the tenant's client did not return as the unit's primary link", async () => {
+  it("keeps only the device id and the dates", async () => {
     const { source } = setup({
-      ownLinks: [own("p1", "2026-11-01"), own("not-asked", "2026-11-01")],
-      primaryLinks: [
-        { device_id: "p1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
-        { device_id: "x1", effective_from: "2026-11-01", effective_to: null, tenant_id: "another-unit" },
-      ],
+      sharedDays: [{ ...row("p1", "2026-11-01", "2026-12-01"), tenant_id: "another-unit" }],
     });
 
-    const spans = await source.listPrimaryElsewhere({ deviceIds: ["p1", "x1"], ...range });
+    const spans = await source.listPrimaryElsewhere(range);
 
-    const serviceRead = log.find((entry) => entry[0] === "service")!;
-    expect(serviceRead).toContainEqual(["in", "device_id", ["p1"]]);
     expect(spans).toEqual([{ deviceId: "p1", effectiveFrom: "2026-11-01", effectiveTo: "2026-12-01" }]);
-    expect(JSON.stringify(spans)).not.toContain("tenant");
+    expect(Object.keys(spans[0]).sort()).toEqual(["deviceId", "effectiveFrom", "effectiveTo"]);
+    expect(JSON.stringify(spans)).not.toContain("another-unit");
   });
 
-  it("creates no service client when the tenant's client confirms no primary link, or for no ids", async () => {
-    const { source } = setup({ ownLinks: [] });
+  it.each([
+    ["an open end", row("p1", "2026-11-01", null)],
+    ["a date that does not exist", row("p1", "2026-02-30", "2026-03-01")],
+    ["a device id that is not a string", row(7, "2026-11-01", "2026-11-02")],
+  ])("rejects a row with %s, as a failed read", async (_label, bad) => {
+    const { source } = setup({ sharedDays: [row("p2", "2026-11-01", "2026-11-02"), bad] });
 
-    expect(await source.listPrimaryElsewhere({ deviceIds: ["p1"], ...range })).toEqual([]);
-    expect(await source.listPrimaryElsewhere({ deviceIds: [], ...range })).toEqual([]);
-    expect(mocks.createServiceClient).not.toHaveBeenCalled();
-    expect(log.filter((entry) => entry[0] === "tenant")).toHaveLength(1);
+    await expect(source.listPrimaryElsewhere(range)).rejects.toThrow();
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "shared-days", code: "malformed" });
   });
 
   it.each([
     ["2026-11-01,effective_to.gt.0", "2026-12-01"],
     ["2026-11-01", "2026-12-01)"],
     ["2026-02-30", "2026-03-01"],
+    ["2026-12-01", "2026-11-01"],
   ])("rejects %s .. %s before any read", async (fromDate, toDate) => {
-    const { source } = setup({ ownLinks: [own("p1", "2026-11-01")] });
+    const { source } = setup({ sharedDays: [] });
 
-    await expect(source.listPrimaryElsewhere({ deviceIds: ["p1"], fromDate, toDate })).rejects.toThrow();
+    await expect(source.listPrimaryElsewhere({ fromDate, toDate })).rejects.toThrow();
     expect(log).toEqual([]);
-    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "primary-links", code: "invalid_date" });
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "shared-days", code: "invalid_date" });
   });
 
-  it.each([
-    ["the tenant's read fails", { ownLinksError: { code: "57014", message: "statement timeout" } }, { step: "own-links", code: "57014" }],
-    [
-      "the service role's read fails",
-      { ownLinks: [own("p1", "2026-11-01")], primaryLinksError: { code: "PGRST301", message: "JWT rejected" } },
-      { step: "primary-links", code: "PGRST301" },
-    ],
-  ])("rejects when %s, logging a step and code only", async (_label, options, detail) => {
-    const { source } = setup(options);
+  it("answers an empty range with no days, without a read", async () => {
+    const { source } = setup({ sharedDays: [row("p2", "2026-11-01", "2026-11-02")] });
 
-    await expect(source.listPrimaryElsewhere({ deviceIds: ["p1"], ...range })).rejects.toThrow();
-    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", detail);
-    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/timeout|JWT/);
+    await expect(source.listPrimaryElsewhere({ fromDate: "2026-11-01", toDate: "2026-11-01" })).resolves.toEqual([]);
+    expect(log).toEqual([]);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the function fails, logging a step and code only", async () => {
+    const { source } = setup({ sharedDaysError: { code: "42501", message: "You do not have access to this unit." } });
+
+    await expect(source.listPrimaryElsewhere(range)).rejects.toThrow();
+    expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "shared-days", code: "42501" });
+    expect(JSON.stringify(errors.mock.calls)).not.toMatch(/access to this unit/);
   });
 });

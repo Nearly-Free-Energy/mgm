@@ -141,17 +141,20 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
 
   /**
    * The days of [fromDate, toDate) on which a meter of these links is also
-   * another unit's primary (D12, decided on mgm#217, 19 November). Rejects
-   * when the read fails, and the view then answers meterLinksUnavailable: a
-   * span missed would show shared use as the unit's own. It reads MGM's own
-   * link rows, not the metering backend, so every view asks for it afresh,
-   * outside the usage throttle and its cache, and a kept figure is never
-   * served without its label.
+   * the primary of another unit, on any microgrid (D12, decided on mgm#217,
+   * 19 November; mgm#228). Rejects when the read fails, and the view then
+   * answers meterLinksUnavailable: a span missed would show shared use as
+   * the unit's own. It reads MGM's own link rows, not the metering backend,
+   * so every view asks for it afresh, outside the usage throttle and its
+   * cache, and a kept figure is never served without its label. The source
+   * re-reads the unit's own links in the database, so it is asked for the
+   * range only; a span for a meter that is not among `links` is dropped.
    */
   private async sharedSpans(links: readonly TenantMeter[], fromDate: string, toDate: string): Promise<PrimaryElsewhereSpan[]> {
-    const deviceIds = [...new Set(links.map((link) => link.deviceId))].sort();
-    if (deviceIds.length === 0) return [];
-    return this.usage.listPrimaryElsewhere({ deviceIds, fromDate, toDate });
+    const deviceIds = new Set(links.map((link) => link.deviceId));
+    if (deviceIds.size === 0) return [];
+    const spans = await this.usage.listPrimaryElsewhere({ fromDate, toDate });
+    return spans.filter((span) => deviceIds.has(span.deviceId));
   }
 
   private ensureActive(): TenantAppFailure | null {

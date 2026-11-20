@@ -233,9 +233,9 @@ describe("the period review's actions in the view", () => {
       expect(kept).toEqual(given);
       const refs = resolved.body.rows.flatMap((r) => r.actions);
       expect(refs.every((a) => a.enabled)).toBe(true);
-      // A typed or ceremony action is shown as dangerous (merge-actions.ts); the rest carry no tone.
-      const danger = new Set(["billing.mark-refunded", "billing.regenerate-bill"]);
-      for (const a of refs) expect([a.action, a.tone]).toEqual([a.action, danger.has(a.action) ? "danger" : undefined]);
+      // Only a DELETE or destructive action is shown as dangerous (actionTone in merge-actions.ts), and
+      // none of these is one, typed Mark as refunded and ceremony Regenerate bill included.
+      for (const a of refs) expect([a.action, a.tone]).toEqual([a.action, undefined]);
     },
   );
 });

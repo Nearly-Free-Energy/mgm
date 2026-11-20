@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ActionRef, EntityRef } from "../../../contract";
 import {
   actionRef,
+  actionTone,
   appendTargetedActions,
   fillPath,
   idFits,
@@ -244,7 +245,7 @@ describe("appendTargetedActions", () => {
     expect(ownView.model.actions.map((a) => a.action)).toEqual(["metering.own-view-only"]);
   });
 
-  it("marks typed, ceremony, destructive and DELETE actions as danger", () => {
+  it("marks DELETE and destructive actions as danger, and typed and ceremony ones not", () => {
     const actions: MergeAction[] = [
       { plugin: "metering", def: def("metering.a", { confirm: "typed" }) },
       { plugin: "metering", def: def("metering.b", { confirm: "ceremony" }) },
@@ -253,7 +254,15 @@ describe("appendTargetedActions", () => {
       { plugin: "metering", def: def("metering.e") },
     ];
     const { model } = appendTargetedActions(record(HH), input(actions));
-    expect(model.actions.map((a) => a.tone)).toEqual(["danger", "danger", "danger", "danger", undefined]);
+    expect(model.actions.map((a) => a.tone)).toEqual([undefined, undefined, "danger", "danger", undefined]);
+  });
+
+  it("takes an action's tone from its risk and method alone", () => {
+    expect(actionTone({ risk: "destructive", method: "POST" })).toBe("danger");
+    expect(actionTone({ risk: "write", method: "DELETE" })).toBe("danger");
+    for (const risk of ["write", "money", "external"] as const) {
+      for (const method of ["POST", "PUT", "PATCH"] as const) expect(actionTone({ risk, method })).toBe("neutral");
+    }
   });
 
   it("adds nothing to a view without an entity, and never changes its inputs", () => {
