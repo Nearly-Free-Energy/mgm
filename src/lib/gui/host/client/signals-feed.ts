@@ -174,16 +174,27 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       if (visible() && Date.now() - last >= wait(SIGNALS_MIN_GAP_MS)) load();
     };
     feedRef.current = { load, seed };
-    // A turn later, so a view's model that carries the signals can seed them first.
-    timer = setTimeout(() => {
-      if (last === 0) load();
-    }, 0);
+    // The first fetch waits for the page's load event, then a turn more, so
+    // a view's model that carries the signals can seed them first. The load
+    // event fires once the streamed page is complete: a fetch sent while the
+    // page's Suspense boundary (src/app/(gui)/loading.tsx) is still
+    // streaming answered before it finished, and the update left the streamed
+    // copy behind as a hidden duplicate of the page (the 360 px smoke).
+    const first = () => {
+      timer = setTimeout(() => {
+        if (last === 0) load();
+      }, 0);
+    };
+    const loaded = document.readyState === "complete";
+    if (loaded) first();
+    else window.addEventListener("load", first, { once: true });
     document.addEventListener("visibilitychange", ifStale);
     window.addEventListener("focus", ifStale);
     return () => {
       alive = false;
       controller?.abort();
       clearTimeout(timer);
+      window.removeEventListener("load", first);
       document.removeEventListener("visibilitychange", ifStale);
       window.removeEventListener("focus", ifStale);
       if (feedRef.current?.load === load) feedRef.current = null;

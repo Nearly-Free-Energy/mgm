@@ -97,6 +97,25 @@ describe("useSignalsFeed", () => {
     expect(badge.set).toHaveBeenCalledWith(3);
   });
 
+  it("waits for the page's load event before its first fetch", async () => {
+    Object.defineProperty(document, "readyState", { configurable: true, value: "interactive" });
+    try {
+      const fetch = fetchOf({ body: signals(2) });
+      render(<Probe org={ORG} fetch={fetch} />);
+      await advance(1_000);
+      expect(fetch).not.toHaveBeenCalled();
+      Object.defineProperty(document, "readyState", { configurable: true, value: "complete" });
+      act(() => {
+        window.dispatchEvent(new Event("load"));
+      });
+      await settle();
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(feed().signals?.count).toBe(2);
+    } finally {
+      delete (document as { readyState?: unknown }).readyState;
+    }
+  });
+
   it("clears the badge at zero", async () => {
     render(<Probe org={ORG} fetch={fetchOf({ body: signals(0) })} />);
     await settle();
