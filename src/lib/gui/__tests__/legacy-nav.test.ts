@@ -115,12 +115,9 @@ const REACHED_IN_PAGE: Record<string, Reach> = {
     from: "/microgrids/[id]/setup/edges",
     link: "href={`/microgrids/${id}/setup/edges/shared`}",
   },
-  "/microgrids/[id]/billing/[periodId]": { fromView: "billing.periods" },
-  "/communities/[id]/payment": {
-    from: "/microgrids/[id]/billing/[periodId]",
-    via: ["src/components/BillingTable.tsx"],
-    link: "href={`/communities/${communityId}/payment`}",
-  },
+  // Offered to super admins on the payment setup section of a period's send
+  // queue, since the period's review moved to a view.
+  "/communities/[id]/payment": { fromView: "payments.payment-setup" },
 };
 
 const ROOT = path.resolve(__dirname, "../../../..");
@@ -202,6 +199,9 @@ function pagePattern(page: string): RegExp {
 
 const fill = (pattern: string) => pattern.replace(/\[[^\]]+\]/g, "x");
 
+/** A catalog page the host's catch-all serves by a view (`servedBy: "view"`). */
+const servedByView = (page: string) => MGM_BUNDLED_PLUGINS.some((p) => p.pages.some((pg) => pg.path === page && pg.servedBy === "view"));
+
 afterAll(() => resetMgmRuntimeForTests());
 
 describe("legacy navigation", () => {
@@ -236,11 +236,14 @@ describe("legacy navigation", () => {
       (p) => isReleasedRoute(fill(p)),
     );
     expect(released.filter((p) => !hrefs.has(p) && !Object.hasOwn(REACHED_IN_PAGE, p))).toEqual([]);
-    // Each listed page is a released page without an entry, and leads back to one.
+    // Each listed page is a released page without an entry, and leads back
+    // to one or to a page a view serves.
     expect(Object.keys(REACHED_IN_PAGE).filter((p) => !released.includes(p) || hrefs.has(p))).toEqual([]);
+    // A walk that reaches a page a view serves ends there, as above: the
+    // host lists that page through the views it is attached to or linked from.
     for (const start of Object.keys(REACHED_IN_PAGE)) {
       let at = start;
-      for (let hops = 0; !hrefs.has(at); hops++) {
+      for (let hops = 0; !hrefs.has(at) && !servedByView(at); hops++) {
         expect(hops, `${start} does not lead back to a nav entry`).toBeLessThan(5);
         const via = REACHED_IN_PAGE[at];
         expect(via, `${at} is neither a nav entry nor reached in a page`).toBeDefined();

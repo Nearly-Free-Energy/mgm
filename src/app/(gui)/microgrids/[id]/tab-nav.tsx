@@ -19,15 +19,17 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 //   3. Setup      — configure-once (edges, tenants, rate schedule).
 //
 // Tabs are next/link <Link>s so a click is a client-side navigation and the
-// (gui) layout stays mounted. Setup's pages and a billing period's review
-// are pages under microgrids/[id]/layout.tsx, so between them this
-// microgrid header stays mounted too, and [id]/loading.tsx shows while the
-// new page renders. Operations and Billing are not: they land on the
-// metering.site-day and billing.periods views, which the catch-all
-// (gui)/[...path]/page.tsx serves outside this layout, so a click on either
-// leaves the header behind (and nothing here renders on those pages). If
-// either is served under microgrids/[id]/ again, or the period review moves
-// to a view too, revisit.
+// (gui) layout stays mounted. Setup's pages are pages under
+// microgrids/[id]/layout.tsx, so between them this microgrid header stays
+// mounted too, and [id]/loading.tsx shows while the new page renders.
+// Operations and Billing are not: they land on the metering.site-day and
+// billing.periods views, which the catch-all (gui)/[...path]/page.tsx serves
+// outside this layout, as it serves every billing page (a period's review
+// and history included), so a click on either leaves the header behind (and
+// nothing here renders on those pages). The Billing tab is never
+// highlighted, since no billing page renders this nav; #201's Deletes item
+// removes billing's sub-navigation. If a billing page or Operations is
+// served under microgrids/[id]/ again, revisit.
 //
 // Each tab links to the page a click lands on, not to a URL that redirects:
 // Setup links to its first sub-tab rather than the /setup index. Operations

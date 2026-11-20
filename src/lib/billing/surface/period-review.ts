@@ -43,7 +43,7 @@ type Refusal = Extract<Loaded<never>, { ok: false }>;
 export const PERIOD_REVIEW_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This billing period could not be found." },
   unavailable: { ok: false, status: 503, message: "Could not load this billing period right now. Try again shortly." },
-  // The legacy page's copy (src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx).
+  // The legacy period page's copy, kept when this view took its URL.
   noTariff: {
     ok: false,
     status: 409,

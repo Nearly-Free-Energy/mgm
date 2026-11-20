@@ -10,19 +10,18 @@
  * deleted only once no row is; parity.test.ts enforces both, and fails
  * while a row has no contribution and is not listed as pending there, so a
  * control cannot be lost on the way. Since "Serve the billing pages through
- * the GUI host" the host serves the periods list and the history (their
- * page.tsx files are gone); the review keeps its page.tsx while any row of
- * the period-review screen is pending (PENDING in parity.test.ts lists
- * them), and BillingPeriodList, AuditLogList and BillingTable stay until
- * the Deletes pull request.
+ * the GUI host" the host serves the periods list and the history, and
+ * since "Serve period review through the GUI host" the review too (their
+ * page.tsx files are gone); BillingPeriodList, AuditLogList and
+ * BillingTable stay until the Deletes pull request.
  *
  * Out of the table, on purpose:
  *  - The rest of the microgrid layout's chrome on these pages (the
  *    Operations and Setup tabs, the breadcrumb, Edit microgrid and the
- *    timezone nudge): it belongs to the microgrid pages. The host serves the
- *    periods list and the history outside that layout, so they show the
- *    GUI's own dock and trail instead; the chrome stays on Setup and on a
- *    period's review. The Billing tab is billing's sub-navigation, which
+ *    timezone nudge): it belongs to the microgrid pages. The host serves
+ *    every billing screen outside that layout, so they show the GUI's own
+ *    dock and trail instead; the chrome stays on Setup. The Billing tab is
+ *    billing's sub-navigation, which
  *    #201's Deletes item removes, so it is a row (billing-tab).
  *  - Controls that only change what is on screen (opening the pre-flight
  *    panel, the create form, a dialog, a period picker's list) and the fields

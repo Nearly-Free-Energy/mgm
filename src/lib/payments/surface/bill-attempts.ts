@@ -17,8 +17,8 @@ import "server-only";
  * reads through the same client; the loader reads no payment table itself,
  * so the capability's one definition of received and difference is what
  * the view shows. Composing on req.supabase queues that client's other
- * queries behind getUser's auth lock (the legacy period page's note on
- * paymentLinkAvailable), so it runs after the view's own reads.
+ * queries behind getUser's auth lock (as the legacy period page found), so
+ * it runs after the view's own reads.
  *
  * The view and its actions follow the reconcile route on who may act: any
  * staff member with access to the organization, as composePayments and

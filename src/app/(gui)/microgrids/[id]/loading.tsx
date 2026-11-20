@@ -1,7 +1,8 @@
 // Microgrid section loading fallback.
 //
-// Generic minimal frame for the whole `microgrids/[id]` subtree (a billing
-// period's review, setup/*). Deliberately NOT page-specific: App Router
+// Generic minimal frame for the whole `microgrids/[id]` subtree (setup/*;
+// the billing pages are views the (gui) catch-all serves outside this
+// segment). Deliberately NOT page-specific: App Router
 // `loading.tsx` wraps its segment's page AND all children, so a page-shaped
 // skeleton here would flash the wrong frame on e.g. the rates or tenants
 // pages (pr-375 review).

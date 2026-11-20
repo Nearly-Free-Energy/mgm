@@ -372,7 +372,7 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
 
   it("finds the catalog's pages and the host's", () => {
     expect(CATALOG_PAGES.length).toBeGreaterThan(10);
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing/[periodId]"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
   });
 
   it("opens the tenant pages and nothing else among them", async () => {

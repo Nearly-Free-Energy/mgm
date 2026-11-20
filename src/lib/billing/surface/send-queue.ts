@@ -19,8 +19,8 @@ import "server-only";
  * organization; it reads the merchant account and the plugin state through
  * the same client. A readiness that cannot be read hides the links and says
  * so; it never refuses the view. Billing composing payments while payments
- * depends on billing in the catalog is what the legacy period page does too
- * (paymentLinkAvailable in src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx);
+ * depends on billing in the catalog is what the legacy period page did too
+ * (its paymentLinkAvailable, before billing.period-review took its URL);
  * if the catalog or gui-surface.test.ts comes to forbid a plugin composing
  * one that depends on it, or getReadiness leaves LOADER_READS, revisit.
  *
@@ -76,7 +76,7 @@ const READINESS: readonly SendReadiness[] = ["ready", "sandbox", "disabled", "un
 /**
  * The community's payment readiness, or "unchecked" when it cannot be read.
  * Composing on req.supabase queues that client's other queries behind
- * getUser's auth lock (the legacy page's note on paymentLinkAvailable), so
+ * getUser's auth lock (as the legacy period page found), so
  * this runs after the view's own reads; it costs latency only.
  */
 async function readReadiness(req: SurfaceRequest, communityId: string): Promise<SendReadiness> {
