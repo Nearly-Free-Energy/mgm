@@ -118,11 +118,11 @@ describe("HostKitProvider", () => {
     // must not re-render then (SignalsContext in ../kit-provider.tsx).
     const signals: Signals = { type: "signals", org: ORG, count: 3, top: [], checked: ["billing.due"], unchecked: [] };
     const fetch = vi.fn(async () => Response.json(signals));
-    const renders = { view: 0 };
+    const viewRendered = vi.fn();
     const seen: (Signals | null)[] = [];
     function ViewReader() {
       useView();
-      renders.view += 1;
+      viewRendered();
       return null;
     }
     function SignalsReader() {
@@ -137,9 +137,9 @@ describe("HostKitProvider", () => {
         </HostKitProvider>
       </KitRuntimeProvider>
     );
-    const before = renders.view;
+    const before = viewRendered.mock.calls.length;
     await waitFor(() => expect(seen.at(-1)).toEqual(signals));
-    expect(renders.view).toBe(before);
+    expect(viewRendered).toHaveBeenCalledTimes(before);
   });
 
   it("takes the signals a published view's model carries instead of fetching them", async () => {
