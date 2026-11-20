@@ -8,8 +8,19 @@
  * organization's manager, asking for this organization, gets their own and
  * none of these; a person whose rows are all tenant rows gets the answer a
  * missing page gets, with nothing of the organization. While billing is off
- * Today shows neither billing's signal nor its tile. Nothing here calls out:
- * every request goes to the local Supabase.
+ * Today shows neither billing's signal nor its tile.
+ *
+ * "/" names no organization, so it opens in the one ?org= names, else the
+ * one the org cookie names (the route passes it as renderView does), else
+ * the person's first, each only among those the person can see: a manager
+ * of both organizations is shown either, another organization's manager
+ * never this one, and a super admin with no organization role whichever is
+ * asked for. Only org-scoped staff roles ship; the microgrid scope exists
+ * only for the stray `ems_operator` value, whose holder reaches no
+ * organization (403), and there is no community scope to test. A fresh
+ * install with no organization is render-view.test.ts's: this database
+ * always has some. Nothing here calls out: every request goes to the local
+ * Supabase.
  *
  * In the browser the (gui) catch-all serves "/" through the same view (its
  * catalog page is `servedBy: "view"`), which the 360 px smoke
@@ -59,10 +70,19 @@ const TENANT = "e8800000-0000-4000-8004-000000000001";
 const EMAIL = "gui-today-manager@test.local";
 const OTHER_EMAIL = "gui-today-other@test.local";
 const TENANT_EMAIL = "gui-today-tenant@test.local";
+const BOTH_EMAIL = "gui-today-both@test.local";
+const SUPER_EMAIL = "gui-today-super@test.local";
+const OPERATOR_EMAIL = "gui-today-operator@test.local";
 
 let manager: TestUser;
 let other: TestUser;
 let tenantUser: TestUser;
+/** Manages both organizations. */
+let both: TestUser;
+/** A super admin with no organization role. */
+let superAdmin: TestUser;
+/** Holds only a stray `ems_operator` row on the microgrid scope. */
+let operator: TestUser;
 let fetchSpy: { mock: { calls: Parameters<typeof fetch>[] }; mockRestore(): void };
 
 type Model = {
@@ -74,10 +94,15 @@ type Model = {
   body: { rows: { id: string; href?: string; cells: Record<string, { text: string }> }[]; empty: { title: string } };
 };
 
-const view = (href: string) =>
-  GET(new NextRequest(`http://localhost/api/gui/view?href=${encodeURIComponent(href)}`, { headers: { "accept-language": "en-GB" } }));
-async function load(href: string): Promise<{ model: Model; text: string }> {
-  const res = await view(href);
+/** `org`: the organization the person last used, sent as the org cookie (ORG_COOKIE). */
+const view = (href: string, org?: string) =>
+  GET(
+    new NextRequest(`http://localhost/api/gui/view?href=${encodeURIComponent(href)}`, {
+      headers: { "accept-language": "en-GB", ...(org ? { cookie: `mgm-org=${org}` } : {}) },
+    }),
+  );
+async function load(href: string, org?: string): Promise<{ model: Model; text: string }> {
+  const res = await view(href, org);
   const text = await res.text();
   expect(res.status, text).toBe(200);
   return { model: JSON.parse(text) as Model, text };
@@ -92,7 +117,7 @@ async function setBilling(enabled: boolean) {
 async function cleanup() {
   const svc = await serviceClient();
   await svc.from("mgm_plugins").delete().in("org_id", [ORG, OTHER_ORG]);
-  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
+  await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL, BOTH_EMAIL, SUPER_EMAIL, OPERATOR_EMAIL] });
 }
 
 beforeAll(async () => {
@@ -157,6 +182,22 @@ beforeAll(async () => {
   manager = await createTestUser({ email: EMAIL, role: "org_manager", scopeId: ORG });
   other = await createTestUser({ email: OTHER_EMAIL, role: "org_manager", scopeId: OTHER_ORG });
   tenantUser = await createTestUser({ email: TENANT_EMAIL, role: "tenant", scopeId: TENANT });
+  both = await createTestUser({
+    email: BOTH_EMAIL,
+    role: "org_manager",
+    scopeId: ORG,
+    extraRoles: [{ role: "org_manager", scopeType: "org", scopeId: OTHER_ORG }],
+  });
+  superAdmin = await createTestUser({ email: SUPER_EMAIL, role: "super_admin" });
+  // The microgrid scope type exists only for ems_operator, which no code
+  // grants any more and no access check reads (#321); the community scope
+  // does not exist at all. A stray row is still staff (staffRoles), so it
+  // is seeded directly here to show it reaches no organization.
+  operator = await createTestUser({ email: OPERATOR_EMAIL, role: null });
+  const { error: operatorError } = await svc
+    .from("user_roles")
+    .insert({ user_id: operator.userId, role: "ems_operator", scope_type: "microgrid", scope_id: MICROGRID });
+  if (operatorError) throw new Error(`[today.db] ems_operator row: ${operatorError.message}`);
 }, 120_000);
 
 afterAll(async () => {
@@ -227,6 +268,48 @@ describe.skipIf(shouldSkip())("Today through GET /api/gui/view against the datab
       expect(model.body.empty.title).toBe("Nothing needs you right now.");
     } finally {
       await setBilling(true);
+    }
+  });
+
+  it("opens where the shell is for a manager of several organizations, from the org cookie, and in the first without one", async () => {
+    caller = both;
+    expect((await load("/", OTHER_ORG)).model.org).toBe(OTHER_ORG);
+    const shown = await load("/", OTHER_ORG);
+    expect(shown.model.body.rows.map((r) => r.id)).toEqual([`billing.period-due:${OTHER_PERIOD}`]);
+    expect(shown.model.attached).toEqual([TILE(OTHER_ORG)]);
+    // ?org= outranks the cookie, as it does for the shell.
+    expect((await load(`/?org=${ORG}`, OTHER_ORG)).model.org).toBe(ORG);
+    // No cookie, or one naming no organization the person can see: the first by name.
+    expect((await load("/")).model.org).toBe(ORG);
+    expect((await load("/", "e8800000-0000-4000-8000-0000000000ff")).model.org).toBe(ORG);
+  });
+
+  it("lets no cookie widen what a manager sees", async () => {
+    caller = other;
+    const { model, text } = await load("/", ORG);
+    expect(model.org).toBe(OTHER_ORG);
+    for (const id of [ORG, MICROGRID, SEPTEMBER, CURRENT]) expect(text, id).not.toContain(id);
+  });
+
+  it("gives a super admin with no organization role the organization asked for, by ?org= or the cookie", async () => {
+    caller = superAdmin;
+    for (const [href, cookie] of [[`/?org=${ORG}`, undefined], ["/", ORG]] as const) {
+      const { model, text } = await load(href, cookie);
+      expect(model.org, href).toBe(ORG);
+      expect(model.body.rows.map((r) => r.id)).toContain(`billing.period-due:${SEPTEMBER}`);
+      expect(model.attached).toEqual([TILE(ORG)]);
+      for (const id of [OTHER_MICROGRID, OTHER_PERIOD]) expect(text, id).not.toContain(id);
+    }
+  });
+
+  it("answers a person whose only row is a stray microgrid-scoped ems_operator row with no organization, and nothing of one", async () => {
+    caller = operator;
+    for (const href of ["/", `/?org=${ORG}`, `/billing?org=${ORG}`]) {
+      const res = await view(href, ORG);
+      const text = await res.text();
+      expect(res.status, href).toBe(403);
+      expect(JSON.parse(text)).toMatchObject({ code: "gui_no_access" });
+      for (const id of [ORG, MICROGRID, SEPTEMBER, CURRENT]) expect(text, id).not.toContain(id);
     }
   });
 });
