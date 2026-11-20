@@ -12,6 +12,7 @@ import { BillingTable } from "@/components/BillingTable";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { requestUserIsSuperAdmin } from "@/lib/auth/request-access";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type PaymentCommunity = {
   id: string;
@@ -56,6 +57,7 @@ export default async function BillingPeriodDetailPage({
 }: {
   params: Promise<{ id: string; periodId: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id, periodId } = await params;
   const supabase = await createClient();
 

@@ -345,7 +345,9 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
   const CATALOG_PAGES = MGM_BUNDLED_PLUGINS.flatMap((plugin) => plugin.pages.map((page) => page.path));
   const HOST_PAGES = hostPages();
   const ALL_PAGES = [...new Set([...CATALOG_PAGES, ...HOST_PAGES])].sort();
-  const STAFF_PAGES = ALL_PAGES.filter((page) => page !== TENANT_START_PAGE);
+  /** The pages a contributed tenant view serves: the tenant home, and the unit's use by month and by day. */
+  const TENANT_PAGES = [TENANT_START_PAGE, "/my/usage", "/my/usage/day"];
+  const STAFF_PAGES = ALL_PAGES.filter((page) => !TENANT_PAGES.includes(page));
 
   /** Where the layout sends `roles` from `path`, or null when it renders the page. */
   async function opens(path: string, roles: unknown[]): Promise<string | null> {
@@ -373,12 +375,12 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
     expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing/[periodId]"]));
   });
 
-  it("opens the tenant home and nothing else among them", async () => {
+  it("opens the tenant pages and nothing else among them", async () => {
     const open: string[] = [];
     for (const page of ALL_PAGES) {
       if ((await opens(sample(page), tenantRows)) === null) open.push(page);
     }
-    expect(open).toEqual([TENANT_START_PAGE]);
+    expect(open).toEqual([...TENANT_PAGES].sort());
   });
 
   it.each(STAFF_PAGES)("sends them from %s to their home before the manifest is awaited", async (page) => {
@@ -392,7 +394,15 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
     expect(await opens(path, tenantRows)).toBe(TENANT_START_PAGE);
   });
 
-  it.each(["/my", `/my?unit=${UNIT}`, `/my?unit=${ID}`])("renders %s, a tenant view's page, in the shell", async (path) => {
+  it.each([
+    "/my",
+    `/my?unit=${UNIT}`,
+    `/my?unit=${ID}`,
+    "/my/usage",
+    "/my/usage?month=2026-11",
+    `/my/usage?month=2026-11&unit=${UNIT}`,
+    "/my/usage/day?date=2026-11-18",
+  ])("renders %s, a tenant view's page, in the shell", async (path) => {
     // A unit that is not theirs is the view's to refuse (renderView), not the layout's.
     expect(await opens(path, tenantRows)).toBeNull();
     expect(mocks.getManifest).toHaveBeenCalledWith("gridtop", path, null, null);

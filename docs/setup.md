@@ -183,7 +183,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_MAIL_FROM` | with `MGM_SMTP_URL` | no | The From of the deployment's emails: `MGM <no-reply@example.org>` or a bare address |
 | `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
-| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
+| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data and meter energy for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -337,6 +337,14 @@ its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
 with a daylight-saving change has 23 or 25 hours of bins.
 
+It also generates each meter's energy per local day and hour for the
+tenant app's usage views (`src/lib/metering/fixture/meter-energy.ts`), from
+the meter, the day and a fixed seed, so a meter's figures do not depend on
+which other meters are read. About one day in fourteen has a three-hour
+block the meter "did not report", which the views show as no data. These
+figures are generated separately from the site samples and do not add up to
+them.
+
 Two keys guard it:
 
 - `MGM_METERING_FIXTURES` must be on ([Runtime configuration](#runtime-configuration)).
@@ -486,7 +494,9 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 `e2e/` holds a Playwright smoke test that `Test` runs after `npm test`. In
 Chromium at 360 × 800 with touch as the pointer, it signs in by email link
 (RFC #186), reading the link from the local Supabase's mail catcher, opens the home
-page and a microgrid's tenants list, and checks that no page scrolls
+page, a microgrid's tenants list and a tenant record with its App access
+section, its Give access dialog and its Remove confirmation (with a long
+address), and checks that no page or dialog scrolls
 sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
 the invoice logo loads from its signed Supabase Storage URL, and runs
@@ -522,6 +532,16 @@ database owner, which needs the `supabase` CLI and this project's
 directory, or `SUPABASE_WORKDIR`).
 Timings are printed, not enforced.
 
+It also signs in a tenant (RFC #197) at 360 px. Their unit is in a second
+organization of the smoke's own, with the tenant app turned on and one
+meter on a `SYNTHETIC-EDGE-` edge, so the server runs with
+`MGM_METERING_FIXTURES=1` ([Synthetic site data](#synthetic-site-data)).
+The tenant lands on their home, `/my`, and the smoke opens a past month and
+one of its days, checks that
+neither scrolls sideways and that every link and button in `main` is at
+least 44 × 44 px, and follows the links from the month to a day, to the
+day before and back up to the month.
+
 ```bash
 npx playwright install chromium        # once
 npm run build
@@ -538,7 +558,9 @@ app sends its sign-in link to the mail catcher on the default local ports
 `MGM_MAIL_CATCHER_URL=http://127.0.0.1:54324`); set both if your Supabase
 uses other ports. The smoke sets `MGM_APP_URL` to the app on port 3100
 itself, because the link is built from it, and checks that the link lands
-there.
+there. It sets `MGM_METERING_FIXTURES=1` on the server it starts; a server
+you started yourself and it reuses needs that setting too, or the tenant's
+usage pages show no figures.
 
 ## Full-Stack Setup (with OpenEMS)
 

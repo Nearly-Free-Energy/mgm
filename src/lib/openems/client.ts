@@ -8,6 +8,7 @@ import type {
   DeviceEnergyResult,
   EdgeConfig,
   EdgeStatus,
+  JsonRpcErrorResponse,
   JsonRpcResponse,
 } from "./types";
 
@@ -87,6 +88,17 @@ export class OpenEmsClient implements DeviceDataAdapter {
         503,
         cause
       );
+    // A transport failure, while sending or while reading the reply: a
+    // deadline ending is a timeout, anything else a failure to reach it.
+    const transportError = (err: unknown) =>
+      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")
+        ? timedOut(err)
+        : new OpenEmsError(
+            `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+            "OPENEMS_UNREACHABLE",
+            503,
+            err
+          );
     // A deadline that has already passed starts no request.
     if (signal?.aborted) throw timedOut(signal.reason);
 
@@ -112,18 +124,7 @@ export class OpenEmsClient implements DeviceDataAdapter {
         ...(signal ? { signal } : {}),
       });
     } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.name === "TimeoutError" || err.name === "AbortError")
-      ) {
-        throw timedOut(err);
-      }
-      throw new OpenEmsError(
-        `Failed to reach OpenEMS at ${this.baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
-        "OPENEMS_UNREACHABLE",
-        503,
-        err
-      );
+      throw transportError(err);
     }
 
     // A redirect is a configuration problem, not a transport detail. Checked
@@ -201,7 +202,14 @@ export class OpenEmsClient implements DeviceDataAdapter {
     // the stream, so a `response.text()` in the catch would read an already-
     // used body and yield "" — an error message promising the first bytes and
     // delivering none, which is worse than not offering them.
-    const raw = await response.text();
+    // The body arrives after the headers, under the same signal: a deadline
+    // that ends while it streams is a timeout, as it is during the fetch.
+    let raw: string;
+    try {
+      raw = await response.text();
+    } catch (err) {
+      throw transportError(err);
+    }
 
     let json: { error?: { message?: string } } & Record<string, unknown>;
     try {
@@ -504,7 +512,13 @@ export class OpenEmsClient implements DeviceDataAdapter {
     return byDate;
   }
 
-  /** Per-channel daily coverage; absent dates are unavailable, never zero. */
+  /**
+   * Per-channel daily coverage; absent dates are unavailable, never zero.
+   * Each date holds the backend's daily bucket, which on NFE's backend is the
+   * UTC day stamped at local midnight (see queryEnergyPerPeriod), so in
+   * Kampala a date runs 03:00 to 03:00. If daily buckets ever follow the
+   * requested zone, this note goes.
+   */
   async queryDailyEnergyByChannel(
     edgeId: string,
     channels: string[],
@@ -512,28 +526,9 @@ export class OpenEmsClient implements DeviceDataAdapter {
     toDate: string,
     timezone: string = "UTC"
   ): Promise<Record<string, Record<string, number>>> {
-    const result = await this.rpc<{
-      payload: JsonRpcResponse<{
-        timestamps: number[];
-        data: Record<string, (number | null)[]>;
-      }>;
-    }>("edgeRpc", {
-      edgeId,
-      payload: {
-        jsonrpc: "2.0",
-        id: crypto.randomUUID(),
-        method: "queryHistoricTimeseriesEnergyPerPeriod",
-        params: {
-          fromDate,
-          toDate,
-          channels,
-          timezone,
-          resolution: { value: 1, unit: "Days" },
-        },
-      },
-    });
-
-    const { timestamps, data } = result.payload.result;
+    const { timestamps, data } = await this.queryEnergyPerPeriod(
+      edgeId, channels, fromDate, toDate, timezone, "Days"
+    );
     const byChannel: Record<string, Record<string, number>> = {};
 
     for (let i = 0; i < timestamps.length; i++) {
@@ -549,6 +544,65 @@ export class OpenEmsClient implements DeviceDataAdapter {
     }
 
     return byChannel;
+  }
+
+  /**
+   * Energy per period (Wh) for each channel, as OpenEMS's
+   * queryHistoricTimeseriesEnergyPerPeriod returns it: one bucket per `unit`
+   * over whole local days `fromDate`..`toDate` (inclusive) in `timezone`, null
+   * where the backend has no value. Raw: no keying, summing or null dropping.
+   * `options` as for queryHistoricSamples.
+   *
+   * What a stamp means is the backend's, not the zone's (NFE's backend,
+   * observed 19 November 2026): an hourly bucket is stamped at the END of its
+   * hour, and a daily bucket is stamped at local midnight but holds the UTC
+   * day. The tenant usage reads hours and handles this in
+   * `getDeviceEnergySeries` (`src/lib/metering/openems-provider.ts`).
+   */
+  async queryEnergyPerPeriod(
+    edgeId: string,
+    channels: string[],
+    fromDate: string,
+    toDate: string,
+    timezone: string,
+    unit: "Hours" | "Days",
+    options: RpcOptions = {}
+  ): Promise<{ timestamps: Array<number | string>; data: Record<string, (number | null)[]> }> {
+    const result = await this.rpc<{
+      payload:
+        | JsonRpcResponse<{
+            timestamps: Array<number | string>;
+            data: Record<string, (number | null)[]>;
+          }>
+        | JsonRpcErrorResponse;
+    }>("edgeRpc", {
+      edgeId,
+      payload: {
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "queryHistoricTimeseriesEnergyPerPeriod",
+        params: {
+          fromDate,
+          toDate,
+          channels,
+          timezone,
+          resolution: { value: 1, unit },
+        },
+      },
+    }, options);
+    // The edge's own answer travels inside the backend's, so its error can
+    // come back there, in place of the result, inside a successful outer
+    // reply: it is an RPC error, as one in the outer reply is.
+    const { payload } = result;
+    if ("error" in payload) {
+      throw new OpenEmsError(
+        `OpenEMS RPC error: ${payload.error?.message}`,
+        "OPENEMS_RPC_ERROR",
+        502,
+        payload.error
+      );
+    }
+    return payload.result;
   }
 
   /** Fifteen-minute channel samples used only to prove billing coverage. */

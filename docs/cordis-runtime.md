@@ -18,7 +18,7 @@ loads the platform plugins into it:
 | `<capability>-surface` | contributes a capability's GUI navigation, and later its views and actions (`src/lib/<capability>/surface-plugin.ts`, contributing `src/lib/<capability>/surface.ts`), one plugin each for `organization-directory`, `community-management`, `metering`, `billing`, `payments` and `tenant-app` | `mgmSurface` |
 | `metering-providers` | `meteringProviders` — registry of metering provider factories | — |
 | `openems-metering` | registers the `openems` factory | `meteringProviders` |
-| `fixture-metering` | registers the `synthetic` factory, only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |
+| `fixture-metering` | registers the `synthetic` factory (site samples and per-meter energy series), only while `MGM_METERING_FIXTURES` is on (`src/lib/metering/fixture/plugin.ts`) | `meteringProviders` |
 | `payment-providers` | `paymentProviders` — registry of payment provider factories | — |
 | `pesapal` | registers the `pesapal` factory | `paymentProviders` |
 | `mail-transports` | `mailTransports` — registry of mail transport factories, keyed by the settings' kind (RFC #186) | — |
@@ -31,8 +31,23 @@ authorized and decrypted (an organization's email sender, read by
 `PUT /api/organizations/[id]/email-sender` after its access check); the
 registry keeps only the factories. Organization senders carry notices only,
 never sign-in links or codes (RFC #186 decision 5).
-Provider factories receive the request's Supabase client when a request asks
-for a provider, so RLS always applies to the caller. Adding a second metering
+Provider factories receive the client of whoever asks for a provider:
+normally the request's Supabase client, so RLS applies to the caller. Two
+callers pass a service-role client after their own check instead: the
+token-authenticated `POST /api/v1/billing/generate`, which verifies the
+token's organization first, and the tenant app's usage source
+(`src/lib/tenant-app/infrastructure/usage-source.ts`). A tenant's own client
+reads no `microgrids` or `edges` row, so the usage source builds the unit's
+microgrid's provider on the service role, after `composeTenantApp` has
+authorized the unit, for the microgrid `fn_tenant_home` named and the device
+rows the tenant's own client returned, and, for the device ids the tenant's
+own client returned as the unit's primary consumption meter links, reads
+the date spans on which other units also hold them as primary (see "The
+tenant app" below). That read returns dates only, cut to the unit's own
+links, never whose; if it ever returns a tenant id or takes ids from
+anywhere else, revisit it. A new
+caller that builds a provider on the service role needs the same reasoning,
+and a listing in `service-role-session-check.test.ts`. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
 existing registry; nothing in billing or the routes changes. Metering plugins
 register a factory and an optional `supports(client, microgridId)` selector
@@ -44,10 +59,27 @@ matching provider is required; ambiguous selections fail closed. OpenEMS is
 the compatibility fallback for existing microgrids. A configured non-fallback
 provider takes precedence, and selection errors never fall back silently.
 
+A provider may also implement `getDeviceEnergySeries`: kWh per local day or
+local hour for each meter, null where the source has no value, never a
+substituted zero (`src/lib/metering/energy-series.ts` lays out the buckets
+and refuses a range it cannot read with 400). The OpenEMS provider reads it
+with `queryHistoricTimeseriesEnergyPerPeriod` in the microgrid's zone, with
+values keyed by edge and channel, since a component id such as `meter0`
+repeats on every edge. It always asks for hours: NFE's backend stamps an
+hourly bucket with the end of its hour, and its daily buckets are UTC days
+(03:00 to 03:00 in Kampala), so a local day is the sum of its local hours,
+null when an hour that has ended has no value. The backend returned the
+first two hourly buckets of any range empty in the RFC mgm#197 spike, so the
+read runs from the day before the requested start to the day after its end,
+and the provider drops those days before it returns. The synthetic provider
+generates each meter's figures from the meter, the day and a fixed seed
+(`src/lib/metering/fixture/meter-energy.ts`).
+
 The `synthetic` provider serves a microgrid whose edges all have ids starting
 `SYNTHETIC-EDGE-`. It refuses a microgrid that mixes them with real edges
-(409), generates site samples only for devices on such edges, and marks the
-day it produces as synthetic, which the Operations day shows in a banner.
+(409), generates site samples and meter energy series only for devices on
+such edges, and marks what it produces as synthetic, which the Operations
+day shows in a banner.
 While the setting is off, nothing registers it and the edge registration
 route refuses those ids (400). Only that route refuses them, not the
 database (`docs/setup.md` § "Synthetic site data").
@@ -150,13 +182,48 @@ plugin in turn refuses any audience but `"tenant"`.
 other's scope. A new capability plugin that trusts `organizationId` or
 `roles` calls `requireOrganizationAudience` too. The composition also hands
 out no context to load more. The `tenant-app` capability
-provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`). The
-capability is read-only, so it has no write to re-check, and
-`compose-fail-closed.test.ts` leaves it out:
-`src/lib/tenant-app/__tests__/compose.test.ts` compares its refusals with
-the gate's and covers its load failure. If the composer starts reading
-plugin state another way, it goes into `COMPOSERS` in
-`compose-fail-closed.test.ts`.
+provides `tenantAppScope` and `tenantApp` (both in `REQUEST_SERVICES`).
+
+`TenantAppPlugin` also injects the root `meteringProviders` for the unit's
+month and day of use (RFC mgm#197 § 5). No metering capability loads into a
+tenant's scope, so the usage source (`infrastructure/usage-source.ts`)
+builds the unit's microgrid's provider itself, on the service role as
+described above, and only for meters the tenant's own client returned as
+linked to the unit. The capability writes nothing, but its usage reads are
+provider calls: the usage source asks the metering gate with the tenant's
+client right before each one, in place of the metering capability's
+`requirePlugin` re-check, and the tenant-app gate is asked at composition,
+in the same request. Only the unit's primary consumption meter is its use,
+on the home, the month and the day (`USAGE_METER_ROLE` in
+`src/lib/tenant-app/types.ts`). A meter two units hold as primary on the
+same day is shown to each with the label "Shared with another unit, not
+only yours" on those days (D12). For that, the usage source reads other
+units' primary links of the unit's primary meters on the service role;
+that read concerns MGM's own link rows, not the backend, so it runs
+without the metering gate and outside the usage cache, on every view. It
+returns dates only, cut to the unit's own links, for ids the tenant's own
+client returned as the unit's primary links; if it ever returns a tenant id
+or takes ids from anywhere else, revisit it. If it fails, the view answers
+`tenant_app_unavailable` rather than show shared use unlabelled. A read is cached in process memory for 60 s per unit,
+view and period, and a unit may cause at most six uncached reads a minute
+in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
+store, so keys that need no session cannot evict a unit's count); over the
+limit, a read kept for up to 15 minutes is served marked stale, or the view
+shows no data. An uncached read that fails is answered the same way: the
+kept read, marked stale with its read time, or no data. One that finds
+metering off, or a provider with no series, shows no data and never a kept
+read. Neither is a refusal. The cache is read before the metering
+gate is asked, so while metering is off for the unit's organization nothing
+is read from the backend, but a figure read before it was turned off may
+still be served from the cache: for up to 60 s, or, while the unit is over
+its limit, marked stale for up to 15 minutes. `compose-fail-closed.test.ts` still leaves the
+tenant app out, because the composer reads plugin state only through
+`checkGate`: `src/lib/tenant-app/__tests__/compose.test.ts` compares its
+refusals with the gate's and covers its load failure. If the capability
+ever writes, or a usage read moves out of the request that composed it (a
+worker, a background refresh), it needs a tenant-app re-check before the
+call. If the composer starts reading plugin state another way, it goes into
+`COMPOSERS` in `compose-fail-closed.test.ts`.
 
 The tenant asks `mgm_plugin_enabled_for_org` with their own token, about an
 organization whose `mgm_plugins` rows they cannot read. That works because
@@ -171,6 +238,16 @@ own unit's organization first, or every tenant is refused with `503`. Since
 `service-role-session-check.test.ts` counts it and `composeTenantApp` as
 session checks, as it counts `authorizeOrganization` and the organization
 composers.
+
+Giving and removing a person's access to a unit is not the tenant app's: it
+is community-management's, from the tenant record, through
+`composeCommunityManagement`. `POST /api/tenants/[id]/access` finds or
+creates the account for the address in its body and calls
+`fn_tenant_access_grant` on the service role with the manager's `getUser()`
+id as `_actor`, then sends the notice through `sendNotice`, which never
+carries a sign-in link; `DELETE /api/tenants/[id]/access/[accessId]` calls
+`fn_tenant_access_revoke` with the manager's own client. While the tenant
+app is off for the unit's organization, the POST gives no access.
 
 `composeBillingReview` takes the `organizationId` the route resolved and
 trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
@@ -258,33 +335,42 @@ staff rows they held before (the host reads the rows held now): the host
 gives them the tenant manifest (`buildTenantManifestModel` in
 `src/lib/gui/host/shared/manifest-model.ts`), whose `org` is their current
 unit, whose places are their units and whose nav is tenant entries only.
-The (gui) layout sends them to tenant pages, deny by default: a page is a
-tenant page when the catalog has a view serve it and the contributed view
-whose path fits it has scope `tenant` (`isTenantPage` in
-`src/lib/gui/host/server/tenant-pages.ts`, which reads the surface, so a new
-tenant view needs no list edited). From any other page under the layout,
-`/` and every staff page included, it sends them to `/my` before the
-manifest is awaited, and never to `/setup`. This is navigation, not an access
-check. The redirect runs only when the layout renders: on a full load the
-layout renders alongside the page, and a client-side navigation within the
-`(gui)` group skips it, rendering from the first segment that changes. So a
-staff page's server code can still run for such a person, and what they can
-read there is decided as for anyone, by the page's own checks and RLS (their
-own tenant, `tenant_devices` and device rows, which they could query
-directly), with `dispatchView` refusing them every view that is not a tenant
-view. While `/my` is not a released route (`src/lib/mgm/released-routes.ts`),
-it sends them to `/no-access` instead, which has Log out: middleware would
-answer `/my` with the static "not in this release" page, which has no script
-and links back to `/`. `/no-access` is outside the layout, and sign-out is a Supabase Auth call from the
-browser, so neither sends them round. Otherwise they reach `/no-access` only
-when the manifest refuses because none of their units can be read. The
+Every page under `src/app/(gui)` sends them to tenant pages, deny by
+default, as its first call (`keepTenantOnlyToTenantPages` in
+`src/lib/gui/host/server/tenant-pages.ts`), and the (gui) layout does the
+same when it renders. A page is a tenant page when the catalog has a view
+serve it and the contributed view whose path fits it has scope `tenant`
+(`isTenantPage`, which reads the surface, so a new tenant view needs no list
+edited). From any other page, `/` and every staff page included, they are
+sent to `/my` before the page opens a client or loads a view, and never to
+`/setup`. The page's call is the one that holds: a client-side navigation
+within the `(gui)` group skips the layout, rendering from the first segment
+that changes, but always renders the page. It sends them away and grants
+nothing; what they can read is still decided by RLS (their own tenant,
+`tenant_devices` and device rows, which they could query directly), with
+`dispatchView` refusing them every view that is not a tenant view. `/my` is
+a released route (`src/lib/mgm/released-routes.ts`); should it stop being
+one, they are sent to `/no-access` instead, which has Log out: middleware
+would answer `/my` with the static "not in this release" page, which has no
+script and links back to `/`. `/no-access` is outside the layout, and
+sign-out is a Supabase Auth call from the browser, so neither sends them
+round. Otherwise they reach `/no-access` only when the manifest refuses
+because none of their units can be read. The
 layout's test walks every catalog page and every page file under
-`src/app/(gui)` as such a person. Every staff entry point of the host also
+`src/app/(gui)` as such a person, and `tenant-only-pages.test.tsx` calls
+every page file without the layout, as a client-side navigation renders it,
+and fails when one opens a Supabase client or loads a view before the
+redirect. Every staff entry point of the host also
 refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGate`,
 `visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
 view that is not a tenant view. A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
-off for the unit's organization shows the "not in this release" page.
+off for the unit's organization shows the "not in this release" page. The
+choice leaves out a unit whose organization has the tenant app, or a plugin
+it depends on, off for certain, decided as the tenant nav decides it
+(`unitOrganizationPlugins` in `src/lib/gui/host/server/gate-state.ts`); a
+unit whose state could not be read stays, and its view answers for itself.
+When every unit is left out, the person gets the "not in this release" page.
 
 A person may rent any number of units, in any organizations, and nothing in
 the host holds them to one. Each unit is named by its unit label, else the

@@ -6,6 +6,9 @@ const { access, client, notFound } = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client }));
 vi.mock("@/lib/auth/access", () => ({ currentUserCanAccessCommunity: access }));
 vi.mock("next/navigation", () => ({ notFound }));
+// The layout's first call keeps a tenant-only person to tenant pages; that is
+// tested for every nested layout in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
+vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
 import CommunityLayout from "../layout";
 describe("released community layout", () => {
   beforeEach(() => vi.clearAllMocks());

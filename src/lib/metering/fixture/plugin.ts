@@ -12,6 +12,7 @@ import { meteringFixturesEnabled } from "@/lib/config/metering-fixtures";
 import "@/lib/runtime/services";
 import { MeteringError } from "../errors";
 import { FixtureMeteringProvider, isSyntheticEdgeId } from "../fixture-provider";
+import { generateDeviceEnergySeries } from "./meter-energy";
 import { generateSiteSamples } from "./site-samples";
 
 export { SYNTHETIC_EDGE_ID_PREFIX } from "../fixture-provider";
@@ -19,10 +20,17 @@ export { SYNTHETIC_EDGE_ID_PREFIX } from "../fixture-provider";
 export const SYNTHETIC_PROVIDER_NAME = "synthetic";
 
 /**
- * Whether the synthetic provider serves this microgrid, read through the
- * caller's RLS client: true when every edge is synthetic, false when none is
- * (or there are none). Synthetic and real edges in one microgrid are refused
- * (409), so generated figures never sit beside real ones.
+ * Whether the synthetic provider serves this microgrid: true when every edge
+ * is synthetic, false when none is (or there are none). Synthetic and real
+ * edges in one microgrid are refused (409), so generated figures never sit
+ * beside real ones.
+ *
+ * Edges are read through the client the registry is asked with: the caller's
+ * RLS client, or, for a tenant's usage read, a service client scoped to the
+ * microgrid `fn_tenant_home` named (src/lib/tenant-app/infrastructure/
+ * usage-source.ts), because a tenant's own client reads no edge row and would
+ * select `openems` here. If another caller passes a service client, it needs
+ * the same reasoning.
  */
 export async function syntheticSupports(
   supabase: SupabaseClient,
@@ -62,7 +70,13 @@ export const FixtureMeteringPlugin = {
     ctx.effect(() =>
       ctx.meteringProviders.register(
         SYNTHETIC_PROVIDER_NAME,
-        () => new FixtureMeteringProvider([], { siteSamples: (request) => generateSiteSamples(request) }),
+        () =>
+          new FixtureMeteringProvider([], {
+            siteSamples: (request) => generateSiteSamples(request),
+            // Today reads as far as the moment it is asked for, as a real
+            // meter's: the caller's clock when the request carries one.
+            energySeries: (request) => generateDeviceEnergySeries(request, { nowMs: request.nowMs ?? Date.now() }),
+          }),
         { supports: syntheticSupports }
       )
     );

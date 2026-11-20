@@ -7,6 +7,7 @@ import {
   PluginsPageClient,
   type PluginsOrgView,
 } from "./plugins-page-client";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /settings/plugins — organization plugin management (Release 1, issue #3).
@@ -17,6 +18,7 @@ import {
  * identity, dependency order, and records every change in audit history.
  */
 export default async function SettingsPluginsPage() {
+  await keepTenantOnlyToTenantPages();
   const supabase = await createClient();
   const { data: orgs } = await supabase
     .from("organizations")

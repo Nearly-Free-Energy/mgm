@@ -27,6 +27,11 @@
  * with a test send before saving. It never sends sign-in links or codes.
  * Sign-in by email (RFC #186): the link's landing page, and the route that
  * sends the link.
+ * Tenant access (RFC mgm#197 § 6): the route an organization manager uses,
+ * from the tenant record, to give and remove a person's access to a unit's
+ * tenant pages.
+ * Tenant app (RFC mgm#197): a tenant's home and their unit's use by month and
+ * by day, served by the tenant app's views through the GUI host.
  */
 const RELEASE_1_PAGE_ROUTES = [
   /^\/$/,
@@ -173,6 +178,13 @@ const EMAIL_SENDER_API_ROUTES = [
   /^\/api\/auth\/sign-in-link$/,
 ];
 
+// The tenant home, the month and the day. The unit, month and date are query
+// parameters, never path segments, so each page is exactly one path.
+const TENANT_APP_PAGE_ROUTES = [/^\/my(?:\/usage(?:\/day)?)?$/];
+
+// Give access (POST) and remove one access by its id (DELETE).
+const TENANT_ACCESS_API_ROUTES = [/^\/api\/tenants\/[^/]+\/access(?:\/[^/]+)?$/];
+
 export function isReleasedRoute(pathname: string): boolean {
   const path = pathname.replace(/\/$/, "") || "/";
   return [
@@ -183,6 +195,7 @@ export function isReleasedRoute(pathname: string): boolean {
     ...OPERATIONS_PAGE_ROUTES,
     ...GUI_HOST_PAGE_ROUTES,
     ...EMAIL_SENDER_PAGE_ROUTES,
+    ...TENANT_APP_PAGE_ROUTES,
     ...PUBLIC_METADATA_ROUTES,
     ...RELEASE_1_API_ROUTES,
     ...RELEASE_2_API_ROUTES,
@@ -191,5 +204,6 @@ export function isReleasedRoute(pathname: string): boolean {
     ...GUI_HOST_API_ROUTES,
     ...OPERATIONS_API_ROUTES,
     ...EMAIL_SENDER_API_ROUTES,
+    ...TENANT_ACCESS_API_ROUTES,
   ].some((pattern) => pattern.test(path));
 }

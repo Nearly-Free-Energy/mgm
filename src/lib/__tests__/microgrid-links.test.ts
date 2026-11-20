@@ -11,6 +11,12 @@ import { microgridHref, microgridSetupHref } from "../microgrid-links";
 
 // Middleware verifies the session with getClaims().
 const getClaimsMock = vi.fn();
+// This test imports the microgrid setup page, whose first call keeps a
+// tenant-only person to tenant pages and reads the request's headers, which
+// a test outside a request has none of. That call is tested for every page
+// in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
+vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
+
 vi.mock("@supabase/ssr", () => ({
   createServerClient: () => ({ auth: { getClaims: getClaimsMock } }),
 }));

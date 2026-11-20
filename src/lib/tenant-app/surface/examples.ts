@@ -2,21 +2,25 @@ import "server-only";
 
 /**
  * Examples of the `tenant.home` view, so every GUI can be tested against
- * it: a unit with a primary and a secondary meter, and a unit with no meter
- * assigned today, built the way the loader builds them.
+ * it: a unit with a primary and a secondary meter and its month's use so
+ * far (with a day missing), and a unit with no meter assigned today, built
+ * the way the loader builds them. The month is the usage examples' November
+ * (./usage-examples.ts), so "today" is theirs.
  */
 import type { ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
 import type { LoadedModel } from "@/lib/gui/surface";
 import type { TenantHome } from "../types";
 import { buildTenantHomeModel } from "./home-model";
+import { EXAMPLE_MONTHS_SO_FAR, EXAMPLE_SYNTHETIC_NOTICE } from "./usage-examples";
+import { monthSoFar } from "./usage-model";
 
 const LOCALE = "en-GB";
 
 const HOME: TenantHome = {
   tenant: { id: "00000000-0000-4000-8000-0000000000b1", displayName: "Example tenant", unitLabel: "Unit 4" },
   microgrid: { name: "Example site", timezone: "Africa/Kampala", currency: "UGX" },
-  date: "2026-11-06",
+  date: "2026-11-18",
   meters: [
     {
       deviceId: "00000000-0000-4000-8000-0000000000b2",
@@ -44,14 +48,22 @@ const NO_METER: TenantHome = {
 };
 
 /** The models as the loader returns them, before the host fills its fields. */
-export const TENANT_HOME_LOADED_EXAMPLES: readonly LoadedModel<"record">[] = [HOME, NO_METER].map((home) =>
-  buildTenantHomeModel(home, createFmt({ locale: LOCALE })),
-);
+const fmt = createFmt({ locale: LOCALE });
+
+export const TENANT_HOME_LOADED_EXAMPLES: readonly LoadedModel<"record">[] = [
+  buildTenantHomeModel(HOME, fmt, monthSoFar(EXAMPLE_MONTHS_SO_FAR.november, { fmt, locale: LOCALE })),
+  buildTenantHomeModel(NO_METER, fmt, monthSoFar(EXAMPLE_MONTHS_SO_FAR.noMeter, { fmt, locale: LOCALE })),
+];
+
+/** Whether any field's Value is marked synthetic, as the host decides its notice (hasSynthetic in @/lib/gui/host/server/view). */
+const synthetic = (loaded: LoadedModel<"record">) =>
+  loaded.body.sections.some((section) => section.fields.some((field) => field.value.synthetic === true));
 
 /**
  * Each loaded model with the fields the host fills for a tenant view, as a
- * GUI receives it: no organization, trail or attached views
- * (dispatchTenantView in src/lib/gui/host/server/view.ts).
+ * GUI receives it: no organization, trail or attached views, and the
+ * synthetic notice when a figure is generated (dispatchTenantView in
+ * src/lib/gui/host/server/view.ts).
  */
 export const TENANT_HOME_EXAMPLES: readonly ModelOf<"record">[] = TENANT_HOME_LOADED_EXAMPLES.map((loaded) => ({
   ...loaded,
@@ -63,4 +75,5 @@ export const TENANT_HOME_EXAMPLES: readonly ModelOf<"record">[] = TENANT_HOME_LO
   actions: [],
   links: loaded.links ?? [],
   attached: [],
+  ...(synthetic(loaded) ? { notice: { ...EXAMPLE_SYNTHETIC_NOTICE } } : {}),
 }));

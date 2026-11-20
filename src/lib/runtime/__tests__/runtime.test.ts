@@ -107,6 +107,8 @@ describe("MGM root runtime", () => {
       "payments payments.bill-attempts",
       "payments payments.payment-setup",
       "tenant-app tenant.home",
+      "tenant-app tenant.usage-month",
+      "tenant-app tenant.usage-day",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([
       "organization-directory",
@@ -126,7 +128,10 @@ describe("MGM root runtime", () => {
     // The setting is read when the root loads, so it takes a new root.
     expect((await getMgmRuntime()).meteringProviders.names()).toEqual(["openems"]);
     await resetMgmRuntimeForTests();
-    expect((await getMgmRuntime()).meteringProviders.names()).toEqual(["openems", "synthetic"]);
+    const runtime = await getMgmRuntime();
+    expect(runtime.meteringProviders.names()).toEqual(["openems", "synthetic"]);
+    // The tenant usage views read meter energy from it.
+    expect(runtime.meteringProviders.create("synthetic", {} as never).getDeviceEnergySeries).toBeTypeOf("function");
   });
 
   it("binds metering factories to the caller's client", async () => {

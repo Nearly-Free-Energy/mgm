@@ -6,9 +6,12 @@ import type { OpenEmsClientConfig } from "@/lib/openems";
 import type { DeviceConfig, DeviceReading } from "@/lib/adapters/types";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { OpenEmsError } from "@/lib/openems/errors";
-import { dayKeyInZone } from "@/lib/timezone/day-key";
+import { addDaysToDateKey, dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
+import { energySeriesAxis } from "./energy-series";
 import { MeteringError } from "./errors";
 import type {
+  DeviceEnergySeries,
+  DeviceEnergySeriesRequest,
   MeteringProvider,
   MeteringReadRequest,
   SiteSamples,
@@ -28,8 +31,27 @@ export class OpenEmsMeteringProvider implements MeteringProvider {
       return await getOpenEmsSiteSamples(this.supabase, request);
     } catch (error) {
       if (error instanceof MeteringError) throw error;
-      if (error instanceof OpenEmsError) throw siteSamplesError(error);
+      if (error instanceof OpenEmsError) throw historyReadError(error, "site");
       console.error("Unexpected MGM site samples failure", {
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : "non-Error thrown",
+      });
+      throw new MeteringError(
+        "Metering provider failed unexpectedly",
+        "METERING_UNAVAILABLE",
+        503,
+        error
+      );
+    }
+  }
+
+  async getDeviceEnergySeries(request: DeviceEnergySeriesRequest): Promise<DeviceEnergySeries> {
+    try {
+      return await getOpenEmsEnergySeries(this.supabase, request);
+    } catch (error) {
+      if (error instanceof MeteringError) throw error;
+      if (error instanceof OpenEmsError) throw historyReadError(error, "usage");
+      console.error("Unexpected MGM energy series failure", {
         name: error instanceof Error ? error.name : typeof error,
         message: error instanceof Error ? error.message : "non-Error thrown",
       });
@@ -203,12 +225,22 @@ type SampleSet = {
 };
 
 /**
- * OpenEMS installations return either epoch milliseconds or ISO strings. A
- * Java `ZonedDateTime` string carries its zone after the offset, as in
- * `2026-11-01T00:00+03:00[Africa/Kampala]`; the offset alone fixes the
- * instant, so the bracketed zone is dropped before parsing.
+ * An ISO string that names its own instant: it ends in `Z` or a `±HH:MM`
+ * offset, then optionally the zone in brackets, as Java's `ZonedDateTime`
+ * prints it (`2026-11-01T00:00+03:00[Africa/Kampala]`).
+ */
+const ZONED_ISO = /(?:Z|[+-]\d{2}:\d{2})(?:\[[^\]]+\])?$/;
+
+/**
+ * OpenEMS installations return either epoch milliseconds (or seconds) or ISO
+ * strings; the stock backend sends instants in UTC, such as
+ * `2026-11-04T21:00:00Z` for midnight in Kampala. A string with no `Z` or
+ * offset is unreadable rather than parsed: `Date.parse` would read it in the
+ * server's own zone and move every bucket by that zone's offset. The offset
+ * alone fixes the instant, so a bracketed zone is dropped before parsing.
  */
 function toEpochMs(raw: number | string): number | null {
+  if (typeof raw === "string" && !/^\d{10,13}$/.test(raw) && !ZONED_ISO.test(raw)) return null;
   const numeric = typeof raw === "number"
     ? raw
     : /^\d{10,13}$/.test(raw) ? Number(raw) : null;
@@ -273,6 +305,35 @@ async function mapLimited<T, R>(
   return out;
 }
 
+/**
+ * One batch of channels, or, when OpenEMS refuses the batch because a
+ * channel in it has no history, each channel on its own. Each set comes with
+ * the channels it was asked for; a channel that still has no history gives
+ * no set.
+ */
+async function queryBatchOrEach(
+  channels: string[],
+  query: (channels: string[]) => Promise<SampleSet>
+): Promise<{ channels: string[]; set: SampleSet }[]> {
+  try {
+    return [{ channels, set: await query(channels) }];
+  } catch (error) {
+    if (!isNoEnergyData(error)) throw error;
+    // A channel with no history fails the whole batch; one by one, the
+    // others still answer and the missing one stays null. A few at a time,
+    // so a batch of many house meters does not become a burst of requests.
+    const single = await mapLimited(channels, SINGLE_CHANNEL_CONCURRENCY, async (channel) => {
+      try {
+        return { channels: [channel], set: await query([channel]) };
+      } catch (channelError) {
+        if (!isNoEnergyData(channelError)) throw channelError;
+        return null;
+      }
+    });
+    return single.filter((entry) => entry !== null);
+  }
+}
+
 async function querySiteEdge(
   client: ReturnType<typeof createOpenEmsClient>,
   edgeId: string,
@@ -281,27 +342,212 @@ async function querySiteEdge(
   /** The page read's one deadline, shared by every request and retry. */
   signal: AbortSignal
 ): Promise<SampleSet[]> {
-  const query = (list: string[]) => client.queryHistoricSamples(
+  const sets = await queryBatchOrEach(channels, (list) => client.queryHistoricSamples(
     edgeId, list, request.startDate, request.endDate, request.timezone,
     request.resolutionMinutes, { signal }
-  );
-  try {
-    return [await query(channels)];
-  } catch (error) {
-    if (!isNoEnergyData(error)) throw error;
-    // A channel with no history fails the whole batch; one by one, the
-    // others still answer and the missing one stays null. A few at a time,
-    // so a batch of many house meters does not become a burst of requests.
-    const single = await mapLimited(channels, SINGLE_CHANNEL_CONCURRENCY, async (channel) => {
-      try {
-        return await query([channel]);
-      } catch (channelError) {
-        if (!isNoEnergyData(channelError)) throw channelError;
-        return null;
-      }
-    });
-    return single.filter((set): set is SampleSet => set !== null);
+  ));
+  return sets.map(({ set }) => set);
+}
+
+/** A meter's consumption counter, as OpenEMS names its channel. */
+const consumptionChannel = (componentId: string) => `${componentId}/ActiveConsumptionEnergy`;
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * Implements `MeteringProvider.getDeviceEnergySeries` for OpenEMS, with
+ * queryHistoricTimeseriesEnergyPerPeriod per edge, always per hour.
+ *
+ * - `"hour"`: each local hour's Wh as the backend gives it, null where it has
+ *   none. The hour holding the read carries what was counted so far.
+ * - `"day"`: a local day is the sum of its local hours, as the synthetic
+ *   provider sums them (`fixture/meter-energy.ts`). An hour that starts at or
+ *   after now is not counted; an hour that has ended without a value makes
+ *   the day null, never a lower number; the hour holding now counts when it
+ *   has a value and is not missing when it has none yet (its first sample may
+ *   not have arrived). A day that starts at or after now is null.
+ */
+async function getOpenEmsEnergySeries(
+  supabase: SupabaseClient,
+  request: DeviceEnergySeriesRequest
+): Promise<DeviceEnergySeries> {
+  // Validates the request before anything is read.
+  const axis = energySeriesAxis(request);
+
+  // A device without OpenEMS identifiers is not requested; its series stays
+  // all null. Channels are grouped and deduplicated per edge only: component
+  // ids such as `meter0` repeat on every edge, so a channel name never
+  // identifies a meter on its own.
+  const channelsByEdge = new Map<string, string[]>();
+  for (const device of request.devices) {
+    if (!device.edgeOpenemsId || !device.componentId) continue;
+    const channels = channelsByEdge.get(device.edgeOpenemsId) ?? [];
+    const channel = consumptionChannel(device.componentId);
+    if (!channels.includes(channel)) channels.push(channel);
+    channelsByEdge.set(device.edgeOpenemsId, channels);
   }
+  const noValues = (): (number | null)[] => axis.buckets.map(() => null);
+  if (channelsByEdge.size === 0) {
+    // Nothing to read: no configuration is resolved, no credential decrypted.
+    return {
+      buckets: axis.buckets,
+      kwh: Object.fromEntries(request.devices.map((device) => [device.id, noValues()])),
+    };
+  }
+
+  const config = await resolveOpenEmsConfig(supabase, request.microgridId);
+  if (!config) {
+    throw new MeteringError(
+      "Metering provider is not configured for this microgrid",
+      "METERING_CONFIGURATION",
+      503,
+      { microgridId: request.microgridId }
+    );
+  }
+  const client = createOpenEmsClient(config);
+  // One deadline for the whole read, however many requests and retries it
+  // takes: once it passes, the client starts no further request.
+  const signal = AbortSignal.timeout(OpenEmsClient.PAGE_READ_TIMEOUT_MS);
+
+  // The local hours of the requested days, whatever the resolution: a day
+  // is summed from its hours below.
+  const days: { date: string; first: number; count: number }[] = [];
+  const hourStarts: number[] = [];
+  for (let date = request.startDate; date <= request.endDate; date = addDaysToDateKey(date, 1)) {
+    const starts = localHourStarts(date, request.timezone);
+    days.push({ date, first: hourStarts.length, count: starts.length });
+    hourStarts.push(...starts);
+  }
+  const hourIndex = new Map(hourStarts.map((start, i) => [start, i]));
+
+  // Lead day (spike on RFC mgm#197, 17 November 2026): the backend returns
+  // the first two hourly buckets of any range as null, so the range starts
+  // a day before the requested start. Trailing day: the backend stamps each
+  // hour at its end (below), and a range ending on `endDate` stops at the
+  // bucket stamped 23:00, so the hour 23:00 to 24:00 of `endDate` comes back
+  // only when the range runs to the next day. Hours outside the requested
+  // days are dropped below and never leave this function. A null inside the
+  // requested range is real missing data and stays null. If the backend stops
+  // leaving the first buckets empty, the lead day is merely wasted; if it
+  // ever leaves more than a day empty, the lead must grow.
+  // ENERGY_SERIES_MAX_DAYS applies to the request, not to these two days.
+  const fromDate = addDaysToDateKey(request.startDate, -1);
+  const toDate = addDaysToDateKey(request.endDate, 1);
+
+  // Wh per local hour, keyed `${edgeId}|${channel}`: one value per hour, or
+  // null; `seen` marks the hours a response has already given a value for.
+  const values = new Map<string, { wh: (number | null)[]; seen: boolean[] }>();
+  await Promise.all([...channelsByEdge].map(async ([edgeId, channels]) => {
+    const sets = await queryBatchOrEach(channels, (list) => client.queryEnergyPerPeriod(
+      edgeId, list, fromDate, toDate, request.timezone, "Hours", { signal }
+    ));
+    for (const { channels: asked, set } of sets) {
+      const times = set.timestamps.map(toEpochMs);
+      const unreadable = times.filter((time) => time === null).length;
+      // A response whose instants mostly cannot be read is not missing
+      // data: say so rather than show every bucket as missing.
+      if (set.timestamps.length && unreadable * 2 > set.timestamps.length) {
+        console.error("MGM energy series: unreadable OpenEMS timestamps", {
+          edgeId,
+          count: set.timestamps.length,
+          unreadable,
+          examples: set.timestamps
+            .filter((_, i) => times[i] === null)
+            .slice(0, 3)
+            .map((raw) => String(raw).slice(0, 64)),
+        });
+        throw new MeteringError(
+          "OpenEMS returned this usage in a form MGM could not read. Try again shortly.",
+          "METERING_INVALID_DATA",
+          502,
+          { edgeId, count: set.timestamps.length, unreadable }
+        );
+      }
+      // Only the channels this set was asked for: a set never fills another
+      // request's channel.
+      for (const channel of asked) {
+        const raw = set.data[channel];
+        if (!raw) continue;
+        const key = `${edgeId}|${channel}`;
+        const entry = values.get(key) ?? {
+          wh: hourStarts.map(() => null),
+          seen: hourStarts.map(() => false),
+        };
+        values.set(key, entry);
+        for (let i = 0; i < times.length; i++) {
+          const time = times[i];
+          // The backend stamps an hourly bucket with the END of its hour: the
+          // bucket stamped 15:00 holds 14:00 to 15:00, and while that hour
+          // runs it already holds what was counted so far. Observed on NFE's
+          // backend (OpenEMS 2026.x with InfluxDB), 19 November 2026: 118
+          // hours of two meters matched their counters' rise over the hour
+          // before each stamp, not the hour after it. Matched exactly against
+          // the local hour starts, so a stamp off the hour, or a source that
+          // leaves an hour out, shifts no other value. If a backend stamps an
+          // hour at its start, every hour reads one hour late and this offset
+          // must go.
+          const index = time === null ? undefined : hourIndex.get(time - HOUR_MS);
+          if (index === undefined) continue;
+          if (entry.seen[index]) {
+            console.error("MGM energy series: two OpenEMS values for one bucket", {
+              edgeId,
+              channel,
+              bucket: new Date(hourStarts[index]).toISOString(),
+            });
+            throw new MeteringError(
+              "OpenEMS returned this usage with ambiguous buckets. Try again shortly.",
+              "METERING_INVALID_DATA",
+              502,
+              { edgeId, channel }
+            );
+          }
+          entry.seen[index] = true;
+          const value = raw[i];
+          // A negative value is a counter reset, not energy used.
+          entry.wh[index] =
+            typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+        }
+      }
+    }
+  }));
+
+  // Days are summed from hours rather than read per day: the same backend
+  // stamps a daily bucket at local midnight but fills it with the UTC day,
+  // 03:00 to 03:00 in Kampala (observed alongside the hours above). If daily
+  // buckets ever follow the requested zone, days could be read directly
+  // again. A gap in telemetry leaves its hour null rather than carrying its
+  // energy into the next hour, which is why an ended hour without a value
+  // makes its day null.
+  const nowMs = request.nowMs ?? Date.now();
+  const toSeries = (wh: (number | null)[]): (number | null)[] => {
+    if (request.resolution === "hour") {
+      return wh.map((value) => (value === null ? null : value / 1000));
+    }
+    return days.map(({ first, count }) => {
+      if (hourStarts[first] >= nowMs) return null;
+      let dayWh = 0;
+      for (let i = first; i < first + count; i++) {
+        const start = hourStarts[i];
+        if (start >= nowMs) break;
+        const value = wh[i];
+        if (value !== null) dayWh += value;
+        else if (start + HOUR_MS <= nowMs) return null;
+      }
+      return dayWh / 1000;
+    });
+  };
+
+  // Looked up by edge and channel, never by the channel alone; each device
+  // gets its own array, so two devices on one channel never share one.
+  return {
+    buckets: axis.buckets,
+    kwh: Object.fromEntries(request.devices.map((device) => {
+      const wh = device.edgeOpenemsId && device.componentId
+        ? values.get(`${device.edgeOpenemsId}|${consumptionChannel(device.componentId)}`)?.wh
+        : undefined;
+      return [device.id, wh ? toSeries(wh) : noValues()];
+    })),
+  };
 }
 
 /** Implements `MeteringProvider.getSiteSamples` for OpenEMS. */
@@ -542,13 +788,29 @@ export function createOpenEmsMeteringProvider(
 }
 
 /**
- * What the operations page says when OpenEMS fails a site read. The
- * client's own messages name the backend URL and quote its replies, so
- * they go to the server log only; the page gets a plain sentence per kind
- * of failure, and keeps the MeteringError code and status of
- * `translateOpenEmsError`.
+ * The history reads whose failures get fixed copy: the operations page's
+ * site read, and a meter energy series (a tenant's usage). `log` heads the
+ * server log line; `fallback` is the sentence for a failure with no more
+ * specific one.
  */
-function siteSamplesMessage(code: string): string {
+const HISTORY_READS = {
+  site: {
+    log: "MGM site samples: OpenEMS failed",
+    fallback: "OpenEMS could not provide this day's data. Try again shortly.",
+  },
+  usage: {
+    log: "MGM energy series: OpenEMS failed",
+    fallback: "OpenEMS could not provide this usage. Try again shortly.",
+  },
+} as const;
+
+/**
+ * What a history read says when OpenEMS fails it. The client's own
+ * messages name the backend URL and quote its replies, so they go to the
+ * server log only; the caller gets a plain sentence per kind of failure,
+ * and keeps the MeteringError code and status of `translateOpenEmsError`.
+ */
+function historyReadMessage(code: string, subject: keyof typeof HISTORY_READS): string {
   switch (code) {
     case "OPENEMS_UNREACHABLE":
       return "OpenEMS did not answer in time. Try again shortly.";
@@ -561,18 +823,18 @@ function siteSamplesMessage(code: string): string {
     case "OPENEMS_REDIRECT":
       return "The OpenEMS connection for this microgrid is not set up correctly. Check it under Setup.";
     default:
-      return "OpenEMS could not provide this day's data. Try again shortly.";
+      return HISTORY_READS[subject].fallback;
   }
 }
 
-function siteSamplesError(error: OpenEmsError): MeteringError {
-  console.error("MGM site samples: OpenEMS failed", {
+function historyReadError(error: OpenEmsError, subject: keyof typeof HISTORY_READS): MeteringError {
+  console.error(HISTORY_READS[subject].log, {
     code: error.code,
     message: error.message,
   });
   const translated = translateOpenEmsError(error);
   return new MeteringError(
-    siteSamplesMessage(error.code),
+    historyReadMessage(error.code, subject),
     translated.code,
     translated.statusCode,
     { openemsCode: error.code }

@@ -40,6 +40,10 @@
  *   superAdmin   — super admin
  *   noRole       — an account with no role rows
  *   grantee      — no rows at first; given and then removed access to B
+ *   microgridOnly — an ems_operator row and nothing else, created and
+ *                  removed by one invitation test, so the staff record
+ *                  (staff_access_accounts, history that outlives rows) never
+ *                  names noRole
  * and, created by the staff-record tests (after the access tests, so the
  * counts above do not move):
  *   formerStaff  — org manager of the organization, whose row is removed;
@@ -136,6 +140,7 @@ const EMAIL = {
   superAdmin: "tenant-access-super-admin@test.local",
   noRole: "tenant-access-no-role@test.local",
   grantee: "tenant-access-grantee@test.local",
+  microgridOnly: "tenant-access-microgrid-only@test.local",
   formerStaff: "tenant-access-former-staff@test.local",
   emsTenant: "tenant-access-ems-tenant@test.local",
   madeStaff: "tenant-access-made-staff@test.local",
@@ -662,7 +667,7 @@ desc("a tenant reads nothing staff-only", () => {
 });
 
 desc("a tenant writes nothing", () => {
-  it("cannot change their tenant row, its assignments, or their devices", async () => {
+  it("cannot change their tenant row, its assignments, their devices, or what a meter is", async () => {
     const svc = await serviceClient();
 
     const updated = await tenantOnly.client.from("tenants").update({ display_name: "Changed" }).eq("id", F.tenantA).select();
@@ -687,6 +692,25 @@ desc("a tenant writes nothing", () => {
 
     const renamed = await tenantOnly.client.from("devices").update({ name: "Mine" }).eq("id", F.deviceA).select();
     expect(renamed.data ?? []).toEqual([]);
+    // The tenant app counts a unit's use by the device type, the edge and
+    // component it reads, and the link's role and dates. The fixture tenant
+    // sees only consumption meters, so re-typing Meter A away from one shows
+    // the column cannot be written at all.
+    for (const patch of [
+      { openems_component_id: "meter99" },
+      { device_type: "grid_meter" as const },
+      { edge_id: F.otherEdge },
+    ]) {
+      const changed = await tenantOnly.client.from("devices").update(patch).eq("id", F.deviceA).select();
+      expect(changed.data ?? [], JSON.stringify(patch)).toEqual([]);
+    }
+    const relinked = await tenantOnly.client
+      .from("tenant_devices")
+      .update({ role: "secondary_meter", effective_from: "2026-01-01", effective_to: "2026-02-01" })
+      .eq("tenant_id", F.tenantA)
+      .eq("device_id", F.deviceA)
+      .select();
+    expect(relinked.data ?? []).toEqual([]);
     const created = await tenantOnly.client
       .from("devices")
       .insert({ edge_id: F.edge, name: "Rogue", device_type: "consumption_meter", openems_component_id: "meter99" });
@@ -696,8 +720,24 @@ desc("a tenant writes nothing", () => {
     expect(tenant.data?.display_name).toBe("Unit A");
     const links = await svc.from("tenant_devices").select("id").eq("tenant_id", F.tenantA);
     expect(links.data).toHaveLength(2);
-    const device = await svc.from("devices").select("name").eq("id", F.deviceA).single();
-    expect(device.data?.name).toBe("Meter A");
+    const device = await svc
+      .from("devices")
+      .select("name, device_type, edge_id, openems_component_id")
+      .eq("id", F.deviceA)
+      .single();
+    expect(device.data).toEqual({
+      name: "Meter A",
+      device_type: "consumption_meter",
+      edge_id: F.edge,
+      openems_component_id: "meter10",
+    });
+    const link = await svc
+      .from("tenant_devices")
+      .select("role, effective_from, effective_to")
+      .eq("tenant_id", F.tenantA)
+      .eq("device_id", F.deviceA)
+      .single();
+    expect(link.data).toEqual({ role: "primary_consumption_meter", effective_from: "2026-04-01", effective_to: null });
   });
 
   it("cannot write user_roles, not even their own row", async () => {
@@ -1149,6 +1189,46 @@ desc("the staff role functions keep refusing the tenant role", () => {
       ]),
     );
     expect(data).toHaveLength(3);
+  });
+
+  // 20261119150000: an invitation is for an account with no role row of any
+  // scope. A tenant row and a microgrid-scoped row each count.
+  it("fn_finalize_user_invitation refuses an account holding only a tenant row, or only a microgrid row", async () => {
+    const svc = await serviceClient();
+    const snapshot = async (userId: string) => {
+      const roles = await svc.from("user_roles").select("role, scope_type, scope_id").eq("user_id", userId).order("role");
+      const profile = await svc.from("user_profiles").select("first_name, last_name, phone").eq("user_id", userId).single();
+      return { roles: roles.data, profile: profile.data };
+    };
+    const invite = (client: typeof manager.client, userId: string) =>
+      client.rpc("fn_finalize_user_invitation", {
+        p_user_id: userId,
+        p_first_name: "Over",
+        p_last_name: "Written",
+        p_phone: "+256700000009",
+        p_role: "org_manager",
+        p_scope_id: F.org,
+      });
+
+    // An account of its own: the staff record keeps any account that ever
+    // held a row other than tenant (20261118140000), and the staff-record
+    // tests below expect noRole never to have held one.
+    const microgridOnly = await createTestUser({ email: EMAIL.microgridOnly, role: null });
+    try {
+      const { error: insErr } = await svc
+        .from("user_roles")
+        .insert({ user_id: microgridOnly.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
+      expect(insErr).toBeNull();
+      for (const target of [tenantOnly.userId, microgridOnly.userId]) {
+        const before = await snapshot(target);
+        for (const caller of [manager.client, superAdmin.client]) {
+          expectCode((await invite(caller, target)).error, "42501");
+        }
+        expect(await snapshot(target)).toEqual(before);
+      }
+    } finally {
+      await svc.auth.admin.deleteUser(microgridOnly.userId);
+    }
   });
 
   it("a tenant still gets a sign-in link: fn_auth_sign_in_target accepts any role row", async () => {

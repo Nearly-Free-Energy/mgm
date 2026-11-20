@@ -1,11 +1,17 @@
 /**
  * Import boundary of the tenant app (RFC mgm#197 § 3).
  *
- * The capability and its types consume the `TenantAppRepository` interface
- * only: never a database client, the service role, an access helper, plugin
- * state, a vendor client or the metering providers. The tenant's own client
- * lives in `infrastructure/`, request wiring in `compose.ts`, so what the
- * capability reads is what the tenant's row-level access allows.
+ * The capability, its types and its pure helpers (the usage calendar and the
+ * usage cache and limit) consume the `TenantAppRepository` and
+ * `TenantUsageSource` interfaces only: never a database client, the service
+ * role, an access helper, plugin state, a vendor client or the metering
+ * providers. The tenant's own client lives in
+ * `infrastructure/supabase-repository.ts`, request wiring in `compose.ts`,
+ * so what the capability reads from the database is what the tenant's
+ * row-level access allows. `infrastructure/usage-source.ts` is the one place
+ * that reaches the service role, the metering gate and the metering
+ * providers; `compose.ts` wires it in TenantAppPlugin, which loads only after
+ * authorizeTenant (service-role-session-check.test.ts lists both).
  *
  * Type-only imports (`import type ...`) are stripped before matching: they
  * carry no runtime dependency.
@@ -15,7 +21,13 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 const PLUGIN_ROOT = path.resolve(__dirname, "..");
-const GUARDED = ["capability.ts", "types.ts", "infrastructure/supabase-repository.ts"];
+const GUARDED = [
+  "capability.ts",
+  "types.ts",
+  "usage-calendar.ts",
+  "usage-throttle.ts",
+  "infrastructure/supabase-repository.ts",
+];
 
 /** Runtime import specifiers the guarded files must never touch. */
 const FORBIDDEN = [

@@ -152,6 +152,19 @@ describe.each(LOCALES)("createFmt in %s", (locale) => {
     expect(fmt.energy(84512, { bare: true, digits: 3 })).toEqual({ t: "energy", v: 84.512, unit: "kWh", text: formatKwh(84.512, locale, { digits: 3 }) });
   });
 
+  it("formats energy with two decimals when asked, for figures as small as an hour's use", () => {
+    expect(fmt.energy(85, { digits: 2 })).toEqual({
+      t: "energy",
+      v: 0.085,
+      unit: "kWh",
+      text: `${formatKwh(0.085, locale, { digits: 2 })} kWh`,
+    });
+    expect(fmt.energy(85, { digits: 2, bare: true }).text).toBe(formatKwh(0.085, locale, { digits: 2 }));
+    expect(fmt.energy(85, { digits: 1 }).text).toBe(fmt.energy(85).text);
+    // The option shapes the text only: it is not a flag of the Value.
+    expect(Object.keys(fmt.energy(85, { digits: 2 }))).not.toContain("digits");
+  });
+
   it("formats power in W below 1000 W and in kW from there", () => {
     const watts = (w: number) => `${formatRate(w, locale, { minDigits: 0, maxDigits: 0 })} W`;
     const kilowatts = (kw: number) => `${formatRate(kw, locale, { minDigits: 1, maxDigits: 1 })} kW`;

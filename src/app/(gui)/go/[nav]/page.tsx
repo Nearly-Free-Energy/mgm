@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
 import { resolveGoTarget } from "@/lib/gui/host/server/go";
 import { GoPicker } from "@/lib/gui/host/server/go-picker";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /go/<nav>: opens a navigation entry by its id, for links and home-screen
@@ -9,6 +10,7 @@ import { GoPicker } from "@/lib/gui/host/server/go-picker";
  * src/lib/gui/host/server/go.ts.
  */
 export default async function GoPage({ params }: { params: Promise<{ nav: string }> }) {
+  await keepTenantOnlyToTenantPages();
   const { user } = await getRequestUserAccess();
   if (!user) redirect("/login");
   const { nav } = await params;

@@ -4,6 +4,15 @@ Operator-facing steps for enabling the customerapp (`/api/v1/*`) integration
 for a specific org. Required reading before flipping `customerapp_enabled =
 TRUE` against any production org.
 
+**Tenant usage moved into MGM.** The tenant app (RFC mgm#197) supersedes the
+customer app's usage screen: tenants sign in to MGM itself, with an email
+link, and see their unit's use by month and by day at `/my/usage`, once an
+organization manager gives them access from the tenant record. The cutover,
+an operations step, retires that screen; the customer app stays readable
+through it for the days from before the OpenEMS records began, which the
+tenant app does not show. The `/api/v1` endpoints and `customerapp_enabled`
+described below are not part of that change.
+
 ## What gets activated
 
 When an org has `organizations.customerapp_enabled = TRUE` AND a valid

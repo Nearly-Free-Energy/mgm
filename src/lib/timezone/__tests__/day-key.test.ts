@@ -5,6 +5,7 @@ import {
   dayKeyInZone,
   addDaysToDateKey,
   isCalendarDateKey,
+  localHourStarts,
   startOfDayInZone,
 } from "../day-key";
 
@@ -156,5 +157,46 @@ describe("isCalendarDateKey", () => {
     "１２３４-01-05",
   ])("rejects the wrong shape %j", (value) => {
     expect(isCalendarDateKey(value)).toBe(false);
+  });
+});
+
+describe("localHourStarts", () => {
+  const HOUR = 3_600_000;
+  const iso = (starts: number[]) => starts.map((start) => new Date(start).toISOString());
+
+  it("gives the 24 hour starts of a Kampala day, from local midnight", () => {
+    const starts = localHourStarts("2026-11-05", "Africa/Kampala");
+    expect(starts).toHaveLength(24);
+    expect(starts[0]).toBe(Date.parse("2026-11-04T21:00:00Z"));
+    expect(starts.every((start, i) => start === starts[0] + i * HOUR)).toBe(true);
+    expect(starts.at(-1)! + HOUR).toBe(startOfDayInZone("2026-11-06", "Africa/Kampala").getTime());
+  });
+
+  it("gives 25 hours on New York's fall-back day, the 01:00 hour twice", () => {
+    const starts = localHourStarts("2026-11-01", "America/New_York");
+    expect(starts).toHaveLength(25);
+    expect(iso(starts.slice(0, 4))).toEqual([
+      "2026-11-01T04:00:00.000Z", // 00:00 -04:00
+      "2026-11-01T05:00:00.000Z", // 01:00 -04:00
+      "2026-11-01T06:00:00.000Z", // 01:00 -05:00
+      "2026-11-01T07:00:00.000Z", // 02:00 -05:00
+    ]);
+    expect(starts.at(-1)! + HOUR).toBe(Date.parse("2026-11-02T05:00:00Z"));
+  });
+
+  it("gives 23 hours on New York's spring-forward day, with no 02:00", () => {
+    const starts = localHourStarts("2026-03-08", "America/New_York");
+    expect(starts).toHaveLength(23);
+    expect(iso(starts.slice(0, 3))).toEqual([
+      "2026-03-08T05:00:00.000Z", // 00:00 -05:00
+      "2026-03-08T06:00:00.000Z", // 01:00 -05:00
+      "2026-03-08T07:00:00.000Z", // 03:00 -04:00
+    ]);
+    expect(starts.at(-1)! + HOUR).toBe(Date.parse("2026-03-09T04:00:00Z"));
+  });
+
+  it("throws on an unknown zone or a malformed date, as startOfDayInZone does", () => {
+    expect(() => localHourStarts("2026-11-05", "Mars/OlympusMons")).toThrow(RangeError);
+    expect(() => localHourStarts("not-a-date", "UTC")).toThrow(RangeError);
   });
 });

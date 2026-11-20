@@ -95,3 +95,23 @@ export function startOfDayInZone(dateKey: string, timezone: string): Date {
   }
   return new Date(low);
 }
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * The start of every local hour of `dateKey` in `timezone`, epoch ms: from
+ * startOfDayInZone(dateKey) up to, not including, the start of the next day,
+ * one hour apart. 23 or 25 entries on a daylight-saving day. A zone whose
+ * offset changes by less than an hour (Australia/Lord_Howe) gets one short
+ * bucket; no supported microgrid zone does that today.
+ *
+ * Throws RangeError on an unknown zone id or a malformed date key, as
+ * `startOfDayInZone` does.
+ */
+export function localHourStarts(dateKey: string, timezone: string): number[] {
+  const start = startOfDayInZone(dateKey, timezone).getTime();
+  const end = startOfDayInZone(addDaysToDateKey(dateKey, 1), timezone).getTime();
+  const starts: number[] = [];
+  for (let t = start; t < end; t += HOUR_MS) starts.push(t);
+  return starts;
+}

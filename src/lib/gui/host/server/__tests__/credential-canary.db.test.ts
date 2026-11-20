@@ -47,13 +47,6 @@ vi.mock("../snapshot", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../snapshot")>();
   return { surfaceSnapshot: async () => served ?? actual.surfaceSnapshot() };
 });
-// /my, the tenant app's page, is released by RFC mgm#197's PR 5. Until then
-// it is released here, so its view is scanned like every other; once it is
-// released, this mock changes nothing and can go.
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...actual, isReleasedRoute: (path: string) => path === "/my" || actual.isReleasedRoute(path) };
-});
 
 import { SITE_DAY_PROBLEMS } from "@/lib/metering/surface/site-day-model";
 import { getMgmRuntime } from "@/lib/runtime/root";
@@ -72,6 +65,7 @@ import {
   ROW_KEY,
   prepareEveryAction,
   seedCanaries,
+  TENANT_METER_COMPONENT,
   type Canary,
   type CanaryIds,
 } from "./credential-canary";
@@ -264,6 +258,25 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     expect(homes.map((r) => [r.href, r.status])).toEqual(IDS.unitIds.map((unit) => [`/my?unit=${unit}`, 200]));
     for (const [i, r] of homes.entries()) expect(JSON.parse(r.output.split("\n")[0]), r.href).toMatchObject({ title: `Canary unit ${i}`, org: null });
 
+    // The unit's use by month and by day, read as the tenant through the
+    // usage source, which builds each microgrid's provider on the service
+    // role. Only the synthetic microgrid's source answers; every other read
+    // fails (nothing answers at the canary address, Keycloak's token address
+    // is refused, the mixed microgrid is refused), and the view still loads
+    // with the fixed "no data" copy.
+    const synthetic = canaryMicrogrids(IDS).indexOf(IDS.syntheticMicrogridId);
+    for (const [id, path] of [["tenant.usage-month", "/my/usage"], ["tenant.usage-day", "/my/usage/day"]] as const) {
+      const usage = results.filter((r) => r.id === id);
+      expect(usage.map((r) => [r.href, r.status])).toEqual(IDS.unitIds.map((unit) => [`${path}?unit=${unit}`, 200]));
+      for (const [i, r] of usage.entries()) {
+        const parsed = JSON.parse(r.output.split("\n")[0]);
+        expect(parsed, r.href).toMatchObject({ view: id, org: null });
+        expect([parsed.ext.data.synthetic, parsed.ext.data.problem?.kind ?? null], r.href).toEqual(
+          i === synthetic ? [true, null] : [false, "unavailable"],
+        );
+      }
+    }
+
     // The decrypted credentials reached an OpenEMS client: every request for
     // a bearer, Basic or AWS microgrid's edge (its id is in the JSON-RPC body,
     // as seeded by seedCanaries) carried that microgrid's own plaintext, as
@@ -291,6 +304,14 @@ describe.skipIf(shouldSkip())("credential canary", () => {
       return String(signed.headers?.Authorization);
     });
     expect(sentFor("keycloak"), "keycloak: no request to the canary backend").toEqual([]);
+    // The tenant's path reached the decrypt too: each of those microgrids was
+    // asked for its house meter's energy, with the header checked above.
+    for (const path of ["bearer", "basic", "aws"] as const) {
+      const usage = sentFor(path).filter(
+        (s) => s.body.includes("queryHistoricTimeseriesEnergyPerPeriod") && s.body.includes(`${TENANT_METER_COMPONENT}/ActiveConsumptionEnergy`),
+      );
+      expect(usage.length, `${path}: a tenant usage read`).toBeGreaterThan(0);
+    }
 
     // The Operations day: generated on the synthetic microgrid, and elsewhere
     // loaded in its problem state with fixed copy. A bearer, Basic or AWS

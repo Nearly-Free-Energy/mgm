@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/access";
 import type { InvoiceConfig } from "@/lib/invoices/config-schema";
 import { InvoiceShell } from "./invoice-shell";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /communities/[id]/invoice — Invoice branding page (#204 / PDF2).
@@ -33,6 +34,7 @@ export default async function InvoicePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 

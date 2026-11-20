@@ -284,6 +284,21 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     expect(samples.batterySocPct).toEqual([10, 12]);
   });
 
+  it("drops a timestamp with no zone or offset rather than read it in the server's zone", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: ["2026-10-31T21:00:00Z", "2026-11-01T00:05:00", "2026-10-31T21:10:00Z"],
+      data: { "ess0/Soc": [10, 11, 12] },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    }));
+
+    expect(samples.timestamps).toEqual([T0, T0 + 2 * FIVE_MIN]);
+    expect(samples.batterySocPct).toEqual([10, 12]);
+  });
+
   it("still reads a response when exactly half its timestamps are unreadable", async () => {
     clearPilotEnv();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({

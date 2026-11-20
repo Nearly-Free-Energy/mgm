@@ -148,8 +148,10 @@ describe("legacyView on every catalog page", () => {
       "/microgrids/[id]/billing/[periodId]/not-billed": ["billing.not-billed", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payments": ["payments.bill-attempts", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payment-setup": ["payments.payment-setup", "billing.periods"],
-      // A tenant's page: a staff manifest has no tenant entry, and /my names no place.
+      // Tenant pages: a staff manifest has no tenant entry, and /my names no place.
       "/my": ["tenant.home", null],
+      "/my/usage": ["tenant.usage-month", null],
+      "/my/usage/day": ["tenant.usage-day", null],
     };
     const served = ALL_PAGES.filter((p) => p.servedBy === "view");
     expect(served.map((p) => p.path).sort()).toEqual(Object.keys(SERVED).sort());
@@ -373,7 +375,7 @@ describe("a tenant manifest (RFC mgm#197 § 4)", () => {
   const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
   const home = { id: "tenant.home" as const, title: "My home", icon: "tenants" as const, group: "operate" as const, order: 80, href: "/my" as const, needs: [] };
 
-  /** A tenant manifest whose nav holds the tenant home, as it will once /my is released. */
+  /** A tenant manifest whose nav holds the tenant home. */
   function tenantManifest(units: { id: string; label: string }[], current: string | null = null): Manifest {
     const m = buildTenantManifestModel({
       release: null,

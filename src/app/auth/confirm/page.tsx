@@ -11,14 +11,13 @@
  */
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { RETURN_PATH_PARAM, safeReturnPath } from "@/lib/auth/return-path";
+import { loadPage } from "./load-page";
 
 type Phase = "ready" | "verifying" | "failed" | "missing";
 
 export default function ConfirmSignInPage() {
-  const router = useRouter();
   const [phase, setPhase] = React.useState<Phase>("ready");
   const [tokenHash, setTokenHash] = React.useState<string | null>(null);
 
@@ -39,8 +38,15 @@ export default function ConfirmSignInPage() {
       return;
     }
     const next = new URLSearchParams(window.location.search).get(RETURN_PATH_PARAM);
-    router.replace(safeReturnPath(next));
-    router.refresh();
+    // A full load, not router.replace: a client-side navigation from this
+    // page into the (gui) group that the server answers with a redirect to
+    // another page of the group never settles (Next.js 16 refetches the
+    // target's payload without end). The (gui) layout sends a person whose
+    // rows are all tenant rows from "/" to their home (/my), so a tenant's
+    // Continue would hang. A full load also renders every layout with the
+    // new session. If that redirect goes, or Next.js settles such a
+    // navigation, router.replace would do again.
+    loadPage(safeReturnPath(next));
   }
 
   const unusable = phase === "failed" || phase === "missing";

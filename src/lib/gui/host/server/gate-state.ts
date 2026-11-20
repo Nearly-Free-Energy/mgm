@@ -10,8 +10,9 @@ import "server-only";
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { rolesCanAccessOrg } from "@/lib/auth/access";
-import type { MgmPluginName } from "@/lib/plugins/bundled";
+import { MGM_BUNDLED_PLUGINS, type MgmPluginName } from "@/lib/plugins/bundled";
 import { checkGate, type GateDecision } from "@/lib/runtime/gate";
+import { livePlugins } from "../shared/manifest-model";
 import { tenantUnitIds } from "../shared/tenant-units";
 import { requireIssued, type HostContext } from "./access";
 
@@ -75,4 +76,42 @@ export function unitPluginGate(ctx: HostContext, unit: { tenantId: string; organ
     throw new Error("GUI host: plugin state asked for a unit the caller does not hold");
   }
   return memoGate(ctx, unit.organizationId);
+}
+
+/** What one organization of the caller's units has live (unitOrganizationPlugins). */
+export type UnitOrganizationPlugins = Readonly<{
+  /** The plugins live there, each with its dependencies, as livePlugins decides. */
+  live: ReadonlySet<MgmPluginName>;
+  /**
+   * The plugins live there if every state the gate could not read (its 503)
+   * were on: what is not in it is off there for certain.
+   */
+  possiblyLive: ReadonlySet<MgmPluginName>;
+}>;
+
+/**
+ * What each organization of `units` has live, by organization id, each
+ * asked once through the gate of one unit there (unitPluginGate), with the
+ * person's own session. A gate that throws rejects that organization's entry
+ * only. The tenant manifest's nav (unitsGate in ./manifest.ts) and the unit
+ * picker (./render-view.tsx) both read this, so they agree on where a plugin
+ * is live; if one of them stops reading it, they can disagree.
+ */
+export async function unitOrganizationPlugins(
+  ctx: HostContext,
+  units: readonly { tenantId: string; organizationId: string }[],
+): Promise<Map<string, PromiseSettledResult<UnitOrganizationPlugins>>> {
+  const byOrganization = new Map<string, { tenantId: string; organizationId: string }>();
+  for (const unit of units) if (!byOrganization.has(unit.organizationId)) byOrganization.set(unit.organizationId, unit);
+  const settled = await Promise.allSettled(
+    [...byOrganization.values()].map(async (unit) => {
+      const gate = unitPluginGate(ctx, unit);
+      const decisions = await Promise.all(MGM_BUNDLED_PLUGINS.map(async (p) => [p.name, await gate(p.name)] as const));
+      return {
+        live: livePlugins(Object.fromEntries(decisions.map(([name, d]) => [name, d.ok]))),
+        possiblyLive: livePlugins(Object.fromEntries(decisions.map(([name, d]) => [name, d.ok || d.status === 503]))),
+      };
+    }),
+  );
+  return new Map([...byOrganization.keys()].map((id, i) => [id, settled[i]]));
 }

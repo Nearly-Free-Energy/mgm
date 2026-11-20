@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { TenantAppCapability } from "../capability";
 import { createSupabaseTenantAppRepository } from "../infrastructure/supabase-repository";
-import type { TenantAppRepository, TenantAppScope, TenantMeter } from "../types";
+import type { TenantAppRepository, TenantAppScope, TenantMeter, TenantUsageSource } from "../types";
 
 const TENANT_ID = "550e8400-e29b-41d4-a716-446655440010";
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -44,17 +44,31 @@ function repository(meters: TenantMeter[] | Error) {
     if (meters instanceof Error) throw meters;
     return meters;
   });
-  return { repo: { listMetersInForce } satisfies TenantAppRepository, listMetersInForce };
+  const listMeterAssignments = vi.fn(async () => {
+    throw new Error("the home reads no assignments over a range");
+  });
+  return {
+    repo: { listMetersInForce, listMeterAssignments } satisfies TenantAppRepository,
+    listMetersInForce,
+  };
 }
+
+/** The home reads no usage; a source that fails the test if asked for it, and finds no meter shared. */
+const noUsage: TenantUsageSource = {
+  readSeries: async () => {
+    throw new Error("the home reads no usage");
+  },
+  listPrimaryElsewhere: async () => [],
+};
 
 describe("TenantAppCapability.getHome", () => {
   it("returns the unit, its microgrid and the meters in force today in the microgrid's zone", async () => {
     const { repo, listMetersInForce } = repository([
-      meter({ deviceId: "d3", name: "B secondary", role: "secondary_meter" }),
-      meter({ deviceId: "d2", name: "Z main" }),
+      meter({ deviceId: "d3", name: "Z main" }),
+      meter({ deviceId: "d2", name: "B main" }),
       meter({ deviceId: "d1", name: "A main" }),
     ]);
-    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, noUsage);
 
     const result = await capability.getHome();
 
@@ -74,9 +88,41 @@ describe("TenantAppCapability.getHome", () => {
     });
   });
 
+  it("marks a meter that is also another unit's primary today, asking about the unit's meters for today only", async () => {
+    const { repo } = repository([meter({ deviceId: "d2", name: "B main" }), meter({ deviceId: "d1", name: "A main" })]);
+    const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere: async (request) => {
+        asked.push(request);
+        return [{ deviceId: "d2", effectiveFrom: "2026-11-19", effectiveTo: "2026-11-20" }];
+      },
+    });
+
+    const result = await capability.getHome();
+
+    expect(asked).toEqual([{ deviceIds: ["d1", "d2"], fromDate: "2026-11-19", toDate: "2026-11-20" }]);
+    expect(result.ok && result.data.meters).toEqual([
+      expect.not.objectContaining({ shared: true }),
+      expect.objectContaining({ deviceId: "d2", shared: true }),
+    ]);
+  });
+
+  it("answers 503, rather than show a shared meter unmarked, when the shared days cannot be read", async () => {
+    const { repo } = repository([meter({ deviceId: "d1", name: "A main" })]);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere: async () => {
+        throw new Error("statement timeout");
+      },
+    });
+
+    expect(await capability.getHome()).toMatchObject({ ok: false, status: 503, code: "tenant_app_unavailable" });
+  });
+
   it("reads a stored zone that is not an IANA id as UTC", async () => {
     const { repo, listMetersInForce } = repository([]);
-    const capability = new TenantAppCapability(repo, scope("Kampala"), () => true, () => NOW);
+    const capability = new TenantAppCapability(repo, scope("Kampala"), () => true, () => NOW, noUsage);
 
     const result = await capability.getHome();
 
@@ -86,7 +132,7 @@ describe("TenantAppCapability.getHome", () => {
 
   it("answers 503 when the meters cannot be read", async () => {
     const { repo } = repository(new Error("statement timeout"));
-    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, noUsage);
 
     expect(await capability.getHome()).toEqual({
       ok: false,
@@ -98,7 +144,7 @@ describe("TenantAppCapability.getHome", () => {
 
   it("refuses once its composition is disposed, without reading", async () => {
     const { repo, listMetersInForce } = repository([]);
-    const capability = new TenantAppCapability(repo, scope(), () => false, () => NOW);
+    const capability = new TenantAppCapability(repo, scope(), () => false, () => NOW, noUsage);
 
     expect(await capability.getHome()).toMatchObject({
       ok: false,
@@ -116,7 +162,7 @@ function recordingClient(result: { data: unknown; error: { message: string } | n
     then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject),
   };
-  for (const method of ["select", "eq", "in", "lte", "or"]) {
+  for (const method of ["select", "eq", "in", "lte", "lt", "or", "order"]) {
     query[method] = (...args: unknown[]) => {
       calls.push([method, ...args]);
       return query;
@@ -159,7 +205,11 @@ describe("the Supabase tenant app repository", () => {
       ["from", "tenant_devices"],
       ["select", "device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)"],
       ["eq", "tenant_id", TENANT_ID],
-      ["in", "role", ["primary_consumption_meter", "secondary_meter"]],
+      // The meters whose use the views show: the unit's primary consumption
+      // meters only (USAGE_METER_ROLE); the database filter is tested in
+      // usage.db.test.ts.
+      ["eq", "role", "primary_consumption_meter"],
+      ["eq", "devices.device_type", "consumption_meter"],
       ["lte", "effective_from", "2026-11-19"],
       ["or", "effective_to.is.null,effective_to.gt.2026-11-19"],
     ]);
@@ -183,6 +233,32 @@ describe("the Supabase tenant app repository", () => {
     ]);
   });
 
+  it("leaves out a linked device that is not a consumption meter, even if the read returns one", async () => {
+    const linked = (deviceId: string, device_type: string) => ({
+      device_id: deviceId,
+      role: "secondary_meter",
+      effective_from: "2026-11-01",
+      effective_to: null,
+      devices: { id: deviceId, name: deviceId, device_type },
+    });
+    const { client } = recordingClient({
+      data: [
+        linked("grid", "grid_meter"),
+        linked("battery", "battery"),
+        linked("pv", "pv_meter"),
+        linked("inverter", "inverter"),
+        linked("meter", "consumption_meter"),
+      ],
+      error: null,
+    });
+    const repository = createSupabaseTenantAppRepository(client);
+
+    expect((await repository.listMetersInForce(TENANT_ID, "2026-11-19")).map((m) => m.deviceId)).toEqual(["meter"]);
+    expect(
+      (await repository.listMeterAssignments(TENANT_ID, "2026-11-01", "2026-12-01")).map((m) => m.deviceId)
+    ).toEqual(["meter"]);
+  });
+
   it("rejects when the read fails", async () => {
     const { client } = recordingClient({ data: null, error: { message: "permission denied" } });
     await expect(
@@ -194,6 +270,79 @@ describe("the Supabase tenant app repository", () => {
     const { client, calls } = recordingClient({ data: [], error: null });
     await expect(
       createSupabaseTenantAppRepository(client).listMetersInForce(TENANT_ID, "2026-11-19,effective_to.gt.0")
+    ).rejects.toThrow(/Invalid date key/);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("the Supabase tenant app repository's links over a range", () => {
+  it("reads the primary consumption meter links that cover any day of [from, to), half-open on both sides, oldest first", async () => {
+    const { client, calls } = recordingClient({
+      data: [
+        {
+          device_id: "d1",
+          role: "primary_consumption_meter",
+          effective_from: "2026-10-01",
+          effective_to: "2026-11-15",
+          devices: { id: "d1", name: "Shop 4 meter", device_type: "consumption_meter" },
+        },
+        {
+          device_id: "d1",
+          role: "primary_consumption_meter",
+          effective_from: "2026-11-20",
+          effective_to: null,
+          devices: null,
+        },
+      ],
+      error: null,
+    });
+
+    const meters = await createSupabaseTenantAppRepository(client).listMeterAssignments(
+      TENANT_ID,
+      "2026-11-01",
+      "2026-12-01"
+    );
+
+    expect(calls).toEqual([
+      ["from", "tenant_devices"],
+      ["select", "device_id, role, effective_from, effective_to, devices!inner(id, name, device_type)"],
+      ["eq", "tenant_id", TENANT_ID],
+      // Only the unit's primary meter, and only a consumption meter, is its
+      // use (USAGE_METER_ROLE); the database filter is tested in usage.db.test.ts.
+      ["eq", "role", "primary_consumption_meter"],
+      ["eq", "devices.device_type", "consumption_meter"],
+      // Starts before the range ends, and ends after it starts (or not at all).
+      ["lt", "effective_from", "2026-12-01"],
+      ["or", "effective_to.is.null,effective_to.gt.2026-11-01"],
+      ["order", "effective_from"],
+    ]);
+    // A link whose device row is not visible is left out, as in the home.
+    expect(meters).toEqual([
+      {
+        deviceId: "d1",
+        name: "Shop 4 meter",
+        deviceType: "consumption_meter",
+        role: "primary_consumption_meter",
+        effectiveFrom: "2026-10-01",
+        effectiveTo: "2026-11-15",
+      },
+    ]);
+  });
+
+  it("rejects when the read fails", async () => {
+    const { client } = recordingClient({ data: null, error: { message: "permission denied" } });
+    await expect(
+      createSupabaseTenantAppRepository(client).listMeterAssignments(TENANT_ID, "2026-11-01", "2026-12-01")
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it.each([
+    ["2026-11-01,effective_to.gt.0", "2026-12-01"],
+    ["2026-11-01", "2026-12-01)"],
+  ])("refuses %s .. %s before it builds a filter", async (from, to) => {
+    const { client, calls } = recordingClient({ data: [], error: null });
+    await expect(
+      createSupabaseTenantAppRepository(client).listMeterAssignments(TENANT_ID, from, to)
     ).rejects.toThrow(/Invalid date key/);
     expect(calls).toEqual([]);
   });

@@ -7,12 +7,18 @@ import "server-only";
  * composeTenantApp authorizes it again with the caller's own session and
  * refuses while the tenant app is off for the unit's organization.
  *
+ * It also shows the month's use so far, from the same `getUsageMonth` read
+ * as the month view (./usage.ts), so it is cached and limited with it and a
+ * visit to both reads the backend once. A failed or refused usage read never
+ * refuses the home: it shows no figure, with the month view's copy.
+ *
  * A refusal carries fixed copy chosen by status and code, never the
  * capability's message.
  */
 import type { Loaded, LoadedModel, TenantRequest } from "@/lib/gui/surface";
 import { composeTenantApp } from "../compose";
 import { buildTenantHomeModel } from "./home-model";
+import { monthSoFar } from "./usage-model";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
@@ -50,7 +56,11 @@ export async function loadTenantHome(req: TenantRequest): Promise<Loaded<LoadedM
   try {
     const home = await composed.data.tenantApp.getHome();
     if (!home.ok) return tenantHomeRefusal(home);
-    return { ok: true, model: buildTenantHomeModel(home.data, req.fmt) };
+    const month = await composed.data.tenantApp.getUsageMonth();
+    return {
+      ok: true,
+      model: buildTenantHomeModel(home.data, req.fmt, month.ok ? monthSoFar(month.data, { fmt: req.fmt, locale: req.locale }) : null),
+    };
   } finally {
     await composed.data.dispose();
   }

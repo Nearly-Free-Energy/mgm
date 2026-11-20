@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { createOpenEmsClient } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import type { OpenEmsClientConfig } from "@/lib/openems";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > Edges > [edgeId] — edge detail (D2 / #53, #77).
 // Lists devices on this edge. For each device, shows the linked tenant
@@ -49,6 +50,7 @@ export default async function EdgeDetailPage({
 }: {
   params: Promise<{ id: string; edgeId: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id, edgeId } = await params;
   const supabase = await createClient();
 

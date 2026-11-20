@@ -19,7 +19,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { Banner } from "@/components/ui/banner";
-import { matchCatalogPage } from "@/lib/plugins/bundled";
+import { matchCatalogPage, TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { PUBLIC_COPY, pickPublicLanguage } from "@/lib/public-html/copy";
 import { createClient } from "@/lib/supabase/server";
 import type { GuiPlugin, InitialView, Manifest, ViewModel } from "../../contract";
@@ -30,6 +30,7 @@ import { unloadedView } from "../shared/legacy-view";
 import { pickRenderer } from "../shared/pick-renderer";
 import { withUnit } from "../shared/tenant-units";
 import { hostContext, type HostContext } from "./access";
+import { unitOrganizationPlugins } from "./gate-state";
 import { parseHref } from "./hrefs";
 import { surfaceSnapshot } from "./snapshot";
 import { UnitPicker } from "./unit-picker";
@@ -88,11 +89,27 @@ async function loadPageView(
  * named as the shell names it (unitName in ./units.ts) with its microgrid
  * beneath. A unit that cannot be read is left out (readTenantUnits); not
  * found when none can be read any more.
+ *
+ * A unit whose organization does not have the tenant app live is left out
+ * too, decided as the tenant manifest's nav decides it
+ * (unitOrganizationPlugins), so the picker offers no unit whose page would
+ * be "not in this release"; when every unit is left out, that page is what
+ * the person gets. A unit is left out only when the app, or a plugin it
+ * depends on, is off there for certain: one whose state could not be read,
+ * or whose gate threw, stays, and its view checks the app again through
+ * composeTenantApp and answers for itself.
  */
 async function unitPicker(ctx: HostContext, href: string): Promise<ReactNode> {
   const units = await readTenantUnits(ctx);
   if (units.length === 0) notFound();
-  const choices = units.map((unit) => ({
+  const organizations = await unitOrganizationPlugins(ctx, units);
+  const offered = units.filter((unit) => {
+    const entry = organizations.get(unit.organizationId);
+    if (!entry || entry.status === "rejected") return true;
+    return entry.value.possiblyLive.has(TENANT_APP_PLUGIN_NAME);
+  });
+  if (offered.length === 0) return notReleased();
+  const choices = offered.map((unit) => ({
     label: unit.name,
     detail: unit.microgridName || null,
     href: withUnit(href, unit.tenantId),
