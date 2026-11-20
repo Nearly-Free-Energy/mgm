@@ -8,6 +8,7 @@ import {
 import { SUPER_ADMIN, ORG_MANAGER } from "@/lib/roles";
 import type { UserVisibleRow, UserRoleRecord } from "@/lib/types/domain";
 import { UsersPageClient } from "./users-page-client";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /settings/users — admin view of all users visible to the caller.
@@ -34,6 +35,7 @@ import { UsersPageClient } from "./users-page-client";
  * admin is an org manager by their org-scoped rows alone.
  */
 export default async function SettingsUsersPage() {
+  await keepTenantOnlyToTenantPages();
   const supabase = await createClient();
 
   const roles: UserRoleRecord[] = await getCurrentUserRoles(supabase);

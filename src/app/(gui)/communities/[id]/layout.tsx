@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 import { createClient } from "@/lib/supabase/server";
 import { currentUserCanAccessCommunity } from "@/lib/auth/access";
 
@@ -11,6 +12,9 @@ export default async function CommunityLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
+  // Before any read: a nested layout renders alongside the page on a
+  // client-side navigation, so the page's own call is not enough (mgm#209).
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
   const canAccess = await currentUserCanAccessCommunity(supabase, id);
