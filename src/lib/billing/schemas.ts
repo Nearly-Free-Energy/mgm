@@ -627,6 +627,34 @@ export const RegenerateBillBody = z.strictObject(
   { error: bodyError }
 );
 export const REGENERATE_BILL_BODY_VERSION = 2;
+
+/**
+ * POST /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings:
+ * the start and end readings typed by hand for a tenant with no bill, and
+ * why, as the legacy pre-flight panel's manual rows take them. The period
+ * and tenant come from the path. Decimals are accepted (the bill engine
+ * stores kWh to 3 places) and no upper bound is set, as on POST
+ * /api/billing/generate and the regenerate route. The route checks that
+ * end_kwh is not below start_kwh. Flat and without an object-level
+ * refinement, so the kit renders it and the GUI host can check a prefill
+ * (cleanPrefill in src/lib/gui/host/server/merge.ts); if a refinement is
+ * added, a prefill is dropped: revisit. No confirmation: a confirm-level
+ * action is sent none (invoke.ts), so one is refused as an unknown key.
+ */
+export const BillFromReadingsBody = z.strictObject(
+  {
+    start_kwh: lineItemsKwh("start_kwh").meta({ title: "Start reading (kWh)" }),
+    end_kwh: lineItemsKwh("end_kwh").meta({ title: "End reading (kWh)" }),
+    reason: z
+      .string({ error: "reason must be a string" })
+      .trim()
+      .max(500, { error: "reason must be 500 characters or fewer" })
+      .optional()
+      .meta({ title: "Reason" }),
+  },
+  { error: bodyError }
+);
+export const BILL_FROM_READINGS_BODY_VERSION = 1;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

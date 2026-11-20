@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
   AddGridTariffBody,
+  BILL_FROM_READINGS_BODY_VERSION,
+  BillFromReadingsBody,
   CLOSE_PERIOD_BODY_VERSION,
   ClosePeriodBody,
   DELETE_PERIOD_BODY_VERSION,
@@ -199,6 +201,46 @@ describe("GenerateFromMetersBody", () => {
 
   it.each([null, [], "{}", 1])("refuses %j as not an object", (body) => {
     expect(firstIssue(GenerateFromMetersBody, body)).toEqual({ field: undefined, message: "Request body must be an object" });
+  });
+});
+
+describe("BillFromReadingsBody", () => {
+  it.each([
+    { start_kwh: 0, end_kwh: 0 },
+    { start_kwh: 100.1234, end_kwh: 150.5 },
+    { start_kwh: 1, end_kwh: 2, reason: "Read on site" },
+    // The route checks the order of the readings, not the schema.
+    { start_kwh: 2, end_kwh: 1 },
+  ])("accepts %j", (body) => {
+    expect(firstIssue(BillFromReadingsBody, body)).toBe("ok");
+  });
+
+  it("trims the reason", () => {
+    expect(BillFromReadingsBody.parse({ start_kwh: 1, end_kwh: 2, reason: "  Read on site  " }).reason).toBe("Read on site");
+  });
+
+  it.each([
+    [{ start_kwh: -1, end_kwh: 2 }, "start_kwh", "start_kwh must be a non-negative number"],
+    [{ start_kwh: 1, end_kwh: -0.5 }, "end_kwh", "end_kwh must be a non-negative number"],
+    [{ start_kwh: "1", end_kwh: 2 }, "start_kwh", "start_kwh must be a finite number"],
+    [{ end_kwh: 2 }, "start_kwh", "start_kwh must be a finite number"],
+    [{ start_kwh: 1 }, "end_kwh", "end_kwh must be a finite number"],
+    [{ start_kwh: 1, end_kwh: 2, reason: 3 }, "reason", "reason must be a string"],
+    [{ start_kwh: 1, end_kwh: 2, reason: "x".repeat(501) }, "reason", "reason must be 500 characters or fewer"],
+  ])("refuses %j under %s", (body, field, message) => {
+    expect(firstIssue(BillFromReadingsBody, body)).toEqual({ field, message });
+  });
+
+  it.each([
+    [{ start_kwh: 1, end_kwh: 2, tenantId: "00000000-0000-4000-8000-000000000001" }, "Unknown field: tenantId"],
+    [{ start_kwh: 1, end_kwh: 2, confirmation: { acknowledged: [] } }, "Unknown field: confirmation"],
+  ])("refuses %j, at the top with no field", (body, message) => {
+    expect(firstIssue(BillFromReadingsBody, body)).toEqual({ field: undefined, message });
+  });
+
+  it("stays a flat object with no refinement, so a prefill can be checked against it", () => {
+    expect(BillFromReadingsBody).toBeInstanceOf(z.ZodObject);
+    expect(() => BillFromReadingsBody.omit({ reason: true }).partial()).not.toThrow();
   });
 });
 
@@ -404,6 +446,21 @@ const DELETE_PERIOD_SHAPES: Record<number, unknown> = {
   },
 };
 
+
+const BILL_FROM_READINGS_SHAPES: Record<number, unknown> = {
+  1: {
+    $schema: SCHEMA,
+    type: "object",
+    properties: {
+      start_kwh: { type: "number", minimum: 0, title: "Start reading (kWh)" },
+      end_kwh: { type: "number", minimum: 0, title: "End reading (kWh)" },
+      reason: { type: "string", maxLength: 500, title: "Reason" },
+    },
+    required: ["start_kwh", "end_kwh"],
+    additionalProperties: false,
+  },
+};
+
 const GENERATE_FROM_METERS_SHAPES: Record<number, unknown> = {
   1: {
     $schema: SCHEMA,
@@ -420,6 +477,7 @@ describe("pinned input versions", () => {
     ["ClosePeriodBody", ClosePeriodBody, CLOSE_PERIOD_BODY_VERSION, CLOSE_PERIOD_SHAPES, "CLOSE_PERIOD_BODY_VERSION"],
     ["DeletePeriodBody", DeletePeriodBody, DELETE_PERIOD_BODY_VERSION, DELETE_PERIOD_SHAPES, "DELETE_PERIOD_BODY_VERSION"],
     ["GenerateFromMetersBody", GenerateFromMetersBody, GENERATE_FROM_METERS_BODY_VERSION, GENERATE_FROM_METERS_SHAPES, "GENERATE_FROM_METERS_BODY_VERSION"],
+    ["BillFromReadingsBody", BillFromReadingsBody, BILL_FROM_READINGS_BODY_VERSION, BILL_FROM_READINGS_SHAPES, "BILL_FROM_READINGS_BODY_VERSION"],
   ] as const)("%s matches the shape pinned for its version", (_name, schema, version, shapes, constant) => {
     expect(
       z.toJSONSchema(schema, { io: "input" }),
@@ -433,5 +491,6 @@ describe("pinned input versions", () => {
     expect(CLOSE_PERIOD_BODY_VERSION).toBe(1);
     expect(DELETE_PERIOD_BODY_VERSION).toBe(1);
     expect(GENERATE_FROM_METERS_BODY_VERSION).toBe(1);
+    expect(BILL_FROM_READINGS_BODY_VERSION).toBe(1);
   });
 });
