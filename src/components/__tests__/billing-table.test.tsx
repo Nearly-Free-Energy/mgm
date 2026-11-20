@@ -32,13 +32,6 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy, refresh: refreshSpy }),
 }));
 
-// Result of `from("billing_periods").delete().eq(...)`; the delete-period
-// tests override it per case.
-const deleteEqMock = vi.fn(
-  (): Promise<{ error: { code?: string; message: string; details?: string } | null }> =>
-    Promise.resolve({ error: null }),
-);
-
 // Mock Supabase client (BillingTable calls createClient() on render)
 // Phase B (#157): also stubs `select().eq()` for the IPN-paid poller
 // (which fires every 30s; we never flush the timer in the test, but the
@@ -65,7 +58,6 @@ const CLOSE_CEREMONY: Ceremony = {
 vi.mock("@/lib/supabase/client", () => ({
   createClient: () => ({
     from: () => ({
-      delete: () => ({ eq: () => deleteEqMock() }),
       update: () => ({ eq: () => Promise.resolve({ error: null }) }),
       select: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }),
     }),
@@ -932,11 +924,28 @@ describe("BillingTable — close via capability API (issue #5, #201)", () => {
 });
 
 describe("BillingTable — delete period", () => {
+  // Deleting goes through DELETE /api/billing-periods/[periodId] (the billing
+  // capability, behind the plugin gate), with the period's name typed.
+  const fetchMock = vi.fn();
+
   beforeEach(() => {
     pushSpy.mockClear();
-    deleteEqMock.mockReset();
-    deleteEqMock.mockResolvedValue({ error: null });
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ deleted: period.id }) });
+    vi.stubGlobal("fetch", fetchMock);
   });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function confirmButton() {
+    return within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
+  }
+
+  function typeName(value = "March 2026") {
+    fireEvent.change(screen.getByLabelText(/Type the period's name to delete it/i), { target: { value } });
+  }
 
   function deleteButton() {
     return screen.queryByRole("button", { name: /^Delete$/ });
@@ -1005,24 +1014,46 @@ describe("BillingTable — delete period", () => {
     ).toBeTruthy();
   });
 
-  it("returns to the period list after a successful delete", async () => {
+  it("keeps Delete disabled until the period's name is typed", () => {
     render(
       <Wrapper>
         <BillingTable {...baseProps} />
       </Wrapper>
     );
     fireEvent.click(deleteButton()!);
-    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    expect(confirmButton().disabled).toBe(true);
+    typeName("2026");
+    expect(confirmButton().disabled).toBe(true);
+    typeName();
+    expect(confirmButton().disabled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes through the route with the typed name, then returns to the period list", async () => {
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    typeName();
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(pushSpy).toHaveBeenCalledWith("/microgrids/mg-1/billing"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/billing-periods/${period.id}`);
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body as string)).toEqual({ confirmation: { acknowledged: [], typed: "March 2026" } });
   });
 
   it("explains a refused delete and stays on the period", async () => {
-    deleteEqMock.mockResolvedValue({
-      error: {
-        code: "23514",
-        message: "billing_period_kept: a billing period with recorded payments cannot be deleted",
-        details: "payment_activity",
-      },
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: "billing_period_kept",
+        message: "This period has recorded payments, so it is kept with its payment records and cannot be deleted.",
+      }),
     });
     render(
       <Wrapper>
@@ -1030,11 +1061,45 @@ describe("BillingTable — delete period", () => {
       </Wrapper>
     );
     fireEvent.click(deleteButton()!);
-    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    typeName();
+    fireEvent.click(confirmButton());
     await waitFor(() =>
       expect(screen.getByText(/has recorded payments, so it is kept/i)).toBeTruthy(),
     );
-    expect(screen.queryByText(/billing_period_kept/)).toBeNull();
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows the gate's message while billing is turned off, and stays on the period", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: "billing_disabled", message: "Billing is disabled for this organization." }),
+    });
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    typeName();
+    fireEvent.click(confirmButton());
+    await waitFor(() =>
+      expect(within(screen.getByRole("alertdialog")).getByText(/Billing is disabled for this organization/i)).toBeTruthy(),
+    );
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+
+  it("says the delete failed when the request does not reach the route", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(
+      <Wrapper>
+        <BillingTable {...baseProps} />
+      </Wrapper>
+    );
+    fireEvent.click(deleteButton()!);
+    typeName();
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(screen.getByText("Could not delete the period.")).toBeTruthy());
     expect(pushSpy).not.toHaveBeenCalled();
   });
 });

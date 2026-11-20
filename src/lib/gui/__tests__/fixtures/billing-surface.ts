@@ -48,7 +48,6 @@ const closePeriod: ActionRef = {
   label: "Close period",
   enabled: false,
   reason: "Review the bills first",
-  tone: "danger",
 };
 
 const periodsExample: ModelOf<"collection"> = {

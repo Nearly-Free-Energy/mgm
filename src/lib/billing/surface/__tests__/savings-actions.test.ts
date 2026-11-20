@@ -132,6 +132,8 @@ describe("billing's savings actions", () => {
         path: `/api/microgrids/${MG}/savings-settings`,
         bound: {},
         ceremony: null,
+        tone: "neutral",
+        prepareAgainOn: [],
       },
     });
     const tariff = await prepare({ action: TARIFF.id, params: { id: MG } });

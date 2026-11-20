@@ -252,17 +252,22 @@ export function createSupabaseBillingRepository(
     },
 
     async deleteBillingPeriod(periodId: string) {
-      // A row that row-level security hides deletes nothing and raises no
-      // error, so the deleted ids are read back.
-      const { data, error } = await supabase
-        .from("billing_periods")
-        .delete()
-        .eq("id", periodId)
-        .select("id");
+      // Through fn_delete_draft_billing_period (migration 20261120130000),
+      // with the person's own client: signed-in callers hold no DELETE on
+      // billing_periods. It returns the deleted period's id, or NULL when
+      // there is no such period or it is not the person's to delete
+      // (user_can_access_microgrid), which reads as not found.
+      const { data, error } = await supabase.rpc("fn_delete_draft_billing_period", {
+        _period_id: periodId,
+      });
       // Only this path carries PostgREST's DETAIL: the delete guard's `closed`
-      // or `payment_activity`. Elsewhere a DETAIL can hold key values.
+      // or `payment_activity`, which fires inside the function. Elsewhere a
+      // DETAIL can hold key values.
       if (error) return { deleted: false, error: { ...toError(error), details: error.details ?? null } };
-      return { deleted: (data ?? []).length > 0, error: null };
+      // Any non-null id is the deleted period. Compare nothing with
+      // `periodId`: Postgres prints the uuid in lower case and the route
+      // passes the path segment through as typed.
+      return { deleted: data != null, error: null };
     },
   };
 }

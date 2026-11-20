@@ -88,9 +88,9 @@ describe("TenantAppCapability.getHome", () => {
     });
   });
 
-  it("marks a meter that is also another unit's primary today, asking about the unit's meters for today only", async () => {
+  it("marks a meter that is also another unit's primary today, asking about today only", async () => {
     const { repo } = repository([meter({ deviceId: "d2", name: "B main" }), meter({ deviceId: "d1", name: "A main" })]);
-    const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+    const asked: { fromDate: string; toDate: string }[] = [];
     const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
       ...noUsage,
       listPrimaryElsewhere: async (request) => {
@@ -101,11 +101,37 @@ describe("TenantAppCapability.getHome", () => {
 
     const result = await capability.getHome();
 
-    expect(asked).toEqual([{ deviceIds: ["d1", "d2"], fromDate: "2026-11-19", toDate: "2026-11-20" }]);
+    expect(asked).toEqual([{ fromDate: "2026-11-19", toDate: "2026-11-20" }]);
     expect(result.ok && result.data.meters).toEqual([
       expect.not.objectContaining({ shared: true }),
       expect.objectContaining({ deviceId: "d2", shared: true }),
     ]);
+  });
+
+  it("drops a span for a meter that is not the unit's today", async () => {
+    const { repo } = repository([meter({ deviceId: "d1", name: "A main" })]);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere: async () => [{ deviceId: "d9", effectiveFrom: "2026-11-19", effectiveTo: "2026-11-20" }],
+    });
+
+    const result = await capability.getHome();
+
+    expect(result.ok && result.data.meters).toEqual([expect.objectContaining({ deviceId: "d1" })]);
+    expect(result.ok && result.data.meters[0]).not.toHaveProperty("shared");
+    expect(JSON.stringify(result)).not.toContain("d9");
+  });
+
+  it("does not ask about shared days when the unit has no meter today", async () => {
+    const { repo } = repository([]);
+    const listPrimaryElsewhere = vi.fn(async () => []);
+    const capability = new TenantAppCapability(repo, scope(), () => true, () => NOW, {
+      ...noUsage,
+      listPrimaryElsewhere,
+    });
+
+    expect(await capability.getHome()).toMatchObject({ ok: true, data: { meters: [] } });
+    expect(listPrimaryElsewhere).not.toHaveBeenCalled();
   });
 
   it("answers 503, rather than show a shared meter unmarked, when the shared days cannot be read", async () => {

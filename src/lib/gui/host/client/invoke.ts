@@ -16,7 +16,11 @@ const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DEL
 /** Only typed and ceremony routes read `confirmation`, so only they are sent it. */
 export const sendsConfirmation = (level: Confirm) => level === "typed" || level === "ceremony";
 
-/** A failure in ActionResult's shape from a route's JSON: `{ error | message, code?, field? }`. */
+/**
+ * A failure in ActionResult's shape from a route's JSON: `{ error | message, code?, field? }`.
+ * ./action-host.tsx prepares an action again on a 409 whose `code` the action
+ * lists in `prepareAgainOn`; if this stops keeping `code`, revisit that.
+ */
 export function failureOf(status: number, body: unknown): ActionResult & { ok: false } {
   const json = body !== null && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const text = (key: string) => (typeof json[key] === "string" ? (json[key] as string) : undefined);

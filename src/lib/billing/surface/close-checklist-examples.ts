@@ -104,13 +104,12 @@ const AVAILABLE: readonly (true | string)[] = [
   true,
 ];
 
-/** As the host resolves Close: its label, the danger tone of a ceremony action (merge-actions.ts), and its availability. */
+/** As the host resolves Close: its label and its availability. No tone: a close is neither a DELETE nor destructive (actionTone in merge-actions.ts). */
 const resolve =
   (available: true | string, disabled: boolean) =>
   (link: ActionLink): ActionRef => ({
     ...link,
     label: link.label ?? CLOSE_PERIOD_ACTION.title,
-    tone: "danger",
     ...(disabled
       ? { enabled: false, reason: BILLING_DISABLED }
       : available === true

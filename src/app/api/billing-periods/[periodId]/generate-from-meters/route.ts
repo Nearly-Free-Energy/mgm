@@ -24,14 +24,14 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * data gets no bill (#293), and keeps the bill they had if they had one:
  * the result counts both. The engine reads the period's status again after
  * reading the meters and refuses, writing nothing, if it closed meanwhile.
- * A tenant's first bill is still inserted unguarded, as on POST
- * /api/billing/generate, so a close committing between that second read
- * and the insert does not stop it, and a bill inserted for that tenant by
- * another write while this run reads the meters (a manual reading, a bill
- * from readings, or an overlapping run) is overwritten; guardExistingBills
- * says why, and the parity note (generate-bills in
- * src/lib/billing/parity.ts) lists both, to be closed before
- * billing.period-review replaces the legacy page.
+ * A tenant's first bill is inserted through
+ * fn_record_first_line_item_with_audit, only while the period is a draft
+ * and the tenant has no bill, under the period's lock: a close committing
+ * after that second read refuses the insert, and a bill inserted for that
+ * tenant by another write while this run reads the meters (a manual
+ * reading, a bill from readings, or an overlapping run) is left as it is;
+ * the result counts both as changed (guardExistingBills in
+ * src/lib/billing/generate.ts).
  *
  * Body (GenerateFromMetersBody): `{}`. The period is the path's.
  *

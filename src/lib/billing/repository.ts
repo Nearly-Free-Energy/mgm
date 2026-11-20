@@ -176,8 +176,9 @@ export interface BillingRepository {
   /** Null when the period is not visible to the caller; rejects when it cannot be read. */
   getBillingPeriod(periodId: string): Promise<BillingPeriodRow | null>;
   /**
-   * Deletes the period. `deleted` is false when no row was removed, as when
-   * row-level security hides it; fn_billing_period_before_delete_guard
+   * Deletes the period through fn_delete_draft_billing_period (migration
+   * 20261120130000). `deleted` is false when no row was removed, as when the
+   * period is not the caller's to delete; fn_billing_period_before_delete_guard
    * refuses a closed period or one with payment activity with an error.
    */
   deleteBillingPeriod(periodId: string): Promise<{ deleted: boolean; error: RepositoryError | null }>;

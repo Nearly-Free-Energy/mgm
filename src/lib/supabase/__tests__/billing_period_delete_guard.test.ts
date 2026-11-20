@@ -4,7 +4,11 @@
  *
  * Verifies the BEFORE DELETE guard on billing_periods against a live local
  * Supabase through PostgREST, as an org manager except where noted (the
- * service_role case and the organization delete run as service_role):
+ * service_role case and the organization delete run as service_role). An
+ * org manager deletes a period through fn_delete_draft_billing_period
+ * (20261120130000), the only delete a signed-in caller has; the guard fires
+ * on its DELETE as on any other
+ * (delete_draft_billing_period.test.ts covers the function itself):
  *   - a draft period with no payment activity can be deleted (its line
  *     items go with it);
  *   - a closed period is kept;
@@ -265,11 +269,11 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
   }, 30_000);
 
   it("an org manager can delete a draft period with no payment activity", async () => {
-    const { error } = await manager.client
-      .from("billing_periods")
-      .delete()
-      .eq("id", FIXTURE.periodDraftEmpty);
+    const { data, error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: FIXTURE.periodDraftEmpty,
+    });
     expect(error).toBeNull();
+    expect(data).toBe(FIXTURE.periodDraftEmpty);
     expect(await periodExists(FIXTURE.periodDraftEmpty)).toBe(false);
 
     const svc = await serviceClient();
@@ -281,10 +285,9 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
   });
 
   it("an org manager cannot delete a closed period", async () => {
-    const { error } = await manager.client
-      .from("billing_periods")
-      .delete()
-      .eq("id", FIXTURE.periodClosed);
+    const { error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: FIXTURE.periodClosed,
+    });
     expect(error?.code).toBe("23514");
     expect(error?.message).toMatch(/^billing_period_kept/);
     expect(error?.details).toBe("closed");
@@ -292,10 +295,9 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
   });
 
   it("an org manager cannot delete a draft period with a paid line item", async () => {
-    const { error } = await manager.client
-      .from("billing_periods")
-      .delete()
-      .eq("id", FIXTURE.periodDraftPaid);
+    const { error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: FIXTURE.periodDraftPaid,
+    });
     expect(error?.code).toBe("23514");
     expect(error?.message).toMatch(/^billing_period_kept/);
     expect(error?.details).toBe("payment_activity");
@@ -303,10 +305,9 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
   });
 
   it("an org manager cannot delete a draft period with a payment attempt", async () => {
-    const { error } = await manager.client
-      .from("billing_periods")
-      .delete()
-      .eq("id", FIXTURE.periodDraftAttempt);
+    const { error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: FIXTURE.periodDraftAttempt,
+    });
     expect(error?.code).toBe("23514");
     expect(error?.details).toBe("payment_activity");
     expect(await periodExists(FIXTURE.periodDraftAttempt)).toBe(true);
@@ -320,10 +321,9 @@ desc("20261103090100_billing_period_delete_guard.sql", () => {
   });
 
   it("an org manager cannot delete a draft period with a payment event", async () => {
-    const { error } = await manager.client
-      .from("billing_periods")
-      .delete()
-      .eq("id", FIXTURE.periodDraftEvent);
+    const { error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: FIXTURE.periodDraftEvent,
+    });
     expect(error?.code).toBe("23514");
     expect(error?.details).toBe("payment_activity");
     expect(await periodExists(FIXTURE.periodDraftEvent)).toBe(true);

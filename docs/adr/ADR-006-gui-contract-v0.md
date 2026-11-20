@@ -159,6 +159,35 @@ read a stored credential, or to send data to another origin.
      `gui-surface.test.ts` holds their links to the plugin's own released
      pages.
 
+10. **The host's confirmation steps.**
+   - A step's tone, and an `ActionRef`'s `tone`, come from the action's
+     definition on the server (`actionTone` in
+     `host/shared/merge-actions.ts`): danger for a DELETE or a
+     `risk: "destructive"` action, neutral for every other, typed and
+     ceremony included. A confirmation level says how carefully a person
+     confirms, not what the write does. The one-step form's footer, the
+     confirm, typed and ceremony steps and the Overlay's `tone` all take
+     the prepared action's tone; a GUI's ref cannot change it. Design
+     rule 5 in CLAUDE.md is the same rule for the legacy dialogs.
+   - An action may declare `prepareAgainOn`: codes of its route's 409
+     answers that mean what the person confirmed changed after prepare (the
+     figures a ceremony's digest covers, say). Registration refuses it
+     without `prepare` or at level none. When a write answers 409 with a
+     declared code, the host prepares the action again with the same ref
+     and the values sent, less secrets. If it gets the same action back
+     (action, route, method and bound fields) at no weaker level, it shows
+     the new step as a new round, ticks and typing cleared, with the
+     route's message as its note, and never sends on its own. A refusal of
+     the new prepare ends the action with that refusal and refreshes the
+     view; any other answer ends it with the route's 409. Any other failed
+     write shows the same step again with the route's message. The host
+     prepares again through `prepareAction` rather than using a step the
+     route's body may carry, so the step is always one the host checked,
+     with the gate, `available()` and the action's own refusals asked
+     again. The codes are declared per action, not inferred from the
+     status: the plugin gate's own 409 must never prepare again. The route
+     stays the authority and checks the confirmation again on every write.
+
 ## Consequences
 
 Better:
@@ -195,6 +224,12 @@ Worse, or to watch:
   a helper module that asks it is caught for the reconcile route by its
   database test, which posts with Payments off, and for the other exempt
   routes by review.
+- That each `prepareAgainOn` code is one its route answers (decision 9) is
+  checked in CI by `gui-surface.test.ts`, which looks for the code written
+  in the route file or in a source file under `src/lib`, not when a
+  contribution is registered. A code that slipped past CI could only leave
+  the host showing the old step again with the route's message, as it does
+  for any other refusal.
 - When this was recorded, the repository held the two contract files and
   their tests, and nothing imported them. The run-time checks in decision 3
   arrive with the code that reads contributions, each with its own tests.
@@ -212,6 +247,8 @@ Worse, or to watch:
 ## References
 
 - `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
+- `src/lib/gui/host/client/action-host.tsx`,
+  `src/lib/gui/host/server/prepare.ts` (decision 9)
 - `src/lib/gui/__tests__/contract-types.test.ts`,
   `src/lib/gui/__tests__/gui-boundary.test.ts`
 - `docs/cordis-runtime.md`; CLAUDE.md, "Cordis runtime"

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import type { BillingPeriod } from "@/lib/types/domain";
 import { StatusChip } from "@/components/ui/status-chip";
 import { Currency } from "@/components/format/currency";
@@ -12,8 +11,10 @@ import { LocalDate } from "@/components/format/local-date";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   DELETE_DRAFT_PERIOD_DESCRIPTION,
-  periodDeleteErrorMessage,
+  DELETE_PERIOD_TYPED_LABEL,
+  deleteDraftPeriodThroughRoute,
 } from "@/lib/billing/period-delete";
+import { periodName } from "@/lib/billing/close";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getDefaultDates } from "@/lib/billing/default-dates";
@@ -49,7 +50,6 @@ export function BillingPeriodList({
   canManage?: boolean;
 }) {
   const router = useRouter();
-  const supabase = createClient();
 
   const defaults = getDefaultDates(new Date(), timezone);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -67,18 +67,18 @@ export function BillingPeriodList({
     setDeleteDialogOpen(true);
   }
 
+  // The name typed to delete the period; the route checks it (DELETE
+  // /api/billing-periods/[periodId], BillingCapability.deletePeriod).
+  const deletingName = deletingPeriod
+    ? periodName(deletingPeriod.start_date, deletingPeriod.end_date)
+    : null;
+
   async function handleDeletePeriod() {
-    if (!deletingPeriod) return;
-    const { error: deleteError } = await supabase
-      .from("billing_periods")
-      .delete()
-      .eq("id", deletingPeriod.id);
-    if (deleteError) {
-      // fn_billing_period_before_delete_guard keeps a closed period or a
-      // draft with recorded payments; the dialog says why instead of showing
-      // the raw error.
-      throw new Error(periodDeleteErrorMessage(deleteError));
-    }
+    if (!deletingPeriod || deletingName === null) return;
+    // Through the billing capability, behind the plugin gate; its refusals
+    // (a closed period, payment activity, billing turned off) come back as
+    // fixed copy, which the dialog shows.
+    await deleteDraftPeriodThroughRoute(deletingPeriod.id, deletingName);
     router.refresh();
   }
 
@@ -142,6 +142,9 @@ export function BillingPeriodList({
         confirmLabel="Delete"
         tone="destructive"
         onConfirm={handleDeletePeriod}
+        requireTypedConfirmation={
+          deletingName === null ? undefined : { label: DELETE_PERIOD_TYPED_LABEL, expected: deletingName }
+        }
       />
 
       <div className="mb-4 flex items-center justify-between">
@@ -304,7 +307,7 @@ export function BillingPeriodList({
                         the billing record and fn_billing_period_before_delete_guard
                         keeps it (src/lib/billing/period-delete.ts). If that
                         trigger's rule changes, revisit. */}
-                    {period.status === "draft" && (
+                    {period.status === "draft" && periodName(period.start_date, period.end_date) !== null && (
                       <button
                         onClick={() => openDeleteDialog(period)}
                         className="rounded-md px-2 py-1 text-sm text-destructive hover:bg-destructive-muted disabled:cursor-not-allowed disabled:opacity-50"

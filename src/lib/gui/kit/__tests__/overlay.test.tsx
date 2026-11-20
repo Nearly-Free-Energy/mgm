@@ -85,6 +85,8 @@ describe("the kit's Overlay as the host's default frame", () => {
             path: `/api/microgrids/${MG}/name`,
             bound: { microgrid_id: MG },
             ceremony: null,
+            tone: "neutral",
+            prepareAgainOn: [],
           } satisfies PreparedAction)
         : Response.json({}),
     );

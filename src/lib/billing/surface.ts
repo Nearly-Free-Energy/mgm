@@ -356,6 +356,11 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
       prepare: prepareClosePeriod,
       available: closePeriodAvailable,
+      // The route's 409 for a digest that no longer matches the totals
+      // (totalsChanged in ./capability.ts): the host prepares the close
+      // again and shows the new totals, with CLOSE_REFUSAL_COPY.totalsChanged
+      // as its note. If the route renames the code, change it here.
+      prepareAgainOn: ["billing_period_totals_changed"],
     },
     // ── The period review's actions ──
     // All human-only (no assistant proposes a billing write yet) and money:
@@ -429,8 +434,10 @@ export const BILLING_SURFACE: Contribution = {
     // the readings choice, and available() and prepare check the bill, so it
     // is sound on any view of a bill. A ceremony, so the host sends the
     // acknowledgement a paid bill's prepare asks for and the route requires
-    // (only typed and ceremony actions are sent a confirmation, invoke.ts);
-    // the host therefore shows it in the danger tone on every bill.
+    // (only typed and ceremony actions are sent a confirmation, invoke.ts).
+    // Its tone is neutral, as it is neither a DELETE nor destructive; if
+    // actionTone (merge-actions.ts) or this action's risk or method changes,
+    // revisit.
     {
       ...REGENERATE_BILL_ACTION,
       target: "lineItem",

@@ -15,8 +15,13 @@
  *   - reads the period's status again just before the insert, and writes
  *     nothing if it closed meanwhile;
  *   - otherwise runs the manual path unchanged: one
- *     fn_record_line_item_with_audit call with the readings rounded, the
- *     pinned tariff's tiers and total, and no metering read.
+ *     fn_record_first_line_item_with_audit call (the insert-only write,
+ *     migration 20261120130100) with fn_record_line_item_with_audit's
+ *     arguments: the readings rounded, the pinned tariff's tiers and total,
+ *     and no metering read;
+ *   - maps that function's refusals to fixed copy: a bill another write
+ *     added after the read (`bill_exists`), a period closed after the last
+ *     status read (`period_closed`), a moved tariff (`tariff_changed`).
  *
  * Harness: a mocked Supabase client, as in generate-guard-existing.test.ts.
  * The database side is bill-from-readings.db.test.ts.
@@ -103,7 +108,7 @@ function harness(
   const listReads: Record<string, number> = {};
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name === "fn_pin_billing_period_rate_schedule") return { data: SCHEDULE_ID, error: null };
-    if (name === "fn_record_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
+    if (name === "fn_record_line_item_with_audit" || name === "fn_record_first_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
       if (o.writeError) return { data: null, error: o.writeError };
       return { data: { id: "written", tenant_id: args?._tenant_id, total_amount: args?._total_amount }, error: null };
     }
@@ -308,12 +313,12 @@ describe("runGenerationFor with newBillOnly", () => {
     expect(writes(h.rpc)).toEqual([]);
   });
 
-  it("bills an unmetered tenant through fn_record_line_item_with_audit, with the readings rounded and the pinned tariff", async () => {
+  it("bills an unmetered tenant through fn_record_first_line_item_with_audit, with the readings rounded and the pinned tariff", async () => {
     const h = harness({ bills: [billOf(3)] });
     const r = await only(h, 1, { manualReadings: [reading(1, 100.1234, 150.5, "Meter read on site")] });
     expect(r).toMatchObject({ kind: "written", tenantId: tenant(1), tenantName: "Unit 1", previousTotalAmount: null, previousReadingSource: null });
     const w = writes(h.rpc);
-    expect(w.map((x) => x.name)).toEqual(["fn_record_line_item_with_audit"]);
+    expect(w.map((x) => x.name)).toEqual(["fn_record_first_line_item_with_audit"]);
     // Usage is end − start, priced as computed and stored to 3 places, as the
     // legacy panel's manual path does it.
     const usage = 50.377;
@@ -381,7 +386,38 @@ describe("runGenerationFor with newBillOnly", () => {
   });
 
   it("reports a tariff changed under the write as tariff_changed", async () => {
-    const h = harness({ writeError: { code: "23514", message: "tariff changed for billing period" } });
+    const h = harness({ writeError: { code: "23514", message: "Billing period tariff changed; recalculate before writing bill" } });
     expect(await only(h, 1)).toMatchObject({ kind: "error", code: "tariff_changed" });
+  });
+
+  it("reports a bill another write added after the read as bill_exists, in fixed copy", async () => {
+    const h = harness({
+      writeError: { code: "23514", message: "billing_line_item_exists: the tenant already has a bill for this billing period" },
+    });
+    expect(await only(h, 1)).toEqual({
+      kind: "error",
+      tenantId: tenant(1),
+      tenantName: "Unit 1",
+      error: BILL_FROM_READINGS_COPY.hasBill,
+      code: "bill_exists",
+    });
+  });
+
+  it("reports a period closed after the last status read as period_closed, in fixed copy", async () => {
+    const h = harness({
+      writeError: { code: "23514", message: "billing_period_closed: a first bill is not added to a closed billing period" },
+    });
+    expect(await only(h, 1)).toEqual({
+      kind: "error",
+      tenantId: tenant(1),
+      tenantName: "Unit 1",
+      error: BILL_FROM_READINGS_COPY.closed,
+      code: "period_closed",
+    });
+  });
+
+  it("reports any other write failure as line_item_write_failed", async () => {
+    const h = harness({ writeError: { code: "P0002", message: "billing_period_not_found: the billing period does not exist" } });
+    expect(await only(h, 1)).toMatchObject({ kind: "error", code: "line_item_write_failed" });
   });
 });

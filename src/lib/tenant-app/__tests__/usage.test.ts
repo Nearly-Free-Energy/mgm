@@ -348,7 +348,7 @@ describe("the sum across a unit's meters", () => {
     });
 
     it("shows each unit the meter's whole use, as billing bills each, labelled as shared on those days only", async () => {
-      const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+      const asked: { fromDate: string; toDate: string }[] = [];
       const monthA = await month(
         capabilityFor(UNIT_A, linksA, {
           ...syntheticSource().source,
@@ -382,7 +382,7 @@ describe("the sum across a unit's meters", () => {
       const sharedDays = datesBetween("2026-11-10", "2026-11-30").filter((date) => generatedDay(D, date) !== null).length;
       expect(monthA.total.shared).toBe(sharedDays);
       expect(monthB.total.shared).toBe(sharedDays);
-      expect(asked).toEqual([{ deviceIds: [D], fromDate: "2026-11-01", toDate: "2026-12-01" }]);
+      expect(asked).toEqual([{ fromDate: "2026-11-01", toDate: "2026-12-01" }]);
     });
 
     it("marks the day itself shared, and not a day before the other unit's link", async () => {

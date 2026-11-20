@@ -13,7 +13,12 @@
  *   - rewrites every other existing bill through fn_regenerate_bill_with_audit
  *     with that bill as read, and writes nothing for a bill whose figures
  *     are already the ones computed;
- *   - inserts a tenant's first bill through fn_record_line_item_with_audit;
+ *   - inserts a tenant's first bill through
+ *     fn_record_first_line_item_with_audit (insert-only, migration
+ *     20261120130100), with fn_record_line_item_with_audit's arguments, and
+ *     maps its refusals: a bill another write added after the read
+ *     (`bill_exists`) and a period closed after the last status read
+ *     (`period_closed`), each for that tenant only;
  *   - reports tenants with no meter, an assignment gap or no meter data with
  *     their codes, as any run does, and says (`hadBill`) which of them had a
  *     bill, which it leaves as it is;
@@ -32,7 +37,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { runGenerationFor, isRunGenerationFatal, type RunGenerationParams } from "@/lib/billing/generate";
-import { GENERATE_FROM_METERS_COPY, REGENERATE_REFUSAL_COPY } from "@/lib/billing/schemas";
+import { BILL_FROM_READINGS_COPY, GENERATE_FROM_METERS_COPY, REGENERATE_REFUSAL_COPY } from "@/lib/billing/schemas";
 import type { MeteringProvider } from "@/lib/metering/types";
 
 const MICROGRID_ID = "dddddddd-dddd-4000-8000-000000000001";
@@ -129,7 +134,7 @@ function harness(
   const listReads: Record<string, number> = {};
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name === "fn_pin_billing_period_rate_schedule") return { data: SCHEDULE_ID, error: null };
-    if (name === "fn_record_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
+    if (name === "fn_record_line_item_with_audit" || name === "fn_record_first_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
       const err = o.writeError?.(name, args?._tenant_id) ?? null;
       if (err) return { data: null, error: err };
       return { data: { id: "written", tenant_id: args?._tenant_id, total_amount: args?._total_amount }, error: null };
@@ -330,7 +335,7 @@ describe("runGenerationFor with guardExistingBills", () => {
       expect(by.get(tenant(n))).toMatchObject({ kind: "error", code, hadBill: true });
     }
     expect(writes(h.rpc).map((w) => [w.name, w.args._tenant_id])).toEqual([
-      ["fn_record_line_item_with_audit", tenant(1)],
+      ["fn_record_first_line_item_with_audit", tenant(1)],
       ["fn_regenerate_bill_with_audit", tenant(2)],
     ]);
   });
@@ -457,12 +462,12 @@ describe("runGenerationFor with guardExistingBills", () => {
     expect(by.get(tenant(8))).not.toHaveProperty("hadBill");
   });
 
-  it("inserts a first bill through fn_record_line_item_with_audit and rewrites an existing one only as it was read", async () => {
+  it("inserts a first bill through fn_record_first_line_item_with_audit and rewrites an existing one only as it was read", async () => {
     const h = harness();
     await results(h);
     const w = writes(h.rpc);
     expect(w.map((x) => [x.name, x.args._tenant_id])).toEqual([
-      ["fn_record_line_item_with_audit", tenant(1)],
+      ["fn_record_first_line_item_with_audit", tenant(1)],
       ["fn_regenerate_bill_with_audit", tenant(2)],
     ]);
     expect(w[1].args._expected).toEqual({
@@ -479,7 +484,8 @@ describe("runGenerationFor with guardExistingBills", () => {
       manual_reason: null,
     });
     expect(w[1].args).toMatchObject({ _usage_kwh: 42, _total_amount: 4200, _reading_source: "edge", _start_kwh: null, _end_kwh: null });
-    // Exactly fn_record_line_item_with_audit's arguments, and _expected.
+    // Exactly the first bill's arguments (fn_record_line_item_with_audit's),
+    // and _expected.
     const recordArgs = { ...w[1].args };
     delete recordArgs._expected;
     expect(Object.keys(recordArgs).sort()).toEqual(Object.keys(w[0].args).sort());
@@ -496,6 +502,18 @@ describe("runGenerationFor with guardExistingBills", () => {
     expect(by.get(tenant(1))).toMatchObject({ kind: "written" });
   });
 
+  it.each([
+    ["billing_line_item_exists: the tenant already has a bill for this billing period", "bill_exists", "hasBill"],
+    ["billing_period_closed: a first bill is not added to a closed billing period", "period_closed", "closed"],
+  ] as const)("reports the first bill's refusal %j as fixed copy, for that tenant only", async (message, code, copy) => {
+    const h = harness({ writeError: (name) => (name === "fn_record_first_line_item_with_audit" ? { code: "23514", message } : null) });
+    const by = await results(h);
+    const error = copy === "closed" ? GENERATE_FROM_METERS_COPY.closed : BILL_FROM_READINGS_COPY.hasBill;
+    // The tenant had no bill as read, so no hadBill.
+    expect(by.get(tenant(1))).toEqual({ kind: "error", tenantId: tenant(1), tenantName: "Unit 1", code, error });
+    expect(by.get(tenant(2))).toMatchObject({ kind: "written" });
+  });
+
   it("keeps a manual bill whatever its payment status", async () => {
     const h = harness({ bills: [edgeBill(4, { reading_source: "manual", payment_status: "paid", invoice_number: "EXS-1" })] });
     const by = await results(h);
@@ -508,7 +526,7 @@ describe("runGenerationFor with guardExistingBills", () => {
     for (const n of [1, 2, 3]) expect(by.get(tenant(n))?.kind).toBe("unchanged");
     // Only the metered tenants with no bill here are written: inserts.
     expect(writes(h.rpc).map((w) => [w.name, w.args._tenant_id])).toEqual(
-      [4, 5, 6, 7].map((n) => ["fn_record_line_item_with_audit", tenant(n)]),
+      [4, 5, 6, 7].map((n) => ["fn_record_first_line_item_with_audit", tenant(n)]),
     );
   });
 

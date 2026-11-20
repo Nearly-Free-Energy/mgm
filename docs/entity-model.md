@@ -177,8 +177,10 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   tenant app's usage source reads their meters' edges and the microgrid's
   OpenEMS connection on the service role
   (`src/lib/tenant-app/infrastructure/usage-source.ts`); the tenant's own
-  client still reads no such row. A meter that is two units' primary on the
-  same day is shown to each, labelled "Shared with another unit, not only
-  yours" on those days, never as either unit's own use; for that, the same
-  source reads the dates of other units' primary links of the unit's
-  primary meters on the service role, never whose they are.
+  client still reads no such row. A meter that is the primary of two units
+  on the same day, on any microgrid, is shown to each, labelled "Shared
+  with another unit, not only yours" on those days, never as either unit's
+  own use; for that, the tenant's own client asks
+  `fn_tenant_shared_meter_days` for the days, which reads the other units'
+  primary links of the unit's meters in the database and returns dates
+  only, never whose they are.
