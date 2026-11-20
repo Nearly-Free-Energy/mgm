@@ -455,6 +455,30 @@ describe("resolveActions: availability", () => {
     ]);
   });
 
+  it("asks about an action kept enabled while its plugin is off, within the same budget, and not about the others", async () => {
+    vi.useFakeTimers();
+    const keptAnswer = vi.fn<Available>(async () => ({ [P1]: true }));
+    const offAnswer = vi.fn<Available>(async () => ({ [P1]: true }));
+    const slowAnswer = vi.fn<Available>(() => new Promise(() => {}));
+    const kept = { ...close, def: { ...close.def, id: "billing.kept", title: "Kept", available: keptAnswer, whilePluginOff: "enabled" } as ActionDef };
+    const off = { ...close, def: { ...close.def, id: "billing.off", title: "Off", available: offAnswer } as ActionDef };
+    const slow = { ...close, def: { ...close.def, id: "billing.slow", title: "Slow", available: slowAnswer, whilePluginOff: "enabled" } as ActionDef };
+    const { m, states } = context([kept, off, slow]);
+    states.set("billing", { ok: false, status: 409, code: "billing_disabled", message: "Billing is disabled." });
+    const links = (["billing.kept", "billing.off", "billing.slow"] as const).map((action) => ({ action, params: { id: P1 } }));
+    const pending = resolveActions(loaded([], links), m);
+    await vi.advanceTimersByTimeAsync(AVAILABILITY_BUDGET_MS);
+    const out = await pending;
+
+    expect(keptAnswer).toHaveBeenCalledWith(expect.anything(), [P1]);
+    expect(offAnswer).not.toHaveBeenCalled();
+    expect(out.actions.map((a) => [a.action, a.enabled, a.reason])).toEqual([
+      ["billing.kept", true, undefined],
+      ["billing.off", false, "Billing is disabled."],
+      ["billing.slow", false, UNCHECKED_REASON],
+    ]);
+  });
+
   it("does not ask about disabled actions, nor without an organization", async () => {
     const available = vi.fn<Available>(async () => ({ [H1]: true }));
     const assign = action("metering", "metering.assign", { available });

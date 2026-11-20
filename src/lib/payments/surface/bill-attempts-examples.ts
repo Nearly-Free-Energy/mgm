@@ -8,7 +8,8 @@ import "server-only";
  * online after a superseded checkout; an unpaid bill whose only checkout
  * has an unknown outcome; a bill with no attempts; a period with no
  * bills; and the second again while Payments is off, with the gate's
- * notice and every action disabled. Built at import the way the loader
+ * notice and its actions as when Payments is on, since their routes accept
+ * them then (whilePluginOff in ../surface.ts). Built at import the way the loader
  * builds them. Each history is one PaymentsCapability can produce: a new
  * checkout is refused on a paid bill and beside any open, verified or held
  * attempt (createCheckout, fn_payment_reserve_checkout), so a paid bill
@@ -36,8 +37,8 @@ const TZ = "Africa/Kampala";
 
 /**
  * A copy of the gate's copy for a disabled payments plugin
- * (src/lib/runtime/gate.ts), which the host shows as the notice and as the
- * reason on the view's own actions. If the gate's copy changes, so may this.
+ * (src/lib/runtime/gate.ts), which the host shows as the view's notice while
+ * Payments is off. If the gate's copy changes, so may this.
  */
 const PAYMENTS_DISABLED =
   "Payments are disabled for this organization. Enable them in Settings → Plugins; history and reconciliation are preserved.";
@@ -140,10 +141,15 @@ export const BILL_ATTEMPTS_LOADED_EXAMPLES: readonly LoadedModel<"collection">[]
 /** Each action's availability as reconcileAvailable answers it for the history the model was built from. */
 const HISTORIES = [undefined, SHORT, PAID, UNKNOWN, NONE, undefined] as const;
 
-function resolve(history: BillHistory | undefined, disabled: boolean) {
+/**
+ * Each action resolved as the host resolves it. Every action of this view
+ * declares whilePluginOff: "enabled", so while Payments is off each resolves
+ * as when it is on, by its availability alone.
+ */
+function resolve(history: BillHistory | undefined) {
   return (link: ActionLink): ActionRef => {
     const which = link.action === RECORD_ADJUSTMENT_ACTION.id ? "record" : link.action === ACCEPT_RECEIPTS_ACTION.id ? "accept" : null;
-    const reason = disabled ? PAYMENTS_DISABLED : which && history ? reconcileReason(history, link.params.id, which) : null;
+    const reason = which && history ? reconcileReason(history, link.params.id, which) : null;
     return {
       ...link,
       label: link.label ?? TITLES[link.action],
@@ -153,9 +159,9 @@ function resolve(history: BillHistory | undefined, disabled: boolean) {
   };
 }
 
-/** A loaded model with the fields the host fills, as a GUI receives it; `disabled` as while Payments is off. */
-function asReceived(loaded: LoadedModel<"collection">, history: BillHistory | undefined, disabled = false): ModelOf<"collection"> {
-  const ref = resolve(history, disabled);
+/** A loaded model with the fields the host fills, as a GUI receives it; `off` as while Payments is off. */
+function asReceived(loaded: LoadedModel<"collection">, history: BillHistory | undefined, off = false): ModelOf<"collection"> {
+  const ref = resolve(history);
   const { empty } = loaded.body;
   return {
     ...loaded,
@@ -176,7 +182,7 @@ function asReceived(loaded: LoadedModel<"collection">, history: BillHistory | un
       rows: loaded.body.rows.map((row) => ({ ...row, actions: row.actions.map(ref) })),
       empty: { title: empty.title, ...(empty.text ? { text: empty.text } : {}) },
     },
-    ...(disabled ? { notice: { tone: "warning" as const, text: PAYMENTS_DISABLED } } : {}),
+    ...(off ? { notice: { tone: "warning" as const, text: PAYMENTS_DISABLED } } : {}),
   };
 }
 

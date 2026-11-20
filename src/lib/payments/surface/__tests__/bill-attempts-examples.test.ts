@@ -9,7 +9,7 @@
  * attempt is the one that paid it. If those refusals change, revisit this.
  */
 import { describe, expect, it } from "vitest";
-import { BILL_ATTEMPTS_EXAMPLE_HISTORIES, BILL_ATTEMPTS_LOADED_EXAMPLES } from "../bill-attempts-examples";
+import { BILL_ATTEMPTS_EXAMPLES, BILL_ATTEMPTS_EXAMPLE_HISTORIES, BILL_ATTEMPTS_LOADED_EXAMPLES } from "../bill-attempts-examples";
 
 describe("the bill attempts examples", () => {
   it.each(BILL_ATTEMPTS_EXAMPLE_HISTORIES.map((e) => [e.bill.tenantName, e] as const))(
@@ -37,5 +37,21 @@ describe("the bill attempts examples", () => {
     for (const e of unknown) expect(e.bill.payment_status).not.toBe("paid");
     const titles = BILL_ATTEMPTS_LOADED_EXAMPLES.map((m) => m.title);
     for (const e of BILL_ATTEMPTS_EXAMPLE_HISTORIES) expect(titles.some((t) => t.includes(e.bill.tenantName)), e.bill.tenantName).toBe(true);
+  });
+
+  it("shows the bill again while Payments is off, with the gate's notice and its actions as when Payments is on", () => {
+    const on = BILL_ATTEMPTS_EXAMPLES[1];
+    const off = BILL_ATTEMPTS_EXAMPLES.at(-1)!;
+    expect(BILL_ATTEMPTS_EXAMPLES).toHaveLength(BILL_ATTEMPTS_LOADED_EXAMPLES.length + 1);
+    expect(on.notice).toBeUndefined();
+    expect(off.notice).toEqual({ tone: "warning", text: expect.stringMatching(/^Payments are disabled for this organization\./) });
+    expect({ ...off, notice: undefined }).toEqual({ ...on, notice: undefined });
+    const actions = off.body.rows.flatMap((r) => r.actions).map((a) => [a.action, a.enabled]);
+    // The receipts fall short, so only accepting them exactly is unavailable.
+    expect(actions).toEqual([
+      ["payments.refresh-attempt", true],
+      ["payments.record-adjustment", true],
+      ["payments.accept-receipts", false],
+    ]);
   });
 });

@@ -58,9 +58,6 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Unscheduled: the host hides a disabled plugin's tab and disables its
-  // actions, which the routes accept while Payments is off (parity.ts).
-  "payments-while-off",
 ]);
 
 /**
@@ -442,6 +439,24 @@ describe("parity with the contributed actions and views", () => {
   it("does not count a link row that names nothing to carry it", () => {
     const row = BILLING_PARITY.find((r) => r.id === "back-to-period")!;
     expect(contributedLink({ ...(row.replacedBy as ParityLink), via: undefined })).toBe(false);
+  });
+
+  it("keeps payments-while-off replaced only while the tab and the exempt actions are declared available while Payments is off", () => {
+    // A view row counts as contributed once the view exists, so this is what
+    // shows the decision was carried out (parity.ts, payments-while-off).
+    const row = BILLING_PARITY.find((r) => r.id === "payments-while-off")!;
+    expect(row.replacedBy).toEqual({ kind: "view", view: "payments.bill-attempts" });
+    const view = PAYMENTS_SURFACE.views!.find((v) => v.id === "payments.bill-attempts")!;
+    expect(view.attach?.whilePluginOff, "payments.bill-attempts is listed while Payments is off").toBe("listed");
+    const kept = ["refresh-attempt", "record-adjustment", "accept-receipts"].map((id) => {
+      const by = BILLING_PARITY.find((r) => r.id === id)!.replacedBy as ParityAction;
+      return [by.action, contributedAction(by)?.whilePluginOff];
+    });
+    expect(kept).toEqual([
+      ["payments.refresh-attempt", "enabled"],
+      ["payments.record-adjustment", "enabled"],
+      ["payments.accept-receipts", "enabled"],
+    ]);
   });
 
   it("lists only rows of the table as pending", () => {
