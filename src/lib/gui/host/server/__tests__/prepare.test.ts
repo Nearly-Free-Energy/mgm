@@ -228,6 +228,46 @@ describe("prepareAction", () => {
     expect(prep).not.toHaveBeenCalled();
   });
 
+  describe("an action declaring whilePluginOff: \"enabled\"", () => {
+    const OFF = { ok: false, status: 409, code: "metering_disabled", message: "Metering is disabled." } as const;
+
+    it("is prepared while its plugin is off, with availability and its own prepare still run", async () => {
+      const available = vi.fn(async (_r: unknown, ids: string[]) => Object.fromEntries(ids.map((id) => [id, true as const])));
+      const prep = vi.fn(async () => ({ ok: true, model: ceremony() }));
+      use(action({ whilePluginOff: "enabled", available, prepare: prep }));
+      gates.set("metering", OFF);
+      expect(await prepare({ action: "metering.backend", params })).toMatchObject({ ok: true, value: { type: "prepared", ceremony: { type: "ceremony" } } });
+      expect(checkGate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ plugin: "metering", access: "write" }));
+      expect(available).toHaveBeenCalledWith(expect.anything(), [MG]);
+      expect(prep).toHaveBeenCalledTimes(1);
+    });
+
+    it("still answers 409 with available()'s reason while its plugin is off", async () => {
+      use(action({ whilePluginOff: "enabled", available: async (_r: unknown, ids: string[]) => Object.fromEntries(ids.map((id) => [id, "Nothing to reconcile"])) }));
+      gates.set("metering", OFF);
+      expect(await prepare({ action: "metering.backend", params })).toEqual({
+        ok: false,
+        status: 409,
+        code: "gui_action_unavailable",
+        message: "Nothing to reconcile",
+      });
+    });
+
+    it("is still refused when the gate cannot be read, or throws", async () => {
+      use(action({ whilePluginOff: "enabled" }));
+      gates.set("metering", { ok: false, status: 503, code: "metering_gate_unavailable", message: "Could not check." });
+      expect(await prepare({ action: "metering.backend", params })).toMatchObject({ ok: false, status: 503, code: "metering_gate_unavailable" });
+      checkGate.mockRejectedValue(new Error(CANARY));
+      expect(await prepare({ action: "metering.backend", params })).toMatchObject({ ok: false, status: 503, code: "metering_gate_unavailable" });
+    });
+
+    it("leaves every other action refused while its plugin is off", async () => {
+      use(action({ whilePluginOff: "enabled" }), action({ id: "metering.other" }));
+      gates.set("metering", OFF);
+      expect(await prepare({ action: "metering.other", params })).toEqual({ ...OFF });
+    });
+  });
+
   it("answers 503 when the gate cannot be read", async () => {
     checkGate.mockRejectedValue(new Error(CANARY));
     expect(await prepare({ action: "metering.backend", params })).toMatchObject({ status: 503, code: "metering_gate_unavailable" });

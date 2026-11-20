@@ -18,16 +18,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
 import * as bundled from "@/lib/plugins/bundled";
+import { getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
 import {
-  PAYMENTS_PLUGIN_NAME,
-  PESAPAL_PLUGIN_NAME,
-  getRouteOwner,
-  type MgmPluginName,
-} from "@/lib/plugins/bundled";
-import {
+  PAYMENT_EXEMPTION_OWNERS,
   UNGATED_WRITES,
   exemptionKey,
   handlerSources,
+  paymentsGating,
+  propertyKey,
   type PaymentExemption,
 } from "./route-rules";
 
@@ -107,16 +105,6 @@ const COMPOSERS: Record<string, MgmPluginName[]> = {
 const SKIPS_PLUGIN_CHECK: Record<string, string[]> = {
   composeBilling: ["readOnly"],
 };
-
-/**
- * The name a property key spells (`readOnly`, `"readOnly"`, `["readOnly"]`
- * all → `readOnly`); null when it cannot be known statically.
- */
-function propertyKey(name: ts.PropertyName): string | null {
-  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;
-  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) return name.expression.text;
-  return null;
-}
 
 function skipsPluginCheck(call: ts.CallExpression, composer: string): boolean {
   const options = call.arguments[0];
@@ -394,51 +382,6 @@ function compositionEscapes(file: ts.SourceFile): { results: string[]; escapes: 
   return { results: [...results], escapes };
 }
 
-const CAPABILITY_GATING = path.resolve(__dirname, "..", "..", "payments", "__tests__", "capability-gating.test.ts");
-
-let gatingCache: Map<string, string> | null = null;
-
-/**
- * Each Payments capability method's `gate` in the `GATING` table of
- * src/lib/payments/__tests__/capability-gating.test.ts
- * ("refuses-when-disabled" or "available-while-disabled"), which that test
- * checks against the capability itself. It is read from the source because
- * importing a test file runs its tests. If the table is renamed or stops
- * being an object literal of `{ gate: "…" }` entries, this throws; follow it.
- */
-function paymentsGating(): Map<string, string> {
-  if (gatingCache) return gatingCache;
-  const file = ts.createSourceFile("capability-gating.test.ts", readFileSync(CAPABILITY_GATING, "utf8"), ts.ScriptTarget.Latest, true);
-  let table: ts.Expression | undefined;
-  const visit = (node: ts.Node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "GATING") table = node.initializer;
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  while (table && (ts.isAsExpression(table) || ts.isSatisfiesExpression(table) || ts.isParenthesizedExpression(table))) {
-    table = table.expression;
-  }
-  if (!table || !ts.isObjectLiteralExpression(table)) {
-    throw new Error(`${CAPABILITY_GATING}: no \`GATING\` object literal to read the capability's classification from`);
-  }
-  const gating = new Map<string, string>();
-  for (const entry of table.properties) {
-    const method = entry.name ? propertyKey(entry.name) : null;
-    const gate = ts.isPropertyAssignment(entry) && ts.isObjectLiteralExpression(entry.initializer)
-      ? entry.initializer.properties.find((field) => field.name && propertyKey(field.name) === "gate")
-      : undefined;
-    if (!method || !gate || !ts.isPropertyAssignment(gate) || !ts.isStringLiteralLike(gate.initializer)) {
-      throw new Error(`${CAPABILITY_GATING}: cannot read the \`gate\` of GATING entry \`${entry.getText(file).split("\n")[0]}\``);
-    }
-    gating.set(method, gate.initializer.text);
-  }
-  gatingCache = gating;
-  return gating;
-}
-
-/** The plugins whose routes check 4 of payments-route-boundary.test.ts holds (see `PaymentExemption`). */
-const BOUNDARY_OWNERS = new Set<string>([PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME]);
-
 /**
  * What is wrong with a handler's exemption, given its route and its route
  * file's text. All of the file is checked, not only the handler: a helper
@@ -460,7 +403,7 @@ function paymentExemptionProblems(exemption: string | PaymentExemption, text: st
   const problems: string[] = [];
   const { reaches } = exemption;
   const owner = getRouteOwner(route)?.name;
-  if (!owner || !BOUNDARY_OWNERS.has(owner)) {
+  if (!owner || !PAYMENT_EXEMPTION_OWNERS.has(owner)) {
     problems.push(
       `is owned by ${owner ?? "no plugin"}, so payments-route-boundary.test.ts does not check what it writes or calls; gate it instead`
     );

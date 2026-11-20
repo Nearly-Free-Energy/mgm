@@ -232,6 +232,29 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+While a plugin is off for an organization (the gate's 409, asked as a write
+by `pluginGate` in `src/lib/gui/host/server/gate-state.ts`), the host still
+serves its views of cost `db`, with the gate's notice followed by the
+loader's own (`dispatchView` and `shownNotice`), and refuses its `vendor`
+views. `attachedViews` lists its sections and leaves out its tabs and tiles,
+unless an attachment declares `whilePluginOff: "listed"`. `actionRef`
+(`src/lib/gui/host/shared/merge-actions.ts`) shows its actions disabled with
+the gate's copy on its own views and leaves them out of other plugins', and
+`prepareAction` refuses them with the gate's 409, unless an action declares
+`whilePluginOff: "enabled"`: that one is shown enabled on its own plugin's
+views and prepared, with its `available()` and `prepare` run as usual. Only
+the 409 is passed over: an unreadable gate (503, or a throw) still disables,
+refuses and leaves out everything. `gui-surface.test.ts` allows
+`whilePluginOff` on an action only where its `METHOD /api/route` is a
+`PaymentExemption` in `UNGATED_WRITES` naming a method that
+`capability-gating.test.ts` (`GATING`) says runs while the plugin is off, on
+a Payments or Pesapal action, so the host never offers a write its route
+refuses. It allows `attach.whilePluginOff` only on a Payments or Pesapal
+view, while every Payments method in `LOADER_READS` runs while off. The
+helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
+in `src/lib/runtime/__tests__/route-rules.ts`, shared with
+`route-surface.test.ts`.
+
 A view is about an organization's records unless it says otherwise:
 `scope: "installation"` serves an installation-wide view (no organization),
 and `scope: "tenant"` a view about one unit the caller rents (RFC mgm#197 §

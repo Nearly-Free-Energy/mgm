@@ -5,11 +5,12 @@ import "server-only";
  * or confirmation is shown: the action is found in the snapshot, its bound
  * entities are resolved to one organization the person can see
  * (./entities.ts), its plugin is checked with the plugin gate
- * (./gate-state.ts), and its own available() is asked. The answer is what
- * the kit needs to run the form, the host-owned confirmation step and the
- * write: the JSON Schema of the fields a person enters, a cleaned prefill,
- * the confirmation (from the action's prepare, strictly parsed) and the route
- * and method the write goes to.
+ * (./gate-state.ts), refusing while it is off unless the action declares
+ * `whilePluginOff: "enabled"`, and its own available() is asked. The answer
+ * is what the kit needs to run the form, the host-owned confirmation step and
+ * the write: the JSON Schema of the fields a person enters, a cleaned
+ * prefill, the confirmation (from the action's prepare, strictly parsed) and
+ * the route and method the write goes to.
  *
  * Preparing writes nothing and never calls the action's route. The write is
  * sent later to that route, which runs its own gate and checks.
@@ -205,7 +206,14 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
   if (decision === null) {
     return fail(503, `${plugin}_gate_unavailable`, "Could not check whether this part of MGM is enabled.");
   }
-  if (!decision.ok) return fail(decision.status, decision.code, decision.message);
+  // An action declaring whilePluginOff: "enabled" goes to a route that
+  // accepts it while its plugin is off (a PaymentExemption in UNGATED_WRITES,
+  // which gui-surface.test.ts requires), so the gate's 409 does not refuse
+  // it here; any other answer still does. Availability and its own prepare
+  // still run. If the route starts gating, remove the field.
+  if (!decision.ok && !(decision.status === 409 && def.whilePluginOff === "enabled")) {
+    return fail(decision.status, decision.code, decision.message);
+  }
 
   const ref: ActionRef = { action, params, label: def.title, enabled: true };
   const [checked] = (

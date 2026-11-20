@@ -127,8 +127,28 @@ interface ViewDefBase<K extends ViewKind> {
    * attached to, so both show the same day or filter.
    */
   query?: readonly string[];
-  /** Shown with every view of an entity kind, or with one view. */
-  attach?: { to: EntityKind | { view: Id }; order: number; hint: "section" | "tab" | "tile" };
+  /**
+   * Shown with every view of an entity kind, or with one view. While the
+   * plugin gate answers that this view's plugin is off for the organization
+   * (its 409), the host still lists a section, so the GUI loads it with the
+   * gate's notice, and leaves a tab or tile out unless `whilePluginOff` is
+   * "listed" (attachedViews in host/server/view.ts). A gate that cannot be
+   * read leaves every one out.
+   *
+   * `whilePluginOff: "listed"` is for a tab or tile whose loader still works
+   * while its plugin is off: gui-surface.test.ts allows it only on a view of
+   * a plugin whose write routes may carry a PaymentExemption
+   * (src/lib/runtime/__tests__/route-rules.ts), and only while every
+   * capability method its surface module may call (LOADER_READS there) runs
+   * while that plugin is off. A vendor view is refused while its plugin is
+   * off, so it cannot declare it.
+   */
+  attach?: {
+    to: EntityKind | { view: Id };
+    order: number;
+    hint: "section" | "tab" | "tile";
+    whilePluginOff?: "listed";
+  };
   /** "vendor": the loader calls an outside system, so it is gated like a write and polled sparingly. */
   cost: "db" | "vendor";
   /** Deny by default: only this lets an assistant read the view. */
@@ -197,6 +217,21 @@ type ActionBase = {
    * a prefill, such an action can use that instead.
    */
   targeted?: false;
+  /**
+   * "enabled": the action's route accepts it while the action's plugin is
+   * off for the organization, by design, so the host shows it enabled on
+   * its own plugin's view and prepares it while the plugin gate answers that
+   * the plugin is off (its 409). The gate is still asked, and a gate that
+   * cannot be read (its 503, or a throw) still disables and refuses it;
+   * available() and prepare still run. Another plugin's view still leaves
+   * it out while its plugin is off (actionRef in host/shared/merge-actions.ts).
+   *
+   * Declared, never inferred: gui-surface.test.ts allows it only on an
+   * action whose `METHOD /api/route` is a PaymentExemption in UNGATED_WRITES
+   * (src/lib/runtime/__tests__/route-rules.ts), so the host never offers a
+   * write the route would refuse. If that exemption is removed, remove this.
+   */
+  whilePluginOff?: "enabled";
 };
 type WriteMethod = "POST" | "PUT" | "PATCH";
 type LightLevel =

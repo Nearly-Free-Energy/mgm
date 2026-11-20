@@ -178,8 +178,9 @@ type Place = {
 /**
  * Views attached to this one's entity kind or to this view, other than
  * itself: each with its path filled from the same entities, released, and
- * its plugin enabled (a section is listed while its plugin is disabled, so
- * its place shows the gate's notice). A query parameter both views declare
+ * its plugin enabled (a section, and a tab or tile declaring
+ * `attach.whilePluginOff: "listed"`, is listed while its plugin is disabled,
+ * so it loads with the gate's notice). A query parameter both views declare
  * is passed on. A view with no path segments gets `?org=`, so it opens in
  * this organization.
  */
@@ -215,15 +216,20 @@ async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unk
       if (!isPageHref(href)) return null;
       // A section of a disabled plugin is still listed, so the GUI loads it and
       // shows the gate's notice in its place (decision 18 on #115); a disabled
-      // plugin's tabs and tiles are left out. If the gate's 409 stops meaning
+      // plugin's tabs and tiles are left out, unless one declares
+      // whilePluginOff: "listed", which gui-surface.test.ts allows only for a
+      // view whose loader works while its plugin is off. A gate that cannot be
+      // read leaves every one out. If the gate's 409 stops meaning
       // "disabled", revisit.
       const decision = await decide(p.gate, other.plugin);
-      if (!decision.ok && !(other.def.attach!.hint === "section" && decision.status === 409)) return null;
+      const attach = other.def.attach!;
+      const listedWhileOff = attach.hint === "section" || attach.whilePluginOff === "listed";
+      if (!decision.ok && !(decision.status === 409 && listedWhileOff)) return null;
       const title =
         p.snapshot.nav.find((n) => "view" in n.def && n.def.view === other.def.id)?.def.title ??
         other.def.examples[0]?.title ??
         other.def.id;
-      return { order: other.def.attach!.order, entry: { view: other.def.id, title, href: href as Href, hint: other.def.attach!.hint } };
+      return { order: attach.order, entry: { view: other.def.id, title, href: href as Href, hint: attach.hint } };
     }),
   );
   return shown
