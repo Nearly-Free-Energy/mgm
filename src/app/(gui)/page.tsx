@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Organization, Microgrid } from "@/lib/types/domain";
 import { COMMUNITY_MANAGEMENT_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { microgridHref } from "@/lib/microgrid-links";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type MicrogridWithTenantCount = {
   id: string;
@@ -14,6 +15,7 @@ type MicrogridWithTenantCount = {
 };
 
 export default async function DashboardPage() {
+  await keepTenantOnlyToTenantPages();
   const supabase = await createClient();
 
   const [{ data: organizations, error: orgError }, { data: pluginStates }] = await Promise.all([

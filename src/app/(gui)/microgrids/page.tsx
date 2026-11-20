@@ -7,6 +7,7 @@ import { getHierarchyLevels } from "@/lib/hierarchy";
 import { microgridHref } from "@/lib/microgrid-links";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { CommunityOption } from "@/components/forms/AddEntityButton";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type MicrogridWithTenantCount = MicrogridPublic & {
   tenant_count: number;
@@ -24,6 +25,7 @@ export default async function MicrogridsPage({
 }: {
   searchParams: Promise<{ community?: string; org?: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { community: communityId, org: orgId } = await searchParams;
   const supabase = await createClient();
 

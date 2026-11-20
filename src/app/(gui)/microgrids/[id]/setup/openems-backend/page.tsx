@@ -7,6 +7,7 @@ import { getHierarchyLevels } from "@/lib/hierarchy";
 import { getEmsSecretForMicrogrid } from "@/lib/openems/config";
 import { deriveOpenemsBackendHealth } from "./health";
 import { OpenemsBackendShell } from "./openems-backend-shell";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > OpenEMS Backend (#102).
 //
@@ -29,6 +30,7 @@ export default async function OpenemsBackendPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 

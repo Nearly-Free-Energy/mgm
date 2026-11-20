@@ -23,6 +23,10 @@ const { notFoundMock } = vi.hoisted(() => {
   return { notFoundMock };
 });
 
+// The page's first call keeps a tenant-only person to tenant pages; that is
+// tested for every page in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
+vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
+
 vi.mock("next/navigation", () => ({
   notFound: notFoundMock,
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),

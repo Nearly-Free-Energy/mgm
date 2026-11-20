@@ -1,4 +1,5 @@
 import { SetupSubNav } from "./setup-subnav";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 import { createClient } from "@/lib/supabase/server";
 import { deriveOpenemsBackendHealth } from "./openems-backend/health";
 import { timeAgo } from "@/lib/time-ago";
@@ -15,6 +16,9 @@ export default async function SetupLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
+  // Before any read: a nested layout renders alongside the page on a
+  // client-side navigation, so the page's own call is not enough (mgm#209).
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 

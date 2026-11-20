@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 import { createClient } from "@/lib/supabase/server";
 import type { MicrogridPublic } from "@/lib/types/microgrid-columns";
 import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
@@ -19,6 +20,9 @@ export default async function MicrogridLayout({
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }) {
+  // Before any read: a nested layout renders alongside the page on a
+  // client-side navigation, so the page's own call is not enough (mgm#209).
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 
