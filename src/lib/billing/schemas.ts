@@ -538,6 +538,37 @@ export const GENERATE_FROM_METERS_COPY = {
 } as const;
 
 /**
+ * Why a tenant with no bill is not billed from readings typed by hand, as
+ * fixed copy: POST
+ * /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings
+ * answers with it, never with a database's own message, and
+ * billing.bill-from-readings' availability (`closed`) and prepare (`closed`,
+ * `tenantNotFound`, `otherMicrogrid`, `hasBill`) give the same refusals
+ * before it runs (src/lib/billing/surface/not-billed.ts). The bill engine
+ * gives `closed`, `hasBill` and `failed` itself (newBillOnly in
+ * ./generate.ts).
+ *  - closed: a closed period's totals were reviewed and closed.
+ *  - hasBill: the tenant already has a bill for the period; regenerating
+ *    that bill (billing.regenerate-bill, manual readings) changes it.
+ *  - otherMicrogrid: the tenant belongs to another microgrid than the
+ *    period's.
+ *  - tenantNotFound: no tenant the person can read has that id.
+ *  - noTariff: the microgrid has no rate schedule to pin.
+ *  - tariffChanged: the period's tariff changed between the pin and the
+ *    write (fn_record_line_item_with_audit).
+ *  - failed: anything else, including bills that could not be read.
+ */
+export const BILL_FROM_READINGS_COPY = {
+  closed: "Bills cannot be added to a closed period.",
+  hasBill: "This tenant already has a bill for this period. Regenerate that bill to change its readings.",
+  otherMicrogrid: "This tenant is not on this period's microgrid.",
+  tenantNotFound: "Tenant not found.",
+  noTariff: GENERATE_FROM_METERS_COPY.noTariff,
+  tariffChanged: "The period's tariff changed while the bill was calculated. Nothing was written. Try again.",
+  failed: "The bill could not be written. Refresh the period to see its bills, and try again.",
+} as const;
+
+/**
  * POST /api/billing-periods/[periodId]/generate-from-meters. The period comes
  * from the path, and the run takes nothing else: every tenant's bill is read
  * from its meter (BillingCapability.generateFromMeters). The body is the empty
