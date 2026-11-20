@@ -17,7 +17,9 @@ import "server-only";
  * `billing.send-queue` view, reached from the review's Payment links link;
  * and the savings as the `billing.savings` view, shown under the
  * Operations day, with the writes that change what it counts. A page that
- * moves to a view keeps its nav id.
+ * moves to a view keeps its nav id. Its watcher, `billing.period-due`,
+ * reports each draft period whose last day has passed, leading to its close
+ * checklist, or to its review while it has no bills.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves the periods list's
@@ -74,6 +76,9 @@ import {
   recordUsageAvailable,
   regenerateBillAvailable,
 } from "./surface/period-review";
+import { loadPeriodDue } from "./surface/period-due";
+import { PERIOD_DUE_EXAMPLES } from "./surface/period-due-examples";
+import { PERIOD_DUE_SIGNAL } from "./surface/period-due-model";
 import { loadPeriodHistory } from "./surface/period-history";
 import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
@@ -460,4 +465,5 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
     },
   ],
+  signals: [{ id: PERIOD_DUE_SIGNAL, load: loadPeriodDue, examples: PERIOD_DUE_EXAMPLES }],
 };
