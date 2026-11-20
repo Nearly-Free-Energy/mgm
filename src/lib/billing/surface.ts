@@ -370,7 +370,9 @@ export const BILLING_SURFACE: Contribution = {
     // is sound on any view of a bill. A ceremony, so the host sends the
     // acknowledgement a paid bill's prepare asks for and the route requires
     // (only typed and ceremony actions are sent a confirmation, invoke.ts).
-    // Its tone is neutral, as it is neither a DELETE nor destructive.
+    // Its tone is neutral, as it is neither a DELETE nor destructive; if
+    // actionTone (merge-actions.ts) or this action's risk or method changes,
+    // revisit.
     {
       ...REGENERATE_BILL_ACTION,
       target: "lineItem",

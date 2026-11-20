@@ -13,6 +13,8 @@
  * the prepared action's `tone`, which prepare takes from the action's risk and
  * method (actionTone in ../shared/merge-actions.ts): danger only for a DELETE
  * or destructive action, whatever the level. A GUI's ref cannot change it.
+ * If actionTone weighs anything else, or prepare stops setting `tone` from
+ * it (../server/prepare.ts), revisit.
  *
  * A GUI's Overlay frames the step but never holds it. Its one child is
  * HostSlot, an element with no props that only places a node the host owns,

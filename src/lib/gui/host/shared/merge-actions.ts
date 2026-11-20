@@ -80,7 +80,8 @@ export function fillPath(pattern: string, params: Readonly<Record<string, string
  * carefully a person confirms, not what the write does: closing a period is
  * a final commit, not a destruction (design rule 5 in CLAUDE.md). The host
  * takes a step's tone from the prepared action (../server/prepare.ts), never
- * from a GUI's ref.
+ * from a GUI's ref; if prepare stops calling this, or the host reads tone
+ * from anywhere else (../client/action-host.tsx), revisit.
  */
 export function actionTone(def: Pick<ActionDef, "risk" | "method">): "neutral" | "danger" {
   return def.risk === "destructive" || def.method === "DELETE" ? "danger" : "neutral";
