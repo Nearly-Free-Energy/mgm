@@ -328,8 +328,8 @@ export const BILLING_SURFACE: Contribution = {
     // pre-flight panel still serves Generate, and parity.test.ts keeps the
     // row pending until a form exists; then the period review offers it
     // (GENERATE_BILLS_ACTION in ./surface/period-review-model.ts).
-    // `targeted: false`: GenerateBillsBody is refined, so a loader's prefill
-    // would be dropped, and appended elsewhere it would open with no form.
+    // `targeted: false`: appended to another view it would open with no
+    // form, as above.
     {
       ...GENERATE_BILLS_ACTION,
       target: "billingPeriod",
