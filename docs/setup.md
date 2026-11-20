@@ -183,7 +183,7 @@ browser bundle or the image. The decision is recorded in
 | `MGM_MAIL_FROM` | with `MGM_SMTP_URL` | no | The From of the deployment's emails: `MGM <no-reply@example.org>` or a bare address |
 | `MGM_SMTP_ALLOW_PLAINTEXT_LOCAL` | no | no | `1` allows `MGM_SMTP_URL` to be plaintext `smtp://` to a name with no dot, such as docker compose's `smtp://mailpit:1025`. Set it only where that name is a mail catcher in the same container network, never in production: sign-in links are credentials, and a dotless name may resolve to another machine |
 | `MGM_GUI` | no | no | Which compiled-in interface (`src/gui/meta.ts`) serves this installation's pages. Unset or blank means `gridtop`, the default. The interface pages read it and link that interface's stylesheet; payment and sign-in pages do not |
-| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
+| `MGM_METERING_FIXTURES` | no | no | `on` (or `1`, `true`) lets the fixture metering provider generate synthetic site data and meter energy for edges whose id starts with `SYNTHETIC-EDGE-` ([Synthetic site data](#synthetic-site-data)). Unset, blank, `off`, `0` or `false` means off. Read when the server's runtime starts, so a change needs a restart |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | no | Privileged server key; never serialized |
 
 How it works: the root layout renders per request (it is never prerendered or
@@ -336,6 +336,14 @@ a clear day, an evening power cut, a long cut in which the battery reaches
 its floor and the houses go dark, a battery at its floor before dawn, and a
 45-minute gateway gap. Time bins follow the microgrid's time zone, so a day
 with a daylight-saving change has 23 or 25 hours of bins.
+
+It also generates each meter's energy per local day and hour for the
+tenant app's usage views (`src/lib/metering/fixture/meter-energy.ts`), from
+the meter, the day and a fixed seed, so a meter's figures do not depend on
+which other meters are read. About one day in fourteen has a three-hour
+block the meter "did not report", which the views show as no data. These
+figures are generated separately from the site samples and do not add up to
+them.
 
 Two keys guard it:
 

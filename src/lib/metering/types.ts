@@ -32,7 +32,51 @@ export interface MeteringProvider {
    * says so instead of showing zeros.
    */
   getSiteSamples?(request: SiteSamplesRequest): Promise<SiteSamples>;
+  /**
+   * Energy per local day or hour for each device. Optional: a source that
+   * cannot provide it leaves it out, and a tenant's usage shows no figures,
+   * with the copy for that case in TENANT_USAGE_PROBLEMS
+   * (src/lib/tenant-app/surface/usage-model.ts).
+   */
+  getDeviceEnergySeries?(request: DeviceEnergySeriesRequest): Promise<DeviceEnergySeries>;
 }
+
+/** The width of one bucket of an energy series. */
+export type EnergySeriesResolution = "day" | "hour";
+
+/**
+ * Energy counted by meters, per local day or local hour, over whole local
+ * days. Provider-neutral: a provider maps each device to its own counter.
+ */
+export type DeviceEnergySeriesRequest = {
+  microgridId: string;
+  devices: DeviceConfig[];
+  /** Whole local days in `timezone`, `endDate` inclusive. */
+  startDate: string;
+  endDate: string;
+  resolution: EnergySeriesResolution;
+  /** The microgrid's IANA zone; passed to the source as is (no offset arithmetic). */
+  timezone: string;
+  /**
+   * The instant the caller counts as now, epoch ms; the provider's own clock
+   * when absent. A provider that sums days from hours leaves out the hours
+   * that have not ended by then.
+   */
+  nowMs?: number;
+};
+
+/**
+ * One bucket per local day ("day") or local hour ("hour") from the start of
+ * `startDate` to the end of `endDate`, ascending; a day with a daylight-saving
+ * change has 23 or 25 hours. `kwh[device.id][i]` is what the meter counted in
+ * bucket i, or null when the source has no value for it: never a substituted
+ * zero, never a value from outside the requested range.
+ */
+export type DeviceEnergySeries = {
+  /** Bucket starts, epoch ms: local midnights, or local hour starts. */
+  buckets: number[];
+  kwh: Record<string, (number | null)[]>;
+};
 
 /**
  * The site devices a daily operations view reads, by what they are rather

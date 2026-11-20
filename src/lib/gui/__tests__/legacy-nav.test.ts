@@ -57,6 +57,7 @@ const VIEW_ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, ord
   "metering.operations": ["Operations", "operate", "live", 40, "metering.site-day"],
   "billing.periods": ["Billing", "money", "billing", 10, "billing.periods"],
   "tenant.home": ["My home", "operate", "tenants", 80, "tenant.home"],
+  "tenant.usage": ["My usage", "operate", "readings", 81, "tenant.usage-month"],
 };
 
 /**

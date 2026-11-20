@@ -11,6 +11,7 @@
 import { addDaysToDateKey, startOfDayInZone } from "@/lib/timezone/day-key";
 import { isSiteResolution, LOW_BATTERY_PCT } from "../site-operations";
 import type { SiteSamples, SiteSamplesRequest } from "../types";
+import { fnv1a, mulberry32 } from "./random";
 
 export const SITE_FIXTURE_SEED = "mgm-fixture-site-v1";
 
@@ -63,28 +64,6 @@ const DAY_LOAD_CAP_WH = 24_000;
 const COUNTER_EPOCH_MS = Date.UTC(2020, 0, 1);
 /** The share of the site's load that passes through house meters. */
 const HOUSES_SHARE = 0.85;
-
-/** FNV-1a, 32 bit. */
-function fnv1a(text: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
-/** mulberry32: a small seeded generator, uniform in [0, 1). */
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
-}
 
 /** The day's generator; its first draw picks the scenario. */
 function dayRandom(seed: string, microgridId: string, date: string) {

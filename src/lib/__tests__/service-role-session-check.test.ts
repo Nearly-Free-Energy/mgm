@@ -63,7 +63,7 @@ const PRIVILEGED_MODULES: Record<string, string> = {
  */
 const PRIVILEGED_REGISTRIES: Record<string, string> = {
   meteringProviders:
-    "Builds metering providers; the OpenEMS provider calls getMicrogridEmsConfig when it reads.",
+    "Builds metering providers; the OpenEMS provider calls getMicrogridEmsConfig when it reads. The tenant app's usage source builds them on a service client, so the config read takes fn_tenant_home's microgrid as its authorization.",
   mgmSurface:
     "Holds contributed loaders, signals, search and prepare functions, which compose capabilities that can build credentialed providers; a call made through it cannot be followed by import, so every caller settles the session first.",
 };
@@ -137,6 +137,16 @@ const MODULES: Record<string, Module> = {
     privilegedExports: ["BillingPlugin"],
     reason:
       "composeBilling runs authorizeOrganization (getUser) before it opens a scope, readOnly or not; BillingPlugin builds a provider in whatever scope loads it.",
+  },
+  "src/lib/tenant-app/compose.ts": {
+    privilegedExports: ["TenantAppPlugin"],
+    reason:
+      "composeTenantApp runs authorizeTenant (getUser, the caller's tenant row, fn_tenant_home) before it opens a scope; TenantAppPlugin builds the usage source, which reads edges and builds the microgrid's metering provider on the service role, in whatever scope loads it. The tenant views' loaders (src/lib/tenant-app/surface/home.ts and usage.ts) import only composeTenantApp, so they inherit nothing here: their usage reads reach the service role only inside the scope it opened after that check, and the host calls them only through mgmSurface.",
+  },
+  "src/lib/tenant-app/infrastructure/usage-source.ts": {
+    privilegedExports: "all",
+    reason:
+      "Reads the unit's edges and builds the microgrid's metering provider, which decrypts its stored credential, on the service role, for the microgrid fn_tenant_home named and the device rows the tenant's own client returned; only TenantAppPlugin calls it, after composeTenantApp's authorizeTenant.",
   },
   "src/lib/cordis/billing-review.ts": {
     privilegedExports: ["composeBillingReview", "BillingReviewPlugin"],

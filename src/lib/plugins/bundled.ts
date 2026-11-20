@@ -405,22 +405,29 @@ export const TENANT_APP_PLUGIN: BundledPlugin = {
   version: TENANT_APP_PLUGIN_VERSION,
   displayName: "Tenant app",
   description:
-    "A tenant's own view of their unit and its meters, for the tenants the organization gives access to. Off until it is turned on for the organization.",
+    "A tenant's own view of their unit, its meters and their use by day and hour, for the tenants the organization gives access to. Off until it is turned on for the organization.",
   dependencies: [METERING_PLUGIN_NAME, COMMUNITY_MANAGEMENT_PLUGIN_NAME],
   core: false,
   // The only plugin that is off without a state row: an operator turns it
   // on for the organizations whose tenants get the app (RFC mgm#197 § 3).
   defaultEnabled: false,
   // Read-only for tenants. It reads tenants and their meter assignments
-  // through the tenant's own row-level access and owns no API route: its
-  // views are read through /api/gui/view. Giving a tenant access is
-  // community management's (/api/tenants).
-  provides: ["tenant home"],
+  // through the tenant's own row-level access, and its meters' use through
+  // the metering provider registry; what that read takes on the service
+  // role, and why, is in src/lib/tenant-app/infrastructure/usage-source.ts.
+  // It owns no API route: its views are read through /api/gui/view. Giving
+  // a tenant access is community management's (/api/tenants).
+  provides: ["tenant home", "tenant usage"],
   routes: [],
+  // Each page's unit comes from the query, not the path, so no page has a
+  // bracketed segment.
   pages: [
-    // The tenant's home, as the tenant.home view. Its unit comes from the
-    // query, not the path, so the page has no bracketed segment.
+    // The tenant's home, as the tenant.home view.
     { path: "/my", params: {}, servedBy: "view" },
+    // The unit's use per day, as the tenant.usage-month view (?month=YYYY-MM).
+    { path: "/my/usage", params: {}, servedBy: "view" },
+    // One day's use per hour, as the tenant.usage-day view (?date=YYYY-MM-DD).
+    { path: "/my/usage/day", params: {}, servedBy: "view" },
   ],
   tables: [],
 };

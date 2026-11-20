@@ -66,7 +66,13 @@ export function requireOrganizationAudience(request: MgmRequest, plugin: string)
 
 export type MeteringProviderFactory = (supabase: SupabaseClient) => MeteringProvider;
 
-/** Root registry of metering sources. Factories bind to a request's client. */
+/**
+ * Root registry of metering sources. Factories bind to a request's client.
+ * The tenant app's usage source binds them to a service client instead,
+ * after composeTenantApp has authorized the unit, for the microgrid
+ * `fn_tenant_home` named (src/lib/tenant-app/infrastructure/usage-source.ts);
+ * if another caller does, it needs the same reasoning.
+ */
 export type MeteringProviderSelection = {
   /** Provider-owned lookup of configuration; no vendor knowledge in consumers. */
   supports?: (supabase: SupabaseClient, microgridId: string) => Promise<boolean>;
