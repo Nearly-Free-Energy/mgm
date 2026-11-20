@@ -96,6 +96,7 @@ describe("MGM root runtime", () => {
     expect(runtime.mailTransports.has("smtp")).toBe(true);
     // Each contribution or compiled-in GUI added later shows up here.
     expect(runtime.mgmSurface.snapshot().views.map((v) => `${v.plugin} ${v.def.id}`)).toEqual([
+      "organization-directory org.today",
       "metering metering.site-day",
       "billing billing.periods",
       "billing billing.period-review",
@@ -104,6 +105,7 @@ describe("MGM root runtime", () => {
       "billing billing.close-checklist",
       "billing billing.send-queue",
       "billing billing.savings",
+      "billing billing.current-periods",
       "payments payments.bill-attempts",
       "payments payments.payment-setup",
       "tenant-app tenant.home",

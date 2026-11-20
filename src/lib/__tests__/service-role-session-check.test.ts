@@ -255,7 +255,7 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; tenantOnlyRedirect runs only after getUser() and runs no view loader either.",
   },
-  "src/app/(gui)/[...path]/page.tsx": {
+  "src/app/(gui)/[[...path]]/page.tsx": {
     kind: "session",
     reason:
       "getRequestUserAccess (getUser) redirects to /login before renderView, which loads the view for that read's user. An /api path or an unreleased one answers 404 before either.",

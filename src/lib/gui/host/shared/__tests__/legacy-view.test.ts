@@ -67,7 +67,6 @@ const filled = (page: (typeof PAGES)[number]) =>
 
 /** The current app of every catalog page, for a super admin with every plugin on. */
 const CURRENT_APP: Record<string, Id | null> = {
-  "/": "org.today",
   "/organizations": "org.organizations",
   "/organizations/[id]": "org.organizations",
   "/settings/profile": "org.profile",
@@ -139,6 +138,10 @@ describe("legacyView on every catalog page", () => {
   it("leaves each page a view serves to contributedView", () => {
     /** The view that serves each page, and its current app in this staff manifest. */
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
+      // Today, the home page; "/" matches only its own entry.
+      "/": ["org.today", "org.today"],
+      // A tile on Today, with no entry of its own and no place in its path.
+      "/billing": ["billing.current-periods", null],
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
       "/microgrids/[id]/billing": ["billing.periods", "billing.periods"],
@@ -176,7 +179,8 @@ describe("legacyView trails", () => {
   const crumbs = (path: string) => legacyView(path, MANIFEST)!.trail.map((c) => c.label);
 
   it("follows organization, community, microgrid, then the app unless it is the last crumb", () => {
-    expect(crumbs("/")).toEqual(["Org One", "Dashboard"]);
+    // Today is served by a view; UNSERVED asks what its place would be outside the contract.
+    expect(legacyView("/", MANIFEST, UNSERVED)!.trail.map((c) => c.label)).toEqual(["Org One", "Today"]);
     // History is served by a view; UNSERVED asks what its place would be outside the contract.
     expect(legacyView(`/microgrids/${MICROGRID}/billing/${DEEPER}/history`, MANIFEST, UNSERVED)!.trail.map((c) => c.label)).toEqual([
       "Org One",

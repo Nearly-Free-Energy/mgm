@@ -24,7 +24,7 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 // microgrid header stays mounted too, and [id]/loading.tsx shows while the
 // new page renders. Operations and Billing are not: they land on the
 // metering.site-day and billing.periods views, which the catch-all
-// (gui)/[...path]/page.tsx serves outside this layout, so a click on either
+// (gui)/[[...path]]/page.tsx serves outside this layout, so a click on either
 // leaves the header behind (and nothing here renders on those pages). If
 // either is served under microgrids/[id]/ again, or the period review moves
 // to a view too, revisit.

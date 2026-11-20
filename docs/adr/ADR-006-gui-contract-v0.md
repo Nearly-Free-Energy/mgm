@@ -158,6 +158,16 @@ read a stored credential, or to send data to another origin.
    - Each watcher declares examples. Registration parses them;
      `gui-surface.test.ts` holds their links to the plugin's own released
      pages.
+   - A view may declare `takesSignals`. The host then collects the signals
+     of the organization the view loads in, with these rules, before its
+     loader runs, and hands them over as `req.signals` (null when they could
+     not be collected). Today (`org.today`), the home page on "/", is such a
+     view: one row per signal, with the tray's copy when nothing needs the
+     person or a source did not answer, and other plugins attach tiles to
+     it (`attach.hint: "tile"`), which the host leaves out while their
+     plugin is off. Each load runs every watcher, so registration refuses
+     `takesSignals` on a view that is not an organization's, is attached to
+     another view, or polls.
 
 ## Consequences
 

@@ -27,6 +27,7 @@ const EXPECTED: Record<StatusKind, string> = {
   meterType:
     "grid=brand consumption=warn production=success unknown=neutral GRID=brand CONSUMPTION=warn PRODUCTION=success UNKNOWN=neutral",
   openemsBackendHealth: "healthy=success* failing=alert* not_configured=neutral",
+  signalSeverity: "critical=alert* warn=warn* info=neutral",
   siteDay: "cut=warn floor=warn dark=alert",
 };
 

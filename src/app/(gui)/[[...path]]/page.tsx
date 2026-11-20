@@ -10,15 +10,16 @@ import { renderView, type PageSearch } from "@/lib/gui/host/server/render-view";
 /**
  * A contributed view on its own path. Next.js prefers every other page's
  * static or dynamic segments over this catch-all, so it answers only paths
- * no page.tsx serves, and never "/". Kept short on purpose: CODEOWNERS
- * cannot name this path, so the logic lives in the code-owned
- * src/lib/gui/host/server/render-view.tsx.
+ * no page.tsx serves. It is optional, so it answers "/" too, which Today
+ * (org.today) serves; no page.tsx may exist at "/" beside it. Kept short on
+ * purpose: CODEOWNERS cannot name this path, so the logic lives in the
+ * code-owned src/lib/gui/host/server/render-view.tsx.
  */
 export default async function ContributedViewPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ path: string[] }>;
+  params: Promise<{ path?: string[] }>;
   searchParams: Promise<PageSearch>;
 }) {
   // A render the middleware did not see answers 404 before any read
@@ -29,14 +30,15 @@ export default async function ContributedViewPage({
   // (next/dist/shared/lib/router/utils/get-dynamic-param.js): a request for
   // /a%20b arrives as "a%20b". If it starts decoding them, drop this decode;
   // the page test's %20, %2F and %25 cases then fail.
+  // "/" arrives with no segments, and so with no `path` at all.
   let path: string[] = [];
   try {
-    path = (await params).path.map(decodeURIComponent);
+    path = ((await params).path ?? []).map(decodeURIComponent);
   } catch {
     notFound();
   }
   // An /api path with no route handler would otherwise render as a page.
-  if (path.length === 0 || path[0] === "api") notFound();
+  if (path[0] === "api") notFound();
   // Middleware has already applied the release allowlist to this path
   // (requireMiddlewarePath above shows it ran). The check is repeated here
   // so a request that sent x-mgm-path itself still answers 404 before any
