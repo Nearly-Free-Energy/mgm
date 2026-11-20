@@ -27,10 +27,11 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * A tenant's first bill is still inserted unguarded, as on POST
  * /api/billing/generate, so a close committing between that second read
  * and the insert does not stop it, and a bill inserted for that tenant by
- * another write while this run reads the meters (a manual reading, or an
- * overlapping run) is overwritten; guardExistingBills says why, and the
- * parity note (generate-bills in src/lib/billing/parity.ts) lists both, to
- * be closed before billing.period-review replaces the legacy page.
+ * another write while this run reads the meters (a manual reading, a bill
+ * from readings, or an overlapping run) is overwritten; guardExistingBills
+ * says why, and the parity note (generate-bills in
+ * src/lib/billing/parity.ts) lists both, to be closed before
+ * billing.period-review replaces the legacy page.
  *
  * Body (GenerateFromMetersBody): `{}`. The period is the path's.
  *

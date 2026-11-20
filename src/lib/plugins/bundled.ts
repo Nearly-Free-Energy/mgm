@@ -305,6 +305,13 @@ export const BILLING_PLUGIN: BundledPlugin = {
       params: { id: "microgrid", periodId: "billingPeriod" },
       servedBy: "view",
     },
+    // The tenants with no bill for a period, as the billing.not-billed view,
+    // a section of the period review.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/not-billed",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
     { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
     { path: "/communities/[id]/invoice", params: { id: "community" } },
     // The savings under the Operations day, as the billing.savings view.

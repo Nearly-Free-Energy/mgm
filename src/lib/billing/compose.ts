@@ -73,6 +73,7 @@ export const BillingPlugin = {
           actorUserId: input.actorUserId,
           expectedBill: input.expectedBill,
           guardExistingBills: input.guardExistingBills,
+          newBillOnly: input.newBillOnly,
           meteringProvider: meteringProviders.forRequest(request.supabase),
           requireEffectiveDatedAssignments: true,
           allowUsageOnlyReadings: true,

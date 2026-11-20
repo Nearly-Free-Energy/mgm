@@ -715,9 +715,9 @@ export class BillingCapability implements BillingCapabilityContract {
   private async runGeneration(
     input: unknown,
     mode: "write" | "preview",
-    expectedBill?: ExpectedBill,
-    guardExistingBills?: true,
+    options: { expectedBill?: ExpectedBill; guardExistingBills?: true; newBillOnly?: true } = {},
   ) {
+    const { expectedBill, guardExistingBills, newBillOnly } = options;
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     // The routes parse first (generate with this schema, regenerate-preview
@@ -753,6 +753,7 @@ export class BillingCapability implements BillingCapabilityContract {
       actorUserId: this.scope.userId,
       ...(expectedBill ? { expectedBill } : {}),
       ...(guardExistingBills ? { guardExistingBills } : {}),
+      ...(newBillOnly ? { newBillOnly } : {}),
     });
     if ((out as GenerationFatal).kind === "fatal") {
       const fatal = out as GenerationFatal;
@@ -776,7 +777,7 @@ export class BillingCapability implements BillingCapabilityContract {
   }
 
   async generateBills(input: unknown, options: { expectedBill?: ExpectedBill } = {}) {
-    return this.runGeneration(input, "write", options.expectedBill);
+    return this.runGeneration(input, "write", { expectedBill: options.expectedBill });
   }
 
   async generateFromMeters(periodId: string) {
@@ -791,7 +792,40 @@ export class BillingCapability implements BillingCapabilityContract {
       };
     }
     // Scope and the plugin re-check run in runGeneration, as for every write.
-    return this.runGeneration({ billingPeriodId: periodId }, "write", undefined, true);
+    return this.runGeneration({ billingPeriodId: periodId }, "write", { guardExistingBills: true });
+  }
+
+  async billFromReadings(periodId: string, tenantId: string, readings: { startKwh: number; endKwh: number; reason?: string }) {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    if (!UUID_RE.test(periodId)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_period",
+        message: "Invalid billing period id — expected UUID.",
+      };
+    }
+    if (!UUID_RE.test(tenantId)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_tenant",
+        message: "Invalid tenant id — expected UUID.",
+      };
+    }
+    // Scope and the plugin re-check run in runGeneration, as for every write;
+    // GenerateBillsBody checks the readings there too.
+    const reason = readings.reason?.trim();
+    return this.runGeneration(
+      {
+        billingPeriodId: periodId,
+        tenantIds: [tenantId],
+        manualReadings: [{ tenantId, startKwh: readings.startKwh, endKwh: readings.endKwh, ...(reason ? { reason } : {}) }],
+      },
+      "write",
+      { newBillOnly: true },
+    );
   }
 
   async recordManualPayment(lineItemId: string, input: unknown) {
