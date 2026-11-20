@@ -140,7 +140,8 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/go",
   ],
   pages: [
-    { path: "/", params: {} },
+    // Today, the home page, as the org.today view.
+    { path: "/", params: {}, servedBy: "view" },
     { path: "/organizations", params: {} },
     { path: "/organizations/[id]", params: { id: "organization" } },
     { path: "/organizations/[id]/email", params: { id: "organization" } },
@@ -278,6 +279,9 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/v1/billing",
   ],
   pages: [
+    // Each microgrid's newest period, as the billing.current-periods view,
+    // a tile on Today.
+    { path: "/billing", params: {}, servedBy: "view" },
     // A microgrid's billing periods, as the billing.periods view.
     { path: "/microgrids/[id]/billing", params: { id: "microgrid" }, servedBy: "view" },
     // A period's review, as the billing.period-review view. It moved once no

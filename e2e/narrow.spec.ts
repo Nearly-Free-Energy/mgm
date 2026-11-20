@@ -5,13 +5,24 @@ import { readSmokeFixtures } from "./fixtures";
 // Signed in as the smoke's organization manager (auth.setup.ts), on a
 // 360 px touch screen (playwright.config.ts).
 
-test("home renders at 360 px", async ({ page }) => {
+test("Today, the home page, renders at 360 px", async ({ page }) => {
+  const { microgridId, periodId } = readSmokeFixtures();
+  // Opening the page only reads: the signals are collected and the tile
+  // loaded with GETs, and nothing is pressed.
   const watch = await watchPage(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Smoke microgrid 1" })).toBeVisible();
+  // The host's catch-all serves "/" by the org.today view.
+  await expect(page.locator('[data-gui-view="org.today"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
+  // Billing's watcher: the smoke's October period has ended, with bills, and is not closed.
+  await expect(page.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}/close"]`)).toBeVisible();
+  // Billing's tile, loaded after the first paint.
+  const tile = page.locator('[data-gui-tile="billing.current-periods"]');
+  await expect(tile.getByRole("heading", { name: "Current billing periods" })).toBeVisible();
+  await expect(tile.getByText("Smoke microgrid 1", { exact: true })).toBeVisible();
   await checkNarrowPage(page);
-  await reportTiming(page, "Home");
+  await checkTouchTargets(page, "main");
+  await reportTiming(page, "Today");
   watch.assertClean();
 });
 

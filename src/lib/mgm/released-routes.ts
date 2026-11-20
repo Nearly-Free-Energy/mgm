@@ -83,6 +83,8 @@ const RELEASE_2_API_ROUTES = [
 ];
 
 const RELEASE_3_PAGE_ROUTES = [
+  // Each microgrid's newest billing period, a tile on Today (the home page).
+  /^\/billing$/,
   // Billing period list, detail, history, close checklist, send queue and
   // the tenants not billed.
   /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/(?:history|close|send|not-billed))?)?$/,

@@ -1,9 +1,15 @@
+/**
+ * The organization cards that were the home page before Today (org.today,
+ * src/lib/organization-directory/surface.ts) replaced them. Nothing mounts
+ * them any more; #201's Deletes pull request deletes this file. A page that
+ * mounted them again would need its own tenant-only check first
+ * (keepTenantOnlyToTenantPages), as every page under src/app/(gui) makes.
+ */
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import type { Organization, Microgrid } from "@/lib/types/domain";
 import { COMMUNITY_MANAGEMENT_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { microgridHref } from "@/lib/microgrid-links";
-import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type MicrogridWithTenantCount = {
   id: string;
@@ -14,8 +20,7 @@ type MicrogridWithTenantCount = {
   tenant_count: number;
 };
 
-export default async function DashboardPage() {
-  await keepTenantOnlyToTenantPages();
+export async function OrganizationCards() {
   const supabase = await createClient();
 
   const [{ data: organizations, error: orgError }, { data: pluginStates }] = await Promise.all([

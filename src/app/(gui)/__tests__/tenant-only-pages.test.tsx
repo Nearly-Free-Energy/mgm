@@ -79,7 +79,7 @@ const staffAndTenantRows = [...tenantRows, { user_id: "user-1", role: "org_manag
 const patternOf = (file: string) =>
   `/${file.replace(/^\.\.\//, "").replace(/\/?(page|layout)\.tsx$/, "")}`.replace(/\/\([^)]*\)/g, "");
 
-const CATCH_ALL = "/[...path]";
+const CATCH_ALL = "/[[...path]]";
 const HOST_PAGES = Object.keys(PAGE_FILES).map(patternOf).filter((p) => p !== CATCH_ALL).sort();
 const LAYOUTS = Object.keys(LAYOUT_FILES).map(patternOf).sort();
 
@@ -119,7 +119,7 @@ async function answer(pattern: string, roles: unknown[], viaCatchAll = false): P
   const path = sample(pattern);
   mocks.getRequestUserAccess.mockResolvedValue({ user: { id: "user-1" }, roles });
   mocks.headers = new Headers({ "x-mgm-path": path });
-  const file = viaCatchAll ? "../[...path]/page.tsx" : Object.keys(PAGE_FILES).find((f) => patternOf(f) === pattern)!;
+  const file = viaCatchAll ? "../[[...path]]/page.tsx" : Object.keys(PAGE_FILES).find((f) => patternOf(f) === pattern)!;
   const { default: Page } = await PAGE_FILES[file]();
   const params: Record<string, unknown> = viaCatchAll ? { path: path.split("/").filter(Boolean) } : paramsOf(pattern);
   return outcome(() => Page({ params: Promise.resolve(params), searchParams: Promise.resolve({}) }));
@@ -163,7 +163,9 @@ afterAll(async () => {
 
 describe("Every page under (gui) keeps a person whose rows are all tenant rows to tenant pages (mgm#209)", () => {
   it("finds the host's pages, the nested layouts and the catalog's view pages, by scope", () => {
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
+    // Today, the staff home on "/", is served by the catch-all.
+    expect(STAFF_VIEW_PAGES).toContain("/");
     expect(HOST_PAGES.length).toBeGreaterThan(20);
     expect(LAYOUTS).toEqual(expect.arrayContaining(["/communities/[id]", "/microgrids/[id]", "/microgrids/[id]/setup", "/settings"]));
     expect(LAYOUTS).not.toContain("");
@@ -217,7 +219,7 @@ describe("Every page under (gui) keeps a person whose rows are all tenant rows t
     const [staffPage] = STAFF_VIEW_PAGES;
     mocks.getRequestUserAccess.mockResolvedValue({ user: { id: "user-1" }, roles: tenantRows });
     mocks.headers = new Headers({ "x-mgm-path": TENANT_START_PAGE });
-    const { default: Page } = await PAGE_FILES["../[...path]/page.tsx"]();
+    const { default: Page } = await PAGE_FILES["../[[...path]]/page.tsx"]();
     const path = sample(staffPage).split("/").filter(Boolean);
     expect(await outcome(() => Page({ params: Promise.resolve({ path }), searchParams: Promise.resolve({}) }))).toBe(
       `redirect:${TENANT_START_PAGE}`,

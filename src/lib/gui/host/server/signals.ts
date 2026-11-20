@@ -20,6 +20,7 @@ import "server-only";
  * as unchecked; only its id and the kind of miss are logged, never its error
  * or its output.
  */
+import { cache } from "react";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getRouteOwner, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { ActionRef, Id, Signal, Signals, StatusItem } from "../../contract";
@@ -138,11 +139,19 @@ const instant = (iso: string | undefined, otherwise: number) => {
   const t = iso === undefined ? NaN : Date.parse(iso);
   return Number.isNaN(t) ? otherwise : t;
 };
-/** Most severe first; then the earliest due, undated last; then the newest. */
+/**
+ * Most severe first; within a severity, alarms before every other kind; then
+ * the earliest due, undated last; then the newest. Alarms (a site that cannot
+ * be reached) carry no due date, so without their own rank enough dated
+ * signals of the same severity would push every one of them out of `top`,
+ * which is all Today and the tray list.
+ */
 function order(a: Signal, b: Signal): number {
   const cmp = (x: number, y: number) => (x < y ? -1 : x > y ? 1 : 0);
+  const alarmFirst = (s: Signal) => (s.kind === "alarm" ? 0 : 1);
   return (
     SEVERITY[a.severity] - SEVERITY[b.severity] ||
+    alarmFirst(a) - alarmFirst(b) ||
     cmp(instant(a.due, Infinity), instant(b.due, Infinity)) ||
     cmp(instant(b.at, -Infinity), instant(a.at, -Infinity))
   );
@@ -168,7 +177,6 @@ async function checkProposals(ctx: HostContext, organizationId: string, snapshot
  */
 export async function collectSignals(ctx: HostContext, o: { requested?: string | null }): Promise<HostOutcome<Signals>> {
   requireIssued(ctx);
-  const snapshot = await surfaceSnapshot();
   let organizationId: string | null;
   try {
     organizationId = (await selectOrganization(ctx, { requested: o.requested })).organizationId;
@@ -176,8 +184,40 @@ export async function collectSignals(ctx: HostContext, o: { requested?: string |
     return { ok: false, status: 503, code: "gui_unavailable", message: "Signals could not be checked right now." };
   }
   if (organizationId === null) return { ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." };
-  const org = organizationId;
+  return organizationSignals(ctx, organizationId);
+}
 
+/**
+ * One slot per person and organization for the length of one server render
+ * (React cache()), so every caller in that render shares one collection.
+ * Outside a render (route handlers, tests) cache() memoizes nothing and each
+ * call collects again. Keyed by the user's id, not the context: each page,
+ * layout and route builds its own HostContext from the same access read, and
+ * a render serves one session, so a slot is never shared between people.
+ */
+const renderSlot = cache((userId: string, org: string): { key: string; signals?: Promise<HostOutcome<Signals>> } => ({ key: `${userId} ${org}` }));
+
+/**
+ * The signals of `org`, which the caller has already chosen among the
+ * organizations the person can see (selectOrganization, ./organization.ts),
+ * as collectSignals chooses it: dispatchView (./view.ts) passes the
+ * organization a view loads in, for a view that declares `takesSignals`.
+ * The rules are collectSignals'.
+ *
+ * Within one server render the watchers run once per organization, however
+ * many callers ask (Today's loader, and the shell's tray if it is ever fed
+ * from the same render); a later render, or GET /api/gui/signals, runs them
+ * again.
+ */
+export function organizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
+  requireIssued(ctx);
+  const slot = renderSlot(ctx.access.user.id, org);
+  slot.signals ??= collectOrganizationSignals(ctx, org);
+  return slot.signals;
+}
+
+async function collectOrganizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
+  const snapshot = await surfaceSnapshot();
   const gate = pluginGate(ctx, org);
   const results = await Promise.all(
     snapshot.signals.map(async (entry): Promise<Watched | "off"> => {

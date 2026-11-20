@@ -322,7 +322,7 @@ function hostPages(): string[] {
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (entry.name !== "__tests__" && !entry.name.startsWith("[...")) walk(join(dir, entry.name));
+        if (entry.name !== "__tests__" && !/^\[\[?\.\.\./.test(entry.name)) walk(join(dir, entry.name));
       } else if (entry.name === "page.tsx") {
         const segments = relative(root, dir).split(sep).filter((s) => s && !/^\(.*\)$/.test(s));
         found.push(`/${segments.join("/")}`);
@@ -372,7 +372,10 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
 
   it("finds the catalog's pages and the host's", () => {
     expect(CATALOG_PAGES.length).toBeGreaterThan(10);
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
+    // Today, on "/", is a catalog page the catch-all serves.
+    expect(HOST_PAGES).not.toContain("/");
+    expect(CATALOG_PAGES).toContain("/");
   });
 
   it("opens the tenant pages and nothing else among them", async () => {

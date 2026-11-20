@@ -12,7 +12,7 @@ import { Tray } from "./tray";
 
 const MARK = "gt:inline-flex gt:size-9 gt:shrink-0 gt:items-center gt:justify-center gt:rounded-md gt:text-title gt:text-primary gt:pointer-coarse:size-11";
 
-/** The dashboard's nav id (src/lib/organization-directory/surface.ts, which keeps it if the page moves to a view); if it changes, revisit. */
+/** Today's nav id, the home page's (src/lib/organization-directory/surface.ts, where it names the org.today view); if it changes, revisit. */
 const DASHBOARD = "org.today";
 
 /** `app` is the current app's nav id, which a switch keeps where it can. */

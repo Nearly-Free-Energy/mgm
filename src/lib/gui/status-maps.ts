@@ -174,6 +174,15 @@ export const STATUS_MAPS = {
     failing:        { label: "Failing",       tone: "danger",  dot: true  },
     not_configured: { label: "Not connected", tone: "neutral" /* no dot */ },
   },
+  // A signal's severity on Today (org.today): the three values of
+  // Signal.severity in src/lib/gui/contract.ts. Critical and needs attention
+  // carry a dot: each asks a person to act. Information is neutral, as Chip
+  // has no info tone.
+  signalSeverity: {
+    critical: { label: "Critical",        tone: "danger",  dot: true },
+    warn:     { label: "Needs attention", tone: "warning", dot: true },
+    info:     { label: "For information", tone: "neutral"            },
+  },
   // Operations day tile statuses: a grid cut, the battery at its discharge
   // floor, houses without power.
   siteDay: {
