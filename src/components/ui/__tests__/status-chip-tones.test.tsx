@@ -10,6 +10,7 @@ import { STATUS_MAPS, type StatusKind } from "@/lib/gui/status-maps";
 const EXPECTED: Record<StatusKind, string> = {
   billingLineItemPaymentStatus: "unpaid=neutral link_generated=warn* paid=success* failed=alert* refunded=neutral",
   billingLineItemReadingSource: "edge=success manual=neutral",
+  billingAuditEntry: "post_close_revision=warn",
   billingPeriod: "draft=warn* closed=success*",
   edge: "online=success* degraded=warn* offline=alert* stale=success* unknown=neutral*",
   edgeSource: "openems=brand modbus_direct=neutral mqtt=neutral rest_api=neutral",
