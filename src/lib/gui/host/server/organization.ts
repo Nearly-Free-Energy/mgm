@@ -11,6 +11,9 @@ import { rolesCanAccessOrg, rolesIncludeStaff } from "@/lib/auth/access";
 import { UUID_RE } from "@/lib/plugins/state";
 import { requireIssued, type HostContext } from "./access";
 
+/** Re-exported so a GUI host route reads the cookie through the host's server modules, the only ones route-surface.test.ts lets it import. */
+export { ORG_COOKIE } from "../shared/org-cookie";
+
 export type VisibleOrganization = { id: string; name: string };
 
 export type OrganizationHints = {

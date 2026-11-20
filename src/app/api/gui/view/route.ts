@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { getCurrentUserAccess } from "@/lib/auth/access";
 import { hostFailure, hostOutcome, routeHostContext } from "@/lib/gui/host/server/http";
+import { ORG_COOKIE } from "@/lib/gui/host/server/organization";
 import { dispatchView } from "@/lib/gui/host/server/view";
-import { ORG_COOKIE } from "@/lib/gui/host/shared/org-cookie";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
