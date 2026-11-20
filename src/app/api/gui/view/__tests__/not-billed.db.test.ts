@@ -196,7 +196,11 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the tenants not billed for a p
   it("lists a closed period's tenants not billed with no action", async () => {
     caller = manager;
     const model = await loaded(href(CLOSED));
-    expect(model.body.rows.map((r) => r.id)).toEqual([tenant(1), tenant(2), tenant(3)]);
+    expect(model.body.rows.map((r) => [r.id, r.cells.reason.text])).toEqual([
+      [tenant(1), "No bill from its meter for this period"],
+      [tenant(2), "No meter for this period"],
+      [tenant(3), "Meter assignment gap in this period"],
+    ]);
     for (const row of model.body.rows) expect(row.actions).toEqual([]);
   });
 

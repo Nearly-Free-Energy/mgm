@@ -5,9 +5,9 @@ import "server-only";
  * against it: a draft with three tenants not billed, one for each reason,
  * each offered Bill from readings; the same while billing is off, with the
  * action disabled and the gate's notice; a closed period, whose tenants not
- * billed are listed with no action; a draft where every tenant has a bill;
- * and a microgrid with no tenants. Built at import the way the loader builds
- * them.
+ * billed are listed with no action, its metered tenants with no promise of a
+ * bill from their meter; a draft where every tenant has a bill; and a
+ * microgrid with no tenants. Built at import the way the loader builds them.
  */
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
@@ -41,7 +41,7 @@ const tenant = (n: number, name: string, links: PrimaryMeterLink[]): NotBilledTe
 const TENANTS = [
   // Billed in the examples below.
   tenant(1, "Akello Grace", [meter("2026-01-01")]),
-  // A meter assigned for the whole period, with no bill from it yet.
+  // A meter assigned for the whole period, with no bill from it.
   tenant(2, "Byaruhanga Peter", [meter("2026-01-01")]),
   // No meter.
   tenant(3, "Kato Joseph", []),

@@ -22,7 +22,9 @@
  * and this is then the only way to bill them. The reason is meterCoverage's
  * (../meter-coverage.ts), the choice the bill engine makes, so it says why
  * generating did not bill the tenant, or would not: a metered tenant's
- * meter may still have no data, which only a run finds.
+ * meter may still have no data, which only a run finds. In a closed period
+ * no run can bill them, so a metered tenant's reason says only that their
+ * meter gave them no bill for it.
  */
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { meterCoverage, type MeterCoverage, type PrimaryMeterLink } from "../meter-coverage";
@@ -35,7 +37,9 @@ export const NOT_BILLED_KEYS = ["tenant", "reason"] as const;
 /**
  * The view's title. Constant: the host takes an attached view's title from
  * its first example (attachedViews in src/lib/gui/host/server/view.ts), so
- * the review lists the section under this name whatever the period.
+ * the review lists the section under this name whatever the period. If
+ * attachedViews stops taking examples[0].title, or a nav entry for this view
+ * gives it a title of its own (which attachedViews prefers), revisit.
  */
 export const NOT_BILLED_TITLE = "Tenants not billed";
 
@@ -43,15 +47,30 @@ export const NOT_BILLED_TITLE = "Tenants not billed";
 export const BILL_FROM_READINGS_ACTION = { id: "billing.bill-from-readings", title: "Bill from readings" } as const;
 
 /**
- * Why a tenant has no bill, by meterCoverage's answer. A metered tenant has
- * none yet because no run from meter data billed them: none has run, or
- * their meter had no data for the period.
+ * Why a tenant has no bill in a draft, by meterCoverage's answer. A metered
+ * tenant has none yet because no run from meter data billed them: none has
+ * run, or their meter had no data for the period.
  */
 export const NOT_BILLED_REASON = {
   no_meter: "No meter for this period",
   assignment_gap: "Meter assignment gap in this period",
   metered: "No bill from its meter yet",
 } as const satisfies Record<MeterCoverage, string>;
+
+/**
+ * Why a tenant has no bill in a closed period. A metered tenant's reason
+ * promises nothing: generate-from-meters refuses a closed period, and a
+ * closed period is never reopened (trg_billing_period_stays_closed). If
+ * either changes, revisit.
+ */
+export const NOT_BILLED_CLOSED_REASON = {
+  ...NOT_BILLED_REASON,
+  metered: "No bill from its meter for this period",
+} as const satisfies Record<MeterCoverage, string>;
+
+/** The reason a row gives, by the period's status and meterCoverage's answer. */
+export const notBilledReason = (status: "draft" | "closed", coverage: MeterCoverage): string =>
+  (status === "closed" ? NOT_BILLED_CLOSED_REASON : NOT_BILLED_REASON)[coverage];
 
 export const NOT_BILLED_COPY = {
   subtitle: "These tenants have no bill for this period.",
@@ -94,7 +113,7 @@ export function buildNotBilledModel(i: NotBilledInput): LoadedModel<"collection"
         entity: tenantRef,
         cells: {
           tenant: fmt.ref(tenantRef),
-          reason: fmt.text(NOT_BILLED_REASON[meterCoverage(t.primaryLinks, period)]),
+          reason: fmt.text(notBilledReason(period.status, meterCoverage(t.primaryLinks, period))),
         },
         actions,
       };

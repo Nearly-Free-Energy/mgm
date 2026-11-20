@@ -15,6 +15,7 @@ import {
   buildNotBilledModel,
   NOT_BILLED_COPY,
   NOT_BILLED_KEYS,
+  NOT_BILLED_CLOSED_REASON,
   NOT_BILLED_REASON,
   NOT_BILLED_TITLE,
   NOT_BILLED_VIEW,
@@ -100,6 +101,14 @@ describe("buildNotBilledModel", () => {
     for (const row of model.body.rows) expect(row.actions).toEqual([]);
   });
 
+  it("promises a closed period's metered tenant no bill from its meter, which no run can give it", () => {
+    const reasons = (status: "draft" | "closed") => build({ period: { ...PERIOD, status } }).body.rows.map((r) => r.cells.reason);
+    expect(reasons("closed")).toEqual([NOT_BILLED_CLOSED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_REASON.assignment_gap].map((t) => fmt.text(t)));
+    expect(reasons("draft")).toEqual([NOT_BILLED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_REASON.assignment_gap].map((t) => fmt.text(t)));
+    expect(NOT_BILLED_CLOSED_REASON).toEqual({ ...NOT_BILLED_REASON, metered: "No bill from its meter for this period" });
+    expect(NOT_BILLED_CLOSED_REASON.metered).not.toMatch(/\byet\b/);
+  });
+
   it("says every tenant has a bill, or that the microgrid has none", () => {
     expect(build({ billedTenantIds: new Set([T(1), T(2), T(3), T(4)]) }).body).toMatchObject({ rows: [], empty: { title: NOT_BILLED_COPY.allBilled } });
     expect(build({ tenants: [] }).body).toMatchObject({ rows: [], empty: { title: NOT_BILLED_COPY.noTenants } });
@@ -129,7 +138,7 @@ describe("NOT_BILLED_EXAMPLES", () => {
       [NOT_BILLED_TITLE, 3, [NOT_BILLED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_REASON.assignment_gap], [true, true, true], null],
       [NOT_BILLED_TITLE, 3, [NOT_BILLED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_REASON.assignment_gap], [false, false, false], "warning"],
       // In October the replaced meter still covered the whole period.
-      [NOT_BILLED_TITLE, 3, [NOT_BILLED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_REASON.metered], [], null],
+      [NOT_BILLED_TITLE, 3, [NOT_BILLED_CLOSED_REASON.metered, NOT_BILLED_REASON.no_meter, NOT_BILLED_CLOSED_REASON.metered], [], null],
       [NOT_BILLED_TITLE, 0, [], [], null],
       [NOT_BILLED_TITLE, 0, [], [], null],
     ]);
