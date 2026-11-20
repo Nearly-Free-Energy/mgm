@@ -20,11 +20,14 @@ export const CURRENT_PERIODS_KEYS = ["microgrid", "period", "status", "bills"] a
 /** The most microgrids the view lists; the loader reads one more, to tell when there are more. */
 export const MAX_CURRENT_PERIODS = 100;
 
+/** A known billing_period_status, or "unknown" for any other (periodStatus in ./current-periods.ts). */
+export type CurrentPeriodStatus = "draft" | "closed" | "unknown";
+
 export type CurrentPeriodInput = {
   microgridId: string;
   microgridName: string;
   /** The microgrid's newest period by start date, or null when it has none. */
-  period: { id: string; start_date: string; end_date: string; status: "draft" | "closed"; bills: number } | null;
+  period: { id: string; start_date: string; end_date: string; status: CurrentPeriodStatus; bills: number } | null;
 };
 
 /** `microgrids` in the loader's order; past MAX_CURRENT_PERIODS, the rest are left out with a notice. */
@@ -47,7 +50,11 @@ export function buildCurrentPeriodsModel(fmt: Fmt, microgrids: readonly CurrentP
           cells: {
             microgrid: fmt.text(microgridName),
             period: period ? fmt.text(periodLabel(fmt, period.start_date, period.end_date)) : fmt.empty(),
-            status: period ? fmt.status("billingPeriod", period.status) : fmt.text("No periods yet"),
+            status: !period
+              ? fmt.text("No periods yet")
+              : period.status === "unknown"
+                ? fmt.text("Status unknown")
+                : fmt.status("billingPeriod", period.status),
             bills: period ? fmt.number(period.bills) : fmt.empty(),
           },
           actions: [],
