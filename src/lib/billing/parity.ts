@@ -219,7 +219,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.periods",
     },
     pr: PERIODS,
-    note: "The legacy screens still delete through PostgREST with the browser's own client, with no typed name and no plugin gate, until they are deleted.",
+    note: "The legacy screens delete through the same route, with the period's name typed in their confirm dialog, so they follow the plugin gate and give the capability's refusals in its fixed copy.",
   },
 
   {
