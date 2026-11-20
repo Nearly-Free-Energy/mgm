@@ -230,6 +230,72 @@ describe("resolveActions: the view's own links", () => {
     ]);
   });
 
+  it("checks a prefill field by field against an input with object-level refinements", async () => {
+    const onPeriod = {
+      target: "billingPeriod",
+      path: "/api/billing-periods/[id]",
+      bind: { path: { id: "billingPeriod" }, body: { tenant_id: "tenant" } },
+    };
+    const range = (b: { from: string; to: string }) => b.from <= b.to;
+    const strict = action("billing", "billing.strict-range", {
+      ...onPeriod,
+      input: z
+        .strictObject({
+          tenant_id: z.string(),
+          from: z.iso.date(),
+          to: z.iso.date(),
+          token: z.string().meta({ writeOnly: true }).optional(),
+          confirmation: z.unknown().optional(),
+        })
+        .refine(range, { path: ["from"] }),
+    } as Partial<ActionDef>);
+    const loose = action("billing", "billing.loose-range", {
+      ...onPeriod,
+      input: z.looseObject({ tenant_id: z.string(), from: z.iso.date(), to: z.iso.date() }).superRefine(() => {}),
+    } as Partial<ActionDef>);
+    const { m } = context([strict, loose]);
+    const params = { id: P1, tenant_id: H1 };
+    const links: ActionLink[] = [
+      // One date only, and dates the refinement would refuse: starting values, checked per field.
+      { action: "billing.strict-range", params, prefill: { from: "2026-10-01" } },
+      { action: "billing.strict-range", params, prefill: { from: "2026-10-31", to: "2026-10-01" } },
+      // A writeOnly field is parsed, then left out.
+      { action: "billing.strict-range", params, prefill: { from: "2026-10-01", token: "t" } },
+      // A loose input lets undeclared, bound and host-managed keys through the parse; the prefill still never carries them.
+      { action: "billing.loose-range", params, prefill: { to: "2026-10-31", extra: 1, tenant_id: "other", confirmation: "x" } },
+    ];
+    const out = await resolveActions(loaded([], links), m);
+    expect(out.actions.map((a) => a.prefill)).toEqual([
+      { from: "2026-10-01" },
+      { from: "2026-10-31", to: "2026-10-01" },
+      { from: "2026-10-01" },
+      { to: "2026-10-31" },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("still drops a prefill whose field a refined input refuses, or with a key its strict object does not take", async () => {
+    const strict = action("billing", "billing.strict-range", {
+      target: "billingPeriod",
+      path: "/api/billing-periods/[id]",
+      bind: { path: { id: "billingPeriod" }, body: { tenant_id: "tenant" } },
+      input: z.strictObject({ tenant_id: z.string(), from: z.iso.date(), to: z.iso.date() }).refine((b) => b.from <= b.to),
+    } as Partial<ActionDef>);
+    const { m } = context([strict]);
+    const params = { id: P1, tenant_id: H1 };
+    const links: ActionLink[] = [
+      { action: "billing.strict-range", params, prefill: { from: "1 October" } },
+      { action: "billing.strict-range", params, prefill: { from: "2026-10-01", extra: 1 } },
+      // A bound field is never a starting value, as for an unrefined strict input.
+      { action: "billing.strict-range", params, prefill: { from: "2026-10-01", tenant_id: "other" } },
+    ];
+    const out = await resolveActions(loaded([], links), m);
+    expect(out.actions.map((a) => a.prefill)).toEqual([undefined, undefined, undefined]);
+    expect(warn.mock.calls.map((c: unknown[]) => String(c[0]))).toEqual(
+      Array(3).fill("[gui] view billing.periods: action billing.strict-range prefill dropped"),
+    );
+  });
+
   it("disables the view's own action while its plugin is off, and drops another plugin's", async () => {
     const assign = action("metering", "metering.assign");
     const payments = action("payments", "payments.other", { target: "paymentAttempt" });

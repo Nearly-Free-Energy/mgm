@@ -583,11 +583,11 @@ export const GENERATE_FROM_METERS_BODY_VERSION = 1;
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 
 /**
- * POST /api/billing-line-items/[lineItemId]/regenerate. Flat and without an
- * object-level refinement, so the GUI host can check a prefill
- * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit form can
- * render it; the route checks which readings each mode takes. If a
- * refinement is added, the period review's prefills are dropped: revisit.
+ * POST /api/billing-line-items/[lineItemId]/regenerate. Flat, so the kit
+ * form can render it, and an object of fields, so the GUI host can check the
+ * period review's prefills against it field by field (cleanPrefill in
+ * src/lib/gui/host/server/merge.ts); the route checks which readings each
+ * mode takes.
  */
 export const RegenerateBillBody = z.strictObject(
   {

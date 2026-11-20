@@ -118,8 +118,10 @@ export async function POST(
   if (!body.ok) return body.response;
   const parsed = body.data;
 
-  // Which readings each mode takes. The schema stays flat (no refinement) so
-  // the GUI host can check a prefill against it; the mode rules live here.
+  // Which readings each mode takes. RegenerateBillBody (src/lib/billing/schemas.ts)
+  // is one flat object for every mode, so the kit form renders one set of
+  // fields, and the mode rules live here. If the schema comes to hold them,
+  // as a refinement or a union per mode, drop these checks with it.
   if (parsed.readings === "edge") {
     const given = (["start_kwh", "end_kwh", "reason"] as const).find((k) => parsed[k] !== undefined);
     if (given) return invalid("Readings are taken from the meter in edge mode", given);

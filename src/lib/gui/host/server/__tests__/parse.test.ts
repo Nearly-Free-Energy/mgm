@@ -135,9 +135,15 @@ describe("strictParseModel", () => {
   });
 
   it("refuses every field the host fills", () => {
-    const host = { type: "view", view: "billing.periods", kind: "collection", org: null, trail: [], attached: [], notice: { tone: "info", text: "x" }, live: { refreshSeconds: 60, staleAfterSeconds: 120 } };
+    const host = { type: "view", view: "billing.periods", kind: "collection", org: null, trail: [], attached: [], live: { refreshSeconds: 60, staleAfterSeconds: 120 } };
     for (const [key, value] of Object.entries(host))
       expect(refused(periods, { ...model(periods), [key]: value }), key).toEqual(["(model) unrecognized_keys"]);
+  });
+
+  it("takes a loader's own notice, of the contract's shape only", () => {
+    expect(strictParseModel(periods, { ...model(periods), notice: { tone: "warning", text: "x" } }).ok).toBe(true);
+    expect(refused(periods, { ...model(periods), notice: { tone: "loud", text: "x" } })).toEqual(["notice.tone invalid_value"]);
+    expect(refused(periods, { ...model(periods), notice: { tone: "info", text: "x", href: "/x" } })).toEqual(["notice unrecognized_keys"]);
   });
 
   it("checks ext against the view's own schema", () => {

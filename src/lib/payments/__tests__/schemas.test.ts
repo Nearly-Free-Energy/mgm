@@ -121,9 +121,10 @@ describe("ReconcileAttemptBody", () => {
     }
   });
 
-  it("is an unrefined object, so the host can clean a prefill against it", () => {
+  it("is an object of fields, so the host can clean a prefill against it field by field", () => {
+    // cleanPrefill (src/lib/gui/host/server/merge.ts) takes only an object input, and checks a prefill against its fields.
     expect(ReconcileAttemptBody).toBeInstanceOf(z.ZodObject);
-    expect(() => ReconcileAttemptBody.omit({ confirmation: true }).partial().parse({ action: "record_external" })).not.toThrow();
+    expect(() => z.object(ReconcileAttemptBody.shape).omit({ confirmation: true }).partial().parse({ action: "record_external" })).not.toThrow();
   });
 
   it("is drawn by the kit as a form: the resolution, the amount, the reference and the notes", () => {
