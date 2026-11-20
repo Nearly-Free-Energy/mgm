@@ -26,6 +26,11 @@
  *     → tenants`) preferred over the snapshot in `details.tenant_name`;
  *     snapshot used when the line item is hard-deleted (FK NULL).
  *
+ * A third reader does its own paged reads with the same normalization (step
+ * 5 below, without raw_payload): the `billing.period-history` view's loader,
+ * src/lib/billing/surface/period-history.ts. If the normalization changes in
+ * either place, revisit the other.
+ *
  * The result discriminator mirrors the `unauthorized` / `not-found` /
  * `error` / `ok` shape the route needs to map to HTTP status codes.
  */

@@ -189,13 +189,14 @@ jobs:
           npm test
 
       # The browser smoke (e2e/, playwright.config.ts): sign-in, home, a
-      # tenants list, a tenant record's app access and the invoice page's
-      # logo and PDF preview at 360 px, and a tenant's sign-in and their
-      # usage month and day on a synthetic meter, against the production
-      # build and the local Supabase above, as throwaway users it creates
-      # and deletes. Every value comes from `supabase status` on this runner;
-      # none is a repository secret. Timings go to the job summary and are
-      # not enforced.
+      # tenants list, a tenant record's app access, the invoice page's logo
+      # and PDF preview, a billing period's close checklist with its
+      # confirmation step, its send queue and a bill's payments at 360 px, and
+      # a tenant's sign-in and their usage month and day on a synthetic meter,
+      # against the production build and the local Supabase above, as
+      # throwaway users it creates and deletes. Every value comes from
+      # `supabase status` on this runner; none is a repository secret. Timings
+      # go to the job summary and are not enforced.
       - name: Cache Playwright's Chromium
         uses: actions/cache@v4
         with:

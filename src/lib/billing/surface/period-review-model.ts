@@ -20,7 +20,9 @@ import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentS
 import { buildCsvFilename } from "../csv-export";
 import { sumMoney } from "../money";
 import { roundKwh } from "../precision";
+import { periodHistoryHref } from "./period-history-model";
 import type { PeriodReviewExtData } from "./period-review-ext";
+import { periodLabel } from "./period-label";
 
 /** Every cell and total key the view emits, besides the per-tier ones under PERIOD_REVIEW_PREFIXES. */
 export const PERIOD_REVIEW_KEYS = ["tenant", "begin", "end", "usage", "total", "source", "payment", "entered"] as const;
@@ -56,6 +58,43 @@ export const CANCEL_PAYMENT_LINK_ACTION = { id: "billing.cancel-payment-link", t
 export const EXPORT_CSV_LINK = "billing.export-csv";
 export const VIEW_HISTORY_LINK = "billing.view-history";
 export const DOWNLOAD_BILL_LINK = "billing.download-bill";
+/** A draft's link to its close checklist (`billing.close-checklist`, ./close-checklist-model.ts). */
+export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
+
+/** A period's link to its send queue (`billing.send-queue`, ./send-queue-model.ts). */
+export const SEND_QUEUE_LINK = "billing.send-queue";
+/** That link's label. */
+export const SEND_QUEUE_LINK_LABEL = "Payment links";
+
+/**
+ * The close checklist of a period: the path the `billing.close-checklist`
+ * view is registered on (../surface.ts). Here rather than in
+ * ./close-checklist-model.ts, which imports this module's link ids, so
+ * neither module imports the other in a cycle.
+ */
+export function closeChecklistHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/close`;
+}
+
+/** The send queue of a period: the path `billing.send-queue` is registered on (../surface.ts), here for the same reason. */
+export function sendQueueHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/send`;
+}
+
+/**
+ * A bill's PDF, as its row links it in the period review and the send
+ * queue. The route names the file after the invoice number it allocates on
+ * first use; before then, as the legacy menu falls back.
+ */
+export function downloadBillLink(bill: { id: string; invoice_number: string | null }): LinkRef {
+  return {
+    id: DOWNLOAD_BILL_LINK,
+    label: "Download bill (PDF)",
+    icon: "download",
+    href: `/api/billing-line-items/${bill.id}/pdf`,
+    download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
+  };
+}
 
 /**
  * The statuses only a super admin may set by hand: the payment-status
@@ -152,10 +191,7 @@ type Column = LoadedModel<"collection">["body"]["columns"][number];
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-/** A period as the host labels it (src/lib/gui/host/server/entities.ts). */
-export function periodLabel(fmt: Fmt, start: string, end: string): string {
-  return `${fmt.date(start).text} – ${fmt.date(end).text}`;
-}
+export { periodLabel };
 
 /** The actions one bill is offered, in the legacy row menu's order. */
 function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput): ActionLink[] {
@@ -217,7 +253,8 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   const { microgrid, period, tiers, fmt } = i;
   const currency = microgrid.currency;
   const label = periodLabel(fmt, period.start_date, period.end_date);
-  const historyHref = `/microgrids/${microgrid.id}/billing/${period.id}/history` as const;
+  // Built by the history view's own helper, so these links and the query name it reads cannot drift apart.
+  const historyHref = periodHistoryHref(microgrid.id, period.id);
 
   // A bill's readings and usage to 3 dp, as the legacy table shows them; the
   // totals below stay at 1 dp, as its grand total row does.
@@ -258,15 +295,8 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
       }),
     );
     const links: LinkRef[] = [
-      {
-        id: DOWNLOAD_BILL_LINK,
-        label: "Download bill (PDF)",
-        icon: "download",
-        href: `/api/billing-line-items/${bill.id}/pdf`,
-        // The route names the file after the invoice number it allocates on first use; before then, as the legacy menu falls back.
-        download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
-      },
-      { id: VIEW_HISTORY_LINK, label: "View history", href: `${historyHref}?tenant_id=${tenant.id}` },
+      downloadBillLink(bill),
+      { id: VIEW_HISTORY_LINK, label: "View history", href: periodHistoryHref(microgrid.id, period.id, { tenantId: tenant.id }) },
     ];
     return [
       {
@@ -340,6 +370,19 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   };
 
   const links: LinkRef[] = [{ id: VIEW_HISTORY_LINK, label: "View history", href: historyHref }];
+  // A draft links to its close checklist, with or without bills: the
+  // checklist says what blocks the close, where the legacy page shows a
+  // disabled Close Period button. Not attached as a section, which would run
+  // the close review on every load of this view.
+  if (period.status === "draft") {
+    links.push({ id: CLOSE_CHECKLIST_LINK, label: "Close period", href: closeChecklistHref(microgrid.id, period.id) });
+  }
+  // The bills' payment links, for draft and closed periods alike (both are
+  // payable); left out with no bills, which have none. Labelled for the
+  // links, not a send: the view sends nothing (./send-queue-model.ts).
+  if (i.bills.length > 0) {
+    links.push({ id: SEND_QUEUE_LINK, label: SEND_QUEUE_LINK_LABEL, icon: "payments", href: sendQueueHref(microgrid.id, period.id) });
+  }
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {
     links.push({

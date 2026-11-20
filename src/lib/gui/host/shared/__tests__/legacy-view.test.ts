@@ -143,6 +143,10 @@ describe("legacyView on every catalog page", () => {
     const SERVED: Record<string, [view: Id, nav: Id | null]> = {
       "/microgrids/[id]/operations": ["metering.site-day", "metering.operations"],
       "/microgrids/[id]/operations/savings": ["billing.savings", "metering.operations"],
+      "/microgrids/[id]/billing/[periodId]/close": ["billing.close-checklist", "billing.periods"],
+      "/microgrids/[id]/billing/[periodId]/send": ["billing.send-queue", "billing.periods"],
+      "/microgrids/[id]/billing/[periodId]/payments": ["payments.bill-attempts", "billing.periods"],
+      "/microgrids/[id]/billing/[periodId]/payment-setup": ["payments.payment-setup", "billing.periods"],
       // Tenant pages: a staff manifest has no tenant entry, and /my names no place.
       "/my": ["tenant.home", null],
       "/my/usage": ["tenant.usage-month", null],

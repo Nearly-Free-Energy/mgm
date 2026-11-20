@@ -11,15 +11,20 @@ import {
 
 // The smoke's own rows: one organization, one community with an invoice
 // configuration whose logo is an object in the invoice-logos bucket, three
-// microgrids, three tenants on the first, and an org_manager who signs in
-// by email link (RFC #186), read from the local mail catcher. The tenant
-// app is on for that organization, and the first tenant's record lists one
-// address with app access, long enough to need wrapping at 360 px, so the
-// smoke opens Give access and the Remove confirmation. Beside it, in
-// an organization of its own (so the manager's pages and counts do not
-// change), one unit on a synthetic meter and the tenant who rents it
-// (RFC mgm#197). This file writes only the ids and the emails to disk, for
-// the other projects and the teardown.
+// microgrids, three tenants on the first, a tariff and a draft October 2026
+// billing period on the first with bills for two of its tenants (one with no
+// usage), a default sandbox Pesapal account for the organization, so the
+// period's send queue shows a payment link, an online payment attempt on the
+// first bill held for reconciliation, so the period's payments show one with
+// its actions (the account stores no credential, so nothing could contact a
+// provider), and an org_manager who signs in by email link (RFC #186), read
+// from the local mail catcher. The tenant app is on for that organization,
+// and the first tenant's record lists one address with app access, long
+// enough to need wrapping at 360 px, so the smoke opens Give access and the
+// Remove confirmation. Beside it, in an organization of its own (so the
+// manager's pages and counts do not change), one unit on a synthetic meter
+// and the tenant who rents it (RFC mgm#197). This file writes only the ids
+// and the emails to disk, for the other projects and the teardown.
 
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");
@@ -32,6 +37,9 @@ export type SmokeFixtures = {
   orgId: string;
   communityId: string;
   microgridId: string;
+  periodId: string;
+  /** The first bill, which has a payment attempt. */
+  billId: string;
   email: string;
   tenantOrgId?: string;
   unitId?: string;
@@ -91,13 +99,25 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   const orgId = randomUUID();
   const communityId = randomUUID();
   const microgridIds = [randomUUID(), randomUUID(), randomUUID()];
+  const tenantIds = [randomUUID(), randomUUID(), randomUUID()];
+  const scheduleId = randomUUID();
+  const periodId = randomUUID();
+  const billId = randomUUID();
   const email = `smoke-${tag}@test.local`; // the domain the database suites use
   // No break opportunity in 50-odd characters: wider than a 360 px line at the dialog's title size.
   const accessEmail = `smoke-access-${tag}-a-long-synthetic-renter-address@test.local`;
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
-  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], email, accessEmail };
+  const fixtures: SmokeFixtures = {
+    orgId,
+    communityId,
+    microgridId: microgridIds[0],
+    periodId,
+    billId,
+    email,
+    accessEmail,
+  };
   writeFileSync(FIXTURES_FILE, JSON.stringify(fixtures));
 
   await must("organization", svc.from("organizations").insert({ id: orgId, name: `Smoke organization ${tag}` }));
@@ -122,7 +142,6 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
       microgridIds.map((id, i) => ({ id, community_id: communityId, name: `Smoke microgrid ${i + 1}` }))
     )
   );
-  const tenantIds = [randomUUID(), randomUUID(), randomUUID()];
   await must(
     "tenants",
     svc.from("tenants").insert(
@@ -146,6 +165,105 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
       plugin_name: TENANT_APP_PLUGIN_NAME,
       version: TENANT_APP_PLUGIN_VERSION,
       enabled: true,
+    })
+  );
+  // A draft period with its tariff pinned, so the close checklist loads
+  // (src/lib/billing/surface/close-checklist.ts refuses a period without
+  // one): two bills with whole totals, the second with no usage, and the
+  // third tenant unbilled, so the close asks for every acknowledgement.
+  await must(
+    "rate schedule",
+    svc.from("rate_schedules").insert({
+      id: scheduleId,
+      microgrid_id: microgridIds[0],
+      tiers: [{ label: "Lifeline", min_kwh: 1, max_kwh: null, rate_per_kwh: 250 }],
+      service_charge: 0,
+      tax_rate: 0,
+    })
+  );
+  await must(
+    "billing period",
+    svc.from("billing_periods").insert({
+      id: periodId,
+      microgrid_id: microgridIds[0],
+      start_date: "2026-10-01",
+      end_date: "2026-10-31",
+      timezone: "Africa/Kampala",
+      status: "draft",
+      rate_schedule_id: scheduleId,
+    })
+  );
+  await must(
+    "bills",
+    svc.from("billing_line_items").insert([
+      {
+        id: billId,
+        billing_period_id: periodId,
+        tenant_id: tenantIds[0],
+        start_kwh: 100,
+        end_kwh: 110,
+        usage_kwh: 10,
+        tier_breakdown: [{ label: "Lifeline", kwh: 10, amount: 2500 }],
+        total_amount: 2500,
+        reading_source: "edge",
+      },
+      {
+        id: randomUUID(),
+        billing_period_id: periodId,
+        tenant_id: tenantIds[1],
+        start_kwh: null,
+        end_kwh: null,
+        usage_kwh: null,
+        tier_breakdown: [],
+        total_amount: 0,
+        reading_source: "edge",
+      },
+    ])
+  );
+  // The organization's default Pesapal account, as tested and registered, so
+  // payment readiness is "sandbox" and the send queue shows the first bill's
+  // link. Readiness reads only the database (getReadiness in
+  // src/lib/payments/capability.ts), so loading the queue calls no provider;
+  // no credential is stored, so nothing could. If readiness starts testing
+  // the account live, take this out.
+  const account = await must(
+    "payment account",
+    svc
+      .from("payment_merchant_accounts")
+      .insert({
+        org_id: orgId,
+        provider: "pesapal",
+        is_default: true,
+        sandbox: true,
+        last_test_status: "success",
+        ipn_id: `smoke-ipn-${tag}`,
+      })
+      .select("id")
+      .single()
+  );
+  // An attempt on the first bill, held for reconciliation with a tracking id,
+  // so the period's payments show it with Refresh status and both
+  // reconciliations. The smoke never presses Refresh status, which would ask
+  // the provider; the account stores no credential anyway. Payment records
+  // are kept with their bill, so the teardown purges the organization as the
+  // database owner (cleanupTestData).
+  const attemptId = randomUUID();
+  await must(
+    "payment attempt",
+    svc.from("payment_attempts").insert({
+      id: attemptId,
+      org_id: orgId,
+      line_item_id: billId,
+      community_id: communityId,
+      merchant_account_id: (account as { id: string }).id,
+      merchant_account_version: 1,
+      amount: 2500,
+      currency: "UGX",
+      bill_revision_total: 2500,
+      merchant_reference: `MGM-${attemptId}`,
+      provider_tracking_id: `smoke-tracking-${tag}`,
+      status: "needs_reconciliation",
+      failure_code: "balance_mismatch",
     })
   );
   await createTestUser({ email, role: "org_manager", scopeId: orgId });
@@ -302,6 +420,12 @@ export async function deleteSmokeFixtures(): Promise<void> {
       await must("invoice logos", bucket.remove(listed.map((object) => `${communityId}/${object.name}`)));
     }
   }
+  // payment_merchant_versions references organizations without ON DELETE
+  // CASCADE, so the payment account's versions go first, or the
+  // organization's delete fails and cleanupTestData leaves it; if that
+  // foreign key gains a cascade, this delete becomes a no-op.
+  const svc = await serviceClient();
+  await must("payment account versions", svc.from("payment_merchant_versions").delete().eq("org_id", orgId));
   await cleanupTestData({
     orgIds: [orgId, tenantOrgId].filter((id): id is string => Boolean(id)),
     userEmails: [email, tenantEmail, accessEmail].filter((address): address is string => Boolean(address)),
