@@ -31,8 +31,7 @@
  *   tenant's display name, compared trimmed on both sides. This route is the
  *   authority on it (ADR-006), whatever sent the request: the GUI host sends
  *   it for billing.mark-refunded, whose prepare names the same tenant
- *   (src/lib/billing/surface/period-review.ts), and the legacy row menu's
- *   refund dialog asks for it (src/components/billing/row-actions-menu.tsx).
+ *   (src/lib/billing/surface/period-review.ts).
  *   Every other status ignores `confirmation`.
  *
  * Response:

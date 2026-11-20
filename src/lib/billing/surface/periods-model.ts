@@ -4,9 +4,9 @@
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here. The columns and empty-state copy are the legacy
- * periods list's (src/components/BillingPeriodList.tsx), which this view
- * replaced at the Billing path; the component stays until #201's Deletes
- * pull request. The host's catch-all serves this view outside the microgrid
+ * periods list's (BillingPeriodList, deleted with the legacy billing
+ * screens), which this view replaced at the Billing path. The host's
+ * catch-all serves this view outside the microgrid
  * layout, so the view repeats that layout's time zone nudge as its notice,
  * in the nudge's own copy (src/lib/timezone/nudge.ts). The host shows its
  * own notices (the gate's while billing is off) before this one, not in its
@@ -73,7 +73,7 @@ function timezoneNotice(microgridId: string, nudge: TimezoneNudgeCopy | null): P
 
 export function buildPeriodsModel({ microgridId, currency, periods, defaults, nudge, fmt }: PeriodsModelInput): LoadedModel<"collection"> {
   // The form starts at the previous month in the microgrid's zone, as the
-  // legacy list (BillingPeriodList) starts it. The host checks the prefill
+  // legacy list (BillingPeriodList) started it. The host checks the prefill
   // against CreatePeriodBody's fields; the route checks start <= end.
   const create = {
     action: CREATE_PERIOD_ACTION.id,

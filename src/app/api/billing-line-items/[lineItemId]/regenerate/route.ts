@@ -24,13 +24,13 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
  *   route refuses a paid bill without it, and a refunded bill, an invoiced
  *   bill and a bill in a closed period outright, but only on its own
- *   requests: POST /api/billing/generate, which the legacy Regenerate
- *   dialogs and Refresh Readings call, rewrites any of them with no
- *   acknowledgement (generate.ts keeps the payment columns and refuses no
+ *   requests: POST /api/billing/generate, which the deleted legacy
+ *   Regenerate dialogs and Refresh Readings called, rewrites any of them
+ *   with no acknowledgement (generate.ts keeps the payment columns and refuses no
  *   payment status, invoice number or closed period; on a closed period
  *   that is the legacy menu's "Logged as audit revision", and the database
  *   lets that audited write change a closed bill's amount). There the
- *   paid-bill warning is the legacy dialog's own, on the client with POST
+ *   paid-bill warning was the legacy dialog's own, on the client with POST
  *   /api/billing/regenerate-preview, and nothing on the server asks for it.
  *   If generation comes to refuse any of these itself, say so here.
  *
@@ -60,8 +60,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         microgrid could not be read, or nothing was written)
  *   and the capability's own refusals (plugin gate, organization scope).
  *
- * The legacy dialogs still call POST /api/billing/generate, which checks none
- * of these (above).
+ * POST /api/billing/generate checks none of these (above); nothing in MGM
+ * calls it since the legacy dialogs were deleted.
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

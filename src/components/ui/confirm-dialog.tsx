@@ -6,8 +6,8 @@
 //   • Single-purpose destructive confirm. Can optionally require the user
 //     to type a specific string to enable the Confirm button (see
 //     `requireTypedConfirmation` — added in #89 for the entity-delete
-//     blast-radius dialog). For the richer "Close Period" multi-channel
-//     confirm, keep using <ClosePeriodDialog>.
+//     blast-radius dialog). Closing a billing period is not this
+//     dialog's: the GUI host's ceremony step (ConfirmStep) does it.
 //   • Cancel button is the first focusable element (defensive default
 //     for destructive flows). When `requireTypedConfirmation` is set,
 //     focus moves to the typed-input instead — it is the only actionable
@@ -24,8 +24,7 @@
 //     supplied so screen-readers announce the blast-radius counts on
 //     open.
 //   • Use cases: Delete Period, Delete Meter, Delete Tenant, last-tier
-//     warning, entity-delete (#89). Use <ClosePeriodDialog> only for
-//     billing-period close.
+//     warning, entity-delete (#89).
 //
 // Tone:
 //   • "destructive" — confirm button uses bg-destructive/text-destructive-foreground.

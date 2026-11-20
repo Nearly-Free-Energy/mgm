@@ -335,8 +335,9 @@ describe("dialogs use the shared dialog frame", () => {
 
   it("scans the app and its components", () => {
     expect(repo.files).toBeGreaterThan(100);
-    // Sanity: the scanner recognises the frame's panel where it is used.
-    expect(repo.panels).toBeGreaterThanOrEqual(15);
+    // Sanity: the scanner recognises the frame's panel where it is used. The
+    // legacy billing screens' dialogs went with #201's Deletes item.
+    expect(repo.panels).toBeGreaterThanOrEqual(12);
   });
 
   it("the frame itself is the one place that renders Content and Overlay", () => {

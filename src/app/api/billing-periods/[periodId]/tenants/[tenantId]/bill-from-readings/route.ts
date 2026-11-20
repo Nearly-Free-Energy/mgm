@@ -29,9 +29,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * writes only while the period is a draft and the tenant has no bill, under
  * the period's lock: a close committing after that read is refused
  * (period_closed), and so is a bill another write inserted for that tenant
- * after the engine read the period's bills (a run from meter data, the
- * legacy panel, or a second submission of this action), which is left as
- * it is (has_bill). Nothing is written either way.
+ * after the engine read the period's bills (a run from meter data, POST
+ * /api/billing/generate, or a second submission of this action), which is
+ * left as it is (has_bill). Nothing is written either way.
  *
  * Body (BillFromReadingsBody): { start_kwh, end_kwh, reason? }, kWh of 0 or
  * more, end_kwh not below start_kwh; reason up to 500 characters, trimmed.

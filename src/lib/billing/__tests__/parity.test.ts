@@ -2,14 +2,16 @@
  * The billing parity table (src/lib/billing/parity.ts) against the code (#201).
  *
  * Every row names something real: its route with the method and body
- * schema, its page (a page.tsx, or a catalog page a view serves) or GET
- * route, and, while any row is pending, its legacy component. Every row is
- * either contributed, matching the contribution, or listed in PENDING
- * below. The contributing pull requests of #201 remove their rows from
- * PENDING as they land; the legacy billing screens may be deleted only once
- * PENDING is empty, and a screen's URL may move to the GUI host (its
- * page.tsx deleted, its catalog page served by a view) only once no row of
- * that screen is pending, which the last two tests enforce.
+ * schema, and its page (a page.tsx, or a catalog page a view serves) or GET
+ * route. Every row is either contributed, matching the contribution, or
+ * listed in PENDING below. The contributing pull requests of #201 removed
+ * their rows from PENDING as they landed; the legacy billing screens could
+ * be deleted only once PENDING was empty, and a screen's URL could move to
+ * the GUI host (its page.tsx deleted, its catalog page served by a view)
+ * only once no row of that screen was pending. #201's Deletes item deleted
+ * them, so the last two tests now hold the deletion: the legacy components
+ * stay deleted with nothing pending, and a row added as pending fails until
+ * its screen's page is restored.
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
@@ -61,21 +63,46 @@ const PENDING = new Set<string>([
 ]);
 
 /**
- * The legacy screens #201 deletes once nothing is pending. A screen's
- * page.tsx leaves this list in the change that moves its URL to the GUI host,
- * which the last test allows only once no row of that screen is pending; the
- * components stay until the Deletes pull request.
+ * The legacy screens' components, which #201's Deletes item deleted once
+ * nothing was pending, with the menus, panels and dialogs only they
+ * rendered. Their page.tsx files went earlier: billing/page.tsx and
+ * …/[periodId]/history/page.tsx with "Serve the billing pages through the
+ * GUI host", …/[periodId]/page.tsx with "Serve period review through the
+ * GUI host", each once no row of its screen was pending. Every file a row
+ * names as `legacy` is here or in KEPT.
  */
 const LEGACY_SCREENS = [
   "src/components/BillingTable.tsx",
   "src/components/BillingPeriodList.tsx",
-  // billing/page.tsx and …/[periodId]/history/page.tsx left with "Serve the
-  // billing pages through the GUI host": no row of the periods or
-  // period-history screen was pending, and the billing.periods and
-  // billing.period-history views serve their URLs. …/[periodId]/page.tsx
-  // left with "Serve period review through the GUI host" once no
-  // period-review row was, and billing.period-review serves its URL.
+  "src/components/CopyButton.tsx",
+  "src/components/billing/audit-log-list.tsx",
+  "src/components/billing/error-code-copy.ts",
+  "src/components/billing/manual-usage-cell.tsx",
+  "src/components/billing/multi-select-column.tsx",
+  "src/components/billing/payment-link-popover.tsx",
+  "src/components/billing/payment-notes-confirm-dialog.tsx",
+  "src/components/billing/preflight-panel.tsx",
+  "src/components/billing/regenerate-multi-dialog.tsx",
+  "src/components/billing/regenerate-row-dialog.tsx",
+  "src/components/billing/row-actions-menu.tsx",
+  "src/components/billing/row-banner-stack.tsx",
+  "src/components/billing/sticky-selection-bar.tsx",
+  "src/components/payments/payment-history.tsx",
+  "src/components/ui/close-period-dialog.tsx",
+  "src/components/ui/copy-table.tsx",
+  "src/components/ui/period-picker.tsx",
+  "src/lib/billing/audit-humanize.tsx",
 ];
+
+/**
+ * Files a row names as `legacy` that stay on purpose, and why. The
+ * microgrid's tabs are not a billing screen: Setup still renders them, and
+ * their Billing tab now opens billing.periods (billing-tab). If Setup stops
+ * rendering them, revisit.
+ */
+const KEPT: Record<string, string> = {
+  "src/app/(gui)/microgrids/[id]/tab-nav.tsx": "the microgrid's tabs, which Setup still renders",
+};
 
 /**
  * The catalog page (src/lib/plugins/bundled.ts) that serves each legacy
@@ -279,17 +306,15 @@ function isContributed(r: ParityRow): boolean {
 }
 
 describe("the billing parity table", () => {
-  it("gives every row a unique id, and every row a legacy component that exists while any row is pending", () => {
+  it("gives every row a unique id, and names as legacy only a deleted screen's component or a file kept on purpose", () => {
     const ids = BILLING_PARITY.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    // Every row while anything is pending, so a row cannot name a file that
-    // has gone; once nothing is, the Deletes pull request removes the legacy
-    // files, and only a pending row (none) is held to its file.
-    for (const row of BILLING_PARITY.filter((r) => PENDING.size > 0 || PENDING.has(r.id))) {
+    for (const row of BILLING_PARITY) {
       for (const file of row.legacy.split(", ")) {
-        expect(existsSync(path.join(ROOT, file)), `${row.id}: ${file}`).toBe(true);
+        expect(LEGACY_SCREENS.includes(file) || Object.hasOwn(KEPT, file), `${row.id}: ${file} is in LEGACY_SCREENS or KEPT`).toBe(true);
       }
     }
+    for (const file of Object.keys(KEPT)) expect(existsSync(path.join(ROOT, file)), `${file} is kept`).toBe(true);
   });
 
   it.each(BILLING_PARITY.filter(ofKind("action")).map((r) => [r.id, r.replacedBy] as const))(
@@ -466,9 +491,10 @@ describe("parity with the contributed actions and views", () => {
     expect([...PENDING].filter((id) => !ids.has(id))).toEqual([]);
   });
 
-  it("deletes the legacy billing screens only once nothing is pending", () => {
-    const gone = LEGACY_SCREENS.filter((file) => !existsSync(path.join(ROOT, file)));
-    if (gone.length > 0) expect([...PENDING], `deleted ${gone.join(", ")} with rows still pending`).toEqual([]);
+  it("has deleted the legacy billing screens, with nothing pending", () => {
+    expect([...PENDING], "the legacy screens are deleted: a pending row has no control left to fall back on").toEqual([]);
+    const left = LEGACY_SCREENS.filter((file) => existsSync(path.join(ROOT, file)));
+    expect(left, "the legacy billing screens stay deleted").toEqual([]);
   });
 
   it("keeps a screen's URL on its legacy page while a row of that screen is pending", () => {

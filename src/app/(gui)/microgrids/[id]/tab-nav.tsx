@@ -27,9 +27,9 @@ import { microgridSetupHref } from "@/lib/microgrid-links";
 // outside this layout, as it serves every billing page (a period's review
 // and history included), so a click on either leaves the header behind (and
 // nothing here renders on those pages). The Billing tab is never
-// highlighted, since no billing page renders this nav; #201's Deletes item
-// removes billing's sub-navigation. If a billing page or Operations is
-// served under microgrids/[id]/ again, revisit.
+// highlighted, since no billing page renders this nav; it stays as Setup's
+// way to Billing. If a billing page or Operations is served under
+// microgrids/[id]/ again, revisit.
 //
 // Each tab links to the page a click lands on, not to a URL that redirects:
 // Setup links to its first sub-tab rather than the /setup index. Operations

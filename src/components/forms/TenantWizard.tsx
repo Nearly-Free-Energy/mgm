@@ -101,7 +101,7 @@ type FormState = {
   /**
    * #158: when true, Step 3 surfaces no meter picker — the tenant will
    * be created without a primary_consumption_meter link and Aaron enters
-   * usage manually each period from the BillingTable. Step 3 is treated as
+   * usage manually each period from the period review. Step 3 is treated as
    * valid regardless of meter count when this is set.
    */
   no_meter: boolean;

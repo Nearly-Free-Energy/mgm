@@ -10,7 +10,6 @@ import { createFmt } from "@/lib/gui/fmt";
 import { strictParseModel } from "@/lib/gui/host/server/parse";
 import type { ViewDef } from "@/lib/gui/surface";
 import type { BillingAuditEventType, BillingAuditLogEntry } from "@/lib/types/billing-audit";
-import { humanizeAuditEvent } from "../../audit-humanize";
 import { BILLING_SURFACE } from "../../surface";
 import { PERIOD_HISTORY_EXAMPLES, PERIOD_HISTORY_LOADED_EXAMPLES } from "../period-history-examples";
 import {
@@ -135,15 +134,6 @@ describe("humanizeHistoryEntry", () => {
       ["token_regenerated", "API token regenerated", null, null],
       ["tariff_reconciled", "Historical tariff reconciled (TR-1)", null, null],
     ]);
-  });
-
-  it("matches the legacy page's labels and post-close mark for every event type", () => {
-    for (const e of FIXTURES) {
-      const legacy = humanizeAuditEvent(e);
-      expect(typeof legacy.label).toBe("string");
-      expect(human(e).change, e.eventType).toBe(legacy.label);
-      expect(human(e).postClose, e.eventType).toBe(legacy.postCloseRevision);
-    }
   });
 
   it("says the total is unchanged when there is no previous total or it is the same", () => {

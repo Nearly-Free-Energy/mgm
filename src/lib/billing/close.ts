@@ -47,10 +47,8 @@ export const CLOSE_REFUSAL_COPY = {
    * The close route's 409 billing_period_totals_changed, shown over the new
    * totals. The GUI host prepares billing.close-period again on this code
    * (its prepareAgainOn in ./surface.ts) and shows this sentence over the
-   * new ceremony (src/lib/gui/host/client/action-host.tsx). The legacy
-   * ClosePeriodDialog shows it over the ceremony the 409 carries, or loads
-   * the review again when the 409 carries none. If either stops showing the
-   * new totals with it, revisit this sentence.
+   * new ceremony (src/lib/gui/host/client/action-host.tsx). If it stops
+   * showing the new totals with it, revisit this sentence.
    */
   totalsChanged: "The period's totals changed after you reviewed them. Review the new totals and confirm again.",
 } as const;

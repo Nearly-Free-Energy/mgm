@@ -1,28 +1,26 @@
 /**
- * The billing parity table (#201): every control on today's legacy billing
- * period screens, and the contributed action or view link that replaces it.
+ * The billing parity table (#201): every control on the legacy billing
+ * period screens, and the contributed action or view link that replaced it.
  *
- * The legacy screens are the periods list (BillingPeriodList.tsx), the
+ * The legacy screens were the periods list (BillingPeriodList.tsx), the
  * period review (BillingTable.tsx and the menus, panels and dialogs it
- * renders) and the period history page, under
- * src/app/(gui)/microgrids/[id]/billing/. A screen's URL moves to the GUI
- * host only once none of its rows is pending, and the legacy components are
- * deleted only once no row is; parity.test.ts enforces both, and fails
- * while a row has no contribution and is not listed as pending there, so a
- * control cannot be lost on the way. Since "Serve the billing pages through
- * the GUI host" the host serves the periods list and the history, and
- * since "Serve period review through the GUI host" the review too (their
- * page.tsx files are gone); BillingPeriodList, AuditLogList and
- * BillingTable stay until the Deletes pull request.
+ * rendered) and the period history page, under
+ * src/app/(gui)/microgrids/[id]/billing/. A screen's URL moved to the GUI
+ * host only once none of its rows was pending, and the legacy components
+ * were deleted only once no row was; parity.test.ts enforced both, and
+ * fails while a row has no contribution and is not listed as pending there,
+ * so a control could not be lost on the way. The host serves all three
+ * screens' URLs by views, and #201's Deletes item deleted the legacy
+ * components, which parity.test.ts now checks stay deleted.
  *
  * Out of the table, on purpose:
  *  - The rest of the microgrid layout's chrome on these pages (the
  *    Operations and Setup tabs, the breadcrumb, Edit microgrid and the
  *    timezone nudge): it belongs to the microgrid pages. The host serves
  *    every billing screen outside that layout, so they show the GUI's own
- *    dock and trail instead; the chrome stays on Setup. The Billing tab is
- *    billing's sub-navigation, which
- *    #201's Deletes item removes, so it is a row (billing-tab).
+ *    dock and trail instead; the chrome stays on Setup. The Billing tab in
+ *    those tabs is billing's way in from Setup, so it is a row
+ *    (billing-tab); the tabs stay, since Setup still renders them.
  *  - Controls that only change what is on screen (opening the pre-flight
  *    panel, the create form, a dialog, a period picker's list) and the fields
  *    inside a form: they are the form of the action their submit maps to.
@@ -34,8 +32,7 @@
  * If one of these becomes a control on a billing screen, add a row.
  *
  * The inventory behind this table was taken on 18 November 2026 from the
- * components named in `legacy`. A control added to those screens later needs
- * a row here in the same change.
+ * components named in `legacy`, since deleted.
  */
 import type { Confirm, EntityKind } from "@/lib/gui/contract";
 
@@ -147,9 +144,10 @@ export type ParityRow = {
   /** The control as labelled today; several controls doing one thing share a row. */
   control: string;
   /**
-   * Where it is today: the legacy components that draw it, which exist until
-   * the Deletes pull request (parity.test.ts). A control that was on a
-   * page.tsx the GUI host has replaced names the screen's remaining legacy
+   * Where it was: the legacy components that drew it, deleted by #201's
+   * Deletes item (parity.test.ts checks they stay deleted), or a file kept
+   * on purpose (parity.test.ts's KEPT says why). A control that was on a
+   * page.tsx the GUI host replaced names the screen's last legacy
    * component, and says so.
    */
   legacy: string;
@@ -218,7 +216,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.periods",
     },
     pr: PERIODS,
-    note: "The legacy screens delete through the same route, with the period's name typed in their confirm dialog, so they follow the plugin gate and give the capability's refusals in its fixed copy. The route deletes through fn_delete_draft_billing_period (migration 20261120130000) with the person's own client. Signed-in users hold no DELETE on billing_periods, and the function asks the billing plugin's gate itself, so a call that skips the route is refused while billing is off too.",
+    note: "The legacy screens deleted through the same route, with the period's name typed in their confirm dialog, so they followed the plugin gate and give the capability's refusals in its fixed copy. The route deletes through fn_delete_draft_billing_period (migration 20261120130000) with the person's own client. Signed-in users hold no DELETE on billing_periods, and the function asks the billing plugin's gate itself, so a call that skips the route is refused while billing is off too.",
   },
 
   {
@@ -251,7 +249,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
     },
     pr: FROM_METERS,
-    note: "Meter data only, on a route of its own whose body is only the bound period, so the kit submits it with no form; the period review offers it as its header action (Generate bills from meter data before the first bill, Refresh readings from meters after) and as a draft's empty-state call to action. Differences from the panel: a closed period is refused; manual bills are kept as there; paid, invoiced and refunded bills are left as they are and their meters not read, where Refresh Readings rewrote them (regenerate-bill, with its acknowledgement, regenerates a paid bill); an existing bill is rewritten only if it is unchanged since the run read it (fn_regenerate_bill_with_audit), and one whose figures are already the meter's is not written, so a second run adds no audit rows. A bill with a pending payment link (link_generated) is rewritten, as Refresh Readings rewrote it, so its readings stay fresh: where its total changes, its Pesapal link is cleared (fn_record_line_item_with_audit) and an open checkout of it is set aside for reconciliation (fn_payment_bill_revision), so prepare counts those bills and warns of both, and the result says how many links stopped working. Prepare says how many tenants will be read from meters and how many bills are kept or left, and names the tenants whose meter cannot be read, by the reason the result gives (no meter, or a meter assignment gap): not billed if they have no bill, their bill left as it is if they have one; it cannot foresee a meter with no data. The result is counts in fixed copy (the host keeps only a message, of up to 300 characters, so past that it gives the not-billed and left counts as totals), never per-tenant errors; an existing bill whose meter could not be read counts as left as it was, not as not billed. Readings typed by hand for a tenant that has a bill come from regenerate-bill in manual mode, or record-usage on an unmetered draft bill with a starting reading; the panel's Override available toggle maps to regenerate-bill's Switch to manual entry after generating. The panel's starting-reading rows stay unreachable, as before (header). A tenant with no meter data gets no bill: billing.bill-from-readings bills them from readings typed by hand (bill-from-readings). The full-body billing.generate-bills on POST /api/billing/generate is no longer contributed; the route stays for the legacy panel. The run reads every page of the period's tenants and bills (and of the prior readings it starts meters from, in slices of the period and device lists, which travel in the read's URL), so a bill past PostgREST's max_rows is not taken for no bill; a read it cannot complete stops it with nothing written. It reads the period's status again after reading the meters and writes nothing if the period is no longer a draft. A tenant's first bill goes through fn_record_first_line_item_with_audit (migration 20261120130100), which inserts only while the period is a draft and the tenant has no bill, under the period's lock: a close committing after that second read refuses the insert, and a bill another write inserted for that tenant while the run read the meters (a manual reading on the legacy panel, a bill from readings (billing.bill-from-readings), or an overlapping run) is left as it is, counted as changed; neither is overwritten. The legacy panel's POST /api/billing/generate keeps upserting (fn_record_line_item_with_audit), overwriting a bill and accepting a closed period, until the legacy page is deleted.",
+    note: "Meter data only, on a route of its own whose body is only the bound period, so the kit submits it with no form; the period review offers it as its header action (Generate bills from meter data before the first bill, Refresh readings from meters after) and as a draft's empty-state call to action. Differences from the panel: a closed period is refused; manual bills are kept as there; paid, invoiced and refunded bills are left as they are and their meters not read, where Refresh Readings rewrote them (regenerate-bill, with its acknowledgement, regenerates a paid bill); an existing bill is rewritten only if it is unchanged since the run read it (fn_regenerate_bill_with_audit), and one whose figures are already the meter's is not written, so a second run adds no audit rows. A bill with a pending payment link (link_generated) is rewritten, as Refresh Readings rewrote it, so its readings stay fresh: where its total changes, its Pesapal link is cleared (fn_record_line_item_with_audit) and an open checkout of it is set aside for reconciliation (fn_payment_bill_revision), so prepare counts those bills and warns of both, and the result says how many links stopped working. Prepare says how many tenants will be read from meters and how many bills are kept or left, and names the tenants whose meter cannot be read, by the reason the result gives (no meter, or a meter assignment gap): not billed if they have no bill, their bill left as it is if they have one; it cannot foresee a meter with no data. The result is counts in fixed copy (the host keeps only a message, of up to 300 characters, so past that it gives the not-billed and left counts as totals), never per-tenant errors; an existing bill whose meter could not be read counts as left as it was, not as not billed. Readings typed by hand for a tenant that has a bill come from regenerate-bill in manual mode, or record-usage on an unmetered draft bill with a starting reading; the panel's Override available toggle maps to regenerate-bill's Switch to manual entry after generating. The panel's starting-reading rows stay unreachable, as before (header). A tenant with no meter data gets no bill: billing.bill-from-readings bills them from readings typed by hand (bill-from-readings). The full-body billing.generate-bills on POST /api/billing/generate is no longer contributed; the route stays, though nothing in MGM calls it since the legacy panel was deleted (#201's Deletes item). The run reads every page of the period's tenants and bills (and of the prior readings it starts meters from, in slices of the period and device lists, which travel in the read's URL), so a bill past PostgREST's max_rows is not taken for no bill; a read it cannot complete stops it with nothing written. It reads the period's status again after reading the meters and writes nothing if the period is no longer a draft. A tenant's first bill goes through fn_record_first_line_item_with_audit (migration 20261120130100), which inserts only while the period is a draft and the tenant has no bill, under the period's lock: a close committing after that second read refuses the insert, and a bill another write inserted for that tenant while the run read the meters (a manual reading on POST /api/billing/generate, a bill from readings (billing.bill-from-readings), or an overlapping run) is left as it is, counted as changed; neither is overwritten. POST /api/billing/generate, the deleted legacy panel's route, still upserts (fn_record_line_item_with_audit), overwriting a bill and accepting a closed period, for any caller left.",
   },
   {
     id: "bill-from-readings",
@@ -272,7 +270,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.not-billed",
     },
     pr: FROM_READINGS,
-    note: "Decided by the maintainer: after generating from meter data, a tenant with no meter for the period, an assignment gap, or no meter data has no bill, and regenerate-bill and record-usage both need one; writing a zero bill for them is not an option (#293, #339). billing.not-billed, a section of the period review titled Tenants not billed, lists every tenant of the microgrid with no bill for the period, before the first bill too, in name order, with why (meterCoverage's answer: no meter for the period, a meter assignment gap, or a meter with no bill from it yet, which a run from meter data reads but may find without data; in a closed period, which no run bills, a meter with no bill from it for the period), and offers Bill from readings on each while the period is a draft. Its form is the panel's row: start and end readings (end not below start, decimals kept to 3 places by the engine, no upper bound, as before) and an optional reason of up to 500 characters; its confirmation names the tenant, the period and what is known of the meter, and warns that a metered tenant's bill from readings is kept by later runs from meter data. Differences from the panel: one tenant per submit, on a route of its own through the same engine (POST /api/billing/generate's manual path, with the same tariff pin, rounding and audit row); a closed period is refused, and so is a tenant who already has a bill (regenerate-bill in manual mode changes it), where the panel's POST /api/billing/generate overwrote that bill and accepted a closed period; no seed readings, as before (header). The section also replaces the legacy page's banner of tenants not billed (BillingTable, #293), which named only tenants with no available meter, and only once the period had a bill; the banner shows information and is no control, so it has no row. The engine reads every page of the period's tenants and bills, so a bill past PostgREST's max_rows is not taken for no bill; a read it cannot complete stops it with nothing written. It reads the period's status again just before the insert and writes nothing if the period is no longer a draft. The bill's insert goes through fn_record_first_line_item_with_audit (migration 20261120130100), with the same columns, rounding and audit row as the panel's upsert, but only while the period is a draft and the tenant has no bill, under the period's lock: a close committing after that read refuses it (period_closed), and a bill another write inserted for that tenant after the engine read the period's bills (a run from meter data, the legacy panel, or a second submission of this action) is left as it is and the submission refused (has_bill).",
+    note: "Decided by the maintainer: after generating from meter data, a tenant with no meter for the period, an assignment gap, or no meter data has no bill, and regenerate-bill and record-usage both need one; writing a zero bill for them is not an option (#293, #339). billing.not-billed, a section of the period review titled Tenants not billed, lists every tenant of the microgrid with no bill for the period, before the first bill too, in name order, with why (meterCoverage's answer: no meter for the period, a meter assignment gap, or a meter with no bill from it yet, which a run from meter data reads but may find without data; in a closed period, which no run bills, a meter with no bill from it for the period), and offers Bill from readings on each while the period is a draft. Its form is the panel's row: start and end readings (end not below start, decimals kept to 3 places by the engine, no upper bound, as before) and an optional reason of up to 500 characters; its confirmation names the tenant, the period and what is known of the meter, and warns that a metered tenant's bill from readings is kept by later runs from meter data. Differences from the panel: one tenant per submit, on a route of its own through the same engine (POST /api/billing/generate's manual path, with the same tariff pin, rounding and audit row); a closed period is refused, and so is a tenant who already has a bill (regenerate-bill in manual mode changes it), where the panel's POST /api/billing/generate overwrote that bill and accepted a closed period; no seed readings, as before (header). The section also replaces the legacy page's banner of tenants not billed (BillingTable, #293), which named only tenants with no available meter, and only once the period had a bill; the banner shows information and is no control, so it has no row. The engine reads every page of the period's tenants and bills, so a bill past PostgREST's max_rows is not taken for no bill; a read it cannot complete stops it with nothing written. It reads the period's status again just before the insert and writes nothing if the period is no longer a draft. The bill's insert goes through fn_record_first_line_item_with_audit (migration 20261120130100), with the same columns, rounding and audit row as the panel's upsert, but only while the period is a draft and the tenant has no bill, under the period's lock: a close committing after that read refuses it (period_closed), and a bill another write inserted for that tenant after the engine read the period's bills (a run from meter data, POST /api/billing/generate, or a second submission of this action) is left as it is and the submission refused (has_bill).",
   },
   {
     id: "regenerate-bill",
@@ -295,7 +293,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
     },
     pr: REVIEW,
-    note: "On its own route: on /api/billing/generate a per-bill action would carry its bill as a tenantIds prefill, which the kit cannot render (GenerateBillsBody's arrays), and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total, the legacy paid-bill warning as an acknowledgement the regenerate route requires (the legacy dialogs' generate path keeps it as a client-side warning only: /api/billing/generate checks no payment status); the route answers with the previous and new totals in its message, which the host passes on as the action's result and Gridtop's period review shows (a GUI that draws only failures does not). Unlike the legacy menu, which offers regenerating a bill in a closed period (\"Logged as audit revision\") and an invoiced bill through /api/billing/generate, the route refuses both, as it refuses a refunded bill (REGENERATE_REFUSAL_COPY), and the review shows the action disabled with that reason; correcting a closed or invoiced bill once the legacy screens are deleted is left to a later decision. A read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row; a run over chosen tenants would need a contribution of its own, as generate-from-meters takes no tenants.",
+    note: "On its own route: on /api/billing/generate a per-bill action would carry its bill as a tenantIds prefill, which the kit cannot render (GenerateBillsBody's arrays), and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total, the legacy paid-bill warning as an acknowledgement the regenerate route requires (the legacy dialogs' generate path keeps it as a client-side warning only: /api/billing/generate checks no payment status); the route answers with the previous and new totals in its message, which the host passes on as the action's result and Gridtop's period review shows (a GUI that draws only failures does not). Unlike the legacy menu, which offers regenerating a bill in a closed period (\"Logged as audit revision\") and an invoiced bill through /api/billing/generate, the route refuses both, as it refuses a refunded bill (REGENERATE_REFUSAL_COPY), and the review shows the action disabled with that reason; correcting a closed or invoiced bill, which only the deleted legacy screens offered, is left to a later decision. A read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row; a run over chosen tenants would need a contribution of its own, as generate-from-meters takes no tenants.",
   },
   {
     id: "record-usage",
@@ -502,7 +500,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/billing/row-actions-menu.tsx",
     replacedBy: { kind: "view", view: "billing.send-queue" },
     pr: SEND,
-    note: "The send queue shows each bill's stable payment link, ready to copy, so Generate, Regenerate and Retry have nothing left to do. The url route has written nothing and called no provider since the stable link replaced per-checkout links (its UNGATED_WRITES entry in src/lib/runtime/__tests__/route-rules.ts says so), and an action result carries no URL a person could copy: invoke.ts keeps only a message and a same-site href, which the host opens, and opening …/pay starts a checkout. The queue offers a link only where checkout would accept it (no paid or refunded bill, no zero total, a tenant with an email or phone) and while readiness is ready or sandbox, as the legacy menu offered Generate only once payments were set up. If the link ever needs a write (a per-bill token, say), it becomes an action again. The url route's only caller is the legacy row menu; the Deletes pull request removes it, or keeps it, with its UNGATED_WRITES entry, its released route and its tests.",
+    note: "The send queue shows each bill's stable payment link, ready to copy, so Generate, Regenerate and Retry have nothing left to do. The url route has written nothing and called no provider since the stable link replaced per-checkout links (its UNGATED_WRITES entry in src/lib/runtime/__tests__/route-rules.ts says so), and an action result carries no URL a person could copy: invoke.ts keeps only a message and a same-site href, which the host opens, and opening …/pay starts a checkout. The queue offers a link only where checkout would accept it (no paid or refunded bill, no zero total, a tenant with an email or phone) and while readiness is ready or sandbox, as the legacy menu offered Generate only once payments were set up. If the link ever needs a write (a per-bill token, say), it becomes an action again. The url route's only caller was the legacy row menu, which #201's Deletes item deleted; the route stays for now, with its UNGATED_WRITES entry, its released route and its tests, and removing them is a follow-up.",
   },
   {
     id: "payment-history",
@@ -609,8 +607,8 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-history",
     control: "Back to period",
     // Back to period was on the history's page.tsx, which "Serve the billing
-    // pages through the GUI host" deleted; AuditLogList is what remains of
-    // that screen until the Deletes pull request.
+    // pages through the GUI host" deleted; AuditLogList was what remained of
+    // that screen until #201's Deletes item.
     legacy: "src/components/billing/audit-log-list.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]", via: { link: "billing.back-to-period" } },
     pr: HISTORY,

@@ -320,7 +320,7 @@ describe("runGenerationFor with newBillOnly", () => {
     const w = writes(h.rpc);
     expect(w.map((x) => x.name)).toEqual(["fn_record_first_line_item_with_audit"]);
     // Usage is end − start, priced as computed and stored to 3 places, as the
-    // legacy panel's manual path does it.
+    // manual path of POST /api/billing/generate does it.
     const usage = 50.377;
     const calc = calculateTieredCost(150.5 - 100.1234, TIERS, 1000, 0.18);
     expect(w[0].args).toEqual({

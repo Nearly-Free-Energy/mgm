@@ -1,19 +1,23 @@
 /**
  * Each bill's actions and links in `billing.period-review` against the
- * legacy row menu (computeMenuItems in src/components/billing/row-actions-menu.tsx),
- * over every payment status, reading source, period status, edge
- * availability and role. The payment-link group is left to the send queue
- * (#201's "Contribute the send queue"), so the menu is asked with payments
- * not configured; the usage correction is the legacy page's editable cell,
- * not a menu item, and is compared in period-review-model.test.ts.
+ * legacy row menu (computeMenuItems in the deleted
+ * src/components/billing/row-actions-menu.tsx), over every payment status,
+ * reading source, period status, edge availability and role. The menu was
+ * deleted with the legacy billing screens (#201's Deletes item); its items,
+ * recorded from computeMenuItems over these same cases just before it was
+ * deleted, are pinned below as LEGACY_REGENERATE and LEGACY_STATUS. They did
+ * not depend on the period's status. The payment-link group is left to the
+ * send queue (#201's "Contribute the send queue"), so the menu was asked
+ * with payments not configured; the usage correction was the legacy page's
+ * editable cell, not a menu item, and is compared in
+ * period-review-model.test.ts.
  *
  * The one allowed difference: an organization manager is not offered
- * marking a bill failed or refunded, which the legacy menu shows to every
+ * marking a bill failed or refunded, which the legacy menu showed to every
  * role and the payment-status route answers 403 for anyone but a super
  * admin.
  */
 import { describe, expect, it } from "vitest";
-import { computeMenuItems, type MenuItem } from "@/components/billing/row-actions-menu";
 import { createFmt } from "@/lib/gui/fmt";
 import type { PaymentStatus } from "@/lib/payments/state";
 import {
@@ -50,7 +54,29 @@ const MENU_ACTIONS: Record<string, string> = {
 /** Shown to every role by the legacy menu; refused by the route for anyone but a super admin. */
 const SUPER_ADMIN_ONLY = new Set<string>([MARK_FAILED_ACTION.id, MARK_REFUNDED_ACTION.id]);
 
-const noop = () => {};
+/**
+ * The legacy menu's regenerate group by reading source, with the edge
+ * available and without: a bill with no reading source (written before it
+ * was recorded) had none, and neither had a refunded bill (LEGACY_STATUS).
+ */
+const LEGACY_REGENERATE: Record<"edge" | "manual" | "null", { edge: string[]; noEdge: string[] }> = {
+  edge: { edge: ["Regenerate from edge data", "Switch to manual entry"], noEdge: ["Switch to manual entry"] },
+  manual: { edge: ["Switch back to edge data", "Re-enter manual readings"], noEdge: ["Re-enter manual readings"] },
+  null: { edge: [], noEdge: [] },
+};
+/**
+ * The legacy menu's payment-status group. A refunded bill's menu had only
+ * the disabled "No further status changes available" in place of both
+ * groups, so null here: no regenerate group either.
+ */
+const LEGACY_STATUS: Record<PaymentStatus, string[] | null> = {
+  unpaid: ["Mark as paid"],
+  link_generated: ["Mark as paid", "Cancel pending link", "Mark as failed"],
+  paid: ["Mark as unpaid", "Mark as refunded"],
+  failed: ["Mark as paid"],
+  refunded: null,
+};
+
 const STATUSES: PaymentStatus[] = ["unpaid", "link_generated", "paid", "failed", "refunded"];
 const SOURCES = ["edge", "manual", null] as const;
 
@@ -62,50 +88,21 @@ const cases = STATUSES.flatMap((payment) =>
   ),
 );
 
-/** The menu's controls as [action id, label for a regenerate item], and its links' hrefs. */
-function menu(payment: PaymentStatus, source: "edge" | "manual" | null, status: "draft" | "closed", edgeAvailable: boolean) {
-  const items: MenuItem[] = computeMenuItems({
-    microgridId: MG,
-    // The reading source is null on bills written before it was recorded.
-    lineItem: { id: BILL, payment_status: payment, reading_source: source as "edge", total_amount: 1000, pesapal_redirect_url: null },
-    tenant: TENANT,
-    period: { ...PERIOD, status },
-    edgeAvailable,
-    isPaymentConfigured: false,
-    pendingUrl: null,
-    handlers: {
-      onRequestRegenerate: noop,
-      onRequestSwitchToManual: noop,
-      onGenerateLink: noop,
-      onCopyLink: noop,
-      onMarkAsPaid: noop,
-      onMarkAsRefunded: noop,
-      onMarkAsUnpaid: noop,
-      onCancelLink: noop,
-      onMarkAsFailed: noop,
-      onDownloadPdf: noop,
-    },
-  });
-  const actions: [string, string | undefined][] = [];
-  const links: string[] = [];
-  let download = false;
-  for (const item of items) {
-    if (item.kind === "separator") continue;
-    if (item.kind === "link") {
-      links.push(item.href);
-      continue;
-    }
-    if (item.disabled) continue; // "No further status changes available"
-    if (item.key === "download-pdf") {
-      download = true;
-      continue;
-    }
-    const label = item.label.replace(/…$/, "");
+/**
+ * The legacy menu's controls as [action id, label for a regenerate item],
+ * and its links' hrefs: every bill's menu also offered the PDF download, the
+ * tenant's page and the bill's history.
+ */
+function menu(payment: PaymentStatus, source: "edge" | "manual" | null, edgeAvailable: boolean) {
+  const status = LEGACY_STATUS[payment];
+  const regenerate = status === null ? [] : LEGACY_REGENERATE[source ?? "null"][edgeAvailable ? "edge" : "noEdge"];
+  const actions = [...regenerate, ...(status ?? [])].map((label): [string, string | undefined] => {
     const action = MENU_ACTIONS[label];
-    if (!action) throw new Error(`unmapped legacy menu item "${item.label}"`);
-    actions.push([action, action === REGENERATE_BILL_ACTION.id ? label : undefined]);
-  }
-  return { actions, links, download };
+    if (!action) throw new Error(`unmapped legacy menu item "${label}"`);
+    return [action, action === REGENERATE_BILL_ACTION.id ? label : undefined];
+  });
+  const links = [`/microgrids/${MG}/setup/tenants/${TENANT.id}`, `/microgrids/${MG}/billing/${PERIOD.id}/history?tenant_id=${TENANT.id}`];
+  return { actions, links };
 }
 
 describe("each bill's actions match the legacy row menu", () => {
@@ -136,7 +133,7 @@ describe("each bill's actions match the legacy row menu", () => {
       fmt,
     });
     const [row] = model.body.rows;
-    const legacy = menu(payment, source, status, edgeAvailable);
+    const legacy = menu(payment, source, edgeAvailable);
 
     const expected = legacy.actions.filter(([action]) => superAdmin || !SUPER_ADMIN_ONLY.has(action));
     const actual = row.actions
@@ -145,15 +142,14 @@ describe("each bill's actions match the legacy row menu", () => {
     expect(actual).toEqual(expected);
 
     // The legacy menu's links: the PDF download, the tenant (now the row's tenant ref) and the history.
-    expect(legacy.download).toBe(true);
     expect(row.links?.find((l) => l.id === DOWNLOAD_BILL_LINK)?.download).toBeDefined();
     const hrefs = [...(row.related ?? []).map((r) => r.href), ...(row.links ?? []).filter((l) => l.id === VIEW_HISTORY_LINK).map((l) => l.href)];
     expect(hrefs).toEqual(legacy.links);
   });
 
   it("differs only where the route refuses an organization manager", () => {
-    const missing = cases.flatMap(([payment, source, status, edgeAvailable, superAdmin]) =>
-      superAdmin ? [] : menu(payment, source, status, edgeAvailable).actions.filter(([a]) => SUPER_ADMIN_ONLY.has(a)).map(([a]) => a),
+    const missing = cases.flatMap(([payment, source, , edgeAvailable, superAdmin]) =>
+      superAdmin ? [] : menu(payment, source, edgeAvailable).actions.filter(([a]) => SUPER_ADMIN_ONLY.has(a)).map(([a]) => a),
     );
     // Some cases do hide them, so the allowance above is used, and only for these two.
     expect(new Set(missing)).toEqual(SUPER_ADMIN_ONLY);
