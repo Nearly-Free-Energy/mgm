@@ -187,7 +187,7 @@ export async function collectSignals(ctx: HostContext, o: { requested?: string |
  * layout and route builds its own HostContext from the same access read, and
  * a render serves one session, so a slot is never shared between people.
  */
-const renderSlot = cache((_userId: string, _org: string): { signals?: Promise<HostOutcome<Signals>> } => ({}));
+const renderSlot = cache((userId: string, org: string): { key: string; signals?: Promise<HostOutcome<Signals>> } => ({ key: `${userId} ${org}` }));
 
 /**
  * The signals of `org`, which the caller has already chosen among the
