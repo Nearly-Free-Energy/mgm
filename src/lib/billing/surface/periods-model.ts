@@ -6,9 +6,13 @@
  * shows is built here. The columns and empty-state copy are the legacy
  * periods list's (src/components/BillingPeriodList.tsx), which this view
  * replaced at the Billing path; the component stays until #201's Deletes
- * pull request.
+ * pull request. The host's catch-all serves this view outside the microgrid
+ * layout, so the view repeats that layout's time zone nudge as its notice,
+ * in the nudge's own copy (src/lib/timezone/nudge.ts).
  */
+import type { LinkRef } from "@/lib/gui/contract";
 import type { Fmt, LoadedModel } from "@/lib/gui/surface";
+import type { TimezoneNudgeCopy } from "@/lib/timezone/nudge";
 
 /** Every cell key the view emits. */
 export const PERIODS_KEYS = ["period", "status", "energy", "total"] as const;
@@ -18,6 +22,11 @@ export const PERIODS_TITLE = "Billing periods";
 /** The billing actions the view offers; BILLING_SURFACE (../surface.ts) defines them. */
 export const CREATE_PERIOD_ACTION = { id: "billing.create-period", title: "New billing period" } as const;
 export const DELETE_PERIOD_ACTION = { id: "billing.delete-period", title: "Delete period" } as const;
+
+/** The link beside the time zone notice. */
+export const SET_TIMEZONE_LINK = "billing.set-timezone";
+/** The longest notice text the view sends; the nudge's text holds the microgrid's free-text country. */
+export const TIMEZONE_NOTICE_MAX = 600;
 
 export type PeriodRowInput = {
   id: string;
@@ -34,17 +43,39 @@ export type PeriodsModelInput = {
   currency: string;
   /** Newest first, as the loader reads them. */
   periods: readonly PeriodRowInput[];
+  /** The new period form's starting dates (getDefaultDates in ../default-dates.ts). */
+  defaults: { start: string; end: string };
+  /** The time zone nudge (timezoneNudge in src/lib/timezone/nudge.ts), or null when there is none. */
+  nudge: TimezoneNudgeCopy | null;
   fmt: Fmt;
 };
 
 type Row = LoadedModel<"collection">["body"]["rows"][number];
 
-export function buildPeriodsModel({ microgridId, currency, periods, fmt }: PeriodsModelInput): LoadedModel<"collection"> {
-  // No prefill on create: CreatePeriodBody is refined, so the host cannot
-  // check one and would drop it (cleanPrefill in src/lib/gui/host/server/merge.ts).
-  // The form opens empty; the legacy list (BillingPeriodList) started it at
-  // the previous month.
-  const create = { action: CREATE_PERIOD_ACTION.id, params: { microgrid_id: microgridId } };
+/**
+ * The nudge as the view's notice, with the link to the page that holds the
+ * microgrid's Edit button and the nudge's own Set timezone: billing's Rates
+ * page, inside the microgrid layout (src/app/(gui)/microgrids/[id]/layout.tsx),
+ * which the host's catch-all does not serve. If Rates comes to be served by
+ * a view, or Edit leaves that layout, revisit.
+ */
+function timezoneNotice(microgridId: string, nudge: TimezoneNudgeCopy | null): Pick<LoadedModel<"collection">, "notice" | "links"> {
+  if (!nudge) return {};
+  const full = `${nudge.title}. ${nudge.text}`;
+  const text = full.length > TIMEZONE_NOTICE_MAX ? `${full.slice(0, TIMEZONE_NOTICE_MAX - 1)}…` : full;
+  const link: LinkRef = { id: SET_TIMEZONE_LINK, label: "Set timezone", href: `/microgrids/${microgridId}/setup/rates` };
+  return { notice: { tone: "warning", text }, links: [link] };
+}
+
+export function buildPeriodsModel({ microgridId, currency, periods, defaults, nudge, fmt }: PeriodsModelInput): LoadedModel<"collection"> {
+  // The form starts at the previous month in the microgrid's zone, as the
+  // legacy list (BillingPeriodList) starts it. The host checks the prefill
+  // against CreatePeriodBody's fields; the route checks start <= end.
+  const create = {
+    action: CREATE_PERIOD_ACTION.id,
+    params: { microgrid_id: microgridId },
+    prefill: { start_date: defaults.start, end_date: defaults.end },
+  };
   const rows: Row[] = periods.map((p) => {
     // As the host labels a billing period (src/lib/gui/host/server/entities.ts).
     const label = `${fmt.date(p.start_date).text} – ${fmt.date(p.end_date).text}`;
@@ -66,6 +97,7 @@ export function buildPeriodsModel({ microgridId, currency, periods, fmt }: Perio
   });
   return {
     title: PERIODS_TITLE,
+    ...timezoneNotice(microgridId, nudge),
     actions: [create],
     body: {
       columns: [

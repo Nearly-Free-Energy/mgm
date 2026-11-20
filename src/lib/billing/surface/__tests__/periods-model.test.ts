@@ -11,7 +11,16 @@ import { BillingCapability } from "../../capability";
 import type { BillingRepository } from "../../repository";
 import { BILLING_SURFACE } from "../../surface";
 import { PERIODS_EXAMPLES, PERIODS_LOADED_EXAMPLES } from "../periods-examples";
-import { buildPeriodsModel, CREATE_PERIOD_ACTION, DELETE_PERIOD_ACTION, PERIODS_KEYS, type PeriodRowInput } from "../periods-model";
+import { timezoneNudge } from "@/lib/timezone/nudge";
+import {
+  buildPeriodsModel,
+  CREATE_PERIOD_ACTION,
+  DELETE_PERIOD_ACTION,
+  PERIODS_KEYS,
+  SET_TIMEZONE_LINK,
+  TIMEZONE_NOTICE_MAX,
+  type PeriodRowInput,
+} from "../periods-model";
 
 const fmt = createFmt({ locale: "en-GB" });
 const MG = "e7100000-0000-4000-8002-0000000000a1";
@@ -26,7 +35,11 @@ const period = (o: Partial<PeriodRowInput> = {}): PeriodRowInput => ({
   totalAmount: null,
   ...o,
 });
-const build = (periods: PeriodRowInput[], currency = "UGX") => buildPeriodsModel({ microgridId: MG, currency, periods, fmt });
+const OCTOBER = { start: "2026-10-01", end: "2026-10-31" };
+const build = (periods: PeriodRowInput[], currency = "UGX", o: { nudge?: ReturnType<typeof timezoneNudge> } = {}) =>
+  buildPeriodsModel({ microgridId: MG, currency, periods, defaults: OCTOBER, nudge: o.nudge ?? null, fmt });
+const NOW = new Date("2026-11-18T08:00:00Z");
+const UGANDA_UTC = { address_country: "Uganda", lat: 0.35, lng: 32.6, timezone: "UTC" };
 
 describe("buildPeriodsModel", () => {
   it("emits the legacy list's columns, and only declared keys", () => {
@@ -78,13 +91,42 @@ describe("buildPeriodsModel", () => {
     expect(rows[1].actions).toEqual([]);
   });
 
-  it("offers create on the view and in the empty state, with no prefill", () => {
-    const create = { action: CREATE_PERIOD_ACTION.id, params: { microgrid_id: MG } };
+  it("offers create on the view and in the empty state, starting at the given dates", () => {
+    const create = {
+      action: CREATE_PERIOD_ACTION.id,
+      params: { microgrid_id: MG },
+      prefill: { start_date: "2026-10-01", end_date: "2026-10-31" },
+    };
     const empty = build([]);
     expect(empty.actions).toEqual([create]);
     expect(empty.body.empty).toMatchObject({ title: "Create the first billing period", action: create });
     expect(empty.body.empty.text).toContain("typically one calendar month");
     expect(build([period()]).actions).toEqual([create]);
+  });
+
+  it("has no notice and no links while the microgrid's zone needs no nudge", () => {
+    const model = build([period()]);
+    expect(model).not.toHaveProperty("notice");
+    expect(model).not.toHaveProperty("links");
+    // An address whose zone is already set needs none either.
+    expect(timezoneNudge({ ...UGANDA_UTC, timezone: "Africa/Kampala" }, NOW)).toBeNull();
+  });
+
+  it("repeats the microgrid layout's time zone nudge as its notice, with a link to set the zone", () => {
+    const nudge = timezoneNudge(UGANDA_UTC, NOW)!;
+    const model = build([period()], "UGX", { nudge });
+    expect(model.notice).toEqual({ tone: "warning", text: `Billing timezone is still UTC. ${nudge.text}` });
+    expect(model.notice!.text).toContain("is in Uganda (Africa/Kampala (UTC+3))");
+    expect(model.links).toEqual([{ id: SET_TIMEZONE_LINK, label: "Set timezone", href: `/microgrids/${MG}/setup/rates` }]);
+    // The notice shows above the empty state too.
+    expect(build([], "UGX", { nudge }).notice).toEqual(model.notice);
+  });
+
+  it("cuts a notice longer than its bound, as the free-text country could make it", () => {
+    const nudge = timezoneNudge({ ...UGANDA_UTC, address_country: "U".repeat(800) }, NOW)!;
+    const text = build([], "UGX", { nudge }).notice!.text;
+    expect(text).toHaveLength(TIMEZONE_NOTICE_MAX);
+    expect(text.endsWith("…")).toBe(true);
   });
 });
 
@@ -93,13 +135,20 @@ describe("PERIODS_EXAMPLES", () => {
     for (const loaded of PERIODS_LOADED_EXAMPLES) expect(strictParseModel(view, loaded)).toMatchObject({ ok: true });
   });
 
-  it("are a list with a closed and a draft period, the empty state, and the empty state while billing is off", () => {
+  it("are a list with a closed and a draft period, the empty state, the empty state while billing is off, and a UTC microgrid's nudge", () => {
     expect(PERIODS_EXAMPLES.map((e) => [e.view, e.kind, e.body.rows.length, e.notice?.tone ?? null])).toEqual([
       ["billing.periods", "collection", 2, null],
       ["billing.periods", "collection", 0, null],
       ["billing.periods", "collection", 0, "warning"],
+      ["billing.periods", "collection", 1, "warning"],
     ]);
-    const [list, empty, off] = PERIODS_EXAMPLES;
+    const [list, empty, off, utc] = PERIODS_EXAMPLES;
+    expect(utc.notice!.text).toMatch(/^Billing timezone is still UTC\. This microgrid's address is in Uganda/);
+    expect(utc.links.map((l) => l.id)).toEqual([SET_TIMEZONE_LINK]);
+    // Create starts at the previous month: in Kampala, and in UTC where the zone is still UTC.
+    expect(list.actions[0].prefill).toEqual({ start_date: "2026-11-01", end_date: "2026-11-30" });
+    expect(off.actions[0].prefill).toEqual(list.actions[0].prefill);
+    expect(utc.actions[0].prefill).toEqual({ start_date: "2026-11-01", end_date: "2026-11-30" });
     expect(list.body.rows.map((r) => r.actions.map((a) => [a.action, a.label, a.enabled, a.tone]))).toEqual([
       [["billing.delete-period", "Delete period", true, "danger"]],
       [],

@@ -259,9 +259,10 @@ export const BILLING_SURFACE: Contribution = {
     // Human-only, as no assistant proposes a period yet (#201).
     // `targeted: false`: offered only by billing.periods, which the host now
     // serves at the Billing path. Appended to another plugin's view of the
-    // microgrid (metering.site-day) it would open an empty date form there,
-    // away from the periods it adds to. If the host's prepare comes to
-    // supply starting dates, revisit.
+    // microgrid (metering.site-day) it would open an empty date form there
+    // (the starting dates are billing.periods' own prefill, which an
+    // appended action does not carry), away from the periods it adds to. If
+    // the host's prepare comes to supply starting dates, revisit.
     {
       ...CREATE_PERIOD_ACTION,
       target: "microgrid",

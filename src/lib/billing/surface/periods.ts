@@ -9,14 +9,17 @@ import "server-only";
  * billing_line_items are FOR ALL on user_can_access_microgrid, as the legacy
  * billing page reads them. If their policies change, revisit what this
  * shows. The list loads while billing is off, and the host shows the gate's
- * notice with create disabled. The delete route is the authority on every
+ * notice with create disabled, in place of the view's own time zone notice.
+ * The delete route is the authority on every
  * write; prepare and availability only explain a refusal before it happens.
  *
  * A refusal carries fixed copy, never a database message.
  */
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
+import { timezoneNudge } from "@/lib/timezone/nudge";
 import { periodName } from "../close";
+import { getDefaultDates } from "../default-dates";
 import {
   DELETE_DRAFT_PERIOD_DESCRIPTION,
   lineItemHasRecordedPayment,
@@ -49,12 +52,25 @@ export const DELETE_PERIOD_REFUSALS = {
  */
 const MAX_PERIODS = 500;
 
+type MicrogridRow = {
+  id: string;
+  currency: string | null;
+  timezone: string | null;
+  address_country: string | null;
+  lat: number | null;
+  lng: number | null;
+};
+
 export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedModel<"collection">>> {
+  // The zone starts the new period form; the zone and address columns are
+  // the time zone nudge's, as the microgrid layout reads them. All are in
+  // MICROGRID_PUBLIC_COLUMNS (src/lib/types/microgrid-columns.ts); if one
+  // leaves that projection, revisit this select.
   const { data: microgrid, error } = await req.supabase
     .from("microgrids")
-    .select("id, currency")
+    .select("id, currency, timezone, address_country, lat, lng")
     .eq("id", req.params.id)
-    .maybeSingle<{ id: string; currency: string | null }>();
+    .maybeSingle<MicrogridRow>();
   if (error) return PERIODS_REFUSALS.unavailable;
   if (!microgrid) return PERIODS_REFUSALS.notFound;
 
@@ -101,7 +117,16 @@ export async function loadPeriods(req: SurfaceRequest): Promise<Loaded<LoadedMod
   });
   return {
     ok: true,
-    model: buildPeriodsModel({ microgridId: microgrid.id, currency, periods, fmt: req.fmt }),
+    model: buildPeriodsModel({
+      microgridId: microgrid.id,
+      currency,
+      periods,
+      // microgrids.timezone is NOT NULL DEFAULT 'UTC' (00055); were it ever
+      // missing, the microgrid bills in UTC, not in the server's own zone.
+      defaults: getDefaultDates(req.now, microgrid.timezone ?? "UTC"),
+      nudge: timezoneNudge(microgrid, req.now),
+      fmt: req.fmt,
+    }),
   };
 }
 
