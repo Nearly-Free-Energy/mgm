@@ -2,7 +2,8 @@
 //
 // Strategy:
 //   - Mock @/lib/supabase/server so all three queries return fixture rows, and
-//     the fn_tenant_access_list RPC behind the portal users count.
+//     the fn_tenant_access_list and mgm_plugin_enabled_for_org RPCs behind the
+//     App access section.
 //   - Call TenantDetailPage() directly (async server component) and serialize
 //     the returned JSX to HTML.
 //   - Cover scenarios: populated, empty devices, empty billing, query-error
@@ -12,7 +13,7 @@
 // Environment: node (same pattern as D2 page tests).
 
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 // vi.hoisted() runs before vi.mock() hoisting — lets us capture the mock reference.
@@ -59,11 +60,25 @@ vi.mock("@/lib/auth/access", () => ({
 
 const mockFrom = vi.fn();
 // fn_tenant_access_list: one row per person who can sign in to the tenant's
-// data (tenant role rows, RFC mgm#197).
+// data (tenant role rows, RFC mgm#197). mgm_plugin_enabled_for_org: the
+// tenant app's state for the microgrid's organization.
 const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mockFrom, rpc: mockRpc }),
 }));
+
+// The App access section renders for real; its props are recorded.
+const { sectionProps } = vi.hoisted(() => ({ sectionProps: vi.fn() }));
+vi.mock("./tenant-access-section", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./tenant-access-section")>();
+  return {
+    ...actual,
+    TenantAccessSection: (props: Parameters<typeof actual.TenantAccessSection>[0]) => {
+      sectionProps(props);
+      return actual.TenantAccessSection(props);
+    },
+  };
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -117,6 +132,18 @@ function accessList(count: number) {
   return Promise.resolve({ data, error: null });
 }
 
+let accessAnswer: () => Promise<{ data: unknown; error: unknown }>;
+let tenantAppAnswer: { data: boolean | null; error: { message: string } | null };
+
+/** The RPCs the page makes, by name. */
+function rpcByName(fn: string) {
+  if (fn === "fn_tenant_access_list") return accessAnswer();
+  if (fn === "mgm_plugin_enabled_for_org") return Promise.resolve(tenantAppAnswer);
+  throw new Error(`Unexpected RPC: ${fn}`);
+}
+
+const MICROGRID_ROW = { timezone: "Africa/Kampala", communities: { org_id: "org-1" } };
+
 /**
  * Builds a mock Supabase query chain for billing_line_items.
  * Supports `.select().eq().eq().order().limit().returns()` pattern.
@@ -165,12 +192,19 @@ import TenantDetailPage from "./page";
 describe("TenantDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRpc.mockImplementation(() => accessList(0));
+    vi.stubEnv("MGM_APP_URL", "https://mgm.example.test");
+    accessAnswer = () => accessList(0);
+    tenantAppAnswer = { data: true, error: null };
+    mockRpc.mockImplementation(rpcByName);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   // (a) Populated: 1 primary_consumption_meter device + 1 closed billing period
   it("renders all sections for a populated tenant", async () => {
-    mockRpc.mockImplementation(() => accessList(2));
+    accessAnswer = () => accessList(2);
     mockFrom.mockImplementation((table: string) => {
       if (table === "tenants") {
         return buildTenantQuery({
@@ -206,8 +240,10 @@ describe("TenantDetailPage", () => {
     expect(html).toContain("Block A");
     expect(html).toContain("Unit 1");
 
-    // Portal users: counted from the tenant role rows, not tenant_users
-    expect(html).toContain("2 portal users linked");
+    // App access: listed from the tenant role rows, not tenant_users
+    expect(html).toContain("App access");
+    expect(html).toContain("person-0@example.org");
+    expect(html).toContain("person-1@example.org");
     expect(mockRpc).toHaveBeenCalledWith("fn_tenant_access_list", { _tenant_id: "hh-1" });
     expect(mockFrom).not.toHaveBeenCalledWith("tenant_users");
 
@@ -424,5 +460,92 @@ describe("TenantDetailPage", () => {
     expect(html).toContain("Assignment gaps need attention");
     expect(html).toContain("2026-03-01");
     expect(html).toContain("Record opening register");
+  });
+  describe("App access", () => {
+    function withMicrogrid() {
+      mockFrom.mockImplementation((table: string) => {
+        if (table === "tenants") {
+          return buildTenantQuery({ ...TENANT_BASE, tenant_devices: [] });
+        }
+        if (table === "billing_line_items") return buildLineItemsQuery([]);
+        if (table === "microgrids") return buildFlexQuery([MICROGRID_ROW]);
+        return buildFlexQuery([]);
+      });
+    }
+
+    async function render() {
+      const jsx = await TenantDetailPage({
+        params: Promise.resolve({ id: "mg-1", tenantId: "hh-1" }),
+      });
+      return renderToStaticMarkup(jsx as React.ReactElement);
+    }
+
+    it("passes the list, the tenant app's state, the zone and the sign-in page to the section", async () => {
+      withMicrogrid();
+      accessAnswer = () => accessList(1);
+      await render();
+
+      expect(sectionProps).toHaveBeenCalledTimes(1);
+      expect(sectionProps.mock.calls[0][0]).toEqual({
+        tenantId: "hh-1",
+        entries: [
+          { accessId: "access-0", email: "person-0@example.org", createdAt: "2026-11-18T00:00:00Z" },
+        ],
+        suggestedEmail: "aisha.m@example.org",
+        canManage: true,
+        tenantAppOn: true,
+        timeZone: "Africa/Kampala",
+        loginUrl: "https://mgm.example.test/login",
+      });
+      expect(mockRpc).toHaveBeenCalledWith("mgm_plugin_enabled_for_org", {
+        _org_id: "org-1",
+        _plugin_name: "tenant-app",
+      });
+    });
+
+    it("passes null, never an empty list, when the list cannot be read", async () => {
+      withMicrogrid();
+      accessAnswer = () => Promise.resolve({ data: null, error: { code: "42501", message: "denied" } });
+      const html = await render();
+
+      expect(sectionProps.mock.calls[0][0].entries).toBeNull();
+      expect(html).toContain("Could not load app access");
+      expect(html).not.toContain("Nobody can sign in to this unit yet");
+    });
+
+    it("shows the empty state with Give access while nobody has access", async () => {
+      withMicrogrid();
+      const html = await render();
+
+      expect(html).toContain("Give this tenant access to the app");
+      expect(html).toContain("Nobody can sign in to this unit yet");
+      expect(html).toContain(">Give access</button>");
+    });
+
+    it("hides Give access while the tenant app is off for the organization", async () => {
+      withMicrogrid();
+      tenantAppAnswer = { data: false, error: null };
+      const html = await render();
+
+      expect(sectionProps.mock.calls[0][0].tenantAppOn).toBe(false);
+      expect(html).toContain("The tenant app is not on yet");
+      expect(html).not.toContain(">Give access</button>");
+    });
+
+    it("passes an unknown tenant app state as null when it cannot be read", async () => {
+      withMicrogrid();
+      tenantAppAnswer = { data: null, error: { message: "unavailable" } };
+      await render();
+
+      expect(sectionProps.mock.calls[0][0].tenantAppOn).toBeNull();
+    });
+
+    it("renders without a sign-in address while MGM_APP_URL is unset", async () => {
+      withMicrogrid();
+      vi.stubEnv("MGM_APP_URL", "");
+      await render();
+
+      expect(sectionProps.mock.calls[0][0].loginUrl).toBeNull();
+    });
   });
 });

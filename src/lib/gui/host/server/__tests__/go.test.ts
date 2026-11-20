@@ -25,8 +25,8 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("../manifest", () => ({ getManifest: mocks.getManifest }));
 // Pages that need a community and a microgrid, in either order, which no
-// released page does yet, and the tenant home, which RFC mgm#197's PR 5 releases.
-const PAIR_ROUTES = [/^\/communities\/[^/]+\/microgrids\/[^/]+$/, /^\/microgrids\/[^/]+\/communities\/[^/]+$/, /^\/my$/];
+// released page does yet.
+const PAIR_ROUTES = [/^\/communities\/[^/]+\/microgrids\/[^/]+$/, /^\/microgrids\/[^/]+\/communities\/[^/]+$/];
 vi.mock("@/lib/mgm/released-routes", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/mgm/released-routes")>();
   return { isReleasedRoute: (path: string) => PAIR_ROUTES.some((r) => r.test(path)) || actual.isReleasedRoute(path) };

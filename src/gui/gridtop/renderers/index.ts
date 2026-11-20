@@ -12,12 +12,15 @@ import { PeriodReviewRenderer } from "./period-review";
 import { SavingsRenderer } from "./savings";
 import { SendQueueRenderer } from "./send-queue";
 import { SiteDayRenderer } from "./site-day";
+import { UsageDayRenderer, UsageMonthRenderer } from "./tenant-usage";
 
 export const GRIDTOP_RENDERERS = {
   "billing.period-review": { reads: [1], Component: PeriodReviewRenderer },
   "billing.savings": { reads: [1], Component: SavingsRenderer },
   "billing.send-queue": { reads: [1], Component: SendQueueRenderer },
   "metering.site-day": { reads: [1], Component: SiteDayRenderer },
+  "tenant.usage-month": { reads: [1], Component: UsageMonthRenderer },
+  "tenant.usage-day": { reads: [1], Component: UsageDayRenderer },
 } satisfies NonNullable<GuiPlugin["renderers"]>;
 
 /**
@@ -31,7 +34,12 @@ export const GRIDTOP_RENDERERS = {
  * renderer is not one either: it leaves the period's links to the window bar
  * on its own page (./send-queue/view.tsx).
  */
-const PLACE_PAGE_CONTROLS: readonly (keyof typeof GRIDTOP_RENDERERS)[] = ["billing.period-review", "metering.site-day"];
+const PLACE_PAGE_CONTROLS: readonly (keyof typeof GRIDTOP_RENDERERS)[] = [
+  "billing.period-review",
+  "metering.site-day",
+  "tenant.usage-month",
+  "tenant.usage-day",
+];
 
 /**
  * Whether Gridtop draws the page's `model` with a renderer that places its

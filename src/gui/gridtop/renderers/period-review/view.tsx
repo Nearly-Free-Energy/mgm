@@ -8,7 +8,8 @@
  * toolbar leaves that action out. The window bar leaves the period's
  * controls to this view (PLACE_PAGE_CONTROLS in ../index.ts). It prints the
  * text the server formatted, copies the ext's figures, and writes only
- * through kit.act. A model whose ext it cannot read is drawn by the kit's
+ * through kit.act. What an action answered is shown under the control that
+ * ran it: a failure, or the message its route gave with a success. A model whose ext it cannot read is drawn by the kit's
  * view instead.
  *
  * Loaded on demand by ./index.tsx, which hands it the kit. These files
@@ -20,7 +21,7 @@
 import { useCallback, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import type { GuiKit, ModelOf, SyncNode, ViewProps } from "@/lib/gui/contract";
 import { BillCards } from "./cards";
-import { ActionControl, ControlList, TONE } from "./controls";
+import { ActionControl, ControlList, OutcomeLine, TONE, type ActionOutcome } from "./controls";
 import { useCopier } from "./copy";
 import { CopyTable } from "./copy-table";
 import { cls, readPeriodReviewExt } from "./ext";
@@ -50,19 +51,24 @@ function LiveRegion({ speaker }: { speaker: Ref<Speaker> }) {
   );
 }
 
-/** The empty state, which owns the action it offers. */
-function Empty({ empty, kit }: { empty: ModelOf<"collection">["body"]["empty"]; kit: GuiKit }) {
-  const [error, setError] = useState<string | null>(null);
+/** The empty state, which owns the action it offers; the review keeps that action's outcome. */
+function Empty({
+  empty,
+  kit,
+  outcome,
+  onOutcome,
+}: {
+  empty: ModelOf<"collection">["body"]["empty"];
+  kit: GuiKit;
+  outcome: ActionOutcome;
+  onOutcome(outcome: ActionOutcome): void;
+}) {
   return (
     <section className="gt:flex gt:flex-col gt:items-center gt:gap-3 gt:rounded-lg gt:border gt:border-dashed gt:border-border gt:bg-card gt:px-6 gt:py-10 gt:text-center">
       <h2 className="gt:text-title gt:font-semibold gt:text-foreground">{empty.title}</h2>
       {empty.text && <p className="gt:max-w-prose gt:text-body gt:text-muted-foreground">{empty.text}</p>}
-      {empty.action && <ActionControl actionRef={empty.action} onResult={setError} kit={kit} />}
-      {error && (
-        <p role="alert" className="gt:text-caption gt:text-destructive-fg">
-          {error}
-        </p>
-      )}
+      {empty.action && <ActionControl actionRef={empty.action} onResult={onOutcome} kit={kit} />}
+      <OutcomeLine outcome={outcome} />
     </section>
   );
 }
@@ -76,6 +82,13 @@ function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
   const copier = useCopier(announce);
   // Read once per model, not on every redraw: at the caps it checks 22,000 figures.
   const figures = useMemo(() => readPeriodReviewExt(m), [m]);
+  // The outcome of the period's own last action, and where it was pressed.
+  // Kept here, not in the control, so it outlives the refresh that follows
+  // a success: a generation pressed in the empty state brings bills, the
+  // empty state goes, and its message moves under the period's controls.
+  const [period, setPeriod] = useState<{ outcome: ActionOutcome; from: "controls" | "empty" }>({ outcome: null, from: "controls" });
+  const fromControls = useCallback((outcome: ActionOutcome) => setPeriod({ outcome, from: "controls" }), []);
+  const fromEmpty = useCallback((outcome: ActionOutcome) => setPeriod({ outcome, from: "empty" }), []);
   // A refresh that brings figures this renderer cannot read: the kit's view
   // draws that model, without polling again, since this one still does.
   if (!figures || m.kind !== "collection") return <kit.KitView model={{ ...m, live: undefined }} />;
@@ -98,9 +111,16 @@ function Review({ model, kit }: { model: ModelOf<"collection">; kit: GuiKit }) {
           <p className={cls("gt:rounded-md gt:px-3 gt:py-2 gt:text-dense gt:font-medium", TONE[m.notice.tone] ?? TONE.neutral)}>{m.notice.text}</p>
         </div>
       )}
-      <ControlList actions={actions} links={m.links} kit={kit} label="Period actions" />
+      <ControlList
+        actions={actions}
+        links={m.links}
+        kit={kit}
+        label="Period actions"
+        outcome={zero && period.from === "empty" ? null : period.outcome}
+        onOutcome={fromControls}
+      />
       {zero ? (
-        <Empty empty={empty} kit={kit} />
+        <Empty empty={empty} kit={kit} outcome={period.from === "empty" ? period.outcome : null} onOutcome={fromEmpty} />
       ) : (
         <>
           <h2 className="gt:sr-only">Bills</h2>

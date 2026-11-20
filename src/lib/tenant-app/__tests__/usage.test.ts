@@ -95,7 +95,7 @@ function syntheticSource() {
     energySeries: (request) => generateDeviceEnergySeries(request, { nowMs: clock.now }),
   });
   const requests: TenantUsageSeriesRequest[] = [];
-  const source: TenantUsageSource = {
+  const source: SeriesSource = {
     async readSeries(request) {
       requests.push(request);
       const series = await provider.getDeviceEnergySeries({
@@ -116,7 +116,7 @@ function syntheticSource() {
 /** A source that answers `value(deviceId, bucket start)` for every bucket of the request. */
 function fakeSource(value: (deviceId: string, start: number, date: string) => number | null) {
   const requests: TenantUsageSeriesRequest[] = [];
-  const source: TenantUsageSource = {
+  const source: SeriesSource = {
     async readSeries(request) {
       requests.push(request);
       const buckets: { start: number; date: string }[] = [];
@@ -135,10 +135,13 @@ function fakeSource(value: (deviceId: string, start: number, date: string) => nu
   return { source, requests };
 }
 
+/** A usage source for these tests: its series, and other units' primary links (none unless given). */
+type SeriesSource = Pick<TenantUsageSource, "readSeries"> & Partial<TenantUsageSource>;
+
 function capabilityFor(
   tenantId: string,
   links: Parameters<typeof repositoryOf>[0],
-  source: TenantUsageSource,
+  source: SeriesSource,
   options: { timezone?: string; active?: () => boolean } = {}
 ) {
   const { repo, listMeterAssignments } = repositoryOf(links);
@@ -147,7 +150,7 @@ function capabilityFor(
     unitScope(tenantId, options.timezone),
     options.active ?? (() => true),
     () => clock.now,
-    source
+    { listPrimaryElsewhere: async () => [], ...source }
   );
   return { capability, listMeterAssignments };
 }
@@ -331,27 +334,74 @@ describe("the sum across a unit's meters", () => {
     expect(shown.total).toEqual({ kwh: 62, withoutData: 0 });
   });
 
-  it("counts a meter that is two units' primary for each, only on its own link's days, as billing bills each", async () => {
-    clock.now = Date.parse("2026-12-05T09:00:00Z");
+  describe("a meter that is two units' primary on the same days (D12)", () => {
     // D is A's primary from 1 October, and B's from 10 November, when it
     // replaced B's meter P. (The repository returns primary links only:
-    // usage.db.test.ts.)
-    const monthA = await month(capabilityFor(UNIT_A, [link(D, "2026-10-01", null)], syntheticSource().source).capability, { month: "2026-11" });
-    const monthB = await month(
-      capabilityFor(UNIT_B, [link(P, "2026-10-01", "2026-11-10"), link(D, "2026-11-10", null)], syntheticSource().source).capability,
-      { month: "2026-11" }
-    );
+    // usage.db.test.ts.) The source answers each unit with the days the
+    // other also holds D, cut to the unit's own link, as it does.
+    const linksA = [link(D, "2026-10-01", null)];
+    const linksB = [link(P, "2026-10-01", "2026-11-10"), link(D, "2026-11-10", null)];
+    const sharedFrom10th = [{ deviceId: D, effectiveFrom: "2026-11-10", effectiveTo: "2026-12-01" }];
 
-    const expectBucket = (shown: TenantUsageMonth, date: string, kwh: number | null) =>
-      expect(stateOf(shown, date)).toEqual({ date, state: kwh === null ? "no-data" : "data", kwh });
-    for (const date of datesOfMonth("2026-11")) {
-      expectBucket(monthA, date, generatedDay(D, date));
-      expectBucket(monthB, date, date < "2026-11-10" ? generatedDay(P, date) : generatedDay(D, date));
-    }
-    // A day on which D did not report is no data for both units from the 10th.
-    expect(generatedDay(D, "2026-11-19")).toBeNull();
-    expect(stateOf(monthA, "2026-11-19").state).toBe("no-data");
-    expect(stateOf(monthB, "2026-11-19").state).toBe("no-data");
+    beforeEach(() => {
+      clock.now = Date.parse("2026-12-05T09:00:00Z");
+    });
+
+    it("shows each unit the meter's whole use, as billing bills each, labelled as shared on those days only", async () => {
+      const asked: { deviceIds: string[]; fromDate: string; toDate: string }[] = [];
+      const monthA = await month(
+        capabilityFor(UNIT_A, linksA, {
+          ...syntheticSource().source,
+          listPrimaryElsewhere: async (request) => {
+            asked.push(request);
+            return sharedFrom10th;
+          },
+        }).capability,
+        { month: "2026-11" }
+      );
+      const monthB = await month(
+        capabilityFor(UNIT_B, linksB, { ...syntheticSource().source, listPrimaryElsewhere: async () => sharedFrom10th }).capability,
+        { month: "2026-11" }
+      );
+
+      const bucket = (date: string, kwh: number | null) => ({
+        date,
+        state: kwh === null ? "no-data" : "data",
+        kwh,
+        ...(kwh !== null && date >= "2026-11-10" ? { shared: true } : {}),
+      });
+      for (const date of datesOfMonth("2026-11")) {
+        expect(stateOf(monthA, date)).toEqual(bucket(date, generatedDay(D, date)));
+        expect(stateOf(monthB, date)).toEqual(bucket(date, generatedDay(date < "2026-11-10" ? P : D, date)));
+      }
+      // The same figure for both units on a shared day: the meter's total.
+      expect(stateOf(monthA, "2026-11-12").kwh).toBe(stateOf(monthB, "2026-11-12").kwh);
+      // A day on which D did not report is no data for both, and carries no label.
+      expect(generatedDay(D, "2026-11-19")).toBeNull();
+      expect(stateOf(monthA, "2026-11-19")).toEqual({ date: "2026-11-19", state: "no-data", kwh: null });
+      const sharedDays = datesBetween("2026-11-10", "2026-11-30").filter((date) => generatedDay(D, date) !== null).length;
+      expect(monthA.total.shared).toBe(sharedDays);
+      expect(monthB.total.shared).toBe(sharedDays);
+      expect(asked).toEqual([{ deviceIds: [D], fromDate: "2026-11-01", toDate: "2026-12-01" }]);
+    });
+
+    it("marks the day itself shared, and not a day before the other unit's link", async () => {
+      const source = { ...syntheticSource().source, listPrimaryElsewhere: async () => sharedFrom10th };
+      expect((await day(capabilityFor(UNIT_A, linksA, source).capability, { date: "2026-11-12" })).shared).toBe(true);
+      expect(await day(capabilityFor(UNIT_A, linksA, source).capability, { date: "2026-11-05" })).not.toHaveProperty("shared");
+    });
+
+    it("answers 503 on the month and the day, rather than show shared use unlabelled, when the shared days cannot be read", async () => {
+      const failing = {
+        ...syntheticSource().source,
+        listPrimaryElsewhere: async () => {
+          throw new Error("statement timeout");
+        },
+      };
+      const { capability } = capabilityFor(UNIT_A, linksA, failing);
+      expect(await capability.getUsageMonth({ month: "2026-11" })).toMatchObject({ ok: false, status: 503, code: "tenant_app_unavailable" });
+      expect(await capability.getUsageDay({ date: "2026-11-12" })).toMatchObject({ ok: false, status: 503, code: "tenant_app_unavailable" });
+    });
   });
 });
 
@@ -452,7 +502,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   ] as const)(
     "shows every past day with a meter as no data when the source answers %s, as problem %s",
     async (reason, problem) => {
-      const source: TenantUsageSource = { readSeries: async () => ({ ok: false, reason }) };
+      const source: SeriesSource = { readSeries: async () => ({ ok: false, reason }) };
       const shown = await month(capabilityFor(UNIT_A, [link("p", "2026-11-10", null)], source).capability);
 
       expect(shown.read).toEqual({ readAt: null, stale: false, synthetic: false, problem });
@@ -482,7 +532,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
 
   it("shows an hour the source returned twice as no data, never either figure, and leaves it out of the total", async () => {
     const hours = localHourStarts("2026-11-17", KAMPALA);
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       async readSeries(): Promise<TenantUsageSeriesResult> {
         // 05:00 comes back twice, with two figures.
         const buckets = [...hours.slice(0, 6), hours[5], ...hours.slice(6)];
@@ -499,7 +549,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   });
 
   it("shows no data when the source throws", async () => {
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       readSeries: async () => {
         throw new Error("connect ECONNREFUSED https://openems.example.test");
       },
@@ -512,7 +562,7 @@ describe("the read's failures and limits as the tenant sees them", () => {
   });
 
   it("shows a source that returns fewer buckets as no data, never a figure on another day", async () => {
-    const source: TenantUsageSource = {
+    const source: SeriesSource = {
       async readSeries(request): Promise<TenantUsageSeriesResult> {
         // Only the 2nd and 3rd of the month, at their own midnights.
         const buckets = ["2026-11-02", "2026-11-03"].map((date) => startOfDayInZone(date, request.timezone).getTime());

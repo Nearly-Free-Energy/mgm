@@ -38,8 +38,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   200 → { lineItemId, totalAmount, previousTotalAmount, changed, message }
  *         — both totals numbers (previousTotalAmount null for a new bill);
  *         message names the previous and new totals, in the microgrid's
- *         currency and the request's locale; the GUI host shows it as the
- *         action's result. changed is false, and nothing was written (no
+ *         currency and the request's locale; the GUI host passes it on as
+ *         the action's result (invoke.ts), and Gridtop's period review
+ *         shows it under the control. changed is false, and nothing was written (no
  *         audit row), when the bill already had the figures this
  *         regeneration computed: sending it twice records it once
  *   400 → { error, field?, code: "invalid_body" } (body, or a reading the

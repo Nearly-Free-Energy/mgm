@@ -374,7 +374,7 @@ describe("a tenant manifest (RFC mgm#197 § 4)", () => {
   const UNIT_B = "e7400000-0000-4000-8000-00000000000b";
   const home = { id: "tenant.home" as const, title: "My home", icon: "tenants" as const, group: "operate" as const, order: 80, href: "/my" as const, needs: [] };
 
-  /** A tenant manifest whose nav holds the tenant home, as it will once /my is released. */
+  /** A tenant manifest whose nav holds the tenant home. */
   function tenantManifest(units: { id: string; label: string }[], current: string | null = null): Manifest {
     const m = buildTenantManifestModel({
       release: null,

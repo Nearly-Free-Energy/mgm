@@ -16,9 +16,10 @@ import "server-only";
  * (@/lib/gui/host/server/view) relies on that, and if a model ever carries
  * one of those records, that function must check it.
  *
- * The models carry no LinkRef or row href while the /my pages are
- * unreleased (RFC mgm#197: released by PR 5): the host refuses a link to an
- * unreleased page. The navigation is in the ext, which is data.
+ * The models carry no LinkRef or row href yet: the navigation is in the ext,
+ * which is data. If they gain row links, Gridtop's renderers join them with
+ * the ext's links (Controls in src/gui/gridtop/renderers/tenant-usage/
+ * parts.tsx), which needs a place for them first.
  */
 import { formatLocalDate } from "@/components/format/local-date";
 import { withUnit } from "@/lib/gui/host/shared/tenant-units";
@@ -27,7 +28,7 @@ import type { Fmt, LoadedModel } from "@/lib/gui/surface";
 import { dayKeyInZone, localHourStarts } from "@/lib/timezone/day-key";
 import type { TenantUsageBucket, TenantUsageDay, TenantUsageMonth, TenantUsageProblem, TenantUsageTotal } from "../types";
 import { USAGE_EARLIEST_MONTH } from "../usage-calendar";
-import { unitTitle } from "./home-model";
+import { SHARED_USE_NOTE, unitTitle } from "./home-model";
 import type { TenantUsageDayExtData, TenantUsageMonthExtData } from "./usage-ext";
 
 export const TENANT_USAGE_MONTH_PATH = "/my/usage";
@@ -131,7 +132,15 @@ function staleNote(read: TenantUsageMonth["read"], timezone: string, locale: str
   return read.stale && read.readAt !== null ? `As read at ${readTimeLabel(read.readAt, timezone, locale)}.` : null;
 }
 
-/** The unit's title, then why there are no figures, or when the kept ones were read. */
+/**
+ * The unit's title, then why there are no figures, or when the kept ones
+ * were read. Gridtop's usage renderer prints this whole subtitle below
+ * 600 px when there is no problem, since its window bar does not show the
+ * subtitle there, and the unit's label alone when there is one (its band
+ * shows the message); if the unit stops coming first or the problem
+ * message moves out of the ext, revisit
+ * (src/gui/gridtop/renderers/tenant-usage/parts.tsx).
+ */
 function subtitleOf(
   tenant: TenantUsageMonth["tenant"],
   read: TenantUsageMonth["read"],
@@ -154,9 +163,22 @@ function readAtExt(read: TenantUsageMonth["read"], timezone: string, locale: str
   return read.readAt === null ? null : { at: iso(read.readAt), label: staleNote(read, timezone, locale) };
 }
 
-/** A day row's note: today so far, or no meter in force. */
+/** A day row's note: today so far, or no meter in force, and the shared-use label. */
 function dayNote(d: TenantUsageBucket): string | null {
-  return d.state === "partial" ? "So far today" : d.state === "no-meter" ? "No meter on this day" : null;
+  const note = d.state === "partial" ? "So far today" : d.state === "no-meter" ? "No meter on this day" : null;
+  return d.shared ? [note, SHARED_USE_NOTE].filter(Boolean).join(" · ") : note;
+}
+
+/**
+ * A month total's part of the shared-use label: the label itself when every
+ * day with a figure is shared, else how many are; "" when none is.
+ */
+function sharedMonthNote(month: TenantUsageMonth): string {
+  const shared = month.total.shared ?? 0;
+  if (shared === 0 || month.total.kwh === null) return "";
+  return shared >= month.days.filter(hasFigure).length
+    ? SHARED_USE_NOTE
+    : `${shared} ${shared === 1 ? "day" : "days"} shared with another unit, not only yours`;
 }
 
 /**
@@ -204,6 +226,8 @@ function totalCells(
     unit: [one: string, many: string];
     /** The rows' own decimals, so the total never rounds away what they show; 2 under 1 kWh. */
     digits: 1 | 2;
+    /** The shared-use label's part, or "" (sharedMonthNote, SHARED_USE_NOTE). */
+    shared: string;
   },
 ): { cells: Record<string, Value>; text: string; note: string } {
   const usage =
@@ -216,7 +240,7 @@ function totalCells(
   const note = o.problem
     ? ""
     : total.kwh !== null
-      ? [o.current ? "So far" : "", total.withoutData > 0 ? missingNote(total.withoutData, o.unit) : ""]
+      ? [o.current ? "So far" : "", total.withoutData > 0 ? missingNote(total.withoutData, o.unit) : "", o.shared]
           .filter(Boolean)
           .join(" · ")
       : total.withoutData > 0
@@ -252,6 +276,7 @@ export function monthSoFar(month: TenantUsageMonth, o: { fmt: Fmt; locale: strin
   }
   const parts = [
     total.withoutData > 0 ? missingNote(total.withoutData, ["day", "days"]) : "",
+    sharedMonthNote(month),
     staleNote(read, timezone, o.locale) ?? "",
   ].filter(Boolean);
   return {
@@ -282,6 +307,7 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
     ? shown.map((d) => {
         const note = dayNote(d);
         return {
+          // Gridtop joins rows to the ext's days by this id (src/gui/gridtop/renderers/tenant-usage/ext.ts).
           id: d.date,
           cells: {
             date: fmt.date(d.date),
@@ -299,6 +325,7 @@ export function buildUsageMonthModel(month: TenantUsageMonth, o: Options): Loade
     problem: read.problem !== null,
     unit: ["day", "days"],
     digits: 1,
+    shared: sharedMonthNote(month),
   });
 
   const tier = tiers(month.days.map((d) => (hasFigure(d) ? d.kwh : null)));
@@ -368,6 +395,7 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
       ? shown.map((h) => {
           const note = hourNote(h, read);
           return {
+            // Gridtop joins rows to the ext's hours by this id, the hour's `start` (src/gui/gridtop/renderers/tenant-usage/ext.ts).
             id: iso(h.start),
             cells: {
               hour: fmt.text(label(h.start)),
@@ -385,6 +413,7 @@ export function buildUsageDayModel(day: TenantUsageDay, o: Options): LoadedModel
     problem: read.problem !== null,
     unit: ["hour", "hours"],
     digits: 2,
+    shared: day.shared && day.total.kwh !== null ? SHARED_USE_NOTE : "",
   });
   const month = day.date.slice(0, 7);
 

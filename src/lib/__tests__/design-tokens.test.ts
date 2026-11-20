@@ -165,6 +165,16 @@ function resolve(vars: Map<string, string>, name: string, seen: string[] = []): 
  *  stricter than CSS's chroma-reducing gamut map, which keeps lightness and
  *  gives up chroma instead. */
 function luminance(value: string): number {
+  return luminanceOf(linearRgb(value));
+}
+
+/** WCAG relative luminance of linear sRGB channels. */
+function luminanceOf([red, green, blue]: [number, number, number]): number {
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+/** An `oklch(L% C H)` colour as linear sRGB channels, each clipped to 0–1. */
+function linearRgb(value: string): [number, number, number] {
   const m = /^oklch\(\s*([\d.]+)%\s+([\d.]+)\s+([\d.]+)\s*\)$/.exec(value);
   if (!m) throw new Error(`not an oklch(L% C H) colour: ${value}`);
   const [L, C, H] = [Number(m[1]) / 100, Number(m[2]), (Number(m[3]) * Math.PI) / 180];
@@ -177,7 +187,18 @@ function luminance(value: string): number {
   const red = clip(4.0767416621 * l - 3.3077115913 * mm + 0.2309699292 * s);
   const green = clip(-1.2684380046 * l + 2.6097574011 * mm - 0.3413193965 * s);
   const blue = clip(-0.0041960863 * l - 0.7034186147 * mm + 1.707614701 * s);
-  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return [red, green, blue];
+}
+
+const encode = (v: number) => (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055);
+const decode = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+
+/**
+ * Linear sRGB channels of `top` at `alpha` painted over `base`, mixed in
+ * gamma-encoded sRGB as browsers composite.
+ */
+function over(top: [number, number, number], alpha: number, base: [number, number, number]): [number, number, number] {
+  return top.map((v, i) => decode(alpha * encode(v) + (1 - alpha) * encode(base[i]))) as [number, number, number];
 }
 
 /** WCAG contrast ratio between two tokens, named without the leading `--`. */
@@ -435,6 +456,45 @@ describe("design tokens", () => {
           for (const [fg, bg, minimum] of checks) {
             const ratio = contrast(vars, fg, bg);
             if (ratio < minimum) failures.push(`${theme} hue ${hue}: ${fg} on ${bg} is ${ratio.toFixed(2)}:1`);
+          }
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+
+    it("keeps text on the tenant calendar's shade tiers at 4.5:1, and its focus mark at 3:1", () => {
+      // The calendar puts foreground text on these tiers over the page
+      // background (src/gui/gridtop/renderers/tenant-usage/month.tsx; main
+      // has no surface of its own in src/gui/gridtop/shell/shell.tsx), and
+      // over surface-1 in case it moves into a card. Its month.test.tsx
+      // checks that nothing in a shaded cell sets another text colour. The
+      // focus mark is drawn inside the cell, on the tier, in the colour
+      // CELL names. The lowest ratio found was 5.8:1 (dark, tier 4 over
+      // surface-1) when this was written. If the text colour, the base
+      // surface or a tier above 50 changes, revisit.
+      const month = readFileSync(path.join(REPO_ROOT, "src/gui/gridtop/renderers/tenant-usage/month.tsx"), "utf8");
+      const alphas = [...month.matchAll(/bg-energy-load\/(\d+)/g)].map((m) => Number(m[1]) / 100);
+      expect(alphas).toHaveLength(4);
+      const focus = [...month.matchAll(/focus-visible:outline-([a-z][a-z-]*)\b/g)]
+        .map((m) => m[1])
+        .filter((name) => !name.startsWith("offset"));
+      expect(focus).toEqual(["foreground"]);
+      const checks: [string, number][] = [
+        ["foreground", 4.5],
+        [focus[0], 3],
+      ];
+      const failures: string[] = [];
+      for (const theme of THEMES) {
+        const vars = palette(theme);
+        const tint = linearRgb(resolve(vars, "--energy-load"));
+        for (const [name, minimum] of checks) {
+          const fg = luminance(resolve(vars, `--${name}`));
+          for (const base of ["background", "surface-1"]) {
+            for (const alpha of alphas) {
+              const bg = luminanceOf(over(tint, alpha, linearRgb(resolve(vars, `--${base}`))));
+              const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+              if (ratio < minimum) failures.push(`${theme}: ${name} on energy-load/${alpha * 100} over ${base} is ${ratio.toFixed(2)}:1`);
+            }
           }
         }
       }

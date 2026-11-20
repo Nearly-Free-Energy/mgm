@@ -6,19 +6,23 @@
  * current periods are (RFC mgm#197 § 4).
  *
  * The hrefs here are data: the host's model parse checks no href under
- * `ext` (DATA_KEYS in @/lib/gui/host/server/parse), so they may name the
- * /my pages before they are released (RFC mgm#197: released by PR 5). If
- * that parse starts checking hrefs inside an ext, these are refused until
- * the pages are released. Each is a same-origin path the renderer still
- * checks before following it. The models carry no LinkRef or row href to
- * those pages until then.
+ * `ext` (DATA_KEYS in @/lib/gui/host/server/parse). They name only the /my
+ * pages, which are released routes; if that parse starts checking hrefs
+ * inside an ext, a /my page that stops being released is refused there.
+ * Each is a same-origin path the renderer still checks before following it.
+ * The models carry no LinkRef or row href to those pages.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in @/lib/gui/host/server/contribution-schema) passes
  * it. Every label is formatted on the server; a renderer formats nothing.
  * Times are ISO 8601 instants. Field names carry no word the GUI surface
- * test reads as a secret. A change to either shape after a renderer reads
- * it is `@2`, named by the constants in ./usage-model.ts.
+ * test reads as a secret.
+ *
+ * Gridtop's renderer reads both (its reader is
+ * src/gui/gridtop/renderers/tenant-usage/ext.ts), and with them the models'
+ * row ids and subtitle (./usage-model.ts says where). A change to either
+ * shape is now `@2`, named by the constants in ./usage-model.ts and added to
+ * that renderer's `reads`.
  */
 import { z } from "zod";
 import { isSameOriginPath } from "@/lib/gui/host/shared/href";
@@ -38,13 +42,18 @@ const total = (buckets: number) =>
     kwh,
     /** The total as the rows' footer prints it, with the rows' decimals: "54.3 kWh", "1.24 kWh", or "No data". */
     text: label(32),
-    /** "So far", "2 days missing", "So far · 2 days missing", "No data for 2 days", or "". */
-    note: label(40),
+    /**
+     * "So far", "2 days missing", "So far · 2 days missing", "No data for 2
+     * days", or "", and the shared-use note when the figure includes a meter
+     * that is also another unit's primary ("So far · 12 days shared with
+     * another unit, not only yours").
+     */
+    note: label(120),
     /** Buckets with a meter in force and no figure: what `kwh` leaves out, or all of them when it is null. */
     withoutData: z.number().int().min(0).max(buckets),
   });
 /** A bucket's note as the rows print it, or null; one cap for the day and hour notes. */
-const note = label(40).nullable();
+const note = label(80).nullable();
 const read = {
   /** Generated, not measured (the synthetic metering provider). */
   synthetic: z.boolean(),

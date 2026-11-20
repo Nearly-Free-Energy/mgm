@@ -7,6 +7,8 @@ import {
   ClosePeriodBody,
   DELETE_PERIOD_BODY_VERSION,
   DeletePeriodBody,
+  GENERATE_FROM_METERS_BODY_VERSION,
+  GenerateFromMetersBody,
   SAVE_SAVINGS_SETTINGS_BODY_VERSION,
   SaveSavingsSettingsBody,
 } from "../schemas";
@@ -179,6 +181,24 @@ describe("DeletePeriodBody", () => {
       field: "confirmation",
       message: "confirmation needs the period's name, typed",
     });
+  });
+});
+
+describe("GenerateFromMetersBody", () => {
+  it("accepts only the empty object the host sends", () => {
+    expect(firstIssue(GenerateFromMetersBody, {})).toBe("ok");
+  });
+
+  it.each([
+    [{ billingPeriodId: "00000000-0000-4000-8000-000000000001" }, "Unknown field: billingPeriodId"],
+    [{ confirmation: { acknowledged: [] } }, "Unknown field: confirmation"],
+    [{ tenantIds: [] }, "Unknown field: tenantIds"],
+  ])("refuses %j, at the top with no field", (body, message) => {
+    expect(firstIssue(GenerateFromMetersBody, body)).toEqual({ field: undefined, message });
+  });
+
+  it.each([null, [], "{}", 1])("refuses %j as not an object", (body) => {
+    expect(firstIssue(GenerateFromMetersBody, body)).toEqual({ field: undefined, message: "Request body must be an object" });
   });
 });
 
@@ -384,12 +404,22 @@ const DELETE_PERIOD_SHAPES: Record<number, unknown> = {
   },
 };
 
+const GENERATE_FROM_METERS_SHAPES: Record<number, unknown> = {
+  1: {
+    $schema: SCHEMA,
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+};
+
 describe("pinned input versions", () => {
   it.each([
     ["AddGridTariffBody", AddGridTariffBody, ADD_GRID_TARIFF_BODY_VERSION, ADD_GRID_TARIFF_SHAPES, "ADD_GRID_TARIFF_BODY_VERSION"],
     ["SaveSavingsSettingsBody", SaveSavingsSettingsBody, SAVE_SAVINGS_SETTINGS_BODY_VERSION, SAVE_SAVINGS_SETTINGS_SHAPES, "SAVE_SAVINGS_SETTINGS_BODY_VERSION"],
     ["ClosePeriodBody", ClosePeriodBody, CLOSE_PERIOD_BODY_VERSION, CLOSE_PERIOD_SHAPES, "CLOSE_PERIOD_BODY_VERSION"],
     ["DeletePeriodBody", DeletePeriodBody, DELETE_PERIOD_BODY_VERSION, DELETE_PERIOD_SHAPES, "DELETE_PERIOD_BODY_VERSION"],
+    ["GenerateFromMetersBody", GenerateFromMetersBody, GENERATE_FROM_METERS_BODY_VERSION, GENERATE_FROM_METERS_SHAPES, "GENERATE_FROM_METERS_BODY_VERSION"],
   ] as const)("%s matches the shape pinned for its version", (_name, schema, version, shapes, constant) => {
     expect(
       z.toJSONSchema(schema, { io: "input" }),
@@ -402,5 +432,6 @@ describe("pinned input versions", () => {
     expect(SAVE_SAVINGS_SETTINGS_BODY_VERSION).toBe(1);
     expect(CLOSE_PERIOD_BODY_VERSION).toBe(1);
     expect(DELETE_PERIOD_BODY_VERSION).toBe(1);
+    expect(GENERATE_FROM_METERS_BODY_VERSION).toBe(1);
   });
 });

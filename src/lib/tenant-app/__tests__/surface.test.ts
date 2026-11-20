@@ -119,15 +119,14 @@ describe("TENANT_APP_SURFACE", () => {
     for (const key of ["attach", "live", "agent", "entity"]) expect(viewById(id)).not.toHaveProperty(key);
   });
 
-  it("names the home and the month from tenant nav entries, on catalog pages served by their views and not yet released", () => {
+  it("names the home and the month from tenant nav entries, on released catalog pages served by their views", () => {
     expect(TENANT_APP_SURFACE.nav).toEqual([
       { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
       { id: "tenant.usage", title: "My usage", icon: "readings", group: "operate", order: 81, view: "tenant.usage-month", audience: "tenant" },
     ]);
     for (const path of ["/my", "/my/usage", "/my/usage/day"]) {
       expect(matchCatalogPage(path), path).toMatchObject({ plugin: { name: "tenant-app" }, page: { path, params: {}, servedBy: "view" } });
-      // RFC mgm#197: released by PR 5.
-      expect(isReleasedRoute(path), path).toBe(false);
+      expect(isReleasedRoute(path), path).toBe(true);
     }
   });
 
@@ -207,8 +206,33 @@ describe("the tenant.home model and examples", () => {
   });
 });
 
+describe("the home's meters (D12)", () => {
+  it("labels a meter that is also another unit's primary today", () => {
+    const [first] = HOME.meters;
+    const plain = buildTenantHomeModel({ ...HOME, meters: [first] }, fmt, null);
+    const shared = buildTenantHomeModel({ ...HOME, meters: [{ ...first, shared: true }] }, fmt, null);
+    const field = (model: typeof plain) => model.body.sections[1].fields[0];
+    expect(field(shared).value).toEqual({
+      t: "text",
+      text: `${field(plain).value.text} · Shared with another unit, not only yours`,
+    });
+  });
+});
+
 describe("monthSoFar: the home's month", () => {
   const o = { fmt, locale: "en-GB" };
+
+  it("says how many days of the month are shared with another unit, or just that it is when all are (D12)", () => {
+    const day = (date: string) => ({ date, state: "data" as const, kwh: 2 });
+    const days = ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"].map(day);
+    expect(monthSoFar({ ...usageMonth({ kwh: 10, withoutData: 1, shared: 3 }), days }, o)).toEqual({
+      value: fmt.energy(10_000, { digits: 1 }),
+      note: "1 day missing · 3 days shared with another unit, not only yours",
+    });
+    expect(monthSoFar({ ...usageMonth({ kwh: 10, withoutData: 0, shared: 5 }), days }, o).note).toBe(
+      "Shared with another unit, not only yours"
+    );
+  });
 
   it("shows the total, marked synthetic when generated, with no note when nothing is missing", () => {
     expect(monthSoFar(usageMonth({ kwh: 41.25, withoutData: 0 }, { synthetic: true }), o)).toEqual({

@@ -115,6 +115,37 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     });
   });
 
+  it("generateFromMeters reaches the engine as a guarded whole-period run, with effective-dated assignments required", async () => {
+    const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
+    if (!composed.ok) throw new Error("expected composition");
+    try {
+      expect(await composed.data.billing.generateFromMeters(PERIOD_ID)).toMatchObject({ ok: true });
+    } finally {
+      await composed.data.dispose();
+    }
+    expect(capturedParams).toMatchObject({
+      periodId: PERIOD_ID,
+      mode: "write",
+      guardExistingBills: true,
+      requireEffectiveDatedAssignments: true,
+      allowUsageOnlyReadings: true,
+    });
+    expect(capturedParams?.tenantIds).toBeUndefined();
+    expect(capturedParams?.manualReadings).toBeUndefined();
+    expect(capturedParams?.expectedBill).toBeUndefined();
+  });
+
+  it("generateBills never sets guardExistingBills", async () => {
+    const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
+    if (!composed.ok) throw new Error("expected composition");
+    try {
+      await composed.data.billing.generateBills({ billingPeriodId: PERIOD_ID });
+    } finally {
+      await composed.data.dispose();
+    }
+    expect(capturedParams?.guardExistingBills).toBeUndefined();
+  });
+
   it("generateBills passes revertToEdgeTenantIds through to the engine", async () => {
     const HH = "880e8400-e29b-41d4-a716-446655440000";
     const composed = await composeBilling({

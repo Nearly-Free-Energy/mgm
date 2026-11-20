@@ -40,7 +40,12 @@ token's organization first, and the tenant app's usage source
 reads no `microgrids` or `edges` row, so the usage source builds the unit's
 microgrid's provider on the service role, after `composeTenantApp` has
 authorized the unit, for the microgrid `fn_tenant_home` named and the device
-rows the tenant's own client returned (see "The tenant app" below). A new
+rows the tenant's own client returned, and, for the device ids the tenant's
+own client returned as the unit's primary consumption meter links, reads
+the date spans on which other units also hold them as primary (see "The
+tenant app" below). That read returns dates only, cut to the unit's own
+links, never whose; if it ever returns a tenant id or takes ids from
+anywhere else, revisit it. A new
 caller that builds a provider on the service role needs the same reasoning,
 and a listing in `service-role-session-check.test.ts`. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
@@ -188,7 +193,18 @@ linked to the unit. The capability writes nothing, but its usage reads are
 provider calls: the usage source asks the metering gate with the tenant's
 client right before each one, in place of the metering capability's
 `requirePlugin` re-check, and the tenant-app gate is asked at composition,
-in the same request. A read is cached in process memory for 60 s per unit,
+in the same request. Only the unit's primary consumption meter is its use,
+on the home, the month and the day (`USAGE_METER_ROLE` in
+`src/lib/tenant-app/types.ts`). A meter two units hold as primary on the
+same day is shown to each with the label "Shared with another unit, not
+only yours" on those days (D12). For that, the usage source reads other
+units' primary links of the unit's primary meters on the service role;
+that read concerns MGM's own link rows, not the backend, so it runs
+without the metering gate and outside the usage cache, on every view. It
+returns dates only, cut to the unit's own links, for ids the tenant's own
+client returned as the unit's primary links; if it ever returns a tenant id
+or takes ids from anywhere else, revisit it. If it fails, the view answers
+`tenant_app_unavailable` rather than show shared use unlabelled. A read is cached in process memory for 60 s per unit,
 view and period, and a unit may cause at most six uncached reads a minute
 in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
 store, so keys that need no session cannot evict a unit's count); over the
@@ -222,6 +238,16 @@ own unit's organization first, or every tenant is refused with `503`. Since
 `service-role-session-check.test.ts` counts it and `composeTenantApp` as
 session checks, as it counts `authorizeOrganization` and the organization
 composers.
+
+Giving and removing a person's access to a unit is not the tenant app's: it
+is community-management's, from the tenant record, through
+`composeCommunityManagement`. `POST /api/tenants/[id]/access` finds or
+creates the account for the address in its body and calls
+`fn_tenant_access_grant` on the service role with the manager's `getUser()`
+id as `_actor`, then sends the notice through `sendNotice`, which never
+carries a sign-in link; `DELETE /api/tenants/[id]/access/[accessId]` calls
+`fn_tenant_access_revoke` with the manager's own client. While the tenant
+app is off for the unit's organization, the POST gives no access.
 
 `composeBillingReview` takes the `organizationId` the route resolved and
 trusts it. Its only caller, `POST /api/billing-review/preview`, resolves that
@@ -345,13 +371,14 @@ within the `(gui)` group skips the layout, rendering from the first segment
 that changes, but always renders the page. It sends them away and grants
 nothing; what they can read is still decided by RLS (their own tenant,
 `tenant_devices` and device rows, which they could query directly), with
-`dispatchView` refusing them every view that is not a tenant
-view. While `/my` is not a released route (`src/lib/mgm/released-routes.ts`),
-they are sent to `/no-access` instead, which has Log out: middleware would
-answer `/my` with the static "not in this release" page, which has no script
-and links back to `/`. `/no-access` is outside the layout, and sign-out is a Supabase Auth call from the
-browser, so neither sends them round. Otherwise they reach `/no-access` only
-when the manifest refuses because none of their units can be read. The
+`dispatchView` refusing them every view that is not a tenant view. `/my` is
+a released route (`src/lib/mgm/released-routes.ts`); should it stop being
+one, they are sent to `/no-access` instead, which has Log out: middleware
+would answer `/my` with the static "not in this release" page, which has no
+script and links back to `/`. `/no-access` is outside the layout, and
+sign-out is a Supabase Auth call from the browser, so neither sends them
+round. Otherwise they reach `/no-access` only when the manifest refuses
+because none of their units can be read. The
 layout's test walks every catalog page and every page file under
 `src/app/(gui)` as such a person, and `tenant-only-pages.test.tsx` calls
 every page file without the layout, as a client-side navigation renders it,
@@ -361,7 +388,12 @@ refuses them by their roles: `surfaceRequest`, `installationRequest`, `pluginGat
 `visibleOrganizations` (none), `resolveSegments` and `dispatchView` for any
 view that is not a tenant view. A tenant view opened without `?unit=` by a
 person with several units shows a choice of them, and one whose plugin is
-off for the unit's organization shows the "not in this release" page.
+off for the unit's organization shows the "not in this release" page. The
+choice leaves out a unit whose organization has the tenant app, or a plugin
+it depends on, off for certain, decided as the tenant nav decides it
+(`unitOrganizationPlugins` in `src/lib/gui/host/server/gate-state.ts`); a
+unit whose state could not be read stays, and its view answers for itself.
+When every unit is left out, the person gets the "not in this release" page.
 
 A person may rent any number of units, in any organizations, and nothing in
 the host holds them to one. Each unit is named by its unit label, else the

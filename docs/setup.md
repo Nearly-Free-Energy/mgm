@@ -494,7 +494,9 @@ policies. No password round-trips to GoTrue — the impersonation is purely loca
 `e2e/` holds a Playwright smoke test that `Test` runs after `npm test`. In
 Chromium at 360 × 800 with touch as the pointer, it signs in by email link
 (RFC #186), reading the link from the local Supabase's mail catcher, opens the home
-page and a microgrid's tenants list, and checks that no page scrolls
+page, a microgrid's tenants list and a tenant record with its App access
+section, its Give access dialog and its Remove confirmation (with a long
+address), and checks that no page or dialog scrolls
 sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
 the invoice logo loads from its signed Supabase Storage URL, and runs
@@ -530,6 +532,16 @@ database owner, which needs the `supabase` CLI and this project's
 directory, or `SUPABASE_WORKDIR`).
 Timings are printed, not enforced.
 
+It also signs in a tenant (RFC #197) at 360 px. Their unit is in a second
+organization of the smoke's own, with the tenant app turned on and one
+meter on a `SYNTHETIC-EDGE-` edge, so the server runs with
+`MGM_METERING_FIXTURES=1` ([Synthetic site data](#synthetic-site-data)).
+The tenant lands on their home, `/my`, and the smoke opens a past month and
+one of its days, checks that
+neither scrolls sideways and that every link and button in `main` is at
+least 44 × 44 px, and follows the links from the month to a day, to the
+day before and back up to the month.
+
 ```bash
 npx playwright install chromium        # once
 npm run build
@@ -546,7 +558,9 @@ app sends its sign-in link to the mail catcher on the default local ports
 `MGM_MAIL_CATCHER_URL=http://127.0.0.1:54324`); set both if your Supabase
 uses other ports. The smoke sets `MGM_APP_URL` to the app on port 3100
 itself, because the link is built from it, and checks that the link lands
-there.
+there. It sets `MGM_METERING_FIXTURES=1` on the server it starts; a server
+you started yourself and it reuses needs that setting too, or the tenant's
+usage pages show no figures.
 
 ## Full-Stack Setup (with OpenEMS)
 

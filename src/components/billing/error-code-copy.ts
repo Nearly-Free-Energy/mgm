@@ -39,8 +39,14 @@ export function errorCodeCopy(err: PartialFailureError): string {
       return `${name} has no meter and no manual reading provided.`;
     case "meter_assignment_continuity":
       return `${name}'s meter assignment does not cover the whole period. Verify the historical meter and replacement date, or enter manual readings to reconcile this bill.`;
-    // Only a per-bill regeneration (expectedBill, the regenerate route)
-    // reports these three; listed so no code falls through to raw text.
+    // Only a per-bill regeneration (expectedBill, the regenerate route) and a
+    // whole-period run from meter data (guardExistingBills, the
+    // generate-from-meters route) report these five; listed so no code falls
+    // through to raw text.
+    case "paid":
+      return `${name}'s bill is marked paid and was left as it is. Regenerate it on its own to change it.`;
+    case "refunded":
+      return `${name}'s bill is refunded and was left as it is.`;
     case "period_closed":
       return `${name}'s bill is in a closed period and was not regenerated.`;
     case "invoiced":

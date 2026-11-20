@@ -18,6 +18,10 @@
  * battery, and M, B's primary, linked to C as a secondary meter. Only C's
  * own primary consumption meter, from 21 October, is ever read.
  *
+ * Units D and E share one meter S as primary (D12, decided on mgm#217): D's
+ * from 1 October, E's from 10 October, both still open. From the 10th each
+ * sees S's whole use, labelled as shared, never as its own.
+ *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,7 +40,10 @@ import { generateDeviceEnergySeries } from "@/lib/metering/fixture/meter-energy"
 import { TENANT_APP_PLUGIN_NAME, TENANT_APP_PLUGIN_VERSION } from "@/lib/plugins/bundled";
 import { addDaysToDateKey, localHourStarts } from "@/lib/timezone/day-key";
 import { composeTenantApp } from "../compose";
-import type { TenantUsageDay, TenantUsageMonth } from "../types";
+import { buildTenantHomeModel, SHARED_USE_NOTE } from "../surface/home-model";
+import { buildUsageDayModel, monthSoFar } from "../surface/usage-model";
+import { createFmt } from "@/lib/gui/fmt";
+import type { TenantHome, TenantUsageDay, TenantUsageMonth } from "../types";
 import { _resetTenantUsageCacheForTests } from "../usage-throttle";
 
 const ORG = "e7700000-0000-4000-8000-000000000001";
@@ -54,15 +61,22 @@ const GRID_METER = "e7700000-0000-4000-8004-000000000003";
 const PV_METER = "e7700000-0000-4000-8004-000000000004";
 const BATTERY = "e7700000-0000-4000-8004-000000000005";
 const OWN_METER = "e7700000-0000-4000-8004-000000000006";
+const SHARED_METER = "e7700000-0000-4000-8004-000000000007";
+const UNIT_D = "e7700000-0000-4000-8005-000000000004";
+const UNIT_E = "e7700000-0000-4000-8005-000000000005";
 const LINK_X = "e7700000-0000-4000-8006-000000000001";
 const EMAIL_A = "tenant-usage-a@test.local";
 const EMAIL_B = "tenant-usage-b@test.local";
 const EMAIL_C = "tenant-usage-c@test.local";
+const EMAIL_D = "tenant-usage-d@test.local";
+const EMAIL_E = "tenant-usage-e@test.local";
 const KAMPALA = "Africa/Kampala";
 
 let tenantA: TestUser;
 let tenantB: TestUser;
 let tenantC: TestUser;
+let tenantD: TestUser;
+let tenantE: TestUser;
 
 const energySeries = vi.spyOn(FixtureMeteringProvider.prototype, "getDeviceEnergySeries");
 
@@ -85,7 +99,7 @@ beforeAll(async () => {
     vi.stubEnv(name, "");
   }
   vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "");
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E] });
 
   const svc = await serviceClient();
   const rows: [string, Record<string, unknown>][] = [
@@ -101,9 +115,12 @@ beforeAll(async () => {
     ["devices", { id: PV_METER, edge_id: EDGE, name: "PV meter", device_type: "pv_meter", openems_component_id: "meter2" }],
     ["devices", { id: BATTERY, edge_id: EDGE, name: "Battery", device_type: "battery", openems_component_id: "ess0" }],
     ["devices", { id: OWN_METER, edge_id: EDGE, name: "Meter C", device_type: "consumption_meter", openems_component_id: "meter3" }],
+    ["devices", { id: SHARED_METER, edge_id: EDGE, name: "Meter S", device_type: "consumption_meter", openems_component_id: "meter4" }],
     ["tenants", { id: UNIT_A, microgrid_id: MICROGRID, display_name: "Unit A", primary_phone: "+256700000001" }],
     ["tenants", { id: UNIT_B, microgrid_id: MICROGRID, display_name: "Unit B", primary_phone: "+256700000002" }],
     ["tenants", { id: UNIT_C, microgrid_id: MICROGRID, display_name: "Unit C", primary_phone: "+256700000003" }],
+    ["tenants", { id: UNIT_D, microgrid_id: MICROGRID, display_name: "Unit D", primary_phone: "+256700000004" }],
+    ["tenants", { id: UNIT_E, microgrid_id: MICROGRID, display_name: "Unit E", primary_phone: "+256700000005" }],
     ["tenant_devices", { tenant_id: UNIT_A, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: "2026-09-15" }],
     ["tenant_devices", { tenant_id: UNIT_B, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
     ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
@@ -112,6 +129,8 @@ beforeAll(async () => {
     ["tenant_devices", { tenant_id: UNIT_C, device_id: BATTERY, role: "battery", effective_from: "2026-10-01", effective_to: null }],
     ["tenant_devices", { tenant_id: UNIT_C, device_id: METER, role: "secondary_meter", effective_from: "2026-10-01", effective_to: null }],
     ["tenant_devices", { tenant_id: UNIT_C, device_id: OWN_METER, role: "primary_consumption_meter", effective_from: "2026-10-21", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_D, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_E, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-10", effective_to: null }],
     // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts).
     ["mgm_plugins", { org_id: ORG, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }],
   ];
@@ -122,13 +141,15 @@ beforeAll(async () => {
   tenantA = await createTestUser({ email: EMAIL_A, role: "tenant", scopeId: UNIT_A });
   tenantB = await createTestUser({ email: EMAIL_B, role: "tenant", scopeId: UNIT_B });
   tenantC = await createTestUser({ email: EMAIL_C, role: "tenant", scopeId: UNIT_C });
+  tenantD = await createTestUser({ email: EMAIL_D, role: "tenant", scopeId: UNIT_D });
+  tenantE = await createTestUser({ email: EMAIL_E, role: "tenant", scopeId: UNIT_E });
 }, 60_000);
 
 afterAll(async () => {
   if (shouldSkip()) return;
   vi.unstubAllEnvs();
   energySeries.mockRestore();
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E] });
 }, 60_000);
 
 beforeEach(() => {
@@ -142,6 +163,18 @@ async function usageMonth(user: TestUser, tenantId: string, month: string): Prom
   try {
     const result = await composed.data.tenantApp.getUsageMonth({ month });
     if (!result.ok) throw new Error(`getUsageMonth: ${result.status} ${result.code}`);
+    return result.data;
+  } finally {
+    await composed.data.dispose();
+  }
+}
+
+async function home(user: TestUser, tenantId: string): Promise<TenantHome> {
+  const composed = await composeTenantApp({ supabase: user.client, tenantId });
+  if (!composed.ok) throw new Error(`composeTenantApp: ${composed.status} ${composed.code}`);
+  try {
+    const result = await composed.data.tenantApp.getHome();
+    if (!result.ok) throw new Error(`getHome: ${result.status} ${result.code}`);
     return result.data;
   } finally {
     await composed.data.dispose();
@@ -320,6 +353,61 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
         date: "2026-10-25",
         ...bucket(generated("2026-10-25", "2026-10-25", "day")[0]),
       });
+    });
+  });
+
+  describe("a meter that is two units' primary on the same days (D12, mgm#217)", () => {
+    const shared = { id: SHARED_METER, componentId: "meter4" };
+    const fmt = createFmt({ locale: "en-GB" });
+
+    it("shows each unit the meter's whole use on the shared days, labelled, and the same figures to both", async () => {
+      const unitD = await usageMonth(tenantD, UNIT_D, "2026-10");
+      const unitE = await usageMonth(tenantE, UNIT_E, "2026-10");
+      const figures = generated("2026-10-01", "2026-10-31", "day", shared);
+
+      expect(unitD.days).toEqual(
+        october.map((date, i) => ({
+          date,
+          ...bucket(figures[i]),
+          ...(date >= "2026-10-10" && figures[i] !== null ? { shared: true } : {}),
+        }))
+      );
+      // E holds S from the 10th: every day it shows is shared, with D's figures.
+      expect(unitE.days.slice(9)).toEqual(unitD.days.slice(9));
+      expect(unitE.days.slice(0, 9).every((d) => d.state === "no-meter")).toBe(true);
+      const sharedDays = unitD.days.filter((d) => d.shared).length;
+      expect(sharedDays).toBeGreaterThan(10);
+      expect(unitD.total).toMatchObject({ shared: sharedDays });
+      expect(unitE.total).toMatchObject({ shared: sharedDays, kwh: kwhSum(figures.slice(9)) });
+      // The label, as the month and the home show it.
+      expect(monthSoFar(unitE, { fmt, locale: "en-GB" }).note).toContain(SHARED_USE_NOTE);
+      expect(monthSoFar(unitD, { fmt, locale: "en-GB" }).note).toContain("days shared with another unit, not only yours");
+    });
+
+    it("labels a shared day's total, with the meter's own hours", async () => {
+      const day = await usageDay(tenantE, UNIT_E, "2026-10-12");
+      expect(day.shared).toBe(true);
+      expect(day.hours.map((h) => h.kwh)).toEqual(generated("2026-10-12", "2026-10-12", "hour", shared));
+      const model = buildUsageDayModel(day, { fmt, locale: "en-GB", links: { tenantId: UNIT_E, several: false } });
+      expect(model.body.totals?.note?.text).toContain(SHARED_USE_NOTE);
+      expect(await usageDay(tenantD, UNIT_D, "2026-10-05")).not.toHaveProperty("shared");
+    });
+
+    it("labels the meter on both units' homes while both hold it", async () => {
+      for (const [user, unit] of [[tenantD, UNIT_D], [tenantE, UNIT_E]] as const) {
+        const shown = await home(user, unit);
+        expect(shown.meters).toEqual([expect.objectContaining({ deviceId: SHARED_METER, shared: true })]);
+        const model = buildTenantHomeModel(shown, fmt, null);
+        expect(JSON.stringify(model.body)).toContain(SHARED_USE_NOTE);
+      }
+    });
+
+    it("never labels a meter another unit links only as secondary", async () => {
+      // M is B's primary and C's secondary: not shared with C's link.
+      const unitB = await usageMonth(tenantB, UNIT_B, "2026-10");
+      expect(unitB.days.some((d) => d.shared)).toBe(false);
+      expect(unitB.total).not.toHaveProperty("shared");
+      expect((await home(tenantB, UNIT_B)).meters.every((m) => !m.shared)).toBe(true);
     });
   });
 

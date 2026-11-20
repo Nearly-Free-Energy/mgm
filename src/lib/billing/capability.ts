@@ -712,7 +712,12 @@ export class BillingCapability implements BillingCapabilityContract {
     return { ok: true as const, data: { periodId, microgridId: period.microgrid_id, name } };
   }
 
-  private async runGeneration(input: unknown, mode: "write" | "preview", expectedBill?: ExpectedBill) {
+  private async runGeneration(
+    input: unknown,
+    mode: "write" | "preview",
+    expectedBill?: ExpectedBill,
+    guardExistingBills?: true,
+  ) {
     const inactive = this.ensureActive();
     if (inactive) return inactive;
     // The routes parse first (generate with this schema, regenerate-preview
@@ -747,6 +752,7 @@ export class BillingCapability implements BillingCapabilityContract {
       mode,
       actorUserId: this.scope.userId,
       ...(expectedBill ? { expectedBill } : {}),
+      ...(guardExistingBills ? { guardExistingBills } : {}),
     });
     if ((out as GenerationFatal).kind === "fatal") {
       const fatal = out as GenerationFatal;
@@ -771,6 +777,21 @@ export class BillingCapability implements BillingCapabilityContract {
 
   async generateBills(input: unknown, options: { expectedBill?: ExpectedBill } = {}) {
     return this.runGeneration(input, "write", options.expectedBill);
+  }
+
+  async generateFromMeters(periodId: string) {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    if (!UUID_RE.test(periodId)) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "billing_invalid_period",
+        message: "Invalid billing period id — expected UUID.",
+      };
+    }
+    // Scope and the plugin re-check run in runGeneration, as for every write.
+    return this.runGeneration({ billingPeriodId: periodId }, "write", undefined, true);
   }
 
   async recordManualPayment(lineItemId: string, input: unknown) {

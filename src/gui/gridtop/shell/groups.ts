@@ -3,7 +3,7 @@
  * entries of each by `order`, the apps pinned to the phone dock, and which
  * app the current page belongs to.
  */
-import type { Href, Id, NavEntry, NavGroup } from "@/lib/gui/contract";
+import type { Href, Id, Manifest, NavEntry, NavGroup } from "@/lib/gui/contract";
 
 export const GROUPS: readonly { id: NavGroup; title: string }[] = [
   { id: "operate", title: "Operate" },
@@ -18,6 +18,24 @@ export const GROUPS: readonly { id: NavGroup; title: string }[] = [
  */
 export const PINNED: readonly Id[] = ["org.today", "metering.operations", "billing.periods"];
 
+/**
+ * The phone dock's apps for a tenant (RFC mgm#197 § 4), from the tenant
+ * app's surface (src/lib/tenant-app/surface.ts); the third slot is the
+ * account menu (./bottom-dock.tsx). If those nav ids change, revisit.
+ */
+export const TENANT_PINNED: readonly Id[] = ["tenant.home", "tenant.usage"];
+
+/**
+ * Whether the manifest is a tenant's: the host builds a tenant manifest with
+ * no organization to switch to (buildTenantManifestModel,
+ * src/lib/gui/host/shared/manifest-model.ts), and a staff manifest always
+ * lists the current organization. A person with staff and tenant rows gets a
+ * staff manifest. NavEntry carries no audience on the client. If a staff
+ * manifest can ever list no organization, or the contract starts carrying
+ * audience, revisit.
+ */
+export const isTenantManifest = (manifest: Pick<Manifest, "orgs">): boolean => manifest.orgs.length === 0;
+
 const rank = (group: NavGroup) => GROUPS.findIndex((g) => g.id === group);
 
 /** Every entry, in group order and then by `order`. */
@@ -31,11 +49,11 @@ export function grouped(nav: readonly NavEntry[]): { id: NavGroup; title: string
   return GROUPS.map((g) => ({ ...g, entries: all.filter((e) => e.group === g.id) })).filter((g) => g.entries.length > 0);
 }
 
-/** PINNED, each absent app replaced by the first entry in group order not already shown. */
-export function pinned(nav: readonly NavEntry[]): NavEntry[] {
+/** The apps `ids` names (PINNED by default), each absent one replaced by the first entry in group order not already shown. */
+export function pinned(nav: readonly NavEntry[], ids: readonly Id[] = PINNED): NavEntry[] {
   const all = ordered(nav);
-  const used = new Set(PINNED.filter((id) => all.some((e) => e.id === id)));
-  return PINNED.flatMap((id) => {
+  const used = new Set(ids.filter((id) => all.some((e) => e.id === id)));
+  return ids.flatMap((id) => {
     const own = all.find((e) => e.id === id);
     if (own) return [own];
     const next = all.find((e) => !used.has(e.id));

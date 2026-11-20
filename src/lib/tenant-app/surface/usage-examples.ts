@@ -13,9 +13,13 @@ import "server-only";
  * Month: November so far, with the house meter replaced on the 10th and a
  * day the old meter did not report; October, whose read failed; November over the
  * read limit, with nothing kept and with a read kept from 14:20; February,
- * before the unit's first meter; and September, every day read.
+ * before the unit's first meter; September, every day read; and September
+ * again for a person with several units, whose links name the unit.
  * Day: today so far; the day the old meter did not report three hours; a
- * day before the unit's first meter; and a day whose read failed.
+ * day before the unit's first meter; a day whose read failed; and, for a
+ * unit in New York, the 23-hour day the clocks go forward (8 March 2026)
+ * and the 25-hour day they go back (1 November 2026), whose hours carry
+ * their UTC offsets.
  *
  * The meters are picked by what the generator gives them, as the
  * Operations day's examples pick their days, so the examples keep their
@@ -35,10 +39,12 @@ import {
   sumMeters,
   type UsageFigures,
 } from "../usage-calendar";
-import { buildUsageDayModel, buildUsageMonthModel } from "./usage-model";
+import { buildUsageDayModel, buildUsageMonthModel, type UsageLinkContext } from "./usage-model";
 
 const LOCALE = "en-GB";
 const TIMEZONE = "Africa/Kampala";
+/** A zone whose clocks change, for the 23- and 25-hour days. */
+const NEW_YORK = "America/New_York";
 /** 14:30 in Kampala. */
 const NOW = Date.parse("2026-11-18T11:30:00Z");
 const TODAY = dayKeyInZone(NOW, TIMEZONE);
@@ -46,7 +52,9 @@ const TENANT = { id: "00000000-0000-4000-8000-0000000000b1", displayName: "Examp
 /** The generator's input only: no model shows it. */
 const MICROGRID = "00000000-0000-4000-8000-0000000000c1";
 const fmt = createFmt({ locale: LOCALE });
-const links = { tenantId: TENANT.id, several: false };
+const links: UsageLinkContext = { tenantId: TENANT.id, several: false };
+/** The same unit for a person who holds several, so every href names it. */
+const severalLinks: UsageLinkContext = { tenantId: TENANT.id, several: true };
 
 /** What the host shows on a model whose Values are synthetic: SYNTHETIC_NOTICE in @/lib/gui/host/server/view, which surface.test.ts compares. */
 export const EXAMPLE_SYNTHETIC_NOTICE = {
@@ -93,8 +101,8 @@ const LINKS: TenantMeter[] = [
 const devicesOf = (ids: Iterable<string>) => [...ids].sort().map((id) => ({ id, edgeOpenemsId: "SYNTHETIC-EDGE-EXAMPLE", componentId: "meter1" }));
 
 /** The month's figures as the capability sums them, read at `readAt`: one read of every meter in force, clipped per day. */
-function monthFigures(month: string, assignments: TenantMeter[], readAt: number, stale = false): UsageFigures {
-  const today = dayKeyInZone(readAt, TIMEZONE);
+function monthFigures(month: string, assignments: TenantMeter[], readAt: number, stale = false, zone = TIMEZONE): UsageFigures {
+  const today = dayKeyInZone(readAt, zone);
   const inForce = datesOfMonth(month).filter((date) => date <= today && metersOn(assignments, date).size > 0);
   const series = generateDeviceEnergySeries(
     {
@@ -103,11 +111,11 @@ function monthFigures(month: string, assignments: TenantMeter[], readAt: number,
       startDate: inForce[0],
       endDate: inForce[inForce.length - 1],
       resolution: "day",
-      timezone: TIMEZONE,
+      timezone: zone,
     },
     { nowMs: readAt },
   );
-  const index = new Map(series.buckets.map((start, i) => [dayKeyInZone(start, TIMEZONE), i]));
+  const index = new Map(series.buckets.map((start, i) => [dayKeyInZone(start, zone), i]));
   const values = Object.fromEntries(
     inForce.map((date) => [date, sumMeters({ ...series, synthetic: true }, metersOn(assignments, date), index.get(date))]),
   );
@@ -115,32 +123,46 @@ function monthFigures(month: string, assignments: TenantMeter[], readAt: number,
 }
 
 /** The day's figures per hour, read at `readAt`. */
-function dayFigures(date: string, assignments: TenantMeter[], readAt: number): UsageFigures {
+function dayFigures(date: string, assignments: TenantMeter[], readAt: number, zone = TIMEZONE): UsageFigures {
   const devices = metersOn(assignments, date);
   const series = generateDeviceEnergySeries(
-    { microgridId: MICROGRID, devices: devicesOf(devices), startDate: date, endDate: date, resolution: "hour", timezone: TIMEZONE },
+    { microgridId: MICROGRID, devices: devicesOf(devices), startDate: date, endDate: date, resolution: "hour", timezone: zone },
     { nowMs: readAt },
   );
   const index = new Map(series.buckets.map((start, i) => [start, i]));
   const values = Object.fromEntries(
-    localHourStarts(date, TIMEZONE).map((start) => [String(start), sumMeters({ ...series, synthetic: true }, devices, index.get(start))]),
+    localHourStarts(date, zone).map((start) => [String(start), sumMeters({ ...series, synthetic: true }, devices, index.get(start))]),
   );
   return { kind: "figures", values, readAt, stale: false, synthetic: true };
 }
 
 const problem = (kind: TenantUsageProblem): UsageFigures => ({ kind: "problem", problem: kind });
 
-function computedMonth(month: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): TenantUsageMonth {
-  return computeUsageMonth({ tenant: TENANT, timezone: TIMEZONE, month, today: TODAY, nowMs: NOW, assignments, figures });
+function computedMonth(month: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS, zone = TIMEZONE): TenantUsageMonth {
+  const today = dayKeyInZone(NOW, zone);
+  return computeUsageMonth({ tenant: TENANT, timezone: zone, month, today, nowMs: NOW, assignments, figures });
 }
 
-function month(month: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): LoadedModel<"collection"> {
-  return buildUsageMonthModel(computedMonth(month, figures, assignments), { fmt, locale: LOCALE, links });
+function month(
+  month: string,
+  figures: UsageFigures,
+  assignments: TenantMeter[] = LINKS,
+  unitLinks: UsageLinkContext = links,
+  zone = TIMEZONE,
+): LoadedModel<"collection"> {
+  return buildUsageMonthModel(computedMonth(month, figures, assignments, zone), { fmt, locale: LOCALE, links: unitLinks });
 }
 
-function day(date: string, figures: UsageFigures, assignments: TenantMeter[] = LINKS): LoadedModel<"collection"> {
-  const computed = computeUsageDay({ tenant: TENANT, timezone: TIMEZONE, date, today: TODAY, nowMs: NOW, assignments, figures });
-  return buildUsageDayModel(computed, { fmt, locale: LOCALE, links });
+function day(
+  date: string,
+  figures: UsageFigures,
+  assignments: TenantMeter[] = LINKS,
+  unitLinks: UsageLinkContext = links,
+  zone = TIMEZONE,
+): LoadedModel<"collection"> {
+  const today = dayKeyInZone(NOW, zone);
+  const computed = computeUsageDay({ tenant: TENANT, timezone: zone, date, today, nowMs: NOW, assignments, figures });
+  return buildUsageDayModel(computed, { fmt, locale: LOCALE, links: unitLinks });
 }
 
 const SEPTEMBER_LINKS = [link(SEPTEMBER, "House meter", "2026-08-01")];
@@ -163,6 +185,7 @@ export const TENANT_USAGE_MONTH_LOADED_EXAMPLES: readonly LoadedModel<"collectio
   month("2026-11", monthFigures("2026-11", LINKS, Date.parse("2026-11-18T11:20:00Z"), true)),
   month("2026-02", { kind: "none" }),
   month("2026-09", monthFigures("2026-09", SEPTEMBER_LINKS, NOW), SEPTEMBER_LINKS),
+  month("2026-09", monthFigures("2026-09", SEPTEMBER_LINKS, NOW), SEPTEMBER_LINKS, severalLinks),
 ];
 
 /** The day view's models as the loader returns them, before the host fills its fields. */
@@ -171,6 +194,8 @@ export const TENANT_USAGE_DAY_LOADED_EXAMPLES: readonly LoadedModel<"collection"
   day(GAP_DAY, dayFigures(GAP_DAY, LINKS, NOW)),
   day("2026-02-20", { kind: "none" }),
   day("2026-11-17", problem("unavailable")),
+  day("2026-03-08", dayFigures("2026-03-08", LINKS, NOW, NEW_YORK), LINKS, links, NEW_YORK),
+  day("2026-11-01", dayFigures("2026-11-01", LINKS, NOW, NEW_YORK), LINKS, links, NEW_YORK),
 ];
 
 /** Whether any Value of the body is marked synthetic, as the host decides its notice (hasSynthetic in @/lib/gui/host/server/view). */

@@ -111,6 +111,8 @@ const source: TenantUsageSource = {
     });
     return { ok: true, series: { ...series, synthetic: true } };
   },
+  // No example meter is another unit's primary.
+  listPrimaryElsewhere: async () => [],
 };
 
 const dispose = vi.fn(async () => {});

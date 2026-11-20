@@ -4,9 +4,10 @@ import "server-only";
  * Examples of the `billing.period-review` view, so every GUI can be tested
  * against it: a draft period seen by an organization manager, with an edge
  * bill, a manual paid one, one with a pending payment link and a refunded
- * one; a closed period seen by a super admin, who is also offered marking a
- * bill failed or refunded; a draft with tenants and no bills; a microgrid
- * with no tenants; and the first again
+ * one, offered refreshing its readings from the meters; a closed period seen
+ * by a super admin, who is also offered marking a bill failed or refunded; a
+ * draft with tenants and no bills, whose empty state offers generating them
+ * from meter data; a microgrid with no tenants; and the first again
  * while billing is off, with every action disabled and the gate's notice.
  * Built at import the way the loader builds them, so each carries the
  * `billing.period-review@1` ext and a GUI with a renderer for it (Gridtop's)
@@ -18,6 +19,7 @@ import type { ActionLink, LoadedModel } from "@/lib/gui/surface";
 import {
   buildPeriodReviewModel,
   CANCEL_PAYMENT_LINK_ACTION,
+  GENERATE_FROM_METERS_ACTION,
   MARK_FAILED_ACTION,
   MARK_PAID_ACTION,
   MARK_REFUNDED_ACTION,
@@ -42,6 +44,7 @@ const BILLING_DISABLED =
 
 const TITLES: Record<string, string> = Object.fromEntries(
   [
+    GENERATE_FROM_METERS_ACTION,
     REGENERATE_BILL_ACTION,
     RECORD_USAGE_ACTION,
     MARK_PAID_ACTION,
