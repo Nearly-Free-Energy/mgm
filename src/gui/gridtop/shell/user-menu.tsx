@@ -2,7 +2,9 @@
  * The account menu: who is signed in, their profile, the status items below
  * 600 px, opening this page in a new window from 600 px, and Sign out. A
  * failed sign-out shows the kit's message here, and the sheet stays open so
- * the person can try again.
+ * the person can try again. Its trigger sits in the tray, or, for a tenant
+ * below 600 px, in the phone dock (./bottom-dock.tsx), which passes its own
+ * column class so this module does not import the dock.
  */
 import { UserRound } from "lucide-react";
 import { kit } from "@/lib/gui/kit";
@@ -20,22 +22,29 @@ export function popOut(): void {
   window.open(window.location.href, "_blank", "noopener,noreferrer");
 }
 
-export function UserMenu() {
+type Place = { place?: "tray"; className?: never } | { place: "dock"; className: string };
+
+export function UserMenu({ place = "tray", className }: Place = {}) {
   const { user, org } = kit.useManifest();
   const view = kit.useView();
   const who = user.name ?? user.email;
   const profile = org.nav.find((entry) => entry.id === PROFILE);
   const profileHref = profile && view.href(profile);
+  // The name holds the word shown, so speech input can say "Account" (WCAG 2.5.3).
+  const trigger =
+    place === "dock" ? (
+      <button type="button" aria-label={`Account: ${who}`} className={className}>
+        <UserRound aria-hidden="true" focusable="false" className="gt:size-5 gt:shrink-0" />
+        <span className="gt:max-w-full gt:truncate">Account</span>
+      </button>
+    ) : (
+      <button type="button" aria-label={`Account: ${who}`} className={TRAY_BUTTON}>
+        <UserRound aria-hidden="true" focusable="false" className="gt:size-5" />
+        <span className="gt:hidden gt:max-w-48 gt:truncate gt:expanded:inline">{who}</span>
+      </button>
+    );
   return (
-    <Sheet
-      title="Account"
-      trigger={
-        <button type="button" aria-label={`Account: ${who}`} className={TRAY_BUTTON}>
-          <UserRound aria-hidden="true" focusable="false" className="gt:size-5" />
-          <span className="gt:hidden gt:max-w-48 gt:truncate gt:expanded:inline">{who}</span>
-        </button>
-      }
-    >
+    <Sheet title="Account" trigger={trigger}>
       <div className="gt:flex gt:flex-col gt:gap-2">
         <p className="gt:flex gt:flex-col gt:px-1">
           {user.name && <span className="gt:text-body gt:font-medium">{user.name}</span>}

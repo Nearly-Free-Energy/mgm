@@ -120,6 +120,32 @@ export async function checkShellLinks(page: Page) {
 }
 
 /**
+ * Every link and button in main that is drawn on screen is at least 44 px
+ * each way. TOUCH_TALL selects a link only by its own `flex` or
+ * `inline-flex` class, and Gridtop's classes are prefixed (`gt:flex`), so
+ * the links a GUI draws in main are measured here instead. A box of 1 px
+ * or less is the visually hidden pattern (sr-only), not a target.
+ */
+export async function checkMainTargets(page: Page) {
+  expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), "touch is the primary pointer").toBe(true);
+  const small = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("main a, main button, [role=main] a, [role=main] button"))
+      .filter((el) => !el.closest("[aria-hidden=true]"))
+      .filter((el) => {
+        const box = el.getBoundingClientRect();
+        if (box.width <= 1 || box.height <= 1 || getComputedStyle(el).visibility === "hidden") return false;
+        return box.width < 43.5 || box.height < 43.5;
+      })
+      .map((el) => {
+        const box = el.getBoundingClientRect();
+        const name = (el.getAttribute("aria-label") ?? el.textContent ?? "").trim().slice(0, 40);
+        return `${el.tagName.toLowerCase()} "${name}" ${Math.round(box.width)}x${Math.round(box.height)}`;
+      })
+  );
+  expect(small, "links and buttons in main under 44 x 44 px on a touch screen").toEqual([]);
+}
+
+/**
  * The page never scrolls sideways, nor does its main landmark (the shell's
  * main is what scrolls), every table sits in a box of its own that scrolls
  * sideways within the screen, and every control is a 44 px target.

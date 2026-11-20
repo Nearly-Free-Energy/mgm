@@ -5,8 +5,10 @@ import "server-only";
  * mgm#197 § 3–5: tenant views about the caller's own unit, with nav entries
  * for the tenant audience. `tenant.home` is the unit, its meters and its
  * month's use so far; `tenant.usage-month` and `tenant.usage-day` are its
- * use per day of a month and per hour of a day. Gridtop draws them with its
- * kit until its own renderers read their exts (RFC mgm#197: PR 4).
+ * use per day of a month and per hour of a day. Gridtop draws the usage
+ * views with its own renderers (src/gui/gridtop/renderers/tenant-usage),
+ * which read the exts; other GUIs, and Gridtop on an ext it cannot read,
+ * draw them with the kit.
  *
  * Their pages, /my, /my/usage and /my/usage/day, are in the catalog but not
  * released (RFC mgm#197: released by PR 5), so neither the entries nor the

@@ -17,8 +17,13 @@
  * check (strictProblems in @/lib/gui/host/server/contribution-schema) passes
  * it. Every label is formatted on the server; a renderer formats nothing.
  * Times are ISO 8601 instants. Field names carry no word the GUI surface
- * test reads as a secret. A change to either shape after a renderer reads
- * it is `@2`, named by the constants in ./usage-model.ts.
+ * test reads as a secret.
+ *
+ * Gridtop's renderer reads both (its reader is
+ * src/gui/gridtop/renderers/tenant-usage/ext.ts), and with them the models'
+ * row ids and subtitle (./usage-model.ts says where). A change to either
+ * shape is now `@2`, named by the constants in ./usage-model.ts and added to
+ * that renderer's `reads`.
  */
 import { z } from "zod";
 import { isSameOriginPath } from "@/lib/gui/host/shared/href";

@@ -1,12 +1,15 @@
 /**
  * The tray, at the right of the title bar: what needs the person, the
  * status items, and the account menu. Status items show here from 600 px
- * and in the account menu below it.
+ * and in the account menu below it. On a tenant's manifest the account menu
+ * shows here from 600 px only, since the phone dock holds it below that
+ * (./bottom-dock.tsx).
  */
 import { Bell } from "lucide-react";
 import type { Signals } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { SHEET_ROW, Sheet } from "../ui/sheet";
+import { isTenantManifest } from "./groups";
 import { StatusLinks, TRAY_BUTTON } from "./tray-parts";
 import { UserMenu } from "./user-menu";
 
@@ -49,7 +52,8 @@ function NeedsYou({ signals }: { signals: Signals | null }) {
 }
 
 export function Tray() {
-  const { org } = kit.useManifest();
+  const manifest = kit.useManifest();
+  const { org } = manifest;
   const signals = kit.useSignals();
   const count = signals?.count ?? 0;
   return (
@@ -60,7 +64,13 @@ export function Tray() {
         {count > 0 ? `${count} ${count === 1 ? "thing needs" : "things need"} you` : ""}
       </span>
       <StatusLinks items={org.status} className="gt:hidden gt:items-center gt:gap-1 gt:medium:flex" />
-      <UserMenu />
+      {isTenantManifest(manifest) ? (
+        <span className="gt:max-medium:hidden">
+          <UserMenu />
+        </span>
+      ) : (
+        <UserMenu />
+      )}
     </div>
   );
 }
