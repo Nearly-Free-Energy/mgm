@@ -23,10 +23,11 @@ Operations tab, its tenants list with the Add tenant dialog, and a
 billing period with its Close period dialog. Hovering in the inspector shows
 sizes. If one of those pages is removed or renamed, update this list.
 The browser smoke in `Test` already covers sign-in (an organization manager
-and a tenant), home and the tenants list with the Add tenant dialog at
-360 px (e2e/); the tenant usage month and day join it once they are
-released (RFC #197). It does not cover the other pages. If e2e/ starts or
-stops opening a page, update this sentence.
+and a tenant), home, the tenants list with the Add tenant dialog, a tenant
+record's App access section with its Give access dialog and Remove
+confirmation, and the tenant's usage month and day at 360 px
+(e2e/). It does not cover the other pages. If e2e/ starts or stops opening
+a page, update this sentence.
 -->
 
 - [ ] Nothing renders differently, or I opened at 360 px:

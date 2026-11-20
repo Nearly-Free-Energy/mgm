@@ -2,8 +2,7 @@
  * dispatchView for a tenant view (scope "tenant", RFC mgm#197 § 4): the unit
  * is chosen among the person's own tenant rows, the loader runs on its own
  * client with a TenantRequest, and the host reads nothing of an organization,
- * asks no gate and offers no action. /my is not released until PR 5, so the
- * released-route check is widened to it here.
+ * asks no gate and offers no action.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,10 +19,6 @@ vi.mock("@/lib/runtime/gate", () => ({
 }));
 let snapshot: SurfaceSnapshot;
 vi.mock("../snapshot", () => ({ surfaceSnapshot: async () => snapshot }));
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...real, isReleasedRoute: (path: string) => path === "/my" || real.isReleasedRoute(path) };
-});
 
 import { dispatchView } from "../view";
 import { ORG_A, contextFor, managerOf, superAdmin, tableClient, tenantOf } from "./host-fakes";

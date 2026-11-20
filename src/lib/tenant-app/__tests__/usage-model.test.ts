@@ -53,11 +53,13 @@ type Cells = Record<string, { t: string; text: string; synthetic?: true }>;
 const cellsOf = (model: ReturnType<typeof buildUsageMonthModel>) =>
   Object.fromEntries(model.body.rows.map((r) => [r.id, r.cells as Cells]));
 
+type Shared = { deviceId: string; effectiveFrom: string; effectiveTo: string | null }[];
+
 function month(
   monthKey: string,
   f: UsageFigures,
   assignments: TenantMeter[] = [link("m", "2026-01-01")],
-  o: { today?: string; nowMs?: number; links?: typeof ONE; timezone?: string } = {},
+  o: { today?: string; nowMs?: number; links?: typeof ONE; timezone?: string; shared?: Shared } = {},
 ) {
   const computed = computeUsageMonth({
     tenant: TENANT,
@@ -67,6 +69,7 @@ function month(
     nowMs: o.nowMs ?? NOW,
     assignments,
     figures: f,
+    shared: o.shared,
   });
   const model = buildUsageMonthModel(computed, { fmt, locale: LOCALE, links: o.links ?? ONE });
   return { computed, model, ext: model.ext!.data as TenantUsageMonthExtData };
@@ -76,7 +79,7 @@ function day(
   date: string,
   f: UsageFigures,
   assignments: TenantMeter[] = [link("m", "2026-01-01")],
-  o: { today?: string; nowMs?: number; links?: typeof ONE; timezone?: string } = {},
+  o: { today?: string; nowMs?: number; links?: typeof ONE; timezone?: string; shared?: Shared } = {},
 ) {
   const computed = computeUsageDay({
     tenant: TENANT,
@@ -86,6 +89,7 @@ function day(
     nowMs: o.nowMs ?? NOW,
     assignments,
     figures: f,
+    shared: o.shared,
   });
   const model = buildUsageDayModel(computed, { fmt, locale: LOCALE, links: o.links ?? ONE });
   return { computed, model, ext: model.ext!.data as TenantUsageDayExtData };
@@ -266,6 +270,49 @@ describe("the month model", () => {
     // 1 November 2026 is a Sunday, 1 October 2026 a Thursday.
     expect(month("2026-11", { kind: "none" }).ext.firstWeekday).toBe(6);
     expect(month("2026-10", { kind: "none" }).ext.firstWeekday).toBe(3);
+  });
+});
+
+describe("a meter that is also another unit's primary (D12)", () => {
+  const LABEL = "Shared with another unit, not only yours";
+
+  it("labels each shared day with a figure, and says in the total how many days are shared", () => {
+    const shared = [{ deviceId: "m", effectiveFrom: "2026-11-10", effectiveTo: null }];
+    const { model, ext } = month("2026-11", figures({ ...NOVEMBER, "2026-11-12": null }), undefined, { shared });
+    const cells = cellsOf(model);
+    expect(cells["2026-11-09"]).not.toHaveProperty("note");
+    expect(cells["2026-11-10"].note).toEqual({ t: "text", text: LABEL });
+    // Today so far keeps its own note first.
+    expect(cells[TODAY].note).toEqual({ t: "text", text: `So far today · ${LABEL}` });
+    // A shared day with no figure shows no use, so no label.
+    expect(cells["2026-11-12"]).toMatchObject({ usage: { text: "No data" } });
+    expect(cells["2026-11-12"]).not.toHaveProperty("note");
+    // Shared: the 10th to the 18th, less the 12th, 8 days. The total is the
+    // same as without the label: 34.5 kWh less the 12th's 2 kWh.
+    expect(model.body.totals).toEqual({
+      usage: fmt.energy(32_500, { digits: 1 }),
+      note: { t: "text", text: "So far · 1 day missing · 8 days shared with another unit, not only yours" },
+    });
+    expect(ext.days[9].note).toBe(LABEL);
+    expect(ext.total.note).toBe("So far · 1 day missing · 8 days shared with another unit, not only yours");
+    expect(TenantUsageMonthExt.safeParse(ext).success).toBe(true);
+  });
+
+  it("uses the label itself when every day with a figure is shared", () => {
+    const shared = [{ deviceId: "m", effectiveFrom: "2026-11-01", effectiveTo: null }];
+    const { model } = month("2026-11", figures(NOVEMBER), undefined, { shared });
+    expect(model.body.totals?.note).toEqual({ t: "text", text: `So far · ${LABEL}` });
+  });
+
+  it("labels the day's total when the day is shared, and leaves its hours as they are", () => {
+    const hours = localHourStarts(TODAY, KAMPALA);
+    const values = Object.fromEntries(hours.filter((s) => s <= NOW).map((s) => [String(s), 0.085]));
+    const shared = [{ deviceId: "m", effectiveFrom: TODAY, effectiveTo: "2026-11-19" }];
+    const { model, ext } = day(TODAY, figures(values), undefined, { shared });
+    expect(model.body.totals?.note).toEqual({ t: "text", text: `So far · ${LABEL}` });
+    expect(ext.total.note).toBe(`So far · ${LABEL}`);
+    expect(model.body.rows.some((row) => row.cells.note?.text.includes("Shared"))).toBe(false);
+    expect(TenantUsageDayExt.safeParse(ext).success).toBe(true);
   });
 });
 

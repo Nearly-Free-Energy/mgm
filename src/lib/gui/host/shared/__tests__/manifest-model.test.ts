@@ -16,14 +16,14 @@ import {
   type TenantManifestInput,
 } from "../manifest-model";
 
-// Paths a test releases on top of the real list, such as /my, which PR 5 of
-// RFC mgm#197 releases.
-const extraReleased = vi.hoisted(() => new Set<string>());
+// Released paths a test withholds, such as /my, to see what the manifest does
+// with an unreleased page.
+const withheld = vi.hoisted(() => new Set<string>());
 vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...actual, isReleasedRoute: (path: string) => extraReleased.has(path) || actual.isReleasedRoute(path) };
+  return { ...actual, isReleasedRoute: (path: string) => !withheld.has(path) && actual.isReleasedRoute(path) };
 });
-afterEach(() => extraReleased.clear());
+afterEach(() => withheld.clear());
 
 const ORG = "e7100000-0000-4000-8000-000000000001";
 const OTHER = "e7100000-0000-4000-8000-000000000002";
@@ -133,8 +133,7 @@ describe("buildManifestModel", () => {
   });
 
   describe("nav audiences", () => {
-    // A tenant entry names a tenant view. "/" is released and stands in for
-    // /my, which is not yet (RFC mgm#197: released by PR 5).
+    // A tenant entry names a tenant view, here the home at /my.
     const tenantHome: ManifestInput["nav"][number] = {
       plugin: "tenant-app",
       def: { id: "tenant.home", title: "My home", icon: "tenants", group: "operate", order: 80, view: "tenant.home", audience: "tenant" },
@@ -143,7 +142,7 @@ describe("buildManifestModel", () => {
     // Tenant entries follow the gate of the person's own units' organizations
     // (tenantGate), not that of the organization the manifest is built for.
     const UNITS_ON: ManifestInput["gate"] = { ...ALL_ON, "tenant-app": true };
-    const withTenant = (over: Partial<ManifestInput>, path = "/") =>
+    const withTenant = (over: Partial<ManifestInput>, path = "/my") =>
       navIds(input({ tenantGate: UNITS_ON, nav: [...legacyNav, tenantHome], views: tenantView(path), ...over }));
     const staffIds = navIds(input()).filter((id) => id !== "org.organizations");
 
@@ -167,7 +166,10 @@ describe("buildManifestModel", () => {
     });
 
     it("leaves out a tenant entry whose page is not released, and one whose plugin is off", () => {
-      expect(withTenant({ staff: false, tenant: true }, "/my")).toEqual([]);
+      withheld.add("/my");
+      expect(withTenant({ staff: false, tenant: true })).toEqual([]);
+      withheld.clear();
+      expect(withTenant({ staff: false, tenant: true })).toEqual(["tenant.home"]);
       expect(withTenant({ staff: false, tenant: true, tenantGate: ALL_ON })).toEqual([]);
       expect(withTenant({ staff: false, tenant: true, tenantGate: undefined })).toEqual([]);
     });
@@ -428,7 +430,6 @@ describe("buildTenantManifestModel", () => {
   }
 
   it("makes the person's one unit the manifest's place and context, with no organization", () => {
-    extraReleased.add("/my");
     const m = buildTenantManifestModel(tenantInput());
     expect(manifestSchema.parse(m)).toEqual(m);
     expect(m.org).toEqual({
@@ -445,7 +446,6 @@ describe("buildTenantManifestModel", () => {
   });
 
   it("shows tenant entries only, of plugins live for the person's units", () => {
-    extraReleased.add("/my");
     // Every staff entry's plugin is on in the gate, and none is shown.
     expect(buildTenantManifestModel(tenantInput()).org.nav.map((n) => n.id)).toEqual(["tenant.home"]);
     expect(buildTenantManifestModel(tenantInput({ tenantGate: ALL_ON })).org.nav).toEqual([]);
@@ -453,6 +453,7 @@ describe("buildTenantManifestModel", () => {
   });
 
   it("leaves out an unreleased home and the places' links to it, keeping the unit's own href", () => {
+    withheld.add("/my");
     const m = buildTenantManifestModel(tenantInput());
     expect(manifestSchema.safeParse(m).success).toBe(true);
     expect(m.org.nav).toEqual([]);
@@ -461,7 +462,6 @@ describe("buildTenantManifestModel", () => {
   });
 
   it("names the unit in every link for a person with two, and acts in the current one", () => {
-    extraReleased.add("/my");
     const units = [
       { id: UNIT_A, label: "Grace Namata", timezone: "Africa/Kampala" },
       { id: UNIT_B, label: "Shop 4", timezone: "Africa/Nairobi" },

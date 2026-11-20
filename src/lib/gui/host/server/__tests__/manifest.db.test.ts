@@ -60,11 +60,6 @@ vi.mock("@/lib/runtime/root", async (importOriginal) => {
     getMgmRuntime: async () => ({ ...(await actual.getMgmRuntime()), mgmSurface: { snapshot: () => snapshot } }),
   };
 });
-// /my, the tenant home, is released by RFC mgm#197's PR 5.
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...actual, isReleasedRoute: (path: string) => path === "/my" || actual.isReleasedRoute(path) };
-});
 
 import { MAX_PLACES_PER_KIND } from "../../shared/manifest-model";
 import { buildManifest } from "../manifest";

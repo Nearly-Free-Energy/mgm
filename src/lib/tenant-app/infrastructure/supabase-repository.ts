@@ -35,11 +35,16 @@ function one<T>(value: Embedded<T>): T | null {
   return Array.isArray(value) ? (value[0] ?? null) : value;
 }
 
-/** The links as meters; a link whose device row is not visible is left out. */
+/**
+ * The links as meters; a link whose device row is not visible, or whose
+ * device is not a consumption meter, is left out. The reads already filter
+ * on the device type; this keeps the rule if that embed filter ever stops
+ * applying.
+ */
 function toMeters(rows: MeterLinkRow[]): TenantMeter[] {
   return rows.flatMap((row) => {
     const device = one(row.devices);
-    if (!device) return [];
+    if (!device || device.device_type !== USAGE_DEVICE_TYPE) return [];
     return [
       {
         deviceId: row.device_id,

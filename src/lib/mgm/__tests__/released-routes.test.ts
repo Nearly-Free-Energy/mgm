@@ -103,6 +103,13 @@ describe("isReleasedRoute", () => {
     "/api/microgrids/mg-1/savings-settings",
     "/go/billing.periods",
     "/go/metering.operations",
+    // Tenant access (RFC mgm#197 § 6): give access, remove one by its id.
+    "/api/tenants/t-1/access",
+    "/api/tenants/t-1/access/a-1",
+    // Tenant app (RFC mgm#197): the home, the month and the day.
+    "/my",
+    "/my/usage",
+    "/my/usage/day",
   ])("allows released route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(true);
   });
@@ -143,6 +150,18 @@ describe("isReleasedRoute", () => {
     // /go takes one nav id and nothing else.
     "/go",
     "/go/billing.periods/extra",
+    // Tenant access takes a unit and at most one access id.
+    "/api/tenants/t-1/access/a-1/extra",
+    "/api/tenants/t-1/accessx",
+    "/api/tenants/t-1/access-list",
+    // The tenant pages take the unit, month and date as query parameters,
+    // never as path segments.
+    "/my/other",
+    "/my/t-1",
+    "/my/usage/extra",
+    "/my/usage/day/extra",
+    "/My",
+    "/myx",
   ])("blocks unreleased route %s", (path) => {
     expect(isReleasedRoute(path)).toBe(false);
   });
@@ -157,5 +176,9 @@ describe("isReleasedRoute", () => {
     expect(isReleasedRoute("/api/gui/search/")).toBe(true);
     expect(isReleasedRoute("/api/microgrids/mg-1/savings-settings/")).toBe(true);
     expect(isReleasedRoute("/go/billing.periods/")).toBe(true);
+    expect(isReleasedRoute("/api/tenants/t-1/access/")).toBe(true);
+    expect(isReleasedRoute("/api/tenants/t-1/access/a-1/")).toBe(true);
+    expect(isReleasedRoute("/my/")).toBe(true);
+    expect(isReleasedRoute("/my/usage/day/")).toBe(true);
   });
 });

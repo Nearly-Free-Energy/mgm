@@ -21,11 +21,6 @@ vi.mock("@/lib/auth/request-access", () => ({ getRequestUserAccess: () => getReq
 const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en-UG" }) }));
-// /my is the tenant home, which RFC mgm#197's PR 5 releases.
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const real = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  return { ...real, isReleasedRoute: (path: string) => path === "/my" || real.isReleasedRoute(path) };
-});
 
 import { STATUS_BUDGET_MS, buildManifest, getManifest, preloadManifest } from "../manifest";
 import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantHomes, tenantOf } from "./host-fakes";

@@ -46,14 +46,6 @@ vi.mock("@/lib/supabase/server", () => ({
     return caller.client;
   },
 }));
-// The tenant app's pages are released by RFC mgm#197's PR 5; until then they
-// are released here, so the host's model check (which refuses no href in an
-// ext, and no other link is made) runs as it will in production.
-vi.mock("@/lib/mgm/released-routes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/mgm/released-routes")>();
-  const pages = ["/my", "/my/usage", "/my/usage/day"];
-  return { ...actual, isReleasedRoute: (path: string) => pages.includes(path) || actual.isReleasedRoute(path) };
-});
 
 import { SYNTHETIC_NOTICE } from "@/lib/gui/host/server/view";
 import { FixtureMeteringProvider } from "@/lib/metering/fixture-provider";

@@ -19,10 +19,13 @@ import {
 // reconciliation, so the period's payments show one with its actions (the
 // account stores no credential, so nothing could contact a provider), and an
 // org_manager who signs in by email link (RFC #186), read from the local mail
-// catcher. Beside it, in an organization of its own (so the manager's pages
-// and counts do not change), one unit on a synthetic meter and the tenant who
-// rents it (RFC mgm#197). This file writes only the ids and the emails to
-// disk, for the other projects and the teardown.
+// catcher. The tenant app is on for that organization, and the first tenant's
+// record lists one address with app access, long enough to need wrapping at
+// 360 px, so the smoke opens Give access and the Remove confirmation. Beside
+// it, in an organization of its own (so the manager's pages and counts do not
+// change), one unit on a synthetic meter and the tenant who rents it (RFC
+// mgm#197). This file writes only the ids and the emails to disk, for the
+// other projects and the teardown.
 
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");
@@ -42,6 +45,8 @@ export type SmokeFixtures = {
   tenantOrgId?: string;
   unitId?: string;
   tenantEmail?: string;
+  /** The address with app access to the first smoke tenant. */
+  accessEmail?: string;
 };
 
 /**
@@ -100,10 +105,20 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   const periodId = randomUUID();
   const billId = randomUUID();
   const email = `smoke-${tag}@test.local`; // the domain the database suites use
+  // No break opportunity in 50-odd characters: wider than a 360 px line at the dialog's title size.
+  const accessEmail = `smoke-access-${tag}-a-long-synthetic-renter-address@test.local`;
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
-  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], periodId, billId, email };
+  const fixtures: SmokeFixtures = {
+    orgId,
+    communityId,
+    microgridId: microgridIds[0],
+    periodId,
+    billId,
+    email,
+    accessEmail,
+  };
   writeFileSync(FIXTURES_FILE, JSON.stringify(fixtures));
 
   await must("organization", svc.from("organizations").insert({ id: orgId, name: `Smoke organization ${tag}` }));
@@ -140,6 +155,18 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
         primary_phone: `+25670000000${n}`,
       }))
     )
+  );
+  // The tenant app is off for an organization with no row for it
+  // (defaultEnabled in src/lib/plugins/bundled.ts); on here, so the record
+  // offers Give access.
+  await must(
+    "smoke tenant app",
+    svc.from("mgm_plugins").insert({
+      org_id: orgId,
+      plugin_name: TENANT_APP_PLUGIN_NAME,
+      version: TENANT_APP_PLUGIN_VERSION,
+      enabled: true,
+    })
   );
   // A draft period with its tariff pinned, so the close checklist loads
   // (src/lib/billing/surface/close-checklist.ts refuses a period without
@@ -241,6 +268,7 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
     })
   );
   await createTestUser({ email, role: "org_manager", scopeId: orgId });
+  await createTestUser({ email: accessEmail, role: "tenant", scopeId: tenantIds[0] });
   return createTenantFixtures(fixtures, tag);
 }
 
@@ -382,7 +410,7 @@ export function readSmokeFixtures(): SmokeFixtures {
 export async function deleteSmokeFixtures(): Promise<void> {
   if (!existsSync(FIXTURES_FILE)) return;
   assertLocalSupabase();
-  const { orgId, communityId, email, tenantOrgId, tenantEmail } = readSmokeFixtures();
+  const { orgId, communityId, email, tenantOrgId, tenantEmail, accessEmail } = readSmokeFixtures();
   // Storage objects are not rows under the organization, so deleting it
   // leaves them; remove everything under the community's prefix first.
   if (communityId) {
@@ -401,7 +429,7 @@ export async function deleteSmokeFixtures(): Promise<void> {
   await must("payment account versions", svc.from("payment_merchant_versions").delete().eq("org_id", orgId));
   await cleanupTestData({
     orgIds: [orgId, tenantOrgId].filter((id): id is string => Boolean(id)),
-    userEmails: [email, tenantEmail].filter((address): address is string => Boolean(address)),
+    userEmails: [email, tenantEmail, accessEmail].filter((address): address is string => Boolean(address)),
   });
   rmSync(FIXTURES_FILE);
 }
