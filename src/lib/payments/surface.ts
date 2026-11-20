@@ -33,6 +33,13 @@ import "server-only";
  * with the gate's notice, and Payments being off is one of the states it
  * explains. If the host comes to hide a disabled plugin's sections too,
  * revisit.
+ *
+ * Its watchers report what needs a manager in payments: `payments.reconcile`,
+ * each period with attempts held for reconciliation, and `payments.failed`,
+ * each period with failures in the last week on bills still to be paid,
+ * each leading to the period's payments, or to the bill when only one is
+ * concerned. Each composes the capability, so it has a longer budget than
+ * the host's default.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { PAYMENTS_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -48,6 +55,9 @@ import {
   prepareRecordAdjustment,
   reconcileAvailable,
 } from "./surface/bill-attempts";
+import { loadFailedSignals, loadReconcileSignals } from "./surface/attention-signals";
+import { FAILED_EXAMPLES, RECONCILE_EXAMPLES } from "./surface/attention-signals-examples";
+import { FAILED_SIGNAL, RECONCILE_SIGNAL } from "./surface/attention-signals-model";
 import { BILL_ATTEMPTS_EXAMPLES } from "./surface/bill-attempts-examples";
 import { loadPaymentSetup } from "./surface/payment-setup";
 import { PAYMENT_SETUP_EXAMPLES } from "./surface/payment-setup-examples";
@@ -59,6 +69,13 @@ import {
   RECORD_ADJUSTMENT_ACTION,
   REFRESH_ATTEMPT_ACTION,
 } from "./surface/bill-attempts-model";
+
+/**
+ * Each payments watcher's budget: composePayments checks the session and the
+ * roles before the capability's reads and the bills', so the host's default
+ * 1.5 s is tight on a cold path.
+ */
+const ATTENTION_BUDGET_MS = 3_000;
 
 export const PAYMENTS_SURFACE: Contribution = {
   plugin: PAYMENTS_PLUGIN_NAME,
@@ -194,5 +211,9 @@ export const PAYMENTS_SURFACE: Contribution = {
       available: reconcileAvailable("accept"),
       whilePluginOff: "enabled",
     },
+  ],
+  signals: [
+    { id: RECONCILE_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadReconcileSignals, examples: RECONCILE_EXAMPLES },
+    { id: FAILED_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadFailedSignals, examples: FAILED_EXAMPLES },
   ],
 };
