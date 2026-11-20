@@ -372,7 +372,7 @@ describe("GuiLayout sends a person whose rows are all tenant rows to tenant page
 
   it("finds the catalog's pages and the host's", () => {
     expect(CATALOG_PAGES.length).toBeGreaterThan(10);
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing/[periodId]"]));
   });
 
   it("opens the tenant pages and nothing else among them", async () => {
@@ -471,7 +471,7 @@ describe("GuiLayout for a render the middleware did not see", () => {
 describe("GuiLayout shell", () => {
   it("renders every page inside the selected GUI's shell, inside the kit", async () => {
     wire(SIGNED_IN);
-    const path = `/microgrids/${MICROGRID}/billing`;
+    const path = `/microgrids/${MICROGRID}/setup/rates`;
     mocks.headers = new Headers({ "x-mgm-path": path });
     const tree = await GuiLayout({ children: "page" });
 
@@ -483,7 +483,7 @@ describe("GuiLayout shell", () => {
     const initial = resolveLegacyView(path, MANIFEST);
     expect(provider.props).toMatchObject({ manifest: MANIFEST, initial });
     expect(shell.props).toMatchObject({ manifest: MANIFEST, initial });
-    expect(initial).toMatchObject({ nav: "billing.periods", unplaced: false });
+    expect(initial).toMatchObject({ nav: "billing.tariff", unplaced: false });
     expect(initial.scope.microgrid?.id).toBe(MICROGRID);
   });
 

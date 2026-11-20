@@ -41,8 +41,8 @@ export interface AuditLogListProps {
   /** tenantId → display_name map (for the "filtered to {name}" banner). */
   tenantNamesById: Record<string, string>;
   /** When set, only entries whose billingLineItemId belongs to this
-   *  tenant render. The history page reads this from
-   *  `searchParams.tenant_id`. */
+   *  tenant render, as the billing.period-history view's tenant filter
+   *  does. */
   filterTenantId?: string;
   /** For the "Show all" link's href. */
   microgridId: string;

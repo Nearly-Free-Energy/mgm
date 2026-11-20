@@ -11,17 +11,18 @@ import {
 
 // The smoke's own rows: one organization, one community with an invoice
 // configuration whose logo is an object in the invoice-logos bucket, three
-// microgrids, three tenants on the first, a tariff and a draft October 2026
+// microgrids, three tenants on the first, a tariff, a draft October 2026
 // billing period on the first with bills for two of its tenants (one with no
-// usage), a default sandbox Pesapal account for the organization, so the
-// period's send queue shows a payment link, an online payment attempt on the
-// first bill held for reconciliation, so the period's payments show one with
-// its actions (the account stores no credential, so nothing could contact a
-// provider), and an org_manager who signs in by email link (RFC #186), read
-// from the local mail catcher. Beside it, in an organization of its own (so
-// the manager's pages and counts do not change), one unit on a synthetic
-// meter and the tenant who rents it (RFC mgm#197). This file writes only the
-// ids and the emails to disk, for the other projects and the teardown.
+// usage), which the periods list shows and whose history opens, a default
+// sandbox Pesapal account for the organization, so the period's send queue
+// shows a payment link, an online payment attempt on the first bill held for
+// reconciliation, so the period's payments show one with its actions (the
+// account stores no credential, so nothing could contact a provider), and an
+// org_manager who signs in by email link (RFC #186), read from the local mail
+// catcher. Beside it, in an organization of its own (so the manager's pages
+// and counts do not change), one unit on a synthetic meter and the tenant who
+// rents it (RFC mgm#197). This file writes only the ids and the emails to
+// disk, for the other projects and the teardown.
 
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");

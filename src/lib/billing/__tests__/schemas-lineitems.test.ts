@@ -229,10 +229,10 @@ describe("RegenerateBillBody", () => {
     }
   });
 
-  it("has no object-level refinement, so the GUI host can check a prefill against it", () => {
-    // .omit() throws on an object schema with refinements (cleanPrefill in src/lib/gui/host/server/merge.ts).
-    expect(() => RegenerateBillBody.omit({}).partial()).not.toThrow();
-    expect(RegenerateBillBody.omit({}).partial().safeParse({ readings: "manual", start_kwh: 12 }).success).toBe(true);
+  it("is an object of fields, so the GUI host can check a prefill against it field by field", () => {
+    // cleanPrefill (src/lib/gui/host/server/merge.ts) takes only an object input, and checks a prefill against its fields.
+    expect(RegenerateBillBody).toBeInstanceOf(z.ZodObject);
+    expect(z.object(RegenerateBillBody.shape).partial().safeParse({ readings: "manual", start_kwh: 12 }).success).toBe(true);
   });
 
   it("takes the host's confirmation, and refuses one of another shape", () => {

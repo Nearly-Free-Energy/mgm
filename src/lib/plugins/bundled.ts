@@ -278,14 +278,20 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/v1/billing",
   ],
   pages: [
-    { path: "/microgrids/[id]/billing", params: { id: "microgrid" } },
+    // A microgrid's billing periods, as the billing.periods view.
+    { path: "/microgrids/[id]/billing", params: { id: "microgrid" }, servedBy: "view" },
+    // A period's review stays its page.tsx while a parity row of the
+    // period-review screen is pending (src/lib/billing/parity.ts, enforced by
+    // parity.test.ts); once none is, it becomes the billing.period-review view.
     {
       path: "/microgrids/[id]/billing/[periodId]",
       params: { id: "microgrid", periodId: "billingPeriod" },
     },
+    // A period's audit history, as the billing.period-history view.
     {
       path: "/microgrids/[id]/billing/[periodId]/history",
       params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
     },
     // The close checklist, as the billing.close-checklist view.
     {

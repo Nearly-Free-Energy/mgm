@@ -2,12 +2,16 @@
  * GET /api/gui/view serves a microgrid's billing periods, `billing.periods`:
  * the route checks the session, the host resolves the microgrid through the
  * person's own client, and the loader reads the periods and their bills
- * through that client. Another organization's manager gets nothing, and
- * while billing is off the list still loads, with the gate's notice and
- * create disabled.
+ * through that client. Create starts at the previous month in the
+ * microgrid's zone, and a microgrid in Uganda still billing in UTC carries
+ * the time zone nudge as the view's notice. Another organization's manager
+ * gets nothing, and while billing is off the list still loads, with the
+ * gate's notice (followed by the nudge, with its link) and create disabled.
  *
- * The legacy page still serves /microgrids/[id]/billing in the browser; this
- * reaches the view only through the host's API.
+ * In the browser the (gui) catch-all serves /microgrids/[id]/billing through
+ * the same view (its catalog page is `servedBy: "view"`), which the 360 px
+ * smoke (e2e/narrow.spec.ts) opens; this suite reaches the view through the
+ * host's API.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
@@ -30,6 +34,7 @@ vi.mock("@/lib/supabase/server", () => ({
   },
 }));
 
+import { getDefaultDates } from "@/lib/billing/default-dates";
 import { GET } from "../route";
 import { DELETE } from "../../../billing-periods/[periodId]/route";
 
@@ -39,6 +44,7 @@ const COMMUNITY = "e7700000-0000-4000-8001-000000000001";
 const OTHER_COMMUNITY = "e7700000-0000-4000-8001-000000000002";
 const MICROGRID = "e7700000-0000-4000-8002-000000000001";
 const OTHER_MICROGRID = "e7700000-0000-4000-8002-000000000002";
+const UTC_MICROGRID = "e7700000-0000-4000-8002-000000000003";
 const TENANT = "e7700000-0000-4000-8004-000000000001";
 const OCTOBER = "e7700000-0000-4000-8003-000000000001";
 const NOVEMBER = "e7700000-0000-4000-8003-000000000002";
@@ -78,6 +84,10 @@ beforeAll(async () => {
     ["communities", { id: OTHER_COMMUNITY, org_id: OTHER_ORG, name: "GUI Periods Other Community" }],
     ["microgrids", { id: MICROGRID, community_id: COMMUNITY, name: "Periods site", currency: "UGX", timezone: "Africa/Kampala" }],
     ["microgrids", { id: OTHER_MICROGRID, community_id: OTHER_COMMUNITY, name: "Other site", currency: "UGX", timezone: "Africa/Kampala" }],
+    [
+      "microgrids",
+      { id: UTC_MICROGRID, community_id: COMMUNITY, name: "UTC site", currency: "UGX", timezone: "UTC", address_country: "Uganda", lat: 0.35, lng: 32.6 },
+    ],
     ["tenants", { id: TENANT, microgrid_id: MICROGRID, display_name: "Unit 1", primary_phone: "+256700000001" }],
     // Both drafts, so the organization's delete in cleanup removes them.
     ["billing_periods", { id: OCTOBER, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala" }],
@@ -118,7 +128,17 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
       entity: { kind: "microgrid", id: MICROGRID, label: "Periods site" },
     });
     expect(model).not.toHaveProperty("notice");
-    expect(model.actions).toMatchObject([{ action: "billing.create-period", params: { microgrid_id: MICROGRID }, enabled: true }]);
+    // The month before today in Kampala; a run that straddles midnight there could see the next month.
+    const { start, end } = getDefaultDates(new Date(), "Africa/Kampala");
+    expect(model.actions).toEqual([
+      {
+        action: "billing.create-period",
+        params: { microgrid_id: MICROGRID },
+        label: "New billing period",
+        enabled: true,
+        prefill: { start_date: start, end_date: end },
+      },
+    ]);
     const rows = model.body.rows as { id: string; href: string; cells: Record<string, { t: string; v?: number }>; actions: { action: string; enabled: boolean }[] }[];
     expect(rows.map((r) => r.id)).toEqual([NOVEMBER, OCTOBER]);
     expect(rows[1].href).toBe(`/microgrids/${MICROGRID}/billing/${OCTOBER}`);
@@ -126,6 +146,25 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
     expect(rows[1].cells.total).toMatchObject({ t: "money", v: 300000, currency: "UGX" });
     expect(rows[0].cells.total.t).toBe("empty");
     for (const row of rows) expect(row.actions).toMatchObject([{ action: "billing.delete-period", enabled: true }]);
+  });
+
+  it("shows the time zone nudge for a microgrid in Uganda that still bills in UTC, after the gate's notice while billing is off", async () => {
+    caller = manager;
+    await setBilling(true);
+    const model = await (await view(`/microgrids/${UTC_MICROGRID}/billing`)).json();
+    expect(model.notice).toEqual({ tone: "warning", text: expect.stringMatching(/^Billing timezone is still UTC\. This microgrid's address is in Uganda/) });
+    expect(model.links).toEqual([{ id: "billing.set-timezone", label: "Set timezone", href: `/microgrids/${UTC_MICROGRID}/setup/rates` }]);
+    expect(model.body.rows).toEqual([]);
+    const { start, end } = getDefaultDates(new Date(), "UTC");
+    expect(model.body.empty.action).toMatchObject({ action: "billing.create-period", prefill: { start_date: start, end_date: end } });
+    await setBilling(false);
+    try {
+      const off = await (await view(`/microgrids/${UTC_MICROGRID}/billing`)).json();
+      expect(off.notice).toEqual({ tone: "warning", text: expect.stringMatching(/^Billing is disabled.* Billing timezone is still UTC\. This microgrid's address is in Uganda/) });
+      expect(off.links).toEqual(model.links);
+    } finally {
+      await setBilling(true);
+    }
   });
 
   it("gives another organization's manager nothing", async () => {

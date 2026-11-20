@@ -11,8 +11,11 @@
  * organization's manager and a tenant get nothing; and while billing is off
  * the history still loads, with the gate's notice.
  *
- * The legacy page still serves /microgrids/[id]/billing/[periodId]/history
- * in the browser; this reaches the view only through the host's API.
+ * In the browser the (gui) catch-all serves
+ * /microgrids/[id]/billing/[periodId]/history through the same view (its
+ * catalog page is `servedBy: "view"`), which the 360 px smoke
+ * (e2e/narrow.spec.ts) opens; this suite reaches the view through the host's
+ * API.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
