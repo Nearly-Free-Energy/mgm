@@ -4,81 +4,10 @@ import * as React from "react";
 import { LocaleProvider } from "@/components/format/locale-context";
 import { Chip } from "@/components/ui/chip";
 import { StatusChip } from "@/components/ui/status-chip";
-import { CopyTable, type ColumnDef } from "@/components/ui/copy-table";
-import { ClosePeriodDialog, type CloseAnswer } from "@/components/ui/close-period-dialog";
-import type { Ceremony } from "@/lib/gui/contract";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { ConsumptionCell } from "@/components/ui/consumption-cell";
 import { ConsumptionCalendar } from "@/components/ui/consumption-calendar";
-
-// The close route's answers for the gallery: the review first (428), then a
-// close after a short wait. The figures are made up.
-const GALLERY_CEREMONY: Ceremony = {
-  type: "ceremony",
-  statement: "Close April 2026. Bills become final, and corrections after this are recorded against the closed period.",
-  facts: [
-    { label: "Period", value: { t: "text", text: "April 2026" } },
-    { label: "Bills", value: { t: "number", v: 12, text: "12" } },
-    { label: "Energy", value: { t: "energy", v: 487.3, unit: "kWh", text: "487.3 kWh" } },
-    { label: "Total", value: { t: "money", v: 4216800, currency: "UGX", text: "UGX 4,216,800" } },
-  ],
-  warnings: ["1 bill has no usage recorded: House 7."],
-  acknowledgements: [
-    { id: "totals_reviewed", label: "I have reviewed these totals, and they are what I will file. Closing is final." },
-    { id: "bills_without_usage", label: "I am closing this period although some bills have no usage recorded." },
-  ],
-  typed: "April 2026",
-  digest: "v1:gallery",
-};
-
-async function galleryClose(_periodId: string, body: unknown): Promise<CloseAnswer> {
-  const confirmed = !!body && typeof body === "object" && "confirmation" in body;
-  if (!confirmed) return { ok: false, status: 428, code: "billing_close_confirmation_required", ceremony: GALLERY_CEREMONY };
-  await new Promise((res) => setTimeout(res, 1500));
-  return { ok: true, status: 200 };
-}
-
-// ─── CopyTable sample data ───────────────────────────────────────────────────
-
-type TenantRow = {
-  name: string;
-  tier1Kwh: number;
-  tier2Kwh: number;
-  totalAmount: number;
-};
-
-const COPY_TABLE_ROWS: TenantRow[] = [
-  { name: "Aisha M.",   tier1Kwh: 47.3, tier2Kwh: 12.1, totalAmount: 58400 },
-  { name: "Bernard K.", tier1Kwh: 31.0, tier2Kwh:  0.0, totalAmount: 31000 },
-  { name: "Cynthia O.", tier1Kwh: 52.8, tier2Kwh: 24.9, totalAmount: 77700 },
-  { name: "David N.",   tier1Kwh: 18.5, tier2Kwh:  0.0, totalAmount: 18500 },
-  { name: "Esther W.",  tier1Kwh: 44.2, tier2Kwh:  8.3, totalAmount: 52500 },
-];
-
-const COPY_TABLE_COLS: ColumnDef<TenantRow>[] = [
-  { header: "Tenant", kind: "row-header", accessor: (r) => r.name },
-  { header: "Tier 1 kWh", kind: "value", accessor: (r) => r.tier1Kwh },
-  { header: "Tier 2 kWh", kind: "value", accessor: (r) => r.tier2Kwh },
-  {
-    header: "Total (UGX)",
-    kind: "value",
-    accessor: (r) => r.totalAmount,
-    format: (v) => (v == null ? "—" : Number(v).toLocaleString()),
-  },
-];
-
-// ─── PeriodPicker sample data ─────────────────────────────────────────────────
-
-const SAMPLE_PERIODS: PeriodOption[] = [
-  { id: "1", startDate: "2026-04-01", endDate: "2026-04-30", status: "draft",  totalAmount: 4216800 },
-  { id: "2", startDate: "2026-03-01", endDate: "2026-03-31", status: "closed", totalAmount: 3870000 },
-  { id: "3", startDate: "2026-02-01", endDate: "2026-02-28", status: "closed", totalAmount: 3540000 },
-  { id: "4", startDate: "2026-01-01", endDate: "2026-01-31", status: "closed", totalAmount: 3910000 },
-  { id: "5", startDate: "2025-12-01", endDate: "2025-12-31", status: "closed", totalAmount: 4050000 },
-  { id: "6", startDate: "2025-12-15", endDate: "2025-12-15", status: "closed", totalAmount: 120000  },
-];
 
 // ─── ConsumptionCalendar sample data ─────────────────────────────────────────
 
@@ -107,11 +36,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ComponentsDevPage() {
-  const [closePeriodOpen, setClosePeriodOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [confirmNeutralOpen, setConfirmNeutralOpen] = React.useState(false);
   const [confirmTypedOpen, setConfirmTypedOpen] = React.useState(false);
-  const [currentPeriodId, setCurrentPeriodId] = React.useState("1");
 
   return (
     <LocaleProvider locale="en-UG" currency="UGX">
@@ -168,37 +95,6 @@ export default function ComponentsDevPage() {
             <StatusChip kind="meterType" status="PRODUCTION" />
             <StatusChip kind="meterType" status="UNKNOWN" />
           </div>
-        </Section>
-
-        {/* ── CopyTable ── */}
-        <Section title="CopyTable — 5 rows × 4 columns">
-          <CopyTable
-            rows={COPY_TABLE_ROWS}
-            columns={COPY_TABLE_COLS}
-            caption="April 2026 billing summary, 5 tenants"
-            ariaLabel="Billing summary table"
-          />
-          <p className="mt-2 text-caption text-muted-foreground">
-            Tab/Shift+Tab navigates column-major. C or Enter copies. Esc exits grid.
-          </p>
-        </Section>
-
-        {/* ── ClosePeriodDialog ── */}
-        <Section title="ClosePeriodDialog">
-          <button
-            onClick={() => setClosePeriodOpen(true)}
-            className="inline-flex h-8 items-center rounded-md border border-primary bg-card px-3.5 text-dense font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            Open Close Period Dialog
-          </button>
-          <ClosePeriodDialog
-            open={closePeriodOpen}
-            onOpenChange={setClosePeriodOpen}
-            periodId="demo-period"
-            onClosed={() => {}}
-            onExportCsv={() => {}}
-            post={galleryClose}
-          />
         </Section>
 
         {/* ── ConfirmDialog (destructive) ── */}
@@ -270,19 +166,6 @@ export default function ComponentsDevPage() {
             tone="neutral"
             onConfirm={() => new Promise((res) => setTimeout(res, 800))}
           />
-        </Section>
-
-        {/* ── PeriodPicker ── */}
-        <Section title="PeriodPicker — 6 sample periods">
-          <PeriodPicker
-            periods={SAMPLE_PERIODS}
-            currentId={currentPeriodId}
-            onSelect={(p) => setCurrentPeriodId(p.id)}
-            onNewPeriod={() => alert("New period clicked")}
-          />
-          <p className="mt-2 text-caption text-muted-foreground">
-            Selected: {SAMPLE_PERIODS.find((p) => p.id === currentPeriodId)?.startDate}
-          </p>
         </Section>
 
         {/* ── HierarchyNav — single org ── */}

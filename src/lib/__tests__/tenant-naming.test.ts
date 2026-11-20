@@ -26,8 +26,6 @@ const KEEPS_OLD_NAME: Record<string, string> = {
   "CLAUDE.md": "records the schema's history",
   "docs/entity-model.md": "records the old name and what the rename changed",
   "src/lib/billing/audit-log-fetch.ts": "reads the household_name snapshot that bills generated before the rename keep",
-  "src/lib/billing/audit-humanize.tsx": "reads the household_name snapshot that bills generated before the rename keep",
-  "src/lib/billing/__tests__/audit-humanize.test.tsx": "proves the household_name snapshot still resolves",
   "src/lib/billing/surface/period-history.ts": "reads the household_name snapshot that bills generated before the rename keep",
   "src/lib/billing/surface/period-history-model.ts": "reads the household_name snapshot that bills generated before the rename keep",
   "src/lib/billing/surface/__tests__/period-history-model.test.ts": "proves the household_name snapshot still resolves",

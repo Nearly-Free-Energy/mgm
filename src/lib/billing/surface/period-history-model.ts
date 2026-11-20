@@ -5,12 +5,9 @@
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here. The labels, summaries, notes and empty states are
- * the legacy history's (src/components/billing/audit-log-list.tsx, with the
- * labels of src/lib/billing/audit-humanize.tsx), as strings rather than
- * JSX; period-history-model.test.ts compares the labels with
- * audit-humanize's. The legacy history page that rendered AuditLogList is
- * gone: this view serves its URL. The component and audit-humanize stay
- * until #201's Deletes pull request; when they go, that comparison goes too.
+ * the legacy history's (AuditLogList and audit-humanize, deleted with the
+ * legacy billing screens), as strings rather than JSX;
+ * period-history-model.test.ts pins each event type's wording.
  *
  * A collection rather than a feed: a feed has no empty state and no `next`,
  * and the host caps its entries at 200 (MODEL_CAPS.entries in
@@ -196,7 +193,7 @@ export function mergePage<T extends HistoryKeyed>(
 
 // ── Humanizing an entry ─────────────────────────────────────────────────────
 
-/** "System" for no actor, "Restricted" for one the person may not see, else the name (audit-humanize.tsx's actorDisplayLabel). */
+/** "System" for no actor, "Restricted" for one the person may not see, else the name, as the legacy history named them. */
 export function historyActorLabel(entry: Pick<BillingAuditLogEntry, "actorUserId" | "actorDisplayName">): string {
   if (entry.actorUserId === null) return "System";
   if (entry.actorDisplayName === null) return "Restricted";
@@ -227,7 +224,7 @@ export type HumanizedHistoryEntry = {
   postClose: boolean;
 };
 
-/** One entry as AuditLogList words it (src/lib/billing/audit-humanize.tsx), with money and statuses formatted on the server. */
+/** One entry as the legacy history worded it, with money and statuses formatted on the server. */
 export function humanizeHistoryEntry(entry: BillingAuditLogEntry, fmt: Fmt, currency: string): HumanizedHistoryEntry {
   const d = entry.details ?? {};
   const postClose = d["period_was_closed"] === true;

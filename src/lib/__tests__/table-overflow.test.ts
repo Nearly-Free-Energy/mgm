@@ -29,7 +29,7 @@
  * (`function BatteryChart()` used as `<BatteryChart />`) takes the state of
  * those uses, the worst one deciding.
  * A `<CopyTable>` counts as contained when the table inside
- * src/components/ui/copy-table.tsx scrolls.
+ * src/gui/gridtop/renderers/period-review/copy-table.tsx scrolls.
  * A chart drawn with a fixed minimum width (an `<svg>` with a class such as
  * `min-w-[560px]`, like the battery chart on the Operations tab) is held to
  * the same rule.
@@ -64,7 +64,7 @@ const ROOTS = ["src/app", "src/components", "src/lib/gui", "src/gui"];
 
 /** Components whose own markup puts their table in a scroll container. */
 const CONTAINED: Record<string, string> = {
-  CopyTable: "src/components/ui/copy-table.tsx",
+  CopyTable: "src/gui/gridtop/renderers/period-review/copy-table.tsx",
 };
 
 type Exemption = { tables: number; reason: string };

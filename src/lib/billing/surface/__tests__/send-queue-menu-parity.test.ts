@@ -1,18 +1,22 @@
 /**
  * Which bills `billing.send-queue` shows a payment link for, against the
- * legacy row menu's payment-link group (computeMenuItems in
- * src/components/billing/row-actions-menu.tsx) once payments are set up:
- * over every payment status, reading source and period status, a bill with
- * a total and a tenant with a contact has a link exactly where the menu
- * offers Generate or Regenerate payment link.
+ * legacy row menu's payment-link group (computeMenuItems in the deleted
+ * src/components/billing/row-actions-menu.tsx) once payments were set up:
+ * over every payment status and period status, a bill with a total and a
+ * tenant with a contact has a link exactly where the menu offered Generate
+ * or Regenerate payment link. The menu was deleted with the legacy billing
+ * screens (#201's Deletes item); what it offered, recorded from
+ * computeMenuItems over every payment status, reading source, period status
+ * and stored URL, with a total and with a total of zero, just before it was
+ * deleted, is pinned below as LEGACY_LINK_STATUSES. It depended on the
+ * payment status alone.
  *
- * The two deliberate differences, where the menu offers a link checkout
+ * The two deliberate differences, where the menu offered a link checkout
  * would refuse (ensureCheckout in src/lib/payments/capability.ts): a total
  * of zero or less, and a tenant with neither email nor phone. The queue
  * shows a note instead.
  */
 import { describe, expect, it } from "vitest";
-import { computeMenuItems } from "@/components/billing/row-actions-menu";
 import { createFmt } from "@/lib/gui/fmt";
 import type { PaymentStatus } from "@/lib/payments/state";
 import { buildSendQueueModel, SEND_QUEUE_COPY } from "../send-queue-model";
@@ -24,36 +28,12 @@ const TENANT = { id: "e8100000-0000-4000-8004-000000000001", display_name: "Akel
 const BILL = "e8100000-0000-4000-8005-000000000001";
 const LINK = `https://mgm.example.org/api/billing-line-items/${BILL}/pay`;
 
-const noop = () => {};
 const STATUSES: PaymentStatus[] = ["unpaid", "link_generated", "paid", "failed", "refunded"];
-const SOURCES = ["edge", "manual", null] as const;
-const LINK_ITEMS = new Set(["generate-link", "regenerate-link"]);
+/** The payment statuses for which the legacy menu, with payments set up, offered Generate or Regenerate payment link. */
+const LEGACY_LINK_STATUSES = new Set<PaymentStatus>(["unpaid", "link_generated", "failed"]);
 
-/** Whether the legacy menu, with payments set up, offers a payment link for the bill. */
-function menuOffersLink(payment: PaymentStatus, source: "edge" | "manual" | null, status: "draft" | "closed", total: number, storedUrl: string | null): boolean {
-  const items = computeMenuItems({
-    microgridId: MG,
-    lineItem: { id: BILL, payment_status: payment, reading_source: source as "edge", total_amount: total, pesapal_redirect_url: storedUrl },
-    tenant: TENANT,
-    period: { ...PERIOD, status },
-    edgeAvailable: true,
-    isPaymentConfigured: true,
-    pendingUrl: null,
-    handlers: {
-      onRequestRegenerate: noop,
-      onRequestSwitchToManual: noop,
-      onGenerateLink: noop,
-      onCopyLink: noop,
-      onMarkAsPaid: noop,
-      onMarkAsRefunded: noop,
-      onMarkAsUnpaid: noop,
-      onCancelLink: noop,
-      onMarkAsFailed: noop,
-      onDownloadPdf: noop,
-    },
-  });
-  return items.some((item) => item.kind === "action" && LINK_ITEMS.has(item.key) && !item.disabled);
-}
+/** Whether the legacy menu, with payments set up, offered a payment link for the bill. */
+const menuOffersLink = (payment: PaymentStatus): boolean => LEGACY_LINK_STATUSES.has(payment);
 
 function queueLink(payment: PaymentStatus, status: "draft" | "closed", total: number, hasContact: boolean) {
   const model = buildSendQueueModel({
@@ -69,22 +49,20 @@ function queueLink(payment: PaymentStatus, status: "draft" | "closed", total: nu
   return model.body.rows[0].cells;
 }
 
-const cases = STATUSES.flatMap((payment) =>
-  SOURCES.flatMap((source) => (["draft", "closed"] as const).flatMap((status) => [null, "https://pay.example/old"].map((url) => [payment, source, status, url] as const))),
-);
+// The queue reads no reading source and no stored URL, and the legacy menu's answer did not depend on them.
+const cases = STATUSES.flatMap((payment) => (["draft", "closed"] as const).map((status) => [payment, status] as const));
 
 describe("the send queue's links match the legacy menu's payment-link items", () => {
-  it.each(cases)("%s bill, %s readings, %s period, stored URL %s", (payment, source, status, storedUrl) => {
-    const offered = menuOffersLink(payment, source, status, 1000, storedUrl);
+  it.each(cases)("%s bill, %s period", (payment, status) => {
+    const offered = menuOffersLink(payment);
     const cells = queueLink(payment, status, 1000, true);
-    expect(cells.link.t === "text", "a link in the queue exactly where the menu offers one").toBe(offered);
+    expect(cells.link.t === "text", "a link in the queue exactly where the menu offered one").toBe(offered);
   });
 
   it("differs on purpose for a zero total and a tenant with no contact, which checkout refuses", () => {
     for (const payment of ["unpaid", "link_generated", "failed"] as const) {
-      expect(menuOffersLink(payment, "edge", "draft", 0, null)).toBe(true);
+      expect(menuOffersLink(payment)).toBe(true);
       expect(queueLink(payment, "draft", 0, true)).toMatchObject({ link: fmt.empty(), note: fmt.text(SEND_QUEUE_COPY.zero) });
-      expect(menuOffersLink(payment, "edge", "draft", 1000, null)).toBe(true);
       expect(queueLink(payment, "draft", 1000, false)).toMatchObject({ link: fmt.empty(), note: fmt.text(SEND_QUEUE_COPY.noContact) });
     }
   });

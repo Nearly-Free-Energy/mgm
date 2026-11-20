@@ -9,9 +9,6 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DialogFooter, DialogOverlay, DialogPanel } from "../dialog";
 import { ConfirmDialog } from "../confirm-dialog";
-import { ClosePeriodDialog } from "../close-period-dialog";
-import type { Ceremony } from "@/lib/gui/contract";
-import { LocaleProvider } from "../../format/locale-context";
 
 function classesOf(el: Element | null): string[] {
   expect(el).not.toBeNull();
@@ -160,34 +157,5 @@ describe("dialogs built on the frame", () => {
     expect(classesOf(panel)).not.toContain("overflow-hidden");
     expect(stickyAncestor(screen.getByRole("button", { name: "Cancel" }))).not.toBeNull();
     expect(stickyAncestor(screen.getByRole("button", { name: "Delete" }))).not.toBeNull();
-  });
-
-  it("ClosePeriodDialog keeps Cancel and Close period in the pinned row", async () => {
-    const ceremony: Ceremony = {
-      type: "ceremony",
-      statement: "Close April 2026.",
-      facts: [],
-      warnings: ["1 bill has no usage recorded: House 1."],
-      acknowledgements: [{ id: "totals_reviewed", label: "I have reviewed these totals." }],
-      typed: "April 2026",
-      digest: "v1:x",
-    };
-    render(
-      <LocaleProvider locale="en-UG" currency="UGX">
-        <ClosePeriodDialog
-          open
-          onOpenChange={vi.fn()}
-          periodId="period-1"
-          onClosed={vi.fn()}
-          post={vi.fn().mockResolvedValue({ ok: false, status: 428, ceremony })}
-        />
-      </LocaleProvider>,
-    );
-    await screen.findByRole("heading", { name: "Close April 2026?" });
-    const panel = screen.getByRole("dialog");
-    expect(panel.getAttribute("aria-modal")).toBe("true");
-    expect(classesOf(panel)).toContain("overflow-y-auto");
-    expect(stickyAncestor(screen.getByRole("button", { name: "Cancel" }))).not.toBeNull();
-    expect(stickyAncestor(screen.getByRole("button", { name: "Close period" }))).not.toBeNull();
   });
 });
