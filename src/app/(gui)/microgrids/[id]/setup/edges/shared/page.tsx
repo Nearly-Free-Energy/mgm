@@ -5,6 +5,7 @@ import { Banner } from "@/components/ui/banner";
 import { StatusChip } from "@/components/ui/status-chip";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > Edges > Shared (D2 / #53).
 // Devices on this microgrid's edges that are NOT linked to any tenant.
@@ -24,6 +25,7 @@ export default async function SharedDevicesPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 
