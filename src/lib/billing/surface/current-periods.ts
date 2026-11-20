@@ -20,7 +20,7 @@ import "server-only";
  * refusal carries fixed copy, never a database message.
  */
 import type { Loaded, LoadedModel, SurfaceRequest } from "@/lib/gui/surface";
-import { buildCurrentPeriodsModel, MAX_CURRENT_PERIODS, type CurrentPeriodInput } from "./current-periods-model";
+import { buildCurrentPeriodsModel, MAX_CURRENT_PERIODS, type CurrentPeriodInput, type CurrentPeriodStatus } from "./current-periods-model";
 
 const COLUMNS =
   "id, name, communities!inner(org_id), billing_periods(id, start_date, end_date, status, billing_line_items(count))";
@@ -29,9 +29,26 @@ type Row = {
   id: string;
   name: string;
   billing_periods:
-    | { id: string; start_date: string; end_date: string; status: "draft" | "closed"; billing_line_items: { count: number }[] | null }[]
+    | { id: string; start_date: string; end_date: string; status: string; billing_line_items: { count: number }[] | null }[]
     | null;
 };
+
+/**
+ * A period's status as the tile shows it: the two values of
+ * billing_period_status, and "unknown" for anything else, so a value a later
+ * migration adds is shown as unknown rather than as its raw enum text. If
+ * the enum gains a value, map it here and in the billingPeriod status map
+ * (src/lib/gui/status-maps.ts).
+ */
+export function periodStatus(status: string): CurrentPeriodStatus {
+  switch (status) {
+    case "draft":
+    case "closed":
+      return status;
+    default:
+      return "unknown";
+  }
+}
 
 export const CURRENT_PERIODS_UNAVAILABLE = {
   ok: false,
@@ -62,7 +79,7 @@ export async function loadCurrentPeriods(req: SurfaceRequest): Promise<Loaded<Lo
             id: period.id,
             start_date: period.start_date,
             end_date: period.end_date,
-            status: period.status,
+            status: periodStatus(period.status),
             bills: period.billing_line_items?.[0]?.count ?? 0,
           }
         : null,

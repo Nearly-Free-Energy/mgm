@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   checkGate: vi.fn(),
   cookies: new Map<string, string>(),
+  organizationExists: vi.fn(),
 }));
 // The real matchView, so the first paint names the view dispatchView would load.
 vi.mock("../view", async (importOriginal) => ({
@@ -39,6 +40,7 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: (name: string) => (mocks.cookies.has(name) ? { value: mocks.cookies.get(name)! } : undefined) }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
+vi.mock("@/lib/mgm/organization-exists", () => ({ organizationExists: mocks.organizationExists }));
 vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/runtime/gate")>()),
   checkGate: mocks.checkGate,
@@ -117,6 +119,7 @@ beforeEach(() => {
   mocks.dispatchView.mockResolvedValue({ ok: true, value: MODEL });
   mocks.snapshot.mockResolvedValue(REGISTERED);
   mocks.checkGate.mockResolvedValue({ ok: true, organizationId: null });
+  mocks.organizationExists.mockResolvedValue(true);
 });
 
 describe("renderView", () => {
@@ -181,6 +184,27 @@ describe("renderView", () => {
     ).rejects.toThrow("redirect:/no-access");
     mocks.dispatchView.mockResolvedValue({ ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." });
     await expect(renderView({ path: ["x"], search: {}, access: ACCESS, gui: GUI })).rejects.toThrow("redirect:/no-access");
+  });
+
+  it("sends a person with no organization to /setup while none exists, as the (gui) layout does, so a fresh install's home is the first-run path", async () => {
+    const SUPER = { user: ACCESS.user, roles: [{ user_id: "user-1", role: "super_admin", scope_type: "org", scope_id: null }] } as CurrentUserAccess;
+    mocks.dispatchView.mockResolvedValue({ ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." });
+    mocks.organizationExists.mockResolvedValue(false);
+    await expect(renderView({ path: [], search: {}, access: SUPER, gui: GUI })).rejects.toThrow("redirect:/setup");
+    await expect(renderView({ path: [], search: {}, access: ACCESS, gui: GUI })).rejects.toThrow("redirect:/setup");
+    // Once one exists, the person simply reaches none of them.
+    mocks.organizationExists.mockResolvedValue(true);
+    await expect(renderView({ path: [], search: {}, access: SUPER, gui: GUI })).rejects.toThrow("redirect:/no-access");
+    // A check that fails sends them to /no-access rather than to the first-run page.
+    mocks.organizationExists.mockRejectedValue(new Error("down"));
+    await expect(renderView({ path: [], search: {}, access: SUPER, gui: GUI })).rejects.toThrow("redirect:/no-access");
+  });
+
+  it("asks whether any organization exists only for a person the host found no organization for", async () => {
+    await renderView({ path: [], search: {}, access: ACCESS, gui: GUI });
+    mocks.dispatchView.mockResolvedValue({ ok: false, status: 404, code: "gui_not_found", message: "This page could not be found." });
+    await expect(renderView({ path: [], search: {}, access: ACCESS, gui: GUI })).rejects.toThrow("not-found");
+    expect(mocks.organizationExists).not.toHaveBeenCalled();
   });
 
   it("shows a refusal with its own copy as a banner", async () => {

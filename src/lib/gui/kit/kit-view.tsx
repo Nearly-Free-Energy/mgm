@@ -12,7 +12,7 @@
  * Views attached as tiles are loaded and drawn below the page's body (Tiles);
  * the others are listed as links.
  */
-import { Component, Fragment, useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { LOCAL_DATE_TIME_OPTS } from "@/components/format/local-date-time";
 import { LocalDate } from "@/components/format/local-date";
 import { Chip, type ChipProps } from "@/components/ui/chip";
@@ -97,34 +97,40 @@ const TILE_NOT_LOADED = "This tile could not be loaded.";
  * The views attached as tiles (Today's, org.today), each loaded with
  * loadView after the first paint and drawn one level deep in a card of its
  * own, in the order the host lists them. A tile that cannot be loaded or
- * drawn shows why in its place, so the page and the other tiles stay. Each
- * loads again whenever the page's model is a new one (after a refresh or an
- * action), as Gridtop's sections do (src/gui/gridtop/shell/section-list.tsx).
+ * drawn shows why in its place, so the page and the other tiles stay.
+ *
+ * Each loads again whenever the page's model says something new (after a
+ * refresh or an action whose answer differs), compared by its content, not
+ * by the object: a renderer that copies the model on every render (as
+ * `{ ...model, live: undefined }` does) must not reload the tiles each time.
+ * A refresh whose answer is the same as the last leaves them as they are.
  */
 function Tiles({ tiles, page }: { tiles: Attached[]; page: ViewModel }) {
+  const pageKey = useMemo(() => JSON.stringify(page), [page]);
   return (
     <section aria-label="Tiles" className="grid grid-cols-1 gap-4 min-[600px]:grid-cols-2">
       {tiles.map((tile) => (
-        <Tile key={`${tile.view} ${tile.href}`} entry={tile} page={page} />
+        <Tile key={`${tile.view} ${tile.href}`} entry={tile} pageKey={pageKey} />
       ))}
     </section>
   );
 }
 
-function Tile({ entry, page }: { entry: Attached; page: ViewModel }) {
-  const [loaded, setLoaded] = useState<{ href: string; out: ViewModel | ActionResult } | null>(null);
+function Tile({ entry, pageKey }: { entry: Attached; pageKey: string }) {
+  const [loaded, setLoaded] = useState<{ load: number; out: ViewModel | ActionResult } | null>(null);
+  const loads = useRef(0);
   useEffect(() => {
     let current = true;
-    const href = entry.href;
-    loadView(href).then(
-      (out) => current && setLoaded({ href, out }),
-      () => current && setLoaded({ href, out: { type: "result", ok: false, status: 0, code: "network", message: TILE_NOT_LOADED } }),
+    const load = ++loads.current;
+    loadView(entry.href).then(
+      (out) => current && setLoaded({ load, out }),
+      () => current && setLoaded({ load, out: { type: "result", ok: false, status: 0, code: "network", message: TILE_NOT_LOADED } }),
     );
     return () => {
       current = false;
     };
-    // `page` is read only as a signal: a new page model loads the tile again.
-  }, [entry.href, page]);
+    // `pageKey` is read only as a signal: a page model that says something new loads the tile again.
+  }, [entry.href, pageKey]);
 
   const note = (text: string) => (
     <div className="flex flex-col gap-2">
@@ -141,8 +147,8 @@ function Tile({ entry, page }: { entry: Attached; page: ViewModel }) {
     body = note(loaded.out.ok ? TILE_NOT_LOADED : loaded.out.message);
   } else {
     body = (
-      // Keyed by href, so a tile that failed to draw is tried again for the next one.
-      <TileBoundary key={loaded.href} fallback={note(TILE_NOT_LOADED)}>
+      // Keyed by the load, so a tile that failed to draw is tried again with the next answer.
+      <TileBoundary key={loaded.load} fallback={note(TILE_NOT_LOADED)}>
         <KitViewAt model={loaded.out} depth={1} />
       </TileBoundary>
     );

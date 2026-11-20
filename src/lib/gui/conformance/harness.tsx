@@ -30,7 +30,12 @@ export interface Recorded {
 
 const CANCELLED = { type: "result", ok: false, status: 0, code: "cancelled", message: "Cancelled." } as const;
 
-export function recordingRuntime(input: { pathname: string; model?: ViewModel | null }): {
+/**
+ * A runtime that records what the kit asks of it. GET /api/gui/view answers
+ * with the model `views` holds for the href asked for, else with `model`,
+ * else 404.
+ */
+export function recordingRuntime(input: { pathname: string; model?: ViewModel | null; views?: Readonly<Record<string, ViewModel>> }): {
   runtime: KitRuntime;
   log: Recorded;
 } {
@@ -48,8 +53,10 @@ export function recordingRuntime(input: { pathname: string; model?: ViewModel | 
     fetch: async (url) => {
       const parsed = new URL(url, "http://kit.test");
       if (parsed.pathname === "/api/gui/view") {
-        log.loadView.push(parsed.searchParams.get("href") ?? "");
-        return input.model ? Response.json(input.model) : Response.json({ code: "not_found" }, { status: 404 });
+        const href = parsed.searchParams.get("href") ?? "";
+        log.loadView.push(href);
+        const answer = (input.views && Object.hasOwn(input.views, href) ? input.views[href] : undefined) ?? input.model;
+        return answer ? Response.json(answer) : Response.json({ code: "not_found" }, { status: 404 });
       }
       if (parsed.pathname === "/api/gui/search") {
         log.search.push(parsed.searchParams.get("q") ?? "");
@@ -157,8 +164,12 @@ export async function renderShell(gui: GuiPlugin, fixture: ManifestFixture, chil
  * no Shell. Like renderShell, it mounts the providers empty first, so a kit
  * call the child makes while it renders reaches this render's log.
  */
-export async function renderInKit(child: ReactNode, fixture: ManifestFixture = MANIFEST_FIXTURES[0]): Promise<Omit<Rendered, "goTo">> {
-  const { runtime, log } = recordingRuntime({ pathname: fixture.pathname });
+export async function renderInKit(
+  child: ReactNode,
+  fixture: ManifestFixture = MANIFEST_FIXTURES[0],
+  views?: Readonly<Record<string, ViewModel>>,
+): Promise<Omit<Rendered, "goTo">> {
+  const { runtime, log } = recordingRuntime({ pathname: fixture.pathname, views });
   const tree = (content: ReactNode) => (
     <KitRuntimeProvider runtime={runtime}>
       <KitProvider manifest={fixture.manifest} initial={fixture.initial}>
@@ -206,7 +217,16 @@ export async function loadLazyRenderers(gui: GuiPlugin, models: readonly ViewMod
   }
 }
 
-/** Renders a model the way production picks its renderer, inside the kit and with no Shell. */
-export function renderModel(gui: GuiPlugin, model: ViewModel, kindsSince?: KindsSince): Promise<Omit<Rendered, "goTo">> {
-  return renderInKit(<ModelView gui={gui} model={model} kindsSince={kindsSince} />);
+/**
+ * Renders a model the way production picks its renderer, inside the kit and
+ * with no Shell. `views` answers the views the model loads after the first
+ * paint (its tiles), by href; any other is a 404.
+ */
+export function renderModel(
+  gui: GuiPlugin,
+  model: ViewModel,
+  kindsSince?: KindsSince,
+  views?: Readonly<Record<string, ViewModel>>,
+): Promise<Omit<Rendered, "goTo">> {
+  return renderInKit(<ModelView gui={gui} model={model} kindsSince={kindsSince} />, MANIFEST_FIXTURES[0], views);
 }

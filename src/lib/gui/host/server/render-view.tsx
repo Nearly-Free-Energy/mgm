@@ -20,6 +20,7 @@ import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { Banner } from "@/components/ui/banner";
+import { organizationExists } from "@/lib/mgm/organization-exists";
 import { matchCatalogPage, TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { PUBLIC_COPY, pickPublicLanguage } from "@/lib/public-html/copy";
 import { createClient } from "@/lib/supabase/server";
@@ -131,6 +132,26 @@ async function unitPicker(ctx: HostContext, href: string): Promise<ReactNode> {
   );
 }
 
+/**
+ * Where a person the host finds no organization for (gui_no_access) is
+ * sent: to /setup while no organization exists at all, the first-run path
+ * that creates one, otherwise to /no-access. The (gui) layout sends staff
+ * the same way, in the same order (organizationExists before the role
+ * check), and the page decides for itself because the layout does not run
+ * on a client-side navigation; if the layout's order or targets change,
+ * change these with them. dispatchView answers a tenant-only person 404
+ * before any organization is chosen, so this never sends a tenant to
+ * /setup. A check that fails sends the person to /no-access.
+ */
+async function noOrganizationPage(): Promise<"/setup" | "/no-access"> {
+  try {
+    return (await organizationExists()) ? "/no-access" : "/setup";
+  } catch {
+    console.error("[gui] could not check whether any organization exists");
+    return "/no-access";
+  }
+}
+
 /** The page an unreleased path gets (src/lib/public-html/not-released.ts), inside the shell. */
 async function notReleased(): Promise<ReactNode> {
   const copy = PUBLIC_COPY[pickPublicLanguage((await headers()).get("accept-language"))].notReleased;
@@ -200,7 +221,7 @@ export async function renderView(input: {
   const { ctx, out } = await loadPageView(input.access, href);
   if (!out.ok) {
     if (out.status === 401) redirect("/login");
-    if (out.code === "gui_no_access") redirect("/no-access");
+    if (out.code === "gui_no_access") redirect(await noOrganizationPage());
     if (ctx && out.code === UNIT_REQUIRED.code) return unitPicker(ctx, href);
     if (out.code === NOT_RELEASED.code) return notReleased();
     // src/app/(gui)/not-found.tsx draws the ViewUnavailable for this one.

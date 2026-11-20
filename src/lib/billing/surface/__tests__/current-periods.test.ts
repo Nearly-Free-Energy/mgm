@@ -13,7 +13,7 @@ import { superAdmin, tableClient } from "@/lib/gui/host/server/__tests__/host-fa
 import { strictParseModel } from "@/lib/gui/host/server/parse";
 import type { SurfaceRequest, ViewDef } from "@/lib/gui/surface";
 import { BILLING_SURFACE } from "../../surface";
-import { loadCurrentPeriods, CURRENT_PERIODS_UNAVAILABLE } from "../current-periods";
+import { loadCurrentPeriods, CURRENT_PERIODS_UNAVAILABLE, periodStatus } from "../current-periods";
 import { CURRENT_PERIODS_EXAMPLES } from "../current-periods-examples";
 import { buildCurrentPeriodsModel, CURRENT_PERIODS_VIEW, MAX_CURRENT_PERIODS } from "../current-periods-model";
 
@@ -77,6 +77,27 @@ describe("loadCurrentPeriods", () => {
         { microgridId: MG2, microgridName: "South site", period: null },
       ]),
     });
+  });
+
+  it("maps each period status explicitly, and any value it does not know to unknown", async () => {
+    expect(["draft", "closed", "invoiced", "", "DRAFT"].map(periodStatus)).toEqual(["draft", "closed", "unknown", "unknown", "unknown"]);
+    const { client } = tableClient({
+      microgrids: {
+        data: [
+          {
+            id: MG,
+            name: "North site",
+            communities: { org_id: ORG },
+            billing_periods: [{ id: PERIOD, start_date: "2026-11-01", end_date: "2026-11-30", status: "invoiced", billing_line_items: [{ count: 3 }] }],
+          },
+        ],
+      },
+    });
+    const out = await loadCurrentPeriods(req(client));
+    if (!out.ok) throw new Error("refused");
+    expect(out.model.body.rows[0].cells.status).toEqual(fmt.text("Status unknown"));
+    expect(JSON.stringify(out.model)).not.toContain("invoiced");
+    expect(strictParseModel(def, out.model).ok).toBe(true);
   });
 
   it("refuses a failed read with fixed copy, never the database's message", async () => {

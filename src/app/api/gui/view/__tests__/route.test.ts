@@ -18,13 +18,27 @@ const client = () => {
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client() }));
 const surfaceSnapshot = vi.fn();
 vi.mock("@/lib/gui/host/server/snapshot", () => ({ surfaceSnapshot: () => surfaceSnapshot() }));
+// The real dispatchView, watched for the hints the route passes it.
+const dispatched = vi.hoisted(() => ({ calls: [] as unknown[][] }));
+vi.mock("@/lib/gui/host/server/view", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/gui/host/server/view")>();
+  return {
+    ...real,
+    dispatchView: (...args: Parameters<typeof real.dispatchView>) => {
+      dispatched.calls.push(args);
+      return real.dispatchView(...args);
+    },
+  };
+});
 
 import { GET } from "../route";
 
 const ORG = "e7100000-0000-4000-8003-000000000001";
-const get = (query: string) => GET(new NextRequest(`http://localhost/api/gui/view${query}`));
+const get = (query: string, headers: Record<string, string> = {}) =>
+  GET(new NextRequest(`http://localhost/api/gui/view${query}`, { headers }));
 
 beforeEach(() => {
+  dispatched.calls.length = 0;
   user = { id: "e7100000-0000-4000-8003-0000000000aa", email: "m@test.local" };
   roles = [{ role: "org_manager", scope_type: "org", scope_id: ORG }];
   surfaceSnapshot.mockReset().mockResolvedValue({
@@ -70,5 +84,12 @@ describe("GET /api/gui/view", () => {
   it("answers 404 for a page no view serves", async () => {
     await expectFailure(await get(`?href=${encodeURIComponent(`/microgrids/${ORG}/operations?date=2026-11-08`)}`), 404, "gui_not_found");
     expect(surfaceSnapshot).toHaveBeenCalledOnce();
+  });
+
+  it("passes the organization the person last used as a hint, as a page does, and nothing without the cookie", async () => {
+    await get(`?href=${encodeURIComponent("/")}`, { cookie: `mgm-org=${ORG}` });
+    expect(dispatched.calls[0].slice(1)).toEqual(["/", { preferred: ORG }]);
+    await get(`?href=${encodeURIComponent("/")}`);
+    expect(dispatched.calls[1].slice(1)).toEqual(["/", { preferred: null }]);
   });
 });
