@@ -32,6 +32,8 @@ export type GenerateFromMetersCounts = {
    * and a new total: fn_record_line_item_with_audit clears the link when a
    * bill's total changes, so it stops working. Known from the engine's
    * result (the payment status and total it read, and the total written).
+   * If that function clears the link on other changes too, or no longer
+   * clears it, revisit this count, linkCleared and the result message.
    */
   paymentLinksCleared: number;
   /** Read from the meter, with the figures the bill already had: nothing written. */
@@ -69,15 +71,23 @@ type NotBilled = keyof GenerateFromMetersCounts["notBilled"];
 const ERROR_BUCKET: Partial<Record<GenerationErrorCode, "left" | "changed" | NotBilled>> = {
   // `invoiced` is both the run's own choice (a bill it read with an invoice
   // number) and fn_regenerate_bill_with_audit's refusal of a bill invoiced
-  // after the read: either way the bill now has an invoice number and a
-  // second run would leave it too, so both count as left. bill_changed and
-  // period_closed are refusals of a bill or period that changed in some
-  // other way, which a second run may well refresh, so they count apart.
+  // after the read (its billing_line_item_invoiced, mapped to `invoiced` by
+  // EXPECTED_BILL_REFUSALS in ./generate.ts): either way the bill now has an
+  // invoice number and a second run would leave it too, so both count as
+  // left. If that function stops refusing an invoiced bill, or the mapping
+  // gives the refusal another code, revisit.
   invoiced: "left",
   paid: "left",
   refunded: "left",
-  // fn_regenerate_bill_with_audit's refusals of a bill that changed after it was read.
+  // fn_regenerate_bill_with_audit's other refusals, mapped the same way.
+  // bill_changed: the bill changed in some other way after it was read; a
+  // second run reads it again and may well refresh it, so it is not left.
   bill_changed: "changed",
+  // period_closed: the period closed while the run wrote. The bill itself
+  // was not refused, so it is not counted as left for what it is; no second
+  // run can refresh it either, since the route and the engine refuse a
+  // closed period and trg_billing_period_stays_closed keeps it closed (if a
+  // closed period can ever be reopened, revisit).
   period_closed: "changed",
   unmetered_no_manual: "noMeter",
   meter_assignment_continuity: "meterAssignment",
@@ -133,7 +143,9 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
 /**
  * Whether a written bill had a pending payment link and now has another
  * total: compared as fn_record_line_item_with_audit compares them, rounded
- * to whole units (previousTotalAmount already is).
+ * to whole units (previousTotalAmount already is). If that function's test
+ * for clearing the link (the stored total against the new one, rounded)
+ * changes, revisit.
  */
 function linkCleared(r: Extract<TenantResult, { kind: "written" }>): boolean {
   return (
@@ -147,7 +159,11 @@ function linkCleared(r: Extract<TenantResult, { kind: "written" }>): boolean {
 export const notBilledCount = (c: GenerateFromMetersCounts) =>
   c.notBilled.noMeter + c.notBilled.meterAssignment + c.notBilled.noReading + c.notBilled.failed;
 
-/** The most the GUI host keeps of an action's result message (invoke.ts). */
+/**
+ * The most the GUI host keeps of an action's result message: the
+ * `.slice(0, 300)` in src/lib/gui/host/client/invoke.ts. If that limit
+ * changes, change this.
+ */
 const MESSAGE_LIMIT = 300;
 
 function messageFor(c: GenerateFromMetersCounts, fmt: Fmt): string {

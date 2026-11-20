@@ -462,7 +462,9 @@ export type GenerateReadiness = {
    * Of `refresh`, bills with a pending payment link (link_generated). They
    * are recalculated like any other; if a total changes, the bill's link is
    * cleared (fn_record_line_item_with_audit) and the result counts it
-   * (summarizeGenerateFromMeters' paymentLinksCleared).
+   * (summarizeGenerateFromMeters' paymentLinksCleared). If that function
+   * stops clearing the link on a new total, revisit this count and its
+   * warning (paymentLinkWarning in ./period-review.ts).
    */
   withPaymentLink: number;
   /** Manual bills, kept. */

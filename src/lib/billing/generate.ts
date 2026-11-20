@@ -331,7 +331,8 @@ export type RunGenerationParams = {
    *    when its total changes, fn_record_line_item_with_audit clears its
    *    Pesapal link, and fn_payment_bill_revision sets any open checkout
    *    of the bill to needs_reconciliation (summarizeGenerateFromMeters
-   *    counts those bills, and the confirmation warns of them);
+   *    counts those bills, and the confirmation warns of them; if either
+   *    function changes what it does on a new total, revisit both);
    *  - an existing bill whose meter cannot be read (no meter, an assignment
    *    gap, no data) is not written: its error carries `hadBill`;
    *  - the period's status is read again after the meters are read and
