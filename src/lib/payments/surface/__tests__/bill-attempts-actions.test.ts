@@ -223,4 +223,16 @@ describe("the contributed actions", () => {
   it("are human-only and offered only where the view links them", () => {
     for (const a of PAYMENTS_SURFACE.actions!) expect([a.humanOnly, a.targeted]).toEqual([true, false]);
   });
+
+  it("stay enabled while Payments is off, as their routes accept them then, and the view's tab stays listed", () => {
+    expect(PAYMENTS_SURFACE.actions!.map((a) => [a.id, a.whilePluginOff])).toEqual([
+      ["payments.refresh-attempt", "enabled"],
+      ["payments.record-adjustment", "enabled"],
+      ["payments.accept-receipts", "enabled"],
+    ]);
+    const view = PAYMENTS_SURFACE.views!.find((v) => v.id === "payments.bill-attempts")!;
+    expect(view.attach).toEqual({ to: { view: "billing.period-review" }, order: 10, hint: "tab", whilePluginOff: "listed" });
+    // A section is listed while its plugin is off already.
+    expect(PAYMENTS_SURFACE.views!.find((v) => v.id === "payments.payment-setup")!.attach?.whilePluginOff).toBeUndefined();
+  });
 });

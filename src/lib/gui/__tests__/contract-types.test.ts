@@ -143,6 +143,27 @@ describe("GUI contract types", () => {
     accept<ViewDef>({ ...tenantView, scope: "organization" });
   });
 
+  it("names what an action and an attachment keep while their plugin is off, each its own word", () => {
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", whilePluginOff: "enabled" });
+    // @ts-expect-error an action is kept "enabled", not a flag
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", whilePluginOff: true });
+    // @ts-expect-error "listed" is an attachment's word, not an action's
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", whilePluginOff: "listed" });
+    const view = {
+      id: "payments.x",
+      kind: "collection",
+      path: "/microgrids/[id]/billing",
+      params: { id: "microgrid" },
+      cost: "db",
+      declares: { keys: [] },
+      examples: [],
+      load: async () => ({ ok: false as const, status: 503 as const, message: "fixture" }),
+    } as const;
+    accept<ViewDef>({ ...view, attach: { to: "microgrid", order: 1, hint: "tab", whilePluginOff: "listed" } });
+    // @ts-expect-error "enabled" is an action's word, not an attachment's
+    accept<ViewDef>({ ...view, attach: { to: "microgrid", order: 1, hint: "tab", whilePluginOff: "enabled" } });
+  });
+
   it("names the nav audiences", () => {
     expectTypeOf<NonNullable<NavDef["audience"]>>().toEqualTypeOf<"staff" | "super-admin" | "tenant">();
   });

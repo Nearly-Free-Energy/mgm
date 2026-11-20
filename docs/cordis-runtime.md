@@ -309,6 +309,29 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+While a plugin is off for an organization (the gate's 409, asked as a write
+by `pluginGate` in `src/lib/gui/host/server/gate-state.ts`), the host still
+serves its views of cost `db`, with the gate's notice followed by the
+loader's own (`dispatchView` and `shownNotice`), and refuses its `vendor`
+views. `attachedViews` lists its sections and leaves out its tabs and tiles,
+unless an attachment declares `whilePluginOff: "listed"`. `actionRef`
+(`src/lib/gui/host/shared/merge-actions.ts`) shows its actions disabled with
+the gate's copy on its own views and leaves them out of other plugins', and
+`prepareAction` refuses them with the gate's 409, unless an action declares
+`whilePluginOff: "enabled"`: that one is shown enabled on its own plugin's
+views and prepared, with its `available()` and `prepare` run as usual. Only
+the 409 is passed over: an unreadable gate (503, or a throw) still disables,
+refuses and leaves out everything. `gui-surface.test.ts` allows
+`whilePluginOff` on an action only where its `METHOD /api/route` is a
+`PaymentExemption` in `UNGATED_WRITES` naming a method that
+`capability-gating.test.ts` (`GATING`) says runs while the plugin is off, on
+a Payments or Pesapal action, so the host never offers a write its route
+refuses. It allows `attach.whilePluginOff` only on a Payments or Pesapal
+view, while every Payments method in `LOADER_READS` runs while off. The
+helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
+in `src/lib/runtime/__tests__/route-rules.ts`, shared with
+`route-surface.test.ts`.
+
 A view is about an organization's records unless it says otherwise:
 `scope: "installation"` serves an installation-wide view (no organization),
 and `scope: "tenant"` a view about one unit the caller rents (RFC mgm#197 §
@@ -508,10 +531,19 @@ file hands neither the capability nor its composition on, whether by
 aliasing the composer, destructuring the result or passing it along, and
 reaches the capability no other way. It also checks that
 `capability-gating.test.ts` classifies the method as available while
-disabled, and that Payments or Pesapal owns the route. A route whose
+disabled, that Payments or Pesapal owns the route, and that the file
+consults no plugin gate (`gateRoute`, `checkGate`, the plugin-state helpers
+or their database function), since an exemption says the route accepts the
+write while its plugin is off and the GUI host relies on that. A route whose
 exemption is a plain reason may not reach the capability at all, under any
 import name or module path. A new payments write route fails the build until
 it calls `checkGate`/`gateRoute` itself or carries a `PaymentExemption`.
+For the same reason the GUI host keeps `payments.refresh-attempt`,
+`payments.record-adjustment` and `payments.accept-receipts`, whose routes are
+the refresh and reconcile exemptions, enabled and preparable while Payments
+is off, and still lists the period review's Payments tab
+(`payments.bill-attempts`), through the `whilePluginOff` fields described
+under "GUI surface".
 
 Two other tests hold what those methods and routes may do.
 `src/lib/payments/__tests__/capability-gating.test.ts` classifies every

@@ -95,6 +95,33 @@ read a stored credential, or to send data to another origin.
    (`src/gui/meta.ts`) is owned from the pull request that creates it.
    Interface packages under `src/gui/<name>/` are not owned: what they may
    import is fixed by the boundary test, which is.
+8. **A plugin that is off for the organization.** The host asks the plugin
+   gate about the plugin as a write, on every view, attachment and prepare,
+   and treats only its 409 ("off") as off. An unreadable gate (its 503, or a
+   throw) leaves every tab, tile and section out, shows every action
+   disabled and refuses every prepare.
+   - Its views of cost `db` still load, with the gate's notice. A view's
+     loader may give a notice of its own (`LoadedModel.notice`); the host
+     shows its own notice first (the gate's, else the one on generated
+     figures), then the loader's, in one notice, and a loader's `danger`
+     tone outranks the host's warning (`shownNotice` in
+     `host/server/view.ts`). Its views of cost `vendor` are refused.
+   - Its sections are still listed where they are attached, so their place
+     shows the gate's notice. Its tabs and tiles are left out, unless the
+     attachment declares `whilePluginOff: "listed"`.
+   - Its actions are shown disabled with the gate's copy on its own views,
+     left out of other plugins' views, and refused at prepare, unless the
+     action declares `whilePluginOff: "enabled"`. Such an action is shown
+     enabled on its own plugin's views and prepared; its `available()` and
+     `prepare` still run, and other plugins' views still leave it out.
+   - Only an action whose `METHOD /api/route` is a `PaymentExemption` in
+     `UNGATED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`) may
+     declare `whilePluginOff`, so the host never offers a write the route
+     would refuse; only a Payments or Pesapal view may declare
+     `attach.whilePluginOff`, and only while every Payments capability
+     method a surface module may call runs while the plugin is off.
+     `gui-surface.test.ts` checks both. The registration check refuses
+     `attach.whilePluginOff` on a section or a `vendor` view.
 
 ## Consequences
 
@@ -120,6 +147,18 @@ Worse, or to watch:
   must check them again at run time (decision 3).
 - The import boundary rests on the test and on review. It is not process
   isolation.
+- Which actions and views may declare `whilePluginOff` (decision 8) is
+  checked in CI by `gui-surface.test.ts`, not when a contribution is
+  registered, because the registration check reads no test data. The route
+  stays the authority, so a declaration that slipped past CI could only
+  show an action enabled that its route then refuses. If a route with a
+  `PaymentExemption` starts consulting the gate, `route-surface.test.ts`
+  refuses the exemption while the route file names the gate; once the
+  exemption is removed, `gui-surface.test.ts` refuses its actions'
+  `whilePluginOff` until it goes. Only the route file is read for the gate:
+  a helper module that asks it is caught for the reconcile route by its
+  database test, which posts with Payments off, and for the other exempt
+  routes by review.
 - When this was recorded, the repository held the two contract files and
   their tests, and nothing imported them. The run-time checks in decision 3
   arrive with the code that reads contributions, each with its own tests.

@@ -58,6 +58,13 @@ export type ParityPullRequest =
    */
   | "Generate a period's bills from meter data"
   /**
+   * Added to #201 by the maintainer's decision on payments-while-off: a GUI
+   * host rule (whilePluginOff in src/lib/gui/surface.ts) that keeps a bill's
+   * Payments tab and the actions whose routes accept them while Payments is
+   * off available then.
+   */
+  | "Keep a bill's payments available while Payments is off"
+  /**
    * Nothing in #201 contributes it yet: it needs a decision before the
    * deletes. parity.test.ts keeps such a row pending whatever is contributed.
    */
@@ -155,6 +162,7 @@ const GRIDTOP = "Draw period review as a copy table in Gridtop";
 const SERVE = "Serve the billing pages through the GUI host";
 const ATTEMPTS = "Contribute a bill's payment attempts";
 const FROM_METERS = "Generate a period's bills from meter data";
+const WHILE_OFF = "Keep a bill's payments available while Payments is off";
 
 export const BILLING_PARITY: readonly ParityRow[] = [
   // ── Periods list ──────────────────────────────────────────────────────────
@@ -506,8 +514,8 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     control: "Payment history, Refresh status and reconciliation while Payments is off (the row's dialog)",
     legacy: "src/components/payments/payment-history.tsx",
     replacedBy: { kind: "view", view: "payments.bill-attempts" },
-    pr: "unscheduled",
-    note: "While Payments is off the legacy dialog still shows history and offers Refresh status and both reconciliations, which the routes accept by design (their PaymentExemption entries in src/lib/runtime/__tests__/route-rules.ts; docs/payments-rollout.md keeps history and verification available). The host instead leaves a disabled plugin's tab out of the period review, and shows its own actions disabled and refuses to prepare them, so through a GUI the view is reachable only by its URL, read-only. It needs a decision before the deletes, most likely a host rule that keeps an exempt route's action enabled while its plugin is off (src/lib/gui, code-owned).",
+    pr: WHILE_OFF,
+    note: "Decided by the maintainer: keep the actions enabled. While Payments is off the period review still lists the Payments tab (attach.whilePluginOff: \"listed\"), which loads with the gate's notice, and Refresh status and both reconciliations stay enabled and preparable (whilePluginOff: \"enabled\" on payments.refresh-attempt, payments.record-adjustment and payments.accept-receipts), as the legacy dialog offers them, because their routes accept them then by design (their PaymentExemption entries in src/lib/runtime/__tests__/route-rules.ts; docs/payments-rollout.md keeps history and verification available). gui-surface.test.ts allows the action field only on a PaymentExemption route, and parity.test.ts keeps this row replaced only while the four declarations stand. Differences from the dialog: its own line that receipts remain available is replaced by the gate's notice, and Refresh status is offered only on attempts with a tracking id, as when Payments is on (refresh-attempt).",
   },
 
   {

@@ -95,6 +95,18 @@ describe("parseContribution", () => {
     expect(parseContribution(c, CATALOG).contribution.actions?.[0].targeted).toBe(false);
   });
 
+  it("accepts an action kept enabled while its plugin is off, and a tab or tile listed then", () => {
+    // Which plugins may declare these is checked in CI (gui-surface.test.ts), not here.
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.actions[0].whilePluginOff = "enabled";
+    c.views[0].attach.whilePluginOff = "listed";
+    const parsed = parseContribution(c, CATALOG).contribution;
+    expect(parsed.actions?.[0].whilePluginOff).toBe("enabled");
+    expect(parsed.views?.[0].attach?.whilePluginOff).toBe("listed");
+    c.views[0].attach.hint = "tile";
+    expect(() => parseContribution(c, CATALOG)).not.toThrow();
+  });
+
   it("accepts placeholder names with underscores", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     Object.assign(c.actions[2], { path: "/api/billing-periods/[period_id]/close", bind: { path: { period_id: "billingPeriod" } } });
@@ -128,6 +140,21 @@ describe("parseContribution", () => {
     ["unknown signal key", (c) => (c.signals[0].budget = 1), ["signals", 0], 'Unrecognized key: "budget"'],
     ["unknown attach key", (c) => (c.views[0].attach.x = 1), ["views", 0, "attach"], 'Unrecognized key: "x"'],
     ["unknown live key", (c) => (c.views[1].live.x = 1), ["views", 1, "live"], 'Unrecognized key: "x"'],
+    ["an action's whilePluginOff of another value", (c) => (c.actions[0].whilePluginOff = true), ["actions", 0, "whilePluginOff"]],
+    ["an action's whilePluginOff in an attachment's word", (c) => (c.actions[0].whilePluginOff = "listed"), ["actions", 0, "whilePluginOff"]],
+    ["an attachment's whilePluginOff in an action's word", (c) => (c.views[0].attach.whilePluginOff = "enabled"), ["views", 0, "attach", "whilePluginOff"]],
+    [
+      "a section listed while its plugin is off, which it is already",
+      (c) => Object.assign(c.views[0].attach, { hint: "section", whilePluginOff: "listed" }),
+      ["views", 0, "attach", "whilePluginOff"],
+      "a section is listed while its plugin is off already",
+    ],
+    [
+      "a vendor view listed while its plugin is off",
+      (c) => Object.assign(c.views[0], { cost: "vendor", attach: { ...c.views[0].attach, whilePluginOff: "listed" } }),
+      ["views", 0, "attach", "whilePluginOff"],
+      "a vendor view is refused while its plugin is off, so it cannot be listed then",
+    ],
     ["risk outside the enum", (c) => (c.actions[0].risk = "fatal"), ["actions", 0, "risk"]],
     ["targeted set to true, which is the default spelled out", (c) => (c.actions[0].targeted = true), ["actions", 0, "targeted"]],
     ["icon outside the enum", (c) => (c.nav[0].icon = "rocket"), ["nav", 0, "icon"]],

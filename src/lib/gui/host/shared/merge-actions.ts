@@ -20,7 +20,7 @@ export type ActionSlots<A, V = unknown> = { [K in ViewKind]: { kind: K; body: Bo
 /** What the merge reads of an action definition. */
 export type MergeActionDef = Pick<
   ActionDef,
-  "id" | "title" | "target" | "path" | "method" | "risk" | "confirm" | "bind" | "targeted"
+  "id" | "title" | "target" | "path" | "method" | "risk" | "confirm" | "bind" | "targeted" | "whilePluginOff"
 >;
 export type MergeAction = { plugin: MgmPluginName; def: MergeActionDef };
 /**
@@ -81,7 +81,11 @@ function danger(def: MergeActionDef): boolean {
  * An ActionRef for one action with its params, or why it is left out. Checks,
  * in order: the filled path is released; the plugin is enabled. A disabled
  * plugin's action is left out when it is another plugin's, and shown disabled
- * with the gate's copy when it is the view's own.
+ * with the gate's copy when it is the view's own, unless it declares
+ * `whilePluginOff: "enabled"`: its route accepts it while the plugin is off
+ * (a PaymentExemption, which gui-surface.test.ts requires), so it is shown
+ * enabled. Only the gate's 409 ("off") is passed over; an action whose
+ * plugin's state could not be read is shown disabled, whatever it declares.
  */
 export function actionRef(
   a: MergeAction,
@@ -99,8 +103,10 @@ export function actionRef(
   const gate = input.gate.get(a.plugin);
   if (gate && !gate.ok && gate.status === 409) {
     if (foreign) return { ok: false, reason: "disabled" };
-    ref.enabled = false;
-    ref.reason = gate.message;
+    if (a.def.whilePluginOff !== "enabled") {
+      ref.enabled = false;
+      ref.reason = gate.message;
+    }
   } else if (!gate?.ok) {
     ref.enabled = false;
     ref.reason = `Could not verify whether ${displayName(a.plugin)} is enabled.`;

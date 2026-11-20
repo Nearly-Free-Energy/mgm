@@ -16,11 +16,14 @@ import "server-only";
  * describe; examples against the model schemas and the declared keys; no
  * assistant reading of views reached from configure or system navigation;
  * tenant views without segments, attachments or assistant reading, reached
- * only from tenant navigation.
+ * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
+ * of cost "db".
  *
  * Not checked here, because one contribution cannot show them: one
  * contribution per plugin, ids unique across plugins, an attach target in
- * another plugin, released routes and per-organization plugin state.
+ * another plugin, released routes and per-organization plugin state. Nor
+ * which actions and views may declare `whilePluginOff`, which needs the
+ * route exemptions and the capability's gating (gui-surface.test.ts).
  */
 import { z } from "zod";
 import { CORE_ENTITY_KINDS, getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
@@ -223,6 +226,7 @@ const viewSchema = z
         to: z.union([entityKindSchema, z.strictObject({ view: idSchema })]),
         order: z.number(),
         hint: z.enum(["section", "tab", "tile"]),
+        whilePluginOff: z.literal("listed").optional(),
       })
       .optional(),
     cost: z.enum(["db", "vendor"]),
@@ -255,6 +259,15 @@ const viewSchema = z
       if (Object.keys(v.params).length > 0) add(ctx, ["params"], "a tenant view's path has no segments: its unit is the caller's");
       if (v.attach !== undefined) add(ctx, ["attach"], "a tenant view is never attached to another view");
       if (v.agent !== undefined) add(ctx, ["agent"], "a tenant view cannot be read by an assistant");
+    }
+    // Which views may declare it is checked in CI (gui-surface.test.ts),
+    // which can read the route exemptions and the capability's gating; here
+    // only what the host itself would contradict.
+    if (v.attach?.whilePluginOff !== undefined) {
+      if (v.attach.hint === "section")
+        add(ctx, ["attach", "whilePluginOff"], "a section is listed while its plugin is off already");
+      if (v.cost === "vendor")
+        add(ctx, ["attach", "whilePluginOff"], "a vendor view is refused while its plugin is off, so it cannot be listed then");
     }
     for (const p of v.ext ? strictProblems(v.ext.zod) : []) add(ctx, ["ext", "zod", ...p.path], p.message);
     const declared = (key: string) =>
@@ -299,6 +312,10 @@ const actionSchema = z
     bind: z.strictObject({ path: kindMap.optional(), body: kindMap.optional() }),
     available: fn.optional(),
     targeted: z.literal(false).optional(),
+    // Which actions may declare it (a PaymentExemption route) is checked in
+    // CI by gui-surface.test.ts, which can read UNGATED_WRITES; contribute()
+    // reads no test data.
+    whilePluginOff: z.literal("enabled").optional(),
     risk: z.enum(["write", "money", "external", "destructive"]),
     confirm: confirmSchema,
     humanOnly: z.boolean(),
