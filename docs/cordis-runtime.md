@@ -626,6 +626,9 @@ outside any segment layout, such as `microgrids/[id]/layout.tsx`: the page
 loses that layout's header, tabs and notices, and shows the GUI's own dock
 and trail instead. A billing screen's page switches only once no row of
 that screen in `src/lib/billing/parity.ts` is pending (`parity.test.ts`).
+Every billing page under a microgrid is served this way since a period's
+review switched (the last to), so `microgrids/[id]/layout.tsx` and its
+timezone nudge now frame only Setup's pages.
 
 `getRouteOwner` reads page paths as ownership prefixes beside `routes`, so
 `/microgrids/[id]/operations` belongs to metering and `…/setup/rates` to
