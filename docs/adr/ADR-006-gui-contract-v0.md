@@ -122,6 +122,16 @@ read a stored credential, or to send data to another origin.
      method a surface module may call runs while the plugin is off.
      `gui-surface.test.ts` checks both. The registration check refuses
      `attach.whilePluginOff` on a section or a `vendor` view.
+9. **The host's confirmation steps.**
+   - A step's tone, and an `ActionRef`'s `tone`, come from the action's
+     definition on the server (`actionTone` in
+     `host/shared/merge-actions.ts`): danger for a DELETE or a
+     `risk: "destructive"` action, neutral for every other, typed and
+     ceremony included. A confirmation level says how carefully a person
+     confirms, not what the write does. The one-step form's footer, the
+     confirm, typed and ceremony steps and the Overlay's `tone` all take
+     the prepared action's tone; a GUI's ref cannot change it. Design
+     rule 5 in CLAUDE.md is the same rule for the legacy dialogs.
 
 ## Consequences
 
@@ -176,6 +186,8 @@ Worse, or to watch:
 ## References
 
 - `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
+- `src/lib/gui/host/client/action-host.tsx`,
+  `src/lib/gui/host/server/prepare.ts` (decision 9)
 - `src/lib/gui/__tests__/contract-types.test.ts`,
   `src/lib/gui/__tests__/gui-boundary.test.ts`
 - `docs/cordis-runtime.md`; CLAUDE.md, "Cordis runtime"

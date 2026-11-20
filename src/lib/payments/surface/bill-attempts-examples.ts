@@ -46,8 +46,6 @@ const PAYMENTS_DISABLED =
 const TITLES: Record<string, string> = Object.fromEntries(
   [REFRESH_ATTEMPT_ACTION, RECORD_ADJUSTMENT_ACTION, ACCEPT_RECEIPTS_ACTION].map((a) => [a.id, a.title]),
 );
-/** Typed, so the host shows it in the danger tone (merge-actions.ts). */
-const DANGER = new Set<string>([RECORD_ADJUSTMENT_ACTION.id]);
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const PERIOD = { id: id(0xb2), start_date: "2026-11-01", end_date: "2026-11-30" };
@@ -153,7 +151,7 @@ function resolve(history: BillHistory | undefined) {
     return {
       ...link,
       label: link.label ?? TITLES[link.action],
-      ...(DANGER.has(link.action) ? { tone: "danger" as const } : {}),
+      // No tone: none of this view's actions is a DELETE or destructive (actionTone in merge-actions.ts).
       ...(reason === null ? { enabled: true } : { enabled: false, reason }),
     };
   };

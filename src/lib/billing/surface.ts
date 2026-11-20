@@ -364,8 +364,8 @@ export const BILLING_SURFACE: Contribution = {
     // the readings choice, and available() and prepare check the bill, so it
     // is sound on any view of a bill. A ceremony, so the host sends the
     // acknowledgement a paid bill's prepare asks for and the route requires
-    // (only typed and ceremony actions are sent a confirmation, invoke.ts);
-    // the host therefore shows it in the danger tone on every bill.
+    // (only typed and ceremony actions are sent a confirmation, invoke.ts).
+    // Its tone is neutral, as it is neither a DELETE nor destructive.
     {
       ...REGENERATE_BILL_ACTION,
       target: "lineItem",

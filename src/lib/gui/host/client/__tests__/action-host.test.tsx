@@ -77,6 +77,7 @@ function prepared(over: PreparedOver = {}) {
     path: PATH,
     bound: { microgrid_id: MG },
     ceremony: null,
+    tone: "neutral",
     ...rest,
   } as PreparedAction;
 }
@@ -1042,8 +1043,8 @@ describe("ActionHost with the kit's form", () => {
 
   it("shows the ceremony's statement above the one-step footer, describes Confirm by it, and keeps the tone", async () => {
     const ceremony = { type: "ceremony" as const, statement: "Rename this site?", facts: [], warnings: [], acknowledgements: [] };
-    mount({ body: prepared({ ceremony }) });
-    void act(ref({ tone: "danger" }));
+    mount({ body: prepared({ ceremony, tone: "danger" }) });
+    void act(ref());
     await name();
     const statement = screen.getByText("Rename this site?");
     const confirm = await confirmButton();
@@ -1136,5 +1137,57 @@ describe("ActionHost with the kit's form", () => {
     await expect(done).resolves.toMatchObject({ ok: true });
     expect(writes()).toHaveLength(1);
     expect(sent()).toEqual({ name: "Kasenge", microgrid_id: MG });
+  });
+});
+
+describe("ActionHost's tone", () => {
+  const ceremony = { type: "ceremony" as const, statement: "Close it?", facts: [], warnings: [], acknowledgements: [], typed: "Kasenge", digest: "d1" };
+  /** Mounts with an Overlay that records the tone it is handed. */
+  function framed(body: unknown) {
+    const tones: string[] = [];
+    function Recording({ tone, children }: OverlayProps) {
+      tones.push(tone);
+      return <div role="dialog">{children}</div>;
+    }
+    mount({ body }, undefined, { Overlay: Recording });
+    return tones;
+  }
+
+  it.each(["typed", "ceremony"] as const)("draws a neutral %s step and frame in the primary tone", async (level) => {
+    const tones = framed(prepared({ confirm: level, fields: false, ceremony, tone: "neutral" }));
+    void act(ref());
+    const confirm = await confirmButton();
+    expect(confirm.className).toContain("bg-primary");
+    expect(confirm.className).not.toContain("bg-destructive");
+    expect(new Set(tones)).toEqual(new Set(["neutral"]));
+  });
+
+  it("draws a danger step and frame in the destructive tone", async () => {
+    const tones = framed(prepared({ confirm: "typed", fields: false, ceremony, tone: "danger", method: "DELETE" }));
+    void act(ref());
+    expect((await confirmButton()).className).toContain("bg-destructive");
+    expect(new Set(tones)).toEqual(new Set(["danger"]));
+  });
+
+  it("takes the tone from the prepared action, never the GUI's ref", async () => {
+    const tones = framed(prepared({ confirm: "ceremony", fields: false, ceremony, tone: "neutral" }));
+    void act(ref({ tone: "danger" }));
+    expect((await confirmButton()).className).toContain("bg-primary");
+    expect(new Set(tones)).toEqual(new Set(["neutral"]));
+  });
+
+  it("draws the one-step footer in the prepared tone", async () => {
+    mount({ body: prepared({ tone: "neutral" }) });
+    void act(ref({ tone: "danger" }));
+    expect((await confirmButton()).className).toContain("bg-primary");
+  });
+
+  it("falls back to danger when the prepared action carries no tone", async () => {
+    const { tone, ...rest } = prepared({ confirm: "ceremony", fields: false, ceremony });
+    void tone;
+    const tones = framed(rest);
+    void act(ref());
+    expect((await confirmButton()).className).toContain("bg-destructive");
+    expect(new Set(tones)).toEqual(new Set(["danger"]));
   });
 });

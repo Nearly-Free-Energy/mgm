@@ -132,6 +132,7 @@ describe("prepareAction", () => {
         path: `/api/microgrids/${MG}/openems-backend`,
         bound: { microgrid_id: MG },
         ceremony: null,
+        tone: "neutral",
       },
     });
     const input = out.ok ? (out.value.spec.input as { properties: Record<string, unknown> }) : null;
@@ -377,7 +378,18 @@ describe("prepareAction", () => {
     it("returns a ceremony from the action's prepare, strictly parsed", async () => {
       use(guarded("ceremony", async () => ({ ok: true, model: ceremony({ digest: "d1" }) })));
       const out = await prepare({ action: "metering.backend-delete", params });
-      expect(out).toMatchObject({ ok: true, value: { confirm: "ceremony", method: "DELETE", ceremony: ceremony({ digest: "d1" }) } });
+      expect(out).toMatchObject({ ok: true, value: { confirm: "ceremony", method: "DELETE", ceremony: ceremony({ digest: "d1" }), tone: "danger" } });
+    });
+
+    it("takes the tone from the action's risk and method, not its level", async () => {
+      const money = (confirm: "typed" | "ceremony") =>
+        action({ id: "metering.backend-close", confirm, risk: "money", method: "POST", humanOnly: true, prepare: async () => ({ ok: true, model: ceremony({ typed: "Kiwumu" }) }) });
+      for (const confirm of ["typed", "ceremony"] as const) {
+        use(money(confirm));
+        expect(await prepare({ action: "metering.backend-close", params })).toMatchObject({ ok: true, value: { confirm, tone: "neutral" } });
+      }
+      use(action({ id: "metering.backend-wipe", confirm: "typed", risk: "destructive", method: "POST", humanOnly: true, prepare: async () => ({ ok: true, model: ceremony({ typed: "Kiwumu" }) }) }));
+      expect(await prepare({ action: "metering.backend-wipe", params })).toMatchObject({ ok: true, value: { tone: "danger" } });
     });
 
     it("refuses a ceremony with a key the contract does not name", async () => {

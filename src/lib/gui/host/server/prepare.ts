@@ -21,7 +21,7 @@ import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import type { ActionRef, Ceremony, EntityKind, Json } from "../../contract";
 import type { ActionDef, Loaded } from "../../surface";
 import { isApiPath } from "../shared/href";
-import { fillPath, idFits } from "../shared/merge-actions";
+import { actionTone, fillPath, idFits } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
 import { resolveSegments, type Segment } from "./entities";
 import { pluginGate } from "./gate-state";
@@ -67,6 +67,8 @@ export const preparedActionSchema = z.strictObject({
   /** Body fields filled from the entity; the kit sends them over the form's values. */
   bound: z.record(z.string(), z.string()),
   ceremony: ceremonySchema.nullable(),
+  /** The tone of the form's footer, the confirmation step and the Overlay: actionTone of the action's definition. */
+  tone: z.enum(["neutral", "danger"]),
   prefill: jsonSchema.optional(),
 });
 export type PreparedAction = z.output<typeof preparedActionSchema>;
@@ -254,6 +256,7 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
     path,
     bound,
     ceremony: ceremony.value,
+    tone: actionTone(def),
     ...(prefill === undefined ? {} : { prefill }),
   };
   const parsed = parseOrFail(preparedActionSchema, out, `action ${def.id}`);

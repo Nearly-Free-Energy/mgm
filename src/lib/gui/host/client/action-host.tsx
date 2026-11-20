@@ -9,6 +9,10 @@
  *
  * The level the host runs is the prepared action's top-level `confirm`, which
  * prepare raises for a proposal; `spec.confirm` is the action's own level.
+ * The tone of the one-step footer, the confirmation step and the Overlay is
+ * the prepared action's `tone`, which prepare takes from the action's risk and
+ * method (actionTone in ../shared/merge-actions.ts): danger only for a DELETE
+ * or destructive action, whatever the level. A GUI's ref cannot change it.
  *
  * A GUI's Overlay frames the step but never holds it. Its one child is
  * HostSlot, an element with no props that only places a node the host owns,
@@ -467,7 +471,8 @@ export function ActionHost({ Overlay, forms, model = null }: ActionHostSlots & {
     const record = recordFor(event, input, TYPING_EVENTS);
     if (record) record.typed = readInput(input).value;
   };
-  const tone = current.ref.tone === "danger" || level === "typed" || level === "ceremony" ? "danger" : "neutral";
+  // From the prepared action, never the GUI's ref; a missing or unknown value draws danger.
+  const tone = current.prepared.tone === "neutral" ? "neutral" : "danger";
   const formProps: FormProps = {
     spec,
     actionRef: current.ref,

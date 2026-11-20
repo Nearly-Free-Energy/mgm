@@ -17,7 +17,7 @@ import { KitProvider } from "@/lib/gui/host/client/kit-provider";
 import { hostAct, KitRuntimeProvider } from "@/lib/gui/host/client/kit-runtime";
 import { initial, manifest, recordingRuntime } from "@/lib/gui/host/client/__tests__/kit-test-utils";
 import { cleanPrefill } from "@/lib/gui/host/server/merge";
-import { fillPath } from "@/lib/gui/host/shared/merge-actions";
+import { actionTone, fillPath } from "@/lib/gui/host/shared/merge-actions";
 import type { ActionDef } from "@/lib/gui/surface";
 import { kit } from "@/lib/gui/kit";
 import { parseJsonBody } from "@/lib/validation/parse-body";
@@ -57,6 +57,7 @@ function prepared(request: { action: string; params: Record<string, string>; bod
     path: fillPath(def.path, request.params),
     bound: {},
     ceremony: null,
+    tone: actionTone(def),
     ...(prefill === undefined ? {} : { prefill }),
   };
 }
