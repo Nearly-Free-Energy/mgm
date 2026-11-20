@@ -40,20 +40,17 @@ describe("manual payment notes RPC contract", () => {
 describe("deleting a billing period (#201)", () => {
   function deleting(result: { data: unknown; error: unknown }) {
     const calls: [string, unknown[]][] = [];
-    const chain = {
-      delete: (...a: unknown[]) => (calls.push(["delete", a]), chain),
-      eq: (...a: unknown[]) => (calls.push(["eq", a]), chain),
-      select: async (...a: unknown[]) => (calls.push(["select", a]), result),
-    };
-    const client = { from: (table: string) => (calls.push(["from", [table]]), chain) };
+    const client = { rpc: async (...a: unknown[]) => (calls.push(["rpc", a]), result) };
     return { repo: createSupabaseBillingRepository(client as unknown as SupabaseClient), calls };
   }
 
-  it("reads back the deleted id, so a row hidden by row-level security reports nothing deleted", async () => {
-    const done = deleting({ data: [{ id: "period" }], error: null });
+  it("deletes through fn_delete_draft_billing_period, which returns the deleted id or null", async () => {
+    const done = deleting({ data: "period", error: null });
     expect(await done.repo.deleteBillingPeriod("period")).toEqual({ deleted: true, error: null });
-    expect(done.calls).toEqual([["from", ["billing_periods"]], ["delete", []], ["eq", ["id", "period"]], ["select", ["id"]]]);
-    expect(await deleting({ data: [], error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
+    expect(done.calls).toEqual([["rpc", ["fn_delete_draft_billing_period", { _period_id: "period" }]]]);
+    // NULL: no such period, or not the caller's to delete.
+    expect(await deleting({ data: null, error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
+    expect(await deleting({ data: "another", error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
   });
 
   it("keeps the delete guard's DETAIL, which names why the period is kept", async () => {
@@ -61,6 +58,10 @@ describe("deleting a billing period (#201)", () => {
     expect(await repo.deleteBillingPeriod("period")).toEqual({
       deleted: false,
       error: { code: "23514", message: "billing_period_kept", details: "payment_activity" },
+    });
+    expect(await deleting({ data: null, error: { code: "23503", message: "fk" } }).repo.deleteBillingPeriod("period")).toEqual({
+      deleted: false,
+      error: { code: "23503", message: "fk", details: null },
     });
   });
 

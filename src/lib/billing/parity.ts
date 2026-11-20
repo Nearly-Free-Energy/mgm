@@ -219,7 +219,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.periods",
     },
     pr: PERIODS,
-    note: "The legacy screens delete through the same route, with the period's name typed in their confirm dialog, so they follow the plugin gate and give the capability's refusals in its fixed copy.",
+    note: "The legacy screens delete through the same route, with the period's name typed in their confirm dialog, so they follow the plugin gate and give the capability's refusals in its fixed copy. The route deletes through fn_delete_draft_billing_period (migration 20261120130000) with the person's own client, and signed-in users hold no DELETE on billing_periods, so no other delete reaches a period.",
   },
 
   {

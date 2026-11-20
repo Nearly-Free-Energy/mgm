@@ -686,6 +686,7 @@ export class BillingCapability implements BillingCapabilityContract {
           message: "This period has imported pilot data and cannot be deleted.",
         };
       }
+      // A caller without EXECUTE on fn_delete_draft_billing_period (anon).
       if (error.code === "42501" || error.message.includes("row-level security")) {
         return {
           ok: false as const,

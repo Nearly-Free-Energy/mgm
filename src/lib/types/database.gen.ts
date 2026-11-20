@@ -1859,6 +1859,10 @@ export type Database = {
         }
         Returns: string
       }
+      fn_delete_draft_billing_period: {
+        Args: { _period_id: string }
+        Returns: string
+      }
       fn_edge_ids_all_nonempty: { Args: { ids: string[] }; Returns: boolean }
       fn_ems_decrypt_secret: { Args: { p_ciphertext: string }; Returns: string }
       fn_ems_encrypt_secret: { Args: { p_plaintext: string }; Returns: string }
