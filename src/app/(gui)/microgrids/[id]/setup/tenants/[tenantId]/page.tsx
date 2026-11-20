@@ -11,6 +11,7 @@ import { appUrl } from "@/lib/config/app-url";
 import { TenantMeterSection } from "./tenant-meter-section";
 import { TenantAccessSection, type TenantAccessEntry } from "./tenant-access-section";
 import { TenantBillingTable, type BillingLineItemRow } from "./tenant-billing-table";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > Tenants > [tenantId] — Tenant detail page (D3 / #54).
 //
@@ -54,6 +55,7 @@ export default async function TenantDetailPage({
 }: {
   params: Promise<{ id: string; tenantId: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id: microgridId, tenantId } = await params;
   const supabase = await createClient();
 

@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { AddEntityButton } from "@/components/forms/AddEntityButton";
 import type { Community } from "@/lib/types/domain";
 import { microgridHref } from "@/lib/microgrid-links";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 /**
  * /communities/[id] — community detail page (#87).
@@ -45,6 +46,7 @@ export default async function CommunityDetailPage({
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const sp = searchParams ? await searchParams : undefined;
   const supabase = await createClient();
