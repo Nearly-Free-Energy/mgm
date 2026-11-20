@@ -18,7 +18,8 @@ import "server-only";
  * assistant reading of views reached from configure or system navigation;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
- * of cost "db".
+ * of cost "db"; `takesSignals` only on an organization's view that is not
+ * attached and does not poll.
  *
  * Not checked here, because one contribution cannot show them: one
  * contribution per plugin, ids unique across plugins, an attach target in
@@ -233,6 +234,7 @@ const viewSchema = z
       .optional(),
     cost: z.enum(["db", "vendor"]),
     agent: z.literal("read").optional(),
+    takesSignals: z.literal(true).optional(),
     live: z
       .strictObject({ refreshSeconds: z.number().min(5), staleAfterSeconds: z.number() })
       .refine((l) => l.staleAfterSeconds >= l.refreshSeconds, {
@@ -261,6 +263,16 @@ const viewSchema = z
       if (Object.keys(v.params).length > 0) add(ctx, ["params"], "a tenant view's path has no segments: its unit is the caller's");
       if (v.attach !== undefined) add(ctx, ["attach"], "a tenant view is never attached to another view");
       if (v.agent !== undefined) add(ctx, ["agent"], "a tenant view cannot be read by an assistant");
+    }
+    // The host collects signals for one organization (organizationSignals in
+    // ./signals.ts), so only a view about an organization can take them; and
+    // since every watcher runs on each load, never one that polls or is
+    // attached to another view, which would run them all again with it.
+    if (v.takesSignals) {
+      if (v.scope === "installation" || v.scope === "tenant")
+        add(ctx, ["takesSignals"], "only an organization's view takes its signals");
+      if (v.attach !== undefined) add(ctx, ["takesSignals"], "a view that takes signals is never attached to another view");
+      if (v.live !== undefined) add(ctx, ["takesSignals"], "a view that takes signals does not poll");
     }
     // Which views may declare it is checked in CI (gui-surface.test.ts),
     // which can read the route exemptions and the capability's gating; here

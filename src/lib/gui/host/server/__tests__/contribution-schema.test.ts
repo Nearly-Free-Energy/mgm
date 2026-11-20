@@ -109,6 +109,13 @@ describe("parseContribution", () => {
     expect(() => parseContribution(c, CATALOG)).not.toThrow();
   });
 
+  it("accepts an organization's view that takes its signals", () => {
+    const c = copy(BILLING_SURFACE) as Draft;
+    delete c.views[0].attach;
+    c.views[0].takesSignals = true;
+    expect(parseContribution(c, CATALOG).contribution.views?.[0].takesSignals).toBe(true);
+  });
+
   it("accepts placeholder names with underscores", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     Object.assign(c.actions[2], { path: "/api/billing-periods/[period_id]/close", bind: { path: { period_id: "billingPeriod" } } });
@@ -156,6 +163,28 @@ describe("parseContribution", () => {
       (c) => Object.assign(c.views[0], { cost: "vendor", attach: { ...c.views[0].attach, whilePluginOff: "listed" } }),
       ["views", 0, "attach", "whilePluginOff"],
       "a vendor view is refused while its plugin is off, so it cannot be listed then",
+    ],
+    ["takesSignals of another value", (c) => (c.views[0].takesSignals = "yes"), ["views", 0, "takesSignals"]],
+    [
+      "an installation view that takes signals",
+      (c) => {
+        delete c.views[0].attach;
+        Object.assign(c.views[0], { scope: "installation", takesSignals: true });
+      },
+      ["views", 0, "takesSignals"],
+      "only an organization's view takes its signals",
+    ],
+    [
+      "an attached view that takes signals",
+      (c) => (c.views[0].takesSignals = true),
+      ["views", 0, "takesSignals"],
+      "a view that takes signals is never attached to another view",
+    ],
+    [
+      "a polled view that takes signals",
+      (c) => (c.views[1].takesSignals = true),
+      ["views", 1, "takesSignals"],
+      "a view that takes signals does not poll",
     ],
     ["risk outside the enum", (c) => (c.actions[0].risk = "fatal"), ["actions", 0, "risk"]],
     ["targeted set to true, which is the default spelled out", (c) => (c.actions[0].targeted = true), ["actions", 0, "targeted"]],

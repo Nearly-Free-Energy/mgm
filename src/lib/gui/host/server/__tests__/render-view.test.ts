@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   }),
   snapshot: vi.fn(),
   checkGate: vi.fn(),
+  cookies: new Map<string, string>(),
 }));
 // The real matchView, so the first paint names the view dispatchView would load.
 vi.mock("../view", async (importOriginal) => ({
@@ -33,7 +34,10 @@ vi.mock("../view", async (importOriginal) => ({
 }));
 vi.mock("../snapshot", () => ({ surfaceSnapshot: mocks.snapshot }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en" }) }));
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "accept-language": "en" }),
+  cookies: async () => ({ get: (name: string) => (mocks.cookies.has(name) ? { value: mocks.cookies.get(name)! } : undefined) }),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/runtime/gate")>()),
@@ -109,6 +113,7 @@ type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unk
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.cookies.clear();
   mocks.dispatchView.mockResolvedValue({ ok: true, value: MODEL });
   mocks.snapshot.mockResolvedValue(REGISTERED);
   mocks.checkGate.mockResolvedValue({ ok: true, organizationId: null });
@@ -122,6 +127,15 @@ describe("renderView", () => {
     expect(ctx.access.user).toBe(ACCESS.user);
     expect(ctx.access.roles).toEqual(ACCESS.roles);
     expect(ctx.locale).toBe("en");
+  });
+
+  it("passes the organization the person last used, so a view with no organization in its path opens where the shell does", async () => {
+    await renderView({ path: [], search: {}, access: ACCESS, gui: GUI });
+    expect(mocks.dispatchView.mock.calls[0][1]).toBe("/");
+    expect(mocks.dispatchView.mock.calls[0][2]).toEqual({ preferred: null });
+    mocks.cookies.set("mgm-org", OTHER_ORG);
+    await renderView({ path: [], search: {}, access: ACCESS, gui: GUI });
+    expect(mocks.dispatchView.mock.calls[1][2]).toEqual({ preferred: OTHER_ORG });
   });
 
   it("encodes each segment again, so a decoded slash stays inside its segment", async () => {

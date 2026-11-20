@@ -168,7 +168,6 @@ async function checkProposals(ctx: HostContext, organizationId: string, snapshot
  */
 export async function collectSignals(ctx: HostContext, o: { requested?: string | null }): Promise<HostOutcome<Signals>> {
   requireIssued(ctx);
-  const snapshot = await surfaceSnapshot();
   let organizationId: string | null;
   try {
     organizationId = (await selectOrganization(ctx, { requested: o.requested })).organizationId;
@@ -176,8 +175,19 @@ export async function collectSignals(ctx: HostContext, o: { requested?: string |
     return { ok: false, status: 503, code: "gui_unavailable", message: "Signals could not be checked right now." };
   }
   if (organizationId === null) return { ok: false, status: 403, code: "gui_no_access", message: "Your account has no organization yet." };
-  const org = organizationId;
+  return organizationSignals(ctx, organizationId);
+}
 
+/**
+ * The signals of `org`, which the caller has already chosen among the
+ * organizations the person can see (selectOrganization, ./organization.ts),
+ * as collectSignals chooses it: dispatchView (./view.ts) passes the
+ * organization a view loads in, for a view that declares `takesSignals`.
+ * The rules are collectSignals'.
+ */
+export async function organizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
+  requireIssued(ctx);
+  const snapshot = await surfaceSnapshot();
   const gate = pluginGate(ctx, org);
   const results = await Promise.all(
     snapshot.signals.map(async (entry): Promise<Watched | "off"> => {

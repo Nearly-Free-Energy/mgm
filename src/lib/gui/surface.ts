@@ -34,6 +34,7 @@ import type {
   ModelOf,
   NavGroup,
   SignalOf,
+  Signals,
   StatusItemOf,
   Value,
   ViewKind,
@@ -81,6 +82,13 @@ export interface SurfaceRequest {
   locale: string;
   now: Date;
   fmt: Fmt;
+  /**
+   * Set only on the request of a view declaring `takesSignals`: the
+   * organization's signals, collected by the host as GET /api/gui/signals
+   * collects them (ADR-006 decision 9), or null when they could not be
+   * collected. Absent on every other request.
+   */
+  signals?: Signals | null;
 }
 /** Installation-wide views, such as the super admin's organization list, get no organization. */
 export type InstallationRequest = Omit<SurfaceRequest, "organizationId"> & { organizationId: null };
@@ -157,6 +165,16 @@ interface ViewDefBase<K extends ViewKind> {
   cost: "db" | "vendor";
   /** Deny by default: only this lets an assistant read the view. */
   agent?: "read";
+  /**
+   * true: before the loader runs, the host collects the organization's
+   * signals, running every watcher whose plugin is on within its own budget,
+   * and hands them over as `req.signals` (organizationSignals in
+   * host/server/signals.ts). For a view whose body is the signals, as
+   * Today's is (org.today). Only an organization's view may declare it, and
+   * one that is never attached and does not poll, since each load runs
+   * every watcher again (contribution-schema.ts refuses the rest).
+   */
+  takesSignals?: true;
   live?: { refreshSeconds: number; staleAfterSeconds: number };
   /** Every cell, field, tile and series key the view emits. */
   declares: { keys: readonly string[]; prefixes?: readonly string[] };

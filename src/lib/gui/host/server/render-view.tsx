@@ -2,8 +2,9 @@ import "server-only";
 
 /**
  * Serves a contributed view on its own page: the (gui) catch-all page
- * (src/app/(gui)/[...path]/page.tsx) calls renderView, and the (gui) layout
- * calls resolveInitialView for the shell's first paint. Only renderView loads
+ * (src/app/(gui)/[[...path]]/page.tsx, which serves "/" too) calls
+ * renderView, and the (gui) layout calls resolveInitialView for the
+ * shell's first paint. Only renderView loads
  * the view, through dispatchView (./view.ts), the code GET /api/gui/view
  * runs, so a page refuses what that route refuses; if that route adds a
  * refusal outside hostContext and dispatchView, add it here too.
@@ -15,7 +16,7 @@ import "server-only";
  * authorizes nothing.
  */
 import type { ReactNode } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { Banner } from "@/components/ui/banner";
@@ -27,6 +28,7 @@ import { createFmt } from "../../fmt";
 import { RawView } from "../../kit/raw-view";
 import { ViewBoundary, ViewUnavailable } from "../client/view-boundary";
 import { unloadedView } from "../shared/legacy-view";
+import { ORG_COOKIE } from "../shared/org-cookie";
 import { pickRenderer } from "../shared/pick-renderer";
 import { withUnit } from "../shared/tenant-units";
 import { hostContext, type HostContext } from "./access";
@@ -71,16 +73,24 @@ function hrefOfPath(pathWithQuery: string): string | null {
  * getRequestUserAccess (@/lib/auth/request-access) returned in this render:
  * it asks Supabase Auth with getUser(), which hostContext relies on. If it
  * stops calling getUser(), revisit.
+ *
+ * The organization the person last used (the org cookie) is passed as a
+ * hint, as the (gui) layout passes it to getManifest (manifestHints), so a
+ * view whose path names no organization, such as Today on "/", opens in the
+ * organization the shell shows. If the layout stops reading that cookie,
+ * stop passing it here too.
  */
 async function loadPageView(
   access: CurrentUserAccess,
   href: string,
 ): Promise<{ ctx: HostContext | null; out: HostOutcome<ViewModel> }> {
-  const made = hostContext(access, await headers(), {
+  const [requestHeaders, requestCookies] = await Promise.all([headers(), cookies()]);
+  const made = hostContext(access, requestHeaders, {
     newClient: createClient,
     makeFmt: (locale) => createFmt({ locale }),
   });
-  return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href) } : { ctx: null, out: made };
+  const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
+  return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href, { preferred }) } : { ctx: null, out: made };
 }
 
 /**

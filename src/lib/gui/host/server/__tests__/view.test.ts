@@ -7,7 +7,7 @@ import type { GateDecision } from "@/lib/runtime/gate";
 import type { UserRoleRecord } from "@/lib/types/domain";
 import type { ActionDef, SurfaceRequest, ViewDef } from "../../../surface";
 import type { HostContext } from "../access";
-import type { RegisteredAction, RegisteredView, SurfaceSnapshot } from "../surface-registry";
+import type { RegisteredAction, RegisteredSignal, RegisteredView, SurfaceSnapshot } from "../surface-registry";
 
 const checkGate = vi.fn();
 const resolveTargetOrganization = vi.fn();
@@ -507,6 +507,79 @@ describe("dispatchView", () => {
     expect((loadOf(home).mock.calls[0][0] as SurfaceRequest).organizationId).toBe(ORG_B);
     expect(entries[1].embed).toEqual({ type: "values", values: [{ t: "text", text: "Not available" }] });
     expect(loadOf(siteDay)).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchView for a view that takes signals", () => {
+  const AT = "2026-11-19T08:00:00Z";
+  const due = { id: "x", kind: "your-move", severity: "warn", title: "October is not closed", href: `/microgrids/${MG}/billing`, at: AT };
+  const watcher = (load: (req: SurfaceRequest) => Promise<unknown>) =>
+    ({ plugin: "billing", id: "billing.due", load: vi.fn(load), examples: [] }) as unknown as RegisteredSignal;
+  const today = () => rootView("billing.today", "/billing", { takesSignals: true });
+  const requestOf = (v: RegisteredView) => loadOf(v).mock.calls[0][0] as SurfaceRequest;
+
+  it("collects the signals of the organization the view loads in and hands them to the loader", async () => {
+    roles = [managerOf(ORG_A), managerOf(ORG_B)];
+    const v = today();
+    const w = watcher(async () => [due]);
+    snapshot = { ...snapshotOf([v]), signals: [w] };
+    const out = await dispatch(`/billing?org=${ORG_B}`);
+    expect(out).toMatchObject({ ok: true, value: { org: ORG_B } });
+    expect(requestOf(v).organizationId).toBe(ORG_B);
+    expect(requestOf(v).signals).toMatchObject({ type: "signals", org: ORG_B, count: 1, top: [{ id: "billing.due:x", source: "billing.due" }] });
+    expect((vi.mocked(w.load).mock.calls[0][0] as SurfaceRequest).organizationId).toBe(ORG_B);
+    // The watcher runs on a request of its own, not the loader's.
+    expect(vi.mocked(w.load).mock.calls[0][0]).not.toBe(requestOf(v));
+  });
+
+  it("hands the loader null when the signals could not be collected, and still loads the view", async () => {
+    const v = today();
+    snapshot = { ...snapshotOf([v]), signals: [watcher(async () => [due])] };
+    surfaceSnapshot.mockImplementationOnce(async () => snapshot).mockImplementationOnce(async () => {
+      throw new Error(CANARY);
+    });
+    const out = await dispatch("/billing");
+    expect(out.ok).toBe(true);
+    expect(requestOf(v).signals).toBeNull();
+    expect(logged()).not.toContain(CANARY);
+  });
+
+  it("runs no watcher for a view that does not take signals", async () => {
+    const v = rootView("billing.plain", "/billing");
+    const w = watcher(async () => [due]);
+    snapshot = { ...snapshotOf([v]), signals: [w] };
+    expect((await dispatch("/billing")).ok).toBe(true);
+    expect(w.load).not.toHaveBeenCalled();
+    expect("signals" in requestOf(v)).toBe(false);
+  });
+
+  it("runs no watcher for a person with no organization to show", async () => {
+    // A row for an organization row-level security does not show them.
+    roles = [managerOf(ORG_C)];
+    const v = today();
+    const w = watcher(async () => [due]);
+    snapshot = { ...snapshotOf([v]), signals: [w] };
+    expect(await dispatch("/billing")).toMatchObject({ ok: false, status: 403, code: "gui_no_access" });
+    expect(w.load).not.toHaveBeenCalled();
+    expect(loadOf(v)).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchView's organization hint", () => {
+  it("opens a view with no organization in its path in the one the person last used, after ?org=", async () => {
+    roles = [managerOf(ORG_A), managerOf(ORG_B)];
+    const v = rootView("billing.home", "/organizations");
+    snapshot = snapshotOf([v]);
+    const orgOf = async (href: string, preferred: string | null) => {
+      loadOf(v).mockClear();
+      const out = await dispatchView(ctx(), href, { preferred });
+      return out.ok ? out.value.org : null;
+    };
+    expect(await orgOf("/organizations", ORG_B)).toBe(ORG_B);
+    expect(await orgOf(`/organizations?org=${ORG_A}`, ORG_B)).toBe(ORG_A);
+    // A hint naming an organization the person cannot see is ignored.
+    expect(await orgOf("/organizations", ORG_C)).toBe(ORG_A);
+    expect(await orgOf("/organizations", null)).toBe(ORG_A);
   });
 });
 
