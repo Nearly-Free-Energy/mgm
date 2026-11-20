@@ -298,11 +298,31 @@ the others. The registry is privileged in
 capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
 
+A watcher (`signals` in a contribution) reports what needs someone in one
+organization: a period not closed, a payment held for reconciliation. The
+host runs it only for a person with a staff role in that organization (a
+person whose rows are all tenant rows gets a 403 and no watcher runs), on a
+request of its own, so it reads through the person's own client or a
+capability's reads after its composer. It filters by the organization
+itself, since a super admin's row-level security shows every organization,
+and throws when a read fails, so the host lists it as unchecked rather than
+as having nothing to report. The host refuses a watcher's whole answer when
+any signal breaks its schema, repeats an id, links anywhere but a released
+page, or leads anywhere but a page its own plugin owns, and when it returns
+more than `MAX_SIGNALS_PER_SOURCE` (50, in `src/lib/gui/surface.ts`), so a
+watcher caps itself, most urgent first. It sends each id prefixed with the
+watcher's (`<watcher id>:<id>`). Watchers run on every load of the signals,
+which an interface may poll, so they read the database only: a watcher that
+would need a vendor call needs a cached read first. Each declares examples,
+which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
+own released pages.
+
 What a contribution names is checked in CI by
 `src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
 it boots: each action's route file, method, gate and release, and that the
 route parses its body with the action's own `input` from the plugin's
-`schemas.ts`; each view's examples, declared names and links. It also reads
+`schemas.ts`; each view's examples, declared names and links; each watcher's
+examples' links. It also reads
 every module a contributing plugin's surface module loads, and refuses any
 capability method outside its `LOADER_READS`, so a new contributing plugin
 lists the module that exports its contribution in `SURFACE_MODULES` there,

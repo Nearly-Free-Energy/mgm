@@ -65,7 +65,7 @@ function surfaceOf(plugin: string, alias: string, root: string): Contribution {
       },
     ],
     actions: [{ ...BILLING_SURFACE.actions![0], id: `${alias}.act`, path: `/api${root}` }],
-    signals: [{ id: `${alias}.signal`, load: async () => [] }],
+    signals: [{ id: `${alias}.signal`, load: async () => [], examples: BILLING_SURFACE.signals![0].examples }],
     status: [{ id: `${alias}.status`, load: async () => [] }],
     search: [{ prefix: "@", entity: "microgrid", find: async () => [] }],
     entities: [{ kind: `${alias}.thing`, organizationOf: ORGANIZATION_OF }],
@@ -73,7 +73,7 @@ function surfaceOf(plugin: string, alias: string, root: string): Contribution {
 }
 
 const signal = (plugin: string, id: string) =>
-  ({ plugin, signals: [{ id, load: async () => [] }] }) as unknown as Contribution;
+  ({ plugin, signals: [{ id, load: async () => [], examples: BILLING_SURFACE.signals![0].examples }] }) as unknown as Contribution;
 
 const META: GuiMeta = {
   name: "probe",

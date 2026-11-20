@@ -22,6 +22,10 @@
  * Plugins: 8. nothing a contributing plugin's surface module runs uses a
  * capability method outside LOADER_READS, so its loaders, signals, search and
  * prepare steps write nothing through a capability.
+ * Signals: 10. each watcher example's href, where its signal is resolved, is
+ * a released page the plugin owns, as the host requires of what the watcher
+ * returns (watch in src/lib/gui/host/server/signals.ts), and every other
+ * href in it is a released page.
  *
  * Each check is a function over its inputs and the self-tests feed it
  * violating fixtures, so the guard is shown to fail on kinds of entry the
@@ -33,7 +37,7 @@ import ts from "typescript";
 import { z } from "zod";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ViewModel } from "@/lib/gui/contract";
-import type { ActionDef, Contribution, ViewDef } from "@/lib/gui/surface";
+import type { ActionDef, Contribution, SignalDef, ViewDef } from "@/lib/gui/surface";
 import { DATA_KEYS, schemaNames, strictParseModel } from "@/lib/gui/host/server/parse";
 import { SurfaceRegistry, type SurfaceSnapshot } from "@/lib/gui/host/server/surface-registry";
 import { isOutHref } from "@/lib/gui/host/shared/href";
@@ -327,6 +331,37 @@ function whileOffViewProblems(plugin: MgmPluginName, def: ViewDef, facts: Facts)
   return problems.map((p) => `${def.id}: ${p}`);
 }
 
+// ── Signals (check 10) ──────────────────────────────────────────────────────
+
+/** Every href in a value, wherever it is. */
+function everyHref(value: unknown, out: string[] = []): string[] {
+  if (Array.isArray(value)) value.forEach((item) => everyHref(item, out));
+  else if (value !== null && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "href" && typeof child === "string") out.push(child);
+      else everyHref(child, out);
+    }
+  }
+  return out;
+}
+
+function signalProblems(plugin: MgmPluginName, def: Pick<SignalDef, "id" | "examples">, facts: Facts): Problems {
+  const problems: Problems = [];
+  def.examples.forEach((example, i) => {
+    const path = example.href.split(/[?#]/)[0];
+    // The host sends a signal only with a page href (isPageHref), never a route.
+    const own = path === "/api" || path.startsWith("/api/") ? "not a page" : linkProblem(plugin, example.href, facts);
+    if (own) problems.push(`example ${i} leads to ${example.href}: ${own}`);
+    for (const href of everyHref({ ...example, href: undefined })) {
+      const pathname = href.split(/[?#]/)[0];
+      if (!facts.released(pathname) || pathname === "/api" || pathname.startsWith("/api/")) {
+        problems.push(`example ${i} links to ${href}: not a released page`);
+      }
+    }
+  });
+  return problems.map((p) => `${def.id}: ${p}`);
+}
+
 /** Every registered entry, with the plugin that contributed it and a name for messages. */
 function registered(s: SurfaceSnapshot): { plugin: MgmPluginName; name: string; entry: object }[] {
   return [
@@ -365,6 +400,7 @@ function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
   return [
     ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
     ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
+    ...snapshot.signals.flatMap((entry) => signalProblems(entry.plugin, entry, facts)),
   ];
 }
 
@@ -607,7 +643,7 @@ describe("the GUI surface guard", () => {
     const registry = new SurfaceRegistry({ plugins: MGM_BUNDLED_PLUGINS });
     registry.contribute(BILLING_SURFACE);
     const load = async () => [];
-    registry.contribute({ plugin: "metering", signals: [{ id: "metering.quiet", load }] });
+    registry.contribute({ plugin: "metering", signals: [{ id: "metering.quiet", load, examples: BILLING_SURFACE.signals![0].examples }] });
     registry.contribute({ plugin: "payments", search: [{ prefix: "#", entity: "billingPeriod", find: load }] });
     const snapshot = registry.snapshot();
     expect(contributingPlugins(snapshot)).toEqual(["billing", "metering", "payments"]);
@@ -742,6 +778,28 @@ describe("the GUI surface guard", () => {
       "billing.periods: example 0 links to /api/org-api-tokens: not released",
       "billing.periods: example 0 links to /review: not a catalog page",
       `billing.periods: example 0 links to /microgrids/${M}/operations?row: /microgrids/[id]/operations is metering's page`,
+    ]);
+  });
+
+  it("holds a watcher's examples to released pages, its own href to one its plugin owns", () => {
+    const [due] = BILLING_SURFACE.signals as SignalDef[];
+    expect(signalProblems("billing", due, facts)).toEqual([]);
+    const M = "00000000-0000-4000-8000-0000000000b1";
+    const [example] = due.examples;
+    const changed = (over: Record<string, unknown>) =>
+      signalProblems("billing", { ...due, examples: [{ ...example, ...over } as SignalDef["examples"][number]] }, facts);
+    expect(changed({ href: `/microgrids/${M}/operations` })).toEqual([
+      `billing.period-due: example 0 leads to /microgrids/${M}/operations: /microgrids/[id]/operations is metering's page`,
+    ]);
+    expect(changed({ href: "/review" })).toEqual(["billing.period-due: example 0 leads to /review: not a catalog page"]);
+    expect(changed({ href: "/api/org-api-tokens" })).toEqual(["billing.period-due: example 0 leads to /api/org-api-tokens: not a page"]);
+    // An entity's own link may lead to another plugin's page, as long as it is a released page.
+    expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/operations` } })).toEqual([]);
+    expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/nowhere` } })).toEqual([
+      `billing.period-due: example 0 links to /microgrids/${M}/nowhere: not a released page`,
+    ]);
+    expect(signalProblems("metering", due, facts)).toEqual([
+      expect.stringMatching(/^billing\.period-due: example 0 leads to .*: \/microgrids\/\[id\]\/billing\/\[periodId\]\/close is billing's page$/),
     ]);
   });
 

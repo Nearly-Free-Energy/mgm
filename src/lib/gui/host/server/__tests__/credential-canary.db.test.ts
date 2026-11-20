@@ -367,7 +367,8 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     const basic = "microgrids.ems_basic_auth_password_encrypted";
     // A core plugin, so the gate passes and the watcher or search runs.
     const plugin = "organization-directory" as const;
-    const signal = (title: string) => ({ id: "s1", kind: "info", severity: "info", title, href: "/microgrids", at: "2026-11-09T07:00:00Z" });
+    // A page the watcher's own plugin owns, as the host requires of a signal's href.
+    const signal = (title: string) => ({ id: "s1", kind: "info", severity: "info", title, href: "/organizations", at: "2026-11-09T07:00:00Z" });
     const hit = (label: string) => ({ kind: "microgrid", id: IDS.microgridIds.basic, label, href: `/microgrids/${IDS.microgridIds.basic}` });
     const watching = (load: () => Promise<unknown>): SurfaceSnapshot => ({
       ...surface([]),

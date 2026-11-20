@@ -403,9 +403,9 @@ export const ceremonySchema = z.strictObject({
 
 // ── What the shell receives ─────────────────────────────────────────────────
 
-const signalBase = {
+/** What a watcher returns (SignalOut in ../../surface.ts) has no `source`: the host sets it. */
+const signalOutBase = {
   id: z.string().min(1),
-  source: idSchema,
   severity: z.enum(["info", "warn", "critical"]),
   title: z.string(),
   facts: z.array(valueSchema).optional(),
@@ -414,6 +414,7 @@ const signalBase = {
   at: isoDateTime,
   due: z.union([z.iso.date(), isoDateTime]).optional(),
 };
+const signalBase = { ...signalOutBase, source: idSchema };
 /** Only a proposal carries an action; a your-move signal links to the step instead. */
 export const signalSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...signalBase, kind: z.literal("alarm") }),
@@ -421,6 +422,14 @@ export const signalSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...signalBase, kind: z.literal("proposal"), action: actionRefSchema }),
   z.strictObject({ ...signalBase, kind: z.literal("question") }),
   z.strictObject({ ...signalBase, kind: z.literal("info") }),
+]);
+/** What a watcher returns: a proposal's action is an ActionLink until the host resolves it. */
+export const signalOutSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ ...signalOutBase, kind: z.literal("alarm") }),
+  z.strictObject({ ...signalOutBase, kind: z.literal("your-move") }),
+  z.strictObject({ ...signalOutBase, kind: z.literal("proposal"), action: actionLinkSchema }),
+  z.strictObject({ ...signalOutBase, kind: z.literal("question") }),
+  z.strictObject({ ...signalOutBase, kind: z.literal("info") }),
 ]);
 export const signalsSchema = z.strictObject({
   type: z.literal("signals"),

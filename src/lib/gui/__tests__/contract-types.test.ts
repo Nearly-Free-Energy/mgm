@@ -30,6 +30,7 @@ import type {
   NavDef,
   Prepare,
   ProposableAction,
+  SignalDef,
   TenantRequest,
   ViewDef,
 } from "../surface";
@@ -162,6 +163,15 @@ describe("GUI contract types", () => {
     accept<ViewDef>({ ...view, attach: { to: "microgrid", order: 1, hint: "tab", whilePluginOff: "listed" } });
     // @ts-expect-error "enabled" is an action's word, not an attachment's
     accept<ViewDef>({ ...view, attach: { to: "microgrid", order: 1, hint: "tab", whilePluginOff: "enabled" } });
+  });
+
+  it("asks a watcher for examples, which carry no source", () => {
+    const example = { id: "p1", kind: "your-move", severity: "warn", title: "October 2026 is not closed", href: "/microgrids", at: "2026-11-01T00:00:00Z" } as const;
+    accept<SignalDef>({ id: "billing.x", load: async () => [], examples: [example] });
+    // @ts-expect-error a watcher declares examples
+    accept<SignalDef>({ id: "billing.x", load: async () => [] });
+    // @ts-expect-error the host sets a signal's source
+    accept<SignalDef>({ id: "billing.x", load: async () => [], examples: [{ ...example, source: "billing.x" }] });
   });
 
   it("names the nav audiences", () => {

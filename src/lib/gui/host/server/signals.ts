@@ -9,15 +9,19 @@ import "server-only";
  * the organization (./gate-state.ts), on its own request and client of the
  * person's session (./access.ts), and within its own time budget
  * (./budget.ts). What it returns is strictly parsed, its page hrefs must be
- * released pages, and a proposal's action is resolved for the person as a
- * view's own action is (./merge.ts). A watcher that is late, throws, returns
+ * released pages, its own `href` a page its plugin owns, and a proposal's
+ * action is resolved for the person as a view's own action is (./merge.ts).
+ * Each signal's id is sent prefixed with its watcher's id, so two watchers'
+ * ids never collide; a watcher repeating an id is refused. A watcher that is
+ * late, throws, returns
  * anything the parse refuses, or whose plugin state cannot be read is listed
  * as unchecked; only its id and the kind of miss are logged, never its error
  * or its output.
  */
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
-import type { MgmPluginName } from "@/lib/plugins/bundled";
+import { getRouteOwner, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { ActionRef, Id, Signal, Signals, StatusItem } from "../../contract";
+import { MAX_SIGNALS_PER_SOURCE } from "../../surface";
 import type { GateState } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
 import { withinBudget } from "./budget";
@@ -35,7 +39,6 @@ import type { HostOutcome } from "./view";
 export const SIGNAL_BUDGET_MS = 1_500;
 /** How long one status loader may take before its item is left out. */
 export const STATUS_BUDGET_MS = 800;
-export const MAX_SIGNALS_PER_SOURCE = 50;
 /** How many signals the answer carries; `count` says how many there were. */
 export const MAX_TOP = 20;
 /** The longest one signal may be, as JSON. */
@@ -54,6 +57,17 @@ function pageHrefsOnly(v: unknown): boolean {
   return Object.entries(v).every(([key, child]) =>
     key === "href" ? typeof child === "string" && isPageHref(child) : key === "params" || key === "prefill" || pageHrefsOnly(child),
   );
+}
+
+/**
+ * Whether `href` is a page `plugin` owns in the catalog, as gui-surface.test.ts
+ * holds a view's links to its own plugin's pages: a signal leads to where its
+ * own plugin resolves it, never to a page of a plugin the gate was not asked
+ * about.
+ */
+function ownPage(plugin: MgmPluginName, href: string): boolean {
+  const page = matchCatalogPage(href);
+  return page !== undefined && page.plugin.name === plugin && getRouteOwner(page.page.path)?.name === plugin;
 }
 
 function jsonLength(v: unknown): number {
@@ -95,9 +109,12 @@ async function watch(ctx: HostContext, organizationId: string, entry: Registered
   const raw: unknown = out.value;
   if (!Array.isArray(raw) || raw.length > MAX_SIGNALS_PER_SOURCE) return { ok: false, miss: "invalid" };
   const signals: Signal[] = [];
+  const ids = new Set<unknown>();
   for (const item of raw) {
     if (!isPlain(item) || Object.hasOwn(item, "source") || jsonLength(item) > MAX_SIGNAL_CHARS) return { ok: false, miss: "invalid" };
-    const signal: Record<string, unknown> = { ...item, source: entry.id };
+    if (typeof item.id !== "string" || item.id === "" || ids.has(item.id)) return { ok: false, miss: "invalid" };
+    ids.add(item.id);
+    const signal: Record<string, unknown> = { ...item, id: `${entry.id}:${item.id}`, source: entry.id };
     if (item.kind === "proposal") {
       const action = await proposed(item.action, entry, snapshot, gate);
       if (action === undefined) return { ok: false, miss: "invalid" };
@@ -108,7 +125,7 @@ async function watch(ctx: HostContext, organizationId: string, entry: Registered
       signal.action = action;
     }
     const parsed = parseOrFail(signalSchema, signal, `signals ${entry.id}`);
-    if (!parsed.ok || !pageHrefsOnly(parsed.value)) return { ok: false, miss: "invalid" };
+    if (!parsed.ok || !pageHrefsOnly(parsed.value) || !ownPage(entry.plugin, parsed.value.href)) return { ok: false, miss: "invalid" };
     signals.push(parsed.value);
   }
   return { ok: true, signals };

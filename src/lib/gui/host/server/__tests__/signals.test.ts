@@ -20,7 +20,14 @@ const MG = "e7100000-0000-4000-8002-0000000000a1";
 const CANARY = "CANARY-7f3a91";
 const AT = "2026-11-09T07:00:00Z";
 
-const base = { severity: "warn", title: "Readings missing", href: "/microgrids", at: AT };
+/** A page each plugin owns: a signal's own href must be one of its plugin's pages. */
+const OWN = {
+  metering: `/microgrids/${MG}/operations`,
+  billing: `/microgrids/${MG}/billing`,
+  payments: `/microgrids/${MG}/billing/${MG}/payments`,
+} as const;
+const base = { severity: "warn", title: "Readings missing", href: OWN.metering, at: AT };
+const billed = { ...base, href: OWN.billing };
 const watcher = (plugin: MgmPluginName, id: string, load: () => Promise<unknown>, budgetMs?: number): RegisteredSignal =>
   ({ plugin, id, load, ...(budgetMs ? { budgetMs } : {}) }) as unknown as RegisteredSignal;
 const action = (over: Record<string, unknown> = {}, plugin: MgmPluginName = "metering"): RegisteredAction => ({
@@ -108,24 +115,34 @@ describe("collectSignals", () => {
         { ...base, id: "f", kind: "info", severity: "info", at: "2026-11-09T09:00:00+03:00" },
       ]),
       watcher("billing", "billing.due", async () => [
-        { ...base, id: "d", kind: "alarm", severity: "critical" },
-        { ...base, id: "e", kind: "question", due: "2026-11-10" },
+        { ...billed, id: "d", kind: "alarm", severity: "critical" },
+        { ...billed, id: "e", kind: "question", due: "2026-11-10" },
         // 2026-11-09T23:00Z, before e's date although it reads later as text.
-        { ...base, id: "g", kind: "question", due: "2026-11-10T02:00:00+03:00" },
+        { ...billed, id: "g", kind: "question", due: "2026-11-10T02:00:00+03:00" },
       ]),
     ]);
     const out = await value();
     expect(out).toMatchObject({ type: "signals", org: ORG_A, count: 8, checked: ["metering.readings", "billing.due"], unchecked: [] });
+    // Each id is the watcher's own, prefixed with its source.
     expect(out.top.map((s) => [s.id, s.source])).toEqual([
-      ["d", "billing.due"],
-      ["b", "metering.readings"],
-      ["g", "billing.due"],
-      ["e", "billing.due"],
-      ["c", "metering.readings"],
-      ["u", "metering.readings"],
-      ["a", "metering.readings"],
-      ["f", "metering.readings"],
+      ["billing.due:d", "billing.due"],
+      ["metering.readings:b", "metering.readings"],
+      ["billing.due:g", "billing.due"],
+      ["billing.due:e", "billing.due"],
+      ["metering.readings:c", "metering.readings"],
+      ["metering.readings:u", "metering.readings"],
+      ["metering.readings:a", "metering.readings"],
+      ["metering.readings:f", "metering.readings"],
     ]);
+  });
+
+  it("keeps the same id from two watchers apart", async () => {
+    use([
+      watcher("metering", "metering.one", async () => [{ ...base, id: "same", kind: "info" }]),
+      watcher("metering", "metering.two", async () => [{ ...base, id: "same", kind: "info" }]),
+    ]);
+    const out = await value();
+    expect(out.top.map((s) => s.id).sort()).toEqual(["metering.one:same", "metering.two:same"]);
   });
 
   it(`counts every signal and sends the first ${MAX_TOP}`, async () => {
@@ -142,7 +159,7 @@ describe("collectSignals", () => {
       watcher("metering", "metering.short", after(500), 200),
       watcher("metering", "metering.default", after(1_000)),
       watcher("metering", "metering.long", after(1_600), 3_000),
-      watcher("billing", "billing.due", async () => [{ ...base, id: "d", kind: "alarm" }]),
+      watcher("billing", "billing.due", async () => [{ ...billed, id: "d", kind: "alarm" }]),
     ]);
     const pending = collect();
     await vi.advanceTimersByTimeAsync(3_000);
@@ -194,6 +211,10 @@ describe("collectSignals", () => {
     ["a proposal claiming the assistant proposed it", [proposal({ provenance: { by: "assistant", at: AT }, label: CANARY })]],
     ["a proposal naming a proposal id", [proposal({ provenance: { ...provenance, proposal: CANARY } })]],
     ["more signals than one watcher may send", Array.from({ length: 51 }, (_, i) => ({ ...base, id: `s${i}`, kind: "info", title: CANARY }))],
+    ["an id used twice", [{ ...base, id: "x", kind: "info" }, { ...base, id: "x", kind: "info", title: CANARY }]],
+    ["a signal without an id", [{ ...base, kind: "info", title: CANARY }]],
+    ["an href to another plugin's page", [{ ...base, id: "x", kind: "info", href: OWN.billing, title: CANARY }]],
+    ["an href to a core plugin's page", [{ ...base, id: "x", kind: "info", href: "/microgrids", title: CANARY }]],
     ["a signal over the size cap", [{ ...base, id: "x", kind: "info", title: `${CANARY}${"x".repeat(5_000)}` }]],
   ])("lists %s as unchecked, without repeating its output", async (_name, answer) => {
     const load = async () => {
@@ -215,7 +236,7 @@ describe("collectSignals", () => {
     expect(out.top).toEqual([
       {
         ...base,
-        id: "p1",
+        id: "metering.fix:p1",
         kind: "proposal",
         source: "metering.fix",
         action: { action: "metering.backend", params: { id: MG }, label: "Point at the new backend", enabled: false, reason: "Backend is busy", provenance },
@@ -238,8 +259,8 @@ describe("collectSignals", () => {
     );
     const out = await value();
     expect(out.top.map((s) => [s.id, s.kind === "proposal" && s.action])).toEqual([
-      ["p2", expect.objectContaining({ params: { id: MG2 }, label: "Second", enabled: true })],
-      ["p1", expect.objectContaining({ params: { id: MG }, label: "First", enabled: false, reason: "Backend is busy" })],
+      ["metering.fix:p2", expect.objectContaining({ params: { id: MG2 }, label: "Second", enabled: true })],
+      ["metering.fix:p1", expect.objectContaining({ params: { id: MG }, label: "First", enabled: false, reason: "Backend is busy" })],
     ]);
   });
 
@@ -247,7 +268,7 @@ describe("collectSignals", () => {
     throwing = "billing";
     use([watcher("metering", "metering.fix", async () => [proposal()])], [action({}, "billing")]);
     const out = await value();
-    expect(out.top[0]).toMatchObject({ id: "p1", action: { enabled: false, reason: "Could not verify whether Billing is enabled." } });
+    expect(out.top[0]).toMatchObject({ id: "metering.fix:p1", action: { enabled: false, reason: "Could not verify whether Billing is enabled." } });
     expect(JSON.stringify(out)).not.toContain(CANARY);
   });
 
@@ -274,7 +295,7 @@ describe("collectSignals", () => {
     gates.set("billing", { ok: false, status: 409, code: "billing_disabled", message: "Billing is off" });
     use([watcher("metering", "metering.fix", async () => [proposal(), { ...base, id: "kept", kind: "info" }])], actions);
     const out = await value();
-    expect([out.checked, out.top.map((s) => s.id)]).toEqual([["metering.fix"], ["kept"]]);
+    expect([out.checked, out.top.map((s) => s.id)]).toEqual([["metering.fix"], ["metering.fix:kept"]]);
   });
 
   it("collects for the organization asked for when the person can see it, otherwise their first", async () => {
