@@ -86,10 +86,19 @@ type KitState = {
   setBoundary(boundary: Boundary | null): void;
   /** Server time minus device time, in milliseconds. */
   skew: number;
-  signals: Signals | null;
 };
 
 const KitContext = createContext<KitState | null>(null);
+/**
+ * The signals apart from KitContext, so a new answer re-renders only what
+ * reads them (the shell's tray), never the page's views. Those sit inside
+ * the page's Suspense boundary (src/app/(gui)/loading.tsx), which can still
+ * be hydrating or streaming when the feed's first answer lands; a change to
+ * a context they read would make React render that boundary on the client
+ * and leave the streamed copy behind as a hidden duplicate. If a page's view
+ * comes to read the signals, keep that in mind.
+ */
+const SignalsContext = createContext<Signals | null>(null);
 
 export function useKitState(): KitState | null {
   return useContext(KitContext);
@@ -182,18 +191,20 @@ export function KitProvider(props: {
 
   // The published model is left out of this value on purpose (BoundaryStore).
   const state = useMemo<KitState>(
-    () => ({ manifest, view: resolved, boundaries, setBoundary: boundaries.set, skew, signals }),
-    [manifest, resolved, boundaries, skew, signals],
+    () => ({ manifest, view: resolved, boundaries, setBoundary: boundaries.set, skew }),
+    [manifest, resolved, boundaries, skew],
   );
   return (
     <KitContext.Provider value={state}>
-      {runtime === defaultRuntime && <RouterBridge />}
-      {children}
-      <ActionHost
-        {...actions}
-        model={boundary?.pathname === pathname ? boundary.model : null}
-        onSignals={refreshSignals}
-      />
+      <SignalsContext.Provider value={signals}>
+        {runtime === defaultRuntime && <RouterBridge />}
+        {children}
+        <ActionHost
+          {...actions}
+          model={boundary?.pathname === pathname ? boundary.model : null}
+          onSignals={refreshSignals}
+        />
+      </SignalsContext.Provider>
     </KitContext.Provider>
   );
 }
@@ -210,7 +221,7 @@ export function useManifest(): Manifest {
 
 /** The organization's signals, loaded after the first paint (./signals-feed.ts); null until then and for a tenant. */
 export function useSignals(): Signals | null {
-  return useContext(KitContext)?.signals ?? null;
+  return useContext(SignalsContext);
 }
 
 type Scope = Partial<Record<CoreEntityKind, EntityRef>>;

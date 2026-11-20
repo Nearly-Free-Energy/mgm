@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT } from "@/components/ui/navigation-progress";
 import type { Manifest, OverlayProps, Signals, ViewState } from "../../../contract";
 import { HostKitProvider } from "../host-kit-provider";
-import { useView, type KitProvider } from "../kit-provider";
+import { useSignals, useView, type KitProvider } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
 import { ViewBoundary } from "../view-boundary";
 import { initial, manifest, MG, model, ORG, recordingRuntime } from "./kit-test-utils";
@@ -110,6 +110,36 @@ describe("HostKitProvider", () => {
     expect(typeof props.seedSignals).toBe("function");
     await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
     expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("re-renders what reads the signals when they arrive, and not what reads the rest of the kit", async () => {
+    // A page's views read the kit and sit inside the page's Suspense
+    // boundary, which may still be hydrating when the signals land: they
+    // must not re-render then (SignalsContext in ../kit-provider.tsx).
+    const signals: Signals = { type: "signals", org: ORG, count: 3, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json(signals));
+    const renders = { view: 0 };
+    const seen: (Signals | null)[] = [];
+    function ViewReader() {
+      useView();
+      renders.view += 1;
+      return null;
+    }
+    function SignalsReader() {
+      seen.push(useSignals());
+      return null;
+    }
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial}>
+          <ViewReader />
+          <SignalsReader />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    const before = renders.view;
+    await waitFor(() => expect(seen.at(-1)).toEqual(signals));
+    expect(renders.view).toBe(before);
   });
 
   it("takes the signals a published view's model carries instead of fetching them", async () => {
