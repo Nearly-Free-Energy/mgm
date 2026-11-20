@@ -338,12 +338,9 @@ describe("BillingCapability", () => {
       ok: false,
       status: 409,
       code: "billing_period_totals_changed",
-      // The GUI host shows its old step again after a refusal, so the
-      // sentence sends the person back to Close period (../close.ts).
       message: CLOSE_REFUSAL_COPY.totalsChanged,
       review: { digest: "v1:current", totalAmount: 250 },
     });
-    expect(CLOSE_REFUSAL_COPY.totalsChanged).toContain("Close this dialog and choose Close period again");
     expect(close).not.toHaveBeenCalled();
   });
 

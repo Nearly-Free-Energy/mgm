@@ -44,18 +44,15 @@ export const CLOSE_REFUSAL_COPY = {
   closed: "Billing period is already closed.",
   reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
   /**
-   * The close route's 409 billing_period_totals_changed. After a refusal the
-   * GUI host shows the same confirmation step again, with the totals and the
-   * digest it prepared (src/lib/gui/host/client/action-host.tsx), so
-   * confirming there again is refused again: the sentence sends the person
-   * back to Close period, whose prepare reads the new totals. The legacy
-   * ClosePeriodDialog shows its own sentence over the new ceremony the 409
-   * carries, and this one only when the 409 carries none, when reopening is
-   * also the way on. If the host comes to prepare again on this code (a #201
-   * item), revisit this sentence.
+   * The close route's 409 billing_period_totals_changed, shown over the new
+   * totals. The GUI host prepares billing.close-period again on this code
+   * (its prepareAgainOn in ./surface.ts) and shows this sentence over the
+   * new ceremony (src/lib/gui/host/client/action-host.tsx). The legacy
+   * ClosePeriodDialog shows it over the ceremony the 409 carries, or loads
+   * the review again when the 409 carries none. If either stops showing the
+   * new totals with it, revisit this sentence.
    */
-  totalsChanged:
-    "The period's totals changed after you reviewed them. Close this dialog and choose Close period again to review the new totals.",
+  totalsChanged: "The period's totals changed after you reviewed them. Review the new totals and confirm again.",
 } as const;
 
 /** Names shown in a list of tenants before the rest are counted. */

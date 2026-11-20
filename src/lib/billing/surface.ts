@@ -321,6 +321,11 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
       prepare: prepareClosePeriod,
       available: closePeriodAvailable,
+      // The route's 409 for a digest that no longer matches the totals
+      // (totalsChanged in ./capability.ts): the host prepares the close
+      // again and shows the new totals, with CLOSE_REFUSAL_COPY.totalsChanged
+      // as its note. If the route renames the code, change it here.
+      prepareAgainOn: ["billing_period_totals_changed"],
     },
     // ── The period review's actions ──
     // All human-only (no assistant proposes a billing write yet) and money:
