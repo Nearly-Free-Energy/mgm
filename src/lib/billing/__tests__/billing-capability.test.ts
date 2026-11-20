@@ -12,6 +12,7 @@ const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
 const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
 const PERIOD_ID = "770e8400-e29b-41d4-a716-446655440000";
 const ITEM_ID = "880e8400-e29b-41d4-a716-446655440000";
+const TENANT_ID = "990e8400-e29b-41d4-a716-446655441111";
 
 const scope: BillingScope = {
   organizationId: ORG_ID,
@@ -571,6 +572,105 @@ describe("BillingCapability", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview", seedReadings: [seed] }));
   });
 
+  it("generates a period from meter data as a guarded whole-period run, and nothing else", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters(PERIOD_ID)).toEqual({ ok: true, data: { results: [] } });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith({
+      periodId: PERIOD_ID,
+      tenantIds: undefined,
+      manualReadings: undefined,
+      revertToEdgeTenantIds: undefined,
+      seedReadings: undefined,
+      mode: "write",
+      actorUserId: "user-1",
+      guardExistingBills: true,
+    });
+  });
+
+  it("refuses to generate from meter data for a bad id or another organization's period, before the engine", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters("not-a-uuid")).toMatchObject({ ok: false, status: 400, code: "billing_invalid_period" });
+    expect(await capability.generateFromMeters("990e8400-e29b-41d4-a716-446655440000")).toMatchObject({
+      ok: false,
+      status: 403,
+      code: "billing_scope_mismatch",
+    });
+    expect(run).not.toHaveBeenCalled();
+    const disposed = setup({}, { run }, () => false).capability;
+    expect(await disposed.generateFromMeters(PERIOD_ID)).toMatchObject({ ok: false, code: "billing_composition_disposed" });
+  });
+
+  it("maps the engine's fatal refusal of a closed period", async () => {
+    const run = vi.fn(async () => ({
+      kind: "fatal" as const,
+      status: 409,
+      body: { error: "Bills cannot be generated in a closed period.", code: "billing_period_closed" },
+    }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters(PERIOD_ID)).toEqual({
+      ok: false,
+      status: 409,
+      code: "billing_period_closed",
+      message: "Bills cannot be generated in a closed period.",
+    });
+  });
+
+  it("bills one tenant from readings as a first-bill run naming that tenant and their reading, and nothing else", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.billFromReadings(PERIOD_ID, TENANT_ID, { startKwh: 100.5, endKwh: 150, reason: "  Read on site  " })).toEqual({
+      ok: true,
+      data: { results: [] },
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith({
+      periodId: PERIOD_ID,
+      tenantIds: [TENANT_ID],
+      manualReadings: [{ tenantId: TENANT_ID, startKwh: 100.5, endKwh: 150, reason: "Read on site" }],
+      revertToEdgeTenantIds: undefined,
+      seedReadings: undefined,
+      mode: "write",
+      actorUserId: "user-1",
+      newBillOnly: true,
+    });
+  });
+
+  it.each([undefined, "", "   "])("leaves out a reason of %j", async (reason) => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    await capability.billFromReadings(PERIOD_ID, TENANT_ID, { startKwh: 0, endKwh: 0, ...(reason === undefined ? {} : { reason }) });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ manualReadings: [{ tenantId: TENANT_ID, startKwh: 0, endKwh: 0 }] }));
+  });
+
+  it("refuses to bill from readings for a bad id, another organization's period or readings that go backwards, before the engine", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    const readings = { startKwh: 1, endKwh: 2 };
+    expect(await capability.billFromReadings("not-a-uuid", TENANT_ID, readings)).toMatchObject({ ok: false, status: 400, code: "billing_invalid_period" });
+    expect(await capability.billFromReadings(PERIOD_ID, "not-a-uuid", readings)).toEqual({
+      ok: false,
+      status: 400,
+      code: "billing_invalid_tenant",
+      message: "Invalid tenant id — expected UUID.",
+    });
+    expect(await capability.billFromReadings("990e8400-e29b-41d4-a716-446655440000", TENANT_ID, readings)).toMatchObject({
+      ok: false,
+      status: 403,
+      code: "billing_scope_mismatch",
+    });
+    expect(await capability.billFromReadings(PERIOD_ID, TENANT_ID, { startKwh: 2, endKwh: 1 })).toMatchObject({
+      ok: false,
+      status: 400,
+      code: "billing_invalid_body",
+    });
+    expect(run).not.toHaveBeenCalled();
+    const disposed = setup({}, { run }, () => false).capability;
+    expect(await disposed.billFromReadings(PERIOD_ID, TENANT_ID, readings)).toMatchObject({ ok: false, code: "billing_composition_disposed" });
+  });
+
   it("records manual paid/unpaid with trimmed notes", async () => {
     const record = vi.fn(async () => ({ updated: { id: ITEM_ID }, error: null }));
     const { capability } = setup({ recordManualPayment: record });
@@ -773,6 +873,8 @@ const WRITES: { method: string; run: (capability: BillingCapability) => Promise<
   { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, CONFIRMED) },
   { method: "deletePeriod", run: (c) => c.deletePeriod(PERIOD_ID, TYPED) },
   { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
+  { method: "generateFromMeters", run: (c) => c.generateFromMeters(PERIOD_ID) },
+  { method: "billFromReadings", run: (c) => c.billFromReadings(PERIOD_ID, TENANT_ID, { startKwh: 1, endKwh: 2 }) },
   { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },
 ];
 

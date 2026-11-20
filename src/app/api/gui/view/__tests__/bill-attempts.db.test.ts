@@ -7,9 +7,11 @@
  * review lists the view as its Payments tab. POST /api/gui/prepare builds
  * each reconciliation's confirmation step. No checkout URL, tracking id or
  * failure message reaches any output; another organization's manager and a
- * tenant get nothing; while Payments is off the tab is gone and the view
- * loads read-only with the gate's notice. Refresh status is never pressed:
- * it would ask the provider. Nothing here calls out: every request goes to
+ * tenant get nothing; while Payments is off the tab is still listed, the
+ * view loads with the gate's notice and its actions, whose routes accept
+ * them then, are still enabled and prepared, while billing's own action is
+ * refused while billing is off. Refresh status is prepared but never
+ * pressed: it would ask the provider. Nothing here calls out: every request goes to
  * the local Supabase.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
@@ -361,21 +363,70 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's payments", () => {
     });
   });
 
-  it("while Payments is off, drops the tab, and loads read-only with the gate's notice", async () => {
+  // The tab and its three actions declare whilePluginOff (src/lib/payments/surface.ts),
+  // since their routes accept them while Payments is off (PaymentExemption).
+  it("while Payments is off, lists the tab, loads with the gate's notice, and prepares the exempt actions", async () => {
     caller = manager;
     await setPlugin("payments", false);
     try {
       const review = await loaded(`/microgrids/${MICROGRID}/billing/${PERIOD}`);
-      expect(review.attached.map((a) => a.view)).not.toContain("payments.bill-attempts");
+      expect(review.attached).toContainEqual({ view: "payments.bill-attempts", title: "Payments", href: href(), hint: "tab" });
       const model = await loaded(href({ bill: BILL_A }));
       expect(model.notice?.text).toMatch(/^Payments are disabled for this organization/);
-      expect(model.body.rows).toHaveLength(2);
-      const actions = model.body.rows.flatMap((r) => r.actions);
-      expect(actions.length).toBeGreaterThan(0);
-      expect(actions.every((a) => !a.enabled && a.reason === model.notice?.text)).toBe(true);
-      expect((await prepare("payments.record-adjustment", A_HELD)).status).toBe(409);
+      // As when Payments is on: Refresh where there is a tracking id, Accept unavailable while the receipts fall short.
+      expect(model.body.rows.map((r) => r.actions.map((a) => [a.action, a.enabled, a.reason]))).toEqual([
+        [],
+        [
+          ["payments.refresh-attempt", true, undefined],
+          ["payments.record-adjustment", true, undefined],
+          ["payments.accept-receipts", false, "The verified receipts do not come to exactly the current bill: record a completed adjustment instead."],
+        ],
+      ]);
+
+      // Prepared, never posted: Refresh status would ask the provider.
+      const refresh = await prepare("payments.refresh-attempt", A_HELD);
+      expect(refresh.status).toBe(200);
+      const refreshText = await refresh.text();
+      for (const secret of NO_SECRETS) expect(refreshText, secret).not.toContain(secret);
+      expect(JSON.parse(refreshText)).toMatchObject({ method: "POST", path: `/api/payments/attempts/${A_HELD}/refresh`, confirm: "none", ceremony: null });
+      const recordStep = await prepare("payments.record-adjustment", A_HELD);
+      expect(recordStep.status).toBe(200);
+      expect(await recordStep.json()).toMatchObject({ confirm: "typed", ceremony: { typed: "Akello Grace" } });
+      const accept = await prepare("payments.accept-receipts", B_HELD);
+      expect(accept.status).toBe(200);
+      expect(await accept.json()).toMatchObject({ confirm: "confirm", path: `/api/payments/attempts/${B_HELD}/reconcile` });
+      // available() still decides: receipts that fall short are still refused.
+      expect((await prepare("payments.accept-receipts", A_HELD)).status).toBe(409);
+
+      for (const who of [other, tenantUser]) {
+        caller = who;
+        const refused = await prepare("payments.record-adjustment", A_HELD);
+        expect(refused.status).toBe(404);
+        const page = await view(href({ bill: BILL_A }));
+        expect(page.status).toBe(404);
+        expect((await refused.text()) + (await page.text())).not.toContain("Akello");
+      }
     } finally {
+      caller = manager;
       await setPlugin("payments", true);
+    }
+  });
+
+  it("while billing is off, still refuses to prepare billing's own action on the period", async () => {
+    caller = manager;
+    await setPlugin("billing", false);
+    try {
+      const res = await prepareRoute(
+        new NextRequest("http://localhost/api/gui/prepare", {
+          method: "POST",
+          headers: { "content-type": "application/json", "accept-language": "en-GB" },
+          body: JSON.stringify({ action: "billing.delete-period", params: { periodId: PERIOD } }),
+        }),
+      );
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: "billing_disabled" });
+    } finally {
+      await setPlugin("billing", true);
     }
   });
 

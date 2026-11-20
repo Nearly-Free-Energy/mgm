@@ -58,13 +58,6 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Waits for a form: contributed, but the kit cannot render
-  // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
-  // so no interface could submit it (see `submittable` below).
-  "generate-bills",
-  // Unscheduled: the host hides a disabled plugin's tab and disables its
-  // actions, which the routes accept while Payments is off (parity.ts).
-  "payments-while-off",
 ]);
 
 /**
@@ -374,15 +367,39 @@ describe("parity with the contributed actions and views", () => {
   });
 
   it("does not count an action as contributed while no interface can submit it", () => {
-    const generate = contributedAction({ ...BILLING_PARITY.find((r) => r.id === "generate-bills")!.replacedBy } as ParityAction);
-    expect(generate, "billing.generate-bills is contributed").toBeDefined();
-    // Its tenant arrays are arrays of strings, which the kit cannot render, and no GUI registers a form for it.
-    expect(fieldsOf(personInput(generate!))).toBeNull();
-    expect(submittable(generate!)).toBe(false);
-    expect(isContributed(BILLING_PARITY.find((r) => r.id === "generate-bills")!)).toBe(false);
-    // The same action with a flat input the kit renders could be submitted.
-    const flat = { ...generate!, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
+    // generate-bills is replaced by an action whose input has no field to
+    // fill, which the kit submits as a confirmation alone.
+    const fromMeters = contributedAction(BILLING_PARITY.find((r) => r.id === "generate-bills")!.replacedBy as ParityAction);
+    expect(fromMeters?.id).toBe("billing.generate-from-meters");
+    expect(fieldsOf(personInput(fromMeters!))).toEqual([]);
+    expect(submittable(fromMeters!)).toBe(true);
+    // The same action with GenerateBillsBody, the retired billing.generate-bills'
+    // input: its tenant arrays are arrays of strings, which the kit cannot
+    // render, and no GUI registers a form for it.
+    const fullBody = { ...fromMeters!, id: "billing.generate-bills", input: schemas.GenerateBillsBody, bind: { body: { billingPeriodId: "billingPeriod" } } } as ActionDef;
+    expect(fieldsOf(personInput(fullBody))).toBeNull();
+    expect(submittable(fullBody)).toBe(false);
+    // A flat input the kit renders could be submitted.
+    const flat = { ...fullBody, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
     expect(submittable(flat)).toBe(true);
+  });
+
+  it("lets a person type bill-from-readings' readings in the kit's form, and offers it on the tenants not billed", () => {
+    const row = BILLING_PARITY.find((r) => r.id === "bill-from-readings")!;
+    const def = contributedAction(row.replacedBy as ParityAction)!;
+    expect(def.id).toBe("billing.bill-from-readings");
+    // The period and the tenant are bound from the path; the person types the rest.
+    expect(fieldsOf(personInput(def))?.map((f) => f.key)).toEqual(["start_kwh", "end_kwh", "reason"]);
+    expect(submittable(def)).toBe(true);
+    // An example of the section carries it on a row, bound to that row's tenant.
+    const rows = examplesOf("billing.not-billed").flatMap((m) => (m as { body: { rows: { id: string; actions: { action: string; params: Record<string, string> }[] }[] } }).body.rows);
+    const offered = rows.filter((r) => r.actions.some((a) => a.action === def.id));
+    expect(offered.length).toBeGreaterThan(0);
+    for (const r of offered) expect(r.actions.find((a) => a.action === def.id)!.params.tenantId).toBe(r.id);
+  });
+
+  it("no longer contributes the full-body billing.generate-bills", () => {
+    expect(BILLING_SURFACE.actions?.some((a) => a.id === "billing.generate-bills")).toBe(false);
   });
 
   it("clears no action row that no interface can submit", () => {
@@ -422,6 +439,24 @@ describe("parity with the contributed actions and views", () => {
   it("does not count a link row that names nothing to carry it", () => {
     const row = BILLING_PARITY.find((r) => r.id === "back-to-period")!;
     expect(contributedLink({ ...(row.replacedBy as ParityLink), via: undefined })).toBe(false);
+  });
+
+  it("keeps payments-while-off replaced only while the tab and the exempt actions are declared available while Payments is off", () => {
+    // A view row counts as contributed once the view exists, so this is what
+    // shows the decision was carried out (parity.ts, payments-while-off).
+    const row = BILLING_PARITY.find((r) => r.id === "payments-while-off")!;
+    expect(row.replacedBy).toEqual({ kind: "view", view: "payments.bill-attempts" });
+    const view = PAYMENTS_SURFACE.views!.find((v) => v.id === "payments.bill-attempts")!;
+    expect(view.attach?.whilePluginOff, "payments.bill-attempts is listed while Payments is off").toBe("listed");
+    const kept = ["refresh-attempt", "record-adjustment", "accept-receipts"].map((id) => {
+      const by = BILLING_PARITY.find((r) => r.id === id)!.replacedBy as ParityAction;
+      return [by.action, contributedAction(by)?.whilePluginOff];
+    });
+    expect(kept).toEqual([
+      ["payments.refresh-attempt", "enabled"],
+      ["payments.record-adjustment", "enabled"],
+      ["payments.accept-receipts", "enabled"],
+    ]);
   });
 
   it("lists only rows of the table as pending", () => {

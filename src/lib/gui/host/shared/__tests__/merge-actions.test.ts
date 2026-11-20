@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ActionRef, EntityRef } from "../../../contract";
 import {
+  actionRef,
   appendTargetedActions,
   fillPath,
   idFits,
@@ -284,6 +285,41 @@ describe("appendTargetedActions", () => {
 });
 
 const ENTRY = { at: "2026-11-09T08:00:00Z", author: { kind: "system" as const, name: "MGM" }, text: [] };
+
+describe("actionRef", () => {
+  const COPY = "Payments are disabled for this organization.";
+  const OFF: GateState = { ok: false, status: 409, message: COPY };
+  const UNREADABLE: GateState = { ok: false, status: 503, message: "Could not check." };
+  const onView = (plugin: MergeAction["plugin"], gate: GateState | undefined, over: Partial<MergeActionDef> = {}) =>
+    actionRef(
+      { plugin: "payments", def: def("payments.refresh", over) },
+      { id: H1 },
+      input([], { plugin, gate: new Map(gate ? [["payments", gate]] : []) as MergeInput["gate"] }),
+    );
+  const KEPT = { whilePluginOff: "enabled" } as const;
+
+  it("shows its own plugin's action disabled with the gate's copy while the plugin is off", () => {
+    expect(onView("payments", OFF)).toEqual({
+      ok: true,
+      ref: { action: "payments.refresh", params: { id: H1 }, label: "payments.refresh", enabled: false, reason: COPY },
+    });
+  });
+
+  it("keeps an action declaring whilePluginOff enabled on its own plugin's view while the plugin is off", () => {
+    expect(onView("payments", OFF, KEPT)).toEqual({
+      ok: true,
+      ref: { action: "payments.refresh", params: { id: H1 }, label: "payments.refresh", enabled: true },
+    });
+    expect(onView("payments", OK, KEPT)).toMatchObject({ ok: true, ref: { enabled: true } });
+  });
+
+  it("still disables it when the gate could not be read, and still leaves it out of another plugin's view", () => {
+    const unchecked = "Could not verify whether Payments is enabled.";
+    expect(onView("payments", UNREADABLE, KEPT)).toMatchObject({ ok: true, ref: { enabled: false, reason: unchecked } });
+    expect(onView("payments", undefined, KEPT)).toMatchObject({ ok: true, ref: { enabled: false, reason: unchecked } });
+    expect(onView("billing", OFF, KEPT)).toEqual({ ok: false, reason: "disabled" });
+  });
+});
 
 describe("mapActionSlots", () => {
   it("visits every slot, removes what the function drops, and leaves the input as it was", () => {

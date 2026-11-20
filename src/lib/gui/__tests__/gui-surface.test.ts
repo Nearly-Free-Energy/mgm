@@ -7,12 +7,18 @@
  * Actions: 1. the route file exists and exports the method; 2. the handler
  * parses its body with parseJsonBody(request, S), S imported from the plugin's
  * schemas module, and S is the action's `input` itself; 3. the route is gated
- * or composes, or carries a PaymentExemption; 4. the route is released.
+ * or composes, or carries a PaymentExemption, and an action declaring
+ * `whilePluginOff` is a Payments or Pesapal action whose own
+ * `METHOD /api/route` carries a PaymentExemption naming a method that runs
+ * while the plugin is off; 4. the route is released.
  * Views: 5. each example, as a loader would return it, passes
  * strictParseModel; 6. no declared key or prefix, nor any name in its ext
  * schema, looks like a secret unless SECRET_LIKE_EXEMPTIONS says why; 7. each
  * LinkRef in its examples goes to a released page the plugin owns, a released
- * GET route or an OutHref.
+ * GET route or an OutHref; 9. a view declaring `attach.whilePluginOff` is a
+ * Payments or Pesapal view, and every Payments capability method its surface
+ * module may call (LOADER_READS, which check 8 holds it to) runs while the
+ * plugin is off, so its loader, available() and prepare steps still work then.
  * Plugins: 8. nothing a contributing plugin's surface module runs uses a
  * capability method outside LOADER_READS, so its loaders, signals, search and
  * prepare steps write nothing through a capability.
@@ -34,7 +40,13 @@ import { isOutHref } from "@/lib/gui/host/shared/href";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { MGM_BUNDLED_PLUGINS, getRouteOwner, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
-import { UNGATED_WRITES, exemptionKey, handlerSources } from "@/lib/runtime/__tests__/route-rules";
+import {
+  PAYMENT_EXEMPTION_OWNERS,
+  UNGATED_WRITES,
+  exemptionKey,
+  handlerSources,
+  paymentsGating,
+} from "@/lib/runtime/__tests__/route-rules";
 import { BILLING_SURFACE } from "./fixtures/billing-surface";
 
 const REPO = path.resolve(__dirname, "../../../..");
@@ -97,7 +109,15 @@ interface Facts {
   schemas(module: string): Record<string, unknown> | undefined;
   released(path: string): boolean;
   secretExemptions?: Readonly<Record<string, string>>;
+  /** Each Payments capability method's gate; paymentsGating() unless given. */
+  gating?: ReadonlyMap<string, string>;
+  /** The capability methods a surface module may call; LOADER_READS unless given. */
+  reads?: Readonly<Record<string, readonly string[]>>;
 }
+
+/** The capability whose gating decides what runs while Payments or Pesapal is off. */
+const PAYMENTS_CONTRACT = "PaymentsCapabilityContract";
+const WHILE_OFF = "available-while-disabled";
 
 const sourceOf = (name: string, text: string) => ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true);
 const unique = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -176,8 +196,23 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
   // plugin to the gate or a composer unless UNGATED_WRITES exempts it, so only
   // the exemptions that are plain reasons are left to refuse here. If that
   // test stops covering every route, check the gate here instead.
-  if (typeof UNGATED_WRITES[exemptionKey(a.method, a.path)] === "string") {
+  const exemption = UNGATED_WRITES[exemptionKey(a.method, a.path)];
+  if (typeof exemption === "string") {
     problems.push("the route is exempt from the gate without a PaymentExemption");
+  }
+  // The host shows and prepares an action declaring whilePluginOff while its
+  // plugin is off, so its route must accept it then: only a PaymentExemption
+  // route does, and route-surface.test.ts holds each of those to one method
+  // capability-gating.test.ts says runs while off, on a Payments or Pesapal
+  // route whose file consults no plugin gate. Checked again here so the
+  // message names the action.
+  if (a.whilePluginOff !== undefined) {
+    if (typeof exemption !== "object") {
+      problems.push("declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES");
+    } else if ((facts.gating ?? paymentsGating()).get(exemption.reaches) !== WHILE_OFF) {
+      problems.push(`declares whilePluginOff, but ${exemption.reaches} refuses while the plugin is off`);
+    }
+    if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
   }
   if (!facts.released(a.path.replace(/\[[^\]]+\]/g, "0"))) problems.push("the route is not released");
   return problems.map((p) => `${a.id} (${a.method} ${a.path}): ${p}`);
@@ -267,6 +302,31 @@ function viewProblems(plugin: MgmPluginName, def: ViewDef, facts: Facts): Proble
   return problems.map((p) => `${def.id}: ${p}`);
 }
 
+/**
+ * Check 9: a tab or tile listed while its plugin is off is loaded then, so
+ * its loader (and the available() and prepare steps of the actions it links)
+ * must not call a capability method that refuses while the plugin is off.
+ * Check 8 holds every surface module to LOADER_READS, so it is enough that
+ * every Payments method listed there runs while off. Only Payments and
+ * Pesapal views may declare it, as only their actions may declare
+ * whilePluginOff. If check 8 stops covering a plugin's surface module, check
+ * the loader's calls here instead.
+ */
+function whileOffViewProblems(plugin: MgmPluginName, def: ViewDef, facts: Facts): Problems {
+  if (def.attach?.whilePluginOff === undefined) return [];
+  const problems: Problems = [];
+  if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) {
+    problems.push(`declares attach.whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
+  }
+  const gating = facts.gating ?? paymentsGating();
+  for (const method of (facts.reads ?? LOADER_READS)[PAYMENTS_CONTRACT] ?? []) {
+    if (gating.get(method) !== WHILE_OFF) {
+      problems.push(`declares attach.whilePluginOff, but LOADER_READS lets it call ${method}, which refuses while the plugin is off`);
+    }
+  }
+  return problems.map((p) => `${def.id}: ${p}`);
+}
+
 /** Every registered entry, with the plugin that contributed it and a name for messages. */
 function registered(s: SurfaceSnapshot): { plugin: MgmPluginName; name: string; entry: object }[] {
   return [
@@ -304,7 +364,7 @@ function untiedFunctions(snapshot: SurfaceSnapshot, plugin: MgmPluginName, expor
 function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
   return [
     ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
-    ...snapshot.views.flatMap(({ plugin, def }) => viewProblems(plugin, def, facts)),
+    ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
   ];
 }
 
@@ -600,6 +660,56 @@ describe("the GUI surface guard", () => {
     expect(check(file(PARSE, IMPORTS.replace("{ parseJsonBody }", "{ other as parseJsonBody }")))).toEqual(["calls a parseJsonBody that is not @/lib/validation/parse-body's"]);
     expect(check(file(`${PARSE} await parseJsonBody(request, Other);`, `${IMPORTS}import { Other } from "@/lib/billing/schemas";\n`)))
       .toEqual(["parses with several schemas: @/lib/billing/schemas Body, @/lib/billing/schemas Other"]);
+  });
+
+  it("allows whilePluginOff only on a Payments action whose own method and route carry a PaymentExemption", () => {
+    const REFRESH = "/api/payments/attempts/[id]/refresh";
+    const RECONCILE = "/api/payments/attempts/[id]/reconcile";
+    const check = (plugin: MgmPluginName, route: string, o: { method?: string; gating?: ReadonlyMap<string, string> } = {}) => {
+      const schemas = `@/lib/${plugin}/schemas`;
+      const handler = (m: string) => `export async function ${m}(request: Request) { await parseJsonBody(request, Body); }\n`;
+      const text = `import { parseJsonBody } from "@/lib/validation/parse-body";\nimport { Body } from "${schemas}";\n${handler("POST")}${handler("PUT")}`;
+      const a = { ...createPeriod, path: route, method: o.method ?? "POST", whilePluginOff: "enabled" } as ActionDef;
+      return actionProblems(plugin, a, {
+        apiRoutes: [{ route, text }],
+        schemas: (m) => (m === schemas ? { Body: createPeriod.input } : undefined),
+        released: () => true,
+        gating: o.gating,
+      }).map((p) => p.replace(/^.*?\): /, ""));
+    };
+    const notExempt = "declares whilePluginOff, but its route is not a PaymentExemption in UNGATED_WRITES";
+
+    // Each names a method capability-gating.test.ts says runs while Payments is off.
+    expect(check("payments", REFRESH)).toEqual([]);
+    expect(check("payments", RECONCILE)).toEqual([]);
+    // A route exempt with a plain reason, and a gated route.
+    expect(check("payments", "/api/edges")).toEqual(["the route is exempt from the gate without a PaymentExemption", notExempt]);
+    expect(check("payments", "/api/billing-periods")).toEqual([notExempt]);
+    // The exemption is keyed by method too: PUT on an exempt POST route is not exempt.
+    expect(check("payments", RECONCILE, { method: "PUT" })).toEqual([notExempt]);
+    // Another plugin cannot opt out of the gate by declaring it, on its own route or a payments one.
+    expect(check("billing", "/api/billing-periods")).toEqual([notExempt, "declares whilePluginOff, but billing's routes carry no PaymentExemption"]);
+    expect(check("billing", RECONCILE)).toEqual(["declares whilePluginOff, but billing's routes carry no PaymentExemption"]);
+    // An exemption whose method came to refuse while the plugin is off.
+    const refusing = new Map([...paymentsGating(), ["reconcile", "refuses-when-disabled"]]);
+    expect(check("payments", RECONCILE, { gating: refusing })).toEqual(["declares whilePluginOff, but reconcile refuses while the plugin is off"]);
+    // Without the field, an exempt route needs nothing more.
+    expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
+  });
+
+  it("allows attach.whilePluginOff only on a Payments view whose surface module calls nothing that refuses while off", () => {
+    const listed = { ...review, attach: { to: { view: "billing.periods" }, order: 1, hint: "tab", whilePluginOff: "listed" } } as ViewDef;
+    expect(whileOffViewProblems("payments", listed, facts)).toEqual([]);
+    expect(whileOffViewProblems("billing", review, facts)).toEqual([]);
+    for (const plugin of ["billing", "metering"] as const) {
+      expect(whileOffViewProblems(plugin, listed, facts)).toEqual([
+        `billing.period-review: declares attach.whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`,
+      ]);
+    }
+    const reads = { ...LOADER_READS, PaymentsCapabilityContract: ["listHistory", "ensureCheckout"] };
+    expect(whileOffViewProblems("payments", listed, { ...facts, reads })).toEqual([
+      "billing.period-review: declares attach.whilePluginOff, but LOADER_READS lets it call ensureCheckout, which refuses while the plugin is off",
+    ]);
   });
 
   it("parses a view's examples as loader output, and refuses undeclared keys, unreleased hrefs and stray links", () => {

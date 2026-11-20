@@ -106,6 +106,10 @@ export interface BillingGeneration {
     actorUserId: string;
     /** A per-bill regeneration's bill as read (RunGenerationParams.expectedBill). */
     expectedBill?: ExpectedBill;
+    /** A whole-period run from meter data (RunGenerationParams.guardExistingBills). */
+    guardExistingBills?: boolean;
+    /** A first bill for one tenant from readings typed by hand (RunGenerationParams.newBillOnly). */
+    newBillOnly?: boolean;
   }): Promise<GenerationOutput | GenerationFatal>;
 }
 
@@ -197,6 +201,28 @@ export interface BillingCapabilityContract {
    * /api/billing/generate cannot send it.
    */
   generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
+  /**
+   * Generates every bill of a draft period from meter data
+   * (RunGenerationParams.guardExistingBills): manual bills are kept, and
+   * invoiced, paid and refunded bills left as they are; any other existing
+   * bill is changed only as it was read. POST
+   * /api/billing-periods/[periodId]/generate-from-meters calls it.
+   */
+  generateFromMeters(periodId: string): Promise<BillingResult<GenerationOutput>>;
+  /**
+   * Bills one tenant who has no bill in a draft period from readings typed
+   * by hand (RunGenerationParams.newBillOnly), through the same engine as
+   * generateBills: the same tariff pin, rounding and audit row. A tenant
+   * who already has a bill is refused (`bill_exists`), as is a closed
+   * period. POST
+   * /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings
+   * calls it.
+   */
+  billFromReadings(
+    periodId: string,
+    tenantId: string,
+    readings: { startKwh: number; endKwh: number; reason?: string },
+  ): Promise<BillingResult<GenerationOutput>>;
   recordManualPayment(
     lineItemId: string,
     input: unknown

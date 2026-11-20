@@ -6,18 +6,21 @@ import "server-only";
  * to its pages served outside the GUI contract (`legacy: true`); a
  * microgrid's billing periods as the `billing.periods` view, with creating
  * a period and deleting a draft; one period's bills as the
- * `billing.period-review` view, with the actions on each bill (generating
- * them is contributed but offered nowhere yet, below); one period's audit
- * history as the `billing.period-history` view, reached from the review's
- * View history links; a draft period's close checklist as the
- * `billing.close-checklist` view, reached from the review's Close period
- * link, with the close itself (`billing.close-period`, the server's close
- * ceremony); a period's bills with each one's stable payment link, for the
- * manager to copy and share (the page sends nothing), as the
+ * `billing.period-review` view, with generating its bills from meter data
+ * and the actions on each bill; one period's audit history as the
+ * `billing.period-history` view, reached from the review's View history
+ * links; a draft period's close checklist as the `billing.close-checklist`
+ * view, reached from the review's Close period link, with the close itself
+ * (`billing.close-period`, the server's close ceremony); a period's bills
+ * with each one's stable payment link, for the manager to copy and share
+ * (the page sends nothing), as the
  * `billing.send-queue` view, reached from the review's Payment links link;
- * and the savings as the `billing.savings` view, shown under the
- * Operations day, with the writes that change what it counts. A page that
- * moves to a view keeps its nav id.
+ * the tenants with no bill for a period, and why, as the
+ * `billing.not-billed` view, a section of the review, with billing each of
+ * them from readings typed by hand (`billing.bill-from-readings`); and the
+ * savings as the `billing.savings` view, shown under the Operations day,
+ * with the writes that change what it counts. A page that moves to a view
+ * keeps its nav id.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves the periods list's
@@ -26,27 +29,29 @@ import "server-only";
  * `billing.periods`. A period's review is still its legacy page
  * (BillingTable), and parity.test.ts keeps its URL there while any
  * period-review row of src/lib/billing/parity.ts is pending: a control no
- * interface can replace yet (when this was written, generating bills and
- * payment history while Payments is off; parity.test.ts's PENDING is the
- * list). Until none is, `billing.period-review` is reached through GET
- * /api/gui/view. `billing.close-checklist` and `billing.send-queue` are new
- * pages (…/[periodId]/close and …/[periodId]/send) with no page.tsx, so the
- * catalog marks them `servedBy: "view"` and the host's catch-all serves
- * them.
+ * interface can replace yet (when this was written, payment history while
+ * Payments is off; parity.test.ts's PENDING is the list). Until none is,
+ * `billing.period-review` is reached through GET /api/gui/view.
+ * `billing.close-checklist`, `billing.send-queue` and `billing.not-billed`
+ * are new pages (…/[periodId]/close, …/[periodId]/send and
+ * …/[periodId]/not-billed) with no page.tsx, so the catalog marks them
+ * `servedBy: "view"` and the host's catch-all serves them.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import {
   ADD_GRID_TARIFF_BODY_VERSION,
   AddGridTariffBody,
+  BILL_FROM_READINGS_BODY_VERSION,
+  BillFromReadingsBody,
   CLOSE_PERIOD_BODY_VERSION,
   ClosePeriodBody,
   CREATE_PERIOD_BODY_VERSION,
   CreatePeriodBody,
   DELETE_PERIOD_BODY_VERSION,
   DeletePeriodBody,
-  GENERATE_BILLS_BODY_VERSION,
-  GenerateBillsBody,
+  GENERATE_FROM_METERS_BODY_VERSION,
+  GenerateFromMetersBody,
   LINE_ITEM_PAYMENT_STATUS_BODY_VERSION,
   LINE_ITEM_USAGE_BODY_VERSION,
   LineItemPaymentStatusBody,
@@ -61,9 +66,10 @@ import { CLOSE_CHECKLIST_EXAMPLES } from "./surface/close-checklist-examples";
 import { CLOSE_CHECKLIST_STEPS, CLOSE_PERIOD_ACTION } from "./surface/close-checklist-model";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
 import {
-  generateBillsAvailable,
+  generateFromMetersAvailable,
   loadPeriodReview,
   prepareCancelPaymentLink,
+  prepareGenerateFromMeters,
   prepareMarkFailed,
   prepareMarkPaid,
   prepareMarkRefunded,
@@ -72,6 +78,9 @@ import {
   recordUsageAvailable,
   regenerateBillAvailable,
 } from "./surface/period-review";
+import { billFromReadingsAvailable, loadNotBilled, prepareBillFromReadings } from "./surface/not-billed";
+import { NOT_BILLED_EXAMPLES } from "./surface/not-billed-examples";
+import { BILL_FROM_READINGS_ACTION, NOT_BILLED_KEYS, NOT_BILLED_VIEW } from "./surface/not-billed-model";
 import { loadPeriodHistory } from "./surface/period-history";
 import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
@@ -83,7 +92,7 @@ import { SendQueueExt } from "./surface/send-queue-ext";
 import { SEND_QUEUE_EXT_SCHEMA, SEND_QUEUE_KEYS } from "./surface/send-queue-model";
 import {
   CANCEL_PAYMENT_LINK_ACTION,
-  GENERATE_BILLS_ACTION,
+  GENERATE_FROM_METERS_ACTION,
   MARK_FAILED_ACTION,
   MARK_PAID_ACTION,
   MARK_REFUNDED_ACTION,
@@ -166,6 +175,32 @@ export const BILLING_SURFACE: Contribution = {
       ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, zod: PeriodReviewExt },
       examples: PERIOD_REVIEW_EXAMPLES,
       load: loadPeriodReview,
+    },
+    {
+      id: NOT_BILLED_VIEW,
+      kind: "collection",
+      path: "/microgrids/[id]/billing/[periodId]/not-billed",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      // No `entity`: its rows are tenants, and with the period as its entity
+      // the host would append other plugins' targeted actions on a period.
+      // A section of the period review, under its bills, where the legacy
+      // page's banner of tenants not billed sat (#293); a section, not a
+      // tab, so the review lists it while billing is off, with the gate's
+      // notice (attachedViews in src/lib/gui/host/server/view.ts keeps a
+      // disabled plugin's sections and drops its tabs; if that changes,
+      // revisit).
+      attach: { to: { view: "billing.period-review" }, order: 10, hint: "section" },
+      // No `agent`: it names tenants, and no assistant reads billing views.
+      // Read through the person's own client (./surface/not-billed.ts); loads
+      // while billing is off, with the gate's notice and Bill from readings
+      // disabled. No refresh of its own: the review's reloads its sections
+      // (Gridtop's section list, src/gui/gridtop/shell/section-list.tsx,
+      // loads a section again whenever the page's model is a new one; if it
+      // stops, or another GUI draws sections without doing so, revisit).
+      cost: "db",
+      declares: { keys: NOT_BILLED_KEYS },
+      examples: NOT_BILLED_EXAMPLES,
+      load: loadNotBilled,
     },
     {
       id: "billing.period-history",
@@ -324,28 +359,68 @@ export const BILLING_SURFACE: Contribution = {
     // All human-only (no assistant proposes a billing write yet) and money:
     // each changes what a tenant is billed or what they owe.
     //
-    // Generating a period's bills. Contributed, but no view offers it: the
-    // kit cannot render GenerateBillsBody's tenant arrays (its form is
-    // NO_FORM) and no GUI registers a form for billing.generate-bills
-    // (GuiPlugin.forms), so no interface could submit it. The legacy page's
-    // pre-flight panel still serves Generate, and parity.test.ts keeps the
-    // row pending until a form exists; then the period review offers it
-    // (GENERATE_BILLS_ACTION in ./surface/period-review-model.ts).
-    // `targeted: false`: appended to another view it would open with no
-    // form, as above.
+    // Generating a draft period's bills from meter data, on a route of its
+    // own whose body is only the bound period, so the kit submits it with
+    // no form. The period review offers it as its header action and as its
+    // empty state's call to action. Readings typed by hand are not part of
+    // it: a bill's are entered with regenerate-bill (manual) or record-usage
+    // below, and a tenant with no meter data gets no bill, whom
+    // bill-from-readings below bills (parity.ts, generate-bills and
+    // bill-from-readings). Confirm, not ceremony: there
+    // is nothing to acknowledge, since the run leaves manual, invoiced, paid
+    // and refunded bills as they are; prepare says how many tenants it reads
+    // and who has no meter. `targeted: false`: appended to another view of a
+    // period (the history, the close checklist, the send queue, a payments
+    // view) it would generate away from the bills it changes, and only the
+    // review shows the result once it refreshes.
+    // The full-body billing.generate-bills (GenerateBillsBody on POST
+    // /api/billing/generate) is no longer contributed: no interface could
+    // submit it, and that route regenerates closed periods' and paid or
+    // invoiced bills, which the review refuses bill by bill. The route stays
+    // for the legacy pre-flight panel.
     {
-      ...GENERATE_BILLS_ACTION,
+      ...GENERATE_FROM_METERS_ACTION,
       target: "billingPeriod",
-      input: GenerateBillsBody,
-      inputVersion: GENERATE_BILLS_BODY_VERSION,
+      input: GenerateFromMetersBody,
+      inputVersion: GENERATE_FROM_METERS_BODY_VERSION,
       method: "POST",
-      path: "/api/billing/generate",
-      bind: { body: { billingPeriodId: "billingPeriod" } },
+      path: "/api/billing-periods/[periodId]/generate-from-meters",
+      bind: { path: { periodId: "billingPeriod" } },
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
       targeted: false,
-      available: generateBillsAvailable,
+      prepare: prepareGenerateFromMeters,
+      available: generateFromMetersAvailable,
+    },
+    // A first bill for one tenant with no bill, from readings typed by hand,
+    // on a route of its own whose path names the period and the tenant, so
+    // the body is only what a person types (BillFromReadingsBody). Offered
+    // on each row of billing.not-billed while the period is a draft; a
+    // tenant who has a bill is refused (regenerate-bill changes that bill).
+    // Target billingPeriod, so available() can say whether the period is a
+    // draft; which tenants have no bill is the loader's to say, and
+    // prepare's and the route's to check again. Confirm, not ceremony:
+    // nothing to acknowledge, and prepare cannot show the total, as it runs
+    // once before the form (src/lib/gui/host/client/action-host.tsx; if the
+    // host comes to prepare again with the form's values, revisit); it
+    // names the tenant, the period and the meter, and warns for a metered
+    // tenant. `targeted: false`: appended to
+    // another view of a period it could not bind the tenant.
+    {
+      ...BILL_FROM_READINGS_ACTION,
+      target: "billingPeriod",
+      input: BillFromReadingsBody,
+      inputVersion: BILL_FROM_READINGS_BODY_VERSION,
+      method: "POST",
+      path: "/api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings",
+      bind: { path: { periodId: "billingPeriod", tenantId: "tenant" } },
+      risk: "money",
+      confirm: "confirm",
+      humanOnly: true,
+      targeted: false,
+      prepare: prepareBillFromReadings,
+      available: billFromReadingsAvailable,
     },
     // One bill, from the meter or from readings entered, on its own route so
     // it can never become a whole-period run. Targeted: its form needs only

@@ -378,6 +378,37 @@ describe("dispatchView", () => {
     expect(unchecked.ok && unchecked.value.attached).toEqual([]);
   });
 
+  it("lists a disabled plugin's tab declaring whilePluginOff: \"listed\", but not on an unchecked gate, nor another tab of it", async () => {
+    const listed = view("payments", {
+      id: "payments.listed",
+      path: "/microgrids/[id]/billing",
+      attach: { to: "microgrid", order: 0, hint: "tab", whilePluginOff: "listed" },
+    });
+    const tab = view("payments", { id: "payments.tab", path: "/microgrids/[id]/setup/tenants", attach: { to: "microgrid", order: 1, hint: "tab" } });
+    // Another disabled plugin's tab, without the field.
+    const meteringTab = view("metering", { id: "metering.tab", path: "/microgrids/[id]/setup/edges", attach: { to: "microgrid", order: 2, hint: "tab" } });
+    const host = rootView("billing.host", "/microgrids/[id]/setup/rates", { params: { id: "microgrid" }, entity: "id" });
+    snapshot = snapshotOf([host, listed, tab, meteringTab]);
+    gates.set("payments", { ...DISABLED, code: "payments_disabled", message: "Payments are disabled." } as GateDecision);
+    gates.set("metering", DISABLED as GateDecision);
+    const out = await dispatch(`/microgrids/${MG}/setup/rates`);
+    expect(out.ok && out.value.attached).toEqual([
+      { view: "payments.listed", title: "payments.listed example", href: `/microgrids/${MG}/billing`, hint: "tab" },
+    ]);
+    // The tab then loads with the gate's notice, followed by the loader's own.
+    loadOf(listed).mockResolvedValue({ ok: true, model: { ...metrics(), notice: { tone: "info", text: "Two attempts need a decision." } } });
+    expect(await dispatch(`/microgrids/${MG}/billing`)).toMatchObject({
+      ok: true,
+      value: { notice: { tone: "warning", text: "Payments are disabled. Two attempts need a decision." } },
+    });
+    for (const unreadable of [{ ok: false, status: 503, code: "payments_gate_unavailable", message: "Could not check." }, null]) {
+      if (unreadable) gates.set("payments", unreadable as GateDecision);
+      else checkGate.mockRejectedValue(new Error(CANARY));
+      const unchecked = await dispatch(`/microgrids/${MG}/setup/rates`);
+      expect(unchecked.ok && unchecked.value.attached).toEqual([]);
+    }
+  });
+
   it("lists views attached to this view, never itself, in order, with only the query both declare", async () => {
     const other = view("metering", {
       id: "metering.other",

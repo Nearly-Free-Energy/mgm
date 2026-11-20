@@ -4,8 +4,9 @@
  * definitions: the review lists `payments.bill-attempts` as its Payments
  * tab; the view loads with the period's path and its own `?bill=`, and
  * offers its own actions with no other plugin's; and while Payments is off
- * the tab is left out, while the view itself still loads with the gate's
- * notice and its actions disabled.
+ * the tab is still listed and the view loads with the gate's notice, its
+ * actions enabled as when Payments is on (whilePluginOff in ../../surface.ts),
+ * while billing's actions still follow billing's own state.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -117,13 +118,31 @@ describe("payments.bill-attempts under the period review", () => {
     expect(row.actions.find((a) => a.action === "payments.record-adjustment")).toMatchObject({ tone: "danger", prefill: { action: "record_external" } });
   });
 
-  it("while Payments is off, is left out of the review, and loads with the gate's notice and its actions disabled", async () => {
+  it("while Payments is off, is still the review's Payments tab, and loads with the gate's notice and its actions enabled", async () => {
     gates.set("payments", PAYMENTS_OFF);
     const day = await dispatchView(ctx(), `/microgrids/${MG}/billing/${PERIOD}`);
-    expect(day.ok && day.value.attached).toEqual([]);
+    expect(day.ok && day.value.attached).toEqual([
+      { view: "payments.bill-attempts", title: "Payments", href: `/microgrids/${MG}/billing/${PERIOD}/payments`, hint: "tab" },
+    ]);
     const out = await dispatchView(ctx(), `/microgrids/${MG}/billing/${PERIOD}/payments?bill=${BILL}`);
     if (!out.ok || out.value.kind !== "collection") throw new Error("view did not load");
     expect(out.value.notice).toEqual({ tone: "warning", text: PAYMENTS_OFF.message });
-    for (const a of out.value.body.rows.flatMap((r) => r.actions)) expect([a.enabled, a.reason]).toEqual([false, PAYMENTS_OFF.message]);
+    expect(out.value.body.rows[0].actions.map((a) => [a.action, a.enabled, a.reason])).toEqual([
+      ["payments.refresh-attempt", true, undefined],
+      ["payments.record-adjustment", true, undefined],
+      ["payments.accept-receipts", true, undefined],
+    ]);
+  });
+
+  it("while billing is off, still shows billing's own actions on the review disabled with billing's copy", async () => {
+    const BILLING_OFF = { ok: false, status: 409, code: "billing_disabled", message: "Billing is disabled for this organization." } as const;
+    gates.set("payments", PAYMENTS_OFF);
+    gates.set("billing", BILLING_OFF);
+    const out = await dispatchView(ctx(), `/microgrids/${MG}/billing/${PERIOD}`);
+    if (!out.ok || out.value.kind !== "collection") throw new Error("view did not load");
+    const own = [...out.value.actions, ...out.value.body.rows.flatMap((r) => r.actions)];
+    expect(own.length).toBeGreaterThan(0);
+    for (const a of own) expect([a.action, a.enabled, a.reason]).toEqual([a.action, false, BILLING_OFF.message]);
+    expect(out.value.attached.map((a) => a.view)).toEqual(["payments.bill-attempts"]);
   });
 });

@@ -9,7 +9,8 @@
  * fn_payment_reconcile's own refusals of a bill with a checkout whose
  * outcome is unknown, or with receipts in another currency, reach the
  * person as fixed copy, so a reworded RAISE fails here rather than turning
- * into a 500.
+ * into a 500. Accepting exact receipts works while Payments is off, as the
+ * route's PaymentExemption and the GUI's whilePluginOff declaration say.
  * Refresh status is not called here: it would ask the provider.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
@@ -59,6 +60,9 @@ const C_HELD = "e8700000-0000-4000-8008-000000000003";
 const C_UNKNOWN = "e8700000-0000-4000-8008-000000000004";
 /** Bill D (2,000): held, with a receipt of exactly 2,000 and another in USD. */
 const D_HELD = "e8700000-0000-4000-8008-000000000005";
+const BILL_E = "e8700000-0000-4000-8005-000000000005";
+/** Bill E (1,500): held, with a receipt of exactly 1,500, reconciled while Payments is off. */
+const E_HELD = "e8700000-0000-4000-8008-000000000006";
 const EMAIL = "attempts-reconcile-manager@test.local";
 const OTHER_EMAIL = "attempts-reconcile-other@test.local";
 const TENANT_EMAIL = "attempts-reconcile-tenant@test.local";
@@ -93,6 +97,7 @@ const record = (o: { amount?: number; typed?: string } = {}) => ({
 // database owner.
 async function cleanup() {
   const svc = await serviceClient();
+  await svc.from("mgm_plugins").delete().in("org_id", [ORG, OTHER_ORG]);
   const { error } = await svc.from("payment_merchant_versions").delete().in("org_id", [ORG, OTHER_ORG]);
   if (error) throw new Error(`[reconcile.db] payment_merchant_versions: ${error.message}`);
   await cleanupTestData({ orgIds: [ORG, OTHER_ORG], userEmails: [EMAIL, OTHER_EMAIL, TENANT_EMAIL] });
@@ -149,6 +154,7 @@ beforeAll(async () => {
         { id: tenant(2), microgrid_id: MICROGRID, display_name: "Byaruhanga Peter", primary_phone: "+256700000902" },
         { id: tenant(3), microgrid_id: MICROGRID, display_name: "Kato Joseph", primary_phone: "+256700000903" },
         { id: tenant(4), microgrid_id: MICROGRID, display_name: "Nambi Ruth", primary_phone: "+256700000904" },
+        { id: tenant(5), microgrid_id: MICROGRID, display_name: "Okello James", primary_phone: "+256700000905" },
       ],
     ],
     ["billing_periods", { id: PERIOD, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", status: "draft", timezone: "Africa/Kampala", rate_schedule_id: SCHEDULE }],
@@ -159,6 +165,7 @@ beforeAll(async () => {
         { id: BILL_B, billing_period_id: PERIOD, tenant_id: tenant(2), start_kwh: 0, end_kwh: 6, usage_kwh: 6, total_amount: 3000, reading_source: "manual" },
         { id: BILL_C, billing_period_id: PERIOD, tenant_id: tenant(3), start_kwh: 0, end_kwh: 8, usage_kwh: 8, total_amount: 4000, reading_source: "manual" },
         { id: BILL_D, billing_period_id: PERIOD, tenant_id: tenant(4), start_kwh: 0, end_kwh: 4, usage_kwh: 4, total_amount: 2000, reading_source: "manual" },
+        { id: BILL_E, billing_period_id: PERIOD, tenant_id: tenant(5), start_kwh: 0, end_kwh: 3, usage_kwh: 3, total_amount: 1500, reading_source: "manual" },
       ],
     ],
     ["payment_merchant_accounts", { id: MERCHANT, org_id: ORG, provider: "pesapal", is_default: true, sandbox: true, last_test_status: "success", ipn_id: "ipn-test" }],
@@ -170,6 +177,7 @@ beforeAll(async () => {
         attempt(C_HELD, BILL_C, 4000, "trk-c"),
         attempt(C_UNKNOWN, BILL_C, 4000, null, "pending"),
         attempt(D_HELD, BILL_D, 2000, "trk-d"),
+        attempt(E_HELD, BILL_E, 1500, "trk-e"),
       ],
     ],
     [
@@ -180,6 +188,7 @@ beforeAll(async () => {
         receipt(C_HELD, 4000, "trk-c"),
         receipt(D_HELD, 2000, "trk-d"),
         receipt(D_HELD, 1, "trk-d-usd", "USD"),
+        receipt(E_HELD, 1500, "trk-e"),
       ],
     ],
   ];
@@ -310,6 +319,21 @@ describe.skipIf(shouldSkip())("POST /api/payments/attempts/[id]/reconcile on the
     expect(after.bill).toBe("unpaid");
     expect(after.attempt?.status).toBe("needs_reconciliation");
     expect(after.events).toEqual([]);
+  });
+
+  it("accepts receipts that come to the bill exactly while Payments is off", async () => {
+    caller = manager;
+    const svc = await serviceClient();
+    const off = await svc.from("mgm_plugins").upsert({ org_id: ORG, plugin_name: "payments", version: "0.1.0", enabled: false }, { onConflict: "org_id,plugin_name" });
+    if (off.error) throw new Error(`[reconcile.db] mgm_plugins: ${off.error.message}`);
+    try {
+      expect((await reconcile(E_HELD, { action: "accept_exact" })).status).toBe(200);
+      const after = await state(BILL_E, E_HELD);
+      expect(after.bill).toBe("paid");
+      expect(after.attempt).toEqual({ status: "resolved", resolved_by: manager.userId });
+    } finally {
+      await svc.from("mgm_plugins").delete().eq("org_id", ORG);
+    }
   });
 
   it("called nothing but the local Supabase", () => {

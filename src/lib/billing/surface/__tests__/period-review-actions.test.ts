@@ -1,6 +1,6 @@
 /**
  * The period review's actions, as billing contributes them: generating a
- * draft's bills, regenerating one bill on its own route, correcting an
+ * draft's bills from meter data, regenerating one bill on its own route, correcting an
  * unmetered bill's usage, and the five payment-status transitions on the
  * payment-status route. All human-only and money; prepared by the host as
  * the kit needs them. gui-surface.test.ts holds each action to its route
@@ -14,8 +14,9 @@ import { createFmt } from "@/lib/gui/fmt";
 import type { ActionDef, ActionLink, SurfaceRequest } from "@/lib/gui/surface";
 import type { RegisteredAction, SurfaceSnapshot } from "@/lib/gui/host/server/surface-registry";
 import {
-  GENERATE_BILLS_BODY_VERSION,
-  GenerateBillsBody,
+  GENERATE_FROM_METERS_BODY_VERSION,
+  GENERATE_FROM_METERS_COPY,
+  GenerateFromMetersBody,
   LINE_ITEM_PAYMENT_STATUS_BODY_VERSION,
   LINE_ITEM_USAGE_BODY_VERSION,
   LineItemPaymentStatusBody,
@@ -45,8 +46,9 @@ import type { UserRoleRecord } from "@/lib/types/domain";
 import { BILLING_SURFACE } from "../../surface";
 import {
   BILL_REFUSALS,
-  GENERATE_CLOSED_REASON,
-  generateBillsAvailable,
+  GENERATE_REFUSALS,
+  generateFromMetersAvailable,
+  prepareGenerateFromMeters,
   recordUsageAvailable,
   regenerateBillAvailable,
   REGENERATE_PAID_LABEL,
@@ -60,7 +62,7 @@ const BILL = "e7100000-0000-4000-8005-0000000000c1";
 const TENANT = "e7100000-0000-4000-8004-0000000000d1";
 const actions = BILLING_SURFACE.actions as ActionDef[];
 const def = (id: string) => actions.find((a) => a.id === id)!;
-const GENERATE = def("billing.generate-bills");
+const GENERATE = def("billing.generate-from-meters");
 const REGENERATE = def("billing.regenerate-bill");
 const USAGE = def("billing.record-usage");
 const PAYMENT_IDS = ["billing.mark-paid", "billing.mark-unpaid", "billing.mark-refunded", "billing.mark-failed", "billing.cancel-payment-link"];
@@ -121,23 +123,25 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the period review's actions", () => {
-  it("generate a draft's bills on the generate route, offered only by the review", () => {
+  it("generate a draft's bills from meter data on their own route, offered only by the review, with a prepare", () => {
     expect(GENERATE).toMatchObject({
-      id: "billing.generate-bills",
-      title: "Generate bills",
+      id: "billing.generate-from-meters",
+      title: "Generate bills from meter data",
       target: "billingPeriod",
       method: "POST",
-      path: "/api/billing/generate",
-      bind: { body: { billingPeriodId: "billingPeriod" } },
+      path: "/api/billing-periods/[periodId]/generate-from-meters",
+      bind: { path: { periodId: "billingPeriod" } },
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
       targeted: false,
     });
-    expect(GENERATE.input).toBe(GenerateBillsBody);
-    expect(GENERATE.inputVersion).toBe(GENERATE_BILLS_BODY_VERSION);
-    expect(GENERATE.prepare).toBeUndefined();
+    expect(GENERATE.input).toBe(GenerateFromMetersBody);
+    expect(GENERATE.inputVersion).toBe(GENERATE_FROM_METERS_BODY_VERSION);
+    expect(typeof GENERATE.prepare).toBe("function");
     expect(typeof GENERATE.available).toBe("function");
+    // The full-body action on POST /api/billing/generate is retired.
+    expect(actions.some((a) => a.id === "billing.generate-bills")).toBe(false);
   });
 
   it("regenerate one bill on its own route, targeted, with availability and a prepare", () => {
@@ -242,12 +246,12 @@ const req = (client: SupabaseClient) => ({ supabase: client }) as unknown as Sur
 const GONE = "e7100000-0000-4000-8005-0000000000ff";
 
 describe("availability", () => {
-  it("offers Generate on a draft, and explains a closed or missing period", async () => {
+  it("offers Generate on a draft, and explains a closed or missing period with the route's copy", async () => {
     const CLOSED = "e7100000-0000-4000-8003-0000000000b2";
     const { client, calls } = tableClient({ billing_periods: { data: [{ id: PERIOD, status: "draft" }, { id: CLOSED, status: "closed" }] } });
-    expect(await generateBillsAvailable(req(client), [PERIOD, CLOSED, GONE])).toEqual({
+    expect(await generateFromMetersAvailable(req(client), [PERIOD, CLOSED, GONE])).toEqual({
       [PERIOD]: true,
-      [CLOSED]: GENERATE_CLOSED_REASON,
+      [CLOSED]: GENERATE_FROM_METERS_COPY.closed,
       [GONE]: "This billing period could not be found.",
     });
     expect(calls).toEqual([{ table: "billing_periods", ops: [["select", ["id, status"]], ["in", ["id", [PERIOD, CLOSED, GONE]]]] }]);
@@ -334,13 +338,13 @@ describe("availability", () => {
   });
 
   it.each([
-    ["generate-bills", generateBillsAvailable, "billing_periods"],
+    ["generate-from-meters", generateFromMetersAvailable, "billing_periods"],
     ["regenerate-bill", regenerateBillAvailable, "billing_line_items"],
     ["record-usage", recordUsageAvailable, "billing_line_items"],
   ] as const)("%s throws on a failed read, so the host shows it as not checked", async (_label, available, table) => {
     const { client } = tableClient({ [table]: { data: null, error: { message: "permission denied" } } });
     await expect(available(req(client), [BILL])).rejects.toThrow();
-    const ref: ActionRef = { action: `billing.${_label}`, params: _label === "generate-bills" ? { billingPeriodId: PERIOD } : { lineItemId: BILL }, label: "x", enabled: true };
+    const ref: ActionRef = { action: `billing.${_label}`, params: _label === "generate-from-meters" ? { periodId: PERIOD } : { lineItemId: BILL }, label: "x", enabled: true };
     const [checked] = (
       await checkAvailability({ kind: "record", body: { sections: [] }, actions: [ref] }, { actions: snapshot.actions, request: async () => req(client) })
     ).actions;
@@ -368,16 +372,56 @@ async function sent(prepared: PreparedAction, form: Json | null, level: Confirm,
 }
 
 describe("preparing the period review's actions", () => {
-  it("prepares Generate with the period bound, and sends a body GenerateBillsBody parses", async () => {
-    const out = await prepare({ action: GENERATE.id, params: { billingPeriodId: PERIOD } });
+  it("prepares Generate with the path filled, what it will read and who has no meter, and sends the {} GenerateFromMetersBody parses", async () => {
+    const out = await prepare({ action: GENERATE.id, params: { periodId: PERIOD } }, generateTables().client);
     if (!out.ok) throw new Error(out.message);
-    expect(out.value).toMatchObject({ confirm: "confirm", method: "POST", path: "/api/billing/generate", bound: { billingPeriodId: PERIOD }, ceremony: null });
-    expect(GenerateBillsBody.parse(await sent(out.value, {}, "confirm"))).toEqual({ billingPeriodId: PERIOD });
+    expect(out.value).toMatchObject({
+      confirm: "confirm",
+      method: "POST",
+      path: `/api/billing-periods/${PERIOD}/generate-from-meters`,
+      bound: {},
+    });
+    expect(out.value.ceremony).toEqual({
+      type: "ceremony",
+      statement:
+        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are; any other bill is recalculated, one with a pending payment link included.",
+      facts: [
+        { label: "Period", value: { t: "text", text: expect.any(String) } },
+        { label: "Read from meters", value: expect.objectContaining({ t: "number", v: 2, text: "2" }) },
+        { label: "Of these, already billed", value: expect.objectContaining({ v: 1 }) },
+        { label: "Kept, entered by hand", value: expect.objectContaining({ v: 1 }) },
+        { label: "Left as they are: paid, invoiced or refunded", value: expect.objectContaining({ v: 1 }) },
+        { label: "Not billed: no meter for the period", value: expect.objectContaining({ v: 1 }) },
+        { label: "Not billed: a meter assignment gap", value: expect.objectContaining({ v: 1 }) },
+      ],
+      warnings: [
+        "No meter for this period, so not billed: Unit 5.",
+        "A meter assignment gap in this period (no one meter assigned for all of it), so not billed: Unit 6.",
+        // A bill is recalculated (unit 2's): what a new total does to a payment under way.
+        "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.",
+        "A tenant whose meter has no data for the period is not billed, and a bill they already have is left as it is; the result says how many.",
+        "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
+      ],
+      acknowledgements: [],
+    });
+    // Nothing to fill: the form has no field, and the host sends only the bound path.
+    expect((out.value.spec.input as { properties: Record<string, unknown> }).properties).toEqual({});
+    const body = await sent(out.value, null, "confirm");
+    expect(body).toEqual({});
+    expect(GenerateFromMetersBody.parse(body)).toEqual({});
   });
 
-  it("refuses to prepare Generate on a closed period", async () => {
-    const out = await prepare({ action: GENERATE.id, params: { billingPeriodId: PERIOD } }, tables({ period: [{ ...OCTOBER, status: "closed" }] }).client);
-    expect(out).toMatchObject({ ok: false, status: 409, message: GENERATE_CLOSED_REASON });
+  it("refuses to prepare Generate on a closed period, with the route's copy", async () => {
+    const out = await prepare({ action: GENERATE.id, params: { periodId: PERIOD } }, generateTables({ period: { ...OCTOBER, status: "closed" } }).client);
+    expect(out).toMatchObject({ ok: false, status: 409, message: GENERATE_FROM_METERS_COPY.closed });
+  });
+
+  it("refuses to prepare Generate with nothing to read from meters", async () => {
+    const out = await prepare(
+      { action: GENERATE.id, params: { periodId: PERIOD } },
+      generateTables({ tenants: [genTenant(5, []), genTenant(3, [link()])], bills: [genBill(3, { reading_source: "manual" })] }).client,
+    );
+    expect(out).toMatchObject({ ok: false, status: 409, message: GENERATE_FROM_METERS_COPY.nothingToRead });
   });
 
   it("prepares Regenerate with the bill's facts, keeps the loader's prefill, and sends a body RegenerateBillBody parses", async () => {
@@ -548,5 +592,139 @@ describe("preparing the period review's actions", () => {
   it.each([...PAYMENT_IDS, REGENERATE.id, USAGE.id])("does not let an assistant propose %s", async (action) => {
     const provenance = { by: "assistant", proposal: "e7100000-0000-4000-8009-0000000000c1", at: "2026-11-09T08:00:00Z" };
     expect(await prepare({ ...onBill(action), provenance })).toMatchObject({ ok: false, status: 403, code: "gui_human_only" });
+  });
+});
+
+// ── Generate's prepare, on its own ─────────────────────────────────────────
+
+const genTenantId = (n: number) => `e7100000-0000-4000-8004-0000000001${String(n).padStart(2, "0")}`;
+const link = (o: Record<string, unknown> = {}) => ({
+  role: "primary_consumption_meter",
+  effective_from: "2026-01-01",
+  effective_to: null,
+  devices: { openems_component_id: "meter0", edges: { openems_edge_id: "edge0" } },
+  ...o,
+});
+const genTenant = (n: number, links: unknown[]) => ({ id: genTenantId(n), display_name: `Unit ${n}`, tenant_devices: links });
+const genBill = (n: number, o: Record<string, unknown> = {}) => ({
+  id: `e7100000-0000-4000-8005-0000000001${String(n).padStart(2, "0")}`,
+  tenant_id: genTenantId(n),
+  reading_source: "edge",
+  payment_status: "unpaid",
+  invoice_number: null,
+  ...o,
+});
+/**
+ * 1 metered with no bill, 2 metered with an unpaid bill, 3 a manual bill, 4
+ * a paid bill, 5 no meter, 6 a meter assigned only after the period.
+ */
+const GEN_TENANTS = [
+  genTenant(1, [link()]),
+  genTenant(2, [link()]),
+  genTenant(3, [link()]),
+  genTenant(4, [link()]),
+  genTenant(5, []),
+  genTenant(6, [link({ effective_from: "2026-11-01" })]),
+];
+const GEN_BILLS = [genBill(2), genBill(3, { reading_source: "manual" }), genBill(4, { payment_status: "paid" })];
+
+function generateTables(o: { period?: unknown; tenants?: unknown[]; bills?: unknown[]; error?: "period" | "bills" | "tenants" } = {}) {
+  const failed = { data: null, error: { message: "permission denied" } };
+  return tableClient({
+    microgrids: { data: [{ id: MG, name: "North", community_id: null }] },
+    billing_periods: o.error === "period" ? failed : { data: o.period === null ? [] : [o.period ?? OCTOBER] },
+    billing_line_items: o.error === "bills" ? failed : { data: o.bills ?? GEN_BILLS },
+    tenants: o.error === "tenants" ? failed : { data: o.tenants ?? GEN_TENANTS },
+  });
+}
+
+const fmtReq = (client: SupabaseClient) => ({ supabase: client, fmt: createFmt({ locale: "en-GB" }) }) as unknown as SurfaceRequest;
+const prepareGenerate = (client: SupabaseClient) => prepareGenerateFromMeters(fmtReq(client), { params: { periodId: PERIOD } });
+
+describe("billing.generate-from-meters' prepare", () => {
+  it("reads the period, its bills and the microgrid's tenants with their primary links, through the person's client", async () => {
+    const { client, calls } = generateTables();
+    expect(await prepareGenerate(client)).toMatchObject({ ok: true });
+    expect(calls.map((c) => c.table)).toEqual(["billing_periods", "billing_line_items", "tenants"]);
+    expect(calls[0].ops).toContainEqual(["eq", ["id", PERIOD]]);
+    expect(calls[1].ops).toContainEqual(["eq", ["billing_period_id", PERIOD]]);
+    expect(calls[2].ops).toContainEqual(["eq", ["microgrid_id", MG]]);
+    expect(calls[2].ops).toContainEqual(["eq", ["tenant_devices.role", "primary_consumption_meter"]]);
+    // It pins no tariff and reads no meter.
+    expect(calls.some((c) => c.table.startsWith("rpc:"))).toBe(false);
+  });
+
+  it.each([
+    ["a period it cannot see", { period: null }, GENERATE_REFUSALS.notFound],
+    ["a closed period", { period: { ...OCTOBER, status: "closed" } }, GENERATE_REFUSALS.closed],
+    ["a failed period read", { error: "period" as const }, GENERATE_REFUSALS.unavailable],
+    ["a failed bills read", { error: "bills" as const }, GENERATE_REFUSALS.unavailable],
+    ["a failed tenants read", { error: "tenants" as const }, GENERATE_REFUSALS.unavailable],
+    ["no tenant to read from a meter", { tenants: [genTenant(5, [])] }, GENERATE_REFUSALS.nothingToRead],
+  ])("refuses %s with fixed copy", async (_label, o, refusal) => {
+    expect(await prepareGenerate(generateTables(o).client)).toEqual(refusal);
+  });
+
+  it("names the first five tenants with no meter, then counts the rest", async () => {
+    const tenants = [genTenant(1, [link()]), ...[11, 12, 13, 14, 15, 16, 17].map((n) => genTenant(n, []))];
+    const out = await prepareGenerate(generateTables({ tenants, bills: [] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.warnings[0]).toBe("No meter for this period, so not billed: Unit 11, Unit 12, Unit 13, Unit 14, Unit 15 and 2 more.");
+    // With no bill, nothing is already billed, kept or left: those facts are left out.
+    expect(out.model.facts.map((f) => f.label)).toEqual(["Period", "Read from meters", "Not billed: no meter for the period"]);
+  });
+
+  it("says a bill whose meter cannot be read is left as it is, not that its tenant is not billed, by the reason the result gives", async () => {
+    const tenants = [
+      genTenant(1, [link()]),
+      genTenant(5, []),
+      // A meter replaced mid-period: two links, neither covering all of it.
+      genTenant(6, [link({ effective_to: "2026-10-15" }), link({ effective_from: "2026-10-15" })]),
+      genTenant(7, []),
+    ];
+    const out = await prepareGenerate(generateTables({ tenants, bills: [genBill(5), genBill(6)] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.facts.map((f) => [f.label, f.value.text])).toEqual([
+      ["Period", expect.any(String)],
+      ["Read from meters", "1"],
+      ["Not billed: no meter for the period", "1"],
+      ["Bill left as it is, not refreshed: no meter for the period", "1"],
+      ["Bill left as it is, not refreshed: a meter assignment gap", "1"],
+    ]);
+    expect(out.model.warnings.slice(0, 3)).toEqual([
+      "No meter for this period, so not billed: Unit 7.",
+      "No meter for this period, so their bills are left as they are, not refreshed: Unit 5.",
+      "A meter assignment gap in this period (no one meter assigned for all of it), so their bills are left as they are, not refreshed: Unit 6.",
+    ]);
+  });
+
+  it("counts the bills with a pending payment link it will recalculate, and says what a new total does to them", async () => {
+    const tenants = [1, 2, 3, 4].map((n) => genTenant(n, [link()]));
+    const bills = [
+      genBill(1, { payment_status: "link_generated" }),
+      genBill(2, { payment_status: "link_generated" }),
+      // Not recalculated, so not counted: kept or left.
+      genBill(3, { payment_status: "link_generated", reading_source: "manual" }),
+      genBill(4, { payment_status: "link_generated", invoice_number: "EXS-1" }),
+    ];
+    const out = await prepareGenerate(generateTables({ tenants, bills }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.facts.map((f) => [f.label, f.value.text])).toContainEqual(["Of these, with a pending payment link", "2"]);
+    expect(out.model.warnings.slice(0, 2)).toEqual([
+      "2 bills to be recalculated have a pending payment link. Where a bill's total changes, its link stops working and the tenant needs a new one.",
+      "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.",
+    ]);
+    const one = await prepareGenerate(generateTables({ tenants, bills: bills.slice(1) }).client);
+    if (!one.ok) throw new Error(one.message);
+    expect(one.model.warnings[0]).toBe(
+      "1 bill to be recalculated has a pending payment link. If its total changes, the link stops working and the tenant needs a new one.",
+    );
+  });
+
+  it("says nothing of tenants with no meter when every tenant has one", async () => {
+    const out = await prepareGenerate(generateTables({ tenants: [genTenant(1, [link()])], bills: [] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.warnings).toHaveLength(2);
+    expect(out.model.facts.map((f) => f.label)).toEqual(["Period", "Read from meters"]);
   });
 });

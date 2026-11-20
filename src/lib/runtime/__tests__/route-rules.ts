@@ -1,10 +1,18 @@
 /**
  * What route-surface.test.ts knows about route files that gui-surface.test.ts
- * (src/lib/gui/__tests__) needs too: the gate exemptions and how a handler's
- * code is found. Kept here so neither test imports the other, which would run
- * its tests twice.
+ * (src/lib/gui/__tests__) needs too: the gate exemptions, which plugins may
+ * hold a PaymentExemption, the Payments capability's gating as
+ * capability-gating.test.ts classifies it, and how a handler's code is found.
+ * gui-surface.test.ts reads the exemptions and the gating to decide which
+ * actions and views may declare `whilePluginOff` (src/lib/gui/surface.ts).
+ * Kept here so neither test imports the other, which would run its tests
+ * twice.
  */
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+import ts from "typescript";
 import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
+import { PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME } from "@/lib/plugins/bundled";
 
 /** A handler's key in UNGATED_WRITES: `METHOD /api/route`, every bracket spelled `[id]`. */
 export function exemptionKey(method: string, route: string): string {
@@ -15,8 +23,10 @@ export function exemptionKey(method: string, route: string): string {
  * An exemption for a write route that reaches the Payments capability. Its
  * reason is not taken on trust: route-surface.test.ts's "holds each payment
  * exemption to the method it names" checks that the route file (all of it, not only the handler)
- * composes Payments, calls exactly `reaches` on the capability, and hands
- * neither the capability nor its composition on. What `reaches` may write or
+ * composes Payments, calls exactly `reaches` on the capability, hands
+ * neither the capability nor its composition on, and consults no plugin gate
+ * (the GUI host keeps an action declaring `whilePluginOff` enabled on the
+ * exemption's word that the route accepts it while off). What `reaches` may write or
  * ask the provider is pinned by capability-gating.test.ts, and what the
  * route does besides (no write and no outbound call outside the capability,
  * apart from the exceptions listed there) by check 4 of
@@ -81,6 +91,66 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
     reaches: "handleNotification",
   },
 };
+
+/**
+ * The name a property key spells (`readOnly`, `"readOnly"`, `["readOnly"]`
+ * all → `readOnly`); null when it cannot be known statically.
+ */
+export function propertyKey(name: ts.PropertyName): string | null {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) return name.text;
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) return name.expression.text;
+  return null;
+}
+
+const CAPABILITY_GATING = path.resolve(__dirname, "..", "..", "payments", "__tests__", "capability-gating.test.ts");
+
+let gatingCache: Map<string, string> | null = null;
+
+/**
+ * Each Payments capability method's `gate` in the `GATING` table of
+ * src/lib/payments/__tests__/capability-gating.test.ts
+ * ("refuses-when-disabled" or "available-while-disabled"), which that test
+ * checks against the capability itself. It is read from the source because
+ * importing a test file runs its tests. If the table is renamed or stops
+ * being an object literal of `{ gate: "…" }` entries, this throws; follow it.
+ */
+export function paymentsGating(): Map<string, string> {
+  if (gatingCache) return gatingCache;
+  const file = ts.createSourceFile("capability-gating.test.ts", readFileSync(CAPABILITY_GATING, "utf8"), ts.ScriptTarget.Latest, true);
+  let table: ts.Expression | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "GATING") table = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  while (table && (ts.isAsExpression(table) || ts.isSatisfiesExpression(table) || ts.isParenthesizedExpression(table))) {
+    table = table.expression;
+  }
+  if (!table || !ts.isObjectLiteralExpression(table)) {
+    throw new Error(`${CAPABILITY_GATING}: no \`GATING\` object literal to read the capability's classification from`);
+  }
+  const gating = new Map<string, string>();
+  for (const entry of table.properties) {
+    const method = entry.name ? propertyKey(entry.name) : null;
+    const gate = ts.isPropertyAssignment(entry) && ts.isObjectLiteralExpression(entry.initializer)
+      ? entry.initializer.properties.find((field) => field.name && propertyKey(field.name) === "gate")
+      : undefined;
+    if (!method || !gate || !ts.isPropertyAssignment(gate) || !ts.isStringLiteralLike(gate.initializer)) {
+      throw new Error(`${CAPABILITY_GATING}: cannot read the \`gate\` of GATING entry \`${entry.getText(file).split("\n")[0]}\``);
+    }
+    gating.set(method, gate.initializer.text);
+  }
+  gatingCache = gating;
+  return gating;
+}
+
+/**
+ * The plugins whose routes check 4 of payments-route-boundary.test.ts holds,
+ * and so the only owners of a route with a PaymentExemption (see
+ * `PaymentExemption`; route-surface.test.ts refuses any other). If that
+ * check's `COMPOSER_OWNERS` changes, revisit.
+ */
+export const PAYMENT_EXEMPTION_OWNERS: ReadonlySet<string> = new Set<string>([PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME]);
 
 const HANDLER_RE =
   /^export\s+(?:(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\b|(?:const|let)\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\s*=\s*([A-Za-z_$][\w$]*)\s*;)/gm;

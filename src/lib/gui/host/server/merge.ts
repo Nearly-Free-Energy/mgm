@@ -4,7 +4,9 @@ import "server-only";
  * Resolves the actions in a loader's model into what a GUI receives: the
  * view's own ActionLinks become ActionRefs, other plugins' targeted actions
  * are appended (../shared/merge-actions.ts), and each action's `available()`
- * is asked within one shared time budget.
+ * is asked within one shared time budget. It is asked only of an action
+ * still enabled, which includes one declaring `whilePluginOff: "enabled"`
+ * while its plugin is off.
  *
  * Takes the snapshot's actions as an argument and never names the registry,
  * so it stays unprivileged. Organization access, already settled when the

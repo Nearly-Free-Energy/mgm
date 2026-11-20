@@ -27,6 +27,16 @@ import "server-only";
  *      edit. Internally resolves `tenantIds: [<resolved>]` +
  *      `manualReadings: [<resolved>]` and calls with mode='write'.
  *
+ *   Two later callers rewrite an existing bill only as they read it, through
+ *   fn_regenerate_bill_with_audit: `POST
+ *   /api/billing-line-items/[lineItemId]/regenerate` for one bill
+ *   (`expectedBill`), and `POST
+ *   /api/billing-periods/[periodId]/generate-from-meters` for a whole period
+ *   from meter data (`guardExistingBills`). A third bills one tenant who has
+ *   no bill from readings typed by hand, and refuses one who has: `POST
+ *   /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings`
+ *   (`newBillOnly`). Their params below say how.
+ *
  * ── Write semantics (mode='write') ──────────────────────────────────────────
  *
  * Every tenant processed goes through `fn_record_line_item_with_audit`
@@ -90,7 +100,9 @@ import type {
   BillingLineItemPaymentStatus,
 } from "@/lib/types/domain";
 import type { LineItemRegeneratedDetails } from "@/lib/types/billing-audit";
-import { REGENERATE_REFUSAL_COPY } from "./schemas";
+import { coversPeriod, overlapsPeriod } from "./meter-coverage";
+import { BILL_FROM_READINGS_COPY, GENERATE_FROM_METERS_COPY, REGENERATE_REFUSAL_COPY } from "./schemas";
+import { chunked, pageAfter, readAllPages } from "./surface/pages";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -145,14 +157,30 @@ export type GenerationErrorCode =
   | "meter_assignment_continuity"
   | "unknown_tenant"
   /**
-   * A per-bill regeneration (`expectedBill`) found the bill no longer as the
-   * caller read it: its period closed, it was invoiced, or its payment
-   * status or figures changed (fn_regenerate_bill_with_audit). Nothing was
-   * written.
+   * A per-bill regeneration (`expectedBill`), or a whole-period one
+   * (`guardExistingBills`) rewriting a bill it read, found the bill no
+   * longer as it was read: its period closed, it was invoiced, or its
+   * payment status or figures changed (fn_regenerate_bill_with_audit).
+   * Nothing was written. A whole-period run also reports `invoiced` for a
+   * bill it found invoiced when it read it, and leaves that bill alone.
    */
   | "period_closed"
   | "invoiced"
   | "bill_changed"
+  /**
+   * A whole-period run (`guardExistingBills`) found the bill paid or
+   * refunded and left it as it is, unread from the meter: regenerating a
+   * paid bill needs its own acknowledged regeneration, and a refunded bill
+   * is not regenerated at all (REGENERATE_REFUSAL_COPY).
+   */
+  | "paid"
+  | "refunded"
+  /**
+   * A first bill from readings typed by hand (`newBillOnly`) found the
+   * tenant already billed for the period, as it read the period's bills.
+   * Nothing was written: that bill is changed by regenerating it.
+   */
+  | "bill_exists"
   /**
    * #339. The device has no prior MGM `end_kwh` and no seed was supplied, so
    * `start_kwh` is unknowable. Previously this fell to `?? 0`, which asserted
@@ -215,6 +243,13 @@ export type ErrorTenantResult = {
   tenantName: string;
   error: string;
   code: GenerationErrorCode;
+  /**
+   * Set only by a guarded whole-period run (`guardExistingBills`), when the
+   * tenant had a bill as the run read it. An error writes nothing, so that
+   * bill is left as it was: a tenant whose meter could not be read keeps
+   * the bill it had, rather than going unbilled.
+   */
+  hadBill?: true;
 };
 
 export type TenantResult =
@@ -283,6 +318,87 @@ export type RunGenerationParams = {
    * /api/billing/generate, nothing here applies.
    */
   expectedBill?: ExpectedBill;
+  /**
+   * A whole-period run from meter data that changes an existing bill only
+   * as it was read (POST /api/billing-periods/[periodId]/generate-from-meters,
+   * through BillingCapability.generateFromMeters). Only in write mode, for
+   * every tenant (no tenantIds) and with no manual readings, reverts, seeds
+   * or expectedBill; otherwise the run is refused before anything is read.
+   * When set:
+   *  - a period that is not a draft is refused (409 billing_period_closed);
+   *  - a bill with an invoice number, a paid bill and a refunded bill are
+   *    left as they are and not read from the meter, reported as errors
+   *    with the codes invoiced, paid and refunded (manual bills are kept,
+   *    as on any whole-period run);
+   *  - every other existing bill is written as a per-bill regeneration with
+   *    that bill as read here as its expectedBill: through
+   *    fn_regenerate_bill_with_audit, refused under its locks if the bill
+   *    or its period changed since, and not written at all (`unchanged`, no
+   *    audit row) when its figures are already the ones computed, so a
+   *    second run writes nothing. A bill with a pending payment link
+   *    (link_generated) is rewritten too, as Refresh Readings rewrote it:
+   *    when its total changes, fn_record_line_item_with_audit clears its
+   *    Pesapal link, and fn_payment_bill_revision sets any open checkout
+   *    of the bill to needs_reconciliation (summarizeGenerateFromMeters
+   *    counts those bills, and the confirmation warns of them; if either
+   *    function changes what it does on a new total, revisit both);
+   *  - an existing bill whose meter cannot be read (no meter, an assignment
+   *    gap, no data) is not written: its error carries `hadBill`;
+   *  - the period's status is read again after the meters are read and
+   *    before the first write, and the run is refused the same way, with
+   *    nothing written, if it is no longer a draft;
+   *  - a tenant with no bill gets one through fn_record_line_item_with_audit,
+   *    as on POST /api/billing/generate. That insert is not guarded, and
+   *    cannot be without a migration that gives it an expected "no bill"
+   *    state checked under the period's lock: it checks no period status,
+   *    so a close committing between the second read above and the insert
+   *    is not caught, and it upserts, so a bill another write inserted for
+   *    that tenant after this run read the period's bills (a manual reading
+   *    on POST /api/billing/generate, a bill from readings on POST
+   *    /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings,
+   *    or a second run overlapping this one) is overwritten with this run's
+   *    figures and logged as regenerated. Runs one after another are not
+   *    affected. The parity note (generate-bills in ./parity.ts) lists both
+   *    as known gaps, to be closed by an insert-only function that checks
+   *    the period under its lock before billing.period-review replaces the
+   *    legacy page; when it lands, use it here and drop this.
+   * POST /api/billing/generate leaves it unset and checks none of this.
+   */
+  guardExistingBills?: boolean;
+  /**
+   * A first bill for one tenant from readings typed by hand (POST
+   * /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings,
+   * through BillingCapability.billFromReadings). Only in write mode, with
+   * tenantIds exactly that one tenant and one manual reading for them, and
+   * no reverts, seeds, expectedBill or guardExistingBills; otherwise the run
+   * is refused before anything is read. When set:
+   *  - a period that is not a draft is refused (409 billing_period_closed),
+   *    before the tariff pin;
+   *  - the period's tenants and bills are read in full, every page, and a
+   *    read that cannot be completed stops the run with nothing written
+   *    (500, BILL_FROM_READINGS_COPY.failed);
+   *  - a tenant who already has a bill, as the period's bills are read here,
+   *    is refused with `bill_exists` and nothing is written: that bill is
+   *    changed by regenerating it (POST
+   *    /api/billing-line-items/[lineItemId]/regenerate);
+   *  - the period's status is read again just before the insert, as for
+   *    guardExistingBills, and the run is refused the same way, with nothing
+   *    written, if it is no longer a draft;
+   *  - otherwise the manual path below runs unchanged: the same tariff pin,
+   *    rounding and audit row as on POST /api/billing/generate.
+   * The insert is fn_record_line_item_with_audit's, as for guardExistingBills
+   * above, with the same two known gaps: it checks no period status, so a
+   * close committing between that second read and the insert is not caught,
+   * and it upserts, so a bill another write inserts for this tenant between
+   * the read of the period's bills here and that insert is overwritten with
+   * the readings entered and logged as regenerated. Nothing slow runs
+   * between the two (no meter is read), so the window is as narrow as it can
+   * be without a migration. The parity note (bill-from-readings in
+   * ./parity.ts) lists both, to be closed by the same insert-only function
+   * that checks the period under its lock before billing.period-review
+   * replaces the legacy page; when it lands, use it here and drop this.
+   */
+  newBillOnly?: boolean;
 };
 
 /**
@@ -365,9 +481,14 @@ type PriorItem = {
   entered_by_user_id: string | null;
   entered_at: string | null;
   manual_reason: string | null;
+  /** Read for `guardExistingBills`, which leaves an invoiced bill alone. */
+  invoice_number: string | null;
 };
 
 // ── Implementation ──────────────────────────────────────────────────────────
+
+/** A run that could not read its tenants, bills or prior readings (in full). */
+const UNREADABLE_COPY = "The period's tenants and bills could not be read. Nothing was written; try again.";
 
 /**
  * Compute (and optionally persist) billing line items for a billing period.
@@ -391,7 +512,25 @@ export async function runGenerationFor(
   const seedByDevice = new Map<string, SeedReadingInput>();
   for (const s of params.seedReadings ?? []) seedByDevice.set(s.deviceId, s);
 
-  // ── 0a. A per-bill regeneration names its one tenant and nothing else ──────
+  // ── 0a. A guarded whole-period run reads every tenant from its meter ───────
+  const guardExistingBills = params.guardExistingBills === true;
+  if (
+    guardExistingBills &&
+    (mode !== "write" ||
+      tenantIdsParam !== undefined ||
+      manualReadingsParam.length > 0 ||
+      revertToEdgeSet.size > 0 ||
+      (params.seedReadings ?? []).length > 0 ||
+      params.expectedBill !== undefined)
+  ) {
+    return {
+      kind: "fatal",
+      status: 400,
+      body: { error: "A whole-period run from meter data names no tenants and takes no readings.", code: "guard_existing_bills_mismatch" },
+    };
+  }
+
+  // ── 0b. A per-bill regeneration names its one tenant and nothing else ──────
   const expectedBill = mode === "write" ? params.expectedBill : undefined;
   if (
     expectedBill &&
@@ -406,6 +545,51 @@ export async function runGenerationFor(
       body: { error: "A per-bill regeneration names its bill's one tenant.", code: "expected_bill_mismatch" },
     };
   }
+
+  // ── 0c. A first bill from readings names one tenant and their readings ────
+  const newBillOnly = params.newBillOnly === true;
+  const newBillTenant = tenantIdsParam?.length === 1 ? tenantIdsParam[0] : undefined;
+  if (
+    newBillOnly &&
+    (mode !== "write" ||
+      newBillTenant === undefined ||
+      manualReadingsParam.length !== 1 ||
+      manualReadingsParam[0].tenantId !== newBillTenant ||
+      revertToEdgeSet.size > 0 ||
+      (params.seedReadings ?? []).length > 0 ||
+      params.expectedBill !== undefined ||
+      guardExistingBills)
+  ) {
+    return {
+      kind: "fatal",
+      status: 400,
+      body: { error: "A first bill from readings names one tenant and that tenant's readings only.", code: "new_bill_only_mismatch" },
+    };
+  }
+
+  // A guarded run's or a first bill's refusal of a period that is not (or
+  // no longer) a draft, each in its own action's copy.
+  const periodClosed = (): RunGenerationFatal => ({
+    kind: "fatal",
+    status: 409,
+    body: { error: newBillOnly ? BILL_FROM_READINGS_COPY.closed : GENERATE_FROM_METERS_COPY.closed, code: "billing_period_closed" },
+  });
+  // A read the run depends on (tenants, bills, prior readings, the period's
+  // status again) that could not be completed: nothing has been written, and
+  // the run stops rather than go on from part of the rows. Fixed copy, never
+  // the database's.
+  const unreadable = (code: string): RunGenerationFatal => ({
+    kind: "fatal",
+    status: 500,
+    body: {
+      error: guardExistingBills
+        ? GENERATE_FROM_METERS_COPY.failed
+        : newBillOnly
+          ? BILL_FROM_READINGS_COPY.failed
+          : UNREADABLE_COPY,
+      code,
+    },
+  });
 
   // ── 0. Empty-array short-circuit (AC3 explicit no-op) ─────────────────────
   // `tenantIds: []` AND `manualReadings: []` is a well-defined no-op.
@@ -437,7 +621,16 @@ export async function runGenerationFor(
 
   // Q4=B: closed-period regenerate IS allowed via /api/billing/generate (the
   // legacy reject removed in this ticket). PATCH /usage retains its own
-  // `period_closed` reject upstream — see the route handler.
+  // `period_closed` reject upstream — see the route handler. A guarded
+  // whole-period run refuses it here, before the tariff pin, and again after
+  // reading the meters, before the first write (6b below); its rewrites of
+  // existing bills check it under the period's lock
+  // (fn_regenerate_bill_with_audit), but the insert of a bill a tenant did
+  // not have does not (fn_record_line_item_with_audit checks no period
+  // status): guardExistingBills says what that leaves. A first bill from
+  // readings is refused the same way, with its own copy (periodClosed), and
+  // checked again at 6b too: newBillOnly says what that leaves.
+  if ((guardExistingBills || newBillOnly) && billingPeriod.status !== "draft") return periodClosed();
 
   // ── 2. Resolve the period's pinned rate schedule ─────────────────────────
   // A period must never silently reprice against the microgrid's latest
@@ -481,10 +674,15 @@ export async function runGenerationFor(
   const rateSchedule = schedule as RateSchedule;
 
   // ── 4. Fetch tenants on the period's microgrid (LEFT join) ─────────────
-  const { data: tenantsRaw, error: tenantsError } = await supabase
-    .from("tenants")
-    .select(
-      `
+  // Every page (readAllPages): PostgREST answers at most max_rows rows and
+  // says nothing when it stops, and a tenant missing from this read would
+  // be missing from the run.
+  const tenantsRaw = await readAllPages<TenantRow>((after) =>
+    pageAfter(
+      supabase
+        .from("tenants")
+        .select(
+          `
       id,
       display_name,
       tenant_devices(
@@ -498,22 +696,17 @@ export async function runGenerationFor(
           )
         )
       )
-    `
-    )
-    .eq("microgrid_id", billingPeriod.microgrid_id)
-    .eq("tenant_devices.role", "primary_consumption_meter");
+    `,
+          { count: "exact" },
+        )
+        .eq("microgrid_id", billingPeriod.microgrid_id)
+        .eq("tenant_devices.role", "primary_consumption_meter"),
+      after,
+    ),
+  );
+  if (tenantsRaw === null) return unreadable("billing_tenants_unreadable");
 
-  if (tenantsError) {
-    return {
-      kind: "fatal",
-      status: 500,
-      body: {
-        error: `Error fetching tenants: ${tenantsError.message}`,
-      },
-    };
-  }
-
-  const tenantsAll = (tenantsRaw ?? []) as unknown as TenantRow[];
+  const tenantsAll = tenantsRaw;
   const tenantNames = new Map<string, string>(
     tenantsAll.map((h) => [h.id, h.display_name])
   );
@@ -551,20 +744,13 @@ export async function runGenerationFor(
       // Assignments are half-open DATE ranges [effective_from, effective_to),
       // while billing_periods stores inclusive end dates. Historical links
       // outside this period must not make a later or earlier period ambiguous.
-      const overlappingAssignments = primaryAssignments.filter(
-        (assignment) =>
-          Boolean(assignment.effective_from) &&
-          assignment.effective_from! <= billingPeriod.end_date &&
-          (assignment.effective_to === null ||
-            assignment.effective_to === undefined ||
-            assignment.effective_to > billingPeriod.start_date)
+      // meterCoverage (./meter-coverage.ts) makes the same choice for
+      // billing.generate-from-meters' confirmation.
+      const overlappingAssignments = primaryAssignments.filter((assignment) =>
+        overlapsPeriod(assignment, billingPeriod)
       );
-      const coveringAssignments = overlappingAssignments.filter(
-        (assignment) =>
-          assignment.effective_from! <= billingPeriod.start_date &&
-          (assignment.effective_to === null ||
-            assignment.effective_to === undefined ||
-            assignment.effective_to > billingPeriod.end_date)
+      const coveringAssignments = overlappingAssignments.filter((assignment) =>
+        coversPeriod(assignment, billingPeriod)
       );
 
       if (overlappingAssignments.length === 0) {
@@ -655,19 +841,49 @@ export async function runGenerationFor(
   //   - existing line items in THIS period (for previousTotalAmount /
   //     previousPaymentStatus / Q5 currently_manual detection)
   //   - prior-period end_kwh per device for start_kwh derivation
-  const { data: existingItemsRaw } = await supabase
-    .from("billing_line_items")
-    .select(
-      // The trailing fields (start_kwh, usage_kwh, tier_breakdown,
-      // entered_by_user_id, entered_at, manual_reason) are read for #218's
-      // `previous_snapshot` audit-details capture — the RPC overwrites them
-      // on UPSERT-UPDATE, so we must read them BEFORE calling the RPC.
-      "id, tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason"
-    )
-    .eq("billing_period_id", periodId);
+  //
+  // Every page (readAllPages): a bill missing from a truncated read would
+  // look like "no bill", and a run would not keep it if manual, nor leave
+  // it if paid, invoiced or refunded, and would insert over it. A read
+  // that cannot be completed stops the run, in every mode.
+  const existingItemsRaw = await readAllPages<PriorItem>((after) =>
+    pageAfter(
+      supabase
+        .from("billing_line_items")
+        .select(
+          // The trailing fields (start_kwh, usage_kwh, tier_breakdown,
+          // entered_by_user_id, entered_at, manual_reason) are read for #218's
+          // `previous_snapshot` audit-details capture — the RPC overwrites them
+          // on UPSERT-UPDATE, so we must read them BEFORE calling the RPC.
+          "id, tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason, invoice_number",
+          { count: "exact" },
+        )
+        .eq("billing_period_id", periodId),
+      after,
+    ),
+  );
+  if (existingItemsRaw === null) return unreadable("billing_bills_unreadable");
   const existingByTenant = new Map<string, PriorItem>();
-  for (const r of (existingItemsRaw ?? []) as unknown as PriorItem[]) {
+  for (const r of existingItemsRaw) {
     existingByTenant.set(r.tenant_id, r);
+  }
+
+  // A first bill from readings for a tenant who already has one writes
+  // nothing: that bill is changed by regenerating it. This read of the
+  // period's bills is the last before the insert below, and the manual path
+  // reads no meter in between (RunGenerationParams.newBillOnly).
+  if (newBillOnly && newBillTenant !== undefined && processedSet.has(newBillTenant) && existingByTenant.has(newBillTenant)) {
+    return {
+      results: [
+        {
+          kind: "error",
+          tenantId: newBillTenant,
+          tenantName: tenantNames.get(newBillTenant) ?? newBillTenant,
+          error: BILL_FROM_READINGS_COPY.hasBill,
+          code: "bill_exists",
+        },
+      ],
+    };
   }
 
   // Q5: a currently-manual row the request neither re-enters nor reverts
@@ -678,42 +894,79 @@ export async function runGenerationFor(
     existingByTenant.get(hid)?.reading_source === "manual" &&
     !revertToEdgeSet.has(hid);
 
+  // A guarded whole-period run leaves an invoiced, paid or refunded bill as
+  // it is, and does not read its meter: the code it reports, or null.
+  const leftAs = (hid: string): "invoiced" | "paid" | "refunded" | null => {
+    if (!guardExistingBills) return null;
+    const prior = existingByTenant.get(hid);
+    if (!prior) return null;
+    if (prior.invoice_number !== null && prior.invoice_number !== undefined) return "invoiced";
+    if (prior.payment_status === "refunded") return "refunded";
+    if (prior.payment_status === "paid") return "paid";
+    return null;
+  };
+
   // Prior-period device → last end_kwh (start_kwh derivation).
   const deviceIdsForLookup: string[] = [];
   for (const hid of processedSet) {
     if (manualByTenant.has(hid)) continue; // start/end come from override
     if (isGuardedManual(hid)) continue;
+    if (leftAs(hid)) continue;
     const dev = tenantToDevice.get(hid);
     if (dev) deviceIdsForLookup.push(dev.deviceId);
   }
+  // Every page of both reads (readAllPages), and a read that cannot be
+  // completed stops the run: a missing prior reading would start a meter's
+  // bill at no reading, or at an older one. The readings are read in slices
+  // of the period and device lists (chunked, IN_LIST_CHUNK in
+  // ./surface/pages.ts), since both lists grow with the microgrid and travel
+  // in the read's URL; the periods latest first, and only the devices not
+  // yet found, so a device's reading comes from the first slice that holds
+  // one, which holds its latest.
   const priorEndKwhMap = new Map<string, number>();
   if (deviceIdsForLookup.length > 0) {
-    const { data: priorPeriods } = await supabase
-      .from("billing_periods")
-      .select("id")
-      .eq("microgrid_id", billingPeriod.microgrid_id)
-      .lte("end_date", billingPeriod.start_date)
-      .neq("id", billingPeriod.id)
-      .order("end_date", { ascending: false });
-    if (priorPeriods && priorPeriods.length > 0) {
-      const priorPeriodIds = priorPeriods.map((p) => p.id);
-      const { data: priorItems } = await supabase
-        .from("billing_line_items")
-        .select("device_id, end_kwh, billing_period_id")
-        .in("billing_period_id", priorPeriodIds)
-        .in("device_id", deviceIdsForLookup)
-        .not("end_kwh", "is", null);
-      if (priorItems) {
-        const periodOrder = new Map(priorPeriodIds.map((id, i) => [id, i]));
-        priorItems.sort(
-          (a, b) =>
-            (periodOrder.get(a.billing_period_id) ?? 999) -
-            (periodOrder.get(b.billing_period_id) ?? 999)
+    const priorPeriods = await readAllPages<{ id: string; end_date: string }>((after) =>
+      pageAfter(
+        supabase
+          .from("billing_periods")
+          .select("id, end_date", { count: "exact" })
+          .eq("microgrid_id", billingPeriod.microgrid_id)
+          .lte("end_date", billingPeriod.start_date)
+          .neq("id", billingPeriod.id),
+        after,
+      ),
+    );
+    if (priorPeriods === null) return unreadable("billing_readings_unreadable");
+    // Latest first; read in pages by id, so ordered here.
+    priorPeriods.sort((a, b) => (a.end_date < b.end_date ? 1 : a.end_date > b.end_date ? -1 : 0));
+    const periodOrder = new Map(priorPeriods.map((p, i) => [p.id, i]));
+    for (const periodIds of chunked(priorPeriods.map((p) => p.id))) {
+      const unfound = deviceIdsForLookup.filter((id) => !priorEndKwhMap.has(id));
+      if (unfound.length === 0) break;
+      const found: { id: string; device_id: string | null; end_kwh: number | string | null; billing_period_id: string }[] = [];
+      for (const deviceIds of chunked(unfound)) {
+        const items = await readAllPages<(typeof found)[number]>((after) =>
+          pageAfter(
+            supabase
+              .from("billing_line_items")
+              .select("id, device_id, end_kwh, billing_period_id", { count: "exact" })
+              .in("billing_period_id", periodIds)
+              .in("device_id", deviceIds)
+              .not("end_kwh", "is", null),
+            after,
+          ),
         );
-        for (const item of priorItems) {
-          if (item.device_id && !priorEndKwhMap.has(item.device_id)) {
-            priorEndKwhMap.set(item.device_id, Number(item.end_kwh));
-          }
+        if (items === null) return unreadable("billing_readings_unreadable");
+        found.push(...items);
+      }
+      found.sort(
+        (a, b) =>
+          (periodOrder.get(a.billing_period_id) ?? Infinity) -
+          (periodOrder.get(b.billing_period_id) ?? Infinity)
+      );
+      for (const item of found) {
+        if (item.device_id && !priorEndKwhMap.has(item.device_id)) {
+          priorEndKwhMap.set(item.device_id, Number(item.end_kwh));
         }
       }
     }
@@ -724,6 +977,7 @@ export async function runGenerationFor(
   for (const hid of processedSet) {
     if (manualByTenant.has(hid)) continue;
     if (isGuardedManual(hid)) continue;
+    if (leftAs(hid)) continue;
     const dev = tenantToDevice.get(hid);
     if (dev) tenantsNeedingMetering.push(hid);
   }
@@ -778,6 +1032,25 @@ export async function runGenerationFor(
     }
   }
 
+  // ── 6b. A guarded run reads the period's status again before writing ─────
+  // Reading the meters can take seconds, and a close in that time would
+  // otherwise meet only the rewrites' own check, not the inserts. A close
+  // that commits after this read is still not caught by an insert
+  // (guardExistingBills). A first bill from readings reads no meter, but
+  // pins the tariff and reads the tenants and bills since its first check,
+  // so it reads the status again here too, just before its insert
+  // (newBillOnly).
+  if (guardExistingBills || newBillOnly) {
+    const { data: now, error: nowError } = await supabase
+      .from("billing_periods")
+      .select("status")
+      .eq("id", periodId)
+      .maybeSingle<{ status: string }>();
+    if (nowError) return unreadable("billing_period_unreadable");
+    if (!now) return { kind: "fatal", status: 404, body: { error: "Billing period not found" } };
+    if (now.status !== "draft") return periodClosed();
+  }
+
   // ── 7. Per-tenant processing loop ──────────────────────────────────────
   const results: TenantResult[] = [...unknownTenantErrors];
 
@@ -811,6 +1084,20 @@ export async function runGenerationFor(
       });
       continue;
     }
+
+    // Left as it is by a guarded whole-period run (REGENERATE_REFUSAL_COPY
+    // says why), after manual rows, which that run keeps whatever their status.
+    const left = leftAs(hid);
+    if (left) {
+      results.push({ kind: "error", tenantId: hid, tenantName, error: REGENERATE_REFUSAL_COPY[left], code: left });
+      continue;
+    }
+
+    // The bill this write must still find: the caller's, on a per-bill
+    // regeneration, or on a guarded whole-period run, this tenant's bill as
+    // read above. None for a tenant with no bill, whose bill is inserted.
+    const expected: ExpectedBill | undefined =
+      expectedBill ?? (guardExistingBills && prior && mode === "write" ? expectedFromPrior(prior) : undefined);
 
     // Resolve start_kwh / end_kwh / usage_kwh / reading_source / device_id.
     let startKwh: number | null;
@@ -996,7 +1283,7 @@ export async function runGenerationFor(
     // calculateTieredCost has already rounded).
     const enteredBy = readingSource === "manual" ? actorUserId : null;
     if (
-      expectedBill &&
+      expected &&
       prior &&
       sameBill(prior, {
         deviceId,
@@ -1078,26 +1365,26 @@ export async function runGenerationFor(
       _actor_kind: actorKind,
       _actor_ref: actorRef,
     };
-    const { data: rpcRow, error: rpcErr } = expectedBill
+    const { data: rpcRow, error: rpcErr } = expected
       ? await supabase.rpc("fn_regenerate_bill_with_audit", {
           ...recordArgs,
           _expected: {
-            line_item_id: expectedBill.lineItemId,
-            payment_status: expectedBill.paymentStatus,
-            total_amount: expectedBill.totalAmount,
-            usage_kwh: expectedBill.usageKwh,
-            start_kwh: expectedBill.startKwh,
-            end_kwh: expectedBill.endKwh,
-            reading_source: expectedBill.readingSource,
-            device_id: expectedBill.deviceId,
-            tier_breakdown: expectedBill.tierBreakdown,
-            entered_by_user_id: expectedBill.enteredByUserId,
-            manual_reason: expectedBill.manualReason,
+            line_item_id: expected.lineItemId,
+            payment_status: expected.paymentStatus,
+            total_amount: expected.totalAmount,
+            usage_kwh: expected.usageKwh,
+            start_kwh: expected.startKwh,
+            end_kwh: expected.endKwh,
+            reading_source: expected.readingSource,
+            device_id: expected.deviceId,
+            tier_breakdown: expected.tierBreakdown,
+            entered_by_user_id: expected.enteredByUserId,
+            manual_reason: expected.manualReason,
           },
         })
       : await supabase.rpc("fn_record_line_item_with_audit", recordArgs);
 
-    const refused = expectedBill && rpcErr ? expectedBillRefusal(rpcErr) : null;
+    const refused = expected && rpcErr ? expectedBillRefusal(rpcErr) : null;
     if (refused) {
       results.push({ kind: "error", tenantId: hid, tenantName, ...refused });
       continue;
@@ -1133,6 +1420,14 @@ export async function runGenerationFor(
     });
   }
 
+  // A guarded run says which tenants it did not bill already had a bill,
+  // which stays as it was read (ErrorTenantResult.hadBill).
+  if (guardExistingBills) {
+    for (const r of results) {
+      if (r.kind === "error" && existingByTenant.has(r.tenantId)) r.hadBill = true;
+    }
+  }
+
   return { results };
 }
 
@@ -1157,6 +1452,27 @@ function expectedBillRefusal(err: { code?: string; message?: string }): { code: 
 }
 
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+
+/**
+ * A bill as a guarded whole-period run read it, as the expectedBill of its
+ * rewrite: every value fn_regenerate_bill_with_audit compares, as stored.
+ */
+function expectedFromPrior(prior: PriorItem): ExpectedBill {
+  return {
+    lineItemId: prior.id,
+    tenantId: prior.tenant_id,
+    paymentStatus: prior.payment_status,
+    totalAmount: Number(prior.total_amount),
+    usageKwh: numOrNull(prior.usage_kwh),
+    startKwh: numOrNull(prior.start_kwh),
+    endKwh: numOrNull(prior.end_kwh),
+    readingSource: prior.reading_source ?? null,
+    deviceId: prior.device_id ?? null,
+    tierBreakdown: prior.tier_breakdown,
+    enteredByUserId: prior.entered_by_user_id ?? null,
+    manualReason: prior.manual_reason ?? null,
+  };
+}
 
 /** Whether a bill already holds the figures a regeneration would write. */
 function sameBill(
