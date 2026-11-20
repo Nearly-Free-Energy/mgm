@@ -3,12 +3,13 @@
  *
  * Every row names something real: its route with the method and body
  * schema, its page (a page.tsx, or a catalog page a view serves) or GET
- * route, and, while any row is pending, its legacy component. Every row is either contributed, matching the contribution, or
- * listed in PENDING below. The contributing pull requests of #201 remove
- * their rows from PENDING as they land; the legacy billing screens may be
- * deleted only once PENDING is empty, and a screen's URL may move to the GUI
- * host (its page.tsx deleted, its catalog page served by a view) only once no
- * row of that screen is pending, which the last two tests enforce.
+ * route, and, while any row is pending, its legacy component. Every row is
+ * either contributed, matching the contribution, or listed in PENDING
+ * below. The contributing pull requests of #201 remove their rows from
+ * PENDING as they land; the legacy billing screens may be deleted only once
+ * PENDING is empty, and a screen's URL may move to the GUI host (its
+ * page.tsx deleted, its catalog page served by a view) only once no row of
+ * that screen is pending, which the last two tests enforce.
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
