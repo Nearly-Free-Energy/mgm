@@ -176,7 +176,7 @@ test("a period's close checklist and its confirmation render at 360 px", async (
   await expect(dialog.getByRole("checkbox")).toHaveCount(3);
   await expect(dialog.getByRole("textbox")).toBeVisible();
   // Drawn neutral: a close is neither a DELETE nor destructive (actionTone,
-  // ADR-006 decision 9). Never clicked.
+  // ADR-006 decision 10). Never clicked.
   const confirm = dialog.getByRole("button", { name: "Close period" });
   await expect(confirm).toHaveClass(/\bbg-primary\b/);
   await expect(confirm).not.toHaveClass(/\bbg-destructive\b/);

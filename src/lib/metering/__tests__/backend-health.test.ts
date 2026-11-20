@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveOpenemsBackendHealth } from "../health";
+import { deriveOpenemsBackendHealth } from "../backend-health";
 
 const NOW = new Date("2026-04-23T12:00:00Z");
 

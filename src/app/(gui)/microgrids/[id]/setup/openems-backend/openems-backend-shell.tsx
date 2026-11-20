@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LocalDate } from "@/components/format/local-date";
-import type { OpenemsBackendHealth } from "./health";
+import type { OpenemsBackendHealth } from "@/lib/metering/backend-health";
 
 type MicrogridProps = {
   id: string;

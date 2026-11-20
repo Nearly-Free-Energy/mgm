@@ -125,6 +125,18 @@ export type BillSnapshot = {
   periodLabel: string;
 };
 
+/** An attempt that needs a manager's attention, as listAttention returns it: no amount, reference or provider detail. */
+export type AttentionAttempt = {
+  id: string;
+  lineItemId: string;
+  status: "needs_reconciliation" | "failed";
+  failureCode: string | null;
+  updatedAt: string;
+};
+
+/** The most attempts listAttention reads at once; `truncated` says when there were more. */
+export const MAX_ATTENTION_ATTEMPTS = 500;
+
 export interface PaymentsRepository {
   isPaymentsEnabled(organizationId: string): Promise<boolean>;
   isPesapalEnabled(organizationId: string): Promise<boolean>;
@@ -203,6 +215,20 @@ export interface PaymentsRepository {
   }): Promise<{ failed: boolean; error: RepositoryError | null }>;
   getAttempt(attemptId: string): Promise<PaymentAttempt | null>;
   listAttemptsForLineItem(lineItemId: string): Promise<PaymentAttempt[]>;
+  /**
+   * The organization's attempts in `status`, most recently changed first,
+   * changed at or after `since` when given, without those whose failure
+   * code is in `exceptFailureCodes`, at most `limit`; throws when the read
+   * fails, as listAttemptsForLineItem does.
+   */
+  listAttentionAttempts(input: {
+    orgId: string;
+    status: AttentionAttempt["status"];
+    since?: string;
+    /** Left out; an attempt with no failure code is kept. */
+    exceptFailureCodes?: readonly string[];
+    limit: number;
+  }): Promise<AttentionAttempt[]>;
   recordReceipt(input: {
     orgId: string;
     attemptId: string;
@@ -288,4 +314,14 @@ export interface PaymentsCapabilityContract {
   listHistory(
     lineItemId: string
   ): Promise<PaymentsResult<{ attempts: PaymentAttempt[]; receipts: PaymentReceipt[]; currentTotal: number; currency: string; received: number; difference: number }>>;
+  /**
+   * The organization's attempts that need a manager: `{ status:
+   * "needs_reconciliation" }`, or `{ status: "failed", since }` for failures
+   * changed since an instant, leaving out the failures MGM records for its
+   * own bookkeeping (a checkout replaced by a newer one, or never
+   * submitted). Most recently changed first, at most MAX_ATTENTION_ATTEMPTS.
+   */
+  listAttention(
+    input: unknown
+  ): Promise<PaymentsResult<{ attempts: AttentionAttempt[]; truncated: boolean }>>;
 }

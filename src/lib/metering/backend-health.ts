@@ -14,7 +14,17 @@
 //                                                                      recognized status")
 //
 // "Not connected" copy is strictly reserved for `ems_type IS NULL`.
-// Pure — no DB access. Callers (layout, page) each fetch the fields.
+// Pure — no DB access. Callers (the setup layout and the OpenEMS Backend
+// page, and metering's `metering.connection` watcher, which filters on
+// FAILING_DISCOVER_STATUSES in its read) each fetch the fields.
+
+/** The last check's statuses that read as failing; anything else reads as healthy. */
+export const FAILING_DISCOVER_STATUSES = ["auth_failed", "unreachable", "zero_edges", "unknown_error"] as const;
+export type FailingDiscoverStatus = (typeof FAILING_DISCOVER_STATUSES)[number];
+
+export function isFailingDiscoverStatus(status: string | null): status is FailingDiscoverStatus {
+  return (FAILING_DISCOVER_STATUSES as readonly (string | null)[]).includes(status);
+}
 
 export type OpenemsBackendHealth =
   | "healthy"
@@ -36,14 +46,7 @@ export function deriveOpenemsBackendHealth(
 
   const status = row.ems_last_discover_status;
 
-  if (
-    status === "auth_failed" ||
-    status === "unreachable" ||
-    status === "zero_edges" ||
-    status === "unknown_error"
-  ) {
-    return "failing";
-  }
+  if (isFailingDiscoverStatus(status)) return "failing";
 
   // Fail-open (#215): `success` (any age) and the catch-all "configured but
   // no recognized discover status" (including NULL) both read healthy.

@@ -267,6 +267,7 @@ export const GUI_KINDS_SINCE: Readonly<Record<ViewKind, string>> = {
 // ── What the Shell receives ─────────────────────────────────────────────────
 
 type SignalBase = {
+  /** Unique in the answer: the host sends the watcher's own id prefixed with its source, "<source>:<id>". */
   id: string;
   source: Id;
   severity: "info" | "warn" | "critical";

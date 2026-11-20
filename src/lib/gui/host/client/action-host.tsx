@@ -42,7 +42,7 @@
  * the action. A flow and its prepared action are frozen once made. The routes
  * stay the authority for every write (ADR-006, decision 3).
  *
- * Preparing again (ADR-006, decision 9): when a write answers 409 with a code
+ * Preparing again (ADR-006, decision 10): when a write answers 409 with a code
  * the prepared action lists in `prepareAgainOn`, what the person confirmed
  * changed after prepare (a ceremony's digest, say). The host prepares the
  * same ref again, with the values sent less secrets, and when the answer is

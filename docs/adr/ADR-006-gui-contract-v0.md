@@ -122,7 +122,44 @@ read a stored credential, or to send data to another origin.
      method a surface module may call runs while the plugin is off.
      `gui-surface.test.ts` checks both. The registration check refuses
      `attach.whilePluginOff` on a section or a `vendor` view.
-9. **The host's confirmation steps.**
+   - Its watchers are not run, and are listed as neither checked nor
+     unchecked, unless the watcher declares `whilePluginOff: "checked"`;
+     an unreadable gate lists every watcher as unchecked. As with
+     `attach.whilePluginOff`, only a Payments or Pesapal watcher may
+     declare it, and only while every Payments capability method a surface
+     module may call runs while the plugin is off.
+
+9. **Signals.** A plugin reports what needs someone through watchers
+   (`signals` in its contribution); `GET /api/gui/signals` and
+   `collectSignals` (`src/lib/gui/host/server/signals.ts`) collect them for
+   one organization.
+   - Only staff of that organization get signals. A person whose rows are
+     all tenant rows gets a 403, and no watcher runs.
+   - The host asks the plugin gate per watcher. Its 409 skips the watcher,
+     which is then neither checked nor unchecked, unless it declares
+     `whilePluginOff: "checked"` (decision 8); an unreadable gate lists it
+     as unchecked, without running it.
+   - Each watcher runs on its own request, within its own budget (1500 ms
+     unless it sets `budgetMs`). One that is late, throws, or returns
+     anything the host refuses is listed as unchecked, and only its id and
+     the kind of miss are logged, so one failing watcher never hides the
+     others.
+   - The host refuses a watcher's whole answer when a signal breaks its
+     schema, repeats an id, links anywhere but a released page, or leads
+     (`href`) anywhere but a page its own plugin owns, or when it holds
+     more than 50 signals. It sends each id prefixed with the watcher's.
+   - A watcher reads through the person's own client or a capability's
+     reads, filters by the organization itself and throws when a read
+     fails. It reads the database only, since every load of the signals
+     runs every watcher. It aggregates (one signal per period or site, not
+     per bill), writes fixed copy with values formatted on the server, and
+     names no tenant, because an assistant may read signals later (#133's
+     data boundary).
+   - Each watcher declares examples. Registration parses them;
+     `gui-surface.test.ts` holds their links to the plugin's own released
+     pages.
+
+10. **The host's confirmation steps.**
    - A step's tone, and an `ActionRef`'s `tone`, come from the action's
      definition on the server (`actionTone` in
      `host/shared/merge-actions.ts`): danger for a DELETE or a
@@ -175,7 +212,7 @@ Worse, or to watch:
   must check them again at run time (decision 3).
 - The import boundary rests on the test and on review. It is not process
   isolation.
-- Which actions and views may declare `whilePluginOff` (decision 8) is
+- Which actions, views and watchers may declare `whilePluginOff` (decision 8) is
   checked in CI by `gui-surface.test.ts`, not when a contribution is
   registered, because the registration check reads no test data. The route
   stays the authority, so a declaration that slipped past CI could only

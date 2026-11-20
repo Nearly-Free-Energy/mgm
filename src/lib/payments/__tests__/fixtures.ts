@@ -97,6 +97,7 @@ export function baseRepo(overrides: Partial<PaymentsRepository> = {}): PaymentsR
     failUnlinkedAttempt: async () => ({ failed: true, error: null }),
     getAttempt: async () => null,
     listAttemptsForLineItem: async () => [],
+    listAttentionAttempts: async () => [],
     recordReceipt: async () => ({ created: true, error: null }),
     listExternalAdjustments: async () => [],
     listReceiptsForAttempt: async () => [],

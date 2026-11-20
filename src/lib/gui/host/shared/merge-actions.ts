@@ -76,7 +76,7 @@ export function fillPath(pattern: string, params: Readonly<Record<string, string
 /**
  * The tone of an action's controls and confirmation steps: danger for a
  * DELETE or a destructive action, neutral for every other, typed and
- * ceremony included (ADR-006, decision 9). A confirmation's level says how
+ * ceremony included (ADR-006, decision 10). A confirmation's level says how
  * carefully a person confirms, not what the write does: closing a period is
  * a final commit, not a destruction (design rule 5 in CLAUDE.md). The host
  * takes a step's tone from the prepared action (../server/prepare.ts), never

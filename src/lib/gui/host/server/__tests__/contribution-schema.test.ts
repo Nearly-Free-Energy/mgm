@@ -48,6 +48,8 @@ function refusal(change: (c: Draft) => void, catalog = CATALOG, base: object = B
 }
 
 const fn = async () => null;
+/** The id of the fixture watcher's one example. */
+const PERIOD_ID = "00000000-0000-4000-8000-0000000000c1";
 const TEXT = { t: "text", text: "a" };
 /** Turns views[0] and its example into a view of another kind with the given body. */
 function asKind(c: Draft, kind: string, body: object) {
@@ -181,6 +183,18 @@ describe("parseContribution", () => {
     ],
     ["budgetMs over 10000", (c) => (c.signals[0].budgetMs = 20_000), ["signals", 0, "budgetMs"]],
     ["budgetMs 0", (c) => (c.signals[0].budgetMs = 0), ["signals", 0, "budgetMs"]],
+    ["a watcher's whilePluginOff of another value", (c) => (c.signals[0].whilePluginOff = true), ["signals", 0, "whilePluginOff"]],
+    ["a watcher's whilePluginOff in an attachment's word", (c) => (c.signals[0].whilePluginOff = "listed"), ["signals", 0, "whilePluginOff"]],
+    ["a watcher without examples", (c) => (c.signals[0].examples = []), ["signals", 0, "examples"], "a watcher needs at least one example"],
+    ["a watcher example with a source", (c) => (c.signals[0].examples[0].source = "billing.period-due"), ["signals", 0, "examples", 0], 'Unrecognized key: "source"'],
+    ["a watcher example of an unknown kind", (c) => (c.signals[0].examples[0].kind = "nudge"), ["signals", 0, "examples", 0, "kind"]],
+    ["a watcher example whose href is not a path", (c) => (c.signals[0].examples[0].href = "https://example.com"), ["signals", 0, "examples", 0, "href"]],
+    [
+      "a watcher's examples sharing an id",
+      (c) => c.signals[0].examples.push({ ...c.signals[0].examples[0] }),
+      ["signals", 0, "examples", 1, "id"],
+      `"${PERIOD_ID}" is used twice`,
+    ],
     ["a nav entry with neither view nor href", (c) => delete c.nav[0].view, ["nav", 0], "a nav entry needs a view, or an href with needs and legacy: true"],
     ["a nav entry with both", (c) => (c.nav[0].href = "/microgrids/[id]/billing"), ["nav", 0, "view"], "a nav entry names a view or a legacy href, not both"],
     ["a view nav entry with needs", (c) => (c.nav[0].needs = ["microgrid"]), ["nav", 0, "view"], "a nav entry names a view or a legacy href, not both"],
