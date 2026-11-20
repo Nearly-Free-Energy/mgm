@@ -25,9 +25,13 @@ import type {
 import { ATTEMPT_NOT_OPEN } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
+import { stablePaymentLinkPath } from "./payment-link";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** getReadiness's refusal when a plugin's state could not be read: fixed copy, never the read's error. */
+export const READINESS_UNREADABLE = "Could not check whether online payments are turned on. Try again shortly.";
 
 function splitName(full: string): { first: string; last: string } {
   const trimmed = full.trim();
@@ -132,12 +136,9 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         orgId: this.scope.organizationId,
         communityId,
       }),
-      // An unreadable state reads as disabled. The invoice PDF route and the
-      // billing period page offer a payment link only for `ready`/`sandbox`,
-      // so they render without one instead of failing; if a caller starts
-      // treating `disabled` as an error, revisit.
-      this.repo.isPaymentsEnabled(this.scope.organizationId).catch(() => false),
-      this.repo.isPesapalEnabled(this.scope.organizationId).catch(() => false),
+      // null: the state could not be read (the repository rejects then).
+      this.repo.isPaymentsEnabled(this.scope.organizationId).catch(() => null),
+      this.repo.isPesapalEnabled(this.scope.organizationId).catch(() => null),
     ]);
     if (!loaded.ok) {
       return {
@@ -145,6 +146,22 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         status: 500 as const,
         code: "payments_unavailable",
         message: loaded.message,
+      };
+    }
+    // Either plugin read as off is off, whatever the other read did. A state
+    // that could not be read, with neither read as off, is not an answer:
+    // saying "disabled" would tell a manager payments are turned off when
+    // they may not be. The invoice PDF route, the billing period page and
+    // the send queue offer a payment link only for an answer of
+    // `ready`/`sandbox`, and treat a refusal as no link, so they render
+    // without one; the send queue says it could not check. If a caller
+    // starts failing on a refusal here, revisit.
+    if (paymentsOn !== false && pesapalOn !== false && (paymentsOn === null || pesapalOn === null)) {
+      return {
+        ok: false as const,
+        status: 503 as const,
+        code: "payments_unavailable",
+        message: READINESS_UNREADABLE,
       };
     }
     if (!paymentsOn || !pesapalOn) {
@@ -211,7 +228,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     }
     // The stable MGM link resolves to the current bill revision at click
     // time; invoices embed this same link. Customers need no MGM account.
-    return { ok: true as const, data: { url: this.appUrl(`/api/billing-line-items/${lineItemId}/pay`) } };
+    return { ok: true as const, data: { url: this.appUrl(stablePaymentLinkPath(lineItemId)) } };
   }
 
   private billToDescription(bill: BillSnapshot): string {

@@ -397,9 +397,15 @@ checkout while keeping history and verification available", and the
 when their state cannot be read, before it obtains a provider or writes
 anything. The reads (`getReadiness`, `stablePaymentLink`, `listHistory`),
 verification of attempts already submitted (`refreshPaymentStatus`,
-`handleNotification`) and `reconcile` run regardless; `getReadiness` reports
-unreadable state as disabled, so an invoice renders without a payment link
-instead of failing. The `503` relies on the payments repository rejecting
+`handleNotification`) and `reconcile` run regardless. `getReadiness` answers
+`disabled` when either plugin reads as off, and refuses with
+`503 payments_unavailable` when a state cannot be read and neither plugin
+reads as off, rather than say payments are turned off when they may not be.
+Its callers (the invoice PDF route, the billing period page and the send
+queue) offer a payment link only for `ready` or `sandbox` and treat that
+refusal as no link, so an invoice renders without one instead of failing; a
+new caller does the same. If a caller starts failing on that refusal, revisit
+this paragraph and the comment in `getReadiness`. The `503` relies on the payments repository rejecting
 when it cannot read the state, as `isPluginEnabledForOrg` does; a repository
 that reads a failure as `false` answers `409` instead.
 

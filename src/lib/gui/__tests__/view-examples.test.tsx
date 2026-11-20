@@ -53,7 +53,7 @@ describe.each(Object.entries(INSTALLED_GUIS))("%s draws the contributed views' e
  * (src/gui/<name>/renderers/); if one changes, change it here.
  */
 const RENDERER_MARKS: Partial<Record<keyof typeof INSTALLED_GUIS, Record<string, string>>> = {
-  gridtop: { "billing.period-review": "[data-period-review]" },
+  gridtop: { "billing.period-review": "[data-period-review]", "billing.send-queue": "[data-send-queue]" },
 };
 
 describe.each(Object.entries(RENDERER_MARKS))("%s draws its marked renderers' examples itself", (name, marks) => {

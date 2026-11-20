@@ -61,6 +61,11 @@ export const DOWNLOAD_BILL_LINK = "billing.download-bill";
 /** A draft's link to its close checklist (`billing.close-checklist`, ./close-checklist-model.ts). */
 export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
 
+/** A period's link to its send queue (`billing.send-queue`, ./send-queue-model.ts). */
+export const SEND_QUEUE_LINK = "billing.send-queue";
+/** That link's label. */
+export const SEND_QUEUE_LINK_LABEL = "Payment links";
+
 /**
  * The close checklist of a period: the path the `billing.close-checklist`
  * view is registered on (../surface.ts). Here rather than in
@@ -69,6 +74,26 @@ export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
  */
 export function closeChecklistHref(microgridId: string, periodId: string): `/${string}` {
   return `/microgrids/${microgridId}/billing/${periodId}/close`;
+}
+
+/** The send queue of a period: the path `billing.send-queue` is registered on (../surface.ts), here for the same reason. */
+export function sendQueueHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/send`;
+}
+
+/**
+ * A bill's PDF, as its row links it in the period review and the send
+ * queue. The route names the file after the invoice number it allocates on
+ * first use; before then, as the legacy menu falls back.
+ */
+export function downloadBillLink(bill: { id: string; invoice_number: string | null }): LinkRef {
+  return {
+    id: DOWNLOAD_BILL_LINK,
+    label: "Download bill (PDF)",
+    icon: "download",
+    href: `/api/billing-line-items/${bill.id}/pdf`,
+    download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
+  };
 }
 
 /**
@@ -270,14 +295,7 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
       }),
     );
     const links: LinkRef[] = [
-      {
-        id: DOWNLOAD_BILL_LINK,
-        label: "Download bill (PDF)",
-        icon: "download",
-        href: `/api/billing-line-items/${bill.id}/pdf`,
-        // The route names the file after the invoice number it allocates on first use; before then, as the legacy menu falls back.
-        download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
-      },
+      downloadBillLink(bill),
       { id: VIEW_HISTORY_LINK, label: "View history", href: periodHistoryHref(microgrid.id, period.id, { tenantId: tenant.id }) },
     ];
     return [
@@ -358,6 +376,12 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
   // the close review on every load of this view.
   if (period.status === "draft") {
     links.push({ id: CLOSE_CHECKLIST_LINK, label: "Close period", href: closeChecklistHref(microgrid.id, period.id) });
+  }
+  // The bills' payment links, for draft and closed periods alike (both are
+  // payable); left out with no bills, which have none. Labelled for the
+  // links, not a send: the view sends nothing (./send-queue-model.ts).
+  if (i.bills.length > 0) {
+    links.push({ id: SEND_QUEUE_LINK, label: SEND_QUEUE_LINK_LABEL, icon: "payments", href: sendQueueHref(microgrid.id, period.id) });
   }
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {

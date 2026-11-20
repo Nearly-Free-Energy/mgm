@@ -410,9 +410,9 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Go to Payment tab, in the banner shown when online payments are not set up",
     legacy: "src/components/BillingTable.tsx",
-    replacedBy: { kind: "link", view: "billing.send-queue", href: "/communities/[id]/payment" },
-    pr: SEND,
-    note: "Moved to the send queue, which contributes payment links: the banner explains why none can be made. A billing loader can neither set a notice (host-filled) nor link to payments' page (check 7), so it needs payments' own contribution, such as a super-admin nav entry or the reason payment-link's available() gives.",
+    replacedBy: { kind: "link", view: "payments.community-payment", href: "/communities/[id]/payment" },
+    pr: ATTEMPTS,
+    note: "Decided in review of the send queue (#216): the payments plugin contributes it with a bill's payment attempts, either as its view of the community's Payment page (payments.community-payment) carrying this link, or as a view of its own attached to billing.send-queue that carries the setup link. Until then the send queue says why no link can be made, with the legacy banner's advice by role (a super admin is told to connect a provider on the community's Payment page, anyone else to ask a super admin), but cannot link the page: it is payments' page, which a billing view may not link (gui-surface.test.ts check 7), and a billing loader cannot set the host's notice. If the attached view is the one built, its id replaces payments.community-payment here.",
   },
   {
     id: "close-period",
@@ -439,20 +439,9 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     screen: "period-review",
     control: "Row menu Generate payment link and Regenerate payment link; a row banner's Retry after a failed link",
     legacy: "src/components/billing/row-actions-menu.tsx",
-    replacedBy: {
-      kind: "action",
-      plugin: "payments",
-      action: "payments.payment-link",
-      target: "lineItem",
-      method: "POST",
-      route: "/api/billing-line-items/[lineItemId]/url",
-      risk: "external",
-      confirm: "confirm",
-      form: null,
-      view: "billing.send-queue",
-    },
+    replacedBy: { kind: "view", view: "billing.send-queue" },
     pr: SEND,
-    note: "The route reads no body although its client sends { force }; it needs a body schema (an empty one) before the action can be contributed.",
+    note: "The send queue shows each bill's stable payment link, ready to copy, so Generate, Regenerate and Retry have nothing left to do. The url route has written nothing and called no provider since the stable link replaced per-checkout links (its UNGATED_WRITES entry in src/lib/runtime/__tests__/route-rules.ts says so), and an action result carries no URL a person could copy: invoke.ts keeps only a message and a same-site href, which the host opens, and opening …/pay starts a checkout. The queue offers a link only where checkout would accept it (no paid or refunded bill, no zero total, a tenant with an email or phone) and while readiness is ready or sandbox, as the legacy menu offered Generate only once payments were set up. If the link ever needs a write (a per-bill token, say), it becomes an action again. The url route's only caller is the legacy row menu; the Deletes pull request removes it, or keeps it, with its UNGATED_WRITES entry, its released route and its tests.",
   },
   {
     id: "payment-history",
@@ -541,6 +530,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/components/billing/payment-link-popover.tsx, src/components/billing/row-actions-menu.tsx",
     replacedBy: { kind: "copy", view: "billing.send-queue", what: "a bill's payment link" },
     pr: SEND,
+    note: "Gridtop's renderer of the send queue (src/gui/gridtop/renderers/send-queue) draws Copy link on each bill that has a link, copying the ext's link; a GUI without that renderer shows the link cell as text a person can select.",
   },
 
   // ── Period history ────────────────────────────────────────────────────────

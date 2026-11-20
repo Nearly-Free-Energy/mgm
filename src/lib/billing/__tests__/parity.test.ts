@@ -57,11 +57,10 @@ const PENDING = new Set<string>([
   // GenerateBillsBody's tenant arrays and no GUI registers a form for it,
   // so no interface could submit it (see `submittable` below).
   "generate-bills",
-  // Contribute the send queue on …/send
-  "payment-link",
-  "copy-payment-link",
-  "payment-setup",
   // Contribute a bill's payment attempts
+  // The link to the community's Payment page waits for payments to
+  // contribute that page, or a view attached to the send queue (parity.ts).
+  "payment-setup",
   "payment-history",
   "refresh-attempt",
   "record-adjustment",

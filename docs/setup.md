@@ -494,15 +494,20 @@ Preview bill, checking that the popup is sent to a `blob:` URL holding a
 PDF. It opens a draft billing period's close checklist and its Close
 confirmation step (the totals, the acknowledgements and the name to type),
 checks that the step fits the screen and that its controls are 44 px
-targets, and leaves without confirming. Every page fails on a page error, a
+targets, and leaves without confirming. It opens the period's payment
+links (the send queue, `…/send`), with a sandbox payment account seeded for
+the organization, and checks that it says nothing is sent from it and that
+the bill with a total offers its payment link to copy, without opening or
+copying it. Every page fails on a page error, a
 console error or a content security policy violation, popups included, and
 on any write to the app's API other than the invoice preview and the
 close's prepare step, neither of which writes. The headless Chromium it runs
 has no PDF viewer, so it sees the preview as a download; it cannot show
 that a desktop browser displays it. It creates its own organization,
 community (with an invoice logo in the `invoice-logos` bucket), microgrids,
-tenants, tariff, billing period, bills and user in the local database and
-deletes them afterwards.
+tenants, tariff, billing period, bills, payment account (no credential, and
+never contacted) and user in the local database and deletes them
+afterwards.
 Timings are printed, not enforced.
 
 ```bash
