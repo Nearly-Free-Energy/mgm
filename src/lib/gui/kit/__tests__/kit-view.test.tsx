@@ -481,6 +481,56 @@ describe("KitView: what every view shares", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
   });
 
+  const TODAY_TILES: ViewModel["attached"] = [{ view: "billing.current-periods", title: "Current billing periods", href: "/billing", hint: "tile" }];
+  const tileModel = () => model({ view: "billing.current-periods", title: "Current billing periods", ...collection({}) });
+  /** A model the kit's view cannot draw: a collection with no columns. */
+  const broken = () => model({ view: "billing.current-periods", title: "Current billing periods", kind: "collection", body: { rows: [{ id: "x" }] } } as unknown as Partial<ViewModel>);
+  const page = (over: Partial<ViewModel> = {}) => (
+    <KitRuntimeProvider runtime={runtime}>
+      <KitView model={model({ title: "Today", attached: TODAY_TILES, ...over })} />
+    </KitRuntimeProvider>
+  );
+
+  it("shows why a tile that throws while drawing could not be loaded, keeps the page, and draws it again with the page's next answer", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const answers = [broken(), tileModel()];
+    runtime = recordingRuntime({ act, fetch: vi.fn(async () => Response.json(answers.shift())) });
+    const { rerender } = render(page());
+    const region = screen.getByRole("region", { name: "Tiles" });
+    expect(await within(region).findByText("This tile could not be loaded.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
+    // The same href, a new page answer: the tile loads and draws again, not stuck on its failure.
+    rerender(page({ subtitle: "Refreshed" }));
+    expect(await within(region).findByRole("link", { name: "Aisha" })).toBeTruthy();
+    expect(within(region).queryByText("This tile could not be loaded.")).toBeNull();
+    expect(runtime.fetch).toHaveBeenCalledTimes(2);
+    vi.mocked(console.error).mockRestore();
+  });
+
+  it("loads a tile again only when the page's model says something new, not when it is copied", async () => {
+    runtime = recordingRuntime({ act, fetch: vi.fn(async () => Response.json(tileModel())) });
+    const { rerender } = render(page());
+    expect(await within(screen.getByRole("region", { name: "Tiles" })).findByRole("link", { name: "Aisha" })).toBeTruthy();
+    // A new object with the same content, as a renderer that copies the model hands over.
+    rerender(page());
+    rerender(page());
+    await flush(async () => {});
+    expect(runtime.fetch).toHaveBeenCalledOnce();
+    rerender(page({ subtitle: "Refreshed" }));
+    await waitFor(() => expect(runtime.fetch).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows why a tile could not be loaded when loading it fails outright, and keeps the page", async () => {
+    // A response whose status cannot be read makes loadView itself reject.
+    const unreadable = Object.defineProperty({}, "status", { get: () => { throw new Error("unreadable"); } }) as Response;
+    runtime = recordingRuntime({ act, fetch: vi.fn(async () => unreadable) });
+    render(page());
+    const region = screen.getByRole("region", { name: "Tiles" });
+    expect(await within(region).findByText("This tile could not be loaded.")).toBeTruthy();
+    expect(within(region).getByRole("link", { name: "Open Current billing periods" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
+  });
+
   it("loads no tiles inside a view drawn one level down", async () => {
     const inner = model({ title: "Inner", attached: [{ view: "billing.current-periods", title: "Tile", href: "/billing", hint: "tile" }] });
     show({ kind: "feed", body: { entries: [{ id: "e1", at: "2026-11-10T11:00:00.000Z", author: { kind: "system", name: "MGM" }, text: [], embed: { type: "view", href: "/x", model: inner } }] } } as Partial<ViewModel>);
