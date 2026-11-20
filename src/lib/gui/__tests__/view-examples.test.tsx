@@ -19,7 +19,14 @@ import type { ViewModel } from "../contract";
 const { views } = (await getMgmRuntime()).mgmSurface.snapshot();
 
 const EXAMPLES = views.flatMap(({ def: view }) =>
-  view.examples.map((example, i) => ({ name: `${view.id} example ${i}`, model: example as ViewModel })),
+  view.examples.map((example, i) => ({
+    name: `${view.id} example ${i}`,
+    model: example as ViewModel,
+    // Whether the host merges other plugins' actions onto the example's own
+    // entity: always for a view that declares one, and otherwise only when
+    // the example carries one anyway.
+    poked: view.entity !== undefined || (example as ViewModel).entity !== undefined,
+  })),
 );
 
 afterAll(() => resetMgmRuntimeForTests());
@@ -37,9 +44,14 @@ beforeAll(async () => {
 }, 120_000);
 
 describe.each(Object.entries(INSTALLED_GUIS))("%s draws the contributed views' examples", (_name, gui) => {
-  it.each(EXAMPLES.map((e) => [e.name, e.model] as const))("%s", async (name, model) => {
+  it.each(EXAMPLES.map((e) => [e.name, e.model, e.poked] as const))("%s", async (name, model, entityPoked) => {
     const poked = withPoke(model);
-    expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
+    // An entity is optional in the contract: a view that declares none and
+    // whose loader sets none (payments.bill-attempts, so that no other
+    // plugin's action on its period is appended) gets the poke only on its
+    // rows' entities, if they have any. A view that declares an entity
+    // gets it on every example, so one that loses its entity fails here.
+    if (entityPoked) expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
     expect(await checkModel(gui, poked, name)).toEqual([]);
   });
 });

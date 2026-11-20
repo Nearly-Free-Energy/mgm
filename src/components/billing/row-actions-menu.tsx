@@ -866,7 +866,7 @@ export function RowActionsMenu(props: RowActionsMenuProps) {
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <PaymentHistory lineItemId={lineItem.id} />
+      <PaymentHistory lineItemId={lineItem.id} tenantName={tenant.display_name} />
       {/* Payment-link popover — anchored next to the kebab. */}
       <PaymentLinkPopover url={pendingUrl} onClose={() => setPendingUrl(null)} />
 

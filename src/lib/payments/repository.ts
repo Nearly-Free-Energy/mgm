@@ -18,7 +18,7 @@ export type PaymentsResult<T> =
   | { ok: true; data: T }
   | {
       ok: false;
-      status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502 | 503;
+      status: 400 | 401 | 403 | 404 | 409 | 422 | 428 | 500 | 502 | 503;
       code: string;
       message: string;
       field?: string;
@@ -215,6 +215,7 @@ export interface PaymentsRepository {
     rawPayload: unknown;
   }): Promise<{ created: boolean; error: RepositoryError | null }>;
   listExternalAdjustments(lineItemId: string): Promise<{ amount: number; reference: string | null; notes: string | null; at: string }[]>;
+  /** The attempt's receipts, oldest first; throws when the read fails, as listAttemptsForLineItem does. */
   listReceiptsForAttempt(attemptId: string): Promise<PaymentReceipt[]>;
   upsertNotification(input: {
     orgId: string | null;

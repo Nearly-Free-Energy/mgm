@@ -13,7 +13,10 @@ import {
 // microgrids, three tenants on the first, a tariff and a draft October 2026
 // billing period on the first with bills for two of its tenants (one with no
 // usage), a default sandbox Pesapal account for the organization, so the
-// period's send queue shows a payment link, and an org_manager who signs in
+// period's send queue shows a payment link, an online payment attempt on the
+// first bill held for reconciliation, so the period's payments show one with
+// its actions (the account stores no credential, so nothing could contact a
+// provider), and an org_manager who signs in
 // by email link (RFC #186), read
 // from the local mail catcher. This file writes only the ids and the email
 // to disk, for the narrow project and the teardown.
@@ -21,7 +24,15 @@ import {
 export const AUTH_DIR = path.join(__dirname, ".auth");
 const FIXTURES_FILE = path.join(AUTH_DIR, "fixtures.json");
 
-export type SmokeFixtures = { orgId: string; communityId: string; microgridId: string; periodId: string; email: string };
+export type SmokeFixtures = {
+  orgId: string;
+  communityId: string;
+  microgridId: string;
+  periodId: string;
+  /** The first bill, which has a payment attempt. */
+  billId: string;
+  email: string;
+};
 
 /**
  * The invoice logo: an 8 x 8 PNG, uploaded where the invoice-logo route puts
@@ -77,11 +88,12 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   const tenantIds = [randomUUID(), randomUUID(), randomUUID()];
   const scheduleId = randomUUID();
   const periodId = randomUUID();
+  const billId = randomUUID();
   const email = `smoke-${tag}@test.local`; // the domain the database suites use
 
   // Written first, so the teardown removes whatever the steps below created.
   mkdirSync(AUTH_DIR, { recursive: true });
-  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], periodId, email };
+  const fixtures: SmokeFixtures = { orgId, communityId, microgridId: microgridIds[0], periodId, billId, email };
   writeFileSync(FIXTURES_FILE, JSON.stringify(fixtures));
 
   await must("organization", svc.from("organizations").insert({ id: orgId, name: `Smoke organization ${tag}` }));
@@ -149,6 +161,7 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
     "bills",
     svc.from("billing_line_items").insert([
       {
+        id: billId,
         billing_period_id: periodId,
         tenant_id: tenantIds[0],
         start_kwh: 100,
@@ -159,6 +172,7 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
         reading_source: "edge",
       },
       {
+        id: randomUUID(),
         billing_period_id: periodId,
         tenant_id: tenantIds[1],
         start_kwh: null,
@@ -176,15 +190,44 @@ export async function createSmokeFixtures(): Promise<SmokeFixtures> {
   // src/lib/payments/capability.ts), so loading the queue calls no provider;
   // no credential is stored, so nothing could. If readiness starts testing
   // the account live, take this out.
-  await must(
+  const account = await must(
     "payment account",
-    svc.from("payment_merchant_accounts").insert({
+    svc
+      .from("payment_merchant_accounts")
+      .insert({
+        org_id: orgId,
+        provider: "pesapal",
+        is_default: true,
+        sandbox: true,
+        last_test_status: "success",
+        ipn_id: `smoke-ipn-${tag}`,
+      })
+      .select("id")
+      .single()
+  );
+  // An attempt on the first bill, held for reconciliation with a tracking id,
+  // so the period's payments show it with Refresh status and both
+  // reconciliations. The smoke never presses Refresh status, which would ask
+  // the provider; the account stores no credential anyway. Payment records
+  // are kept with their bill, so the teardown purges the organization as the
+  // database owner (cleanupTestData).
+  const attemptId = randomUUID();
+  await must(
+    "payment attempt",
+    svc.from("payment_attempts").insert({
+      id: attemptId,
       org_id: orgId,
-      provider: "pesapal",
-      is_default: true,
-      sandbox: true,
-      last_test_status: "success",
-      ipn_id: `smoke-ipn-${tag}`,
+      line_item_id: billId,
+      community_id: communityId,
+      merchant_account_id: (account as { id: string }).id,
+      merchant_account_version: 1,
+      amount: 2500,
+      currency: "UGX",
+      bill_revision_total: 2500,
+      merchant_reference: `MGM-${attemptId}`,
+      provider_tracking_id: `smoke-tracking-${tag}`,
+      status: "needs_reconciliation",
+      failure_code: "balance_mismatch",
     })
   );
   await createTestUser({ email, role: "org_manager", scopeId: orgId });
