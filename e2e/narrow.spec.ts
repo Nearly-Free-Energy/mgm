@@ -41,6 +41,61 @@ test("the tenants page renders at 360 px", async ({ page }) => {
   watch.assertClean();
 });
 
+test("a microgrid's billing periods render at 360 px", async ({ page }) => {
+  const { microgridId, periodId } = readSmokeFixtures();
+  // Opening New billing period prepares the action, a POST that writes
+  // nothing (src/lib/gui/host/server/prepare.ts); if prepare starts writing,
+  // take it out of here. Nothing is submitted and no period is deleted.
+  const watch = await watchPage(page, { expectedWrites: [/^\/api\/gui\/prepare$/] });
+  await page.goto(`/microgrids/${microgridId}/billing`);
+  // The host's catch-all serves the path: the legacy list had no view marker.
+  await expect(page.locator('[data-gui-view="billing.periods"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Billing periods" })).toBeVisible();
+  await expect(page.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}"]`).first()).toBeVisible();
+  await expect(page.getByText("Draft", { exact: true }).first()).toBeVisible();
+  await checkNarrowPage(page);
+  await reportTiming(page, "Billing periods");
+
+  // The create form fits the screen. Escape leaves it unsent.
+  await page.getByRole("button", { name: "New billing period" }).click();
+  const dialog = page.locator('[role="dialog"], [role="alertdialog"]');
+  await expect(dialog).toBeVisible();
+  const box = await dialog.boundingBox();
+  expect(box, "the dialog has a box").not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(360);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(800);
+  await checkTouchTargets(page, '[role="dialog"], [role="alertdialog"]');
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  watch.assertClean();
+});
+
+test("a period's history renders at 360 px", async ({ page }) => {
+  const { microgridId, periodId } = readSmokeFixtures();
+  const watch = await watchPage(page);
+  await page.goto(`/microgrids/${microgridId}/billing/${periodId}/history`);
+  await expect(page.locator('[data-gui-view="billing.period-history"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit history" })).toBeVisible();
+  // The fixtures write no audit entry of their own, so this checks the
+  // frame and its way back, not the entries.
+  await checkNarrowPage(page);
+  await reportTiming(page, "Period history");
+
+  // Below 600 px Gridtop's window bar keeps a view's links in its Actions
+  // sheet (src/gui/gridtop/shell/window-bar.tsx); if the bar ever shows them
+  // itself, look for the link on the page instead. Opening it writes nothing.
+  await page.getByRole("button", { name: "Actions" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}"]`)).toBeVisible();
+  await checkTouchTargets(page, '[role="dialog"]');
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  watch.assertClean();
+});
+
 test("a period's close checklist and its confirmation render at 360 px", async ({ page }) => {
   const { microgridId, periodId } = readSmokeFixtures();
   // Opening Close prepares the action, a POST that writes nothing

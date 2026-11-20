@@ -491,7 +491,12 @@ sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
 the invoice logo loads from its signed Supabase Storage URL, and runs
 Preview bill, checking that the popup is sent to a `blob:` URL holding a
-PDF. It opens a draft billing period's close checklist and its Close
+PDF. It opens a microgrid's billing periods, checking that the GUI host
+serves the page (the `billing.periods` view) and lists the draft period,
+and opens New billing period to check that its form fits the screen,
+leaving without creating one; and it opens that period's history (the
+`billing.period-history` view) and its link back to the period. It opens a
+draft billing period's close checklist and its Close
 confirmation step (the totals, the acknowledgements and the name to type),
 checks that the step fits the screen and that its controls are 44 px
 targets, and leaves without confirming. It opens the period's payment
