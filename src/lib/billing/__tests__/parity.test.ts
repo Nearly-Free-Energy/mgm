@@ -58,9 +58,6 @@ const APP = path.join(ROOT, "src/app");
  * and if a row is neither contributed nor listed.
  */
 const PENDING = new Set<string>([
-  // Unscheduled: after generating from meter data, a tenant with no meter
-  // data has no bill, and no GUI action bills them from readings (parity.ts).
-  "bill-from-readings",
 ]);
 
 /**
@@ -385,6 +382,20 @@ describe("parity with the contributed actions and views", () => {
     // A flat input the kit renders could be submitted.
     const flat = { ...fullBody, input: z.strictObject({ billingPeriodId: z.string() }) } as ActionDef;
     expect(submittable(flat)).toBe(true);
+  });
+
+  it("lets a person type bill-from-readings' readings in the kit's form, and offers it on the tenants not billed", () => {
+    const row = BILLING_PARITY.find((r) => r.id === "bill-from-readings")!;
+    const def = contributedAction(row.replacedBy as ParityAction)!;
+    expect(def.id).toBe("billing.bill-from-readings");
+    // The period and the tenant are bound from the path; the person types the rest.
+    expect(fieldsOf(personInput(def))?.map((f) => f.key)).toEqual(["start_kwh", "end_kwh", "reason"]);
+    expect(submittable(def)).toBe(true);
+    // An example of the section carries it on a row, bound to that row's tenant.
+    const rows = examplesOf("billing.not-billed").flatMap((m) => (m as { body: { rows: { id: string; actions: { action: string; params: Record<string, string> }[] }[] } }).body.rows);
+    const offered = rows.filter((r) => r.actions.some((a) => a.action === def.id));
+    expect(offered.length).toBeGreaterThan(0);
+    for (const r of offered) expect(r.actions.find((a) => a.action === def.id)!.params.tenantId).toBe(r.id);
   });
 
   it("no longer contributes the full-body billing.generate-bills", () => {
