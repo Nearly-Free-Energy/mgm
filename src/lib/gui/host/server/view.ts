@@ -51,7 +51,7 @@ export const UNIT_REQUIRED = fail(400, "gui_unit_required", "Choose which of you
  */
 export const NOT_RELEASED = fail(404, "gui_not_released", "This page is not part of the MGM release installed here.");
 
-/** The notice on a model with generated figures, unless the gate's notice is shown. */
+/** The notice on a model with generated figures, unless the gate's notice is shown; it replaces a loader's own. */
 export const SYNTHETIC_NOTICE = {
   tone: "warning",
   text: "Synthetic data: these figures are generated for demonstration, not measured.",
@@ -293,6 +293,7 @@ async function dispatchTenantView(
       trail: [],
       links: links ?? [],
       attached: [],
+      // The notice on generated figures replaces the loader's own (in rest).
       ...(hasSynthetic(merged.body) ? { notice: { ...SYNTHETIC_NOTICE } } : {}),
       ...(live ? { live } : {}),
     };
@@ -399,6 +400,8 @@ export async function dispatchView(
       trail: resolved.trail,
       links: links ?? [],
       attached,
+      // The gate's notice, else the one on generated figures, else the
+      // loader's own (in rest), so a loader cannot hide either of the host's.
       ...(notice ? { notice } : synthetic ? { notice: { ...SYNTHETIC_NOTICE } } : {}),
       ...(live ? { live } : {}),
     };

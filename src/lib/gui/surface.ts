@@ -103,6 +103,13 @@ export type ActionLink = Pick<ActionRef, "action" | "params" | "prefill" | "prov
 type HostFilled = "type" | "view" | "kind" | "org" | "trail" | "attached" | "notice" | "live" | "links";
 export type LoadedModel<K extends ViewKind> = Omit<ModelBase<K, ActionLink, unknown>, HostFilled> & {
   links?: LinkRef[];
+  /**
+   * The view's own notice, such as the time zone nudge. The host's notices
+   * take its place: the gate's for a disabled plugin, then the one on
+   * generated figures (dispatchView in host/server/view.ts), so a loader
+   * cannot hide either.
+   */
+  notice?: ModelBase<K, ActionLink, unknown>["notice"];
 };
 
 interface ViewDefBase<K extends ViewKind> {

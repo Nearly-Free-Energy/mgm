@@ -356,8 +356,9 @@ export function modelSchema<K extends ViewKind>(kind: K): (typeof modelSchemas)[
 
 /**
  * What a loader returns for each kind (LoadedModel in ../../surface.ts). The
- * host fills type, view, kind, org, trail, attached, notice and live, so a
- * loader that supplies any of them is refused.
+ * host fills type, view, kind, org, trail, attached and live, so a loader
+ * that supplies any of them is refused. A loader's notice is its own, which
+ * the host's notices replace.
  */
 function loadedModelOf<K extends ViewKind>(kind: K) {
   return z.strictObject({
@@ -367,6 +368,7 @@ function loadedModelOf<K extends ViewKind>(kind: K) {
     entity: entityRefSchema.optional(),
     actions: z.array(actionLinkSchema),
     links: z.array(linkRefSchema).optional(),
+    notice: z.strictObject({ tone: toneSchema, text: z.string() }).optional(),
     ext: extSchema.optional(),
   });
 }

@@ -400,6 +400,22 @@ describe("dispatchView", () => {
     expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: { text: "Billing is disabled." } } });
   });
 
+  it("shows a loader's own notice unless the gate's notice or the one on generated figures takes its place", async () => {
+    const own = { tone: "warning", text: "Billing timezone is still UTC." } as const;
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics(), notice: own } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: own } });
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics({ synthetic: true }), notice: own } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: SYNTHETIC_NOTICE } });
+    gates.set("billing", { ...DISABLED, message: "Billing is disabled." } as GateDecision);
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics(), notice: own } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: { text: "Billing is disabled." } } });
+  });
+
+  it("refuses a loader's notice of another shape", async () => {
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics(), notice: { tone: "loud", text: "x" } } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: false, status: 500, code: "gui_output_invalid" });
+  });
+
   it("loads a feed's view embeds at depth 1 only", async () => {
     const entry = (id: string, href: string) => ({
       id,
