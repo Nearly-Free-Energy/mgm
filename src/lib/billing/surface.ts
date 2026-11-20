@@ -183,12 +183,17 @@ export const BILLING_SURFACE: Contribution = {
       // A section of the period review, under its bills, where the legacy
       // page's banner of tenants not billed sat (#293); a section, not a
       // tab, so the review lists it while billing is off, with the gate's
-      // notice.
+      // notice (attachedViews in src/lib/gui/host/server/view.ts keeps a
+      // disabled plugin's sections and drops its tabs; if that changes,
+      // revisit).
       attach: { to: { view: "billing.period-review" }, order: 10, hint: "section" },
       // No `agent`: it names tenants, and no assistant reads billing views.
       // Read through the person's own client (./surface/not-billed.ts); loads
       // while billing is off, with the gate's notice and Bill from readings
-      // disabled. No refresh of its own: the review's reloads its sections.
+      // disabled. No refresh of its own: the review's reloads its sections
+      // (Gridtop's section list, src/gui/gridtop/shell/section-list.tsx,
+      // loads a section again whenever the page's model is a new one; if it
+      // stops, or another GUI draws sections without doing so, revisit).
       cost: "db",
       declares: { keys: NOT_BILLED_KEYS },
       examples: NOT_BILLED_EXAMPLES,
@@ -393,8 +398,10 @@ export const BILLING_SURFACE: Contribution = {
     // draft; which tenants have no bill is the loader's to say, and
     // prepare's and the route's to check again. Confirm, not ceremony:
     // nothing to acknowledge, and prepare cannot show the total, as it runs
-    // once before the form; it names the tenant, the period and the meter,
-    // and warns for a metered tenant. `targeted: false`: appended to
+    // once before the form (src/lib/gui/host/client/action-host.tsx; if the
+    // host comes to prepare again with the form's values, revisit); it
+    // names the tenant, the period and the meter, and warns for a metered
+    // tenant. `targeted: false`: appended to
     // another view of a period it could not bind the tenant.
     {
       ...BILL_FROM_READINGS_ACTION,

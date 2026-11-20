@@ -639,7 +639,10 @@ export const REGENERATE_BILL_BODY_VERSION = 2;
  * refinement, so the kit renders it and the GUI host can check a prefill
  * (cleanPrefill in src/lib/gui/host/server/merge.ts); if a refinement is
  * added, a prefill is dropped: revisit. No confirmation: a confirm-level
- * action is sent none (invoke.ts), so one is refused as an unknown key.
+ * action is sent none (sendsConfirmation in
+ * src/lib/gui/host/client/invoke.ts), so one is refused as an unknown key;
+ * if invoke.ts comes to send a confirmation at confirm level, add it here,
+ * or every submit from the GUI is refused.
  */
 export const BillFromReadingsBody = z.strictObject(
   {

@@ -151,9 +151,11 @@ export const BILL_FROM_READINGS_WARNINGS = {
  * billing.bill-from-readings' confirmation: whose bill, which period and
  * what is known of the tenant's meter, with the route's refusals in the
  * route's order (a closed period, a tenant not found, a tenant of another
- * microgrid, a tenant with a bill). It runs once, before the form, so it
- * cannot show the readings or the total; the route answers with both in its
- * message. Reads only.
+ * microgrid, a tenant with a bill). It runs once, before the form (the
+ * action host, src/lib/gui/host/client/action-host.tsx, prepares and then
+ * shows the form), so it cannot show the readings or the total; the route
+ * answers with both in its message. If the host comes to prepare again with
+ * the form's values, revisit. Reads only.
  */
 export async function prepareBillFromReadings(
   req: SurfaceRequest,
