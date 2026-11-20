@@ -14,7 +14,10 @@
  * data, while a tenant with a bill and no meter keeps that bill; one audit
  * row per bill written. A second run writes nothing. A bill paid between
  * the run's read and its write is left as paid. A period closed while its
- * meters are read gets nothing written. A bill with a pending payment link
+ * meters are read gets nothing written. A bill another write adds, while
+ * the meters are read, for a tenant who had none is left as it is, and a
+ * period closed after the run's last read of its status gets no first bill
+ * (fn_record_first_line_item_with_audit refuses both at the insert). A bill with a pending payment link
  * is recalculated, and when its total changes its link is cleared and an
  * open checkout of it waits for reconciliation, as the confirmation warns
  * and the result counts. A closed period, a
@@ -42,6 +45,8 @@ import {
 let caller: TestUser | "anon" | null = null;
 /** Runs once, just before the run's first conditional write reaches the database. */
 let beforeWrite: (() => Promise<void>) | null = null;
+/** Runs once, just before the run's first insert of a tenant's first bill. */
+let beforeFirstBill: (() => Promise<void>) | null = null;
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => {
     if (caller === "anon") return createClient(LOCAL_SUPABASE_URL, testAnonKey() ?? "", { auth: { persistSession: false, autoRefreshToken: false } });
@@ -54,6 +59,11 @@ vi.mock("@/lib/supabase/server", () => ({
             if (name === "fn_regenerate_bill_with_audit" && beforeWrite) {
               const hook = beforeWrite;
               beforeWrite = null;
+              await hook();
+            }
+            if (name === "fn_record_first_line_item_with_audit" && beforeFirstBill) {
+              const hook = beforeFirstBill;
+              beforeFirstBill = null;
               await hook();
             }
             return target.rpc(name, args);
@@ -96,6 +106,10 @@ const NO_TARIFF = "e7a10000-0000-4000-8003-000000000005";
 const CLOSES = "e7a10000-0000-4000-8003-000000000006";
 /** February: bills with a pending payment link. */
 const LINKED = "e7a10000-0000-4000-8003-000000000007";
+/** March: a bill added for unit 2 while its meters are read. */
+const INSERTED = "e7a10000-0000-4000-8003-000000000008";
+/** April: closed just before the run's first insert. */
+const CLOSES_LATE = "e7a10000-0000-4000-8003-000000000009";
 const ATTEMPT = "e7a10000-0000-4000-800a-000000000001";
 const MERCHANT = "e7a10000-0000-4000-800b-000000000001";
 const tenant = (n: number) => `e7a10000-0000-4000-8004-${String(n).padStart(12, "0")}`;
@@ -292,6 +306,8 @@ beforeAll(async () => {
         { id: NO_TARIFF, microgrid_id: UNPRICED, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: null },
         { id: CLOSES, microgrid_id: MICROGRID, start_date: "2027-01-01", end_date: "2027-01-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: LINKED, microgrid_id: MICROGRID, start_date: "2027-02-01", end_date: "2027-02-28", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: INSERTED, microgrid_id: MICROGRID, start_date: "2027-03-01", end_date: "2027-03-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: CLOSES_LATE, microgrid_id: MICROGRID, start_date: "2027-04-01", end_date: "2027-04-30", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
       ],
     ],
     [
@@ -376,6 +392,7 @@ afterAll(async () => {
   unregister?.();
   caller = null;
   beforeWrite = null;
+  beforeFirstBill = null;
   duringRead = null;
   await cleanup();
 }, 120_000);
@@ -520,6 +537,54 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     // Neither unit 3's bill rewritten nor the others' first bills inserted.
     expect(await bills(CLOSES)).toEqual(before);
     expect(await auditRows(CLOSES)).toHaveLength(auditBefore.length);
+  });
+
+  it("leaves a bill added for a tenant with none while the meters are read as it is, and bills the others", async () => {
+    caller = manager;
+    duringRead = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc.from("billing_line_items").insert({
+        billing_period_id: INSERTED,
+        tenant_id: tenant(2),
+        usage_kwh: 7,
+        total_amount: 1750,
+        reading_source: "manual",
+        start_kwh: 0,
+        end_kwh: 7,
+      });
+      if (error) throw new Error(`[generate-from-meters.db] billing_line_items: ${error.message}`);
+    };
+    const res = await generate(INSERTED);
+    expect(duringRead).toBeNull();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ changed: 1 });
+    expect(body.tenants).toContainEqual({ tenantId: tenant(2), tenantName: "Unit 2", outcome: "left", code: "bill_exists" });
+    const after = await bills(INSERTED);
+    expect(after.get(tenant(2))).toMatchObject({ reading_source: "manual", usage_kwh: 7, total_amount: 1750 });
+    expect(after.get(tenant(1))).toMatchObject({ usage_kwh: USAGE, total_amount: TOTAL_40 });
+    const audit = await auditRows(INSERTED);
+    expect(audit.filter((a) => a.billing_line_item_id === after.get(tenant(2))!.id)).toEqual([]);
+    expect(audit.some((a) => a.event_type === "line_item_regenerated")).toBe(false);
+  });
+
+  it("writes no first bill once the period closes after the run's last read of its status", async () => {
+    caller = manager;
+    beforeFirstBill = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc
+        .from("billing_periods")
+        .update({ status: "closed", closed_at: new Date().toISOString() })
+        .eq("id", CLOSES_LATE);
+      if (error) throw new Error(`[generate-from-meters.db] close: ${error.message}`);
+    };
+    const res = await generate(CLOSES_LATE);
+    expect(beforeFirstBill).toBeNull();
+    const body = await res.json();
+    expect(body.generated).toBe(0);
+    expect(body.tenants).toContainEqual({ tenantId: tenant(1), tenantName: "Unit 1", outcome: "left", code: "period_closed" });
+    expect((await bills(CLOSES_LATE)).size).toBe(0);
+    expect(await auditRows(CLOSES_LATE)).toEqual([]);
   });
 
   it("warns of pending payment links, and says which stopped working as their bill's total changed", async () => {
