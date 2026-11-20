@@ -24,8 +24,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * data gets no bill (#293), and keeps the bill they had if they had one:
  * the result counts both. A tenant's first bill is inserted unguarded, as
  * on POST /api/billing/generate, so a bill inserted for that tenant by
- * another write while this run reads the meters (a manual reading, or an
- * overlapping run) is overwritten, and a close landing in that time does
+ * another write while this run reads the meters (a manual reading, a bill
+ * from readings, or an overlapping run) is overwritten, and a close landing in that time does
  * not stop the insert; guardExistingBills says why, and the parity note
  * (generate-bills in src/lib/billing/parity.ts) lists both.
  *

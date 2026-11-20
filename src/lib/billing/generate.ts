@@ -344,8 +344,10 @@ export type RunGenerationParams = {
    *    so a close landing after the check above is not caught, and it
    *    upserts, so a bill another write inserted for that tenant after this
    *    run read the period's bills (a manual reading on POST
-   *    /api/billing/generate, or a second run overlapping this one) is
-   *    overwritten with this run's figures and logged as regenerated. Runs
+   *    /api/billing/generate, a bill from readings on POST
+   *    /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings,
+   *    or a second run overlapping this one) is overwritten with this run's
+   *    figures and logged as regenerated. Runs
    *    one after another are not affected; the parity note (generate-bills
    *    in ./parity.ts) lists both as known gaps. If such a migration lands,
    *    use it here and drop this.
