@@ -538,6 +538,37 @@ export const GENERATE_FROM_METERS_COPY = {
 } as const;
 
 /**
+ * Why a tenant with no bill is not billed from readings typed by hand, as
+ * fixed copy: POST
+ * /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings
+ * answers with it, never with a database's own message, and
+ * billing.bill-from-readings' availability (`closed`) and prepare (`closed`,
+ * `tenantNotFound`, `otherMicrogrid`, `hasBill`) give the same refusals
+ * before it runs (src/lib/billing/surface/not-billed.ts). The bill engine
+ * gives `closed`, `hasBill` and `failed` itself (newBillOnly in
+ * ./generate.ts).
+ *  - closed: a closed period's totals were reviewed and closed.
+ *  - hasBill: the tenant already has a bill for the period; regenerating
+ *    that bill (billing.regenerate-bill, manual readings) changes it.
+ *  - otherMicrogrid: the tenant belongs to another microgrid than the
+ *    period's.
+ *  - tenantNotFound: no tenant the person can read has that id.
+ *  - noTariff: the microgrid has no rate schedule to pin.
+ *  - tariffChanged: the period's tariff changed between the pin and the
+ *    write (fn_record_line_item_with_audit).
+ *  - failed: anything else, including bills that could not be read.
+ */
+export const BILL_FROM_READINGS_COPY = {
+  closed: "Bills cannot be added to a closed period.",
+  hasBill: "This tenant already has a bill for this period. Regenerate that bill to change its readings.",
+  otherMicrogrid: "This tenant is not on this period's microgrid.",
+  tenantNotFound: "Tenant not found.",
+  noTariff: GENERATE_FROM_METERS_COPY.noTariff,
+  tariffChanged: "The period's tariff changed while the bill was calculated. Nothing was written. Try again.",
+  failed: "The bill could not be written. Refresh the period to see its bills, and try again.",
+} as const;
+
+/**
  * POST /api/billing-periods/[periodId]/generate-from-meters. The period comes
  * from the path, and the run takes nothing else: every tenant's bill is read
  * from its meter (BillingCapability.generateFromMeters). The body is the empty
@@ -596,6 +627,37 @@ export const RegenerateBillBody = z.strictObject(
   { error: bodyError }
 );
 export const REGENERATE_BILL_BODY_VERSION = 2;
+
+/**
+ * POST /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings:
+ * the start and end readings typed by hand for a tenant with no bill, and
+ * why, as the legacy pre-flight panel's manual rows take them. The period
+ * and tenant come from the path. Decimals are accepted (the bill engine
+ * stores kWh to 3 places) and no upper bound is set, as on POST
+ * /api/billing/generate and the regenerate route. The route checks that
+ * end_kwh is not below start_kwh. Flat and without an object-level
+ * refinement, so the kit renders it and the GUI host can check a prefill
+ * (cleanPrefill in src/lib/gui/host/server/merge.ts); if a refinement is
+ * added, a prefill is dropped: revisit. No confirmation: a confirm-level
+ * action is sent none (sendsConfirmation in
+ * src/lib/gui/host/client/invoke.ts), so one is refused as an unknown key;
+ * if invoke.ts comes to send a confirmation at confirm level, add it here,
+ * or every submit from the GUI is refused.
+ */
+export const BillFromReadingsBody = z.strictObject(
+  {
+    start_kwh: lineItemsKwh("start_kwh").meta({ title: "Start reading (kWh)" }),
+    end_kwh: lineItemsKwh("end_kwh").meta({ title: "End reading (kWh)" }),
+    reason: z
+      .string({ error: "reason must be a string" })
+      .trim()
+      .max(500, { error: "reason must be 500 characters or fewer" })
+      .optional()
+      .meta({ title: "Reason" }),
+  },
+  { error: bodyError }
+);
+export const BILL_FROM_READINGS_BODY_VERSION = 1;
 // ── Tariffs and invoice settings ──
 
 const TARIFFS_TIERS = "tiers must be a non-empty array (at least 1 tier required)";

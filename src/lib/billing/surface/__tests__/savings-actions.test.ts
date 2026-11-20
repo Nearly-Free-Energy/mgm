@@ -77,6 +77,7 @@ describe("billing's savings actions", () => {
       "billing.delete-period",
       "billing.close-period",
       "billing.generate-from-meters",
+      "billing.bill-from-readings",
       "billing.regenerate-bill",
       "billing.record-usage",
       "billing.mark-paid",

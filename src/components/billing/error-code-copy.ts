@@ -53,6 +53,10 @@ export function errorCodeCopy(err: PartialFailureError): string {
       return `${name}'s bill has been invoiced and was not regenerated.`;
     case "bill_changed":
       return `${name}'s bill changed while it was being regenerated — refresh and try again.`;
+    // Only a first bill from readings (newBillOnly, the bill-from-readings
+    // route) reports this; listed so it does not fall through to raw text.
+    case "bill_exists":
+      return `${name} already has a bill for this period. Regenerate that bill to change its readings.`;
     case "needs_seed_reading":
       // #339. This message decides whether the operator walks to the meter or
       // types a zero to clear a block, so it must not read as a validation

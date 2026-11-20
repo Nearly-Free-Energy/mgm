@@ -145,6 +145,7 @@ describe("legacyView on every catalog page", () => {
       "/microgrids/[id]/billing/[periodId]/history": ["billing.period-history", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/close": ["billing.close-checklist", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/send": ["billing.send-queue", "billing.periods"],
+      "/microgrids/[id]/billing/[periodId]/not-billed": ["billing.not-billed", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payments": ["payments.bill-attempts", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payment-setup": ["payments.payment-setup", "billing.periods"],
       // Tenant pages: a staff manifest has no tenant entry, and /my names no place.
