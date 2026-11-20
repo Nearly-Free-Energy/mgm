@@ -13,13 +13,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { INSTALLED_GUIS } from "@/gui/installed";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
-import { checkModel, loadLazyRenderers, withPoke } from "../conformance";
+import { checkModel, loadLazyRenderers, renderModel, withPoke } from "../conformance";
 import type { ViewModel } from "../contract";
 
 const { views } = (await getMgmRuntime()).mgmSurface.snapshot();
 
 const EXAMPLES = views.flatMap(({ def: view }) =>
-  view.examples.map((example, i) => ({ name: `${view.id} example ${i}`, model: example as ViewModel })),
+  view.examples.map((example, i) => ({
+    name: `${view.id} example ${i}`,
+    model: example as ViewModel,
+    // Whether the host merges other plugins' actions onto the example's own
+    // entity: always for a view that declares one, and otherwise only when
+    // the example carries one anyway.
+    poked: view.entity !== undefined || (example as ViewModel).entity !== undefined,
+  })),
 );
 
 afterAll(() => resetMgmRuntimeForTests());
@@ -37,9 +44,46 @@ beforeAll(async () => {
 }, 120_000);
 
 describe.each(Object.entries(INSTALLED_GUIS))("%s draws the contributed views' examples", (_name, gui) => {
-  it.each(EXAMPLES.map((e) => [e.name, e.model] as const))("%s", async (name, model) => {
+  it.each(EXAMPLES.map((e) => [e.name, e.model, e.poked] as const))("%s", async (name, model, entityPoked) => {
     const poked = withPoke(model);
-    expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
+    // An entity is optional in the contract: a view that declares none and
+    // whose loader sets none (payments.bill-attempts, so that no other
+    // plugin's action on its period is appended) gets the poke only on its
+    // rows' entities, if they have any. A view that declares an entity
+    // gets it on every example, so one that loses its entity fails here.
+    if (entityPoked) expect(poked.actions.length, "acme.poke is merged onto the example's entity").toBeGreaterThan(0);
     expect(await checkModel(gui, poked, name)).toEqual([]);
+  });
+});
+
+/**
+ * A bespoke renderer that cannot read an example's ext draws the kit's view
+ * instead, which passes every check above, so a renderer and its view's ext
+ * could drift apart with this file green. A renderer that marks its own
+ * drawing is listed here with the mark, and must have drawn every example of
+ * its view whose ext version it reads. Each mark is the renderer's own
+ * (src/gui/<name>/renderers/); if one changes, change it here.
+ */
+const RENDERER_MARKS: Partial<Record<keyof typeof INSTALLED_GUIS, Record<string, string>>> = {
+  gridtop: { "billing.period-review": "[data-period-review]", "billing.send-queue": "[data-send-queue]" },
+};
+
+describe.each(Object.entries(RENDERER_MARKS))("%s draws its marked renderers' examples itself", (name, marks) => {
+  const gui = INSTALLED_GUIS[name as keyof typeof INSTALLED_GUIS];
+  it.each(Object.entries(marks))("%s", async (view, mark) => {
+    const read = gui.renderers?.[view as `${string}.${string}`]?.reads ?? [];
+    const drawn = EXAMPLES.filter(({ model }) => {
+      const schema = model.view === view ? model.ext?.schema : undefined;
+      return schema !== undefined && read.includes(Number(schema.slice(schema.lastIndexOf("@") + 1)));
+    });
+    expect(drawn.length, `${view} has examples its renderer reads`).toBeGreaterThan(0);
+    for (const { name: example, model } of drawn) {
+      const { unmount } = await renderModel(gui, withPoke(model));
+      try {
+        expect(document.querySelector(mark), `${example} is drawn by ${name}'s renderer, not the kit's view`).not.toBeNull();
+      } finally {
+        unmount();
+      }
+    }
   });
 });

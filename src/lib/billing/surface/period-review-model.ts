@@ -8,17 +8,35 @@
  * actions follow its row menu (computeMenuItems in
  * src/components/billing/row-actions-menu.tsx; period-review-menu-parity.test.ts
  * compares the two), so both show the same thing while both are served.
+ *
+ * Every figure a person copies is in the `billing.period-review@1` ext
+ * (./period-review-ext.ts) as a plain machine number, for a renderer that
+ * draws the bills as a copy table.
  */
+import { currencyFractionDigits } from "@/components/format/currency";
 import type { LinkRef, Value } from "@/lib/gui/contract";
 import type { ActionLink, Fmt, LoadedModel } from "@/lib/gui/surface";
 import { ALLOWED_MANUAL_TRANSITIONS, type ManualPaymentTransition, type PaymentStatus } from "@/lib/payments/state";
 import { buildCsvFilename } from "../csv-export";
 import { sumMoney } from "../money";
+import { roundKwh } from "../precision";
+import { periodHistoryHref } from "./period-history-model";
+import type { PeriodReviewExtData } from "./period-review-ext";
+import { periodLabel } from "./period-label";
 
 /** Every cell and total key the view emits, besides the per-tier ones under PERIOD_REVIEW_PREFIXES. */
 export const PERIOD_REVIEW_KEYS = ["tenant", "begin", "end", "usage", "total", "source", "payment", "entered"] as const;
 /** `tier.<n>.kwh` and `tier.<n>.amount`, n counting the period's tariff tiers from 1. */
 export const PERIOD_REVIEW_PREFIXES = ["tier."] as const;
+
+/** The ext this model carries; its shape is PeriodReviewExt in ./period-review-ext.ts. */
+export const PERIOD_REVIEW_EXT_SCHEMA = "billing.period-review@1" as const;
+/** Rows past the host's row cap (MODEL_CAPS.rows in src/lib/gui/host/server/parse.ts) are refused, never cut. */
+export const PERIOD_REVIEW_MAX_ROWS = 500;
+/** 10 fixed columns and 2 per tier must stay within the host's 50 (MODEL_CAPS.columns). */
+export const PERIOD_REVIEW_MAX_TIERS = 20;
+/** Begin, end, usage and total, and each tier's kWh and amount: every column a person copies. */
+export const PERIOD_REVIEW_MAX_COPY_COLUMNS = 4 + 2 * PERIOD_REVIEW_MAX_TIERS;
 
 /**
  * The billing actions on bills; BILLING_SURFACE (../surface.ts) defines them.
@@ -40,6 +58,43 @@ export const CANCEL_PAYMENT_LINK_ACTION = { id: "billing.cancel-payment-link", t
 export const EXPORT_CSV_LINK = "billing.export-csv";
 export const VIEW_HISTORY_LINK = "billing.view-history";
 export const DOWNLOAD_BILL_LINK = "billing.download-bill";
+/** A draft's link to its close checklist (`billing.close-checklist`, ./close-checklist-model.ts). */
+export const CLOSE_CHECKLIST_LINK = "billing.close-checklist";
+
+/** A period's link to its send queue (`billing.send-queue`, ./send-queue-model.ts). */
+export const SEND_QUEUE_LINK = "billing.send-queue";
+/** That link's label. */
+export const SEND_QUEUE_LINK_LABEL = "Payment links";
+
+/**
+ * The close checklist of a period: the path the `billing.close-checklist`
+ * view is registered on (../surface.ts). Here rather than in
+ * ./close-checklist-model.ts, which imports this module's link ids, so
+ * neither module imports the other in a cycle.
+ */
+export function closeChecklistHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/close`;
+}
+
+/** The send queue of a period: the path `billing.send-queue` is registered on (../surface.ts), here for the same reason. */
+export function sendQueueHref(microgridId: string, periodId: string): `/${string}` {
+  return `/microgrids/${microgridId}/billing/${periodId}/send`;
+}
+
+/**
+ * A bill's PDF, as its row links it in the period review and the send
+ * queue. The route names the file after the invoice number it allocates on
+ * first use; before then, as the legacy menu falls back.
+ */
+export function downloadBillLink(bill: { id: string; invoice_number: string | null }): LinkRef {
+  return {
+    id: DOWNLOAD_BILL_LINK,
+    label: "Download bill (PDF)",
+    icon: "download",
+    href: `/api/billing-line-items/${bill.id}/pdf`,
+    download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
+  };
+}
 
 /**
  * The statuses only a super admin may set by hand: the payment-status
@@ -136,10 +191,7 @@ type Column = LoadedModel<"collection">["body"]["columns"][number];
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-/** A period as the host labels it (src/lib/gui/host/server/entities.ts). */
-export function periodLabel(fmt: Fmt, start: string, end: string): string {
-  return `${fmt.date(start).text} – ${fmt.date(end).text}`;
-}
+export { periodLabel };
 
 /** The actions one bill is offered, in the legacy row menu's order. */
 function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput): ActionLink[] {
@@ -162,7 +214,10 @@ function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput
   }
   // Only where the usage route accepts a correction (its checks, in order):
   // a draft, an unmetered bill with no meter assigned in the period, and a
-  // starting reading. No prefill: LineItemUsageBody is refined.
+  // starting reading. No prefill: the form opens empty, where the legacy
+  // cell starts at the bill's usage. The host would take one, checked
+  // against LineItemUsageBody's fields (cleanPrefill in
+  // src/lib/gui/host/server/merge.ts).
   if (i.period.status === "draft" && bill.device_id === null && !tenant.meterLinkInPeriod && bill.start_kwh !== null) {
     out.push({ action: RECORD_USAGE_ACTION.id, params });
   }
@@ -172,24 +227,52 @@ function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput
   return out;
 }
 
+/**
+ * The figure a person copies from a cell: a plain number, with no grouping,
+ * a "." decimal point and no unit, or null for an empty cell. kWh to 3
+ * decimals and money in the currency's minor unit, as the period's CSV
+ * export writes them (../csv-export.ts rounds with roundKwh and roundAmount
+ * from ../precision.ts; roundAmount keeps no minor unit, so the two agree
+ * for a currency with none, such as UGX): if the CSV's rounding changes,
+ * revisit. Money comes from the minor units the shown text
+ * was rounded to, so the two never round apart.
+ */
+function copyFigure(v: Value | undefined): string | null {
+  if (!v) return null;
+  switch (v.t) {
+    case "energy":
+      // String() of a rounded number writes no float-dust.
+      return String(roundKwh(v.unit === "Wh" ? v.v / 1000 : v.v));
+    case "money": {
+      const minor = currencyFractionDigits(v.currency);
+      return minor === 0 ? String(v.v) : (v.v / 10 ** minor).toFixed(minor);
+    }
+    default:
+      return null;
+  }
+}
+
 export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"collection"> {
   const { microgrid, period, tiers, fmt } = i;
   const currency = microgrid.currency;
   const label = periodLabel(fmt, period.start_date, period.end_date);
-  const historyHref = `/microgrids/${microgrid.id}/billing/${period.id}/history` as const;
+  // Built by the history view's own helper, so these links and the query name it reads cannot drift apart.
+  const historyHref = periodHistoryHref(microgrid.id, period.id);
 
-
-  const energy = (kwh: number | null | undefined) => (kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true }));
+  // A bill's readings and usage to 3 dp, as the legacy table shows them; the
+  // totals below stay at 1 dp, as its grand total row does.
+  const energy = (kwh: number | null | undefined) =>
+    kwh === null || kwh === undefined ? fmt.empty() : fmt.energy(num(kwh) * 1000, { bare: true, digits: 3 });
   const money = (amount: number | null | undefined) =>
     amount === null || amount === undefined ? fmt.empty() : fmt.money(num(amount), currency, { bare: true });
 
   const columns: Column[] = [
     { key: "tenant", label: "Tenant", type: "ref", priority: 1 },
-    { key: "begin", label: "Begin (kWh)", type: "energy", priority: 3 },
-    { key: "end", label: "End (kWh)", type: "energy", priority: 3 },
-    { key: "usage", label: "Usage (kWh)", type: "energy", priority: 2 },
+    { key: "begin", label: "Begin (kWh)", type: "energy", priority: 3, copy: "bare" },
+    { key: "end", label: "End (kWh)", type: "energy", priority: 3, copy: "bare" },
+    { key: "usage", label: "Usage (kWh)", type: "energy", priority: 2, copy: "bare" },
     ...tiers.flatMap((tier, n): Column[] => [
-      { key: `tier.${n + 1}.kwh`, label: `${tier.label} kWh`, type: "energy", priority: 3 },
+      { key: `tier.${n + 1}.kwh`, label: `${tier.label} kWh`, type: "energy", priority: 3, copy: "bare" },
       { key: `tier.${n + 1}.amount`, label: `${tier.label} (${currency})`, type: "money", priority: 3, copy: "bare" },
     ]),
     // A bare money column names its currency in the header.
@@ -215,15 +298,8 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
       }),
     );
     const links: LinkRef[] = [
-      {
-        id: DOWNLOAD_BILL_LINK,
-        label: "Download bill (PDF)",
-        icon: "download",
-        href: `/api/billing-line-items/${bill.id}/pdf`,
-        // The route names the file after the invoice number it allocates on first use; before then, as the legacy menu falls back.
-        download: { mime: "application/pdf", filename: bill.invoice_number ? `${bill.invoice_number}.pdf` : `bill-${bill.id}.pdf` },
-      },
-      { id: VIEW_HISTORY_LINK, label: "View history", href: `${historyHref}?tenant_id=${tenant.id}` },
+      downloadBillLink(bill),
+      { id: VIEW_HISTORY_LINK, label: "View history", href: periodHistoryHref(microgrid.id, period.id, { tenantId: tenant.id }) },
     ];
     return [
       {
@@ -288,7 +364,28 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
     };
   }
 
+  // The copy figures, in the order of the columns a person copies.
+  const copyKeys = columns.filter((c) => c.copy === "bare").map((c) => c.key);
+  const ext: PeriodReviewExtData = {
+    columns: copyKeys,
+    rows: rows.map((row) => ({ id: row.id, figures: copyKeys.map((k) => copyFigure(row.cells[k])) })),
+    totals: totals ? copyKeys.map((k) => (totals[k] ? copyFigure(totals[k]) : null)) : [],
+  };
+
   const links: LinkRef[] = [{ id: VIEW_HISTORY_LINK, label: "View history", href: historyHref }];
+  // A draft links to its close checklist, with or without bills: the
+  // checklist says what blocks the close, where the legacy page shows a
+  // disabled Close Period button. Not attached as a section, which would run
+  // the close review on every load of this view.
+  if (period.status === "draft") {
+    links.push({ id: CLOSE_CHECKLIST_LINK, label: "Close period", href: closeChecklistHref(microgrid.id, period.id) });
+  }
+  // The bills' payment links, for draft and closed periods alike (both are
+  // payable); left out with no bills, which have none. Labelled for the
+  // links, not a send: the view sends nothing (./send-queue-model.ts).
+  if (i.bills.length > 0) {
+    links.push({ id: SEND_QUEUE_LINK, label: SEND_QUEUE_LINK_LABEL, icon: "payments", href: sendQueueHref(microgrid.id, period.id) });
+  }
   // Left out with no bills, where the legacy page shows it disabled.
   if (i.bills.length > 0) {
     links.push({
@@ -322,5 +419,6 @@ export function buildPeriodReviewModel(i: PeriodReviewInput): LoadedModel<"colle
       ...(totals ? { totals } : {}),
       empty,
     },
+    ext: { schema: PERIOD_REVIEW_EXT_SCHEMA, data: ext },
   };
 }

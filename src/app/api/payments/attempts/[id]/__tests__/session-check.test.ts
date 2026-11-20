@@ -36,7 +36,8 @@ function call(handler: typeof refresh, name: string) {
   return handler(
     new NextRequest(`http://localhost/api/payments/attempts/${ATTEMPT_ID}/${name}`, {
       method: "POST",
-      body: JSON.stringify({ action: "accept_exact" }),
+      // Each route's own valid body: refresh takes none, reconcile an action.
+      body: JSON.stringify(name === "refresh" ? {} : { action: "accept_exact" }),
     }),
     { params: Promise.resolve({ id: ATTEMPT_ID }) }
   );

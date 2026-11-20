@@ -4,8 +4,8 @@ vi.mock("server-only", () => ({}));
 
 import { createFmt } from "@/lib/gui/fmt";
 import { ceremonySchema } from "@/lib/gui/host/server/model-schema";
-import { closeCeremony } from "../close-ceremony";
-import { CLOSE_ACKNOWLEDGEMENTS, parseCloseReview, type CloseReview } from "../close";
+import { closeCeremony, count } from "../close-ceremony";
+import { CLOSE_ACKNOWLEDGEMENTS, parseCloseReview, tenantNames, type CloseReview } from "../close";
 
 const fmt = createFmt({ locale: "en-UG" });
 
@@ -78,5 +78,20 @@ describe("closeCeremony", () => {
       "tenants_without_bills",
       "bills_without_usage",
     ]);
+  });
+});
+
+describe("tenantNames and count", () => {
+  it("name at most five tenants, then count the rest, as the warnings do", () => {
+    expect(tenantNames([])).toBe("");
+    expect(tenantNames(houses(1))).toBe("House 1");
+    expect(tenantNames(houses(5))).toBe("House 1, House 2, House 3, House 4, House 5");
+    expect(tenantNames(houses(6))).toBe("House 1, House 2, House 3, House 4, House 5 and 1 more");
+  });
+
+  it("put the singular or plural phrase after the number", () => {
+    expect(count(1, "bill has", "bills have")).toBe("1 bill has");
+    expect(count(0, "bill has", "bills have")).toBe("0 bills have");
+    expect(count(3, "bill has", "bills have")).toBe("3 bills have");
   });
 });

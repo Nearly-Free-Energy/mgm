@@ -114,7 +114,7 @@ const GATING = {
     gate: "available-while-disabled",
     kind: "read",
     reason:
-      "Reports the plugins as disabled, which is how invoices and the billing page stop offering a payment link.",
+      "Reports the plugins as disabled, or refuses when their state cannot be read, which is how invoices, the billing page and the send queue stop offering a payment link.",
     invalidatedBy: "readiness creating a checkout or contacting the provider",
     reaches: { writes: [], provider: [] },
   },
@@ -443,7 +443,9 @@ const READY_ACCOUNT: MerchantAccountPublic = {
 /**
  * A call each available method completes, and the work it does: `result`
  * while disabled or unreadable, `resultWhenOn` with both plugins on when
- * that differs.
+ * that differs, and `resultWhenUnreadable` when an unreadable plugin state
+ * is answered differently from a disabled one (readiness refuses rather
+ * than say the plugins are off).
  */
 const AVAILABLE_CALLS: Record<
   Available,
@@ -453,6 +455,7 @@ const AVAILABLE_CALLS: Record<
     does: Work;
     result?: object;
     resultWhenOn?: object;
+    resultWhenUnreadable?: object;
   }
 > = {
   getReadiness: {
@@ -465,6 +468,7 @@ const AVAILABLE_CALLS: Record<
     does: { provider: [], writes: [] },
     result: { data: { state: "disabled" } },
     resultWhenOn: { data: { state: "sandbox" } },
+    resultWhenUnreadable: { ok: false, status: 503, code: "payments_unavailable" },
   },
   stablePaymentLink: {
     call: (cap) => cap.stablePaymentLink(LINE_ITEM),
@@ -947,7 +951,7 @@ describe.each(Object.keys(AVAILABLE_CALLS) as Available[])("%s stays available w
   });
 
   // Failing to read plugin state cannot stop these either; readiness
-  // reports it as disabled, so no payment link is offered.
+  // answers that it could not tell, so no payment link is offered.
   it.each(FAILURE_CASES)("completes when reading plugin state meets $failure", async ({ read }) => {
     const { repo, writes } = recordingRepo({
       ...scenario.repo,
@@ -955,7 +959,7 @@ describe.each(Object.keys(AVAILABLE_CALLS) as Available[])("%s stays available w
     });
     const provider = recordingProviders(verifiedProvider().factory);
     const result = await scenario.call(capability(repo, provider.factory));
-    expect(result).toMatchObject({ ok: true, ...scenario.result });
+    expect(result).toMatchObject(scenario.resultWhenUnreadable ?? { ok: true, ...scenario.result });
     expect(provider.forAccount.mock.calls.length > 0).toBe(scenario.does.provider.length > 0);
     expect(provider.operations()).toEqual([...scenario.does.provider].sort());
     expect(writes()).toEqual([...scenario.does.writes].sort());

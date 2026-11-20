@@ -106,8 +106,9 @@ describe("buildPeriodReviewModel: columns", () => {
       ["payment", "Payment", "status"],
       ["entered", "Updated by", "text"],
     ]);
-    // Bare money columns name their currency in the header.
-    for (const c of model.body.columns) if (c.type === "money") expect(c.copy).toBe("bare");
+    // Bare money columns name their currency in the header; every figure a person copies is bare.
+    for (const c of model.body.columns) if (c.type === "money" || c.type === "energy") expect(c.copy).toBe("bare");
+    for (const c of model.body.columns) if (c.type !== "money" && c.type !== "energy") expect(c).not.toHaveProperty("copy");
   });
 
   it("emits only declared keys, so the host's strict parse passes", () => {
@@ -117,6 +118,11 @@ describe("buildPeriodReviewModel: columns", () => {
         expect((PERIOD_REVIEW_KEYS as readonly string[]).includes(key) || key.startsWith("tier.")).toBe(true);
       }
     }
+  });
+
+  it("refuses an ext of another version", () => {
+    const model = PERIOD_REVIEW_LOADED_EXAMPLES[0];
+    expect(strictParseModel(view, { ...model, ext: { ...model.ext!, schema: "billing.period-review@2" } })).toMatchObject({ ok: false });
   });
 
   it("names the microgrid's currency in the headers", () => {
@@ -140,7 +146,7 @@ describe("buildPeriodReviewModel: rows", () => {
 
   it("formats readings, tiers by index, bare money and statuses", () => {
     const [row] = build().body.rows;
-    expect(row.cells.begin).toMatchObject({ t: "energy", v: 100, unit: "kWh", text: "100.0" });
+    expect(row.cells.begin).toMatchObject({ t: "energy", v: 100, unit: "kWh", text: "100.000" });
     expect(row.cells.usage).toMatchObject({ t: "energy", v: 50.25 });
     expect(row.cells["tier.2.kwh"]).toMatchObject({ t: "energy", v: 35.25 });
     expect(row.cells["tier.1.amount"]).toEqual({ t: "money", v: 3750, currency: "UGX", text: "3,750" });
@@ -252,6 +258,110 @@ describe("buildPeriodReviewModel: totals", () => {
   });
 });
 
+describe("buildPeriodReviewModel: the copy figures (ext)", () => {
+  type Figures = { columns: string[]; rows: { id: string; figures: (string | null)[] }[]; totals: (string | null)[] };
+  const extOf = (model: ReturnType<typeof build>) => {
+    expect(model.ext?.schema).toBe("billing.period-review@1");
+    return model.ext!.data as Figures;
+  };
+  const figure = (model: ReturnType<typeof build>, row: number, key: string) => {
+    const ext = extOf(model);
+    return ext.rows[row].figures[ext.columns.indexOf(key)];
+  };
+
+  it.each([0, 1, 2])("lists the copy columns in table order with %i tariff tiers", (n) => {
+    const model = build({ tiers: [{ label: "Lifeline" }, { label: "Standard" }].slice(0, n) });
+    expect(extOf(model).columns).toEqual(model.body.columns.filter((c) => c.copy === "bare").map((c) => c.key));
+    expect(extOf(model).columns).toEqual([
+      "begin",
+      "end",
+      "usage",
+      ...Array.from({ length: n }, (_, i) => [`tier.${i + 1}.kwh`, `tier.${i + 1}.amount`]).flat(),
+      "total",
+    ]);
+  });
+
+  it("writes each figure plainly: 3-dp kWh as the CSV does, money in the currency's minor unit, no grouping", () => {
+    const model = build({
+      bills: [
+        bill(1, A, {
+          start_kwh: 1200,
+          end_kwh: 1284.5,
+          usage_kwh: 84.5123,
+          tier_breakdown: [
+            { label: "Lifeline", kwh: 15, amount: 3750 },
+            { label: "Standard", kwh: 69.5123, amount: 26437.5 },
+          ],
+          total_amount: 55875,
+        }),
+      ],
+    });
+    // Shown to 3 dp, as the legacy table shows it, and copied the same.
+    expect(model.body.rows[0].cells.usage.text).toBe("84.512");
+    expect(figure(model, 0, "begin")).toBe("1200");
+    expect(figure(model, 0, "end")).toBe("1284.5");
+    expect(figure(model, 0, "usage")).toBe("84.512");
+    expect(figure(model, 0, "tier.2.kwh")).toBe("69.512");
+    expect(model.body.rows[0].cells.total.text).toBe("55,875");
+    expect(figure(model, 0, "total")).toBe("55875");
+    expect(figure(model, 0, "tier.2.amount")).toBe("26438");
+    // A currency with a minor unit keeps it, where the CSV export rounds to a whole number.
+    const usd = build({ microgrid: { id: MG, name: "North", currency: "USD" }, bills: [bill(1, A, { total_amount: 12.34 })] });
+    expect(figure(usd, 0, "total")).toBe("12.34");
+    expect(figure(usd, 0, "tier.1.amount")).toBe("3750.00");
+  });
+
+  it("gives an empty cell no figure, and one row per model row with its id", () => {
+    const model = build({
+      bills: [bill(1, A, { usage_kwh: null, tier_breakdown: [{ label: "Lifeline", kwh: 5, amount: 1250 }] }), bill(3, C)],
+    });
+    expect(figure(model, 0, "usage")).toBeNull();
+    expect(figure(model, 0, "tier.2.kwh")).toBeNull();
+    expect(figure(model, 0, "tier.2.amount")).toBeNull();
+    expect(figure(model, 0, "tier.1.amount")).toBe("1250");
+    const ext = extOf(model);
+    expect(ext.rows.map((r) => r.id)).toEqual(model.body.rows.map((r) => r.id));
+    for (const row of ext.rows) expect(row.figures).toHaveLength(ext.columns.length);
+  });
+
+  it("totals every bill, a hidden tenant's included, aligned with the columns and without float-dust", () => {
+    const hidden = tenant(9, "Hidden");
+    const model = build({
+      tenants: [A, B],
+      bills: [
+        bill(1, A, { usage_kwh: 0.1, tier_breakdown: [{ label: "Lifeline", kwh: 0.1, amount: 25 }], total_amount: 25 }),
+        bill(2, B, { usage_kwh: 0.2, tier_breakdown: [{ label: "Lifeline", kwh: 0.2, amount: 50 }], total_amount: 50 }),
+        bill(3, hidden, { usage_kwh: 10, tier_breakdown: [{ label: "Lifeline", kwh: 10, amount: 2500 }], total_amount: 2500 }),
+      ],
+    });
+    const ext = extOf(model);
+    expect(ext.rows).toHaveLength(2);
+    expect(ext.rows.map((r) => r.id)).not.toContain(bill(3, hidden).id);
+    expect(ext.totals).toHaveLength(ext.columns.length);
+    const total = (key: string) => ext.totals[ext.columns.indexOf(key)];
+    expect(total("begin")).toBeNull();
+    expect(total("end")).toBeNull();
+    expect(total("usage")).toBe("10.3");
+    expect(total("tier.1.kwh")).toBe("10.3");
+    expect(total("tier.1.amount")).toBe("2575");
+    expect(total("tier.2.amount")).toBe("0");
+    expect(total("total")).toBe("2575");
+    // 0.1 + 0.2 alone is 0.30000000000000004: rounded as the CSV rounds.
+    const dust = build({ tenants: [A, B], bills: [bill(1, A, { usage_kwh: 0.1 }), bill(2, B, { usage_kwh: 0.2 })] });
+    expect(extOf(dust).totals[extOf(dust).columns.indexOf("usage")]).toBe("0.3");
+  });
+
+  it("has no rows and no totals with no bills", () => {
+    expect(extOf(build({ bills: [] }))).toMatchObject({ rows: [], totals: [] });
+  });
+
+  it("carries no tenant's name", () => {
+    const model = build({ bills: [bill(1, A), bill(2, B)] });
+    const json = JSON.stringify(model.ext);
+    for (const t of [A, B]) expect(json).not.toContain(t.display_name);
+  });
+});
+
 describe("buildPeriodReviewModel: the period", () => {
   it("is titled by the period, with its time zone, and is the period's entity", () => {
     const model = build();
@@ -272,11 +382,21 @@ describe("buildPeriodReviewModel: the period", () => {
     }
   });
 
-  it("links the history always, and the CSV export only when there are bills", () => {
+  it("links the history always, a draft's close checklist, and the send queue and CSV export only when there are bills", () => {
     const history = { id: "billing.view-history", label: "View history", href: `/microgrids/${MG}/billing/${PERIOD}/history` };
-    expect(build({ bills: [] }).links).toEqual([history]);
+    const close = { id: "billing.close-checklist", label: "Close period", href: `/microgrids/${MG}/billing/${PERIOD}/close` };
+    const send = { id: "billing.send-queue", label: "Payment links", icon: "payments", href: `/microgrids/${MG}/billing/${PERIOD}/send` };
+    // With no bills too: the checklist says why Close is blocked. No bills, nothing to send.
+    expect(build({ bills: [] }).links).toEqual([history, close]);
+    expect(build({ bills: [], period: { ...input().period, status: "closed" } }).links).toEqual([history]);
+    // A closed period's bills are still payable, so it links its send queue too.
+    const closed = build({ period: { ...input().period, status: "closed" } }).links ?? [];
+    expect(closed.map((l) => l.id)).toEqual(["billing.view-history", "billing.send-queue", "billing.export-csv"]);
+    expect(closed[1]).toEqual(send);
     expect(build().links).toEqual([
       history,
+      close,
+      send,
       {
         id: "billing.export-csv",
         label: "Export CSV",
@@ -408,7 +528,11 @@ describe("the payment actions", () => {
 describe("the examples", () => {
   it("are received models of this view, built by the model", () => {
     expect(PERIOD_REVIEW_EXAMPLES).toHaveLength(5);
-    for (const example of PERIOD_REVIEW_EXAMPLES) expect(example).toMatchObject({ view: "billing.period-review", kind: "collection" });
+    for (const example of PERIOD_REVIEW_EXAMPLES) {
+      expect(example).toMatchObject({ view: "billing.period-review", kind: "collection" });
+      // So a GUI with a renderer for it draws them with that renderer.
+      expect(example.ext?.schema).toBe("billing.period-review@1");
+    }
     expect(PERIOD_REVIEW_EXAMPLES[4].notice).toMatchObject({ tone: "warning" });
     expect(PERIOD_REVIEW_EXAMPLES[4].body.rows.flatMap((r) => r.actions).every((a) => !a.enabled)).toBe(true);
     // The closed example is seen by a super admin, who is offered marking failed and refunded.

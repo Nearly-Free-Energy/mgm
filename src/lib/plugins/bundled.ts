@@ -278,14 +278,32 @@ export const BILLING_PLUGIN: BundledPlugin = {
     "/api/v1/billing",
   ],
   pages: [
-    { path: "/microgrids/[id]/billing", params: { id: "microgrid" } },
+    // A microgrid's billing periods, as the billing.periods view.
+    { path: "/microgrids/[id]/billing", params: { id: "microgrid" }, servedBy: "view" },
+    // A period's review stays its page.tsx while a parity row of the
+    // period-review screen is pending (src/lib/billing/parity.ts, enforced by
+    // parity.test.ts); once none is, it becomes the billing.period-review view.
     {
       path: "/microgrids/[id]/billing/[periodId]",
       params: { id: "microgrid", periodId: "billingPeriod" },
     },
+    // A period's audit history, as the billing.period-history view.
     {
       path: "/microgrids/[id]/billing/[periodId]/history",
       params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
+    // The close checklist, as the billing.close-checklist view.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/close",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
+    // The send queue, as the billing.send-queue view.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/send",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
     },
     { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
     { path: "/communities/[id]/invoice", params: { id: "community" } },
@@ -335,6 +353,20 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
   pages: [
     { path: "/organizations/[id]/payments", params: { id: "organization" } },
     { path: "/communities/[id]/payment", params: { id: "community" } },
+    // A billing period's bills and one bill's payment attempts, as the
+    // payments.bill-attempts view, shown as a tab of billing's period review.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payments",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
+    // The community's payment readiness, with the link to its Payment page,
+    // as the payments.payment-setup view, a section of billing's send queue.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payment-setup",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
   ],
   tables: [
     "payment_merchant_accounts",

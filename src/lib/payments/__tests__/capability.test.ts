@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PaymentsCapability } from "../capability";
 import { PaymentError } from "../errors";
 import { ATTEMPT_NOT_OPEN, type ProviderFactory } from "../repository";
+import { stablePaymentLinkPath } from "../payment-link";
 import {
   ATTEMPT,
   COMMUNITY,
@@ -103,6 +104,61 @@ describe("PaymentsCapability access gates", () => {
     expect(createSpy).not.toHaveBeenCalled();
   });
 
+  // docs/payments-rollout.md tells operators what a link preview's checkout
+  // does once the bill's total changes. The attempt below is the state
+  // `fn_payment_bill_revision` (20261010202643_payments_integrity.sql) leaves
+  // an open checkout in; if that trigger stops flagging open checkouts, or
+  // ensureCheckout stops refusing on them, revisit that paragraph.
+  it("refuses a checkout after the total changes under one a link preview opened", async () => {
+    const repo = baseRepo({
+      loadBillSnapshot: async () => ({
+        lineItemId: LINE_ITEM,
+        orgId: ORG,
+        communityId: COMMUNITY,
+        totalAmount: 5500,
+        currency: "UGX",
+        updatedAt: "2026-11-19T10:00:00.000Z",
+        paymentStatus: "unpaid",
+        periodStatus: "draft",
+        contactEmail: "aaron@example.com",
+        contactPhone: null,
+        contactFirstName: "Aaron",
+        contactLastName: "NFE",
+        periodLabel: "2026-09-01 – 2026-09-30",
+      }),
+      listAttemptsForLineItem: async () => [
+        {
+          id: "66666666-6666-6666-6666-666666666666",
+          org_id: ORG,
+          line_item_id: LINE_ITEM,
+          community_id: COMMUNITY,
+          merchant_account_id: "acc-1",
+          merchant_account_version: 1,
+          amount: 5000,
+          currency: "UGX",
+          bill_revision_total: 5000,
+          bill_revision_updated_at: "2026-11-18T10:00:00.000Z",
+          merchant_reference: "INV-X-2",
+          provider_tracking_id: "TRACK-2",
+          provider: "pesapal",
+          status: "needs_reconciliation",
+          checkout_url: "https://pay.example/checkout/2",
+          failure_code: "bill_revised",
+          failure_message: "Bill amount changed after checkout was created",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+    const factory = providers();
+    const forAccount = vi.spyOn(factory, "forAccount");
+    const cap = new PaymentsCapability(repo, scope(), factory, () => true, (p) => p);
+    const createSpy = vi.spyOn(repo, "createAttempt");
+    const checkout = await cap.ensureCheckout(LINE_ITEM);
+    expect(checkout).toMatchObject({ ok: false, status: 409, code: "payments_needs_reconciliation" });
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(forAccount).not.toHaveBeenCalled();
+  });
+
   it("errors instead of falling back on a broken override", async () => {
     const repo = baseRepo({
       resolveMerchantAccount: async () => ({
@@ -115,6 +171,27 @@ describe("PaymentsCapability access gates", () => {
     const checkout = await cap.ensureCheckout(LINE_ITEM);
     expect(checkout.ok).toBe(false);
     if (!checkout.ok) expect(checkout.code).toBe("payments_override_broken");
+  });
+});
+
+describe("PaymentsCapability stable payment link", () => {
+  it("is the application URL of stablePaymentLinkPath, the path a billing view builds the same link from", async () => {
+    const repo = baseRepo({});
+    const create = vi.spyOn(repo, "createAttempt");
+    const cap = new PaymentsCapability(repo, scope(), providers(), () => true, (p) => `https://mgm.example.org${p}`);
+    expect(await cap.stablePaymentLink(LINE_ITEM)).toEqual({
+      ok: true,
+      data: { url: `https://mgm.example.org${stablePaymentLinkPath(LINE_ITEM)}` },
+    });
+    expect(stablePaymentLinkPath(LINE_ITEM)).toBe(`/api/billing-line-items/${LINE_ITEM}/pay`);
+    // Handing out the link starts no checkout.
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bill of another organization", async () => {
+    const repo = baseRepo({ getLineItemOrganization: async () => ({ lineItemId: LINE_ITEM, orgId: "99999999-9999-4999-8999-999999999999" }) });
+    const cap = new PaymentsCapability(repo, scope(), providers(), () => true, (p) => p);
+    expect(await cap.stablePaymentLink(LINE_ITEM)).toMatchObject({ ok: false, status: 403, code: "payments_scope_mismatch" });
   });
 });
 
@@ -172,6 +249,13 @@ describe("PaymentsCapability verified payment regressions", () => {
     expect((await new PaymentsCapability(repo, scope(), provider.factory, () => true, p => p).refreshPaymentStatus(ATTEMPT)).ok).toBe(true);
     expect(load).toHaveBeenCalledWith(saved); expect(resolve).not.toHaveBeenCalled();
   });
+  it("lets a failed receipts read fail the history, but still answers a refresh it has applied", async () => {
+    const saved = attempt();
+    const repo = baseRepo({ getAttempt: async () => saved, listAttemptsForLineItem: async () => [saved], listReceiptsForAttempt: async () => { throw new Error("Could not load payment receipts"); } });
+    const cap = new PaymentsCapability(repo, scope(), verifiedProvider().factory, () => true, p => p);
+    await expect(cap.listHistory(LINE_ITEM)).rejects.toThrow("Could not load payment receipts");
+    expect(await cap.refreshPaymentStatus(ATTEMPT)).toMatchObject({ ok: true, data: { receipts: [] } });
+  });
   it.each([{ amount: undefined }, { currency: undefined }, { merchantReference: undefined }])("rejects incomplete provider evidence %j", async missing => {
     const repo = baseRepo({ getAttempt: async () => attempt() }); const commit = vi.spyOn(repo, "commitVerification"); const provider = verifiedProvider(missing);
     expect(await new PaymentsCapability(repo, scope(), provider.factory, () => true, p => p).refreshPaymentStatus(ATTEMPT)).toMatchObject({ ok: false, code: "payments_incomplete_evidence" }); expect(commit).not.toHaveBeenCalled();
@@ -196,8 +280,101 @@ describe("PaymentsCapability verified payment regressions", () => {
     const reconcile = vi.spyOn(repo, "reconcileAttempt"); const cap = new PaymentsCapability(repo, scope(), providers(), () => true, p => p);
     expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalReference: "receipt" })).ok).toBe(false);
     expect(reconcile).not.toHaveBeenCalled();
-    expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally" })).ok).toBe(true);
+    expect((await cap.reconcile(ATTEMPT, { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally", confirmation: { acknowledged: [], typed: "Aaron NFE" } })).ok).toBe(true);
     expect(reconcile).toHaveBeenCalledWith(expect.objectContaining({ externalAmount: -500, actorUserId: "user-1" }));
+  });
+});
+
+describe("PaymentsCapability reconcile", () => {
+  const RECORD = { action: "record_external", externalAmount: -500, externalReference: "refund", notes: "Completed externally" };
+  const named = (typed: string) => ({ ...RECORD, confirmation: { acknowledged: [], typed } });
+  const setup = (overrides: Parameters<typeof baseRepo>[0] = {}) => {
+    const repo = baseRepo({ getAttempt: async () => attempt("needs_reconciliation"), ...overrides });
+    const reconcileAttempt = vi.spyOn(repo, "reconcileAttempt");
+    return { cap: new PaymentsCapability(repo, scope(), providers(), () => true, (p) => p), reconcileAttempt };
+  };
+
+  it("refuses a completed adjustment without the tenant's name typed, before writing", async () => {
+    const { cap, reconcileAttempt } = setup();
+    for (const body of [RECORD, named(""), named("   ")]) {
+      expect(await cap.reconcile(ATTEMPT, body)).toEqual({
+        ok: false,
+        status: 428,
+        code: "payments_reconcile_name_required",
+        message: "Recording a completed adjustment needs the tenant's name typed: use Record completed adjustment.",
+      });
+    }
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+  });
+
+  it("refuses another name, and accepts the tenant's name with any spacing", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect(await cap.reconcile(ATTEMPT, named("Aaron"))).toEqual({
+      ok: false,
+      status: 428,
+      code: "payments_reconcile_name_mismatch",
+      message: "The name typed does not match this bill's tenant.",
+    });
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+    expect((await cap.reconcile(ATTEMPT, named("  Aaron   NFE "))).ok).toBe(true);
+    expect(reconcileAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares the name to the bill's tenant as the snapshot splits it", async () => {
+    const { cap } = setup({
+      loadBillSnapshot: async () => ({ ...(await baseRepo().loadBillSnapshot(LINE_ITEM))!, contactFirstName: "Akello", contactLastName: "Grace Mary" }),
+    });
+    expect((await cap.reconcile(ATTEMPT, named("Akello Grace Mary"))).ok).toBe(true);
+  });
+
+  it("answers 404 when the bill cannot be read, and 500 with fixed copy when reading it fails", async () => {
+    expect(await setup({ loadBillSnapshot: async () => null }).cap.reconcile(ATTEMPT, named("Aaron NFE"))).toMatchObject({ ok: false, status: 404 });
+    const failed = await setup({
+      loadBillSnapshot: async () => {
+        throw new Error("Could not load bill");
+      },
+    }).cap.reconcile(ATTEMPT, named("Aaron NFE"));
+    expect(failed).toEqual({ ok: false, status: 500, code: "payments_unavailable", message: "Could not reconcile this attempt right now." });
+  });
+
+  it("accepts exact receipts without a name, whatever confirmation is sent", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect((await cap.reconcile(ATTEMPT, { action: "accept_exact" })).ok).toBe(true);
+    expect((await cap.reconcile(ATTEMPT, { action: "accept_exact", externalAmount: 0, confirmation: { acknowledged: [], typed: "Someone" } })).ok).toBe(true);
+    expect(reconcileAttempt).toHaveBeenCalledTimes(2);
+    expect(reconcileAttempt).toHaveBeenCalledWith(expect.objectContaining({ action: "accept_exact", externalAmount: 0 }));
+  });
+
+  it("refuses an amount on an exact acceptance", async () => {
+    const { cap, reconcileAttempt } = setup();
+    expect(await cap.reconcile(ATTEMPT, { action: "accept_exact", externalAmount: 5 })).toEqual({
+      ok: false,
+      status: 400,
+      code: "payments_accept_takes_no_amount",
+      message: "Accepting exact receipts takes no amount: record a completed adjustment instead.",
+      field: "externalAmount",
+    });
+    expect(reconcileAttempt).not.toHaveBeenCalled();
+  });
+
+  it("refuses an attempt that needs no reconciliation with fixed copy", async () => {
+    const { cap } = setup({ getAttempt: async () => attempt("verified") });
+    expect(await cap.reconcile(ATTEMPT, { action: "accept_exact" })).toMatchObject({ status: 409, message: "This attempt does not need reconciliation." });
+  });
+
+  it.each([
+    [{ message: "receipts are not exact settlement" }, 409, "payments_not_exact", "The verified receipts do not come to exactly the current bill: record a completed adjustment instead."],
+    [{ message: "external collection/refund must exactly reconcile balance and include reference and notes" }, 409, "payments_adjustment_inexact", "The amount must bring the received total to exactly the current bill, with a reference and notes."],
+    [{ message: "unknown submission outcome must be investigated with provider" }, 409, "payments_unknown_outcome", "A checkout for this bill has an unknown outcome: investigate its reference with the provider before reconciling."],
+    [{ message: "mixed receipt currencies require provider investigation" }, 409, "payments_mixed_currencies", "This bill's receipts are in more than one currency: investigate them with the provider before reconciling."],
+    [{ message: "nothing to reconcile" }, 409, "payments_nothing_to_reconcile", "This attempt does not need reconciliation."],
+    [{ code: "42501", message: "manager authorization required" }, 403, "payments_scope_mismatch", "Not authorized to act on this organization."],
+    [{ code: "XX000", message: "connection reset by peer at 10.0.0.1" }, 500, "payments_unavailable", "Could not reconcile this attempt right now."],
+  ])("answers the database's %o with fixed copy", async (error, status, code, message) => {
+    const { cap } = setup({ reconcileAttempt: async () => ({ error }) });
+    const result = await cap.reconcile(ATTEMPT, named("Aaron NFE"));
+    expect(result).toEqual({ ok: false, status, code, message });
+    expect(JSON.stringify(result)).not.toContain(error.message);
   });
 });
 

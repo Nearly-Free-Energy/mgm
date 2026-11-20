@@ -7,10 +7,13 @@
  *     instead of a full document reload.
  *   - Each tab links to the page a click lands on, not to a URL that
  *     redirects (/microgrids/<id> → Operations, /setup → Edges).
- *   - The highlighted tab for every sub-route this layout renders. Operations
- *     is served by its view through the (gui) catch-all, outside this
- *     layout, so TabNav never renders there; if Operations moves back under
- *     microgrids/[id]/, test its highlight again.
+ *   - The highlighted tab for every sub-route this layout renders.
+ *     Operations, a microgrid's billing periods and a period's history are
+ *     served by their views through the (gui) catch-all, outside this
+ *     layout, so TabNav never renders there; if any of them moves back under
+ *     microgrids/[id]/, test its highlight again. The Billing tab's
+ *     highlight is tested on a period's review, the one billing page left
+ *     under this layout.
  *   - A click announces the navigation to NavigationProgress, except on the
  *     page the user is already on and on a click that opens a new tab.
  */
@@ -19,7 +22,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MGM_NAVIGATION_START_EVENT } from "@/components/ui/navigation-progress";
 
-let mockPathname = "/microgrids/mg-1/billing";
+let mockPathname = "/microgrids/mg-1/billing/p-1";
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
 }));
@@ -96,9 +99,7 @@ describe("TabNav", () => {
   });
 
   it.each([
-    ["/microgrids/mg-1/billing", "Billing"],
     ["/microgrids/mg-1/billing/p-1", "Billing"],
-    ["/microgrids/mg-1/billing/p-1/history", "Billing"],
     ["/microgrids/mg-1/setup/edges", "Setup"],
     ["/microgrids/mg-1/setup/edges/edge-1", "Setup"],
     ["/microgrids/mg-1/setup/tenants", "Setup"],
@@ -128,35 +129,37 @@ describe("TabNav", () => {
   );
 
   it("announces the navigation to Operations from another tab", () => {
-    mockPathname = "/microgrids/mg-1/billing";
+    mockPathname = "/microgrids/mg-1/billing/p-1";
     render(<TabNav microgridId="mg-1" />);
     fireEvent.click(tab("Operations"));
     expect(announced).toEqual(["/microgrids/mg-1/operations"]);
   });
 
-  it("does not announce a click on the tab already shown", () => {
-    mockPathname = "/microgrids/mg-1/billing";
+  // On a period's review the Billing tab is highlighted but links to the
+  // periods list, another page, so its click is a navigation.
+  it("announces a click on the highlighted tab when it leads to another page", () => {
+    mockPathname = "/microgrids/mg-1/billing/p-1";
     render(<TabNav microgridId="mg-1" />);
     fireEvent.click(tab("Billing"));
-    expect(announced).toEqual([]);
+    expect(announced).toEqual(["/microgrids/mg-1/billing"]);
   });
 
   it("announces the navigation when a tab leads somewhere else", () => {
-    mockPathname = "/microgrids/mg-1/billing";
+    mockPathname = "/microgrids/mg-1/billing/p-1";
     render(<TabNav microgridId="mg-1" />);
     fireEvent.click(tab("Setup"));
     expect(announced).toEqual(["/microgrids/mg-1/setup/edges"]);
   });
 
   it("does not announce a click on the page already shown", () => {
-    mockPathname = "/microgrids/mg-1/billing";
+    mockPathname = "/microgrids/mg-1/setup/edges";
     render(<TabNav microgridId="mg-1" />);
-    fireEvent.click(tab("Billing"));
+    fireEvent.click(tab("Setup"));
     expect(announced).toEqual([]);
   });
 
   it("does not announce a click that opens a new tab or window", () => {
-    mockPathname = "/microgrids/mg-1/billing";
+    mockPathname = "/microgrids/mg-1/billing/p-1";
     render(<TabNav microgridId="mg-1" />);
     fireEvent.click(tab("Setup"), { metaKey: true });
     fireEvent.click(tab("Setup"), { ctrlKey: true });

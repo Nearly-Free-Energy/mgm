@@ -16,7 +16,7 @@ import {
 } from "@/lib/billing/period-delete";
 import { PeriodPicker, type PeriodOption } from "@/components/ui/period-picker";
 import { EmptyState } from "@/components/ui/empty-state";
-import { dayKeyInZone } from "@/lib/timezone/day-key";
+import { getDefaultDates } from "@/lib/billing/default-dates";
 
 function toPeriodOption(
   period: BillingPeriod,
@@ -28,48 +28,6 @@ function toPeriodOption(
     endDate: period.end_date,
     status: period.status,
     totalAmount: summaries[period.id]?.totalAmount ?? 0,
-  };
-}
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/**
- * The previous calendar month as `YYYY-MM-DD` start and end dates, for
- * pre-filling the new-period form. "Today" is read in `timezone` (the
- * microgrid's IANA zone) when given, otherwise from the browser's local
- * date parts. Neither path goes through `toISOString()`, which names the
- * UTC day and moves both dates back a day east of UTC.
- */
-export function getDefaultDates(
-  now: Date = new Date(),
-  timezone?: string,
-): { start: string; end: string } {
-  let year = now.getFullYear();
-  let month = now.getMonth() + 1; // 1-12
-  if (timezone) {
-    // dayKeyInZone reads the calendar day of an instant (now), not a stored
-    // billing DATE, so this stays inside the scope its header sets.
-    try {
-      const [y, m] = dayKeyInZone(now, timezone).split("-");
-      year = Number(y);
-      month = Number(m);
-    } catch {
-      // Unknown zone id (RangeError): keep the local date parts rather than
-      // fail the whole billing page over a form's default dates.
-    }
-  }
-
-  const prevYear = month === 1 ? year - 1 : year;
-  const prevMonth = month === 1 ? 12 : month - 1;
-  // Day 0 of the following month is the last day of prevMonth. UTC keeps
-  // this pure calendar arithmetic, free of any local-zone shift.
-  const lastDay = new Date(Date.UTC(prevYear, prevMonth, 0)).getUTCDate();
-
-  return {
-    start: `${prevYear}-${pad2(prevMonth)}-01`,
-    end: `${prevYear}-${pad2(prevMonth)}-${pad2(lastDay)}`,
   };
 }
 

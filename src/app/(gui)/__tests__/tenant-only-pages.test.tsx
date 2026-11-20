@@ -163,7 +163,7 @@ afterAll(async () => {
 
 describe("Every page under (gui) keeps a person whose rows are all tenant rows to tenant pages (mgm#209)", () => {
   it("finds the host's pages, the nested layouts and the catalog's view pages, by scope", () => {
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/", "/go/[nav]", "/settings/users", "/microgrids/[id]/billing/[periodId]"]));
     expect(HOST_PAGES.length).toBeGreaterThan(20);
     expect(LAYOUTS).toEqual(expect.arrayContaining(["/communities/[id]", "/microgrids/[id]", "/microgrids/[id]/setup", "/settings"]));
     expect(LAYOUTS).not.toContain("");

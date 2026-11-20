@@ -2,16 +2,13 @@
  * audit-log-fetch.ts — shared loader for the period audit log (#176, BC4).
  *
  * Lifted verbatim from the BC1 route handler
- * (`src/app/api/billing-periods/[periodId]/audit-log/route.ts`) so two
- * surfaces share one implementation:
- *
- *   1. The HTTP endpoint (BC1) — `GET /api/billing-periods/[id]/audit-log`
- *      delegates to `fetchAuditLogEntries`. Existing route tests at
- *      `route.test.ts` are the behavior contract — DO NOT diverge.
- *   2. The server-rendered history page (BC4) —
- *      `src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx`
- *      calls this directly under the user-bound supabase client. No HTTP
- *      fetch from a server component (cookie + absolute-URL footgun).
+ * (`src/app/api/billing-periods/[periodId]/audit-log/route.ts`), whose
+ * HTTP endpoint (`GET /api/billing-periods/[id]/audit-log`) delegates to
+ * `fetchAuditLogEntries`. Existing route tests at `route.test.ts` are the
+ * behavior contract — DO NOT diverge. The server-rendered history page
+ * (BC4) also called it until #201 served that URL through the GUI host
+ * (the `billing.period-history` view, below), so the route is its only
+ * caller.
  *
  * Behavior preserved (any change here will break the BC1 contract):
  *   - LIMIT 500 per side (memory-safety guard, NOT pagination).
@@ -25,6 +22,11 @@
  *   - Audit-row tenantName resolution: live join (`billing_line_items
  *     → tenants`) preferred over the snapshot in `details.tenant_name`;
  *     snapshot used when the line item is hard-deleted (FK NULL).
+ *
+ * Another reader does its own paged reads with the same normalization (step
+ * 5 below, without raw_payload): the `billing.period-history` view's loader,
+ * src/lib/billing/surface/period-history.ts. If the normalization changes in
+ * either place, revisit the other.
  *
  * The result discriminator mirrors the `unauthorized` / `not-found` /
  * `error` / `ok` shape the route needs to map to HTTP status codes.

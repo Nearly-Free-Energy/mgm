@@ -229,9 +229,14 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(rows[0].related).toEqual([expect.objectContaining({ kind: "tenant", id: tenant(1), href: `/microgrids/${MICROGRID}/setup/tenants/${tenant(1)}` })]);
     expect(model.body.totals.usage).toMatchObject({ t: "energy", v: 210 });
     expect(model.body.totals.total).toMatchObject({ t: "money", v: 122500, currency: "UGX" });
+    // The copy figures pass the host's strict check and follow the rows.
+    expect(model.ext.schema).toBe("billing.period-review@1");
+    expect(model.ext.data.rows.map((r: { id: string }) => r.id)).toEqual(rows.map((r) => r.id));
+    expect(model.ext.data.totals[model.ext.data.columns.indexOf("total")]).toBe("122500");
     // Generate is not offered until an interface has a form for it (parity.test.ts).
     expect(model.actions).toEqual([]);
-    expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.export-csv"]);
+    expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.close-checklist", "billing.send-queue", "billing.export-csv"]);
+    expect(model.links[2]).toMatchObject({ label: "Payment links", href: `/microgrids/${MICROGRID}/billing/${DRAFT}/send` });
     expect(rows[0].links.map((l) => l.id)).toEqual(["billing.download-bill", "billing.view-history"]);
 
     // The prefills survive the host's check against each input.

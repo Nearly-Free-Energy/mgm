@@ -400,9 +400,15 @@ checkout while keeping history and verification available", and the
 when their state cannot be read, before it obtains a provider or writes
 anything. The reads (`getReadiness`, `stablePaymentLink`, `listHistory`),
 verification of attempts already submitted (`refreshPaymentStatus`,
-`handleNotification`) and `reconcile` run regardless; `getReadiness` reports
-unreadable state as disabled, so an invoice renders without a payment link
-instead of failing. The `503` relies on the payments repository rejecting
+`handleNotification`) and `reconcile` run regardless. `getReadiness` answers
+`disabled` when either plugin reads as off, and refuses with
+`503 payments_unavailable` when a state cannot be read and neither plugin
+reads as off, rather than say payments are turned off when they may not be.
+Its callers (the invoice PDF route, the billing period page and the send
+queue) offer a payment link only for `ready` or `sandbox` and treat that
+refusal as no link, so an invoice renders without one instead of failing; a
+new caller does the same. If a caller starts failing on that refusal, revisit
+this paragraph and the comment in `getReadiness`. The `503` relies on the payments repository rejecting
 when it cannot read the state, as `isPluginEnabledForOrg` does; a repository
 that reads a failure as `false` answers `409` instead.
 
@@ -475,7 +481,13 @@ in `pages`. A page is its path as spelled under `src/app`, with route-group
 folders left out, and the entity kind (one of `CORE_ENTITY_KINDS`) of each
 bracketed segment: `/microgrids/[id]/billing/[periodId]` is a microgrid and a
 billing period. A page carries `servedBy: "view"` once a contributed GUI view
-serves it instead of a `page.tsx`.
+serves it instead of a `page.tsx`. A page that switches to a view deletes its
+`page.tsx` in the same commit (`catalog-pages.test.ts` fails otherwise), and
+the host's catch-all (`src/app/(gui)/[...path]/page.tsx`) then serves it
+outside any segment layout, such as `microgrids/[id]/layout.tsx`: the page
+loses that layout's header, tabs and notices, and shows the GUI's own dock
+and trail instead. A billing screen's page switches only once no row of
+that screen in `src/lib/billing/parity.ts` is pending (`parity.test.ts`).
 
 `getRouteOwner` reads page paths as ownership prefixes beside `routes`, so
 `/microgrids/[id]/operations` belongs to metering and `…/setup/rates` to

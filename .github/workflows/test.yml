@@ -189,7 +189,9 @@ jobs:
           npm test
 
       # The browser smoke (e2e/, playwright.config.ts): sign-in, home, a
-      # tenants list and the invoice page's logo and PDF preview at 360 px,
+      # tenants list, the invoice page's logo and PDF preview, a billing
+      # period's close checklist with its confirmation step, and its send
+      # queue at 360 px,
       # against the production build and the local Supabase above, as a
       # throwaway user it creates and deletes. Every
       # value comes from `supabase status` on this runner; none is a

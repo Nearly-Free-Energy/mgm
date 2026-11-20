@@ -99,7 +99,12 @@ describe("MGM root runtime", () => {
       "metering metering.site-day",
       "billing billing.periods",
       "billing billing.period-review",
+      "billing billing.period-history",
+      "billing billing.close-checklist",
+      "billing billing.send-queue",
       "billing billing.savings",
+      "payments payments.bill-attempts",
+      "payments payments.payment-setup",
       "tenant-app tenant.home",
     ]);
     expect([...new Set(runtime.mgmSurface.snapshot().nav.map((entry) => entry.plugin))]).toEqual([

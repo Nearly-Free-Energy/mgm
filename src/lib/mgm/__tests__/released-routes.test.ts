@@ -53,6 +53,8 @@ describe("isReleasedRoute", () => {
     "/microgrids/abc/billing",
     "/microgrids/abc/billing/period-1",
     "/microgrids/abc/billing/period-1/history",
+    "/microgrids/abc/billing/period-1/close",
+    "/microgrids/abc/billing/period-1/send",
     "/microgrids/abc/setup/rates",
     "/communities/abc/invoice",
     // Release 3 APIs.
@@ -82,6 +84,8 @@ describe("isReleasedRoute", () => {
     "/api/payments/reconcile-worker",
     "/p/abc123",
     "/payment/callback",
+    "/microgrids/abc/billing/period-1/payments",
+    "/microgrids/abc/billing/period-1/payment-setup",
     "/communities/abc/payment",
     // Operations: the daily operations view (?date= is a query, not a path).
     "/microgrids/mg-1/operations",
@@ -114,6 +118,10 @@ describe("isReleasedRoute", () => {
     "/api/meter-readings",
     "/settings",
     "/admin",
+    "/microgrids/abc/billing/period-1/close/extra",
+    "/microgrids/abc/billing/period-1/send/extra",
+    "/microgrids/abc/billing/period-1/payments/extra",
+    "/microgrids/abc/billing/period-1/payment-setup/extra",
     "/microgrids/mg-1/operations/extra",
     "/microgrids/mg-1/operations/savings/extra",
     "/manifest.json",
