@@ -20,6 +20,7 @@ import "server-only";
  * as unchecked; only its id and the kind of miss are logged, never its error
  * or its output.
  */
+import { cache } from "react";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getRouteOwner, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { ActionRef, Id, Signal, Signals, StatusItem } from "../../contract";
@@ -179,14 +180,35 @@ export async function collectSignals(ctx: HostContext, o: { requested?: string |
 }
 
 /**
+ * One slot per person and organization for the length of one server render
+ * (React cache()), so every caller in that render shares one collection.
+ * Outside a render (route handlers, tests) cache() memoizes nothing and each
+ * call collects again. Keyed by the user's id, not the context: each page,
+ * layout and route builds its own HostContext from the same access read, and
+ * a render serves one session, so a slot is never shared between people.
+ */
+const renderSlot = cache((_userId: string, _org: string): { signals?: Promise<HostOutcome<Signals>> } => ({}));
+
+/**
  * The signals of `org`, which the caller has already chosen among the
  * organizations the person can see (selectOrganization, ./organization.ts),
  * as collectSignals chooses it: dispatchView (./view.ts) passes the
  * organization a view loads in, for a view that declares `takesSignals`.
  * The rules are collectSignals'.
+ *
+ * Within one server render the watchers run once per organization, however
+ * many callers ask (Today's loader, and the shell's tray if it is ever fed
+ * from the same render); a later render, or GET /api/gui/signals, runs them
+ * again.
  */
-export async function organizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
+export function organizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
   requireIssued(ctx);
+  const slot = renderSlot(ctx.access.user.id, org);
+  slot.signals ??= collectOrganizationSignals(ctx, org);
+  return slot.signals;
+}
+
+async function collectOrganizationSignals(ctx: HostContext, org: string): Promise<HostOutcome<Signals>> {
   const snapshot = await surfaceSnapshot();
   const gate = pluginGate(ctx, org);
   const results = await Promise.all(
