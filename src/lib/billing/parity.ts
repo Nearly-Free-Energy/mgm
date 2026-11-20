@@ -11,10 +11,10 @@
  * while a row has no contribution and is not listed as pending there, so a
  * control cannot be lost on the way. Since "Serve the billing pages through
  * the GUI host" the host serves the periods list and the history (their
- * page.tsx files are gone); the review keeps its page.tsx until
- * generate-bills, payment-setup and payments-while-off are decided, and
- * BillingPeriodList, AuditLogList and BillingTable stay until the Deletes
- * pull request.
+ * page.tsx files are gone); the review keeps its page.tsx while any row of
+ * the period-review screen is pending (PENDING in parity.test.ts lists
+ * them), and BillingPeriodList, AuditLogList and BillingTable stay until
+ * the Deletes pull request.
  *
  * Out of the table, on purpose:
  *  - The rest of the microgrid layout's chrome on these pages (the
@@ -128,7 +128,12 @@ export type ParityRow = {
   screen: ParityScreen;
   /** The control as labelled today; several controls doing one thing share a row. */
   control: string;
-  /** Where it is today. */
+  /**
+   * Where it is today: the legacy components that draw it, which exist until
+   * the Deletes pull request (parity.test.ts). A control that was on a
+   * page.tsx the GUI host has replaced names the screen's remaining legacy
+   * component, and says so.
+   */
   legacy: string;
   replacedBy: ParityAction | ParityLink | ParityCopy | ParityView | ParityNav;
   pr: ParityPullRequest;
@@ -561,7 +566,10 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     id: "back-to-period",
     screen: "period-history",
     control: "Back to period",
-    legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+    // Back to period was on the history's page.tsx, which "Serve the billing
+    // pages through the GUI host" deleted; AuditLogList is what remains of
+    // that screen until the Deletes pull request.
+    legacy: "src/components/billing/audit-log-list.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]", via: { link: "billing.back-to-period" } },
     pr: HISTORY,
     note: "The host's trail also links the period; it does not count.",
@@ -570,7 +578,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     id: "history-show-all",
     screen: "period-history",
     control: "Show all, when the history is filtered to one tenant",
-    legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+    legacy: "src/components/billing/audit-log-list.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.history-show-all" } },
     pr: HISTORY,
     note: "Offered while the view is filtered by tenant_id. Latest changes (billing.history-latest), on a later page, has the same path and does not count.",

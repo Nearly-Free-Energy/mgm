@@ -4,33 +4,35 @@ import "server-only";
  * What billing contributes to GUIs (src/lib/gui/surface.ts): navigation,
  * with the labels the current chrome uses, to its billing periods view and
  * to its pages served outside the GUI contract (`legacy: true`); a
- * microgrid's billing periods as the `billing.periods` view, with creating a period and deleting a draft; one
- * period's bills as the `billing.period-review` view, with the actions on
- * each bill (generating them is contributed but offered nowhere yet, below);
- * one period's audit history as the `billing.period-history` view, reached
- * from the review's View history links; a draft period's close checklist as
- * the `billing.close-checklist` view, reached from the review's Close period
+ * microgrid's billing periods as the `billing.periods` view, with creating
+ * a period and deleting a draft; one period's bills as the
+ * `billing.period-review` view, with the actions on each bill (generating
+ * them is contributed but offered nowhere yet, below); one period's audit
+ * history as the `billing.period-history` view, reached from the review's
+ * View history links; a draft period's close checklist as the
+ * `billing.close-checklist` view, reached from the review's Close period
  * link, with the close itself (`billing.close-period`, the server's close
  * ceremony); a period's bills with each one's stable payment link, for the
  * manager to copy and share (the page sends nothing), as the
  * `billing.send-queue` view, reached from the review's Payment links link;
- * and the savings as the `billing.savings`
- * view, shown under the Operations day, with the writes that change what it
- * counts. A page that moves to a view keeps its nav id.
+ * and the savings as the `billing.savings` view, shown under the
+ * Operations day, with the writes that change what it counts. A page that
+ * moves to a view keeps its nav id.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves the periods list's
  * and the history's paths by their views (`servedBy: "view"`), so the
  * host's catch-all renders them, and the Billing nav entry opens
  * `billing.periods`. A period's review is still its legacy page
- * (BillingTable): it keeps controls no interface can replace yet (generating
- * bills, the link to the community's Payment page, payment history while
- * Payments is off), so parity.test.ts keeps its URL there while those rows
- * of src/lib/billing/parity.ts are pending, and `billing.period-review` is
- * reached through GET /api/gui/view until they clear. `billing.close-checklist`
- * and `billing.send-queue` are new pages (…/[periodId]/close and
- * …/[periodId]/send) with no page.tsx, so the catalog marks them
- * `servedBy: "view"` and the host's catch-all serves them.
+ * (BillingTable), and parity.test.ts keeps its URL there while any
+ * period-review row of src/lib/billing/parity.ts is pending: a control no
+ * interface can replace yet (when this was written, generating bills and
+ * payment history while Payments is off; parity.test.ts's PENDING is the
+ * list). Until none is, `billing.period-review` is reached through GET
+ * /api/gui/view. `billing.close-checklist` and `billing.send-queue` are new
+ * pages (…/[periodId]/close and …/[periodId]/send) with no page.tsx, so the
+ * catalog marks them `servedBy: "view"` and the host's catch-all serves
+ * them.
  */
 import type { ActionDef, Contribution } from "@/lib/gui/surface";
 import { BILLING_PLUGIN_NAME } from "@/lib/plugins/bundled";
