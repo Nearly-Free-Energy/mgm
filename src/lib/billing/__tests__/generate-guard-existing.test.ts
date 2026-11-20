@@ -20,7 +20,10 @@
  *   - reads the period's status again after reading the meters, and writes
  *     nothing if it closed meanwhile;
  *   - reads every page of the tenants and bills (PostgREST's max_rows), and
- *     stops, writing nothing, when a page cannot be read.
+ *     stops, writing nothing, when a page cannot be read;
+ *   - reads the prior readings in slices of the period and device lists,
+ *     which travel in the read's URL, and stops the same way when a slice
+ *     cannot be read.
  *
  * Harness: a mocked Supabase client, as in generate-expected-bill.test.ts.
  * The database side is generate-from-meters.db.test.ts.
@@ -114,6 +117,12 @@ function harness(
     closeDuringRead?: boolean;
     /** The second read of the period's status fails. */
     statusReadError?: boolean;
+    tenants?: Record<string, unknown>[];
+    /** The microgrid's earlier periods, and their bills' end readings. */
+    priorPeriods?: { id: string; end_date: string }[];
+    priorItems?: { id: string; device_id: string; end_kwh: number; billing_period_id: string }[];
+    /** As a gateway's request-line limit: a read whose `.in()` lists hold more ids in all fails. */
+    maxInIds?: number;
   } = {},
 ) {
   const period = { status: o.status ?? "draft" };
@@ -141,7 +150,7 @@ function harness(
         },
         error: null,
       },
-      list: { data: [], error: null },
+      list: { data: o.priorPeriods ?? [], error: null },
     },
     rate_schedules: {
       maybeSingle: {
@@ -149,15 +158,28 @@ function harness(
         error: null,
       },
     },
-    tenants: { list: { data: TENANTS, error: null } },
+    tenants: { list: { data: o.tenants ?? TENANTS, error: null } },
     billing_line_items: { list: o.billsError ? { data: null, error: o.billsError } : { data: o.bills ?? BILLS, error: null } },
   };
   // A list read answers as PostgREST would: the rows after the `gt("id", …)`
   // keyset, at most maxRows of them, with the exact count of all that match.
-  function listRead(table: string, after: string | null) {
+  // A read with `.in()` lists is the prior readings' read: it answers from
+  // priorItems, filtered by those lists.
+  const inLists: Record<string, string[]>[] = [];
+  function listRead(table: string, after: string | null, ins: Record<string, string[]>) {
     const n = (listReads[table] = (listReads[table] ?? 0) + 1);
     if (o.failRead?.table === table && o.failRead.n === n) return { data: null, error: { message: "canceling statement due to statement timeout" }, count: null };
-    const resp = (responses[table]?.list ?? { data: [], error: null }) as { data: unknown; error: unknown };
+    const filtered = Object.keys(ins).length > 0;
+    if (filtered) {
+      inLists.push(ins);
+      const ids = Object.values(ins).reduce((sum, v) => sum + v.length, 0);
+      if (o.maxInIds !== undefined && ids > o.maxInIds) return { data: null, error: { message: "414 Request-URI Too Large" }, count: null };
+    }
+    const resp = (
+      filtered
+        ? { data: (o.priorItems ?? []).filter((r) => Object.entries(ins).every(([c, v]) => v.includes(String((r as Record<string, unknown>)[c])))), error: null }
+        : (responses[table]?.list ?? { data: [], error: null })
+    ) as { data: unknown; error: unknown };
     if (resp.error || !Array.isArray(resp.data) || o.maxRows === undefined) return resp;
     const rows = (resp.data as { id: string }[]).filter((r) => after === null || r.id > after).sort((a, b) => (a.id < b.id ? -1 : 1));
     return { data: rows.slice(0, o.maxRows), error: null, count: rows.length };
@@ -166,8 +188,13 @@ function harness(
     const resp = responses[table] ?? { list: { data: [], error: null } };
     const b: Record<string, unknown> = {};
     let after: string | null = null;
+    const ins: Record<string, string[]> = {};
     const chain = () => b;
-    for (const m of ["select", "eq", "neq", "lte", "gte", "lt", "in", "not", "order", "limit", "is"]) b[m] = chain;
+    for (const m of ["select", "eq", "neq", "lte", "gte", "lt", "not", "order", "limit", "is"]) b[m] = chain;
+    b.in = (column: string, values: string[]) => {
+      ins[column] = values;
+      return b;
+    };
     b.gt = (_column: string, value: string) => {
       after = value;
       return b;
@@ -181,7 +208,7 @@ function harness(
           : { data: { status: period.status }, error: null }
         : (resp.maybeSingle ?? { data: null, error: null });
     b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
-      Promise.resolve(listRead(table, after)).then(onFulfilled, onRejected);
+      Promise.resolve(listRead(table, after, ins)).then(onFulfilled, onRejected);
     return b;
   }
   const supabase = { from: (table: string) => builder(table), rpc } as unknown as SupabaseClient;
@@ -190,7 +217,7 @@ function harness(
     return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(10) ? null : 42, startDate: "2026-04-01", endDate: "2026-04-30" }));
   });
   const meteringProvider = { getReadings } as unknown as MeteringProvider;
-  return { supabase, rpc, getReadings, meteringProvider, listReads };
+  return { supabase, rpc, getReadings, meteringProvider, listReads, inLists };
 }
 
 const writes = (rpc: ReturnType<typeof vi.fn>) =>
@@ -334,6 +361,53 @@ describe("runGenerationFor with guardExistingBills", () => {
       body: { error: "The period's tenants and bills could not be read. Nothing was written; try again.", code: "billing_bills_unreadable" },
     });
     expect(writes(failing.rpc)).toEqual([]);
+  });
+
+  it("reads the prior readings in slices of the period and device lists, latest period first", async () => {
+    // 170 metered tenants and 100 earlier periods: more than one slice of each.
+    const tenants = Array.from({ length: 170 }, (_, i) => ({ id: tenant(i + 1), display_name: `Unit ${i + 1}`, tenant_devices: [covering(i + 1)] }));
+    const priorPeriod = (n: number) => `dddddddd-dddd-4000-8008-${String(n).padStart(12, "0")}`;
+    // Ids that sort against the dates: the latest period has the lowest id.
+    const priorPeriods = Array.from({ length: 100 }, (_, i) => ({
+      id: priorPeriod(100 - i),
+      end_date: new Date(Date.UTC(2025, 11, 1 + i)).toISOString().slice(0, 10),
+    }));
+    const latest = priorPeriods[99].id;
+    const oldest = priorPeriods[0].id;
+    const item = (n: number, d: number, period: string, endKwh: number) => ({ id: bill(1000 + n), device_id: device(d), end_kwh: endKwh, billing_period_id: period });
+    const priorItems = [
+      item(1, 1, oldest, 100),
+      item(2, 1, latest, 500), // the latest wins
+      item(3, 2, oldest, 200), // only in the oldest slice of periods
+      item(4, 170, priorPeriods[50].id, 300), // the last slice of devices
+    ];
+    const h = harness({ tenants, bills: [], priorPeriods, priorItems, maxRows: 2, maxInIds: 200 });
+    await results(h);
+    const start = new Map(writes(h.rpc).map((w) => [w.args._tenant_id, w.args._start_kwh]));
+    expect(start.get(tenant(1))).toBe(500);
+    expect(start.get(tenant(2))).toBe(200);
+    expect(start.get(tenant(170))).toBe(300);
+    expect(start.get(tenant(3))).toBeNull();
+    for (const ins of h.inLists) {
+      expect(ins.billing_period_id.length).toBeLessThanOrEqual(80);
+      expect(ins.device_id.length).toBeLessThanOrEqual(80);
+    }
+    // The second slice of periods asks only for the devices not yet found.
+    const second = h.inLists.filter((ins) => ins.billing_period_id.includes(oldest));
+    expect(second.flatMap((ins) => ins.device_id)).not.toContain(device(1));
+    expect(second.flatMap((ins) => ins.device_id)).not.toContain(device(170));
+    expect(second.flatMap((ins) => ins.device_id)).toContain(device(2));
+  });
+
+  it("stops when a slice of the prior readings cannot be read, writing nothing", async () => {
+    const tenants = Array.from({ length: 170 }, (_, i) => ({ id: tenant(i + 1), display_name: `Unit ${i + 1}`, tenant_devices: [covering(i + 1)] }));
+    const priorPeriods = [{ id: "dddddddd-dddd-4000-8008-000000000001", end_date: "2026-03-31" }];
+    // The period's bills are the first billing_line_items read; the second slice of devices is the third.
+    const h = harness({ tenants, bills: [], priorPeriods, failRead: { table: "billing_line_items", n: 3 } });
+    const out = await run(h);
+    expect(out).toEqual({ kind: "fatal", status: 500, body: { error: GENERATE_FROM_METERS_COPY.failed, code: "billing_readings_unreadable" } });
+    expect(writes(h.rpc)).toEqual([]);
+    expect(h.getReadings).not.toHaveBeenCalled();
   });
 
   it("reads only the meters of tenants it may bill", async () => {

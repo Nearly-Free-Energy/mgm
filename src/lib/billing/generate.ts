@@ -99,7 +99,7 @@ import type {
 import type { LineItemRegeneratedDetails } from "@/lib/types/billing-audit";
 import { coversPeriod, overlapsPeriod } from "./meter-coverage";
 import { GENERATE_FROM_METERS_COPY, REGENERATE_REFUSAL_COPY } from "./schemas";
-import { pageAfter, readAllPages } from "./surface/pages";
+import { chunked, pageAfter, readAllPages } from "./surface/pages";
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -822,7 +822,12 @@ export async function runGenerationFor(
   }
   // Every page of both reads (readAllPages), and a read that cannot be
   // completed stops the run: a missing prior reading would start a meter's
-  // bill at no reading, or at an older one.
+  // bill at no reading, or at an older one. The readings are read in slices
+  // of the period and device lists (chunked, IN_LIST_CHUNK in
+  // ./surface/pages.ts), since both lists grow with the microgrid and travel
+  // in the read's URL; the periods latest first, and only the devices not
+  // yet found, so a device's reading comes from the first slice that holds
+  // one, which holds its latest.
   const priorEndKwhMap = new Map<string, number>();
   if (deviceIdsForLookup.length > 0) {
     const priorPeriods = await readAllPages<{ id: string; end_date: string }>((after) =>
@@ -837,30 +842,34 @@ export async function runGenerationFor(
       ),
     );
     if (priorPeriods === null) return unreadable("billing_readings_unreadable");
-    if (priorPeriods.length > 0) {
-      // Latest first; read in pages by id, so ordered here.
-      priorPeriods.sort((a, b) => (a.end_date < b.end_date ? 1 : a.end_date > b.end_date ? -1 : 0));
-      const priorPeriodIds = priorPeriods.map((p) => p.id);
-      const priorItems = await readAllPages<{ id: string; device_id: string | null; end_kwh: number | string | null; billing_period_id: string }>(
-        (after) =>
+    // Latest first; read in pages by id, so ordered here.
+    priorPeriods.sort((a, b) => (a.end_date < b.end_date ? 1 : a.end_date > b.end_date ? -1 : 0));
+    const periodOrder = new Map(priorPeriods.map((p, i) => [p.id, i]));
+    for (const periodIds of chunked(priorPeriods.map((p) => p.id))) {
+      const unfound = deviceIdsForLookup.filter((id) => !priorEndKwhMap.has(id));
+      if (unfound.length === 0) break;
+      const found: { id: string; device_id: string | null; end_kwh: number | string | null; billing_period_id: string }[] = [];
+      for (const deviceIds of chunked(unfound)) {
+        const items = await readAllPages<(typeof found)[number]>((after) =>
           pageAfter(
             supabase
               .from("billing_line_items")
               .select("id, device_id, end_kwh, billing_period_id", { count: "exact" })
-              .in("billing_period_id", priorPeriodIds)
-              .in("device_id", deviceIdsForLookup)
+              .in("billing_period_id", periodIds)
+              .in("device_id", deviceIds)
               .not("end_kwh", "is", null),
             after,
           ),
-      );
-      if (priorItems === null) return unreadable("billing_readings_unreadable");
-      const periodOrder = new Map(priorPeriodIds.map((id, i) => [id, i]));
-      priorItems.sort(
+        );
+        if (items === null) return unreadable("billing_readings_unreadable");
+        found.push(...items);
+      }
+      found.sort(
         (a, b) =>
           (periodOrder.get(a.billing_period_id) ?? Infinity) -
           (periodOrder.get(b.billing_period_id) ?? Infinity)
       );
-      for (const item of priorItems) {
+      for (const item of found) {
         if (item.device_id && !priorEndKwhMap.has(item.device_id)) {
           priorEndKwhMap.set(item.device_id, Number(item.end_kwh));
         }
