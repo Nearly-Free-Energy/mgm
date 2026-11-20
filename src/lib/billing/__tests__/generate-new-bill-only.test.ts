@@ -8,9 +8,12 @@
  *   - names one tenant and that tenant's readings only, or it is refused
  *     before anything is read;
  *   - refuses a closed period before pinning the tariff;
- *   - stops when the period's bills cannot be read;
+ *   - reads every page of the period's tenants and bills (PostgREST's
+ *     max_rows), and stops, writing nothing, when a page cannot be read;
  *   - refuses a tenant who already has a bill (`bill_exists`) and writes
- *     nothing;
+ *     nothing, wherever in the pages that bill is;
+ *   - reads the period's status again just before the insert, and writes
+ *     nothing if it closed meanwhile;
  *   - otherwise runs the manual path unchanged: one
  *     fn_record_line_item_with_audit call with the readings rounded, the
  *     pinned tariff's tiers and total, and no metering read.
@@ -86,8 +89,18 @@ function harness(
     bills?: Record<string, unknown>[];
     billsError?: { message: string } | null;
     writeError?: { code: string; message: string } | null;
+    /** As PostgREST's max_rows: at most this many rows a read, with the exact count of what is left. */
+    maxRows?: number;
+    /** The read of a table's list that fails, counted from 1. */
+    failRead?: { table: string; n: number };
+    /** Closes the period as the period's bills are read. */
+    closeDuringBillsRead?: boolean;
+    /** The second read of the period's status fails. */
+    statusReadError?: boolean;
   } = {},
 ) {
+  const period = { status: o.status ?? "draft" };
+  const listReads: Record<string, number> = {};
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name === "fn_pin_billing_period_rate_schedule") return { data: SCHEDULE_ID, error: null };
     if (name === "fn_record_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
@@ -118,21 +131,43 @@ function harness(
     tenants: { list: { data: TENANTS, error: null } },
     billing_line_items: { list: o.billsError ? { data: null, error: o.billsError } : { data: o.bills ?? [], error: null } },
   };
+  // A list read answers as PostgREST would: the rows after the `gt("id", …)`
+  // keyset, at most maxRows of them, with the exact count of all that match.
+  function listRead(table: string, after: string | null) {
+    const n = (listReads[table] = (listReads[table] ?? 0) + 1);
+    if (table === "billing_line_items" && o.closeDuringBillsRead) period.status = "closed";
+    if (o.failRead?.table === table && o.failRead.n === n) return { data: null, error: { message: "canceling statement due to statement timeout" }, count: null };
+    const resp = (responses[table]?.list ?? { data: [], error: null }) as { data: unknown; error: unknown };
+    if (resp.error || !Array.isArray(resp.data) || o.maxRows === undefined) return resp;
+    const rows = (resp.data as { id: string }[]).filter((r) => after === null || r.id > after).sort((a, b) => (a.id < b.id ? -1 : 1));
+    return { data: rows.slice(0, o.maxRows), error: null, count: rows.length };
+  }
   const from = vi.fn((table: string) => {
     const resp = responses[table] ?? { list: { data: [], error: null } };
     const b: Record<string, unknown> = {};
+    let after: string | null = null;
     const chain = () => b;
     for (const m of ["select", "eq", "neq", "lte", "gte", "lt", "in", "not", "order", "limit", "is"]) b[m] = chain;
+    b.gt = (_column: string, value: string) => {
+      after = value;
+      return b;
+    };
     b.single = async () => resp.single ?? { data: null, error: null };
-    b.maybeSingle = async () => resp.maybeSingle ?? { data: null, error: null };
+    // The period's status, read again just before the insert.
+    b.maybeSingle = async () =>
+      table === "billing_periods"
+        ? o.statusReadError
+          ? { data: null, error: { message: "permission denied" } }
+          : { data: { status: period.status }, error: null }
+        : (resp.maybeSingle ?? { data: null, error: null });
     b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
-      Promise.resolve(resp.list ?? { data: [], error: null }).then(onFulfilled, onRejected);
+      Promise.resolve(listRead(table, after)).then(onFulfilled, onRejected);
     return b;
   });
   const supabase = { from, rpc } as unknown as SupabaseClient;
   const getReadings = vi.fn(async () => []);
   const meteringProvider = { getReadings } as unknown as MeteringProvider;
-  return { supabase, from, rpc, getReadings, meteringProvider };
+  return { supabase, from, rpc, getReadings, meteringProvider, listReads };
 }
 
 const writes = (rpc: ReturnType<typeof vi.fn>) =>
@@ -225,6 +260,40 @@ describe("runGenerationFor with newBillOnly", () => {
     const h = harness({ billsError: { message: "relation billing_line_items: permission denied" } });
     const out = await run(h, 1);
     expect(out).toEqual({ kind: "fatal", status: 500, body: { error: BILL_FROM_READINGS_COPY.failed, code: "billing_bills_unreadable" } });
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it.each([
+    ["tenants", "billing_tenants_unreadable"],
+    ["billing_line_items", "billing_bills_unreadable"],
+  ])("stops when a later page of the %s cannot be read, before writing", async (table, code) => {
+    const h = harness({ maxRows: 1, bills: [billOf(3), billOf(4)], failRead: { table, n: 2 } });
+    const out = await run(h, 1);
+    expect(out).toEqual({ kind: "fatal", status: 500, body: { error: BILL_FROM_READINGS_COPY.failed, code } });
+    expect(h.listReads[table]).toBe(2);
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it("finds the tenant's bill on a later page of the period's bills, and writes nothing", async () => {
+    // Sorted by id, the tenant's bill comes last, past two pages of one row.
+    const late = billOf(1, { id: "eeeeeeee-eeee-4000-8007-999999999999" });
+    const h = harness({ maxRows: 1, bills: [billOf(3), billOf(4), late] });
+    expect(await only(h, 1)).toMatchObject({ kind: "error", code: "bill_exists", error: BILL_FROM_READINGS_COPY.hasBill });
+    expect(h.listReads.billing_line_items).toBe(3);
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it("reads the period's status again before the insert, and writes nothing if it closed meanwhile", async () => {
+    const h = harness({ closeDuringBillsRead: true });
+    const out = await run(h, 1);
+    expect(out).toEqual({ kind: "fatal", status: 409, body: { error: BILL_FROM_READINGS_COPY.closed, code: "billing_period_closed" } });
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it("stops when the period's status cannot be read again, before writing", async () => {
+    const h = harness({ statusReadError: true });
+    const out = await run(h, 1);
+    expect(out).toEqual({ kind: "fatal", status: 500, body: { error: BILL_FROM_READINGS_COPY.failed, code: "billing_period_unreadable" } });
     expect(writes(h.rpc)).toEqual([]);
   });
 

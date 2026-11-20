@@ -23,11 +23,12 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * /api/billing-line-items/[lineItemId]/regenerate), where that route
  * overwrote the bill and accepted a closed period.
  *
- * Known gaps, both in the bill's insert, which goes through
- * fn_record_line_item_with_audit as on POST /api/billing/generate, with no
- * check at the write that the tenant still has no bill: the insert checks
- * no period status, so a close committing between the engine's check and
- * that insert is not caught; and it
+ * The engine reads the period's status again just before the insert and
+ * refuses, writing nothing, if it closed meanwhile. Known gaps, both in the
+ * bill's insert, which goes through fn_record_line_item_with_audit as on
+ * POST /api/billing/generate, with no check at the write that the tenant
+ * still has no bill: the insert checks no period status, so a close
+ * committing between that second read and the insert is not caught; and it
  * upserts, so a bill another write inserts for that tenant between the
  * engine's read of the period's bills and this insert (a run from meter
  * data, the legacy panel, or a second submission of this action) is

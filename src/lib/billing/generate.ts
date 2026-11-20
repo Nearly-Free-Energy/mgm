@@ -381,11 +381,14 @@ export type RunGenerationParams = {
    *    is refused with `bill_exists` and nothing is written: that bill is
    *    changed by regenerating it (POST
    *    /api/billing-line-items/[lineItemId]/regenerate);
+   *  - the period's status is read again just before the insert, as for
+   *    guardExistingBills, and the run is refused the same way, with nothing
+   *    written, if it is no longer a draft;
    *  - otherwise the manual path below runs unchanged: the same tariff pin,
    *    rounding and audit row as on POST /api/billing/generate.
    * The insert is fn_record_line_item_with_audit's, as for guardExistingBills
    * above, with the same two known gaps: it checks no period status, so a
-   * close committing between the check above and the insert is not caught,
+   * close committing between that second read and the insert is not caught,
    * and it upserts, so a bill another write inserts for this tenant between
    * the read of the period's bills here and that insert is overwritten with
    * the readings entered and logged as regenerated. Nothing slow runs
@@ -625,8 +628,8 @@ export async function runGenerationFor(
   // (fn_regenerate_bill_with_audit), but the insert of a bill a tenant did
   // not have does not (fn_record_line_item_with_audit checks no period
   // status): guardExistingBills says what that leaves. A first bill from
-  // readings is refused the same way, with its own copy (periodClosed):
-  // newBillOnly says what that leaves.
+  // readings is refused the same way, with its own copy (periodClosed), and
+  // checked again at 6b too: newBillOnly says what that leaves.
   if ((guardExistingBills || newBillOnly) && billingPeriod.status !== "draft") return periodClosed();
 
   // ── 2. Resolve the period's pinned rate schedule ─────────────────────────
@@ -1033,8 +1036,11 @@ export async function runGenerationFor(
   // Reading the meters can take seconds, and a close in that time would
   // otherwise meet only the rewrites' own check, not the inserts. A close
   // that commits after this read is still not caught by an insert
-  // (guardExistingBills).
-  if (guardExistingBills) {
+  // (guardExistingBills). A first bill from readings reads no meter, but
+  // pins the tariff and reads the tenants and bills since its first check,
+  // so it reads the status again here too, just before its insert
+  // (newBillOnly).
+  if (guardExistingBills || newBillOnly) {
     const { data: now, error: nowError } = await supabase
       .from("billing_periods")
       .select("status")
