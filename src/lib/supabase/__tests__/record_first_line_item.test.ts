@@ -8,8 +8,10 @@
  *     fn_record_line_item_with_audit writes one from the same inputs, with one
  *     line_item_generated audit row;
  *   - a tenant who has a bill, a closed period and a moved tariff pin are
- *     refused, writing nothing; another organization's manager and a tenant
- *     find no period; anon cannot call it;
+ *     refused, writing nothing; the closed period by the function's own check,
+ *     for service_role too, which the insert guard below lets through;
+ *     another organization's manager and a tenant find no period; anon cannot
+ *     call it;
  *   - races, each with the other transaction holding its locks first: a
  *     close makes the insert find the period closed, a bill inserted by
  *     another write makes it refuse with bill_exists and leave that bill as
@@ -84,6 +86,7 @@ const T = Object.fromEntries(
     "guardClosed",
     "guardUpsert",
     "guardService",
+    "closedService",
   ].map((name, i) => [name, `f1b50000-0000-4000-8007-${String(i + 1).padStart(12, "0")}`]),
 ) as Record<string, string>;
 
@@ -305,13 +308,32 @@ desc("20261120130100_record_first_line_item.sql", () => {
       expect(await auditOf(before.id)).toHaveLength(1);
     });
 
-    it("a closed period: billing_period_closed", async () => {
+    // The function's own text, not the insert guard's ("a bill cannot be
+    // added"), which refuses a signed-in caller with the same code and
+    // DETAIL: these assertions fail if the function's check goes and only
+    // the guard is left.
+    const FUNCTION_CLOSED = /^billing_period_closed: a first bill is not added to a closed billing period$/;
+
+    it("a closed period: billing_period_closed, by the function's own check", async () => {
       const { data, error } = await manager.client.rpc("fn_record_first_line_item_with_audit", args(F.closed, T.closed));
       expect(data).toBeNull();
       expect(error?.code).toBe("23514");
-      expect(error?.message).toMatch(/^billing_period_closed/);
+      expect(error?.message).toMatch(FUNCTION_CLOSED);
       expect(error?.details).toBe("closed");
       expect(await billsOf(F.closed, T.closed)).toEqual([]);
+    });
+
+    it("a closed period refuses service_role too, which the insert guard lets through", async () => {
+      const svc = await serviceClient();
+      const { data, error } = await svc.rpc(
+        "fn_record_first_line_item_with_audit",
+        args(F.closed, T.closedService, { _actor_user_id: null, _entered_by_user_id: null, _actor_kind: "system", _actor_ref: "first-bill-test" }),
+      );
+      expect(data).toBeNull();
+      expect(error?.code).toBe("23514");
+      expect(error?.message).toMatch(FUNCTION_CLOSED);
+      expect(error?.details).toBe("closed");
+      expect(await billsOf(F.closed, T.closedService)).toEqual([]);
     });
 
     it("a tariff pin that moved: the upsert's tariff text", async () => {
@@ -359,7 +381,12 @@ desc("20261120130100_record_first_line_item.sql", () => {
       );
       expect(holder.ok).toBe(true);
       expect(contender.data).toBeNull();
-      expect(contender.error?.message).toMatch(/^billing_period_closed/);
+      // The function's own text: its FOR SHARE waits for the close before
+      // its INSERT reaches the insert guard.
+      expect(contender.error?.message).toMatch(
+        /^billing_period_closed: a first bill is not added to a closed billing period$/,
+      );
+      expect(contender.error?.details).toBe("closed");
       expect(await billsOf(F.raceClose, T.raceClose)).toEqual([]);
     });
 
