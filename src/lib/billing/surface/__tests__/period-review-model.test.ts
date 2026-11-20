@@ -607,14 +607,17 @@ describe("generateReadiness", () => {
         b(5, { invoice_number: "EXS-1" }),
         b(6, { payment_status: "refunded" }),
         b(10, { reading_source: "manual", payment_status: "paid" }),
+        // A pending payment link is recalculated like any other bill, and counted.
         b(11, { reading_source: null, payment_status: "link_generated" }),
         b(12),
-        b(13),
+        // Not counted: its meter is not read.
+        b(13, { payment_status: "link_generated" }),
       ],
     );
     expect(r).toEqual({
       fromMeters: 3,
       refresh: 2,
+      withPaymentLink: 1,
       kept: 2,
       left: 3,
       notBilled: [

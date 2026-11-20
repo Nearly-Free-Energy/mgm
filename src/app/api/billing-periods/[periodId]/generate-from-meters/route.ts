@@ -35,13 +35,15 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * Body (GenerateFromMetersBody): `{}`. The period is the path's.
  *
  * Responses:
- *   200 → { generated, unchanged, kept, left, changed, notRefreshed,
- *           notBilled: { noMeter, meterAssignment, noReading, failed },
+ *   200 → { generated, paymentLinksCleared, unchanged, kept, left, changed,
+ *           notRefreshed, notBilled: { noMeter, meterAssignment, noReading, failed },
  *           tenants: [{ tenantId, tenantName, outcome, code? }], message }
  *         — counts by outcome (generate-from-meters-summary.ts); `code` is the
  *         engine's GenerationErrorCode for a tenant left or not billed, never
  *         its text; `message` sums the counts up in fixed copy, in the
  *         request's locale, within the 300 characters the GUI host keeps.
+ *         `paymentLinksCleared` is the bills written whose pending payment
+ *         link stopped working because their total changed.
  *   400 → { error, field?, code: "invalid_body" } (anything but `{}`);
  *         { error, reason: "bad_request" } (id)
  *   401 → { error: "unauthorized" }

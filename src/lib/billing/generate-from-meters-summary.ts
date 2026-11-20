@@ -7,18 +7,27 @@
  * database's message ("Failed to write line item: …"); it passes on only
  * the code. The message stays within the 300 characters the GUI host keeps
  * of an action's result (invoke.ts): every clause is a count and a fixed
- * phrase, and with every clause present at a thousand tenants each it is
- * just under (the summary test checks it); if a clause or phrase grows, or
- * gains a name or a sentence, test the longest.
+ * phrase, and when the full message would be longer (every clause present
+ * at a thousand tenants each is), it says the not-billed and left counts
+ * as totals instead (the summary test checks both). If a phrase grows, or
+ * the short form gains a sentence, test the longest.
  */
 import type { Fmt } from "@/lib/gui/surface";
 import type { GenerationErrorCode, TenantResult } from "./generate";
+import { roundAmount } from "./precision";
 
 export type GenerateFromMetersOutcome = "generated" | "unchanged" | "kept" | "left" | "not_billed";
 
 export type GenerateFromMetersCounts = {
   /** Written: a first bill, or an existing one with new figures. */
   generated: number;
+  /**
+   * Of `generated`, bills that had a pending payment link (link_generated)
+   * and a new total: fn_record_line_item_with_audit clears the link when a
+   * bill's total changes, so it stops working. Known from the engine's
+   * result (the payment status and total it read, and the total written).
+   */
+  paymentLinksCleared: number;
   /** Read from the meter, with the figures the bill already had: nothing written. */
   unchanged: number;
   /** Manual bills, kept as they are. */
@@ -62,6 +71,7 @@ const plural = (fmt: Fmt, n: number, one: string, many: string) => `${fmt.number
 export function summarizeGenerateFromMeters(results: readonly TenantResult[], fmt: Fmt): GenerateFromMetersSummary {
   const counts: GenerateFromMetersCounts = {
     generated: 0,
+    paymentLinksCleared: 0,
     unchanged: 0,
     kept: 0,
     left: 0,
@@ -74,6 +84,7 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
     switch (r.kind) {
       case "written":
         counts.generated++;
+        if (linkCleared(r)) counts.paymentLinksCleared++;
         tenants.push({ tenantId: r.tenantId, tenantName: r.tenantName, outcome: "generated" });
         break;
       case "unchanged":
@@ -101,11 +112,33 @@ export function summarizeGenerateFromMeters(results: readonly TenantResult[], fm
   return { ...counts, tenants, message: messageFor(counts, fmt) };
 }
 
+/**
+ * Whether a written bill had a pending payment link and now has another
+ * total: compared as fn_record_line_item_with_audit compares them, rounded
+ * to whole units (previousTotalAmount already is).
+ */
+function linkCleared(r: Extract<TenantResult, { kind: "written" }>): boolean {
+  return (
+    r.previousPaymentStatus === "link_generated" &&
+    r.previousTotalAmount !== null &&
+    roundAmount(Number(r.lineItem.total_amount)) !== r.previousTotalAmount
+  );
+}
+
 /** The number of tenants with no bill that a run did not bill from meter data. */
 export const notBilledCount = (c: GenerateFromMetersCounts) =>
   c.notBilled.noMeter + c.notBilled.meterAssignment + c.notBilled.noReading + c.notBilled.failed;
 
+/** The most the GUI host keeps of an action's result message (invoke.ts). */
+const MESSAGE_LIMIT = 300;
+
 function messageFor(c: GenerateFromMetersCounts, fmt: Fmt): string {
+  const full = sentencesFor(c, fmt, false).join(" ");
+  return full.length <= MESSAGE_LIMIT ? full : sentencesFor(c, fmt, true).join(" ");
+}
+
+/** The message's sentences; `short` says the not-billed and left counts as totals. */
+function sentencesFor(c: GenerateFromMetersCounts, fmt: Fmt, short: boolean): string[] {
   const n = (v: number) => fmt.number(v).text;
   const sentences: string[] = [];
   const others = notBilledCount(c) + c.kept + c.left + c.changed + c.notRefreshed;
@@ -123,21 +156,34 @@ function messageFor(c: GenerateFromMetersCounts, fmt: Fmt): string {
   } else {
     sentences.push("No bill was generated.");
   }
+  if (c.paymentLinksCleared > 0) {
+    sentences.push(
+      c.paymentLinksCleared === 1
+        ? `${n(1)} payment link stopped working, as its bill's total changed.`
+        : `${n(c.paymentLinksCleared)} payment links stopped working, as their bills' totals changed.`,
+    );
+  }
   const notBilled = [
     [c.notBilled.noMeter, "with no meter"],
     [c.notBilled.meterAssignment, "with a meter assignment gap"],
     [c.notBilled.noReading, "with no meter data"],
     [c.notBilled.failed, "not saved"],
   ] as const;
-  const nb = notBilled.filter(([count]) => count > 0).map(([count, phrase]) => `${n(count)} ${phrase}`);
-  if (nb.length > 0) sentences.push(`Not billed: ${nb.join(", ")}.`);
   const left = [
     [c.kept, "entered by hand"],
     [c.left, "paid, invoiced or refunded"],
     [c.changed, "changed meanwhile"],
     [c.notRefreshed, "not refreshed"],
   ] as const;
+  if (short) {
+    if (notBilledCount(c) > 0) sentences.push(`Not billed: ${n(notBilledCount(c))}.`);
+    const leftCount = c.kept + c.left + c.changed + c.notRefreshed;
+    if (leftCount > 0) sentences.push(`Left as they were: ${n(leftCount)}.`);
+    return sentences;
+  }
+  const nb = notBilled.filter(([count]) => count > 0).map(([count, phrase]) => `${n(count)} ${phrase}`);
+  if (nb.length > 0) sentences.push(`Not billed: ${nb.join(", ")}.`);
   const lf = left.filter(([count]) => count > 0).map(([count, phrase]) => `${n(count)} ${phrase}`);
   if (lf.length > 0) sentences.push(`Left as they were: ${lf.join(", ")}.`);
-  return sentences.join(" ");
+  return sentences;
 }
