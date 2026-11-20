@@ -50,7 +50,15 @@ describe("deleting a billing period (#201)", () => {
     expect(done.calls).toEqual([["rpc", ["fn_delete_draft_billing_period", { _period_id: "period" }]]]);
     // NULL: no such period, or not the caller's to delete.
     expect(await deleting({ data: null, error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
-    expect(await deleting({ data: "another", error: null }).repo.deleteBillingPeriod("period")).toEqual({ deleted: false, error: null });
+  });
+
+  it("reads any returned id as deleted, whatever the case of the id it was given", async () => {
+    // Postgres prints the uuid in lower case; the route passes the path
+    // segment through as typed, and the capability accepts either case.
+    const upper = "6F1C2B3A-0000-4000-8000-00000000ABCD";
+    const done = deleting({ data: upper.toLowerCase(), error: null });
+    expect(await done.repo.deleteBillingPeriod(upper)).toEqual({ deleted: true, error: null });
+    expect(done.calls).toEqual([["rpc", ["fn_delete_draft_billing_period", { _period_id: upper }]]]);
   });
 
   it("keeps the delete guard's DETAIL, which names why the period is kept", async () => {

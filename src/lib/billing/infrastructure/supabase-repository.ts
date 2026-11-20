@@ -264,7 +264,10 @@ export function createSupabaseBillingRepository(
       // or `payment_activity`, which fires inside the function. Elsewhere a
       // DETAIL can hold key values.
       if (error) return { deleted: false, error: { ...toError(error), details: error.details ?? null } };
-      return { deleted: data === periodId, error: null };
+      // Any non-null id is the deleted period. Compare nothing with
+      // `periodId`: Postgres prints the uuid in lower case and the route
+      // passes the path segment through as typed.
+      return { deleted: data != null, error: null };
     },
   };
 }
