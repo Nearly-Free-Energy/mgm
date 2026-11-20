@@ -123,8 +123,11 @@ describe("billing's period actions", () => {
     expect(typeof DELETE.available).toBe("function");
   });
 
-  it("prepare create with the microgrid bound and an empty date form, and no confirmation step", async () => {
-    const out = await prepare({ action: CREATE.id, params: { microgrid_id: MG } });
+  it("prepare create with the microgrid bound and the view's starting dates, and no confirmation step", async () => {
+    // The ref the periods view offers, as the action host sends its prefill.
+    const ref = PERIODS_LOADED_EXAMPLES[0].actions[0];
+    expect(ref.prefill).toEqual({ start_date: "2026-11-01", end_date: "2026-11-30" });
+    const out = await prepare({ action: CREATE.id, params: { microgrid_id: MG }, body: ref.prefill });
     expect(out).toMatchObject({
       ok: true,
       value: { confirm: "none", method: "POST", path: "/api/billing-periods", bound: { microgrid_id: MG }, ceremony: null },
@@ -133,8 +136,29 @@ describe("billing's period actions", () => {
     const input = out.value.spec.input as { properties: Record<string, unknown>; required: string[] };
     expect(Object.keys(input.properties)).toEqual(["start_date", "end_date"]);
     expect(input.required).toEqual(["start_date", "end_date"]);
-    expect(out.value).not.toHaveProperty("prefill");
+    // CreatePeriodBody's start <= end refinement does not keep the host from checking the dates.
+    expect(out.value.prefill).toEqual({ start_date: "2026-11-01", end_date: "2026-11-30" });
     expect(checkGate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ plugin: "billing", access: "write" }));
+    // No body, no prefill: the form opens empty.
+    const bare = await prepare({ action: CREATE.id, params: { microgrid_id: MG } });
+    expect(bare.ok && "prefill" in bare.value).toBe(false);
+  });
+
+  it("prepare create with starting dates checked one by one: the bound microgrid left out, a date that is not one refused", async () => {
+    const out = await prepare({ action: CREATE.id, params: { microgrid_id: MG }, body: { start_date: "2026-10-01", microgrid_id: PERIOD } });
+    expect(out).toMatchObject({ ok: true, value: { bound: { microgrid_id: MG }, prefill: { start_date: "2026-10-01" } } });
+    // Dates the route would refuse together are still each a date: the route checks the order on submit.
+    expect(await prepare({ action: CREATE.id, params: { microgrid_id: MG }, body: { start_date: "2026-10-31", end_date: "2026-10-01" } })).toMatchObject({
+      ok: true,
+      value: { prefill: { start_date: "2026-10-31", end_date: "2026-10-01" } },
+    });
+    for (const body of [{ start_date: "2026-02-30" }, { end_date: "October" }, { start_date: "2026-10-01", timezone: "UTC" }]) {
+      expect(await prepare({ action: CREATE.id, params: { microgrid_id: MG }, body }), JSON.stringify(body)).toMatchObject({
+        ok: false,
+        status: 400,
+        code: "gui_bad_request",
+      });
+    }
   });
 
   it("send create's dates with the bound microgrid", async () => {
@@ -237,8 +261,17 @@ describe("billing's period actions in the views", () => {
     const model = { kind: "collection", body: loaded.body, actions: loaded.actions, entity: NORTH } as ActionSlots<ActionLink>;
     const { model: resolved, dropped } = resolveOwnAndTargeted(model, mergeInput("billing"), snapshot.actions);
     expect(dropped).toEqual([]);
-    expect(resolved.actions).toEqual([{ action: CREATE.id, params: { microgrid_id: loaded.actions[0].params.microgrid_id }, label: "New billing period", enabled: true }]);
+    expect(resolved.actions).toEqual([
+      {
+        action: CREATE.id,
+        params: { microgrid_id: loaded.actions[0].params.microgrid_id },
+        label: "New billing period",
+        enabled: true,
+        prefill: { start_date: "2026-11-01", end_date: "2026-11-30" },
+      },
+    ]);
     if (resolved.kind !== "collection") throw new Error("not a collection");
+    expect(resolved.body.empty.action).toEqual(resolved.actions[0]);
     expect(resolved.body.rows.map((r) => r.actions.map((a) => [a.action, a.enabled, a.tone]))).toEqual([[[DELETE.id, true, "danger"]], []]);
   });
 

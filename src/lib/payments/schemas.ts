@@ -10,10 +10,10 @@
  * stay in the capability (PaymentsCapability.reconcile in ./capability.ts)
  * and in fn_payment_reconcile, which check them whoever calls the route:
  * a completed adjustment's amount, reference, notes and typed name, and an
- * exact acceptance's lack of an amount. The schemas stay unrefined objects,
- * so the host can clean a loader's prefill against them (cleanPrefill in
- * src/lib/gui/host/server/merge.ts omits fields from them) and the kit can
- * draw them as a form.
+ * exact acceptance's lack of an amount. The schemas stay objects of fields,
+ * so the host can clean a loader's prefill against them field by field
+ * (cleanPrefill in src/lib/gui/host/server/merge.ts) and the kit can draw
+ * them as a form.
  *
  * Client-safe: its only runtime import is zod. If it gains a server-only or
  * side-effecting runtime import, revisit, and revisit payments-route-

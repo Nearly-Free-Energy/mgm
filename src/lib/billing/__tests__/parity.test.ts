@@ -2,11 +2,14 @@
  * The billing parity table (src/lib/billing/parity.ts) against the code (#201).
  *
  * Every row names something real: its route with the method and body
- * schema, its page or GET route, and, while it is pending, its legacy
- * component. Every row is either contributed, matching the contribution, or
- * listed in PENDING below. The contributing pull requests of #201 remove
- * their rows from PENDING as they land; the legacy billing screens may be
- * deleted only once PENDING is empty, which the last test enforces.
+ * schema, its page (a page.tsx, or a catalog page a view serves) or GET
+ * route, and, while any row is pending, its legacy component. Every row is
+ * either contributed, matching the contribution, or listed in PENDING
+ * below. The contributing pull requests of #201 remove their rows from
+ * PENDING as they land; the legacy billing screens may be deleted only once
+ * PENDING is empty, and a screen's URL may move to the GUI host (its
+ * page.tsx deleted, its catalog page served by a view) only once no row of
+ * that screen is pending, which the last two tests enforce.
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
@@ -42,7 +45,8 @@ import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import { BILLING_SURFACE } from "../surface";
 import * as paymentSchemas from "@/lib/payments/schemas";
 import * as schemas from "../schemas";
-import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow } from "../parity";
+import { BILLING_PLUGIN, MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
+import { BILLING_PARITY, type ParityAction, type ParityLink, type ParityRow, type ParityScreen } from "../parity";
 
 const ROOT = path.resolve(__dirname, "../../../..");
 const APP = path.join(ROOT, "src/app");
@@ -61,18 +65,36 @@ const PENDING = new Set<string>([
   // Unscheduled: the host hides a disabled plugin's tab and disables its
   // actions, which the routes accept while Payments is off (parity.ts).
   "payments-while-off",
-  // Serve the billing pages through the GUI host
-  "billing-tab",
 ]);
 
-/** The legacy screens #201 deletes once nothing is pending. */
+/**
+ * The legacy screens #201 deletes once nothing is pending. A screen's
+ * page.tsx leaves this list in the change that moves its URL to the GUI host,
+ * which the last test allows only once no row of that screen is pending; the
+ * components stay until the Deletes pull request.
+ */
 const LEGACY_SCREENS = [
   "src/components/BillingTable.tsx",
   "src/components/BillingPeriodList.tsx",
-  "src/app/(gui)/microgrids/[id]/billing/page.tsx",
   "src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx",
-  "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+  // billing/page.tsx and …/[periodId]/history/page.tsx left with "Serve the
+  // billing pages through the GUI host": no row of the periods or
+  // period-history screen was pending, and the billing.periods and
+  // billing.period-history views serve their URLs.
 ];
+
+/**
+ * The catalog page (src/lib/plugins/bundled.ts) that serves each legacy
+ * screen's URL. A screen's URL moves to the GUI host only once no row of
+ * that screen is pending, so a person loses no control on the way; the last
+ * test of this file enforces it. If a screen comes to be served at another
+ * URL, revisit.
+ */
+const SCREEN_PAGES: Record<ParityScreen, string> = {
+  periods: "/microgrids/[id]/billing",
+  "period-review": "/microgrids/[id]/billing/[periodId]",
+  "period-history": "/microgrids/[id]/billing/[periodId]/history",
+};
 
 const SURFACES: Record<ParityAction["plugin"], Contribution> = {
   billing: BILLING_SURFACE,
@@ -119,6 +141,14 @@ function pageExists(href: string): boolean {
   };
   return walk(APP, segments);
 }
+
+/**
+ * A catalog page the GUI host's catch-all serves by a view (`servedBy:
+ * "view"`), which has no page.tsx of its own. If the host comes to serve a
+ * page some other way, revisit.
+ */
+const servedByView = (href: string) =>
+  MGM_BUNDLED_PLUGINS.some((p) => p.pages.some((page) => page.path === href && page.servedBy === "view"));
 
 function contributedAction(a: ParityAction): ActionDef | undefined {
   return SURFACES[a.plugin].actions?.find((d) => d.id === a.action);
@@ -254,11 +284,13 @@ function isContributed(r: ParityRow): boolean {
 }
 
 describe("the billing parity table", () => {
-  it("gives every row a unique id, and every pending row a legacy component that exists", () => {
+  it("gives every row a unique id, and every row a legacy component that exists while any row is pending", () => {
     const ids = BILLING_PARITY.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    // Only pending rows: the Deletes pull request removes the legacy files once nothing is pending.
-    for (const row of BILLING_PARITY.filter((r) => PENDING.has(r.id))) {
+    // Every row while anything is pending, so a row cannot name a file that
+    // has gone; once nothing is, the Deletes pull request removes the legacy
+    // files, and only a pending row (none) is held to its file.
+    for (const row of BILLING_PARITY.filter((r) => PENDING.size > 0 || PENDING.has(r.id))) {
       for (const file of row.legacy.split(", ")) {
         expect(existsSync(path.join(ROOT, file)), `${row.id}: ${file}`).toBe(true);
       }
@@ -299,7 +331,7 @@ describe("the billing parity table", () => {
         expect(source, `src/app${l.href}/route.ts`).not.toBeNull();
         expect(exportsMethod(source!, "GET"), `${l.href} exports GET`).toBe(true);
       } else {
-        expect(pageExists(l.href), `a page at ${l.href}`).toBe(true);
+        expect(pageExists(l.href) || servedByView(l.href), `a page at ${l.href}`).toBe(true);
       }
     }
   );
@@ -400,5 +432,15 @@ describe("parity with the contributed actions and views", () => {
   it("deletes the legacy billing screens only once nothing is pending", () => {
     const gone = LEGACY_SCREENS.filter((file) => !existsSync(path.join(ROOT, file)));
     if (gone.length > 0) expect([...PENDING], `deleted ${gone.join(", ")} with rows still pending`).toEqual([]);
+  });
+
+  it("keeps a screen's URL on its legacy page while a row of that screen is pending", () => {
+    for (const row of BILLING_PARITY.filter((r) => PENDING.has(r.id))) {
+      const pagePath = SCREEN_PAGES[row.screen];
+      const page = BILLING_PLUGIN.pages.find((p) => p.path === pagePath);
+      expect(page, `${pagePath} is a billing catalog page`).toBeDefined();
+      expect(page!.servedBy, `${row.id} is pending: ${pagePath} stays a page.tsx, not a view`).toBeUndefined();
+      expect(pageExists(pagePath), `${row.id} is pending: a page at ${pagePath}`).toBe(true);
+    }
   });
 });

@@ -198,7 +198,8 @@ function asLoaded(example: ViewModel): unknown {
     const entries = Object.entries(o).filter(([k]) => !(o.type === "view" && k === "model"));
     return Object.fromEntries(entries.map(([k, v]) => [k, cut(v, k)]));
   };
-  const hostFilled = new Set(["type", "view", "kind", "org", "trail", "attached", "notice", "live"]);
+  // A notice is kept: a loader may give its own (LoadedModel in ../surface.ts), and the host's have the same shape.
+  const hostFilled = new Set(["type", "view", "kind", "org", "trail", "attached", "live"]);
   return cut(Object.fromEntries(Object.entries(example).filter(([k]) => !hostFilled.has(k))));
 }
 

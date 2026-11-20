@@ -304,6 +304,23 @@ describe("prepareAction", () => {
       expect(out).toMatchObject({ ok: true, value: { bound: { microgrid_id: MG } } });
     });
 
+    it("cleans a body against a refined input's fields, and still refuses one a field rejects", async () => {
+      const Refined = z
+        .strictObject({ microgrid_id: z.uuid(), from: z.iso.date(), to: z.iso.date(), confirmation: z.unknown().optional() })
+        .refine((b) => b.from <= b.to, { path: ["from"] });
+      use(action({ input: Refined }));
+      const body = { from: "2026-10-01", to: "2026-10-31", microgrid_id: MG, confirmation: { typed: "x" } };
+      const out = await prepare({ action: "metering.backend", params, body });
+      expect(out).toMatchObject({ ok: true, value: { prefill: { from: "2026-10-01", to: "2026-10-31" } } });
+      expect(out.ok && out.value.spec.input).toMatchObject({ required: ["from", "to"] });
+      expect(await prepare({ action: "metering.backend", params, body: { from: "October" } })).toMatchObject({
+        ok: false,
+        status: 400,
+        code: "gui_bad_request",
+      });
+      expect(await prepare({ action: "metering.backend", params, body: { from: "2026-10-01", extra: 1 } })).toMatchObject({ ok: false, status: 400 });
+    });
+
     it("has no prefill when no body is sent", async () => {
       const out = await prepare({ action: "metering.backend", params });
       expect(out.ok && "prefill" in out.value).toBe(false);

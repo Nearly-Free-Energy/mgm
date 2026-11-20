@@ -13,8 +13,9 @@ import { fetchAuditLogEntries } from "@/lib/billing/audit-log-fetch";
  * applies on each. We then merge in memory by createdAt DESC.
  *
  * BC4 (#176) lifted the fetch + normalize logic into
- * `src/lib/billing/audit-log-fetch.ts` so the server-rendered history
- * page can share one implementation. This handler is now a thin wrapper
+ * `src/lib/billing/audit-log-fetch.ts`, which the server-rendered history
+ * page also called until #201 served that URL through the GUI host; this
+ * route is now its only caller. This handler is a thin wrapper
  * — UUID validation, then `fetchAuditLogEntries`, then map the
  * discriminated result to HTTP. The behavior contract pinned by
  * `__tests__/route.test.ts` is unchanged.

@@ -19,7 +19,8 @@ let snapshot: SurfaceSnapshot;
 const surfaceSnapshot = vi.fn(async () => snapshot);
 vi.mock("../snapshot", () => ({ surfaceSnapshot: () => surfaceSnapshot() }));
 
-import { SYNTHETIC_NOTICE, dispatchView, matchView } from "../view";
+import { MODEL_CAPS } from "../parse";
+import { SYNTHETIC_NOTICE, dispatchView, matchView, shownNotice } from "../view";
 import { ORG_A, ORG_B, contextFor, managerOf, tableClient } from "./host-fakes";
 
 const MG = "e7100000-0000-4000-8002-0000000000a1";
@@ -398,6 +399,41 @@ describe("dispatchView", () => {
     expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: SYNTHETIC_NOTICE } });
     gates.set("billing", { ...DISABLED, message: "Billing is disabled." } as GateDecision);
     expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: { text: "Billing is disabled." } } });
+  });
+
+  it("shows a loader's own notice after the gate's notice or the one on generated figures, with the loader's links", async () => {
+    const own = { tone: "warning", text: "Billing timezone is still UTC." } as const;
+    const link = { id: "billing.set-timezone", label: "Set timezone", href: `/microgrids/${MG}/setup/rates` };
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics(), notice: own, links: [link] } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: true, value: { notice: own, links: [link] } });
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics({ synthetic: true }), notice: own, links: [link] } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({
+      ok: true,
+      value: { notice: { tone: "warning", text: `${SYNTHETIC_NOTICE.text} ${own.text}` }, links: [link] },
+    });
+    gates.set("billing", { ...DISABLED, message: "Billing is disabled." } as GateDecision);
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics({ synthetic: true }), notice: own, links: [link] } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({
+      ok: true,
+      value: { notice: { tone: "warning", text: `Billing is disabled. ${own.text}` }, links: [link] },
+    });
+  });
+
+  it("puts a loader's danger tone above the host's warning, and cuts a combined notice to the string cap", () => {
+    const host = { tone: "warning", text: "Billing is disabled." } as const;
+    expect(shownNotice(undefined, undefined)).toEqual({});
+    expect(shownNotice(host, undefined)).toEqual({ notice: host });
+    expect(shownNotice(undefined, { tone: "info", text: "x" })).toEqual({ notice: { tone: "info", text: "x" } });
+    expect(shownNotice(host, { tone: "info", text: "x" })).toEqual({ notice: { tone: "warning", text: "Billing is disabled. x" } });
+    expect(shownNotice(host, { tone: "danger", text: "x" })).toEqual({ notice: { tone: "danger", text: "Billing is disabled. x" } });
+    const long = shownNotice(host, { tone: "warning", text: "y".repeat(MODEL_CAPS.text) }).notice!.text;
+    expect(long).toHaveLength(MODEL_CAPS.text);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("refuses a loader's notice of another shape", async () => {
+    loadOf(rates).mockResolvedValue({ ok: true, model: { ...metrics(), notice: { tone: "loud", text: "x" } } });
+    expect(await dispatch(`/microgrids/${MG}/setup/rates`)).toMatchObject({ ok: false, status: 500, code: "gui_output_invalid" });
   });
 
   it("loads a feed's view embeds at depth 1 only", async () => {
