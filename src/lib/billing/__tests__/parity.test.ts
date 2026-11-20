@@ -3,13 +3,13 @@
  *
  * Every row names something real: its route with the method and body
  * schema, its page (a page.tsx, or a catalog page a view serves) or GET
- * route, and, while it is pending, its legacy
- * component. Every row is either contributed, matching the contribution, or
- * listed in PENDING below. The contributing pull requests of #201 remove
- * their rows from PENDING as they land; the legacy billing screens may be
- * deleted only once PENDING is empty, and a screen's URL may move to the GUI
- * host (its page.tsx deleted, its catalog page served by a view) only once no
- * row of that screen is pending, which the last two tests enforce.
+ * route, and, while any row is pending, its legacy component. Every row is
+ * either contributed, matching the contribution, or listed in PENDING
+ * below. The contributing pull requests of #201 remove their rows from
+ * PENDING as they land; the legacy billing screens may be deleted only once
+ * PENDING is empty, and a screen's URL may move to the GUI host (its
+ * page.tsx deleted, its catalog page served by a view) only once no row of
+ * that screen is pending, which the last two tests enforce.
  *
  * What counts as contributed, by kind of row:
  *  - action: the plugin contributes the action, with the row's route,
@@ -283,11 +283,13 @@ function isContributed(r: ParityRow): boolean {
 }
 
 describe("the billing parity table", () => {
-  it("gives every row a unique id, and every pending row a legacy component that exists", () => {
+  it("gives every row a unique id, and every row a legacy component that exists while any row is pending", () => {
     const ids = BILLING_PARITY.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    // Only pending rows: the Deletes pull request removes the legacy files once nothing is pending.
-    for (const row of BILLING_PARITY.filter((r) => PENDING.has(r.id))) {
+    // Every row while anything is pending, so a row cannot name a file that
+    // has gone; once nothing is, the Deletes pull request removes the legacy
+    // files, and only a pending row (none) is held to its file.
+    for (const row of BILLING_PARITY.filter((r) => PENDING.size > 0 || PENDING.has(r.id))) {
       for (const file of row.legacy.split(", ")) {
         expect(existsSync(path.join(ROOT, file)), `${row.id}: ${file}`).toBe(true);
       }
