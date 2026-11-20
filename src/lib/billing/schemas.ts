@@ -408,7 +408,7 @@ export const LineItemUsageBody = z
 export const LINE_ITEM_USAGE_BODY_VERSION = 1;
 
 // The payment-status route has always said "a JSON object", with a full stop,
-// where bodyError says "an object"; row-actions-menu.tsx shows the text.
+// where bodyError says "an object"; it keeps its wording.
 const lineItemsPaymentBodyError = (issue: { code: string; keys?: string[] }) =>
   issue.code === "unrecognized_keys"
     ? `Unknown field: ${(issue.keys ?? []).join(", ")}`
@@ -476,7 +476,8 @@ export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
  * billing.regenerate-bill's prepare offers it
  * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
  * bill without it. POST /api/billing/generate asks for none and rewrites a
- * paid bill as well; the legacy dialogs that call it warn on the client only.
+ * paid bill as well; the legacy dialogs that called it warned on the client
+ * only.
  */
 export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
 
@@ -499,8 +500,8 @@ export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
  *    whole-period run from meter data (POST
  *    /api/billing-periods/[periodId]/generate-from-meters) leaves a paid
  *    bill as it is, as it leaves an invoiced or refunded one.
- * POST /api/billing/generate, which the legacy dialogs call, refuses none of
- * these: if it comes to, say so here.
+ * POST /api/billing/generate, which the deleted legacy dialogs called,
+ * refuses none of these: if it comes to, say so here.
  */
 export const REGENERATE_REFUSAL_COPY = {
   closed: "Bills in a closed period cannot be regenerated.",

@@ -31,7 +31,7 @@ import "server-only";
  * have the Billing pages' own paths. The catalog serves all three paths by
  * their views (`servedBy: "view"`), so the host's catch-all renders them,
  * and the Billing nav entry opens `billing.periods`. The review took its
- * URL from the legacy page (BillingTable) once no period-review row of
+ * URL from the legacy page once no period-review row of
  * src/lib/billing/parity.ts was pending; parity.test.ts would have kept it
  * there otherwise.
  * `billing.close-checklist`, `billing.send-queue` and `billing.not-billed`

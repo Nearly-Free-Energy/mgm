@@ -9,8 +9,8 @@
 //     root carries `role="status"` + sr-only text), so blocks are
 //     `aria-hidden` here and never double-announce.
 //
-// Visual matches the existing PeriodPicker skeleton (bg-muted + shimmer) so
-// ad-hoc and route-level placeholders read as one pattern.
+// Visual is bg-muted + shimmer, so ad-hoc and route-level placeholders read
+// as one pattern.
 //
 // Invalidation: if the design system ever ships a canonical <Skeleton>,
 // replace this module's body with a re-export and delete the local styles.

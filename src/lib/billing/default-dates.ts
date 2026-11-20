@@ -1,9 +1,7 @@
 /**
  * The dates a new billing period's form starts with: the previous calendar
  * month. The periods view (billing.periods, ./surface/periods.ts) passes them
- * as the create action's prefill and the legacy periods list
- * (src/components/BillingPeriodList.tsx) as its form's starting state, so
- * both open on the same month.
+ * as the create action's prefill.
  *
  * Client-safe and pure apart from the clock its caller passes in.
  */

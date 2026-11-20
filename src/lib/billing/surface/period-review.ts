@@ -508,7 +508,7 @@ function notReadWarnings(outcome: string, list: readonly NotRead[]): string[] {
   });
 }
 
-/** The paid bill's acknowledgement: the legacy dialog's warning (src/components/billing/regenerate-row-dialog.tsx). */
+/** The paid bill's acknowledgement: the legacy regenerate dialog's warning. */
 export const REGENERATE_PAID_LABEL =
   "The bill is currently marked paid. Regenerating will recalculate the readings and totals; the payment record (paid_at, paid_by_user_id, payment_notes, pesapal_order_id, payment_events history) is preserved.";
 
@@ -601,7 +601,7 @@ export function preparePaymentStatus(
           { label: "Total", value: req.fmt.money(Number(bill.total_amount), currency) },
           { label: "Status now", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
         ],
-        // The legacy dialog's copy (src/components/billing/row-actions-menu.tsx):
+        // The legacy row menu's dialog copy:
         // any change away from a pending link stops that link working.
         warnings: o.cancel
           ? ["The pending payment link stops working; they'll need a new link to pay."]

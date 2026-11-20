@@ -13,9 +13,9 @@
  * correcting usage both need a bill, so this section lists those tenants and
  * offers billing each from readings typed by hand
  * (`billing.bill-from-readings`, parity.ts). It also carries what the legacy
- * page's banner of tenants not billed said (src/components/BillingTable.tsx,
- * #293), and more: the banner named only tenants with no available meter, and
- * only once the period had a bill.
+ * page's banner of tenants not billed said (BillingTable, #293), and more:
+ * the banner named only tenants with no available meter, and only once the
+ * period had a bill.
  *
  * Every tenant with no bill is listed, before the first bill too: a period
  * whose metered tenants all have no meter data gets no bill from generating,

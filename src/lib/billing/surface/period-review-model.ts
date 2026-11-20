@@ -4,10 +4,9 @@
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here. The columns, totals and empty-state titles are the
- * legacy period page's (src/components/BillingTable.tsx), and each row's
- * actions follow its row menu (computeMenuItems in
- * src/components/billing/row-actions-menu.tsx; period-review-menu-parity.test.ts
- * compares the two), so both show the same thing while both are served.
+ * legacy period page's (BillingTable.tsx, deleted with the legacy billing
+ * screens), and each row's actions follow its row menu
+ * (period-review-menu-parity.test.ts pins what that menu offered).
  *
  * Every figure a person copies is in the `billing.period-review@1` ext
  * (./period-review-ext.ts) as a plain machine number, for a renderer that
@@ -86,7 +85,7 @@ export function sendQueueHref(microgridId: string, periodId: string): `/${string
 /**
  * A bill's PDF, as its row links it in the period review and the send
  * queue. The route names the file after the invoice number it allocates on
- * first use; before then, as the legacy menu falls back.
+ * first use; before then, as the legacy menu fell back.
  */
 export function downloadBillLink(bill: { id: string; invoice_number: string | null }): LinkRef {
   return {

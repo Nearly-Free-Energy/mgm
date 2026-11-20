@@ -17,7 +17,7 @@
  *       or notes over 500 (after trimming; RECONCILE_REFERENCE_MAX and
  *       RECONCILE_NOTES_MAX in src/lib/payments/reconcile-limits.ts)
  *       included. Notes used to be cut to 500 and saved; now they are
- *       refused, and the legacy dialog caps its inputs at both limits;
+ *       refused;
  *   400 { error, reason } — a completed adjustment without its amount,
  *       reference or notes, or an exact acceptance with an amount;
  *   401 without a live session; 404 for an attempt that does not exist;

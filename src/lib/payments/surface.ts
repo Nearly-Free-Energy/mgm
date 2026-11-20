@@ -12,14 +12,13 @@ import "server-only";
  *
  * `payments.bill-attempts` is a new page (…/[periodId]/payments) with no
  * page.tsx, so the catalog marks it `servedBy: "view"` and the host's
- * catch-all serves it. It replaces the legacy period page's payment history
- * dialog (src/components/payments/payment-history.tsx), which stays mounted
- * until #201's Deletes pull request (src/lib/billing/parity.ts).
+ * catch-all serves it. It replaced the legacy period page's payment history
+ * dialog, deleted with the legacy billing screens (src/lib/billing/parity.ts).
  *
  * While Payments is off, the host still lists this tab on the period review
  * (attach.whilePluginOff: "listed") and loads it with the gate's notice, and
  * keeps Refresh status and both reconciliations enabled and preparable
- * (whilePluginOff: "enabled"), as the legacy dialog offers them, because
+ * (whilePluginOff: "enabled"), as the legacy dialog offered them, because
  * their routes accept them then by design: each is a PaymentExemption in
  * src/lib/runtime/__tests__/route-rules.ts, and docs/payments-rollout.md
  * keeps history and verification available while Payments is off.

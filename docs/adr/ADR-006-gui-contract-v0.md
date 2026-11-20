@@ -178,7 +178,7 @@ read a stored credential, or to send data to another origin.
      confirms, not what the write does. The one-step form's footer, the
      confirm, typed and ceremony steps and the Overlay's `tone` all take
      the prepared action's tone; a GUI's ref cannot change it. Design
-     rule 5 in CLAUDE.md is the same rule for the legacy dialogs.
+     rule 5 in CLAUDE.md applies the same rule to `<ConfirmDialog>`.
    - An action may declare `prepareAgainOn`: codes of its route's 409
      answers that mean what the person confirmed changed after prepare (the
      figures a ceremony's digest covers, say). Registration refuses it

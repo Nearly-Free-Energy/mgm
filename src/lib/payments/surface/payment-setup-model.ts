@@ -6,9 +6,8 @@
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here.
  *
- * It replaces the legacy period page's banner shown when online payments
- * are not set up (src/components/BillingTable.tsx, parity.ts's
- * payment-setup row): a super admin gets the link to the community's
+ * It replaced the legacy period page's banner shown when online payments
+ * were not set up (parity.ts's payment-setup row): a super admin gets the link to the community's
  * Payment page, anyone else is told to ask one, as the banner and the send
  * queue's note decide (SEND_QUEUE_COPY in
  * src/lib/billing/surface/send-queue-model.ts); if either comes to advise
