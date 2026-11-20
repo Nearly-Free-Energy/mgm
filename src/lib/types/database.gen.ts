@@ -2247,6 +2247,14 @@ export type Database = {
           unit_label: string
         }[]
       }
+      fn_tenant_shared_meter_days: {
+        Args: { _from_date: string; _tenant_id: string; _to_date: string }
+        Returns: {
+          device_id: string
+          effective_from: string
+          effective_to: string
+        }[]
+      }
       is_super_admin: { Args: never; Returns: boolean }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }

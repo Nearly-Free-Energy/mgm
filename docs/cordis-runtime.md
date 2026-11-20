@@ -40,12 +40,12 @@ token's organization first, and the tenant app's usage source
 reads no `microgrids` or `edges` row, so the usage source builds the unit's
 microgrid's provider on the service role, after `composeTenantApp` has
 authorized the unit, for the microgrid `fn_tenant_home` named and the device
-rows the tenant's own client returned, and, for the device ids the tenant's
-own client returned as the unit's primary consumption meter links, reads
-the date spans on which other units also hold them as primary (see "The
-tenant app" below). That read returns dates only, cut to the unit's own
-links, never whose; if it ever returns a tenant id or takes ids from
-anywhere else, revisit it. A new
+rows the tenant's own client returned. The shared-use days (see "The
+tenant app" below) are not read there: the tenant's own client asks
+`fn_tenant_shared_meter_days`, which answers only the unit's own tenant and
+returns dates only, never whose. If that read ever moves back to the
+service role, or the function returns a tenant id or takes ids, revisit
+it. A new
 caller that builds a provider on the service role needs the same reasoning,
 and a listing in `service-role-session-check.test.ts`. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
@@ -195,16 +195,20 @@ client right before each one, in place of the metering capability's
 `requirePlugin` re-check, and the tenant-app gate is asked at composition,
 in the same request. Only the unit's primary consumption meter is its use,
 on the home, the month and the day (`USAGE_METER_ROLE` in
-`src/lib/tenant-app/types.ts`). A meter two units hold as primary on the
-same day is shown to each with the label "Shared with another unit, not
-only yours" on those days (D12). For that, the usage source reads other
-units' primary links of the unit's primary meters on the service role;
-that read concerns MGM's own link rows, not the backend, so it runs
-without the metering gate and outside the usage cache, on every view. It
-returns dates only, cut to the unit's own links, for ids the tenant's own
-client returned as the unit's primary links; if it ever returns a tenant id
-or takes ids from anywhere else, revisit it. If it fails, the view answers
-`tenant_app_unavailable` rather than show shared use unlabelled. A read is cached in process memory for 60 s per unit,
+`src/lib/tenant-app/types.ts`). A meter that two units hold as primary on
+the same day, on the same microgrid or not, is shown to each with the label
+"Shared with another unit, not only yours" on those days (D12). For that,
+the usage source asks the database with the tenant's own client:
+`fn_tenant_shared_meter_days`, a `SECURITY DEFINER` function that answers
+only the unit's own tenant while the tenant app is on, reads the unit's
+links itself and counts every other unit that holds the meter as primary,
+as billing bills each. The service role takes no part. That read concerns MGM's own link rows, not
+the backend, so it runs without the metering gate and outside the usage
+cache, on every view. It returns device ids and dates only, cut to the
+unit's own links; a tenant can call it directly, so if it ever returns a
+tenant id or more days than the views need, revisit it. If it fails, the
+view answers `tenant_app_unavailable` rather than show shared use
+unlabelled. A read is cached in process memory for 60 s per unit,
 view and period, and a unit may cause at most six uncached reads a minute
 in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
 store, so keys that need no session cannot evict a unit's count); over the
