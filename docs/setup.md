@@ -499,12 +499,30 @@ sideways, that tables scroll inside their own box and that controls are at
 least 44 px. It also opens a community's invoice branding page, checks that
 the invoice logo loads from its signed Supabase Storage URL, and runs
 Preview bill, checking that the popup is sent to a `blob:` URL holding a
-PDF. Every page fails on a page error, a console error or a content
-security policy violation, popups included. The headless Chromium it runs
+PDF. It opens a draft billing period's close checklist and its Close
+confirmation step (the totals, the acknowledgements and the name to type),
+checks that the step fits the screen and that its controls are 44 px
+targets, and leaves without confirming. It opens the period's payment
+links (the send queue, `…/send`), with a sandbox payment account seeded for
+the organization, and checks that it says nothing is sent from it and that
+the bill with a total offers its payment link to copy, without opening or
+copying it. It opens that bill's payments, with an online payment attempt
+seeded on it and held for reconciliation, checks that Refresh status and
+both reconciliations are offered, and opens Record completed adjustment to
+check that its step fits the screen, leaving without sending it; it never
+presses Refresh status, which would ask the payment provider. Every page
+fails on a page error, a
+console error or a content security policy violation, popups included, and
+on any write to the app's API other than the invoice preview and the
+prepare steps, none of which writes. The headless Chromium it runs
 has no PDF viewer, so it sees the preview as a download; it cannot show
 that a desktop browser displays it. It creates its own organization,
 community (with an invoice logo in the `invoice-logos` bucket), microgrids,
-tenants and user in the local database and deletes them afterwards.
+tenants, tariff, billing period, bills, payment account (no credential, and
+never contacted), payment attempt and user in the local database and deletes
+them afterwards (an organization with payment records is purged as the
+database owner, which needs the `supabase` CLI and this project's
+directory, or `SUPABASE_WORKDIR`).
 Timings are printed, not enforced.
 
 ```bash

@@ -32,6 +32,60 @@ const ACKNOWLEDGEMENT_IDS = Object.keys(CLOSE_ACKNOWLEDGEMENTS) as [
   ...CloseAcknowledgementId[],
 ];
 
+/**
+ * The refusals of a close that the close route (./capability.ts
+ * closePeriod) and the contributed close action's prepare and availability
+ * (./surface/close-checklist.ts) both give, so a person reads the same
+ * sentence in every interface. fractionalTotalsMessage below is shared for
+ * the same reason, and takes the tenants rather than their joined names so
+ * that every caller names them the same way.
+ */
+export const CLOSE_REFUSAL_COPY = {
+  closed: "Billing period is already closed.",
+  reviewUnavailable: "Could not load the period's totals. Retry before closing the period.",
+  /**
+   * The close route's 409 billing_period_totals_changed. After a refusal the
+   * GUI host shows the same confirmation step again, with the totals and the
+   * digest it prepared (src/lib/gui/host/client/action-host.tsx), so
+   * confirming there again is refused again: the sentence sends the person
+   * back to Close period, whose prepare reads the new totals. The legacy
+   * ClosePeriodDialog shows its own sentence over the new ceremony the 409
+   * carries, and this one only when the 409 carries none, when reopening is
+   * also the way on. If the host comes to prepare again on this code (a #201
+   * item), revisit this sentence.
+   */
+  totalsChanged:
+    "The period's totals changed after you reviewed them. Close this dialog and choose Close period again to review the new totals.",
+} as const;
+
+/** Names shown in a list of tenants before the rest are counted. */
+const NAMES_SHOWN = 5;
+
+/**
+ * The tenants a warning or refusal names: the first five, then "and N
+ * more". The ceremony's warnings (./close-ceremony.ts), the close checklist
+ * (./surface/close-checklist-model.ts) and fractionalTotalsMessage name them
+ * with this, so every interface lists the same tenants.
+ */
+export function tenantNames(list: readonly { tenantName: string }[]): string {
+  const shown = list.slice(0, NAMES_SHOWN).map((t) => t.tenantName).join(", ");
+  const more = list.length - NAMES_SHOWN;
+  return more > 0 ? `${shown} and ${more} more` : shown;
+}
+
+/**
+ * The refusal of a close while some bill totals are not whole numbers,
+ * naming those tenants with tenantNames. The close route and the close
+ * checklist both pass the review's fractionalTotals, so the sentence is the
+ * same in both.
+ */
+export function fractionalTotalsMessage(tenants: readonly { tenantName: string }[]): string {
+  const names = tenantNames(tenants);
+  return names.length > 0
+    ? `Regenerate the bills for ${names} before closing: their totals are not whole numbers.`
+    : "Regenerate the bills whose totals are not whole numbers before closing.";
+}
+
 const tenantRef = z.object({ tenantId: z.string(), tenantName: z.string() });
 const calendarDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 

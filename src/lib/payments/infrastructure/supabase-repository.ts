@@ -443,11 +443,15 @@ export function createSupabasePaymentsRepository(
     },
 
     async listReceiptsForAttempt(attemptId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("payment_receipts")
         .select("id, attempt_id, amount, currency, provider_status, provider_tracking_id, confirmation_code, payment_method, created_at")
         .eq("attempt_id", attemptId)
         .order("created_at", { ascending: true });
+      // Throws like the other history reads: listHistory's received total
+      // and difference are built from these, so a failed read must not
+      // read as "no receipts".
+      if (error) throw new Error("Could not load payment receipts");
       return ((data ?? []) as unknown as PaymentReceipt[]) ?? [];
     },
 
