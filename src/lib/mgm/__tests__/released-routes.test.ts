@@ -55,6 +55,7 @@ describe("isReleasedRoute", () => {
     "/microgrids/abc/billing/period-1/history",
     "/microgrids/abc/billing/period-1/close",
     "/microgrids/abc/billing/period-1/send",
+    "/microgrids/abc/billing/period-1/not-billed",
     "/microgrids/abc/setup/rates",
     "/communities/abc/invoice",
     // Release 3 APIs.
@@ -128,6 +129,7 @@ describe("isReleasedRoute", () => {
     "/api/billing-periods/abc/tenants//bill-from-readings",
     "/api/billing-periods/abc/generate",
     "/microgrids/abc/billing/period-1/send/extra",
+    "/microgrids/abc/billing/period-1/not-billed/extra",
     "/microgrids/abc/billing/period-1/payments/extra",
     "/microgrids/abc/billing/period-1/payment-setup/extra",
     "/microgrids/mg-1/operations/extra",

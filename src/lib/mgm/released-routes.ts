@@ -78,8 +78,9 @@ const RELEASE_2_API_ROUTES = [
 ];
 
 const RELEASE_3_PAGE_ROUTES = [
-  // Billing period list, detail, history, close checklist and send queue.
-  /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/(?:history|close|send))?)?$/,
+  // Billing period list, detail, history, close checklist, send queue and
+  // the tenants not billed.
+  /^\/microgrids\/[^/]+\/billing(?:\/[^/]+(?:\/(?:history|close|send|not-billed))?)?$/,
   // Tariff setup.
   /^\/microgrids\/[^/]+\/setup\/rates$/,
   // Invoice branding for PDF exports.
