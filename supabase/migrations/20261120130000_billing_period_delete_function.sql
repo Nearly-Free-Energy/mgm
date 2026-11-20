@@ -4,8 +4,8 @@
 -- The billing capability (BillingCapability.deletePeriod, behind the billing
 -- plugin gate) deletes a draft period against the name the person typed. The
 -- legacy periods list and period page call the same route. This migration
--- gives that route its own write path and makes it the only one a signed-in
--- caller has:
+-- gives that route its own write path, and makes this function the only
+-- delete a signed-in caller has:
 --
 --   1. fn_delete_draft_billing_period(_period_id) deletes one period the
 --      caller may manage and returns its id, or NULL when there is no such
@@ -40,7 +40,18 @@
 -- either case, this function deletes such a period: add the checks here
 -- then.
 --
--- Locks: the DELETE takes the period's row lock, and the guard then locks
+-- The plugin gate: a signed-in caller can call this function directly over
+-- PostgREST, outside the route, so it asks the gate itself, with
+-- mgm_plugin_enabled_for_org on the period's organization, the helper the
+-- route's gate reads (src/lib/runtime/gate.ts, through
+-- isPluginEnabledForOrg). While billing is off it raises SQLSTATE 55000 with
+-- a message starting billing_disabled, after the access check, so a caller
+-- who may not see the period still gets NULL and learns nothing of its
+-- organization. If the route's gate comes to ask more than the billing
+-- plugin's own state (its dependencies, say), ask the same here.
+--
+-- Locks: the function locks the period's row FOR UPDATE before the gate
+-- check, the DELETE keeps it, and the guard then locks
 -- the period's bills FOR UPDATE in id order, as a direct delete did, which
 -- is the order fn_close_billing_period takes (period, then its bills). A
 -- delete that waits on a close re-reads the period once the close commits,
@@ -76,12 +87,30 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_id UUID;
+  v_id  UUID;
+  v_org UUID;
 BEGIN
-  DELETE FROM billing_periods bp
-  WHERE bp.id = _period_id
-    AND user_can_access_microgrid(bp.microgrid_id)
-  RETURNING bp.id INTO v_id;
+  SELECT bp.id, c.org_id
+    INTO v_id, v_org
+    FROM billing_periods bp
+    JOIN microgrids m ON m.id = bp.microgrid_id
+    JOIN communities c ON c.id = m.community_id
+   WHERE bp.id = _period_id
+     AND user_can_access_microgrid(bp.microgrid_id)
+     FOR UPDATE OF bp;
+
+  IF v_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF NOT mgm_plugin_enabled_for_org(v_org, 'billing') THEN
+    RAISE EXCEPTION 'billing_disabled: billing is turned off for this organization'
+      USING ERRCODE = '55000';
+  END IF;
+
+  DELETE FROM billing_periods
+   WHERE id = v_id
+  RETURNING id INTO v_id;
 
   RETURN v_id;
 END;

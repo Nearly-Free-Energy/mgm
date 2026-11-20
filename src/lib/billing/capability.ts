@@ -61,6 +61,10 @@ function totalsChanged(review: CloseReview | undefined) {
   };
 }
 
+/** The gate's copy for billing off (DISABLED_MESSAGES in src/lib/runtime/gate.ts); if that changes, change this. */
+const BILLING_DISABLED_MESSAGE =
+  "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.";
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -177,8 +181,7 @@ export class BillingCapability implements BillingCapabilityContract {
       ok: false,
       status: 409,
       code: "billing_disabled",
-      message:
-        "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
+      message: BILLING_DISABLED_MESSAGE,
     };
   }
 
@@ -674,6 +677,17 @@ export class BillingCapability implements BillingCapabilityContract {
           status: 409 as const,
           code: "billing_period_kept",
           message: periodDeleteErrorMessage(error),
+        };
+      }
+      // fn_delete_draft_billing_period asks the plugin gate itself, for a
+      // call that skips the route; through the route it fires only when
+      // billing was turned off after the route's own gate check.
+      if (error.code === "55000" && error.message.startsWith("billing_disabled")) {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          code: "billing_disabled",
+          message: BILLING_DISABLED_MESSAGE,
         };
       }
       // pilot_import_batches.billing_period_id has no ON DELETE

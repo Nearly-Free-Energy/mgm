@@ -829,6 +829,14 @@ describe("BillingCapability.deletePeriod (#201)", () => {
       "billing_period_referenced",
       "This period has imported pilot data and cannot be deleted.",
     ],
+    [
+      { code: "55000", message: "billing_disabled: billing is turned off for this organization", details: null },
+      409,
+      "billing_disabled",
+      "Billing is disabled for this organization. Enable it in Settings → Plugins; tariffs, periods, bills, and payment history are preserved.",
+    ],
+    // Another 55000 is not the function's gate refusal.
+    [{ code: "55000", message: "object not in prerequisite state", details: null }, 500, "billing_unavailable", "Could not delete the billing period."],
     [{ code: "42501", message: "permission denied", details: null }, 403, "billing_forbidden", "Not authorized to delete this billing period."],
     [{ code: "XX000", message: "boom", details: null }, 500, "billing_unavailable", "Could not delete the billing period."],
   ])("maps the database's refusal %j", async (error, status, code, message) => {

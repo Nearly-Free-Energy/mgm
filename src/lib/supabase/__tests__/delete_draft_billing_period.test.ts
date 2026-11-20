@@ -65,6 +65,7 @@ const F = {
   periodImported: "dd5e0000-0000-4000-8006-000000000007",
   periodRefused: "dd5e0000-0000-4000-8006-000000000008",
   periodServiceRole: "dd5e0000-0000-4000-8006-000000000009",
+  periodBillingOff: "dd5e0000-0000-4000-8006-00000000000f",
   periodCascade: "dd5e0000-0000-4000-8006-00000000000a",
 
   lineByManager: "dd5e0000-0000-4000-8007-000000000001",
@@ -155,6 +156,8 @@ async function cleanupFixtures(): Promise<void> {
   );
   if (!batches.ok) throw new Error(`[delete_draft_billing_period] cleanup failed: ${batches.output}`);
   const svc = await serviceClient();
+  const plugins = await svc.from("mgm_plugins").delete().in("org_id", [F.org, F.otherOrg]);
+  if (plugins.error) throw new Error(`[delete_draft_billing_period] cleanup failed: ${plugins.error.message}`);
   const { error } = await svc.from("payment_merchant_versions").delete().in("org_id", [F.org, F.otherOrg]);
   if (error) throw new Error(`[delete_draft_billing_period] cleanup failed: ${error.message}`);
   await cleanupTestData({ orgIds: [F.org, F.otherOrg], userEmails: Object.values(EMAIL) });
@@ -194,6 +197,7 @@ desc("20261120130000_billing_period_delete_function.sql", () => {
       period(F.periodImported, F.mg, "2025-07", "draft"),
       period(F.periodRefused, F.mg, "2025-08", "draft"),
       period(F.periodServiceRole, F.mg, "2025-09", "draft"),
+      period(F.periodBillingOff, F.mg, "2025-10", "draft"),
       period(F.periodCascade, F.mgCascade, "2025-01", "draft"),
     ]);
     await insertOrThrow(svc, "billing_line_items", [
@@ -300,6 +304,36 @@ desc("20261120130000_billing_period_delete_function.sql", () => {
     expect(error?.message).toMatch(/^billing_period_kept/);
     expect(error?.details).toBe("payment_activity");
     expect(await periodExists(F[key])).toBe(true);
+  });
+
+  it("while billing is off, a direct call keeps the draft and raises billing_disabled", async () => {
+    const svc = await serviceClient();
+    const setBilling = async (enabled: boolean) => {
+      const { error } = await svc
+        .from("mgm_plugins")
+        .upsert({ org_id: F.org, plugin_name: "billing", version: "0.1.0", enabled }, { onConflict: "org_id,plugin_name" });
+      if (error) throw new Error(`[delete_draft_billing_period] mgm_plugins: ${error.message}`);
+    };
+    await setBilling(false);
+    try {
+      const { data, error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+        _period_id: F.periodBillingOff,
+      });
+      expect(data).toBeNull();
+      expect(error?.code).toBe("55000");
+      expect(error?.message).toMatch(/^billing_disabled/);
+      expect(await periodExists(F.periodBillingOff)).toBe(true);
+      // Someone who may not see the period still gets NULL, not the gate's answer.
+      const other = await otherManager.client.rpc("fn_delete_draft_billing_period", { _period_id: F.periodBillingOff });
+      expect(other).toMatchObject({ data: null, error: null });
+    } finally {
+      await setBilling(true);
+    }
+    const { data, error } = await manager.client.rpc("fn_delete_draft_billing_period", {
+      _period_id: F.periodBillingOff,
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(F.periodBillingOff);
   });
 
   it("a draft a pilot import refers to is refused with 23503", async () => {
