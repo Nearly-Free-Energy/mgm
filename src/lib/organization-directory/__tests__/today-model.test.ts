@@ -84,9 +84,9 @@ describe("buildTodayModel", () => {
 
   it("says how many are shown when more were found", () => {
     const model = buildTodayModel(fmt, signals({ count: 34, top: [signal()] }));
-    expect(model.notice).toEqual({ tone: "info", text: "The 1 most urgent of 34 are shown." });
+    expect(model.notice).toEqual({ tone: "warning", text: "1 of 34 are shown: the most severe first, alarms first, then the soonest due." });
     const both = buildTodayModel(fmt, signals({ count: 34, top: [signal()], unchecked: ["payments.failed"] }));
-    expect(both.notice).toEqual({ tone: "warning", text: "Some sources did not answer in time. The 1 most urgent of 34 are shown." });
+    expect(both.notice).toEqual({ tone: "warning", text: "Some sources did not answer in time. 1 of 34 are shown: the most severe first, alarms first, then the soonest due." });
   });
 
   it("does not say nothing needs the person when the signals could not be collected", () => {
@@ -149,7 +149,7 @@ describe("the org.today view", () => {
     expect(TODAY_EXAMPLES.map((e) => [e.body.rows.length, e.body.empty.title, e.notice?.text])).toEqual([
       [3, TODAY_COPY.nothing, undefined],
       [0, TODAY_COPY.nothing, undefined],
-      [1, TODAY_COPY.nothing, "Some sources did not answer in time. The 1 most urgent of 2 are shown."],
+      [1, TODAY_COPY.nothing, "Some sources did not answer in time. 1 of 2 are shown: the most severe first, alarms first, then the soonest due."],
       [0, TODAY_COPY.failed, undefined],
     ]);
     expect(TODAY_EXAMPLES[0].attached).toEqual([expect.objectContaining({ view: "billing.current-periods", hint: "tile" })]);

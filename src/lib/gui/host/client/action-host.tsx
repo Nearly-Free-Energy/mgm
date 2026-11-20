@@ -9,6 +9,12 @@
  *
  * The level the host runs is the prepared action's top-level `confirm`, which
  * prepare raises for a proposal; `spec.confirm` is the action's own level.
+ * The tone of the one-step footer, the confirmation step and the Overlay is
+ * the prepared action's `tone`, which prepare takes from the action's risk and
+ * method (actionTone in ../shared/merge-actions.ts): danger only for a DELETE
+ * or destructive action, whatever the level. A GUI's ref cannot change it.
+ * If actionTone weighs anything else, or prepare stops setting `tone` from
+ * it (../server/prepare.ts), revisit.
  *
  * A GUI's Overlay frames the step but never holds it. Its one child is
  * HostSlot, an element with no props that only places a node the host owns,
@@ -35,6 +41,16 @@
  * action. Without a step: the level is none and the person's gesture started
  * the action. A flow and its prepared action are frozen once made. The routes
  * stay the authority for every write (ADR-006, decision 3).
+ *
+ * Preparing again (ADR-006, decision 10): when a write answers 409 with a code
+ * the prepared action lists in `prepareAgainOn`, what the person confirmed
+ * changed after prepare (a ceremony's digest, say). The host prepares the
+ * same ref again, with the values sent less secrets, and when the answer is
+ * the same action at no weaker level it shows the new step as a new flow and
+ * round, ticks and typing cleared, with the route's message as its note. It
+ * never sends on its own: the person confirms the new step as any other. A
+ * refused second prepare ends the action with that refusal and refreshes the
+ * view; any other answer shows the same step again with the route's message.
  */
 import {
   createContext,
@@ -233,6 +249,49 @@ const withoutKeys = (values: Json | null, keys: readonly string[]): Json | null 
 /** A write needs a step unless its level is none and the person's own gesture started it. */
 const needsStep = (level: Confirm, activated: boolean) => level !== "none" || !activated;
 
+/** The confirmation levels, weakest first. */
+const LEVEL_ORDER: readonly Confirm[] = ["none", "confirm", "typed", "ceremony"];
+
+/** Whether `next` prepares the same write as `prev`, at no weaker level: only then is it shown in its place. */
+function sameAction(prev: PreparedAction, next: PreparedAction): boolean {
+  return (
+    next.spec.id === prev.spec.id &&
+    next.method === prev.method &&
+    next.path === prev.path &&
+    JSON.stringify(next.bound) === JSON.stringify(prev.bound) &&
+    LEVEL_ORDER.indexOf(next.confirm) >= LEVEL_ORDER.indexOf(prev.confirm)
+  );
+}
+
+/** The flow for one prepared action: its level, form and footer, frozen; `state` starts not shown and not sending. */
+function flowOf(
+  ref: ActionRef,
+  prepared: PreparedAction,
+  forms: GuiPlugin["forms"] | undefined,
+  resolve: (result: ActionResult) => void,
+): Flow {
+  const { any, writeOnly } = fieldsOf(prepared.spec.input);
+  const level = prepared.confirm;
+  const bespoke = forms?.[prepared.spec.id];
+  const Form =
+    bespoke && bespoke.reads.includes(prepared.spec.inputVersion) && (level === "none" || level === "confirm")
+      ? bespoke.Component
+      : null;
+  const { ceremony } = prepared;
+  const plain = !ceremony || ceremony.facts.length + ceremony.warnings.length + ceremony.acknowledgements.length === 0;
+  return Object.freeze({
+    ref,
+    prepared,
+    level,
+    hasForm: any,
+    Form,
+    oneStep: any && !Form && level === "confirm" && plain,
+    writeOnly: Object.freeze(writeOnly),
+    state: { shown: false, sending: false },
+    resolve,
+  });
+}
+
 async function prepare(runtime: KitRuntime, ref: ActionRef, initial: Json | undefined): Promise<PreparedAction | Failure> {
   const start =
     isObject(ref.prefill) && isObject(initial) ? { ...ref.prefill, ...initial } : (initial ?? ref.prefill);
@@ -306,6 +365,38 @@ export function ActionHost({
     [show],
   );
 
+  /**
+   * After a write answered that what `current` confirmed changed: prepares
+   * the same ref again and shows the new step in its place, or ends the
+   * action. The step stays busy meanwhile, and nothing is sent.
+   */
+  const prepareAgain = useCallback(
+    async (current: Flow, values: Json | null, result: Failure) => {
+      const again = withoutKeys(values, current.writeOnly);
+      const next = await prepare(runtime, current.ref, isObject(again) ? again : undefined);
+      // Cancelled or unmounted meanwhile: the late answer changes nothing.
+      if (flow.current !== current) return;
+      if (!mounted.current) return finish(current, result);
+      if (next.type !== "prepared") {
+        finish(current, next);
+        // What the view shows behind the step may have changed too, such as a period that became blocked.
+        if (next.status === 401) window.location.assign("/login");
+        else runtime.refresh();
+        return;
+      }
+      // A different write, or a weaker level, is never swapped in.
+      if (!sameAction(current.prepared, next)) return finish(current, result);
+      const fresh = flowOf(current.ref, next, forms, current.resolve);
+      fresh.state.shown = true;
+      flow.current = fresh;
+      show(
+        { flow: fresh, step: fresh.hasForm ? "form" : "confirm", busy: false, error: { message: result.message }, values: again },
+        true,
+      );
+    },
+    [runtime, finish, show, forms],
+  );
+
   /** The one call that writes; it checks `proof` itself and sends nothing when it falls short. */
   const send = useCallback(
     async (current: Flow, proof: Proof) => {
@@ -349,6 +440,12 @@ export function ActionHost({
         window.location.assign("/login");
       } else if (!current.state.shown) {
         finish(current, result);
+      } else if (
+        result.status === 409 &&
+        current.prepared.prepareAgainOn?.includes(result.code) === true &&
+        flow.current === current
+      ) {
+        void prepareAgain(current, values, result);
       } else if (flow.current === current) {
         const error = { message: result.message, ...(result.field ? { field: result.field } : {}) };
         const again = withoutKeys(values, current.writeOnly);
@@ -356,7 +453,7 @@ export function ActionHost({
         show({ flow: current, step: current.hasForm ? "form" : "confirm", busy: false, error, values: again }, current.oneStep);
       }
     },
-    [runtime, finish, show, onSignals],
+    [runtime, finish, show, prepareAgain, onSignals],
   );
 
   const act = useCallback(
@@ -373,32 +470,15 @@ export function ActionHost({
         if (prepared.status === 401) window.location.assign("/login");
         return prepared;
       }
-      const { any, writeOnly } = fieldsOf(prepared.spec.input);
-      const values = isObject(prepared.prefill) ? withoutKeys(prepared.prefill, writeOnly) : null;
-      const level = prepared.confirm;
-      const bespoke = forms?.[prepared.spec.id];
-      const Form =
-        bespoke && bespoke.reads.includes(prepared.spec.inputVersion) && (level === "none" || level === "confirm")
-          ? bespoke.Component
-          : null;
-      const { ceremony } = prepared;
-      const plain = !ceremony || ceremony.facts.length + ceremony.warnings.length + ceremony.acknowledgements.length === 0;
       return new Promise<ActionResult>((resolve) => {
-        const current: Flow = Object.freeze({
-          ref,
-          prepared,
-          level,
-          hasForm: any,
-          Form,
-          oneStep: any && !Form && level === "confirm" && plain,
-          writeOnly: Object.freeze(writeOnly),
-          state: { shown: false, sending: false },
-          resolve,
-        });
+        const current = flowOf(ref, prepared, forms, resolve);
+        const values = isObject(prepared.prefill) ? withoutKeys(prepared.prefill, current.writeOnly) : null;
         flow.current = current;
-        if (!any && !needsStep(current.level, activated)) return void send(current, { kind: "gesture", values, activated });
+        if (!current.hasForm && !needsStep(current.level, activated)) {
+          return void send(current, { kind: "gesture", values, activated });
+        }
         current.state.shown = true;
-        show({ flow: current, step: any ? "form" : "confirm", busy: false, error: null, values });
+        show({ flow: current, step: current.hasForm ? "form" : "confirm", busy: false, error: null, values });
       });
     },
     [runtime, send, show, forms],
@@ -473,7 +553,8 @@ export function ActionHost({
     const record = recordFor(event, input, TYPING_EVENTS);
     if (record) record.typed = readInput(input).value;
   };
-  const tone = current.ref.tone === "danger" || level === "typed" || level === "ceremony" ? "danger" : "neutral";
+  // From the prepared action, never the GUI's ref; a missing or unknown value draws danger.
+  const tone = current.prepared.tone === "neutral" ? "neutral" : "danger";
   const formProps: FormProps = {
     spec,
     actionRef: current.ref,

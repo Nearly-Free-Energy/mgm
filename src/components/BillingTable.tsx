@@ -17,9 +17,11 @@ import { CopyTable, type ColumnDef } from "@/components/ui/copy-table";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   DELETE_DRAFT_PERIOD_DESCRIPTION,
+  DELETE_PERIOD_TYPED_LABEL,
+  deleteDraftPeriodThroughRoute,
   lineItemHasRecordedPayment,
-  periodDeleteErrorMessage,
 } from "@/lib/billing/period-delete";
+import { periodName } from "@/lib/billing/close";
 import { ClosePeriodDialog } from "@/components/ui/close-period-dialog";
 import { Banner } from "@/components/ui/banner";
 import { RowActionsMenu } from "@/components/billing/row-actions-menu";
@@ -413,19 +415,23 @@ export function BillingTable({
     return () => timers.forEach(clearTimeout);
   }, [parentBanners, dismissParentBanner]);
 
+  // The period's name, typed to delete it: the route checks it (DELETE
+  // /api/billing-periods/[periodId], BillingCapability.deletePeriod). Null for
+  // dates periodName cannot name, and then Delete is not offered.
+  const deleteName = periodName(period.start_date, period.end_date);
+
   async function handleDelete() {
+    if (deleteName === null) return;
     setError(null);
     setDeleting(true);
-    const { error: deleteError } = await supabase
-      .from("billing_periods")
-      .delete()
-      .eq("id", period.id);
-    if (deleteError) {
+    try {
+      // Through the billing capability, behind the plugin gate; its refusals
+      // (a closed period, payment activity, billing turned off) come back as
+      // fixed copy, which the dialog shows.
+      await deleteDraftPeriodThroughRoute(period.id, deleteName);
+    } catch (err) {
       setDeleting(false);
-      // fn_billing_period_before_delete_guard keeps a closed period or a
-      // draft with recorded payments; the dialog says why instead of showing
-      // the raw error.
-      throw new Error(periodDeleteErrorMessage(deleteError));
+      throw err;
     }
     router.push(`/microgrids/${microgridId}/billing`);
   }
@@ -676,6 +682,9 @@ export function BillingTable({
         confirmLabel="Delete"
         tone="destructive"
         onConfirm={handleDelete}
+        requireTypedConfirmation={
+          deleteName === null ? undefined : { label: DELETE_PERIOD_TYPED_LABEL, expected: deleteName }
+        }
       />
 
       {/* Close Period Dialog */}
@@ -838,7 +847,7 @@ export function BillingTable({
                     (src/lib/billing/period-delete.ts). If that trigger's rule
                     changes, revisit. Payment attempts and events are not
                     loaded here, so the refusal message still covers them. */}
-                {!hasRecordedPayment && (
+                {!hasRecordedPayment && deleteName !== null && (
                   <button
                     onClick={() => setDeleteDialogOpen(true)}
                     disabled={generating || deleting}

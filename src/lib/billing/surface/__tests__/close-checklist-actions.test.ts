@@ -116,6 +116,8 @@ describe("billing.close-period", () => {
       confirm: "ceremony",
       humanOnly: true,
       targeted: false,
+      // The route's 409 for totals that changed (totalsChanged in ../../capability.ts).
+      prepareAgainOn: ["billing_period_totals_changed"],
     });
     expect(CLOSE.input).toBe(ClosePeriodBody);
     expect(CLOSE.inputVersion).toBe(CLOSE_PERIOD_BODY_VERSION);
@@ -126,7 +128,10 @@ describe("billing.close-period", () => {
   it("prepares the route's own ceremony, with nothing for a form to show", async () => {
     const { client, calls } = tables();
     const out = await prepare(client);
-    expect(out).toMatchObject({ ok: true, value: { confirm: "ceremony", method: "POST", path: `/api/billing-periods/${PERIOD}/close`, bound: {} } });
+    expect(out).toMatchObject({
+      ok: true,
+      value: { confirm: "ceremony", method: "POST", path: `/api/billing-periods/${PERIOD}/close`, bound: {}, tone: "neutral", prepareAgainOn: ["billing_period_totals_changed"] },
+    });
     if (!out.ok) return;
     expect(out.value.ceremony).toEqual(closeCeremony(parseCloseReview(REVIEW)!, fmt));
     expect(out.value.ceremony).toMatchObject({
@@ -295,7 +300,7 @@ const mergeInput = (plugin: MergeInput["plugin"]): MergeInput => ({
 });
 
 describe("billing.close-period in the views", () => {
-  it("resolves on the checklist's close step, in the host's danger tone", () => {
+  it("resolves on the checklist's close step, with no danger tone: a close is neither a DELETE nor destructive", () => {
     const loaded = CLOSE_CHECKLIST_LOADED_EXAMPLES[0];
     const model = { kind: "flow", body: loaded.body, actions: loaded.actions, entity: OCTOBER } as ActionSlots<ActionLink>;
     const { model: resolved, dropped } = resolveOwnAndTargeted(model, mergeInput("billing"), snapshot.actions);
@@ -306,7 +311,6 @@ describe("billing.close-period in the views", () => {
       params: { periodId: OCTOBER.id },
       label: "Close period",
       enabled: true,
-      tone: "danger",
     });
   });
 

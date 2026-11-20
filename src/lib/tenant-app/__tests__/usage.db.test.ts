@@ -22,6 +22,13 @@
  * from 1 October, E's from 10 October, both still open. From the 10th each
  * sees S's whole use, labelled as shared, never as its own.
  *
+ * Units F, G, H, J and K exercise fn_tenant_shared_meter_days directly: F
+ * holds S as primary from 5 October on another microgrid (linked with the
+ * service role, as X is) and counts all the same, since billing bills it
+ * too (mgm#228), so D's shared days start on the 5th; G holds the grid
+ * meter on C's days; H holds S inside E's days; J holds meter T twice with
+ * a gap and K holds T throughout, until its access is removed.
+ *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +38,7 @@ import {
   createTestUser,
   LOCAL_SUPABASE_URL,
   mintServiceRoleJwt,
+  runAsDatabaseOwner,
   serviceClient,
   shouldSkip,
   type TestUser,
@@ -64,12 +72,23 @@ const OWN_METER = "e7700000-0000-4000-8004-000000000006";
 const SHARED_METER = "e7700000-0000-4000-8004-000000000007";
 const UNIT_D = "e7700000-0000-4000-8005-000000000004";
 const UNIT_E = "e7700000-0000-4000-8005-000000000005";
+const UNIT_F = "e7700000-0000-4000-8005-000000000006";
+const UNIT_G = "e7700000-0000-4000-8005-000000000007";
+const UNIT_H = "e7700000-0000-4000-8005-000000000008";
+const UNIT_J = "e7700000-0000-4000-8005-000000000009";
+const UNIT_K = "e7700000-0000-4000-8005-00000000000a";
+const GAP_METER = "e7700000-0000-4000-8004-000000000008";
 const LINK_X = "e7700000-0000-4000-8006-000000000001";
 const EMAIL_A = "tenant-usage-a@test.local";
 const EMAIL_B = "tenant-usage-b@test.local";
 const EMAIL_C = "tenant-usage-c@test.local";
 const EMAIL_D = "tenant-usage-d@test.local";
 const EMAIL_E = "tenant-usage-e@test.local";
+const EMAIL_H = "tenant-usage-h@test.local";
+const EMAIL_J = "tenant-usage-j@test.local";
+const EMAIL_K = "tenant-usage-k@test.local";
+const EMAIL_MANAGER = "tenant-usage-manager@test.local";
+const EMAILS = [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E, EMAIL_H, EMAIL_J, EMAIL_K, EMAIL_MANAGER];
 const KAMPALA = "Africa/Kampala";
 
 let tenantA: TestUser;
@@ -77,6 +96,10 @@ let tenantB: TestUser;
 let tenantC: TestUser;
 let tenantD: TestUser;
 let tenantE: TestUser;
+let tenantH: TestUser;
+let tenantJ: TestUser;
+let tenantK: TestUser;
+let manager: TestUser;
 
 const energySeries = vi.spyOn(FixtureMeteringProvider.prototype, "getDeviceEnergySeries");
 
@@ -99,7 +122,7 @@ beforeAll(async () => {
     vi.stubEnv(name, "");
   }
   vi.stubEnv("OPENEMS_KEYCLOAK_TOKEN_URLS", "");
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: EMAILS });
 
   const svc = await serviceClient();
   const rows: [string, Record<string, unknown>][] = [
@@ -116,11 +139,17 @@ beforeAll(async () => {
     ["devices", { id: BATTERY, edge_id: EDGE, name: "Battery", device_type: "battery", openems_component_id: "ess0" }],
     ["devices", { id: OWN_METER, edge_id: EDGE, name: "Meter C", device_type: "consumption_meter", openems_component_id: "meter3" }],
     ["devices", { id: SHARED_METER, edge_id: EDGE, name: "Meter S", device_type: "consumption_meter", openems_component_id: "meter4" }],
+    ["devices", { id: GAP_METER, edge_id: EDGE, name: "Meter T", device_type: "consumption_meter", openems_component_id: "meter5" }],
     ["tenants", { id: UNIT_A, microgrid_id: MICROGRID, display_name: "Unit A", primary_phone: "+256700000001" }],
     ["tenants", { id: UNIT_B, microgrid_id: MICROGRID, display_name: "Unit B", primary_phone: "+256700000002" }],
     ["tenants", { id: UNIT_C, microgrid_id: MICROGRID, display_name: "Unit C", primary_phone: "+256700000003" }],
     ["tenants", { id: UNIT_D, microgrid_id: MICROGRID, display_name: "Unit D", primary_phone: "+256700000004" }],
     ["tenants", { id: UNIT_E, microgrid_id: MICROGRID, display_name: "Unit E", primary_phone: "+256700000005" }],
+    ["tenants", { id: UNIT_F, microgrid_id: OTHER_MICROGRID, display_name: "Unit F", primary_phone: "+256700000006" }],
+    ["tenants", { id: UNIT_G, microgrid_id: MICROGRID, display_name: "Unit G", primary_phone: "+256700000007" }],
+    ["tenants", { id: UNIT_H, microgrid_id: MICROGRID, display_name: "Unit H", primary_phone: "+256700000008" }],
+    ["tenants", { id: UNIT_J, microgrid_id: MICROGRID, display_name: "Unit J", primary_phone: "+256700000009" }],
+    ["tenants", { id: UNIT_K, microgrid_id: MICROGRID, display_name: "Unit K", primary_phone: "+256700000010" }],
     ["tenant_devices", { tenant_id: UNIT_A, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: "2026-09-15" }],
     ["tenant_devices", { tenant_id: UNIT_B, device_id: METER, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
     ["tenant_devices", { id: LINK_X, tenant_id: UNIT_A, device_id: METER_X, role: "primary_consumption_meter", effective_from: "2026-09-15", effective_to: null }],
@@ -131,6 +160,12 @@ beforeAll(async () => {
     ["tenant_devices", { tenant_id: UNIT_C, device_id: OWN_METER, role: "primary_consumption_meter", effective_from: "2026-10-21", effective_to: null }],
     ["tenant_devices", { tenant_id: UNIT_D, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: null }],
     ["tenant_devices", { tenant_id: UNIT_E, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-10", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_F, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-05", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_G, device_id: GRID_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: "2026-10-11" }],
+    ["tenant_devices", { tenant_id: UNIT_H, device_id: SHARED_METER, role: "primary_consumption_meter", effective_from: "2026-10-15", effective_to: "2026-10-20" }],
+    ["tenant_devices", { tenant_id: UNIT_J, device_id: GAP_METER, role: "primary_consumption_meter", effective_from: "2026-10-01", effective_to: "2026-10-08" }],
+    ["tenant_devices", { tenant_id: UNIT_J, device_id: GAP_METER, role: "primary_consumption_meter", effective_from: "2026-10-20", effective_to: null }],
+    ["tenant_devices", { tenant_id: UNIT_K, device_id: GAP_METER, role: "primary_consumption_meter", effective_from: "2026-09-01", effective_to: null }],
     // The tenant app is off without a row (defaultEnabled in src/lib/plugins/bundled.ts).
     ["mgm_plugins", { org_id: ORG, plugin_name: TENANT_APP_PLUGIN_NAME, version: TENANT_APP_PLUGIN_VERSION, enabled: true }],
   ];
@@ -143,19 +178,30 @@ beforeAll(async () => {
   tenantC = await createTestUser({ email: EMAIL_C, role: "tenant", scopeId: UNIT_C });
   tenantD = await createTestUser({ email: EMAIL_D, role: "tenant", scopeId: UNIT_D });
   tenantE = await createTestUser({ email: EMAIL_E, role: "tenant", scopeId: UNIT_E });
+  tenantH = await createTestUser({ email: EMAIL_H, role: "tenant", scopeId: UNIT_H });
+  tenantJ = await createTestUser({ email: EMAIL_J, role: "tenant", scopeId: UNIT_J });
+  tenantK = await createTestUser({ email: EMAIL_K, role: "tenant", scopeId: UNIT_K });
+  manager = await createTestUser({ email: EMAIL_MANAGER, role: "org_manager", scopeId: ORG });
 }, 60_000);
 
 afterAll(async () => {
   if (shouldSkip()) return;
   vi.unstubAllEnvs();
   energySeries.mockRestore();
-  await cleanupTestData({ orgIds: [ORG], userEmails: [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E] });
+  await cleanupTestData({ orgIds: [ORG], userEmails: EMAILS });
 }, 60_000);
 
 beforeEach(() => {
   _resetTenantUsageCacheForTests();
   energySeries.mockClear();
 });
+
+/** The database's own UTC date, as fn_tenant_shared_meter_days takes it. */
+function databaseUtcDate(): string {
+  const result = runAsDatabaseOwner("SELECT ((now() AT TIME ZONE 'UTC')::date)::text AS today");
+  if (!result.ok) throw new Error(`[tenant-usage.db] database date: ${result.output}`);
+  return (JSON.parse(result.stdout) as { today: string }[])[0].today;
+}
 
 async function usageMonth(user: TestUser, tenantId: string, month: string): Promise<TenantUsageMonth> {
   const composed = await composeTenantApp({ supabase: user.client, tenantId });
@@ -365,20 +411,23 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       const unitE = await usageMonth(tenantE, UNIT_E, "2026-10");
       const figures = generated("2026-10-01", "2026-10-31", "day", shared);
 
+      // From the 5th, F's first day: F is on another microgrid, and billing
+      // bills it for S all the same (mgm#228).
       expect(unitD.days).toEqual(
         october.map((date, i) => ({
           date,
           ...bucket(figures[i]),
-          ...(date >= "2026-10-10" && figures[i] !== null ? { shared: true } : {}),
+          ...(date >= "2026-10-05" && figures[i] !== null ? { shared: true } : {}),
         }))
       );
       // E holds S from the 10th: every day it shows is shared, with D's figures.
       expect(unitE.days.slice(9)).toEqual(unitD.days.slice(9));
       expect(unitE.days.slice(0, 9).every((d) => d.state === "no-meter")).toBe(true);
-      const sharedDays = unitD.days.filter((d) => d.shared).length;
-      expect(sharedDays).toBeGreaterThan(10);
-      expect(unitD.total).toMatchObject({ shared: sharedDays });
-      expect(unitE.total).toMatchObject({ shared: sharedDays, kwh: kwhSum(figures.slice(9)) });
+      const labelled = (month: TenantUsageMonth) => month.days.filter((d) => d.shared).length;
+      expect(labelled(unitE)).toBeGreaterThan(10);
+      expect(labelled(unitD)).toBeGreaterThanOrEqual(labelled(unitE));
+      expect(unitD.total).toMatchObject({ shared: labelled(unitD) });
+      expect(unitE.total).toMatchObject({ shared: labelled(unitE), kwh: kwhSum(figures.slice(9)) });
       // The label, as the month and the home show it.
       expect(monthSoFar(unitE, { fmt, locale: "en-GB" }).note).toContain(SHARED_USE_NOTE);
       expect(monthSoFar(unitD, { fmt, locale: "en-GB" }).note).toContain("days shared with another unit, not only yours");
@@ -390,7 +439,7 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       expect(day.hours.map((h) => h.kwh)).toEqual(generated("2026-10-12", "2026-10-12", "hour", shared));
       const model = buildUsageDayModel(day, { fmt, locale: "en-GB", links: { tenantId: UNIT_E, several: false } });
       expect(model.body.totals?.note?.text).toContain(SHARED_USE_NOTE);
-      expect(await usageDay(tenantD, UNIT_D, "2026-10-05")).not.toHaveProperty("shared");
+      expect(await usageDay(tenantD, UNIT_D, "2026-10-04")).not.toHaveProperty("shared");
     });
 
     it("labels the meter on both units' homes while both hold it", async () => {
@@ -408,6 +457,140 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       expect(unitB.days.some((d) => d.shared)).toBe(false);
       expect(unitB.total).not.toHaveProperty("shared");
       expect((await home(tenantB, UNIT_B)).meters.every((m) => !m.shared)).toBe(true);
+    });
+  });
+
+  describe("fn_tenant_shared_meter_days, as the tenant's own client calls it", () => {
+    type Row = { device_id: string; effective_from: string; effective_to: string };
+    const answers: unknown[] = [];
+
+    async function sharedDays(user: TestUser, tenantId: string, fromDate: string, toDate: string) {
+      const result = await user.client.rpc("fn_tenant_shared_meter_days", {
+        _tenant_id: tenantId,
+        _from_date: fromDate,
+        _to_date: toDate,
+      });
+      answers.push(result.data);
+      return result as { data: Row[] | null; error: { code?: string } | null };
+    }
+
+    const span = (device_id: string, effective_from: string, effective_to: string) => ({
+      device_id,
+      effective_from,
+      effective_to,
+    });
+
+    it("answers D the days S is also E's, F's or H's, merged, F's though it is on another microgrid", async () => {
+      const { data, error } = await sharedDays(tenantD, UNIT_D, "2026-10-01", "2026-11-01");
+      expect(error).toBeNull();
+      expect(data).toEqual([span(SHARED_METER, "2026-10-05", "2026-11-01")]);
+    });
+
+    it("answers E the days of its own link that D holds S too", async () => {
+      const { data, error } = await sharedDays(tenantE, UNIT_E, "2026-10-01", "2026-11-01");
+      expect(error).toBeNull();
+      expect(data).toEqual([span(SHARED_METER, "2026-10-10", "2026-11-01")]);
+    });
+
+    it("cuts the days to the end of the unit's own link, though the other units' links run on", async () => {
+      const { data, error } = await sharedDays(tenantH, UNIT_H, "2026-10-01", "2026-11-01");
+      expect(error).toBeNull();
+      expect(data).toEqual([span(SHARED_METER, "2026-10-15", "2026-10-20")]);
+    });
+
+    it("answers one span per link of the unit's own, and none in the gap between them, though K holds T throughout", async () => {
+      const whole = await sharedDays(tenantJ, UNIT_J, "2026-10-01", "2026-11-01");
+      expect(whole.error).toBeNull();
+      expect(whole.data).toEqual([span(GAP_METER, "2026-10-01", "2026-10-08"), span(GAP_METER, "2026-10-20", "2026-11-01")]);
+
+      const gap = await sharedDays(tenantJ, UNIT_J, "2026-10-10", "2026-10-18");
+      expect(gap).toMatchObject({ error: null, data: [] });
+    });
+
+    it("cuts the days to the range asked", async () => {
+      expect((await sharedDays(tenantD, UNIT_D, "2026-10-12", "2026-10-13")).data).toEqual([
+        span(SHARED_METER, "2026-10-12", "2026-10-13"),
+      ]);
+      expect(await sharedDays(tenantD, UNIT_D, "2026-09-01", "2026-10-01")).toMatchObject({ error: null, data: [] });
+    });
+
+    it("never counts a meter that is not a consumption meter, or a secondary link", async () => {
+      // G holds the grid meter as primary on C's days; M is B's primary and
+      // only C's secondary.
+      expect(await sharedDays(tenantC, UNIT_C, "2026-10-01", "2026-11-01")).toMatchObject({ error: null, data: [] });
+    });
+
+    it("returns a device id and two dates only, never which unit", async () => {
+      await sharedDays(tenantD, UNIT_D, "2026-10-01", "2026-11-01");
+      await sharedDays(tenantJ, UNIT_J, "2026-10-01", "2026-11-01");
+      const rows = answers.flatMap((answer) => (Array.isArray(answer) ? answer : [])) as Record<string, unknown>[];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(Object.keys(row).sort()).toEqual(["device_id", "effective_from", "effective_to"]);
+      const text = JSON.stringify(answers);
+      for (const unit of [UNIT_D, UNIT_E, UNIT_F, UNIT_H, UNIT_J, UNIT_K]) expect(text).not.toContain(unit);
+    });
+
+    it("never accepts another unit's id", async () => {
+      for (const other of [UNIT_E, UNIT_F, UNIT_H, "e7700000-0000-4000-8005-0000000000ff"]) {
+        const { data, error } = await sharedDays(tenantD, other, "2026-10-01", "2026-11-01");
+        expect(error?.code).toBe("42501");
+        expect(data).toBeNull();
+      }
+    });
+
+    it("refuses a tenant whose access to the unit was removed", async () => {
+      // K holds T throughout, so J's links are its shared days until then.
+      const before = await sharedDays(tenantK, UNIT_K, "2026-10-01", "2026-11-01");
+      expect(before.error).toBeNull();
+      expect(before.data?.length).toBeGreaterThan(0);
+
+      const listed = await manager.client.rpc("fn_tenant_access_list", { _tenant_id: UNIT_K });
+      expect(listed.error).toBeNull();
+      const access = (listed.data as { access_id: string; email: string }[]).find((row) => row.email === EMAIL_K);
+      expect(access).toBeDefined();
+      const revoked = await manager.client.rpc("fn_tenant_access_revoke", { _tenant_id: UNIT_K, _access_id: access!.access_id });
+      expect(revoked.error).toBeNull();
+
+      const { data, error } = await sharedDays(tenantK, UNIT_K, "2026-10-01", "2026-11-01");
+      expect(error?.code).toBe("42501");
+      expect(data).toBeNull();
+    });
+
+    it("refuses the service role", async () => {
+      const { data, error } = await (await serviceClient()).rpc("fn_tenant_shared_meter_days", {
+        _tenant_id: UNIT_D,
+        _from_date: "2026-10-01",
+        _to_date: "2026-11-01",
+      });
+      expect(error?.code).toBe("42501");
+      expect(data).toBeNull();
+    });
+
+    it.each([
+      ["an empty range", "2026-10-01", "2026-10-01", ["22023"]],
+      ["a reversed range", "2026-11-01", "2026-10-01", ["22023"]],
+      ["an end at infinity", "2026-10-01", "infinity", ["22023"]],
+      ["a start at -infinity", "-infinity", "2026-11-01", ["22023"]],
+      ["a date that does not exist", "2026-02-30", "2026-03-01", ["22008", "22007"]],
+    ])("rejects %s", async (_label, fromDate, toDate, codes) => {
+      const { data, error } = await sharedDays(tenantD, UNIT_D, fromDate, toDate);
+      expect(codes).toContain(error?.code);
+      expect(data).toBeNull();
+    });
+
+    it("answers no day after UTC's date + 2", async () => {
+      // The bound follows the database's UTC date, read before and after the
+      // calls; a run that straddles UTC midnight tries once more.
+      for (let attempt = 1; ; attempt++) {
+        const utcToday = databaseUtcDate();
+        const after = await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, 3), addDaysToDateKey(utcToday, 40));
+        const within = await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 40));
+        if (attempt === 1 && databaseUtcDate() !== utcToday) continue;
+        expect(after).toMatchObject({ error: null, data: [] });
+        expect(within.error).toBeNull();
+        expect(within.data).toEqual([span(SHARED_METER, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 2))]);
+        return;
+      }
     });
   });
 

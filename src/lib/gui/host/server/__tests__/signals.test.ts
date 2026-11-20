@@ -136,6 +136,18 @@ describe("collectSignals", () => {
     ]);
   });
 
+  it(`keeps an undated alarm in the first ${MAX_TOP} ahead of dated signals of the same severity`, async () => {
+    use([
+      watcher("billing", "billing.due", async () =>
+        Array.from({ length: MAX_TOP + 1 }, (_, i) => ({ ...billed, id: `due${i}`, kind: "your-move", due: "2026-11-01" })),
+      ),
+      watcher("metering", "metering.readings", async () => [{ ...base, id: "down", kind: "alarm" }]),
+    ]);
+    const out = await value();
+    expect([out.count, out.top.length]).toEqual([MAX_TOP + 2, MAX_TOP]);
+    expect(out.top[0]).toMatchObject({ id: "metering.readings:down", kind: "alarm" });
+  });
+
   it("keeps the same id from two watchers apart", async () => {
     use([
       watcher("metering", "metering.one", async () => [{ ...base, id: "same", kind: "info" }]),

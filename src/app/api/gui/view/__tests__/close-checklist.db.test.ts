@@ -95,7 +95,7 @@ const routeFetch = async (url: string, init: RequestInit): Promise<Response> => 
 };
 
 /** The confirmation the host's step sends once every box is ticked and the name typed (action-host.tsx). */
-type Ceremony = { typed: string; digest: string; acknowledgements: { id: string }[] };
+type Ceremony = { typed: string; digest: string; acknowledgements: { id: string }[]; facts: { label: string; value: { text: string } }[] };
 const confirmationFor = (c: Ceremony, o: { acknowledged?: string[]; typed?: string } = {}) => ({
   digest: c.digest,
   acknowledged: o.acknowledged ?? c.acknowledgements.map((a) => a.id),
@@ -266,7 +266,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a period's close checklist", (
     // Close unit 3's bill has no usage and is 'edge' by default; it is not counted as read.
     expect(steps[1].detail).toContain("Of the rest, 1 read from meters, 1 entered by hand.");
     expect(steps[0].href).toBe(`/microgrids/${MICROGRID}/billing/${WARN}`);
-    expect(steps[3].action).toEqual({ action: "billing.close-period", params: { periodId: WARN }, label: "Close period", enabled: true, tone: "danger" });
+    expect(steps[3].action).toEqual({ action: "billing.close-period", params: { periodId: WARN }, label: "Close period", enabled: true });
     expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.back-to-period", "billing.view-history"]);
     expect(model.trail.map((c: { label: string }) => c.label)).toContain("Close site");
   });
@@ -365,13 +365,17 @@ describe.skipIf(shouldSkip())("closing a period through the GUI host", () => {
     expect(await status(READY)).toBe("draft");
   });
 
-  it("refuses totals that changed after prepare, and closes with the new ones", async () => {
+  it("refuses totals that changed after prepare with the code the host prepares again on, and closes with the new ones", async () => {
     caller = manager;
     const stale = await prepared(READY);
+    // Neutral, and prepared again on the route's code for totals that changed (action-host.tsx).
+    expect(stale.tone).toBe("neutral");
+    expect(stale.prepareAgainOn).toContain("billing_period_totals_changed");
+    const total = (p: { ceremony: Ceremony }) => p.ceremony.facts.find((f) => f.label === "Total")?.value.text;
     const svc = await serviceClient();
     const { error } = await svc.from("billing_line_items").update({ total_amount: 3000 }).eq("id", bill(31));
     if (error) throw new Error(`[close-checklist.db] update: ${error.message}`);
-    // What the host shows over its old step: go back to Close period, whose prepare reads the new totals.
+    // The answer the host prepares again on; its message is the note over the new totals.
     expect(await send(stale, confirmationFor(stale.ceremony))).toMatchObject({
       ok: false,
       status: 409,
@@ -380,8 +384,11 @@ describe.skipIf(shouldSkip())("closing a period through the GUI host", () => {
     });
     expect(await status(READY)).toBe("draft");
 
+    // Preparing again, as the host does with the same ref, returns the new totals.
     const fresh = await prepared(READY);
     expect(fresh.ceremony.digest).not.toBe(stale.ceremony.digest);
+    expect(total(fresh)).toBeDefined();
+    expect(total(fresh)).not.toBe(total(stale));
     expect(await send(fresh, confirmationFor(fresh.ceremony))).toMatchObject({ ok: true });
     expect(await status(READY)).toBe("closed");
   });

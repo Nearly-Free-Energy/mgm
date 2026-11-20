@@ -73,8 +73,18 @@ export function fillPath(pattern: string, params: Readonly<Record<string, string
   return missing ? null : path;
 }
 
-function danger(def: MergeActionDef): boolean {
-  return def.confirm === "typed" || def.confirm === "ceremony" || def.risk === "destructive" || def.method === "DELETE";
+/**
+ * The tone of an action's controls and confirmation steps: danger for a
+ * DELETE or a destructive action, neutral for every other, typed and
+ * ceremony included (ADR-006, decision 10). A confirmation's level says how
+ * carefully a person confirms, not what the write does: closing a period is
+ * a final commit, not a destruction (design rule 5 in CLAUDE.md). The host
+ * takes a step's tone from the prepared action (../server/prepare.ts), never
+ * from a GUI's ref; if prepare stops calling this, or the host reads tone
+ * from anywhere else (../client/action-host.tsx), revisit.
+ */
+export function actionTone(def: Pick<ActionDef, "risk" | "method">): "neutral" | "danger" {
+  return def.risk === "destructive" || def.method === "DELETE" ? "danger" : "neutral";
 }
 
 /**
@@ -98,7 +108,7 @@ export function actionRef(
   if (!input.isReleased(path)) return { ok: false, reason: "unreleased" };
   const foreign = a.plugin !== input.plugin;
   const ref: ActionRef = { action: a.def.id, params: { ...params }, label: label ?? a.def.title, enabled: true };
-  if (danger(a.def)) ref.tone = "danger";
+  if (actionTone(a.def) === "danger") ref.tone = "danger";
   if (foreign) ref.from = displayName(a.plugin);
   const gate = input.gate.get(a.plugin);
   if (gate && !gate.ok && gate.status === 409) {

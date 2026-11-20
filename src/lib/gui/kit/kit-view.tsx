@@ -108,7 +108,7 @@ const TILE_NOT_LOADED = "This tile could not be loaded.";
 function Tiles({ tiles, page }: { tiles: Attached[]; page: ViewModel }) {
   const pageKey = useMemo(() => JSON.stringify(page), [page]);
   return (
-    <section aria-label="Tiles" className="grid grid-cols-1 gap-4 min-[600px]:grid-cols-2">
+    <section aria-label="At a glance" className="grid grid-cols-1 gap-4 min-[600px]:grid-cols-2">
       {tiles.map((tile) => (
         <Tile key={`${tile.view} ${tile.href}`} entry={tile} pageKey={pageKey} />
       ))}
@@ -142,7 +142,7 @@ function Tile({ entry, pageKey }: { entry: Attached; pageKey: string }) {
   );
   let body: ReactNode;
   if (loaded === null) {
-    body = <div role="status" aria-busy="true" aria-label={`Loading ${entry.title}`} className="h-32 animate-pulse rounded-md bg-muted" />;
+    body = <div role="status" aria-busy="true" aria-label={`Loading ${entry.title}`} className="h-32 motion-safe:animate-pulse rounded-md bg-muted" />;
   } else if (loaded.out.type !== "view") {
     body = note(loaded.out.ok ? TILE_NOT_LOADED : loaded.out.message);
   } else {

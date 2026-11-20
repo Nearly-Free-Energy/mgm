@@ -31,7 +31,10 @@ export const TODAY_COPY = {
   nothing: "Nothing needs you right now.",
   unchecked: "Some sources did not answer in time.",
   failed: "What needs you could not be checked right now. Try again shortly.",
-  more: (shown: number, count: number) => `The ${shown} most urgent of ${count} are shown.`,
+  // The host's order (order() in src/lib/gui/host/server/signals.ts): most
+  // severe first, alarms first within a severity, then the soonest due. If
+  // that order changes, revisit this sentence.
+  more: (shown: number, count: number) => `${shown} of ${count} are shown: the most severe first, alarms first, then the soonest due.`,
 } as const;
 
 export const TODAY_KEYS = ["title", "severity", "due", "details"] as const;
@@ -94,7 +97,9 @@ function notice(signals: Signals): { tone: Tone; text: string } | undefined {
   if (signals.unchecked.length > 0) parts.push(TODAY_COPY.unchecked);
   if (signals.count > signals.top.length) parts.push(TODAY_COPY.more(signals.top.length, signals.count));
   if (parts.length === 0) return undefined;
-  return { tone: signals.unchecked.length > 0 ? "warning" : "info", text: parts.join(" ") };
+  // Signals left out, like a source that did not answer, are something the
+  // person cannot see here, so both are a warning.
+  return { tone: "warning", text: parts.join(" ") };
 }
 
 /**

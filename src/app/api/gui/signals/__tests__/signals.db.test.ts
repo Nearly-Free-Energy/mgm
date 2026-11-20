@@ -238,10 +238,11 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
     expect(body.count).toBe(ALL_IDS.length);
     expect(body.top.map((s) => [s.id, s.severity, s.title, s.href])).toEqual([
       [`payments.reconcile:${OCTOBER}`, "critical", "Signals site: 1 payment in October 2026 needs reconciliation", `/microgrids/${MICROGRID}/billing/${OCTOBER}/payments?bill=${BILL_HELD}`],
+      // An alarm comes first among the warnings, ahead of dated ones (order() in signals.ts).
+      expect.arrayContaining([`metering.connection:${MICROGRID}`, "warn", "Signals site: OpenEMS could not be reached"]),
       [`billing.period-due:${SEPTEMBER}`, "warn", "Signals site: September 2026 has no bills", `/microgrids/${MICROGRID}/billing/${SEPTEMBER}`],
       [`billing.period-due:${OCTOBER}`, "warn", "Signals site: October 2026 is not closed", `/microgrids/${MICROGRID}/billing/${OCTOBER}/close`],
       expect.arrayContaining([`payments.failed:${OCTOBER}`, "warn", "Signals site: 1 payment failed in October 2026"]),
-      expect.arrayContaining([`metering.connection:${MICROGRID}`, "warn", "Signals site: OpenEMS could not be reached"]),
     ]);
     // The period ending today in Kampala is not yet due.
     expect(text).not.toContain(RUNNING);
