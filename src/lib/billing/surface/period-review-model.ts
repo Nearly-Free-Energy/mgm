@@ -214,7 +214,10 @@ function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput
   }
   // Only where the usage route accepts a correction (its checks, in order):
   // a draft, an unmetered bill with no meter assigned in the period, and a
-  // starting reading. No prefill: LineItemUsageBody is refined.
+  // starting reading. No prefill: the form opens empty, where the legacy
+  // cell starts at the bill's usage. The host would take one, checked
+  // against LineItemUsageBody's fields (cleanPrefill in
+  // src/lib/gui/host/server/merge.ts).
   if (i.period.status === "draft" && bill.device_id === null && !tenant.meterLinkInPeriod && bill.start_kwh !== null) {
     out.push({ action: RECORD_USAGE_ACTION.id, params });
   }

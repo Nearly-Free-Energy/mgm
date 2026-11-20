@@ -5,17 +5,25 @@
  * The legacy screens are the periods list (BillingPeriodList.tsx), the
  * period review (BillingTable.tsx and the menus, panels and dialogs it
  * renders) and the period history page, under
- * src/app/(gui)/microgrids/[id]/billing/. #201 keeps them mounted until
- * every row here is contributed, then deletes them; parity.test.ts fails
+ * src/app/(gui)/microgrids/[id]/billing/. A screen's URL moves to the GUI
+ * host only once none of its rows is pending, and the legacy components are
+ * deleted only once no row is; parity.test.ts enforces both, and fails
  * while a row has no contribution and is not listed as pending there, so a
- * control cannot be lost on the way.
+ * control cannot be lost on the way. Since "Serve the billing pages through
+ * the GUI host" the host serves the periods list and the history (their
+ * page.tsx files are gone); the review keeps its page.tsx while any row of
+ * the period-review screen is pending (PENDING in parity.test.ts lists
+ * them), and BillingPeriodList, AuditLogList and BillingTable stay until
+ * the Deletes pull request.
  *
  * Out of the table, on purpose:
  *  - The rest of the microgrid layout's chrome on these pages (the
  *    Operations and Setup tabs, the breadcrumb, Edit microgrid and the
- *    timezone nudge): it belongs to the microgrid pages and stays. The
- *    Billing tab is billing's sub-navigation, which #201's Deletes item
- *    removes, so it is a row (billing-tab).
+ *    timezone nudge): it belongs to the microgrid pages. The host serves the
+ *    periods list and the history outside that layout, so they show the
+ *    GUI's own dock and trail instead; the chrome stays on Setup and on a
+ *    period's review. The Billing tab is billing's sub-navigation, which
+ *    #201's Deletes item removes, so it is a row (billing-tab).
  *  - Controls that only change what is on screen (opening the pre-flight
  *    panel, the create form, a dialog, a period picker's list) and the fields
  *    inside a form: they are the form of the action their submit maps to.
@@ -120,7 +128,12 @@ export type ParityRow = {
   screen: ParityScreen;
   /** The control as labelled today; several controls doing one thing share a row. */
   control: string;
-  /** Where it is today. */
+  /**
+   * Where it is today: the legacy components that draw it, which exist until
+   * the Deletes pull request (parity.test.ts). A control that was on a
+   * page.tsx the GUI host has replaced names the screen's remaining legacy
+   * component, and says so.
+   */
   legacy: string;
   replacedBy: ParityAction | ParityLink | ParityCopy | ParityView | ParityNav;
   pr: ParityPullRequest;
@@ -194,7 +207,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     legacy: "src/app/(gui)/microgrids/[id]/tab-nav.tsx",
     replacedBy: { kind: "nav", nav: "billing.periods" },
     pr: SERVE,
-    note: "Today the nav entry is legacy: true and points at the legacy page; it is contributed when it opens the view.",
+    note: "The nav entry opens the billing.periods view, which the host serves at the Billing tab's own path, so the tab lands on it too.",
   },
 
   // ── Period review ─────────────────────────────────────────────────────────
@@ -217,7 +230,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     },
     // Waits for a GUI's form, which no #201 pull request names yet.
     pr: "unscheduled",
-    note: "Pending: contributed with no prepare and no prefill (GenerateBillsBody is refined) and `targeted: false`, but offered by no view, since no interface can submit it. The kit cannot render its tenant arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; parity.test.ts keeps an action without a form pending. The route answers 200 with per-tenant errors[], which only such a form can show. Once one exists, the period review offers it as its header action and its empty state's call to action.",
+    note: "Pending: contributed with no prepare and no prefill and `targeted: false`, but offered by no view, since no interface can submit it. The kit cannot render its tenant arrays, so its form is NO_FORM until a GUI registers its own (GuiPlugin.forms, keyed billing.generate-bills) to replace the pre-flight panel; parity.test.ts keeps an action without a form pending. The route answers 200 with per-tenant errors[], which only such a form can show. Once one exists, the period review offers it as its header action and its empty state's call to action.",
   },
   {
     id: "regenerate-bill",
@@ -240,7 +253,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
       view: "billing.period-review",
     },
     pr: REVIEW,
-    note: "On its own route: on /api/billing/generate a per-bill action could carry only { billingPeriodId }, since GenerateBillsBody is refined (a tenant prefill is dropped), the kit cannot render its arrays and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total, the legacy paid-bill warning as an acknowledgement the regenerate route requires (the legacy dialogs' generate path keeps it as a client-side warning only: /api/billing/generate checks no payment status); the route answers with the previous and new totals, which the host shows as the result. Unlike the legacy menu, which offers regenerating a bill in a closed period (\"Logged as audit revision\") and an invoiced bill through /api/billing/generate, the route refuses both, as it refuses a refunded bill (REGENERATE_REFUSAL_COPY), and the review shows the action disabled with that reason; correcting a closed or invoiced bill once the legacy screens are deleted is left to a later decision. A read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row, or generate-bills with tenantIds through a GUI's own form.",
+    note: "On its own route: on /api/billing/generate a per-bill action would carry its bill as a tenantIds prefill, which the kit cannot render (GenerateBillsBody's arrays), and available() cannot target a bill, so Regenerate would run the whole period. There is no preview: the legacy paid-bill preview (POST /api/billing/regenerate-preview) re-pins a draft period's tariff, which a prepare must not do, so prepare shows the current total, the legacy paid-bill warning as an acknowledgement the regenerate route requires (the legacy dialogs' generate path keeps it as a client-side warning only: /api/billing/generate checks no payment status); the route answers with the previous and new totals, which the host shows as the result. Unlike the legacy menu, which offers regenerating a bill in a closed period (\"Logged as audit revision\") and an invoiced bill through /api/billing/generate, the route refuses both, as it refuses a refunded bill (REGENERATE_REFUSAL_COPY), and the review shows the action disabled with that reason; correcting a closed or invoiced bill once the legacy screens are deleted is left to a later decision. A read that recomputes without writing is a follow-up. Regenerate selected is one regenerate-bill per selected row, or generate-bills with tenantIds through a GUI's own form.",
   },
   {
     id: "record-usage",
@@ -553,7 +566,10 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     id: "back-to-period",
     screen: "period-history",
     control: "Back to period",
-    legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+    // Back to period was on the history's page.tsx, which "Serve the billing
+    // pages through the GUI host" deleted; AuditLogList is what remains of
+    // that screen until the Deletes pull request.
+    legacy: "src/components/billing/audit-log-list.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]", via: { link: "billing.back-to-period" } },
     pr: HISTORY,
     note: "The host's trail also links the period; it does not count.",
@@ -562,7 +578,7 @@ export const BILLING_PARITY: readonly ParityRow[] = [
     id: "history-show-all",
     screen: "period-history",
     control: "Show all, when the history is filtered to one tenant",
-    legacy: "src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx",
+    legacy: "src/components/billing/audit-log-list.tsx",
     replacedBy: { kind: "link", view: "billing.period-history", href: "/microgrids/[id]/billing/[periodId]/history", via: { link: "billing.history-show-all" } },
     pr: HISTORY,
     note: "Offered while the view is filtered by tenant_id. Latest changes (billing.history-latest), on a later page, has the same path and does not count.",

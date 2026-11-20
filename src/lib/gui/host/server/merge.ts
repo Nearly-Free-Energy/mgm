@@ -110,10 +110,25 @@ function writeOnlyKeys(input: z.ZodType): ReadonlySet<string> | null {
 }
 
 /**
- * A loader's prefill, checked against the action's input with bound fields
- * and `confirmation` (host-managed) left out, and with writeOnly fields
- * removed. Undefined when it does not parse or its writeOnly fields cannot be
- * found.
+ * The input's own fields: the same field schemas and the same rule for
+ * undeclared keys (strict, loose or stripped), without the object-level
+ * refinements. A refinement reads a whole body, such as "start on or before
+ * end", so it cannot judge starting values a person is still to edit, and
+ * zod's .omit() and .partial() refuse an object that has one. The action's
+ * route parses the submitted body with the whole input, refinements included.
+ */
+function fieldsOnly(input: z.ZodObject): z.ZodObject {
+  if (!input.def.checks?.length) return input;
+  const fields = z.object(input.shape);
+  return input.def.catchall ? fields.catchall(input.def.catchall) : fields;
+}
+
+/**
+ * A loader's prefill, checked field by field against the action's input
+ * (its fields only, without object-level refinements: fieldsOnly above),
+ * with bound fields and `confirmation` (host-managed) left out, and with
+ * writeOnly fields removed. Undefined when it does not parse or its
+ * writeOnly fields cannot be found.
  */
 export function cleanPrefill(def: ActionDef, prefill: Json): Json | undefined {
   if (!(def.input instanceof z.ZodObject) || prefill === null || typeof prefill !== "object" || Array.isArray(prefill))
@@ -122,12 +137,13 @@ export function cleanPrefill(def: ActionDef, prefill: Json): Json | undefined {
   const omitted = new Set([...Object.keys(def.bind.body ?? {}), "confirmation"].filter((k) => Object.hasOwn(shape, k)));
   let parsed: Record<string, unknown> | undefined;
   try {
-    type Mask = Parameters<typeof def.input.omit>[0];
+    const fields = fieldsOnly(def.input);
+    type Mask = Parameters<typeof fields.omit>[0];
     const mask = Object.fromEntries([...omitted].map((k) => [k, true as const])) as Mask;
-    const r = def.input.omit(mask).partial().safeParse(prefill);
+    const r = fields.omit(mask).partial().safeParse(prefill);
     if (r.success) parsed = r.data as Record<string, unknown>;
   } catch {
-    parsed = undefined; // .omit() refuses an object schema with refinements
+    parsed = undefined;
   }
   const writeOnly = parsed ? writeOnlyKeys(def.input) : null;
   if (!parsed || !writeOnly) return undefined;

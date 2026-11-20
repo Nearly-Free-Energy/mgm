@@ -5,11 +5,12 @@
  *
  * Pure: no server-only import, no clock, no I/O. Every string a renderer
  * shows is built here. The labels, summaries, notes and empty states are
- * the legacy history page's (src/app/(gui)/microgrids/[id]/billing/[periodId]/history/page.tsx,
- * which renders src/components/billing/audit-log-list.tsx with the labels
- * of src/lib/billing/audit-humanize.tsx), as strings rather than JSX;
- * period-history-model.test.ts compares the labels with the legacy ones
- * while both are served.
+ * the legacy history's (src/components/billing/audit-log-list.tsx, with the
+ * labels of src/lib/billing/audit-humanize.tsx), as strings rather than
+ * JSX; period-history-model.test.ts compares the labels with
+ * audit-humanize's. The legacy history page that rendered AuditLogList is
+ * gone: this view serves its URL. The component and audit-humanize stay
+ * until #201's Deletes pull request; when they go, that comparison goes too.
  *
  * A collection rather than a feed: a feed has no empty state and no `next`,
  * and the host caps its entries at 200 (MODEL_CAPS.entries in
@@ -226,7 +227,7 @@ export type HumanizedHistoryEntry = {
   postClose: boolean;
 };
 
-/** One entry as the legacy history page words it, with money and statuses formatted on the server. */
+/** One entry as AuditLogList words it (src/lib/billing/audit-humanize.tsx), with money and statuses formatted on the server. */
 export function humanizeHistoryEntry(entry: BillingAuditLogEntry, fmt: Fmt, currency: string): HumanizedHistoryEntry {
   const d = entry.details ?? {};
   const postClose = d["period_was_closed"] === true;

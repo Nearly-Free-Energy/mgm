@@ -397,7 +397,7 @@ describe("resolveInitialView", () => {
   });
 
   it("answers null for a page served outside the contract, a path off the catalog, or no path", async () => {
-    expect(await resolveInitialView(`/microgrids/${MICROGRID}/billing`, MANIFEST)).toBeNull();
+    expect(await resolveInitialView(`/microgrids/${MICROGRID}/setup/rates`, MANIFEST)).toBeNull();
     expect(await resolveInitialView("/no-such-page", MANIFEST)).toBeNull();
     expect(await resolveInitialView("/microgrids/%E0%A4%A/operations", MANIFEST)).toBeNull();
     expect(await resolveInitialView(null, MANIFEST)).toBeNull();
