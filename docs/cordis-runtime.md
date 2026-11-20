@@ -449,6 +449,12 @@ disabled, and that Payments or Pesapal owns the route. A route whose
 exemption is a plain reason may not reach the capability at all, under any
 import name or module path. A new payments write route fails the build until
 it calls `checkGate`/`gateRoute` itself or carries a `PaymentExemption`.
+For the same reason the GUI host keeps `payments.refresh-attempt`,
+`payments.record-adjustment` and `payments.accept-receipts`, whose routes are
+the refresh and reconcile exemptions, enabled and preparable while Payments
+is off, and still lists the period review's Payments tab
+(`payments.bill-attempts`), through the `whilePluginOff` fields described
+under "GUI surface".
 
 Two other tests hold what those methods and routes may do.
 `src/lib/payments/__tests__/capability-gating.test.ts` classifies every
