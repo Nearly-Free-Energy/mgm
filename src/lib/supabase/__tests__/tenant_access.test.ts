@@ -40,6 +40,10 @@
  *   superAdmin   — super admin
  *   noRole       — an account with no role rows
  *   grantee      — no rows at first; given and then removed access to B
+ *   microgridOnly — an ems_operator row and nothing else, created and
+ *                  removed by one invitation test, so the staff record
+ *                  (staff_access_accounts, history that outlives rows) never
+ *                  names noRole
  * and, created by the staff-record tests (after the access tests, so the
  * counts above do not move):
  *   formerStaff  — org manager of the organization, whose row is removed;
@@ -136,6 +140,7 @@ const EMAIL = {
   superAdmin: "tenant-access-super-admin@test.local",
   noRole: "tenant-access-no-role@test.local",
   grantee: "tenant-access-grantee@test.local",
+  microgridOnly: "tenant-access-microgrid-only@test.local",
   formerStaff: "tenant-access-former-staff@test.local",
   emsTenant: "tenant-access-ems-tenant@test.local",
   madeStaff: "tenant-access-made-staff@test.local",
@@ -1149,6 +1154,46 @@ desc("the staff role functions keep refusing the tenant role", () => {
       ]),
     );
     expect(data).toHaveLength(3);
+  });
+
+  // 20261119150000: an invitation is for an account with no role row of any
+  // scope. A tenant row and a microgrid-scoped row each count.
+  it("fn_finalize_user_invitation refuses an account holding only a tenant row, or only a microgrid row", async () => {
+    const svc = await serviceClient();
+    const snapshot = async (userId: string) => {
+      const roles = await svc.from("user_roles").select("role, scope_type, scope_id").eq("user_id", userId).order("role");
+      const profile = await svc.from("user_profiles").select("first_name, last_name, phone").eq("user_id", userId).single();
+      return { roles: roles.data, profile: profile.data };
+    };
+    const invite = (client: typeof manager.client, userId: string) =>
+      client.rpc("fn_finalize_user_invitation", {
+        p_user_id: userId,
+        p_first_name: "Over",
+        p_last_name: "Written",
+        p_phone: "+256700000009",
+        p_role: "org_manager",
+        p_scope_id: F.org,
+      });
+
+    // An account of its own: the staff record keeps any account that ever
+    // held a row other than tenant (20261118140000), and the staff-record
+    // tests below expect noRole never to have held one.
+    const microgridOnly = await createTestUser({ email: EMAIL.microgridOnly, role: null });
+    try {
+      const { error: insErr } = await svc
+        .from("user_roles")
+        .insert({ user_id: microgridOnly.userId, role: "ems_operator", scope_type: "microgrid", scope_id: F.microgrid });
+      expect(insErr).toBeNull();
+      for (const target of [tenantOnly.userId, microgridOnly.userId]) {
+        const before = await snapshot(target);
+        for (const caller of [manager.client, superAdmin.client]) {
+          expectCode((await invite(caller, target)).error, "42501");
+        }
+        expect(await snapshot(target)).toEqual(before);
+      }
+    } finally {
+      await svc.auth.admin.deleteUser(microgridOnly.userId);
+    }
   });
 
   it("a tenant still gets a sign-in link: fn_auth_sign_in_target accepts any role row", async () => {
