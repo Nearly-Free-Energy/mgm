@@ -11,8 +11,9 @@ import "server-only";
  * `billing.period-history` view, reached from the review's View history
  * links; a draft period's close checklist as the `billing.close-checklist`
  * view, reached from the review's Close period link, with the close itself
- * (`billing.close-period`, the server's close ceremony); a period's bills with each one's stable payment link, for the
- * manager to copy and share (the page sends nothing), as the
+ * (`billing.close-period`, the server's close ceremony); a period's bills
+ * with each one's stable payment link, for the manager to copy and share
+ * (the page sends nothing), as the
  * `billing.send-queue` view, reached from the review's Payment links link;
  * and the savings as the `billing.savings` view, shown under the
  * Operations day, with the writes that change what it counts. A page that
