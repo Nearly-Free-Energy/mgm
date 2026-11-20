@@ -69,19 +69,21 @@ const PENDING = new Set<string>([
 const LEGACY_SCREENS = [
   "src/components/BillingTable.tsx",
   "src/components/BillingPeriodList.tsx",
-  "src/app/(gui)/microgrids/[id]/billing/[periodId]/page.tsx",
   // billing/page.tsx and …/[periodId]/history/page.tsx left with "Serve the
   // billing pages through the GUI host": no row of the periods or
   // period-history screen was pending, and the billing.periods and
-  // billing.period-history views serve their URLs.
+  // billing.period-history views serve their URLs. …/[periodId]/page.tsx
+  // left with "Serve period review through the GUI host" once no
+  // period-review row was, and billing.period-review serves its URL.
 ];
 
 /**
  * The catalog page (src/lib/plugins/bundled.ts) that serves each legacy
  * screen's URL. A screen's URL moves to the GUI host only once no row of
  * that screen is pending, so a person loses no control on the way; the last
- * test of this file enforces it. If a screen comes to be served at another
- * URL, revisit.
+ * test of this file enforces it. All three have moved, so a row of any
+ * screen added as pending fails that test until its page is restored. If a
+ * screen comes to be served at another URL, revisit.
  */
 const SCREEN_PAGES: Record<ParityScreen, string> = {
   periods: "/microgrids/[id]/billing",

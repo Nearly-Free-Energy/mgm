@@ -28,15 +28,12 @@ import "server-only";
  * its review while it has no bills.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
- * have the Billing pages' own paths. The catalog serves the periods list's
- * and the history's paths by their views (`servedBy: "view"`), so the
- * host's catch-all renders them, and the Billing nav entry opens
- * `billing.periods`. A period's review is still its legacy page
- * (BillingTable), and parity.test.ts keeps its URL there while any
- * period-review row of src/lib/billing/parity.ts is pending: a control no
- * interface can replace yet (when this was written, payment history while
- * Payments is off; parity.test.ts's PENDING is the list). Until none is,
- * `billing.period-review` is reached through GET /api/gui/view.
+ * have the Billing pages' own paths. The catalog serves all three paths by
+ * their views (`servedBy: "view"`), so the host's catch-all renders them,
+ * and the Billing nav entry opens `billing.periods`. The review took its
+ * URL from the legacy page (BillingTable) once no period-review row of
+ * src/lib/billing/parity.ts was pending; parity.test.ts would have kept it
+ * there otherwise.
  * `billing.close-checklist`, `billing.send-queue` and `billing.not-billed`
  * are new pages (…/[periodId]/close, …/[periodId]/send and
  * …/[periodId]/not-billed) with no page.tsx, so the catalog marks them

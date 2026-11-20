@@ -163,7 +163,7 @@ afterAll(async () => {
 
 describe("Every page under (gui) keeps a person whose rows are all tenant rows to tenant pages (mgm#209)", () => {
   it("finds the host's pages, the nested layouts and the catalog's view pages, by scope", () => {
-    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/go/[nav]", "/settings/users", "/microgrids/[id]/billing/[periodId]"]));
+    expect(HOST_PAGES).toEqual(expect.arrayContaining(["/go/[nav]", "/settings/users", "/microgrids/[id]/setup/tenants/[tenantId]"]));
     // Today, the staff home on "/", is served by the catch-all.
     expect(STAFF_VIEW_PAGES).toContain("/");
     expect(HOST_PAGES.length).toBeGreaterThan(20);
