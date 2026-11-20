@@ -35,6 +35,15 @@
  * cookie, so the next full load of a page with no organization in its path
  * opens there (the layout reads it as a hint). For a tenant manifest that
  * is the current unit, which the tenant manifest reads the same way.
+ *
+ * It fetches the signals of the organization the manifest shows after the
+ * first paint (./signals-feed.ts), hands them to KitProvider for
+ * useSignals(), and sets the installed app's badge to their count. A tenant
+ * manifest gets none, and its badge is cleared: the host builds a staff
+ * manifest's `orgs` with the current organization in it and a tenant's with
+ * none (buildManifestModel and buildTenantManifestModel,
+ * ../shared/manifest-model.ts). If either stops holding, revisit
+ * `signalsOrganization`.
  */
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, type ComponentProps } from "react";
@@ -43,6 +52,8 @@ import { resolveLegacyView } from "../shared/legacy-view";
 import { ORG_COOKIE } from "../shared/org-cookie";
 import { TENANT_UNIT_PARAM } from "../shared/tenant-units";
 import { KitProvider, useRefreshOnce, type ResolveView } from "./kit-provider";
+import { useKitRuntime } from "./kit-runtime";
+import { useSignalsFeed } from "./signals-feed";
 
 const resolve: ResolveView = (pathname, manifest) => resolveLegacyView(pathname, manifest);
 
@@ -55,9 +66,16 @@ function rememberOrganization(id: string): void {
   document.cookie = `${ORG_COOKIE}=${encodeURIComponent(id)}; Max-Age=${REMEMBER_SECONDS}; Path=/; SameSite=Lax${secure}`;
 }
 
-export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve">) {
+/** The organization whose signals the shell shows: a staff manifest's own, never a tenant's unit. */
+function signalsOrganization(manifest: ComponentProps<typeof KitProvider>["manifest"]): string | null {
+  return manifest && manifest.orgs.some((org) => org.id === manifest.org.id) ? manifest.org.id : null;
+}
+
+export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve" | "signals" | "refreshSignals">) {
   const { manifest } = props;
   const organization = manifest?.org.id ?? null;
+  const runtime = useKitRuntime();
+  const feed = useSignalsFeed(signalsOrganization(manifest), runtime.fetch);
   useEffect(() => {
     if (organization) rememberOrganization(organization);
   }, [organization]);
@@ -94,5 +112,5 @@ export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, 
     },
     [],
   );
-  return <KitProvider {...props} resolve={resolve} />;
+  return <KitProvider {...props} resolve={resolve} signals={feed.signals} refreshSignals={feed.refresh} />;
 }

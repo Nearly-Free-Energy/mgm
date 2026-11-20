@@ -259,7 +259,12 @@ async function prepare(runtime: KitRuntime, ref: ActionRef, initial: Json | unde
   return failureOf(response.ok ? 500 : response.status, json);
 }
 
-export function ActionHost({ Overlay, forms, model = null }: ActionHostSlots & { model?: ViewModel | null }) {
+export function ActionHost({
+  Overlay,
+  forms,
+  model = null,
+  onSignals,
+}: ActionHostSlots & { model?: ViewModel | null; onSignals?: () => void }) {
   const runtime = useKitRuntime();
   const flow = useRef<Flow | null>(null);
   /** Taken before prepare is sent, so a second act() waits for nothing. */
@@ -338,6 +343,7 @@ export function ActionHost({ Overlay, forms, model = null }: ActionHostSlots & {
         finish(current, result);
         if (result.href) runtime.navigate(result.href);
         else runtime.refresh();
+        if (result.signals) onSignals?.();
       } else if (result.status === 401) {
         finish(current, result);
         window.location.assign("/login");
@@ -350,7 +356,7 @@ export function ActionHost({ Overlay, forms, model = null }: ActionHostSlots & {
         show({ flow: current, step: current.hasForm ? "form" : "confirm", busy: false, error, values: again }, current.oneStep);
       }
     },
-    [runtime, finish, show],
+    [runtime, finish, show, onSignals],
   );
 
   const act = useCallback(

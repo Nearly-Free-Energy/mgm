@@ -148,6 +148,7 @@ export interface ActionSpec {
   /** JSON Schema of the fields a person enters: bound fields removed, secrets marked writeOnly. */
   input: Json;
 }
+/** `signals`: the route says the write may have changed the signals, and the host fetches them again. */
 export type ActionResult =
   | { type: "result"; ok: true; message?: string; href?: Href; next?: ActionRef; signals?: true }
   | { type: "result"; ok: false; status: number; code: string; message: string; field?: string };

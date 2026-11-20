@@ -134,9 +134,11 @@ export function KitProvider(props: {
   actions?: ActionHostSlots;
   /** What useSignals() returns; null when left out. */
   signals?: Signals | null;
+  /** Fetches the signals again; called after an action whose result says `signals: true`. */
+  refreshSignals?: () => void;
   children: ReactNode;
 }) {
-  const { manifest, initial, resolve, actions, signals = null, children } = props;
+  const { manifest, initial, resolve, actions, signals = null, refreshSignals, children } = props;
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
@@ -178,7 +180,11 @@ export function KitProvider(props: {
     <KitContext.Provider value={state}>
       {runtime === defaultRuntime && <RouterBridge />}
       {children}
-      <ActionHost {...actions} model={boundary?.pathname === pathname ? boundary.model : null} />
+      <ActionHost
+        {...actions}
+        model={boundary?.pathname === pathname ? boundary.model : null}
+        onSignals={refreshSignals}
+      />
     </KitContext.Provider>
   );
 }
@@ -193,7 +199,7 @@ export function useManifest(): Manifest {
   return useRequiredState("useManifest").manifest;
 }
 
-/** Signals load after the first paint once the host serves them; null until then. */
+/** The organization's signals, loaded after the first paint (./signals-feed.ts); null until then and for a tenant. */
 export function useSignals(): Signals | null {
   return useContext(KitContext)?.signals ?? null;
 }

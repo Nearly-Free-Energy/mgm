@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { createElement, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT } from "@/components/ui/navigation-progress";
@@ -89,13 +89,14 @@ describe("HostKitProvider", () => {
     expect(seen.at(-1)).toMatchObject({ view: null, title: "Org", trail: [{ label: "Org", href: `/organizations/${ORG}` }] });
   });
 
-  it("hands KitProvider the GUI's action slots and the signals it was given", () => {
+  it("hands KitProvider the GUI's action slots and the signals it fetched for the manifest's organization", async () => {
     const Overlay: (props: OverlayProps) => null = () => null;
     const forms = {};
-    const signals = {} as Signals;
+    const signals: Signals = { type: "signals", org: ORG, count: 2, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json(signals));
     render(
-      <KitRuntimeProvider runtime={{ ...recordingRuntime(), pathname: "/" }}>
-        <HostKitProvider manifest={withNav()} initial={initial} actions={{ Overlay, forms }} signals={signals}>
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial} actions={{ Overlay, forms }}>
           <Probe />
         </HostKitProvider>
       </KitRuntimeProvider>
@@ -103,8 +104,25 @@ describe("HostKitProvider", () => {
     const props = seenProps.at(-1)!;
     expect(props.actions?.Overlay).toBe(Overlay);
     expect(props.actions?.forms).toBe(forms);
-    expect(props.signals).toBe(signals);
     expect(typeof props.resolve).toBe("function");
+    expect(typeof props.refreshSignals).toBe("function");
+    expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
+    await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
+  });
+
+  it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", () => {
+    const fetch = vi.fn(async () => new Response("null", { status: 404 }));
+    const tenant = withNav();
+    tenant.orgs = [];
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/my" }}>
+        <HostKitProvider manifest={tenant} initial={initial}>
+          <Probe />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(seenProps.at(-1)!.signals).toBeNull();
   });
 
   it("remembers the manifest's organization in the mgm-org cookie", () => {

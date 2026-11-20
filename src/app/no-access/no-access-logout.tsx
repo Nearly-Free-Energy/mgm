@@ -8,6 +8,7 @@
  * layout and its KitProvider.
  */
 import { useRouter } from "next/navigation";
+import { clearAppBadge } from "@/lib/gui/host/client/app-badge";
 import { createClient } from "@/lib/supabase/client";
 
 export function NoAccessLogout() {
@@ -16,6 +17,7 @@ export function NoAccessLogout() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
+    clearAppBadge();
     router.push("/login");
     router.refresh();
   }
