@@ -48,6 +48,8 @@ function refusal(change: (c: Draft) => void, catalog = CATALOG, base: object = B
 }
 
 const fn = async () => null;
+/** The id of the fixture watcher's one example. */
+const PERIOD_ID = "00000000-0000-4000-8000-0000000000c1";
 const TEXT = { t: "text", text: "a" };
 /** Turns views[0] and its example into a view of another kind with the given body. */
 function asKind(c: Draft, kind: string, body: object) {
@@ -105,6 +107,13 @@ describe("parseContribution", () => {
     expect(parsed.views?.[0].attach?.whilePluginOff).toBe("listed");
     c.views[0].attach.hint = "tile";
     expect(() => parseContribution(c, CATALOG)).not.toThrow();
+  });
+
+  it("accepts an action that prepares again on codes its route answers", () => {
+    // That the route answers each code is checked in CI (gui-surface.test.ts), not here.
+    const c = copy(BILLING_SURFACE) as Draft;
+    c.actions[2].prepareAgainOn = ["billing_period_totals_changed"];
+    expect(parseContribution(c, CATALOG).contribution.actions?.[2].prepareAgainOn).toEqual(["billing_period_totals_changed"]);
   });
 
   it("accepts placeholder names with underscores", () => {
@@ -174,6 +183,18 @@ describe("parseContribution", () => {
     ],
     ["budgetMs over 10000", (c) => (c.signals[0].budgetMs = 20_000), ["signals", 0, "budgetMs"]],
     ["budgetMs 0", (c) => (c.signals[0].budgetMs = 0), ["signals", 0, "budgetMs"]],
+    ["a watcher's whilePluginOff of another value", (c) => (c.signals[0].whilePluginOff = true), ["signals", 0, "whilePluginOff"]],
+    ["a watcher's whilePluginOff in an attachment's word", (c) => (c.signals[0].whilePluginOff = "listed"), ["signals", 0, "whilePluginOff"]],
+    ["a watcher without examples", (c) => (c.signals[0].examples = []), ["signals", 0, "examples"], "a watcher needs at least one example"],
+    ["a watcher example with a source", (c) => (c.signals[0].examples[0].source = "billing.period-due"), ["signals", 0, "examples", 0], 'Unrecognized key: "source"'],
+    ["a watcher example of an unknown kind", (c) => (c.signals[0].examples[0].kind = "nudge"), ["signals", 0, "examples", 0, "kind"]],
+    ["a watcher example whose href is not a path", (c) => (c.signals[0].examples[0].href = "https://example.com"), ["signals", 0, "examples", 0, "href"]],
+    [
+      "a watcher's examples sharing an id",
+      (c) => c.signals[0].examples.push({ ...c.signals[0].examples[0] }),
+      ["signals", 0, "examples", 1, "id"],
+      `"${PERIOD_ID}" is used twice`,
+    ],
     ["a nav entry with neither view nor href", (c) => delete c.nav[0].view, ["nav", 0], "a nav entry needs a view, or an href with needs and legacy: true"],
     ["a nav entry with both", (c) => (c.nav[0].href = "/microgrids/[id]/billing"), ["nav", 0, "view"], "a nav entry names a view or a legacy href, not both"],
     ["a view nav entry with needs", (c) => (c.nav[0].needs = ["microgrid"]), ["nav", 0, "view"], "a nav entry names a view or a legacy href, not both"],
@@ -199,6 +220,13 @@ describe("parseContribution", () => {
     ["a destructive action below typed", (c) => (c.actions[0].risk = "destructive"), ["actions", 0, "confirm"], "a destructive action needs typed or ceremony confirmation"],
     ["an external action without prepare", (c) => (c.actions[0].risk = "external"), ["actions", 0, "prepare"], "an external action needs prepare"],
     ["an external action without confirm", (c) => Object.assign(c.actions[0], { risk: "external", confirm: "none", prepare: fn }), ["actions", 0, "confirm"], "an external action needs at least confirm"],
+    // Preparing again
+    ["prepareAgainOn without prepare", (c) => (c.actions[0].prepareAgainOn = ["billing_changed"]), ["actions", 0, "prepareAgainOn"], "an action that prepares again needs prepare"],
+    ["prepareAgainOn at level none", (c) => Object.assign(c.actions[0], { confirm: "none", prepare: fn, prepareAgainOn: ["billing_changed"] }), ["actions", 0, "prepareAgainOn"], "an action that prepares again needs a confirmation step"],
+    ["a prepareAgainOn code listed twice", (c) => (c.actions[2].prepareAgainOn = ["billing_changed", "billing_changed"]), ["actions", 2, "prepareAgainOn"], "a code is listed twice"],
+    ["a prepareAgainOn code that is not lower-case", (c) => (c.actions[2].prepareAgainOn = ["Billing-Changed"]), ["actions", 2, "prepareAgainOn", 0], "Expected a lower-case code"],
+    ["an empty prepareAgainOn", (c) => (c.actions[2].prepareAgainOn = []), ["actions", 2, "prepareAgainOn"]],
+    ["more than eight prepareAgainOn codes", (c) => (c.actions[2].prepareAgainOn = Array.from({ length: 9 }, (_, i) => `billing_changed_${i}`)), ["actions", 2, "prepareAgainOn"]],
     // Segments and kinds
     ["a segment without a param", (c) => (c.views[0].params = {}), ["views", 0, "params"], 'params has no kind for the segment "id"'],
     ["a param that is not a segment", (c) => (c.views[0].params.periodId = "billingPeriod"), ["views", 0, "params", "periodId"], '"periodId" is not a segment of the path'],

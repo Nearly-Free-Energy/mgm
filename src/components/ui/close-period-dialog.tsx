@@ -15,9 +15,10 @@
 //
 // Phases:
 //   loading — the review is being fetched.
-//   review  — ConfirmStep. A 409 billing_period_totals_changed brings the new
-//             ceremony and starts the step again (ticks and typing cleared),
-//             with a note that the totals changed.
+//   review  — ConfirmStep. A 409 billing_period_totals_changed starts the
+//             step again over the new totals (ticks and typing cleared), with
+//             CLOSE_REFUSAL_COPY.totalsChanged as its note: the ceremony the
+//             409 carries, or the review loaded again when it carries none.
 //   blocked — the period cannot close as it is (a bill total that is not a
 //             whole number, or already closed); nothing to confirm.
 //   failed  — the review could not be loaded; Retry fetches it again.
@@ -39,6 +40,7 @@ import { cn } from "@/lib/utils";
 import { DialogFooter, DialogOverlay, DialogPanel } from "@/components/ui/dialog";
 import { ConfirmStep } from "@/lib/gui/host/client/confirm-step";
 import type { Ceremony } from "@/lib/gui/contract";
+import { CLOSE_REFUSAL_COPY } from "@/lib/billing/close";
 
 export interface ClosePeriodDialogProps {
   open: boolean;
@@ -69,8 +71,6 @@ type State =
   | { phase: "blocked"; ceremony: Ceremony | null; message: string }
   | { phase: "failed"; message: string }
   | { phase: "closed"; name: string };
-
-const TOTALS_CHANGED = "The totals changed after you reviewed them. Review the new totals and confirm again.";
 
 export async function postClose(periodId: string, body: unknown): Promise<CloseAnswer> {
   let res: Response;
@@ -130,15 +130,19 @@ export function ClosePeriodDialog({
   const record = React.useRef<{ ticked: Set<string>; typed: string }>({ ticked: new Set(), typed: "" });
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   const live = React.useRef(0);
+  // Each review shown gets a new round, which remounts the step, so nothing
+  // ticked or typed over earlier totals stays on screen.
+  const rounds = React.useRef(0);
 
-  const load = React.useCallback(async () => {
+  /** Loads the review; `note` is shown over it, as after totals that changed. */
+  const load = React.useCallback(async (note?: string) => {
     const call = ++live.current;
     setState({ phase: "loading" });
     const answer = await post(periodId, {});
     if (call !== live.current) return;
     record.current = { ticked: new Set(), typed: "" };
     if (answer.status === 428 && answer.ceremony) {
-      setState({ phase: "review", ceremony: answer.ceremony, round: 0, busy: false, error: null });
+      setState({ phase: "review", ceremony: answer.ceremony, round: ++rounds.current, busy: false, error: note ?? null });
       return;
     }
     const blocked = blockedBy(answer);
@@ -176,9 +180,10 @@ export function ClosePeriodDialog({
       return;
     }
     if (call !== live.current) return;
-    if (answer.code === "billing_period_totals_changed" && answer.ceremony) {
+    if (answer.code === "billing_period_totals_changed") {
+      if (!answer.ceremony) return void load(CLOSE_REFUSAL_COPY.totalsChanged);
       record.current = { ticked: new Set(), typed: "" };
-      setState({ phase: "review", ceremony: answer.ceremony, round: state.round + 1, busy: false, error: TOTALS_CHANGED });
+      setState({ phase: "review", ceremony: answer.ceremony, round: ++rounds.current, busy: false, error: CLOSE_REFUSAL_COPY.totalsChanged });
       return;
     }
     const blocked = blockedBy(answer);

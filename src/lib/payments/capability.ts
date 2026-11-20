@@ -14,6 +14,7 @@ import {
   validateReceiptAgainstAttempt,
 } from "./reconciliation";
 import type {
+  AttentionAttempt,
   BillSnapshot,
   PaymentsCapabilityContract,
   PaymentsRepository,
@@ -22,7 +23,7 @@ import type {
   ProviderFactory,
   RepositoryError,
 } from "./repository";
-import { ATTEMPT_NOT_OPEN } from "./repository";
+import { ATTEMPT_NOT_OPEN, MAX_ATTENTION_ATTEMPTS } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
 import { stablePaymentLinkPath } from "./payment-link";
@@ -33,6 +34,27 @@ const UUID_RE =
 
 /** getReadiness's refusal when a plugin's state could not be read: fixed copy, never the read's error. */
 export const READINESS_UNREADABLE = "Could not check whether online payments are turned on. Try again shortly.";
+
+/**
+ * Failure codes this class writes for its own bookkeeping, which listAttention
+ * leaves out: a checkout replaced by a newer one before it reached the
+ * provider (ensureCheckout), and one the provider never accepted, which the
+ * customer is told to retry (ensureCheckout). No money moved in either, and a
+ * manager has nothing to do about the bill. If either code starts meaning a
+ * payment the customer made, or another bookkeeping code is written, revisit.
+ */
+const BOOKKEEPING_FAILURES = ["checkout_superseded", "checkout_not_submitted"] as const;
+
+/** listAttention's input, or null when it is not one. */
+function attentionQuery(input: unknown): { status: AttentionAttempt["status"]; since?: string } | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  const { status, since, ...rest } = input as Record<string, unknown>;
+  if (Object.keys(rest).length > 0) return null;
+  if (status === "needs_reconciliation") return since === undefined ? { status } : null;
+  if (status !== "failed" || typeof since !== "string" || since.length > 40) return null;
+  const at = Date.parse(since);
+  return Number.isNaN(at) ? null : { status, since: new Date(at).toISOString() };
+}
 
 function splitName(full: string): { first: string; last: string } {
   const trimmed = full.trim();
@@ -875,5 +897,29 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
     if (!bill) return { ok: false as const, status: 404 as const, code: "payments_bill_not_found", message: "Bill not found" };
     const received = receipts.filter(r => r.currency === bill.currency).reduce((total, r) => total + (r.provider_status === "completed" ? Number(r.amount) : r.provider_status === "reversed" ? -Number(r.amount) : 0), 0) + adjustments.reduce((total, adjustment) => total + adjustment.amount, 0);
     return { ok: true as const, data: { attempts, receipts, currentTotal: bill.totalAmount, currency: bill.currency, received, difference: received - bill.totalAmount } };
+  }
+
+  async listAttention(input: unknown) {
+    const inactive = this.ensureActive();
+    if (inactive) return inactive;
+    const query = attentionQuery(input);
+    if (!query) {
+      return {
+        ok: false as const,
+        status: 400 as const,
+        code: "payments_invalid_attention_query",
+        message: "Ask for attempts needing reconciliation, or failed attempts since an instant.",
+      };
+    }
+    // Reads stay available while plugins are disabled — only scope applies.
+    const rows = await this.repo.listAttentionAttempts({
+      orgId: this.scope.organizationId,
+      status: query.status,
+      ...(query.since === undefined ? {} : { since: query.since }),
+      ...(query.status === "failed" ? { exceptFailureCodes: BOOKKEEPING_FAILURES } : {}),
+      limit: MAX_ATTENTION_ATTEMPTS + 1,
+    });
+    const attempts = rows.slice(0, MAX_ATTENTION_ATTEMPTS);
+    return { ok: true as const, data: { attempts, truncated: rows.length > MAX_ATTENTION_ATTEMPTS } };
   }
 }

@@ -48,7 +48,6 @@ const closePeriod: ActionRef = {
   label: "Close period",
   enabled: false,
   reason: "Review the bills first",
-  tone: "danger",
 };
 
 const periodsExample: ModelOf<"collection"> = {
@@ -251,5 +250,22 @@ export const BILLING_SURFACE: Contribution = {
       prepare: unavailable,
     },
   ],
-  signals: [{ id: "billing.period-due", load: async () => [] }],
+  signals: [
+    {
+      id: "billing.period-due",
+      load: async () => [],
+      examples: [
+        {
+          id: PERIOD,
+          kind: "your-move",
+          severity: "warn",
+          title: "Kiwumu: October 2026 is not closed",
+          entity: { kind: "microgrid", id: MICROGRID, label: "Kiwumu" },
+          href: `/microgrids/${MICROGRID}/billing/${PERIOD}/close`,
+          at: "2026-10-31T21:00:00.000Z",
+          due: "2026-11-01",
+        },
+      ],
+    },
+  ],
 };

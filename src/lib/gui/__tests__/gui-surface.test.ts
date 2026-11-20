@@ -10,7 +10,10 @@
  * or composes, or carries a PaymentExemption, and an action declaring
  * `whilePluginOff` is a Payments or Pesapal action whose own
  * `METHOD /api/route` carries a PaymentExemption naming a method that runs
- * while the plugin is off; 4. the route is released.
+ * while the plugin is off; 4. the route is released; 10. each code the
+ * action lists in `prepareAgainOn` is written as a string in its route file
+ * or in a source file under src/lib, outside a `prepareAgainOn` list, so a
+ * misspelt code is caught (the host prepares again only on an exact match).
  * Views: 5. each example, as a loader would return it, passes
  * strictParseModel; 6. no declared key or prefix, nor any name in its ext
  * schema, looks like a secret unless SECRET_LIKE_EXEMPTIONS says why; 7. each
@@ -22,6 +25,13 @@
  * Plugins: 8. nothing a contributing plugin's surface module runs uses a
  * capability method outside LOADER_READS, so its loaders, signals, search and
  * prepare steps write nothing through a capability.
+ * Signals: 10. each watcher example's href, where its signal is resolved, is
+ * a released page the plugin owns, as the host requires of what the watcher
+ * returns (watch in src/lib/gui/host/server/signals.ts), and every other
+ * href in it is a released page; 11. a watcher declaring `whilePluginOff` is
+ * a Payments or Pesapal watcher, and every Payments capability method its
+ * surface module may call (LOADER_READS) runs while the plugin is off, as
+ * check 9 holds a view's attach.whilePluginOff.
  *
  * Each check is a function over its inputs and the self-tests feed it
  * violating fixtures, so the guard is shown to fail on kinds of entry the
@@ -33,7 +43,7 @@ import ts from "typescript";
 import { z } from "zod";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ViewModel } from "@/lib/gui/contract";
-import type { ActionDef, Contribution, ViewDef } from "@/lib/gui/surface";
+import type { ActionDef, Contribution, SignalDef, ViewDef } from "@/lib/gui/surface";
 import { DATA_KEYS, schemaNames, strictParseModel } from "@/lib/gui/host/server/parse";
 import { SurfaceRegistry, type SurfaceSnapshot } from "@/lib/gui/host/server/surface-registry";
 import { isOutHref } from "@/lib/gui/host/shared/href";
@@ -95,7 +105,7 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   BillingCapabilityContract: ["getPeriodSummary", "listTariffs"],
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
   MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
-  PaymentsCapabilityContract: ["getReadiness", "listHistory"],
+  PaymentsCapabilityContract: ["getReadiness", "listAttention", "listHistory"],
   TenantAppCapabilityContract: ["getHome", "getUsageDay", "getUsageMonth"],
 };
 const CONTRACT = /CapabilityContract$/;
@@ -113,6 +123,8 @@ interface Facts {
   gating?: ReadonlyMap<string, string>;
   /** The capability methods a surface module may call; LOADER_READS unless given. */
   reads?: Readonly<Record<string, readonly string[]>>;
+  /** Whether a string literal is written in a non-test source file under src/lib; libWrites unless given. */
+  writes?: (literal: string) => boolean;
 }
 
 /** The capability whose gating decides what runs while Payments or Pesapal is off. */
@@ -215,6 +227,14 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
     if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
   }
   if (!facts.released(a.path.replace(/\[[^\]]+\]/g, "0"))) problems.push("the route is not released");
+  // Check 10. The route answers the code, often from a capability module, so
+  // either place counts; a prepareAgainOn list itself does not.
+  for (const code of a.prepareAgainOn ?? []) {
+    const literal = `"${code}"`;
+    if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
+      problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
+    }
+  }
   return problems.map((p) => `${a.id} (${a.method} ${a.path}): ${p}`);
 }
 
@@ -327,6 +347,56 @@ function whileOffViewProblems(plugin: MgmPluginName, def: ViewDef, facts: Facts)
   return problems.map((p) => `${def.id}: ${p}`);
 }
 
+// ── Signals (check 10) ──────────────────────────────────────────────────────
+
+/** Every href in a value, wherever it is. */
+function everyHref(value: unknown, out: string[] = []): string[] {
+  if (Array.isArray(value)) value.forEach((item) => everyHref(item, out));
+  else if (value !== null && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "href" && typeof child === "string") out.push(child);
+      else everyHref(child, out);
+    }
+  }
+  return out;
+}
+
+function signalProblems(plugin: MgmPluginName, def: Pick<SignalDef, "id" | "examples">, facts: Facts): Problems {
+  const problems: Problems = [];
+  def.examples.forEach((example, i) => {
+    const path = example.href.split(/[?#]/)[0];
+    // The host sends a signal only with a page href (isPageHref), never a route.
+    const own = path === "/api" || path.startsWith("/api/") ? "not a page" : linkProblem(plugin, example.href, facts);
+    if (own) problems.push(`example ${i} leads to ${example.href}: ${own}`);
+    for (const href of everyHref({ ...example, href: undefined })) {
+      const pathname = href.split(/[?#]/)[0];
+      if (!facts.released(pathname) || pathname === "/api" || pathname.startsWith("/api/")) {
+        problems.push(`example ${i} links to ${href}: not a released page`);
+      }
+    }
+  });
+  return problems.map((p) => `${def.id}: ${p}`);
+}
+
+/**
+ * Check 11: a watcher the host runs while its plugin is off may call only
+ * capability methods that run then. Check 8 holds every surface module to
+ * LOADER_READS, so it is enough that every Payments method listed there runs
+ * while off, as for check 9.
+ */
+function whileOffSignalProblems(plugin: MgmPluginName, def: Pick<SignalDef, "id" | "whilePluginOff">, facts: Facts): Problems {
+  if (def.whilePluginOff === undefined) return [];
+  const problems: Problems = [];
+  if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
+  const gating = facts.gating ?? paymentsGating();
+  for (const method of (facts.reads ?? LOADER_READS)[PAYMENTS_CONTRACT] ?? []) {
+    if (gating.get(method) !== WHILE_OFF) {
+      problems.push(`declares whilePluginOff, but LOADER_READS lets it call ${method}, which refuses while the plugin is off`);
+    }
+  }
+  return problems.map((p) => `${def.id}: ${p}`);
+}
+
 /** Every registered entry, with the plugin that contributed it and a name for messages. */
 function registered(s: SurfaceSnapshot): { plugin: MgmPluginName; name: string; entry: object }[] {
   return [
@@ -365,6 +435,7 @@ function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
   return [
     ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
     ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
+    ...snapshot.signals.flatMap((entry) => [...signalProblems(entry.plugin, entry, facts), ...whileOffSignalProblems(entry.plugin, entry, facts)]),
   ];
 }
 
@@ -479,6 +550,21 @@ function apiRoutes(dir = path.join(APP, "api")): RouteFile[] {
     if (!entry.isFile() || entry.name !== "route.ts") return [];
     return [{ route: `/${path.relative(APP, dir).split(path.sep).join("/")}`, text: readFileSync(path.join(dir, entry.name), "utf8") }];
   });
+}
+
+const withoutPrepareAgainOn = (text: string) => text.replace(/prepareAgainOn\s*:\s*\[[^\]]*\]/g, "");
+
+let libText: string | undefined;
+/** The non-test source under src/lib, with every prepareAgainOn list removed, read once. */
+function libWrites(literal: string): boolean {
+  const read = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return entry.name === "__tests__" ? [] : read(full);
+      return entry.isFile() && /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [readFileSync(full, "utf8")] : [];
+    });
+  libText ??= read(path.join(REPO, "src/lib")).map(withoutPrepareAgainOn).join("\n");
+  return libText.includes(literal);
 }
 
 function repoFacts(schemas = new Map<string, Record<string, unknown>>()): Facts {
@@ -607,7 +693,7 @@ describe("the GUI surface guard", () => {
     const registry = new SurfaceRegistry({ plugins: MGM_BUNDLED_PLUGINS });
     registry.contribute(BILLING_SURFACE);
     const load = async () => [];
-    registry.contribute({ plugin: "metering", signals: [{ id: "metering.quiet", load }] });
+    registry.contribute({ plugin: "metering", signals: [{ id: "metering.quiet", load, examples: BILLING_SURFACE.signals![0].examples }] });
     registry.contribute({ plugin: "payments", search: [{ prefix: "#", entity: "billingPeriod", find: load }] });
     const snapshot = registry.snapshot();
     expect(contributingPlugins(snapshot)).toEqual(["billing", "metering", "payments"]);
@@ -697,6 +783,32 @@ describe("the GUI surface guard", () => {
     expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
   });
 
+  it("refuses a prepareAgainOn code that neither the action's route nor src/lib writes", () => {
+    const route = "/api/billing-periods";
+    const text = (extra = "") =>
+      `import { parseJsonBody } from "@/lib/validation/parse-body";\nimport { Body } from "@/lib/billing/schemas";\nexport async function POST(request: Request) { await parseJsonBody(request, Body); ${extra} }`;
+    const check = (codes: string[], o: { route?: string; writes?: (literal: string) => boolean } = {}) =>
+      actionProblems("billing", { ...createPeriod, path: route, prepareAgainOn: codes } as ActionDef, {
+        apiRoutes: [{ route, text: o.route ?? text() }],
+        schemas: (m) => (m === "@/lib/billing/schemas" ? { Body: createPeriod.input } : undefined),
+        released: () => true,
+        writes: o.writes ?? (() => false),
+      }).map((p) => p.replace(/^.*?\): /, ""));
+
+    // Written in the route, or under src/lib (the close route answers its code from capability.ts).
+    expect(check(["acme_changed"], { route: text('return { code: "acme_changed" };') })).toEqual([]);
+    expect(check(["acme_changed"], { writes: (l) => l === '"acme_changed"' })).toEqual([]);
+    expect(libWrites('"billing_period_totals_changed"')).toBe(true);
+    // A misspelt code, and one written only in a prepareAgainOn list.
+    expect(check(["acme_chnaged"], { route: text('return { code: "acme_changed" };') })).toEqual([
+      'lists "acme_chnaged" in prepareAgainOn, which neither its route nor src/lib writes',
+    ]);
+    expect(check(["acme_changed"], { route: text('const d = { prepareAgainOn: ["acme_changed"] };') })).toEqual([
+      'lists "acme_changed" in prepareAgainOn, which neither its route nor src/lib writes',
+    ]);
+    expect(libWrites('"gui_never_written_anywhere_code"')).toBe(false);
+  });
+
   it("allows attach.whilePluginOff only on a Payments view whose surface module calls nothing that refuses while off", () => {
     const listed = { ...review, attach: { to: { view: "billing.periods" }, order: 1, hint: "tab", whilePluginOff: "listed" } } as ViewDef;
     expect(whileOffViewProblems("payments", listed, facts)).toEqual([]);
@@ -742,6 +854,45 @@ describe("the GUI surface guard", () => {
       "billing.periods: example 0 links to /api/org-api-tokens: not released",
       "billing.periods: example 0 links to /review: not a catalog page",
       `billing.periods: example 0 links to /microgrids/${M}/operations?row: /microgrids/[id]/operations is metering's page`,
+    ]);
+  });
+
+  it("holds a watcher's examples to released pages, its own href to one its plugin owns", () => {
+    const [due] = BILLING_SURFACE.signals as SignalDef[];
+    expect(signalProblems("billing", due, facts)).toEqual([]);
+    const M = "00000000-0000-4000-8000-0000000000b1";
+    const [example] = due.examples;
+    const changed = (over: Record<string, unknown>) =>
+      signalProblems("billing", { ...due, examples: [{ ...example, ...over } as SignalDef["examples"][number]] }, facts);
+    expect(changed({ href: `/microgrids/${M}/operations` })).toEqual([
+      `billing.period-due: example 0 leads to /microgrids/${M}/operations: /microgrids/[id]/operations is metering's page`,
+    ]);
+    expect(changed({ href: "/review" })).toEqual(["billing.period-due: example 0 leads to /review: not a catalog page"]);
+    expect(changed({ href: "/api/org-api-tokens" })).toEqual(["billing.period-due: example 0 leads to /api/org-api-tokens: not a page"]);
+    // An entity's own link may lead to another plugin's page, as long as it is a released page.
+    expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/operations` } })).toEqual([]);
+    expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/nowhere` } })).toEqual([
+      `billing.period-due: example 0 links to /microgrids/${M}/nowhere: not a released page`,
+    ]);
+    expect(signalProblems("metering", due, facts)).toEqual([
+      expect.stringMatching(/^billing\.period-due: example 0 leads to .*: \/microgrids\/\[id\]\/billing\/\[periodId\]\/close is billing's page$/),
+    ]);
+  });
+
+  it("allows a watcher's whilePluginOff only on Payments, while every Payments read runs while off", () => {
+    const declared = { id: "payments.reconcile", whilePluginOff: "checked" } as const;
+    expect(whileOffSignalProblems("payments", declared, facts)).toEqual([]);
+    expect(whileOffSignalProblems("billing", { id: "billing.period-due" }, facts)).toEqual([]);
+    for (const plugin of ["billing", "metering"] as const) {
+      expect(whileOffSignalProblems(plugin, declared, facts)).toEqual([`payments.reconcile: declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`]);
+    }
+    const reads = { ...LOADER_READS, PaymentsCapabilityContract: ["listAttention", "ensureCheckout"] };
+    expect(whileOffSignalProblems("payments", declared, { ...facts, reads })).toEqual([
+      "payments.reconcile: declares whilePluginOff, but LOADER_READS lets it call ensureCheckout, which refuses while the plugin is off",
+    ]);
+    const refusing = new Map([...paymentsGating(), ["listAttention", "refuses-when-disabled"]]);
+    expect(whileOffSignalProblems("payments", declared, { ...facts, gating: refusing })).toEqual([
+      "payments.reconcile: declares whilePluginOff, but LOADER_READS lets it call listAttention, which refuses while the plugin is off",
     ]);
   });
 

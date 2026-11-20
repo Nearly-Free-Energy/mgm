@@ -128,7 +128,7 @@ export interface ActionRef {
   /** From role, the plugin gate, the released routes and the action's own `available`. */
   enabled: boolean;
   reason?: string;
-  /** Set for typed and ceremony actions, and for every delete or destructive action. */
+  /** Set for every DELETE or destructive action (actionTone in host/shared/merge-actions.ts), whatever its confirmation level. */
   tone?: "danger";
   /** Set when another plugin contributed this control, such as "SMS reminders". */
   from?: string;
@@ -267,6 +267,7 @@ export const GUI_KINDS_SINCE: Readonly<Record<ViewKind, string>> = {
 // ── What the Shell receives ─────────────────────────────────────────────────
 
 type SignalBase = {
+  /** Unique in the answer: the host sends the watcher's own id prefixed with its source, "<source>:<id>". */
   id: string;
   source: Id;
   severity: "info" | "warn" | "critical";
@@ -445,6 +446,7 @@ export interface FormProps {
 }
 export interface OverlayProps {
   title: string;
+  /** "danger" for a DELETE or destructive action, "neutral" for every other, typed and ceremony included. */
   tone: "neutral" | "danger";
   role: "form" | "confirm";
   onDismiss(): void;

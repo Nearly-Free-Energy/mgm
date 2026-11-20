@@ -40,12 +40,12 @@ token's organization first, and the tenant app's usage source
 reads no `microgrids` or `edges` row, so the usage source builds the unit's
 microgrid's provider on the service role, after `composeTenantApp` has
 authorized the unit, for the microgrid `fn_tenant_home` named and the device
-rows the tenant's own client returned, and, for the device ids the tenant's
-own client returned as the unit's primary consumption meter links, reads
-the date spans on which other units also hold them as primary (see "The
-tenant app" below). That read returns dates only, cut to the unit's own
-links, never whose; if it ever returns a tenant id or takes ids from
-anywhere else, revisit it. A new
+rows the tenant's own client returned. The shared-use days (see "The
+tenant app" below) are not read there: the tenant's own client asks
+`fn_tenant_shared_meter_days`, which answers only the unit's own tenant and
+returns dates only, never whose. If that read ever moves back to the
+service role, or the function returns a tenant id or takes ids, revisit
+it. A new
 caller that builds a provider on the service role needs the same reasoning,
 and a listing in `service-role-session-check.test.ts`. Adding a second metering
 source or payment provider is a new platform plugin that registers into the
@@ -195,16 +195,20 @@ client right before each one, in place of the metering capability's
 `requirePlugin` re-check, and the tenant-app gate is asked at composition,
 in the same request. Only the unit's primary consumption meter is its use,
 on the home, the month and the day (`USAGE_METER_ROLE` in
-`src/lib/tenant-app/types.ts`). A meter two units hold as primary on the
-same day is shown to each with the label "Shared with another unit, not
-only yours" on those days (D12). For that, the usage source reads other
-units' primary links of the unit's primary meters on the service role;
-that read concerns MGM's own link rows, not the backend, so it runs
-without the metering gate and outside the usage cache, on every view. It
-returns dates only, cut to the unit's own links, for ids the tenant's own
-client returned as the unit's primary links; if it ever returns a tenant id
-or takes ids from anywhere else, revisit it. If it fails, the view answers
-`tenant_app_unavailable` rather than show shared use unlabelled. A read is cached in process memory for 60 s per unit,
+`src/lib/tenant-app/types.ts`). A meter that two units hold as primary on
+the same day, on the same microgrid or not, is shown to each with the label
+"Shared with another unit, not only yours" on those days (D12). For that,
+the usage source asks the database with the tenant's own client:
+`fn_tenant_shared_meter_days`, a `SECURITY DEFINER` function that answers
+only the unit's own tenant while the tenant app is on, reads the unit's
+links itself and counts every other unit that holds the meter as primary,
+as billing bills each. The service role takes no part. That read concerns MGM's own link rows, not
+the backend, so it runs without the metering gate and outside the usage
+cache, on every view. It returns device ids and dates only, cut to the
+unit's own links; a tenant can call it directly, so if it ever returns a
+tenant id or more days than the views need, revisit it. If it fails, the
+view answers `tenant_app_unavailable` rather than show shared use
+unlabelled. A read is cached in process memory for 60 s per unit,
 view and period, and a unit may cause at most six uncached reads a minute
 in each process (`src/lib/tenant-app/usage-throttle.ts`, through a limiter with its own
 store, so keys that need no session cannot evict a unit's count); over the
@@ -298,11 +302,31 @@ the others. The registry is privileged in
 capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
 
+A watcher (`signals` in a contribution) reports what needs someone in one
+organization: a period not closed, a payment held for reconciliation. The
+host runs it only for a person with a staff role in that organization (a
+person whose rows are all tenant rows gets a 403 and no watcher runs), on a
+request of its own, so it reads through the person's own client or a
+capability's reads after its composer. It filters by the organization
+itself, since a super admin's row-level security shows every organization,
+and throws when a read fails, so the host lists it as unchecked rather than
+as having nothing to report. The host refuses a watcher's whole answer when
+any signal breaks its schema, repeats an id, links anywhere but a released
+page, or leads anywhere but a page its own plugin owns, and when it returns
+more than `MAX_SIGNALS_PER_SOURCE` (50, in `src/lib/gui/surface.ts`), so a
+watcher caps itself, most urgent first. It sends each id prefixed with the
+watcher's (`<watcher id>:<id>`). Watchers run on every load of the signals,
+which an interface may poll, so they read the database only: a watcher that
+would need a vendor call needs a cached read first. Each declares examples,
+which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
+own released pages.
+
 What a contribution names is checked in CI by
 `src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
 it boots: each action's route file, method, gate and release, and that the
 route parses its body with the action's own `input` from the plugin's
-`schemas.ts`; each view's examples, declared names and links. It also reads
+`schemas.ts`; each view's examples, declared names and links; each watcher's
+examples' links. It also reads
 every module a contributing plugin's surface module loads, and refuses any
 capability method outside its `LOADER_READS`, so a new contributing plugin
 lists the module that exports its contribution in `SURFACE_MODULES` there,
@@ -321,13 +345,16 @@ the gate's copy on its own views and leaves them out of other plugins', and
 `whilePluginOff: "enabled"`: that one is shown enabled on its own plugin's
 views and prepared, with its `available()` and `prepare` run as usual. Only
 the 409 is passed over: an unreadable gate (503, or a throw) still disables,
-refuses and leaves out everything. `gui-surface.test.ts` allows
+refuses and leaves out everything. The same 409 skips the plugin's
+watchers in the signals, unless a watcher declares `whilePluginOff:
+"checked"`; an unreadable gate lists each as unchecked. `gui-surface.test.ts` allows
 `whilePluginOff` on an action only where its `METHOD /api/route` is a
 `PaymentExemption` in `UNGATED_WRITES` naming a method that
 `capability-gating.test.ts` (`GATING`) says runs while the plugin is off, on
 a Payments or Pesapal action, so the host never offers a write its route
-refuses. It allows `attach.whilePluginOff` only on a Payments or Pesapal
-view, while every Payments method in `LOADER_READS` runs while off. The
+refuses. It allows `attach.whilePluginOff`, and a watcher's `whilePluginOff`, only on
+a Payments or Pesapal view or watcher, while every Payments method in
+`LOADER_READS` runs while off. The
 helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
 in `src/lib/runtime/__tests__/route-rules.ts`, shared with
 `route-surface.test.ts`.

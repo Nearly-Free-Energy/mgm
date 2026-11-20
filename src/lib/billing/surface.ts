@@ -20,7 +20,9 @@ import "server-only";
  * them from readings typed by hand (`billing.bill-from-readings`); and the
  * savings as the `billing.savings` view, shown under the Operations day,
  * with the writes that change what it counts. A page that moves to a view
- * keeps its nav id.
+ * keeps its nav id. The watcher, `billing.period-due`, reports each draft
+ * period whose last day has passed, leading to its close checklist, or to
+ * its review while it has no bills.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves the periods list's
@@ -81,6 +83,9 @@ import {
 import { billFromReadingsAvailable, loadNotBilled, prepareBillFromReadings } from "./surface/not-billed";
 import { NOT_BILLED_EXAMPLES } from "./surface/not-billed-examples";
 import { BILL_FROM_READINGS_ACTION, NOT_BILLED_KEYS, NOT_BILLED_VIEW } from "./surface/not-billed-model";
+import { loadPeriodDue } from "./surface/period-due";
+import { PERIOD_DUE_EXAMPLES } from "./surface/period-due-examples";
+import { PERIOD_DUE_SIGNAL } from "./surface/period-due-model";
 import { loadPeriodHistory } from "./surface/period-history";
 import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
@@ -354,6 +359,11 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
       prepare: prepareClosePeriod,
       available: closePeriodAvailable,
+      // The route's 409 for a digest that no longer matches the totals
+      // (totalsChanged in ./capability.ts): the host prepares the close
+      // again and shows the new totals, with CLOSE_REFUSAL_COPY.totalsChanged
+      // as its note. If the route renames the code, change it here.
+      prepareAgainOn: ["billing_period_totals_changed"],
     },
     // ── The period review's actions ──
     // All human-only (no assistant proposes a billing write yet) and money:
@@ -427,8 +437,10 @@ export const BILLING_SURFACE: Contribution = {
     // the readings choice, and available() and prepare check the bill, so it
     // is sound on any view of a bill. A ceremony, so the host sends the
     // acknowledgement a paid bill's prepare asks for and the route requires
-    // (only typed and ceremony actions are sent a confirmation, invoke.ts);
-    // the host therefore shows it in the danger tone on every bill.
+    // (only typed and ceremony actions are sent a confirmation, invoke.ts).
+    // Its tone is neutral, as it is neither a DELETE nor destructive; if
+    // actionTone (merge-actions.ts) or this action's risk or method changes,
+    // revisit.
     {
       ...REGENERATE_BILL_ACTION,
       target: "lineItem",
@@ -523,4 +535,5 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
     },
   ],
+  signals: [{ id: PERIOD_DUE_SIGNAL, load: loadPeriodDue, examples: PERIOD_DUE_EXAMPLES }],
 };

@@ -6,10 +6,15 @@ import "server-only";
  * the pages still served outside the GUI contract (`legacy: true`), with the
  * labels the current chrome uses. A page that moves to a view keeps its nav
  * id, so the Operations entry is still `metering.operations`.
- * `metering.live` is reserved for a later live view of a microgrid.
+ * `metering.live` is reserved for a later live view of a microgrid. Its
+ * watcher, `metering.connection`, reports each microgrid whose last OpenEMS
+ * connection check failed, leading to its OpenEMS Backend page.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { METERING_PLUGIN_NAME } from "@/lib/plugins/bundled";
+import { loadConnectionSignals } from "./surface/connection-signals";
+import { CONNECTION_EXAMPLES } from "./surface/connection-signals-examples";
+import { CONNECTION_SIGNAL } from "./surface/connection-signals-model";
 import { SITE_DAY_EXAMPLES } from "./surface/examples";
 import { loadSiteDay } from "./surface/site-day";
 import { SiteDayExt } from "./surface/site-day-ext";
@@ -66,4 +71,5 @@ export const METERING_SURFACE: Contribution = {
       load: loadSiteDay,
     },
   ],
+  signals: [{ id: CONNECTION_SIGNAL, load: loadConnectionSignals, examples: CONNECTION_EXAMPLES }],
 };

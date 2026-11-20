@@ -13,7 +13,8 @@ import "server-only";
  * ids carry its alias and are unique within the contribution; confirmation
  * levels; path segments against params and bindings; referenced entity kinds;
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
- * describe; examples against the model schemas and the declared keys; no
+ * describe; examples against the model schemas and the declared keys, and a
+ * watcher's examples against the signal schema; no
  * assistant reading of views reached from configure or system navigation;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
@@ -38,6 +39,7 @@ import {
   idSchema,
   modelSchema,
   navGroupSchema,
+  signalOutSchema,
 } from "./model-schema";
 
 /** What the parse reads from the catalog: the plugins, their aliases and routes. */
@@ -316,6 +318,14 @@ const actionSchema = z
     // CI by gui-surface.test.ts, which can read UNGATED_WRITES; contribute()
     // reads no test data.
     whilePluginOff: z.literal("enabled").optional(),
+    // That each code is one the route answers is checked in CI by
+    // gui-surface.test.ts, which reads the source; contribute() reads none.
+    prepareAgainOn: z
+      .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/, "Expected a lower-case code"))
+      .min(1)
+      .max(8)
+      .readonly()
+      .optional(),
     risk: z.enum(["write", "money", "external", "destructive"]),
     confirm: confirmSchema,
     humanOnly: z.boolean(),
@@ -330,12 +340,49 @@ const actionSchema = z
     const needsPrepare = prepared ? `a ${a.confirm} action` : a.risk === "external" ? "an external action" : null;
     if (needsPrepare && !a.prepare) add(ctx, ["prepare"], `${needsPrepare} needs prepare`);
     if (a.risk === "external" && a.confirm === "none") add(ctx, ["confirm"], "an external action needs at least confirm");
+    if (a.prepareAgainOn) {
+      if (!a.prepare) add(ctx, ["prepareAgainOn"], "an action that prepares again needs prepare");
+      if (a.confirm === "none") add(ctx, ["prepareAgainOn"], "an action that prepares again needs a confirmation step");
+      if (new Set(a.prepareAgainOn).size !== a.prepareAgainOn.length) add(ctx, ["prepareAgainOn"], "a code is listed twice");
+    }
     checkSegments(ctx, a.path, Object.keys(a.bind.path ?? {}), ["bind", "path"], "bind.path");
     try {
       z.toJSONSchema(a.input, { io: "input" });
     } catch (error) {
       add(ctx, ["input"], `the input cannot be described as JSON Schema: ${(error as Error).message}`);
     }
+  });
+
+// ── Signals ─────────────────────────────────────────────────────────────────
+
+/**
+ * A watcher. Its examples are what its load() would return: each strictly a
+ * SignalOut, with ids unique among them, as the host requires of a watcher's
+ * answer (watch in ./signals.ts). Whether each href is a released page of
+ * the plugin is checked in CI (gui-surface.test.ts), which reads the
+ * released routes.
+ */
+const signalDefSchema = z
+  .strictObject({
+    id: idSchema,
+    budgetMs: z.int().min(1).max(10_000).optional(),
+    load: fn,
+    examples: z.array(z.unknown()).min(1, "a watcher needs at least one example").readonly(),
+    // Which watchers may declare it is checked in CI (gui-surface.test.ts),
+    // which can read the capability's gating.
+    whilePluginOff: z.literal("checked").optional(),
+  })
+  .superRefine((w, ctx) => {
+    const seen = new Set<string>();
+    w.examples.forEach((example, i) => {
+      const parsed = signalOutSchema.safeParse(example);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) add(ctx, ["examples", i, ...issue.path], issue.message);
+        return;
+      }
+      if (seen.has(parsed.data.id)) add(ctx, ["examples", i, "id"], `"${parsed.data.id}" is used twice`);
+      seen.add(parsed.data.id);
+    });
   });
 
 // ── The contribution ────────────────────────────────────────────────────────
@@ -346,9 +393,7 @@ export const contributionSchema = z.strictObject({
   nav: z.array(navSchema).optional(),
   views: z.array(viewSchema).optional(),
   actions: z.array(actionSchema).optional(),
-  signals: z
-    .array(z.strictObject({ id: idSchema, budgetMs: z.int().min(1).max(10_000).optional(), load: fn }))
-    .optional(),
+  signals: z.array(signalDefSchema).optional(),
   status: z.array(z.strictObject({ id: idSchema, load: fn })).optional(),
   search: z.array(z.strictObject({ prefix: z.enum(["@", "#"]), entity: entityKindSchema, find: fn })).optional(),
   entities: z.array(z.strictObject({ kind: idSchema, organizationOf: fn })).optional(),

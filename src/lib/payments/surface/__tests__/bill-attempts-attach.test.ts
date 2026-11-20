@@ -115,7 +115,10 @@ describe("payments.bill-attempts under the period review", () => {
       ["payments.record-adjustment", true, undefined],
       ["payments.accept-receipts", true, undefined],
     ]);
-    expect(row.actions.find((a) => a.action === "payments.record-adjustment")).toMatchObject({ tone: "danger", prefill: { action: "record_external" } });
+    // Typed, but neither a DELETE nor destructive, so no danger tone (actionTone in merge-actions.ts).
+    const record = row.actions.find((a) => a.action === "payments.record-adjustment");
+    expect(record).toMatchObject({ prefill: { action: "record_external" } });
+    expect(record?.tone).toBeUndefined();
   });
 
   it("while Payments is off, is still the review's Payments tab, and loads with the gate's notice and its actions enabled", async () => {

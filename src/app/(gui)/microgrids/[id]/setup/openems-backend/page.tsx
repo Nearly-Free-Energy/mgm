@@ -5,7 +5,7 @@ import { isMeteringEnabled } from "@/lib/plugins/state";
 import { HierarchyNav } from "@/components/ui/hierarchy-nav";
 import { getHierarchyLevels } from "@/lib/hierarchy";
 import { getEmsSecretForMicrogrid } from "@/lib/openems/config";
-import { deriveOpenemsBackendHealth } from "./health";
+import { deriveOpenemsBackendHealth } from "@/lib/metering/backend-health";
 import { OpenemsBackendShell } from "./openems-backend-shell";
 import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 

@@ -36,7 +36,7 @@ const TITLES: Record<string, string> = {
   [CREATE_PERIOD_ACTION.id]: CREATE_PERIOD_ACTION.title,
   [DELETE_PERIOD_ACTION.id]: DELETE_PERIOD_ACTION.title,
 };
-/** The host marks typed and DELETE actions as dangerous (src/lib/gui/host/shared/merge-actions.ts). */
+/** The host marks DELETE and destructive actions as dangerous (actionTone in src/lib/gui/host/shared/merge-actions.ts). */
 const DANGER = new Set<string>([DELETE_PERIOD_ACTION.id]);
 
 /** The models as the loader returns them, before the host fills its fields. */
