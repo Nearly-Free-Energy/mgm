@@ -172,7 +172,10 @@ beforeAll(async () => {
           ems_type: "direct_url",
           ems_backend_url: "https://example.invalid/rest",
           ems_last_discover_status: "unreachable",
-          ems_last_discover_at: new Date().toISOString(),
+          // An hour back, so the attempts' updated_at (Postgres now(), a moment later) is the
+          // newer of the two undated warnings whichever clock runs ahead: the host orders those
+          // by `at`, and a Docker VM's clock can drift behind the test process's.
+          ems_last_discover_at: new Date(Date.now() - 60 * 60_000).toISOString(),
           ems_last_discover_error: "canary-vendor-error-text",
         },
         { id: OTHER_MICROGRID, community_id: OTHER_COMMUNITY, name: "Other signals site", currency: "UGX", timezone: "Africa/Kampala" },
