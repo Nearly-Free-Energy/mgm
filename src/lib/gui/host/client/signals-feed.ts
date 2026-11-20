@@ -33,7 +33,7 @@
  *   fetched and no answer is applied.
  * Nothing here throws or blocks rendering.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import type { Signals } from "../../contract";
 import { clearAppBadge, isSignedOut, setAppBadge } from "./app-badge";
 
@@ -137,7 +137,14 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     // did not answer; the badge stays as it was.
     const nothingChecked = (signals: Signals) => signals.checked.length === 0 && signals.unchecked.length > 0;
     const show = (signals: Signals | null) => {
-      setHeld({ org: organization, signals });
+      // A transition, so React hydrates the page first. The page's Suspense
+      // boundary (src/app/(gui)/loading.tsx) can still be dehydrated when an
+      // answer lands, even after the load event; a context change above it
+      // schedules it, and as an urgent update React would render it on the
+      // client and leave the streamed copy behind as a hidden duplicate
+      // (React error 421; the 360 px smoke found it, and a feed that never
+      // fetched did not).
+      startTransition(() => setHeld({ org: organization, signals }));
       if (!signals) clearAppBadge();
       else if (!nothingChecked(signals)) setAppBadge(signals.count);
     };
