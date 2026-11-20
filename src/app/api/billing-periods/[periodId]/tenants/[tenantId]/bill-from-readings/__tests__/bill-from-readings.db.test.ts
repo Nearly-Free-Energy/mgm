@@ -13,7 +13,10 @@
  * billing turned off, another organization's manager, a tenant-only
  * account, no session and readings that go backwards are all refused, with
  * nothing written. A bill that appears after the route's own check is
- * found by the engine's, and left as it is.
+ * found by the engine's, and left as it is; one that appears after the
+ * engine's read is found by the insert (fn_record_first_line_item_with_audit),
+ * and left as it is too; and a period that closes after the engine's last
+ * read of its status is refused at the insert.
  *
  * Self-fixturing. Requires a running local Supabase (same harness as
  * rls.test.ts).
@@ -35,6 +38,8 @@ import {
 let caller: TestUser | "anon" | null = null;
 /** Runs once, when the engine pins the period's tariff: after the route's own checks, before the engine reads the period's bills. */
 let beforePin: (() => Promise<void>) | null = null;
+/** Runs once, just before the engine's insert of the first bill: after every read the engine makes. */
+let beforeFirstBill: (() => Promise<void>) | null = null;
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => {
     if (caller === "anon") return createClient(LOCAL_SUPABASE_URL, testAnonKey() ?? "", { auth: { persistSession: false, autoRefreshToken: false } });
@@ -47,6 +52,11 @@ vi.mock("@/lib/supabase/server", () => ({
             if (name === "fn_pin_billing_period_rate_schedule" && beforePin) {
               const hook = beforePin;
               beforePin = null;
+              await hook();
+            }
+            if (name === "fn_record_first_line_item_with_audit" && beforeFirstBill) {
+              const hook = beforeFirstBill;
+              beforeFirstBill = null;
               await hook();
             }
             return target.rpc(name, args);
@@ -81,6 +91,8 @@ const DRAFT = "e7c10000-0000-4000-8003-000000000001";
 const CLOSED = "e7c10000-0000-4000-8003-000000000002";
 /** November: for the bill that appears after the route's check. */
 const RACE = "e7c10000-0000-4000-8003-000000000003";
+/** December: closed just before the engine's insert. */
+const RACE_CLOSE = "e7c10000-0000-4000-8003-000000000004";
 const tenant = (n: number) => `e7c10000-0000-4000-8004-${String(n).padStart(12, "0")}`;
 const device = (n: number) => `e7c10000-0000-4000-8007-${String(n).padStart(12, "0")}`;
 const EMAIL = "bill-readings-db-manager@test.local";
@@ -246,6 +258,7 @@ beforeAll(async () => {
         { id: CLOSED, microgrid_id: MICROGRID, start_date: "2026-09-01", end_date: "2026-09-30", timezone: "Africa/Kampala", status: "closed", closed_at: closedAt, rate_schedule_id: SCHEDULE },
         { id: DRAFT, microgrid_id: MICROGRID, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: RACE, microgrid_id: MICROGRID, start_date: "2026-11-01", end_date: "2026-11-30", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: RACE_CLOSE, microgrid_id: MICROGRID, start_date: "2026-12-01", end_date: "2026-12-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
       ],
     ],
     ["billing_line_items", billRow(DRAFT, 3)],
@@ -264,6 +277,7 @@ afterAll(async () => {
   if (shouldSkip()) return;
   caller = null;
   beforePin = null;
+  beforeFirstBill = null;
   await cleanup();
 }, 120_000);
 
@@ -429,5 +443,38 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/tenants/[ten
     expect(await res.json()).toEqual({ error: BILL_FROM_READINGS_COPY.hasBill, reason: "has_bill" });
     expect((await bills(RACE)).get(tenant(2))).toMatchObject({ reading_source: "edge", usage_kwh: 30, total_amount: 15000, manual_reason: null });
     expect(await auditRows(RACE)).toEqual([]);
+  });
+
+  it("leaves a bill that appears after the engine's read as it is: the insert finds it, and writes nothing", async () => {
+    caller = manager;
+    beforeFirstBill = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc.from("billing_line_items").insert(billRow(RACE, 1));
+      if (error) throw new Error(`[bill-from-readings.db] billing_line_items: ${error.message}`);
+    };
+    const res = await submit(RACE, tenant(1), { start_kwh: 1, end_kwh: 2, reason: "late" });
+    expect(beforeFirstBill).toBeNull();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: BILL_FROM_READINGS_COPY.hasBill, reason: "has_bill" });
+    expect((await bills(RACE)).get(tenant(1))).toMatchObject({ reading_source: "edge", usage_kwh: 30, total_amount: 15000, manual_reason: null });
+    expect(await auditRows(RACE)).toEqual([]);
+  });
+
+  it("refuses at the insert a period that closed after the engine's last read of its status, and writes nothing", async () => {
+    caller = manager;
+    beforeFirstBill = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc
+        .from("billing_periods")
+        .update({ status: "closed", closed_at: new Date().toISOString() })
+        .eq("id", RACE_CLOSE);
+      if (error) throw new Error(`[bill-from-readings.db] billing_periods: ${error.message}`);
+    };
+    const res = await submit(RACE_CLOSE, tenant(1), { start_kwh: 1, end_kwh: 2 });
+    expect(beforeFirstBill).toBeNull();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: BILL_FROM_READINGS_COPY.closed, reason: "period_closed" });
+    expect((await bills(RACE_CLOSE)).size).toBe(0);
+    expect(await auditRows(RACE_CLOSE)).toEqual([]);
   });
 });

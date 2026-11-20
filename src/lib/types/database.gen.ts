@@ -1859,6 +1859,10 @@ export type Database = {
         }
         Returns: string
       }
+      fn_delete_draft_billing_period: {
+        Args: { _period_id: string }
+        Returns: string
+      }
       fn_edge_ids_all_nonempty: { Args: { ids: string[] }; Returns: boolean }
       fn_ems_decrypt_secret: { Args: { p_ciphertext: string }; Returns: string }
       fn_ems_encrypt_secret: { Args: { p_plaintext: string }; Returns: string }
@@ -2098,6 +2102,59 @@ export type Database = {
       fn_pin_billing_period_rate_schedule: {
         Args: { _period_id: string }
         Returns: string
+      }
+      fn_record_first_line_item_with_audit: {
+        Args: {
+          _actor_kind?: string
+          _actor_ref?: string
+          _actor_user_id: string
+          _audit_details: Json
+          _billing_period_id: string
+          _device_id: string
+          _end_kwh: number
+          _entered_by_user_id: string
+          _manual_reason: string
+          _rate_schedule_id: string
+          _reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
+          _start_kwh: number
+          _tenant_id: string
+          _tier_breakdown: Json
+          _total_amount: number
+          _usage_kwh: number
+        }
+        Returns: {
+          billing_period_id: string
+          created_at: string
+          device_id: string | null
+          end_kwh: number | null
+          entered_at: string | null
+          entered_by_user_id: string | null
+          id: string
+          invoice_number: string | null
+          manual_reason: string | null
+          paid_at: string | null
+          paid_by_user_id: string | null
+          payment_failed_at: string | null
+          payment_notes: string | null
+          payment_refunded_at: string | null
+          payment_status: Database["public"]["Enums"]["billing_line_item_payment_status"]
+          pesapal_order_id: string | null
+          pesapal_redirect_url: string | null
+          reading_source: Database["public"]["Enums"]["billing_line_item_reading_source"]
+          short_slug: string | null
+          start_kwh: number | null
+          tenant_id: string
+          tier_breakdown: Json
+          total_amount: number
+          updated_at: string
+          usage_kwh: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "billing_line_items"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       fn_record_line_item_with_audit: {
         Args: {

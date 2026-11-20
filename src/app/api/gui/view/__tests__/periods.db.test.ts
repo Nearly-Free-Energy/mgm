@@ -204,10 +204,75 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
       { params: Promise.resolve({ periodId: NOVEMBER }) },
     );
     expect([403, 404]).toContain(res.status);
-    const { data: direct } = await tenantUser.client.from("billing_periods").delete().eq("id", NOVEMBER).select("id");
-    expect(direct ?? []).toEqual([]);
+    // Signed-in callers hold no DELETE on billing_periods (migration
+    // 20261120130000), so a direct delete is refused outright.
+    const { data: direct, error: directError } = await tenantUser.client
+      .from("billing_periods")
+      .delete()
+      .eq("id", NOVEMBER)
+      .select("id");
+    expect(directError?.code).toBe("42501");
+    expect(direct).toBeNull();
+    const { data: viaFunction } = await tenantUser.client.rpc("fn_delete_draft_billing_period", { _period_id: NOVEMBER });
+    expect(viaFunction).toBeNull();
     const svc = await serviceClient();
     const { data } = await svc.from("billing_periods").select("id").eq("id", NOVEMBER);
     expect(data).toEqual([{ id: NOVEMBER }]);
+  });
+
+  // The route deletes through fn_delete_draft_billing_period with the
+  // person's own client, after composeBilling's organization check and the
+  // plugin gate.
+  describe("deleting a draft through the route", () => {
+    const DECEMBER = "e7700000-0000-4000-8003-000000000003";
+    const deleteDecember = () =>
+      DELETE(
+        new NextRequest(`http://localhost/api/billing-periods/${DECEMBER}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirmation: { acknowledged: [], typed: "December 2026" } }),
+        }),
+        { params: Promise.resolve({ periodId: DECEMBER }) },
+      );
+    const decemberExists = async () => {
+      const svc = await serviceClient();
+      const { data } = await svc.from("billing_periods").select("id").eq("id", DECEMBER);
+      return (data ?? []).length === 1;
+    };
+
+    beforeAll(async () => {
+      if (shouldSkip()) return;
+      const svc = await serviceClient();
+      await svc.from("billing_periods").delete().eq("id", DECEMBER);
+      const { error } = await svc.from("billing_periods").insert({
+        id: DECEMBER,
+        microgrid_id: MICROGRID,
+        start_date: "2026-12-01",
+        end_date: "2026-12-31",
+        timezone: "Africa/Kampala",
+      });
+      if (error) throw new Error(`[periods.db] billing_periods: ${error.message}`);
+    });
+
+    it("is refused while billing is off, and the period stays", async () => {
+      caller = manager;
+      await setBilling(false);
+      try {
+        const res = await deleteDecember();
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({ code: "billing_disabled" });
+        expect(await decemberExists()).toBe(true);
+      } finally {
+        await setBilling(true);
+      }
+    });
+
+    it("deletes the org manager's draft with its name typed", async () => {
+      caller = manager;
+      const res = await deleteDecember();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ deleted: DECEMBER, href: `/microgrids/${MICROGRID}/billing` });
+      expect(await decemberExists()).toBe(false);
+    });
   });
 });

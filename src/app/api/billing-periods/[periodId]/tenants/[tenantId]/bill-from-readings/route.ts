@@ -24,20 +24,14 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * overwrote the bill and accepted a closed period.
  *
  * The engine reads the period's status again just before the insert and
- * refuses, writing nothing, if it closed meanwhile. Known gaps, both in the
- * bill's insert, which goes through fn_record_line_item_with_audit as on
- * POST /api/billing/generate, with no check at the write that the tenant
- * still has no bill: the insert checks no period status, so a close
- * committing between that second read and the insert is not caught; and it
- * upserts, so a bill another write inserts for that tenant between the
- * engine's read of the period's bills and this insert (a run from meter
- * data, the legacy panel, or a second submission of this action) is
- * overwritten with the readings entered and logged as regenerated.
- * Submissions one after another are not affected: the second is refused.
- * The parity note (bill-from-readings in src/lib/billing/parity.ts) lists
- * both, to be closed by an insert-only function that checks the period
- * under its lock before billing.period-review replaces the legacy page;
- * when it lands, drop this paragraph.
+ * refuses, writing nothing, if it closed meanwhile. The insert goes through
+ * fn_record_first_line_item_with_audit (migration 20261120130100), which
+ * writes only while the period is a draft and the tenant has no bill, under
+ * the period's lock: a close committing after that read is refused
+ * (period_closed), and so is a bill another write inserted for that tenant
+ * after the engine read the period's bills (a run from meter data, the
+ * legacy panel, or a second submission of this action), which is left as
+ * it is (has_bill). Nothing is written either way.
  *
  * Body (BillFromReadingsBody): { start_kwh, end_kwh, reason? }, kWh of 0 or
  * more, end_kwh not below start_kwh; reason up to 500 characters, trimmed.
@@ -55,8 +49,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         { error, reason: "tenant_not_found" } (tenant hidden by RLS)
  *   409 → { error, reason: "period_closed" } (nothing written);
  *         { error, reason: "tenant_not_on_microgrid" };
- *         { error, reason: "has_bill" } (the tenant has a bill, found here
- *         or by the engine's own read; nothing written);
+ *         { error, reason: "has_bill" } (the tenant has a bill, found here,
+ *         by the engine's own read or at the insert; nothing written);
  *         { error, reason: "no_tariff" } (no rate schedule to pin);
  *         { error, reason: "tariff_changed" } (nothing written)
  *   500 → { error, reason: "unknown_error" }
@@ -214,6 +208,10 @@ export async function POST(
       switch (mine.code) {
         case "bill_exists":
           return refuse(409, BILL_FROM_READINGS_COPY.hasBill, "has_bill");
+        // The period closed after the engine's last read of its status, and
+        // the insert found it closed under the period's lock.
+        case "period_closed":
+          return refuse(409, BILL_FROM_READINGS_COPY.closed, "period_closed");
         case "unknown_tenant":
           return refuse(409, BILL_FROM_READINGS_COPY.otherMicrogrid, "tenant_not_on_microgrid");
         case "tariff_changed":
