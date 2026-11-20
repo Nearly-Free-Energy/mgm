@@ -139,11 +139,19 @@ const instant = (iso: string | undefined, otherwise: number) => {
   const t = iso === undefined ? NaN : Date.parse(iso);
   return Number.isNaN(t) ? otherwise : t;
 };
-/** Most severe first; then the earliest due, undated last; then the newest. */
+/**
+ * Most severe first; within a severity, alarms before every other kind; then
+ * the earliest due, undated last; then the newest. Alarms (a site that cannot
+ * be reached) carry no due date, so without their own rank enough dated
+ * signals of the same severity would push every one of them out of `top`,
+ * which is all Today and the tray list.
+ */
 function order(a: Signal, b: Signal): number {
   const cmp = (x: number, y: number) => (x < y ? -1 : x > y ? 1 : 0);
+  const alarmFirst = (s: Signal) => (s.kind === "alarm" ? 0 : 1);
   return (
     SEVERITY[a.severity] - SEVERITY[b.severity] ||
+    alarmFirst(a) - alarmFirst(b) ||
     cmp(instant(a.due, Infinity), instant(b.due, Infinity)) ||
     cmp(instant(b.at, -Infinity), instant(a.at, -Infinity))
   );

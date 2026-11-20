@@ -457,7 +457,7 @@ describe("KitView: what every view shares", () => {
       fetch: vi.fn(async () => Response.json(tile)),
     });
     show({ attached: tiles });
-    const region = screen.getByRole("region", { name: "Tiles" });
+    const region = screen.getByRole("region", { name: "At a glance" });
     expect(within(region).getByRole("status", { name: "Loading Current billing periods" })).toBeTruthy();
     expect(await within(region).findByRole("heading", { level: 2, name: "Current billing periods" })).toBeTruthy();
     expect(within(region).getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/tenants/h1");
@@ -475,7 +475,7 @@ describe("KitView: what every view shares", () => {
       fetch: vi.fn(async () => Response.json({ code: "gui_view_refused", error: "Could not load the billing periods right now." }, { status: 503 })),
     });
     show({ title: "Today", attached: [{ view: "billing.current-periods", title: "Current billing periods", href: "/billing", hint: "tile" }] });
-    const region = screen.getByRole("region", { name: "Tiles" });
+    const region = screen.getByRole("region", { name: "At a glance" });
     expect(await within(region).findByText("Could not load the billing periods right now.")).toBeTruthy();
     expect(within(region).getByRole("heading", { level: 2, name: "Current billing periods" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
@@ -496,7 +496,7 @@ describe("KitView: what every view shares", () => {
     const answers = [broken(), tileModel()];
     runtime = recordingRuntime({ act, fetch: vi.fn(async () => Response.json(answers.shift())) });
     const { rerender } = render(page());
-    const region = screen.getByRole("region", { name: "Tiles" });
+    const region = screen.getByRole("region", { name: "At a glance" });
     expect(await within(region).findByText("This tile could not be loaded.")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
     // The same href, a new page answer: the tile loads and draws again, not stuck on its failure.
@@ -510,7 +510,7 @@ describe("KitView: what every view shares", () => {
   it("loads a tile again only when the page's model says something new, not when it is copied", async () => {
     runtime = recordingRuntime({ act, fetch: vi.fn(async () => Response.json(tileModel())) });
     const { rerender } = render(page());
-    expect(await within(screen.getByRole("region", { name: "Tiles" })).findByRole("link", { name: "Aisha" })).toBeTruthy();
+    expect(await within(screen.getByRole("region", { name: "At a glance" })).findByRole("link", { name: "Aisha" })).toBeTruthy();
     // A new object with the same content, as a renderer that copies the model hands over.
     rerender(page());
     rerender(page());
@@ -525,7 +525,7 @@ describe("KitView: what every view shares", () => {
     const unreadable = Object.defineProperty({}, "status", { get: () => { throw new Error("unreadable"); } }) as Response;
     runtime = recordingRuntime({ act, fetch: vi.fn(async () => unreadable) });
     render(page());
-    const region = screen.getByRole("region", { name: "Tiles" });
+    const region = screen.getByRole("region", { name: "At a glance" });
     expect(await within(region).findByText("This tile could not be loaded.")).toBeTruthy();
     expect(within(region).getByRole("link", { name: "Open Current billing periods" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
@@ -535,7 +535,7 @@ describe("KitView: what every view shares", () => {
     const inner = model({ title: "Inner", attached: [{ view: "billing.current-periods", title: "Tile", href: "/billing", hint: "tile" }] });
     show({ kind: "feed", body: { entries: [{ id: "e1", at: "2026-11-10T11:00:00.000Z", author: { kind: "system", name: "MGM" }, text: [], embed: { type: "view", href: "/x", model: inner } }] } } as Partial<ViewModel>);
     await flush(async () => {});
-    expect(screen.queryByRole("region", { name: "Tiles" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "At a glance" })).toBeNull();
     expect(runtime.fetch).not.toHaveBeenCalled();
   });
 

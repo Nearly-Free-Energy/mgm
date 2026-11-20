@@ -46,7 +46,7 @@ describe("Gridtop: tiles on Today", () => {
     // The Operations tile has no answer, so the harness answers it 404.
     const { log } = await renderModel(GridtopGui, TODAY, undefined, { [PERIODS]: CURRENT_PERIODS });
     expect(screen.getByText("Nothing needs you right now.")).toBeTruthy();
-    const region = screen.getByRole("region", { name: "Tiles" });
+    const region = screen.getByRole("region", { name: "At a glance" });
     expect(await within(region).findByRole("link", { name: "Kasana East" })).toBeTruthy();
     await waitFor(() => expect(within(region).queryAllByRole("status", { busy: true })).toHaveLength(0));
     expect(within(region).queryByRole("link", { name: "Kasana East" })).toBeTruthy();
