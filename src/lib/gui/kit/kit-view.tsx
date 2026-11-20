@@ -9,17 +9,19 @@
  * never as a row (rule 4); at zero rows the empty state owns the create
  * action and the filters stay hidden unless another filter has rows (rule 6).
  * Priority-3 columns hide under 600 px but stay in the DOM (decision 16 on #115).
+ * Views attached as tiles are loaded and drawn below the page's body (Tiles);
+ * the others are listed as links.
  */
-import { Fragment, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { LOCAL_DATE_TIME_OPTS } from "@/components/format/local-date-time";
 import { LocalDate } from "@/components/format/local-date";
 import { Chip, type ChipProps } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
-import type { Column, ComposeOf, ActionRef, EmbedOf, EmbeddedView, Inline, LiveState, ModelOf, Rich, ViewModel, ViewProps } from "../contract";
+import type { ActionResult, Column, ComposeOf, ActionRef, EmbedOf, EmbeddedView, Inline, LiveState, ModelOf, Rich, ViewModel, ViewProps } from "../contract";
 import { isHref } from "../host/shared/href";
 import { useKitState } from "../host/client/kit-provider";
-import { act } from "../host/client/kit-runtime";
+import { act, loadView } from "../host/client/kit-runtime";
 import { useLive } from "../host/client/live";
 import { Link, usePathname } from "../host/client/navigation";
 import { RawViewAt } from "./raw-view";
@@ -51,12 +53,16 @@ function KitViewAt({ model, depth, headerInShell }: { model: ViewModel; depth: n
   if (body === null) return <RawViewAt model={m} depth={depth} />;
   const hide = m.kind === "collection" && m.body.rows.length === 0 ? m.body.empty.action?.action : undefined;
   const inShell = depth === 0 && headerInShell === true;
+  // Tiles are loaded and drawn below the body; the host lists none on a view
+  // loaded inside another, so a tile never loads tiles of its own.
+  const tiles = depth === 0 ? m.attached.filter((a) => a.hint === "tile") : [];
   // The shell draws views attached as tabs among its own tabs.
-  const attached = inShell ? m.attached.filter((a) => a.hint !== "tab") : m.attached;
+  const attached = m.attached.filter((a) => !(inShell && a.hint === "tab") && !tiles.includes(a));
   return (
     <article className="flex flex-col gap-4" data-gui-view={m.view} data-gui-kind={m.kind}>
       <ViewHeader model={m} depth={depth} hide={hide} inShell={inShell} />
       {body}
+      {tiles.length > 0 && <Tiles tiles={tiles} page={model} />}
       {attached.length > 0 && (
         <nav aria-label="Related views">
           <ul className="flex flex-wrap gap-3 text-dense">
@@ -69,6 +75,85 @@ function KitViewAt({ model, depth, headerInShell }: { model: ViewModel; depth: n
         </nav>
       )}
     </article>
+  );
+}
+
+type Attached = ViewModel["attached"][number];
+
+/** Shows `fallback` once anything inside throws while rendering. */
+class TileBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+const TILE_NOT_LOADED = "This tile could not be loaded.";
+
+/**
+ * The views attached as tiles (Today's, org.today), each loaded with
+ * loadView after the first paint and drawn one level deep in a card of its
+ * own, in the order the host lists them. A tile that cannot be loaded or
+ * drawn shows why in its place, so the page and the other tiles stay. Each
+ * loads again whenever the page's model is a new one (after a refresh or an
+ * action), as Gridtop's sections do (src/gui/gridtop/shell/section-list.tsx).
+ */
+function Tiles({ tiles, page }: { tiles: Attached[]; page: ViewModel }) {
+  return (
+    <section aria-label="Tiles" className="grid grid-cols-1 gap-4 min-[600px]:grid-cols-2">
+      {tiles.map((tile) => (
+        <Tile key={`${tile.view} ${tile.href}`} entry={tile} page={page} />
+      ))}
+    </section>
+  );
+}
+
+function Tile({ entry, page }: { entry: Attached; page: ViewModel }) {
+  const [loaded, setLoaded] = useState<{ href: string; out: ViewModel | ActionResult } | null>(null);
+  useEffect(() => {
+    let current = true;
+    const href = entry.href;
+    loadView(href).then(
+      (out) => current && setLoaded({ href, out }),
+      () => current && setLoaded({ href, out: { type: "result", ok: false, status: 0, code: "network", message: TILE_NOT_LOADED } }),
+    );
+    return () => {
+      current = false;
+    };
+    // `page` is read only as a signal: a new page model loads the tile again.
+  }, [entry.href, page]);
+
+  const note = (text: string) => (
+    <div className="flex flex-col gap-2">
+      <h2 className="text-title font-semibold text-foreground">{entry.title}</h2>
+      <p role="status" className="text-dense text-muted-foreground">
+        {text}
+      </p>
+    </div>
+  );
+  let body: ReactNode;
+  if (loaded === null) {
+    body = <div role="status" aria-busy="true" aria-label={`Loading ${entry.title}`} className="h-32 animate-pulse rounded-md bg-muted" />;
+  } else if (loaded.out.type !== "view") {
+    body = note(loaded.out.ok ? TILE_NOT_LOADED : loaded.out.message);
+  } else {
+    body = (
+      // Keyed by href, so a tile that failed to draw is tried again for the next one.
+      <TileBoundary key={loaded.href} fallback={note(TILE_NOT_LOADED)}>
+        <KitViewAt model={loaded.out} depth={1} />
+      </TileBoundary>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4" data-gui-tile={entry.view}>
+      {body}
+      <Link href={entry.href} className="inline-flex items-center self-start text-dense text-primary hover:underline">
+        Open {entry.title}
+      </Link>
+    </div>
   );
 }
 

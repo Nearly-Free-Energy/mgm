@@ -446,6 +446,49 @@ describe("KitView: what every view shares", () => {
     expect(within(screen.getByRole("navigation", { name: "Related views" })).getByRole("link", { name: "Savings" })).toBeTruthy();
   });
 
+  it("loads each view attached as a tile and draws it one level down, with a link to its page", async () => {
+    const tiles: ViewModel["attached"] = [
+      { view: "billing.current-periods", title: "Current billing periods", href: "/billing?org=o1", hint: "tile" },
+      { view: "metering.devices", title: "Devices", href: "/microgrids/m/devices", hint: "section" },
+    ];
+    const tile = model({ view: "billing.current-periods", title: "Current billing periods", ...collection({}) });
+    runtime = recordingRuntime({
+      act,
+      fetch: vi.fn(async () => Response.json(tile)),
+    });
+    show({ attached: tiles });
+    const region = screen.getByRole("region", { name: "Tiles" });
+    expect(within(region).getByRole("status", { name: "Loading Current billing periods" })).toBeTruthy();
+    expect(await within(region).findByRole("heading", { level: 2, name: "Current billing periods" })).toBeTruthy();
+    expect(within(region).getByRole("link", { name: "Aisha" }).getAttribute("href")).toBe("/tenants/h1");
+    expect(within(region).getByRole("link", { name: "Open Current billing periods" }).getAttribute("href")).toBe("/billing?org=o1");
+    expect(vi.mocked(runtime.fetch).mock.calls.map(([url]) => url)).toEqual([`/api/gui/view?href=${encodeURIComponent("/billing?org=o1")}`]);
+    // Only the section is listed as a link; the tile is not repeated there.
+    const related = screen.getByRole("navigation", { name: "Related views" });
+    expect(within(related).queryByRole("link", { name: "Current billing periods" })).toBeNull();
+    expect(within(related).getByRole("link", { name: "Devices" })).toBeTruthy();
+  });
+
+  it("shows why a tile could not be loaded in its place, and keeps the page", async () => {
+    runtime = recordingRuntime({
+      act,
+      fetch: vi.fn(async () => Response.json({ code: "gui_view_refused", error: "Could not load the billing periods right now." }, { status: 503 })),
+    });
+    show({ title: "Today", attached: [{ view: "billing.current-periods", title: "Current billing periods", href: "/billing", hint: "tile" }] });
+    const region = screen.getByRole("region", { name: "Tiles" });
+    expect(await within(region).findByText("Could not load the billing periods right now.")).toBeTruthy();
+    expect(within(region).getByRole("heading", { level: 2, name: "Current billing periods" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Today" })).toBeTruthy();
+  });
+
+  it("loads no tiles inside a view drawn one level down", async () => {
+    const inner = model({ title: "Inner", attached: [{ view: "billing.current-periods", title: "Tile", href: "/billing", hint: "tile" }] });
+    show({ kind: "feed", body: { entries: [{ id: "e1", at: "2026-11-10T11:00:00.000Z", author: { kind: "system", name: "MGM" }, text: [], embed: { type: "view", href: "/x", model: inner } }] } } as Partial<ViewModel>);
+    await flush(async () => {});
+    expect(screen.queryByRole("region", { name: "Tiles" })).toBeNull();
+    expect(runtime.fetch).not.toHaveBeenCalled();
+  });
+
   it("shows a warning notice in the warning tone", () => {
     show({ notice: { tone: "warning", text: "Readings are late" } });
     expect(screen.getByRole("status").className).toContain("bg-warning-muted");
