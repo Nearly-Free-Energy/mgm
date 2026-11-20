@@ -99,7 +99,7 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   BillingCapabilityContract: ["getPeriodSummary", "listTariffs"],
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
   MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
-  PaymentsCapabilityContract: ["getReadiness", "listHistory"],
+  PaymentsCapabilityContract: ["getReadiness", "listAttention", "listHistory"],
   TenantAppCapabilityContract: ["getHome", "getUsageDay", "getUsageMonth"],
 };
 const CONTRACT = /CapabilityContract$/;
