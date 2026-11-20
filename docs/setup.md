@@ -504,8 +504,12 @@ Preview bill, checking that the popup is sent to a `blob:` URL holding a
 PDF. It opens a microgrid's billing periods, checking that the GUI host
 serves the page (the `billing.periods` view) and lists the draft period,
 and opens New billing period to check that its form fits the screen,
-leaving without creating one; and it opens that period's history (the
-`billing.period-history` view) and its link back to the period. It opens a
+leaving without creating one; it opens that period's review (the
+`billing.period-review` view), checking that it lists the bills as cards
+with the totals and the period's controls, and opens a bill's actions to
+check that they fit the screen, pressing none of them; and it opens that
+period's history (the `billing.period-history` view) and its link back to
+the period. It opens a
 draft billing period's close checklist and its Close
 confirmation step (the totals, the acknowledgements and the name to type),
 checks that the step fits the screen and that its controls are 44 px

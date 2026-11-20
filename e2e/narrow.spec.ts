@@ -127,6 +127,46 @@ test("a microgrid's billing periods render at 360 px", async ({ page }) => {
   watch.assertClean();
 });
 
+test("a period's review renders at 360 px", async ({ page }) => {
+  const { microgridId, periodId } = readSmokeFixtures();
+  // Loading the review writes nothing, and nothing is pressed: a bill's
+  // actions open in a native disclosure, which sends no request.
+  const watch = await watchPage(page);
+  await page.goto(`/microgrids/${microgridId}/billing/${periodId}`);
+  // The host's catch-all serves the path: the legacy page had no view marker.
+  const review = page.locator('[data-gui-view="billing.period-review"]');
+  await expect(review).toBeVisible();
+  // Below 600 px Gridtop draws the bills as cards and hides the copy table
+  // (src/gui/gridtop/renderers/period-review/view.tsx); if it draws the
+  // table there, look for its rows instead.
+  const bills = review.getByRole("list", { name: "Bills", exact: true });
+  for (const n of [1, 2]) {
+    await expect(bills.getByRole("heading", { name: `Smoke tenant ${n} with a long display name` })).toBeVisible();
+  }
+  await expect(review.getByRole("region", { name: "Totals" })).toBeVisible();
+  // The window bar leaves the period's controls to the view
+  // (PLACE_PAGE_CONTROLS in src/gui/gridtop/renderers/index.ts), so they are
+  // on the page; if the bar takes them, look in its Actions sheet instead.
+  const controls = review.getByRole("list", { name: "Period actions" });
+  await expect(controls.getByRole("button", { name: "Refresh readings from meters" })).toBeVisible();
+  for (const name of ["View history", "Close period", "Payment links"]) {
+    await expect(controls.getByRole("link", { name })).toBeVisible();
+  }
+  await checkNarrowPage(page);
+  await checkTouchTargets(page, '[data-period-review] ul[aria-label="Period actions"]');
+  await reportTiming(page, "Period review");
+
+  // The first bill's actions open in the flow of its card, inside the screen.
+  const tenant = "Smoke tenant 1 with a long display name";
+  await bills.locator(`summary[aria-label="Actions for ${tenant}"]`).click();
+  const actions = bills.getByRole("list", { name: `Actions for ${tenant}` });
+  await expect(actions).toBeVisible();
+  await expect(actions.getByRole("button").first()).toBeVisible();
+  await checkNarrowPage(page);
+  await checkTouchTargets(page, '[data-period-review] ul[aria-label="Bills"] details[open]');
+  watch.assertClean();
+});
+
 test("a period's history renders at 360 px", async ({ page }) => {
   const { microgridId, periodId } = readSmokeFixtures();
   const watch = await watchPage(page);
