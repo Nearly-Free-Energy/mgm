@@ -42,6 +42,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *         engine's GenerationErrorCode for a tenant left or not billed, never
  *         its text; `message` sums the counts up in fixed copy, in the
  *         request's locale, within the 300 characters the GUI host keeps.
+ *         The count `left` is paid, invoiced and refunded bills only, while a
+ *         tenant's outcome "left" also covers the bills counted in `changed`
+ *         and `notRefreshed` (GenerateFromMetersCounts says which is which);
  *         `paymentLinksCleared` is the bills written whose pending payment
  *         link stopped working because their total changed.
  *   400 → { error, field?, code: "invalid_body" } (anything but `{}`);

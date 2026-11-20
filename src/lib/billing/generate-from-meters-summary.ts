@@ -16,6 +16,12 @@ import type { Fmt } from "@/lib/gui/surface";
 import type { GenerationErrorCode, TenantResult } from "./generate";
 import { roundAmount } from "./precision";
 
+/**
+ * A tenant's outcome. "left" is any bill the run left as it was: the ones
+ * counted in `left` (paid, invoiced, refunded) and also those counted in
+ * `changed` and `notRefreshed`, so the tenants marked "left" outnumber the
+ * `left` count whenever those two are not zero.
+ */
 export type GenerateFromMetersOutcome = "generated" | "unchanged" | "kept" | "left" | "not_billed";
 
 export type GenerateFromMetersCounts = {
@@ -32,7 +38,13 @@ export type GenerateFromMetersCounts = {
   unchanged: number;
   /** Manual bills, kept as they are. */
   kept: number;
-  /** Invoiced, paid or refunded bills, left as they are. */
+  /**
+   * Invoiced, paid or refunded bills, left as they are: as the run read
+   * them, or invoiced before its write (that write's refusal counts here
+   * too, see ERROR_BUCKET). A tenant's `outcome` "left" is wider: it also
+   * covers `changed` and `notRefreshed`, whose bills are left as they were
+   * as well.
+   */
   left: number;
   /** Bills that changed, or a period that closed, while the run wrote. */
   changed: number;
@@ -55,6 +67,12 @@ type NotBilled = keyof GenerateFromMetersCounts["notBilled"];
 
 /** Where each error code of a run counts. Codes not listed count as `failed`. */
 const ERROR_BUCKET: Partial<Record<GenerationErrorCode, "left" | "changed" | NotBilled>> = {
+  // `invoiced` is both the run's own choice (a bill it read with an invoice
+  // number) and fn_regenerate_bill_with_audit's refusal of a bill invoiced
+  // after the read: either way the bill now has an invoice number and a
+  // second run would leave it too, so both count as left. bill_changed and
+  // period_closed are refusals of a bill or period that changed in some
+  // other way, which a second run may well refresh, so they count apart.
   invoiced: "left",
   paid: "left",
   refunded: "left",
