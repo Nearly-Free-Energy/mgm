@@ -384,7 +384,7 @@ describe("preparing the period review's actions", () => {
     expect(out.value.ceremony).toEqual({
       type: "ceremony",
       statement:
-        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are.",
+        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are; any other bill is recalculated, one with a pending payment link included.",
       facts: [
         { label: "Period", value: { t: "text", text: expect.any(String) } },
         { label: "Read from meters", value: expect.objectContaining({ t: "number", v: 2, text: "2" }) },
@@ -397,6 +397,8 @@ describe("preparing the period review's actions", () => {
       warnings: [
         "No meter for this period, so not billed: Unit 5.",
         "A meter assignment gap in this period (no one meter assigned for all of it), so not billed: Unit 6.",
+        // A bill is recalculated (unit 2's): what a new total does to a payment under way.
+        "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.",
         "A tenant whose meter has no data for the period is not billed, and a bill they already have is left as it is; the result says how many.",
         "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
       ],
@@ -694,6 +696,29 @@ describe("billing.generate-from-meters' prepare", () => {
       "No meter for this period, so their bills are left as they are, not refreshed: Unit 5.",
       "A meter assignment gap in this period (no one meter assigned for all of it), so their bills are left as they are, not refreshed: Unit 6.",
     ]);
+  });
+
+  it("counts the bills with a pending payment link it will recalculate, and says what a new total does to them", async () => {
+    const tenants = [1, 2, 3, 4].map((n) => genTenant(n, [link()]));
+    const bills = [
+      genBill(1, { payment_status: "link_generated" }),
+      genBill(2, { payment_status: "link_generated" }),
+      // Not recalculated, so not counted: kept or left.
+      genBill(3, { payment_status: "link_generated", reading_source: "manual" }),
+      genBill(4, { payment_status: "link_generated", invoice_number: "EXS-1" }),
+    ];
+    const out = await prepareGenerate(generateTables({ tenants, bills }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.model.facts.map((f) => [f.label, f.value.text])).toContainEqual(["Of these, with a pending payment link", "2"]);
+    expect(out.model.warnings.slice(0, 2)).toEqual([
+      "2 bills to be recalculated have a pending payment link. Where a bill's total changes, its link stops working and the tenant needs a new one.",
+      "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.",
+    ]);
+    const one = await prepareGenerate(generateTables({ tenants, bills: bills.slice(1) }).client);
+    if (!one.ok) throw new Error(one.message);
+    expect(one.model.warnings[0]).toBe(
+      "1 bill to be recalculated has a pending payment link. If its total changes, the link stops working and the tenant needs a new one.",
+    );
   });
 
   it("says nothing of tenants with no meter when every tenant has one", async () => {

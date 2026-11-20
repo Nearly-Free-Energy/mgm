@@ -458,6 +458,15 @@ export type GenerateReadiness = {
   fromMeters: number;
   /** Of those, the ones that have a bill, which is recalculated if its figures changed. */
   refresh: number;
+  /**
+   * Of `refresh`, bills with a pending payment link (link_generated). They
+   * are recalculated like any other; if a total changes, the bill's link is
+   * cleared (fn_record_line_item_with_audit) and the result counts it
+   * (summarizeGenerateFromMeters' paymentLinksCleared). If that function
+   * stops clearing the link on a new total, revisit this count and its
+   * warning (paymentLinkWarning in ./period-review.ts).
+   */
+  withPaymentLink: number;
   /** Manual bills, kept. */
   kept: number;
   /** Invoiced, paid or refunded bills, left as they are. */
@@ -477,7 +486,7 @@ export function generateReadiness(
   bills: readonly { tenant_id: string; reading_source: string | null; payment_status: string; invoice_number: string | null }[],
 ): GenerateReadiness {
   const billByTenant = new Map(bills.map((b) => [b.tenant_id, b]));
-  const out: GenerateReadiness = { fromMeters: 0, refresh: 0, kept: 0, left: 0, notBilled: [], notRefreshed: [] };
+  const out: GenerateReadiness = { fromMeters: 0, refresh: 0, withPaymentLink: 0, kept: 0, left: 0, notBilled: [], notRefreshed: [] };
   for (const t of tenants) {
     const bill = billByTenant.get(t.id);
     if (bill?.reading_source === "manual") {
@@ -492,6 +501,7 @@ export function generateReadiness(
     if (coverage === "metered") {
       out.fromMeters++;
       if (bill) out.refresh++;
+      if (bill?.payment_status === "link_generated") out.withPaymentLink++;
     } else {
       (bill ? out.notRefreshed : out.notBilled).push({ tenantName: t.display_name, reason: coverage });
     }

@@ -437,6 +437,7 @@ export async function prepareGenerateFromMeters(
     { label: "Period", value: req.fmt.text(periodLabel(req.fmt, period.start_date, period.end_date)) },
     { label: "Read from meters", value: count(r.fromMeters) },
     ...(r.refresh > 0 ? [{ label: "Of these, already billed", value: count(r.refresh) }] : []),
+    ...(r.withPaymentLink > 0 ? [{ label: "Of these, with a pending payment link", value: count(r.withPaymentLink) }] : []),
     ...(r.kept > 0 ? [{ label: "Kept, entered by hand", value: count(r.kept) }] : []),
     ...(r.left > 0 ? [{ label: "Left as they are: paid, invoiced or refunded", value: count(r.left) }] : []),
     ...notReadFacts(req.fmt, "Not billed", r.notBilled),
@@ -447,11 +448,13 @@ export async function prepareGenerateFromMeters(
     model: {
       type: "ceremony",
       statement:
-        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are.",
+        "Read each tenant's meter for this period and calculate their bills. Bills entered by hand, and paid, invoiced or refunded bills, are left as they are; any other bill is recalculated, one with a pending payment link included.",
       facts,
       warnings: [
         ...notReadWarnings("so not billed", r.notBilled),
         ...notReadWarnings("so their bills are left as they are, not refreshed", r.notRefreshed),
+        ...(r.withPaymentLink > 0 ? [paymentLinkWarning(req.fmt, r.withPaymentLink)] : []),
+        ...(r.refresh > 0 ? [CHECKOUT_WARNING] : []),
         "A tenant whose meter has no data for the period is not billed, and a bill they already have is left as it is; the result says how many.",
         "Where a meter's starting reading is unknown, its bill bills the usage the meter measured and leaves the starting and ending readings blank.",
       ],
@@ -459,6 +462,22 @@ export async function prepareGenerateFromMeters(
     },
   };
 }
+
+/**
+ * What a new total does to a bill's payment, as the database does it: a
+ * pending Pesapal link is cleared (fn_record_line_item_with_audit), and an
+ * open checkout of the bill is set to needs_reconciliation, so a payment
+ * completed through it is held for reconciliation rather than marking the
+ * bill paid (fn_payment_bill_revision, fn_payment_commit_verification). If
+ * either changes, change these.
+ */
+function paymentLinkWarning(fmt: Fmt, n: number): string {
+  return n === 1
+    ? `${fmt.number(1).text} bill to be recalculated has a pending payment link. If its total changes, the link stops working and the tenant needs a new one.`
+    : `${fmt.number(n).text} bills to be recalculated have a pending payment link. Where a bill's total changes, its link stops working and the tenant needs a new one.`;
+}
+const CHECKOUT_WARNING =
+  "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.";
 
 /**
  * Why a tenant's meter is not read, as the run's result words it

@@ -25,16 +25,18 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *
  * Known gaps, both in the bill's insert, which goes through
  * fn_record_line_item_with_audit as on POST /api/billing/generate, with no
- * check at the write that the tenant still has no bill; closing them needs
- * a migration: the insert checks no period status, so a close landing
- * between the engine's check and that insert is not caught there; and it
+ * check at the write that the tenant still has no bill: the insert checks
+ * no period status, so a close committing between the engine's check and
+ * that insert is not caught; and it
  * upserts, so a bill another write inserts for that tenant between the
  * engine's read of the period's bills and this insert (a run from meter
  * data, the legacy panel, or a second submission of this action) is
  * overwritten with the readings entered and logged as regenerated.
  * Submissions one after another are not affected: the second is refused.
  * The parity note (bill-from-readings in src/lib/billing/parity.ts) lists
- * both; if a migration closes them, drop this paragraph.
+ * both, to be closed by an insert-only function that checks the period
+ * under its lock before billing.period-review replaces the legacy page;
+ * when it lands, drop this paragraph.
  *
  * Body (BillFromReadingsBody): { start_kwh, end_kwh, reason? }, kWh of 0 or
  * more, end_kwh not below start_kwh; reason up to 500 characters, trimmed.

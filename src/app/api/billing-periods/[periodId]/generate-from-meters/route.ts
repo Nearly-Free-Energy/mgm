@@ -22,29 +22,40 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * meanwhile is left too, and a second run writes nothing it does not need.
  * A tenant with no meter for the period, a meter assignment gap or no meter
  * data gets no bill (#293), and keeps the bill they had if they had one:
- * the result counts both. A tenant's first bill is inserted unguarded, as
- * on POST /api/billing/generate, so a bill inserted for that tenant by
+ * the result counts both. The engine reads the period's status again after
+ * reading the meters and refuses, writing nothing, if it closed meanwhile.
+ * A tenant's first bill is still inserted unguarded, as on POST
+ * /api/billing/generate, so a close committing between that second read
+ * and the insert does not stop it, and a bill inserted for that tenant by
  * another write while this run reads the meters (a manual reading, a bill
- * from readings, or an overlapping run) is overwritten, and a close landing in that time does
- * not stop the insert; guardExistingBills says why, and the parity note
- * (generate-bills in src/lib/billing/parity.ts) lists both.
+ * from readings, or an overlapping run) is overwritten; guardExistingBills
+ * says why, and the parity note (generate-bills in
+ * src/lib/billing/parity.ts) lists both, to be closed before
+ * billing.period-review replaces the legacy page.
  *
  * Body (GenerateFromMetersBody): `{}`. The period is the path's.
  *
  * Responses:
- *   200 → { generated, unchanged, kept, left, changed, notRefreshed,
- *           notBilled: { noMeter, meterAssignment, noReading, failed },
+ *   200 → { generated, paymentLinksCleared, unchanged, kept, left, changed,
+ *           notRefreshed, notBilled: { noMeter, meterAssignment, noReading, failed },
  *           tenants: [{ tenantId, tenantName, outcome, code? }], message }
  *         — counts by outcome (generate-from-meters-summary.ts); `code` is the
  *         engine's GenerationErrorCode for a tenant left or not billed, never
  *         its text; `message` sums the counts up in fixed copy, in the
  *         request's locale, within the 300 characters the GUI host keeps.
+ *         The count `left` is paid, invoiced and refunded bills only, while a
+ *         tenant's outcome "left" also covers the bills counted in `changed`
+ *         and `notRefreshed` (GenerateFromMetersCounts says which is which);
+ *         `paymentLinksCleared` is the bills written whose pending payment
+ *         link stopped working because their total changed.
  *   400 → { error, field?, code: "invalid_body" } (anything but `{}`);
  *         { error, reason: "bad_request" } (id)
  *   401 → { error: "unauthorized" }
  *   404 → { error, reason: "not_found" } (period or microgrid hidden by RLS:
  *         another organization's, or a tenant-only account's)
- *   409 → { error, reason: "period_closed" } (nothing read or written);
+ *   409 → { error, reason: "period_closed" } (nothing written: refused
+ *         before the meters are read, or after, if the period closed while
+ *         they were read);
  *         { error, reason: "no_tariff" } (no rate schedule to pin);
  *         { error, reason: "nothing_generated", …the 200 body } when no
  *         tenant was billed or found up to date and some were not billed,
@@ -132,7 +143,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     // Before anything is read from the meters; the engine refuses it again,
-    // and the writes to existing bills check it under their locks.
+    // before reading them and before its first write, and its writes to
+    // existing bills check it under their locks.
     if (period.status !== "draft") return refuse(409, GENERATE_FROM_METERS_COPY.closed, "period_closed");
 
     const result = await composed.data.billing.generateFromMeters(period.id);

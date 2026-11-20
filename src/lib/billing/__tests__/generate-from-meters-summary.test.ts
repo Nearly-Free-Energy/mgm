@@ -14,6 +14,17 @@ let next = 0;
 const id = () => `t-${++next}`;
 const written = (): TenantResult =>
   ({ kind: "written", tenantId: id(), tenantName: "Unit", lineItem: {}, previousTotalAmount: null, previousPaymentStatus: null, previousReadingSource: null }) as unknown as TenantResult;
+/** A rewritten bill that had a pending payment link, its total going from `from` to `to`. */
+const linked = (from: number, to: number | string, status = "link_generated"): TenantResult =>
+  ({
+    kind: "written",
+    tenantId: id(),
+    tenantName: "Unit",
+    lineItem: { total_amount: to },
+    previousTotalAmount: from,
+    previousPaymentStatus: status,
+    previousReadingSource: "edge",
+  }) as unknown as TenantResult;
 const unchanged = (): TenantResult => ({ kind: "unchanged", tenantId: id(), tenantName: "Unit", lineItemId: "b", totalAmount: 1 });
 const kept = (): TenantResult => ({ kind: "kept", tenantId: id(), tenantName: "Unit", readingSource: "manual" });
 const error = (code: GenerationErrorCode, text = "x"): TenantResult => ({ kind: "error", tenantId: id(), tenantName: "Unit", code, error: text });
@@ -100,6 +111,47 @@ describe("summarizeGenerateFromMeters", () => {
   it("formats counts in the request's locale", () => {
     expect(summarizeGenerateFromMeters(times(1200, written), createFmt({ locale: "en" })).message).toBe("Generated 1,200 bills from meter data.");
     expect(summarizeGenerateFromMeters(times(1200, written), createFmt({ locale: "de" })).message).toBe("Generated 1.200 bills from meter data.");
+  });
+
+  it("counts the bills whose pending payment link stopped working, as their total changed", () => {
+    const s = summarizeGenerateFromMeters(
+      [
+        linked(3000, "4200"),
+        linked(3000, 4200),
+        // The same total, as the database rounds it: the link is kept.
+        linked(4200, "4200.000"),
+        // No pending link to stop.
+        linked(3000, 4200, "unpaid"),
+        written(),
+      ],
+      fmt,
+    );
+    expect(s).toMatchObject({ generated: 5, paymentLinksCleared: 2 });
+    expect(s.message).toBe("Generated 5 bills from meter data. 2 payment links stopped working, as their bills' totals changed.");
+    expect(summarizeGenerateFromMeters([linked(3000, 4200), unchanged()], fmt).message).toBe(
+      "Generated 1 bill from meter data; 1 already up to date. 1 payment link stopped working, as its bill's total changed.",
+    );
+  });
+
+  it("says the not-billed and left counts as totals when the full message would pass 300 characters", () => {
+    const codes: GenerationErrorCode[] = ["paid", "bill_changed", "unmetered_no_manual", "meter_assignment_continuity", "no_meter_reading", "tariff_changed"];
+    const results = [
+      ...times(1000, () => linked(3000, 4200)),
+      ...times(1000, unchanged),
+      ...times(1000, kept),
+      ...codes.flatMap((c) => times(1000, () => error(c))),
+      ...times(1000, () => hadBill("no_meter_reading")),
+    ];
+    const s = summarizeGenerateFromMeters(results, fmt);
+    // The counts are all still there; only the message is shorter.
+    expect(s).toMatchObject({ generated: 1000, paymentLinksCleared: 1000, left: 1000, changed: 1000, notRefreshed: 1000 });
+    expect(s.message).toBe(
+      "Generated 1,000 bills from meter data; 1,000 already up to date. 1,000 payment links stopped working, as their bills' totals changed. Not billed: 4,000. Left as they were: 4,000.",
+    );
+    expect(s.message.length).toBeLessThanOrEqual(300);
+    // Far past any microgrid, still within it.
+    const huge = summarizeGenerateFromMeters(results, { ...fmt, number: () => ({ t: "number", v: 0, text: "999,999,999" }) } as typeof fmt);
+    expect(huge.message.length).toBeLessThanOrEqual(300);
   });
 
   it("stays within the host's 300 characters with every clause at a thousand tenants", () => {

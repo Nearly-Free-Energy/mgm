@@ -13,7 +13,11 @@
  * gives no bill to a tenant with no meter, an assignment gap or no meter
  * data, while a tenant with a bill and no meter keeps that bill; one audit
  * row per bill written. A second run writes nothing. A bill paid between
- * the run's read and its write is left as paid. A closed period, a
+ * the run's read and its write is left as paid. A period closed while its
+ * meters are read gets nothing written. A bill with a pending payment link
+ * is recalculated, and when its total changes its link is cleared and an
+ * open checkout of it waits for reconciliation, as the confirmation warns
+ * and the result counts. A closed period, a
  * microgrid with no rate schedule, a period whose meters have no data,
  * billing turned off, another organization's manager, a tenant-only account
  * and no session are all refused, with nothing written.
@@ -88,6 +92,12 @@ const RACE = "e7a10000-0000-4000-8003-000000000003";
 const NO_DATA = "e7a10000-0000-4000-8003-000000000004";
 /** October on the microgrid with no rate schedule. */
 const NO_TARIFF = "e7a10000-0000-4000-8003-000000000005";
+/** January: closed while its meters are read. */
+const CLOSES = "e7a10000-0000-4000-8003-000000000006";
+/** February: bills with a pending payment link. */
+const LINKED = "e7a10000-0000-4000-8003-000000000007";
+const ATTEMPT = "e7a10000-0000-4000-800a-000000000001";
+const MERCHANT = "e7a10000-0000-4000-800b-000000000001";
 const tenant = (n: number) => `e7a10000-0000-4000-8004-${String(n).padStart(12, "0")}`;
 const device = (n: number) => `e7a10000-0000-4000-8007-${String(n).padStart(12, "0")}`;
 const bill = (n: number, period = 0) => `e7a10000-0000-4000-8005-${String(period * 100 + n).padStart(12, "0")}`;
@@ -102,6 +112,8 @@ let tenantUser: TestUser;
 let unregister: (() => void) | null = null;
 /** The devices each read asked for. */
 const reads: string[][] = [];
+/** Runs once, while the meters are read. */
+let duringRead: (() => Promise<void>) | null = null;
 
 /**
  * 1 metered, no bill, an end reading of 500 in September; 2 metered, no
@@ -278,6 +290,8 @@ beforeAll(async () => {
         { id: RACE, microgrid_id: MICROGRID, start_date: "2026-11-01", end_date: "2026-11-30", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: NO_DATA, microgrid_id: MICROGRID, start_date: "2026-12-01", end_date: "2026-12-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: NO_TARIFF, microgrid_id: UNPRICED, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: null },
+        { id: CLOSES, microgrid_id: MICROGRID, start_date: "2027-01-01", end_date: "2027-01-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
+        { id: LINKED, microgrid_id: MICROGRID, start_date: "2027-02-01", end_date: "2027-02-28", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
       ],
     ],
     [
@@ -294,7 +308,39 @@ beforeAll(async () => {
         row(12, { device_id: null }),
         // November's: unit 3, paid while the run writes.
         row(3, { id: bill(3, 11), billing_period_id: RACE }),
+        // January's: unit 3, in a period closed while its meters are read.
+        row(3, { id: bill(3, 1), billing_period_id: CLOSES }),
+        // February's: pending payment links on unit 3's bill, of other
+        // figures, and on unit 4's, with the meter's.
+        row(3, { id: bill(3, 2), billing_period_id: LINKED, payment_status: "link_generated", pesapal_order_id: "order-3", pesapal_redirect_url: "https://pay.test/3" }),
+        row(4, {
+          id: bill(4, 2),
+          billing_period_id: LINKED,
+          usage_kwh: USAGE,
+          tier_breakdown: TIERS_40,
+          total_amount: TOTAL_40,
+          payment_status: "link_generated",
+          pesapal_order_id: "order-4",
+          pesapal_redirect_url: "https://pay.test/4",
+        }),
       ],
+    ],
+    // A merchant account with no credentials, for the checkout below.
+    ["payment_merchant_accounts", { id: MERCHANT, org_id: ORG, display_name: "Generate Meters DB account" }],
+    [
+      "payment_attempts",
+      // A checkout started on unit 3's February bill.
+      {
+        id: ATTEMPT,
+        org_id: ORG,
+        line_item_id: bill(3, 2),
+        community_id: COMMUNITY,
+        merchant_account_id: MERCHANT,
+        amount: 15000,
+        currency: "UGX",
+        bill_revision_total: 15000,
+        merchant_reference: "generate-meters-db-attempt",
+      },
     ],
   ];
   for (const [table, value] of rows) {
@@ -313,6 +359,11 @@ beforeAll(async () => {
     () => ({
       getReadings: async ({ devices, startDate, endDate }) => {
         reads.push(devices.map((d) => d.id).sort());
+        if (duringRead) {
+          const hook = duringRead;
+          duringRead = null;
+          await hook();
+        }
         return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(11) || startDate.startsWith("2026-12") ? null : USAGE, startDate, endDate }));
       },
     }),
@@ -325,6 +376,7 @@ afterAll(async () => {
   unregister?.();
   caller = null;
   beforeWrite = null;
+  duringRead = null;
   await cleanup();
 }, 120_000);
 
@@ -450,6 +502,58 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.closed, reason: "period_closed" });
     expect(await bills(CLOSED)).toEqual(before);
+  });
+
+  it("refuses a period closed while its meters are read, and writes nothing", async () => {
+    caller = manager;
+    const before = await bills(CLOSES);
+    const auditBefore = await auditRows(CLOSES);
+    duringRead = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc.from("billing_periods").update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", CLOSES);
+      if (error) throw new Error(`[generate-from-meters.db] close: ${error.message}`);
+    };
+    const res = await generate(CLOSES);
+    expect(duringRead).toBeNull();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.closed, reason: "period_closed" });
+    // Neither unit 3's bill rewritten nor the others' first bills inserted.
+    expect(await bills(CLOSES)).toEqual(before);
+    expect(await auditRows(CLOSES)).toHaveLength(auditBefore.length);
+  });
+
+  it("warns of pending payment links, and says which stopped working as their bill's total changed", async () => {
+    caller = manager;
+    const prepared = (await (await prepare(LINKED)).json()) as PreparedAction;
+    const facts = Object.fromEntries(prepared.ceremony!.facts.map((f) => [f.label, f.value.text]));
+    expect(facts).toMatchObject({ "Of these, already billed": "2", "Of these, with a pending payment link": "2" });
+    expect(prepared.ceremony!.warnings).toContain(
+      "2 bills to be recalculated have a pending payment link. Where a bill's total changes, its link stops working and the tenant needs a new one.",
+    );
+    expect(prepared.ceremony!.warnings).toContain(
+      "If a bill's total changes, a payment already started for it is held for reconciliation instead of marking the bill paid.",
+    );
+
+    const res = await generate(LINKED);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ paymentLinksCleared: 1, unchanged: 1 });
+    expect(body.message).toContain("1 payment link stopped working, as its bill's total changed.");
+
+    const svc = await serviceClient();
+    const { data: links, error } = await svc
+      .from("billing_line_items")
+      .select("id, total_amount, payment_status, pesapal_order_id, pesapal_redirect_url")
+      .in("id", [bill(3, 2), bill(4, 2)]);
+    if (error) throw new Error(`[generate-from-meters.db] links: ${error.message}`);
+    const byId = new Map((links ?? []).map((l) => [l.id, l]));
+    // A new total: the link is cleared; the payment status is the payment path's, as before.
+    expect(byId.get(bill(3, 2))).toMatchObject({ total_amount: TOTAL_40, payment_status: "link_generated", pesapal_order_id: null, pesapal_redirect_url: null });
+    // The meter's figures already: not written, the link kept.
+    expect(byId.get(bill(4, 2))).toMatchObject({ payment_status: "link_generated", pesapal_order_id: "order-4", pesapal_redirect_url: "https://pay.test/4" });
+    // The checkout started on unit 3's bill waits for reconciliation.
+    const { data: attempt } = await svc.from("payment_attempts").select("status, failure_code").eq("id", ATTEMPT).single();
+    expect(attempt).toEqual({ status: "needs_reconciliation", failure_code: "bill_revised" });
   });
 
   it("refuses a microgrid with no rate schedule as no_tariff, through the real engine, and writes nothing", async () => {
