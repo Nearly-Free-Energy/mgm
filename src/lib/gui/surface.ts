@@ -279,14 +279,62 @@ export type NavDef = {
   // Href for what the type does not check.
   | { href: Href; needs: CoreEntityKind[]; legacy: true }
 );
-type SignalOut = SignalOf<ActionLink> extends infer S ? (S extends unknown ? Omit<S, "source"> : never) : never;
+/** What a watcher returns: a Signal without `source`, which the host sets, and with ActionLinks for actions. */
+export type SignalOut = SignalOf<ActionLink> extends infer S ? (S extends unknown ? Omit<S, "source"> : never) : never;
+
+/**
+ * The most signals one watcher may return. The host refuses a longer answer
+ * as invalid rather than cutting it (collectSignals in
+ * host/server/signals.ts), so a watcher that can find more stops at this
+ * many itself, most urgent first, and `Signals.count` then counts at most
+ * this many from that source.
+ */
+export const MAX_SIGNALS_PER_SOURCE = 50;
+
+/**
+ * A watcher: what a plugin reports that needs someone, for one
+ * organization (ADR-006 decision 9). The host runs it only for staff of that
+ * organization and only while the plugin is on for it, within `budgetMs`
+ * (1500 ms unless given), on a request of its own, and lists it as
+ * unchecked when it is late, throws or returns anything the host refuses.
+ *
+ * Each signal's `id` is unique among the watcher's own, and the host sends
+ * it prefixed with the watcher's id (`<watcher id>:<id>`), so ids from two
+ * watchers never collide. Its `href`, where the person resolves it, is a
+ * released page the watcher's own plugin owns. A watcher reads through
+ * `req.supabase` or a capability's reads, filters by `req.organizationId`
+ * itself (a super admin's row-level security shows every organization), and
+ * throws when a read fails, so a failed read shows as unchecked rather than
+ * as nothing to do.
+ */
+export type SignalDef = {
+  id: Id;
+  budgetMs?: number;
+  load(req: SurfaceRequest): Promise<SignalOut[]>;
+  /** Fixtures, so every GUI can be tested against the watcher's signals. */
+  examples: readonly SignalOut[];
+  /**
+   * "checked": the host still runs this watcher while the plugin gate
+   * answers that its plugin is off for the organization (its 409), because
+   * what it reports can still be resolved then. A gate that cannot be read
+   * (its 503, or a throw) still lists it as unchecked, without running it.
+   *
+   * Declared, never inferred: gui-surface.test.ts allows it only on a
+   * Payments or Pesapal watcher, and only while every Payments capability
+   * method a surface module may call (LOADER_READS there) runs while the
+   * plugin is off, as `attach.whilePluginOff` on a view. If the reconcile
+   * route stops accepting reconciliation while Payments is off
+   * (docs/payments-rollout.md), remove it from `payments.reconcile`.
+   */
+  whilePluginOff?: "checked";
+};
 
 export interface Contribution {
   plugin: MgmPluginName;
   nav?: NavDef[];
   views?: ViewDef[];
   actions?: ActionDef[];
-  signals?: { id: Id; budgetMs?: number; load(req: SurfaceRequest): Promise<SignalOut[]> }[];
+  signals?: SignalDef[];
   status?: { id: Id; load(req: SurfaceRequest): Promise<Omit<StatusItemOf<ActionLink>, "id"> | null> }[];
   search?: { prefix: "@" | "#"; entity: EntityKind; find(req: SurfaceRequest, q: string): Promise<EntityHit[]> }[];
   /** The plugin's own entity kinds, and how each resolves to its organization (null: not visible). */

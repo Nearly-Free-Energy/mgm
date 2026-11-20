@@ -8,7 +8,7 @@ import {
   announceNavigationStart,
   isSameTabClick,
 } from "@/components/ui/navigation-progress";
-import type { OpenemsBackendHealth } from "./openems-backend/health";
+import type { OpenemsBackendHealth } from "@/lib/metering/backend-health";
 
 // Setup sub-nav (D2 / #53, extended #102).
 //

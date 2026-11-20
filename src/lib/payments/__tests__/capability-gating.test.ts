@@ -134,6 +134,15 @@ const GATING = {
     invalidatedBy: "the rollout rule or the payments_disabled message no longer promising history",
     reaches: { writes: [], provider: [] },
   },
+  listAttention: {
+    gate: "available-while-disabled",
+    kind: "read",
+    reason:
+      "The rollout rule keeps history available, and the payments_disabled message promises reconciliation is preserved: this lists the attempts a manager still has to reconcile, and recent failures, without contacting the provider.",
+    invalidatedBy:
+      "the rollout rule or the payments_disabled message no longer promising history and reconciliation, or the listing contacting the provider",
+    reaches: { writes: [], provider: [] },
+  },
   refreshPaymentStatus: {
     gate: "available-while-disabled",
     kind: "verification",
@@ -216,6 +225,7 @@ const REPOSITORY_ACCESS = {
   failUnlinkedAttempt: "write",
   getAttempt: "read",
   listAttemptsForLineItem: "read",
+  listAttentionAttempts: "read",
   recordReceipt: "write",
   listExternalAdjustments: "read",
   listReceiptsForAttempt: "read",
@@ -477,6 +487,16 @@ const AVAILABLE_CALLS: Record<
   listHistory: {
     call: (cap) => cap.listHistory(LINE_ITEM),
     does: { provider: [], writes: [] },
+  },
+  listAttention: {
+    repo: {
+      listAttentionAttempts: async () => [
+        { id: ATTEMPT, lineItemId: LINE_ITEM, status: "needs_reconciliation", failureCode: "balance_mismatch", updatedAt: "2026-11-19T08:00:00Z" },
+      ],
+    },
+    call: (cap) => cap.listAttention({ status: "needs_reconciliation" }),
+    does: { provider: [], writes: [] },
+    result: { data: { attempts: [{ id: ATTEMPT }], truncated: false } },
   },
   refreshPaymentStatus: {
     repo: { getAttempt: async () => attempt() },

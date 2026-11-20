@@ -1,7 +1,7 @@
 import { SetupSubNav } from "./setup-subnav";
 import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 import { createClient } from "@/lib/supabase/server";
-import { deriveOpenemsBackendHealth } from "./openems-backend/health";
+import { deriveOpenemsBackendHealth } from "@/lib/metering/backend-health";
 import { timeAgo } from "@/lib/time-ago";
 
 // Setup sub-layout (D2 / #53).

@@ -20,7 +20,9 @@ import "server-only";
  * them from readings typed by hand (`billing.bill-from-readings`); and the
  * savings as the `billing.savings` view, shown under the Operations day,
  * with the writes that change what it counts. A page that moves to a view
- * keeps its nav id.
+ * keeps its nav id. The watcher, `billing.period-due`, reports each draft
+ * period whose last day has passed, leading to its close checklist, or to
+ * its review while it has no bills.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves the periods list's
@@ -81,6 +83,9 @@ import {
 import { billFromReadingsAvailable, loadNotBilled, prepareBillFromReadings } from "./surface/not-billed";
 import { NOT_BILLED_EXAMPLES } from "./surface/not-billed-examples";
 import { BILL_FROM_READINGS_ACTION, NOT_BILLED_KEYS, NOT_BILLED_VIEW } from "./surface/not-billed-model";
+import { loadPeriodDue } from "./surface/period-due";
+import { PERIOD_DUE_EXAMPLES } from "./surface/period-due-examples";
+import { PERIOD_DUE_SIGNAL } from "./surface/period-due-model";
 import { loadPeriodHistory } from "./surface/period-history";
 import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
@@ -523,4 +528,5 @@ export const BILLING_SURFACE: Contribution = {
       targeted: false,
     },
   ],
+  signals: [{ id: PERIOD_DUE_SIGNAL, load: loadPeriodDue, examples: PERIOD_DUE_EXAMPLES }],
 };

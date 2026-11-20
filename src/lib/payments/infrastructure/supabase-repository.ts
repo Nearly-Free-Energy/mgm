@@ -11,6 +11,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isPluginEnabledForOrg } from "@/lib/plugins/state";
 import type {
+  AttentionAttempt,
   BillSnapshot,
   MerchantAccountPublic,
   MerchantAccountSecret,
@@ -410,6 +411,33 @@ export function createSupabasePaymentsRepository(
         .order("created_at", { ascending: true });
       if (error) throw new Error("Could not load payment history");
       return ((data ?? []) as unknown as PaymentAttempt[]) ?? [];
+    },
+
+    async listAttentionAttempts(input) {
+      let query = supabase
+        .from("payment_attempts")
+        .select("id, line_item_id, status, failure_code, updated_at")
+        .eq("org_id", input.orgId)
+        .eq("status", input.status);
+      if (input.since !== undefined) query = query.gte("updated_at", input.since);
+      // NOT IN alone would also drop a row whose failure code is null. The
+      // codes are the capability's own constants, never request input.
+      if (input.exceptFailureCodes?.length) {
+        query = query.or(`failure_code.is.null,failure_code.not.in.(${input.exceptFailureCodes.join(",")})`);
+      }
+      const { data, error } = await query
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: true })
+        .limit(input.limit);
+      if (error) throw new Error("Could not load payment attempts");
+      type Row = { id: string; line_item_id: string; status: AttentionAttempt["status"]; failure_code: string | null; updated_at: string };
+      return ((data ?? []) as unknown as Row[]).map((row) => ({
+        id: row.id,
+        lineItemId: row.line_item_id,
+        status: row.status,
+        failureCode: row.failure_code,
+        updatedAt: row.updated_at,
+      }));
     },
 
     async recordReceipt(input) {

@@ -35,7 +35,7 @@ import type {
   ViewKind,
   ViewModel,
 } from "../../../contract";
-import type { ActionLink, LoadedModel } from "../../../surface";
+import type { ActionLink, LoadedModel, SignalOut } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import {
   actionLinkSchema,
@@ -60,6 +60,7 @@ import {
   outHrefSchema,
   richSchema,
   signalSchema,
+  signalOutSchema,
   signalsSchema,
   statusItemSchema,
   trailSchema,
@@ -119,6 +120,7 @@ describe("model schemas match the contract types", () => {
     expectTypeOf<Same<Out<typeof ceremonySchema>, Ceremony>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof signalSchema>, Signal>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof signalsSchema>, Signals>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof signalOutSchema>, SignalOut>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof statusItemSchema>, StatusItem>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof manifestSchema>, Manifest>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof initialViewSchema>, InitialView>>().toEqualTypeOf<true>();
