@@ -571,6 +571,52 @@ describe("BillingCapability", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: "preview", seedReadings: [seed] }));
   });
 
+  it("generates a period from meter data as a guarded whole-period run, and nothing else", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters(PERIOD_ID)).toEqual({ ok: true, data: { results: [] } });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith({
+      periodId: PERIOD_ID,
+      tenantIds: undefined,
+      manualReadings: undefined,
+      revertToEdgeTenantIds: undefined,
+      seedReadings: undefined,
+      mode: "write",
+      actorUserId: "user-1",
+      guardExistingBills: true,
+    });
+  });
+
+  it("refuses to generate from meter data for a bad id or another organization's period, before the engine", async () => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters("not-a-uuid")).toMatchObject({ ok: false, status: 400, code: "billing_invalid_period" });
+    expect(await capability.generateFromMeters("990e8400-e29b-41d4-a716-446655440000")).toMatchObject({
+      ok: false,
+      status: 403,
+      code: "billing_scope_mismatch",
+    });
+    expect(run).not.toHaveBeenCalled();
+    const disposed = setup({}, { run }, () => false).capability;
+    expect(await disposed.generateFromMeters(PERIOD_ID)).toMatchObject({ ok: false, code: "billing_composition_disposed" });
+  });
+
+  it("maps the engine's fatal refusal of a closed period", async () => {
+    const run = vi.fn(async () => ({
+      kind: "fatal" as const,
+      status: 409,
+      body: { error: "Bills cannot be generated in a closed period.", code: "billing_period_closed" },
+    }));
+    const { capability } = setup({}, { run });
+    expect(await capability.generateFromMeters(PERIOD_ID)).toEqual({
+      ok: false,
+      status: 409,
+      code: "billing_period_closed",
+      message: "Bills cannot be generated in a closed period.",
+    });
+  });
+
   it("records manual paid/unpaid with trimmed notes", async () => {
     const record = vi.fn(async () => ({ updated: { id: ITEM_ID }, error: null }));
     const { capability } = setup({ recordManualPayment: record });
@@ -773,6 +819,7 @@ const WRITES: { method: string; run: (capability: BillingCapability) => Promise<
   { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, CONFIRMED) },
   { method: "deletePeriod", run: (c) => c.deletePeriod(PERIOD_ID, TYPED) },
   { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
+  { method: "generateFromMeters", run: (c) => c.generateFromMeters(PERIOD_ID) },
   { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },
 ];
 

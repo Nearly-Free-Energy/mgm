@@ -494,6 +494,11 @@ export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
  *  - changed: the bill changed after the route read it (a payment, a
  *    refund, another regeneration); only the write itself finds this
  *    (fn_regenerate_bill_with_audit).
+ *  - paid: not a refusal of the regenerate route, which regenerates a paid
+ *    bill once the person acknowledges it is paid; the reason a
+ *    whole-period run from meter data (POST
+ *    /api/billing-periods/[periodId]/generate-from-meters) leaves a paid
+ *    bill as it is, as it leaves an invoiced or refunded one.
  * POST /api/billing/generate, which the legacy dialogs call, refuses none of
  * these: if it comes to, say so here.
  */
@@ -504,7 +509,45 @@ export const REGENERATE_REFUSAL_COPY = {
   // fn_regenerate_bill_with_audit found the bill changed between the route's
   // read and the write: paid, refunded or regenerated meanwhile.
   changed: "This bill changed while it was being regenerated. Refresh it and try again.",
+  paid: "This bill is marked paid, so it is regenerated only on its own, after confirming that it is paid.",
 } as const;
+
+/**
+ * Why POST /api/billing-periods/[periodId]/generate-from-meters refuses, as
+ * fixed copy: the route answers with it, never with a database's or a
+ * metering source's own message. billing.generate-from-meters
+ * (src/lib/billing/surface/period-review.ts) gives two of these ahead of
+ * time: its availability gives `closed`, and its prepare `closed` and
+ * `nothingToRead`. The other three are known only when the route runs,
+ * since the prepare pins no tariff and reads no meter; if it comes to,
+ * add them to GENERATE_REFUSALS there and say so here.
+ *  - closed: a closed period's bills are not generated again; the bill
+ *    engine refuses it too (guardExistingBills in ./generate.ts).
+ *  - noTariff: the microgrid has no rate schedule to pin.
+ *  - meters: the metering source could not be read, so nothing was written.
+ *  - failed: anything else, including bills that could not be read.
+ *  - nothingToRead: no tenant's meter would be read (prepare), or the
+ *    microgrid has no tenants (route).
+ */
+export const GENERATE_FROM_METERS_COPY = {
+  closed: "Bills cannot be generated in a closed period.",
+  noTariff: "This microgrid has no rate schedule to bill with. Add one under Rate Schedule first.",
+  meters: "Could not read the meters right now. Nothing was changed. Try again shortly.",
+  failed: "Bills could not be generated. Refresh the period to see its bills, and try again.",
+  nothingToRead: "There is nothing to read from meters for this period.",
+} as const;
+
+/**
+ * POST /api/billing-periods/[periodId]/generate-from-meters. The period comes
+ * from the path, and the run takes nothing else: every tenant's bill is read
+ * from its meter (BillingCapability.generateFromMeters). The body is the empty
+ * object the GUI host sends for an action bound only through its path
+ * (invoke.ts); a confirm-level action is sent no confirmation, so any key is
+ * refused. If the action comes to take readings, a confirmation or a choice
+ * of tenants, add them here and bump the version.
+ */
+export const GenerateFromMetersBody = z.strictObject({}, { error: bodyError });
+export const GENERATE_FROM_METERS_BODY_VERSION = 1;
 
 const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
 

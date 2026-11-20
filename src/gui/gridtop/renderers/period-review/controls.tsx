@@ -82,8 +82,19 @@ export function ValueText({ value, live, kit }: { value: Value | undefined; live
   );
 }
 
-/** Writes only through kit.act, with the ref as the model gave it; a disabled action says why instead. */
-export function ActionControl({ actionRef, onResult, kit }: { actionRef: ActionRef; onResult(message: string | null): void; kit: GuiKit }) {
+/**
+ * What the last action pressed answered: its failure, or the message its
+ * route gave with a success (the host keeps only that and a link,
+ * invoke.ts), such as how many bills a generation wrote. Null when there is
+ * nothing to say: a success with no message, or a cancel.
+ */
+export type ActionOutcome = { ok: boolean; message: string } | null;
+
+/**
+ * Writes only through kit.act, with the ref as the model gave it; a disabled
+ * action says why instead. Reports what the action answered to `onResult`.
+ */
+export function ActionControl({ actionRef, onResult, kit }: { actionRef: ActionRef; onResult(outcome: ActionOutcome): void; kit: GuiKit }) {
   const reasonId = useId();
   const [busy, setBusy] = useState(false);
   const run = async () => {
@@ -91,7 +102,9 @@ export function ActionControl({ actionRef, onResult, kit }: { actionRef: ActionR
     onResult(null);
     const result = await kit.act(actionRef);
     setBusy(false);
-    if (!result.ok && result.code !== "cancelled") onResult(result.message);
+    if (result.ok) {
+      if (result.message) onResult({ ok: true, message: result.message });
+    } else if (result.code !== "cancelled") onResult({ ok: false, message: result.message });
   };
   const disabled = !actionRef.enabled;
   return (
@@ -149,16 +162,50 @@ export function LinkControl({ link, kit, className = cls(CONTROL, LINK) }: { lin
   );
 }
 
-/** The model's own actions and links, with the failure of the last action pressed. */
-export function ControlList({ actions, links, kit, label }: { actions: ActionRef[]; links: LinkRef[]; kit: GuiKit; label: string }) {
-  const [error, setError] = useState<string | null>(null);
+/** An action's outcome under its control: a failure as an alert, a success's message as a status line. */
+export function OutcomeLine({ outcome }: { outcome: ActionOutcome }) {
+  if (!outcome) return null;
+  return outcome.ok ? (
+    <p role="status" className="gt:text-caption gt:text-muted-foreground">
+      {outcome.message}
+    </p>
+  ) : (
+    <p role="alert" className="gt:text-caption gt:text-destructive-fg">
+      {outcome.message}
+    </p>
+  );
+}
+
+/**
+ * The model's own actions and links, with the outcome of the last action
+ * pressed. A caller that must keep that outcome across a refresh that
+ * replaces this list's place passes `outcome` and `onOutcome`.
+ */
+export function ControlList({
+  actions,
+  links,
+  kit,
+  label,
+  outcome,
+  onOutcome,
+}: {
+  actions: ActionRef[];
+  links: LinkRef[];
+  kit: GuiKit;
+  label: string;
+  outcome?: ActionOutcome;
+  onOutcome?(outcome: ActionOutcome): void;
+}) {
+  const [own, setOwn] = useState<ActionOutcome>(null);
+  const shown = onOutcome ? (outcome ?? null) : own;
+  const report = onOutcome ?? setOwn;
   if (actions.length + links.length === 0) return null;
   return (
     <div className="gt:flex gt:flex-col gt:gap-2">
       <ul aria-label={label} className="gt:flex gt:flex-wrap gt:items-start gt:gap-2">
         {actions.map((ref, i) => (
           <li key={`${ref.action}-${i}`}>
-            <ActionControl actionRef={ref} onResult={setError} kit={kit} />
+            <ActionControl actionRef={ref} onResult={report} kit={kit} />
           </li>
         ))}
         {links.map((link) => (
@@ -167,11 +214,7 @@ export function ControlList({ actions, links, kit, label }: { actions: ActionRef
           </li>
         ))}
       </ul>
-      {error && (
-        <p role="alert" className="gt:text-caption gt:text-destructive-fg">
-          {error}
-        </p>
-      )}
+      <OutcomeLine outcome={shown} />
     </div>
   );
 }

@@ -3,7 +3,8 @@
  * `billing.period-review`: the route checks the session, the host resolves
  * the microgrid and the period through the person's own client, and the
  * loader reads the pinned tariff, the bills, the tenants and their meters
- * through that client. Marking a bill failed or refunded is offered only to
+ * through that client. A draft is offered Generate from meter data, a
+ * closed period is not. Marking a bill failed or refunded is offered only to
  * a super admin; another organization's manager gets nothing; while billing
  * is off the review still loads, with the gate's notice and every action
  * disabled; and a period with no pinned tariff is refused.
@@ -233,8 +234,10 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     expect(model.ext.schema).toBe("billing.period-review@1");
     expect(model.ext.data.rows.map((r: { id: string }) => r.id)).toEqual(rows.map((r) => r.id));
     expect(model.ext.data.totals[model.ext.data.columns.indexOf("total")]).toBe("122500");
-    // Generate is not offered until an interface has a form for it (parity.test.ts).
-    expect(model.actions).toEqual([]);
+    // The draft's bills can be refreshed from the meters, labelled as the legacy header labels it.
+    expect(model.actions).toEqual([
+      expect.objectContaining({ action: "billing.generate-from-meters", params: { periodId: DRAFT }, label: "Refresh readings from meters", enabled: true }),
+    ]);
     expect(model.links.map((l: { id: string }) => l.id)).toEqual(["billing.view-history", "billing.close-checklist", "billing.send-queue", "billing.export-csv"]);
     expect(model.links[2]).toMatchObject({ label: "Payment links", href: `/microgrids/${MICROGRID}/billing/${DRAFT}/send` });
     expect(rows[0].links.map((l) => l.id)).toEqual(["billing.download-bill", "billing.view-history"]);
@@ -307,8 +310,9 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
       expect(res.status).toBe(200);
       const model = await res.json();
       expect(model.notice).toMatchObject({ tone: "warning", text: expect.stringContaining("Billing is disabled") });
-      const actions = (model.body.rows as Row[]).flatMap((r) => r.actions);
+      const actions = [...(model.body.rows as Row[]).flatMap((r) => r.actions), ...model.actions];
       expect(actions.length).toBeGreaterThan(0);
+      expect(model.actions.map((a: { action: string }) => a.action)).toEqual(["billing.generate-from-meters"]);
       for (const a of actions) expect(a).toMatchObject({ enabled: false, reason: model.notice.text });
     } finally {
       await setBilling(true);

@@ -2,13 +2,33 @@ import "server-only";
 
 /**
  * Reading every row of a query in pages, for the billing views' loaders and
- * prepare steps (./periods.ts, ./period-review.ts). PostgREST answers at most
+ * prepare steps (./periods.ts, ./period-review.ts) and the bill engine's
+ * reads of a period's tenants, bills and prior readings (../generate.ts).
+ * PostgREST answers at most
  * max_rows rows (supabase/config.toml sets 1000) and says nothing when it
  * stops, so each page asks for the exact count of what is left. A read that
  * cannot be completed is a refusal, never a partial sum.
  */
 
 export const BILL_PAGE = 1000;
+
+/**
+ * At most this many ids in one `.in()` list. A select goes out as a GET, so
+ * its filters travel in the URL, at about 39 characters an id once the comma
+ * is encoded, and every page of it repeats them; paging limits the rows, not
+ * the URL. Gateways cap the request line (nginx's and Kong's default buffer
+ * is 8 KB). Two lists of 80 come to about 6.2 KB. If a read puts more than
+ * two such lists in one query, or the deployment's gateway allows less than
+ * 8 KB, revisit.
+ */
+export const IN_LIST_CHUNK = 80;
+
+/** `values` in consecutive slices of at most `size`, in order. */
+export function chunked<T>(values: readonly T[], size: number = IN_LIST_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
 
 type PageRead = { data: unknown; error: unknown; count?: number | null };
 
