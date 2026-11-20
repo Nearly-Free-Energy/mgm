@@ -65,7 +65,7 @@ async function engineCoverage(links: PrimaryMeterLink[]): Promise<MeterCoverage>
   };
   const builder = (table: string) => {
     const b: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "neq", "lte", "in", "not", "order"]) b[m] = () => b;
+    for (const m of ["select", "eq", "neq", "lte", "in", "not", "order", "limit", "gt"]) b[m] = () => b;
     b.single = async () => rows[table];
     b.maybeSingle = async () => rows[table];
     b.then = (f: (v: unknown) => unknown) => Promise.resolve(table === "tenants" ? rows.tenants : { data: [], error: null }).then(f);

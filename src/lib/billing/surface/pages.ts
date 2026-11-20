@@ -2,7 +2,9 @@ import "server-only";
 
 /**
  * Reading every row of a query in pages, for the billing views' loaders and
- * prepare steps (./periods.ts, ./period-review.ts). PostgREST answers at most
+ * prepare steps (./periods.ts, ./period-review.ts) and the bill engine's
+ * reads of a period's tenants, bills and prior readings (../generate.ts).
+ * PostgREST answers at most
  * max_rows rows (supabase/config.toml sets 1000) and says nothing when it
  * stops, so each page asks for the exact count of what is left. A read that
  * cannot be completed is a refusal, never a partial sum.

@@ -13,7 +13,8 @@
  * gives no bill to a tenant with no meter, an assignment gap or no meter
  * data, while a tenant with a bill and no meter keeps that bill; one audit
  * row per bill written. A second run writes nothing. A bill paid between
- * the run's read and its write is left as paid. A closed period, a
+ * the run's read and its write is left as paid. A period closed while its
+ * meters are read gets nothing written. A closed period, a
  * microgrid with no rate schedule, a period whose meters have no data,
  * billing turned off, another organization's manager, a tenant-only account
  * and no session are all refused, with nothing written.
@@ -88,6 +89,8 @@ const RACE = "e7a10000-0000-4000-8003-000000000003";
 const NO_DATA = "e7a10000-0000-4000-8003-000000000004";
 /** October on the microgrid with no rate schedule. */
 const NO_TARIFF = "e7a10000-0000-4000-8003-000000000005";
+/** January: closed while its meters are read. */
+const CLOSES = "e7a10000-0000-4000-8003-000000000006";
 const tenant = (n: number) => `e7a10000-0000-4000-8004-${String(n).padStart(12, "0")}`;
 const device = (n: number) => `e7a10000-0000-4000-8007-${String(n).padStart(12, "0")}`;
 const bill = (n: number, period = 0) => `e7a10000-0000-4000-8005-${String(period * 100 + n).padStart(12, "0")}`;
@@ -102,6 +105,8 @@ let tenantUser: TestUser;
 let unregister: (() => void) | null = null;
 /** The devices each read asked for. */
 const reads: string[][] = [];
+/** Runs once, while the meters are read. */
+let duringRead: (() => Promise<void>) | null = null;
 
 /**
  * 1 metered, no bill, an end reading of 500 in September; 2 metered, no
@@ -278,6 +283,7 @@ beforeAll(async () => {
         { id: RACE, microgrid_id: MICROGRID, start_date: "2026-11-01", end_date: "2026-11-30", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: NO_DATA, microgrid_id: MICROGRID, start_date: "2026-12-01", end_date: "2026-12-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
         { id: NO_TARIFF, microgrid_id: UNPRICED, start_date: "2026-10-01", end_date: "2026-10-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: null },
+        { id: CLOSES, microgrid_id: MICROGRID, start_date: "2027-01-01", end_date: "2027-01-31", timezone: "Africa/Kampala", status: "draft", closed_at: null, rate_schedule_id: SCHEDULE },
       ],
     ],
     [
@@ -294,6 +300,8 @@ beforeAll(async () => {
         row(12, { device_id: null }),
         // November's: unit 3, paid while the run writes.
         row(3, { id: bill(3, 11), billing_period_id: RACE }),
+        // January's: unit 3, in a period closed while its meters are read.
+        row(3, { id: bill(3, 1), billing_period_id: CLOSES }),
       ],
     ],
   ];
@@ -313,6 +321,11 @@ beforeAll(async () => {
     () => ({
       getReadings: async ({ devices, startDate, endDate }) => {
         reads.push(devices.map((d) => d.id).sort());
+        if (duringRead) {
+          const hook = duringRead;
+          duringRead = null;
+          await hook();
+        }
         return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(11) || startDate.startsWith("2026-12") ? null : USAGE, startDate, endDate }));
       },
     }),
@@ -325,6 +338,7 @@ afterAll(async () => {
   unregister?.();
   caller = null;
   beforeWrite = null;
+  duringRead = null;
   await cleanup();
 }, 120_000);
 
@@ -450,6 +464,24 @@ describe.skipIf(shouldSkip())("POST /api/billing-periods/[periodId]/generate-fro
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.closed, reason: "period_closed" });
     expect(await bills(CLOSED)).toEqual(before);
+  });
+
+  it("refuses a period closed while its meters are read, and writes nothing", async () => {
+    caller = manager;
+    const before = await bills(CLOSES);
+    const auditBefore = await auditRows(CLOSES);
+    duringRead = async () => {
+      const svc = await serviceClient();
+      const { error } = await svc.from("billing_periods").update({ status: "closed", closed_at: new Date().toISOString() }).eq("id", CLOSES);
+      if (error) throw new Error(`[generate-from-meters.db] close: ${error.message}`);
+    };
+    const res = await generate(CLOSES);
+    expect(duringRead).toBeNull();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: GENERATE_FROM_METERS_COPY.closed, reason: "period_closed" });
+    // Neither unit 3's bill rewritten nor the others' first bills inserted.
+    expect(await bills(CLOSES)).toEqual(before);
+    expect(await auditRows(CLOSES)).toHaveLength(auditBefore.length);
   });
 
   it("refuses a microgrid with no rate schedule as no_tariff, through the real engine, and writes nothing", async () => {

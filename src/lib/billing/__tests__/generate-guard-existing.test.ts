@@ -16,7 +16,11 @@
  *   - inserts a tenant's first bill through fn_record_line_item_with_audit;
  *   - reports tenants with no meter, an assignment gap or no meter data with
  *     their codes, as any run does, and says (`hadBill`) which of them had a
- *     bill, which it leaves as it is.
+ *     bill, which it leaves as it is;
+ *   - reads the period's status again after reading the meters, and writes
+ *     nothing if it closed meanwhile;
+ *   - reads every page of the tenants and bills (PostgREST's max_rows), and
+ *     stops, writing nothing, when a page cannot be read.
  *
  * Harness: a mocked Supabase client, as in generate-expected-bill.test.ts.
  * The database side is generate-from-meters.db.test.ts.
@@ -102,8 +106,18 @@ function harness(
     bills?: Record<string, unknown>[];
     billsError?: { message: string } | null;
     writeError?: (name: string, tenantId: unknown) => { code: string; message: string } | null;
+    /** As PostgREST's max_rows: at most this many rows a read, with the exact count of what is left. */
+    maxRows?: number;
+    /** The read of a table's list that fails, counted from 1. */
+    failRead?: { table: string; n: number };
+    /** Closes the period while the meters are read. */
+    closeDuringRead?: boolean;
+    /** The second read of the period's status fails. */
+    statusReadError?: boolean;
   } = {},
 ) {
+  const period = { status: o.status ?? "draft" };
+  const listReads: Record<string, number> = {};
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name === "fn_pin_billing_period_rate_schedule") return { data: SCHEDULE_ID, error: null };
     if (name === "fn_record_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
@@ -138,23 +152,45 @@ function harness(
     tenants: { list: { data: TENANTS, error: null } },
     billing_line_items: { list: o.billsError ? { data: null, error: o.billsError } : { data: o.bills ?? BILLS, error: null } },
   };
+  // A list read answers as PostgREST would: the rows after the `gt("id", …)`
+  // keyset, at most maxRows of them, with the exact count of all that match.
+  function listRead(table: string, after: string | null) {
+    const n = (listReads[table] = (listReads[table] ?? 0) + 1);
+    if (o.failRead?.table === table && o.failRead.n === n) return { data: null, error: { message: "canceling statement due to statement timeout" }, count: null };
+    const resp = (responses[table]?.list ?? { data: [], error: null }) as { data: unknown; error: unknown };
+    if (resp.error || !Array.isArray(resp.data) || o.maxRows === undefined) return resp;
+    const rows = (resp.data as { id: string }[]).filter((r) => after === null || r.id > after).sort((a, b) => (a.id < b.id ? -1 : 1));
+    return { data: rows.slice(0, o.maxRows), error: null, count: rows.length };
+  }
   function builder(table: string) {
     const resp = responses[table] ?? { list: { data: [], error: null } };
     const b: Record<string, unknown> = {};
+    let after: string | null = null;
     const chain = () => b;
     for (const m of ["select", "eq", "neq", "lte", "gte", "lt", "in", "not", "order", "limit", "is"]) b[m] = chain;
+    b.gt = (_column: string, value: string) => {
+      after = value;
+      return b;
+    };
     b.single = async () => resp.single ?? { data: null, error: null };
-    b.maybeSingle = async () => resp.maybeSingle ?? { data: null, error: null };
+    // The period's status, read again before the first write.
+    b.maybeSingle = async () =>
+      table === "billing_periods"
+        ? o.statusReadError
+          ? { data: null, error: { message: "permission denied" } }
+          : { data: { status: period.status }, error: null }
+        : (resp.maybeSingle ?? { data: null, error: null });
     b.then = (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
-      Promise.resolve(resp.list ?? { data: [], error: null }).then(onFulfilled, onRejected);
+      Promise.resolve(listRead(table, after)).then(onFulfilled, onRejected);
     return b;
   }
   const supabase = { from: (table: string) => builder(table), rpc } as unknown as SupabaseClient;
-  const getReadings = vi.fn(async ({ devices }: { devices: Array<{ id: string }> }) =>
-    devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(10) ? null : 42, startDate: "2026-04-01", endDate: "2026-04-30" })),
-  );
+  const getReadings = vi.fn(async ({ devices }: { devices: Array<{ id: string }> }) => {
+    if (o.closeDuringRead) period.status = "closed";
+    return devices.map((d) => ({ deviceId: d.id, usageKwh: d.id === device(10) ? null : 42, startDate: "2026-04-01", endDate: "2026-04-30" }));
+  });
   const meteringProvider = { getReadings } as unknown as MeteringProvider;
-  return { supabase, rpc, getReadings, meteringProvider };
+  return { supabase, rpc, getReadings, meteringProvider, listReads };
 }
 
 const writes = (rpc: ReturnType<typeof vi.fn>) =>
@@ -234,6 +270,70 @@ describe("runGenerationFor with guardExistingBills", () => {
     expect(out).toEqual({ kind: "fatal", status: 500, body: { error: GENERATE_FROM_METERS_COPY.failed, code: "billing_bills_unreadable" } });
     expect(writes(h.rpc)).toEqual([]);
     expect(h.getReadings).not.toHaveBeenCalled();
+  });
+
+  it("refuses a period that closed while the meters were read, and writes nothing", async () => {
+    const h = harness({ closeDuringRead: true });
+    const out = await run(h);
+    expect(out).toEqual({ kind: "fatal", status: 409, body: { error: GENERATE_FROM_METERS_COPY.closed, code: "billing_period_closed" } });
+    expect(h.getReadings).toHaveBeenCalledTimes(1);
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it("stops when the period's status cannot be read again before writing", async () => {
+    const h = harness({ statusReadError: true });
+    const out = await run(h);
+    expect(out).toEqual({ kind: "fatal", status: 500, body: { error: GENERATE_FROM_METERS_COPY.failed, code: "billing_period_unreadable" } });
+    expect(writes(h.rpc)).toEqual([]);
+  });
+
+  it("reads every page of the tenants and bills, as PostgREST's max_rows cuts them", async () => {
+    const h = harness({ maxRows: 2 });
+    const by = await results(h);
+    // Ten tenants and six bills, two a page: every page read, the last one short.
+    expect(h.listReads).toMatchObject({ tenants: 5, billing_line_items: 3 });
+    expect(by.size).toBe(10);
+    // The bills of the later pages are seen: kept, left, or rewritten only as read.
+    expect(by.get(tenant(4))).toMatchObject({ kind: "kept" });
+    for (const [n, code] of [
+      [5, "paid"],
+      [6, "invoiced"],
+      [7, "refunded"],
+    ] as const) {
+      expect(by.get(tenant(n))).toMatchObject({ kind: "error", code, hadBill: true });
+    }
+    expect(writes(h.rpc).map((w) => [w.name, w.args._tenant_id])).toEqual([
+      ["fn_record_line_item_with_audit", tenant(1)],
+      ["fn_regenerate_bill_with_audit", tenant(2)],
+    ]);
+  });
+
+  it.each([
+    ["tenants", "billing_tenants_unreadable"],
+    ["billing_line_items", "billing_bills_unreadable"],
+  ])("stops when a later page of %s cannot be read, before reading meters or writing", async (table, code) => {
+    const h = harness({ maxRows: 2, failRead: { table, n: 2 } });
+    const out = await run(h);
+    expect(out).toEqual({ kind: "fatal", status: 500, body: { error: GENERATE_FROM_METERS_COPY.failed, code } });
+    expect(writes(h.rpc)).toEqual([]);
+    expect(h.getReadings).not.toHaveBeenCalled();
+  });
+
+  it("pages and stops the same way without it, in fixed copy", async () => {
+    // Every page read: the manual bill on a later page is kept, not overwritten from the meter.
+    const paged = harness({ maxRows: 2 });
+    const by = await results(paged, { guardExistingBills: undefined });
+    expect(by.get(tenant(4))).toMatchObject({ kind: "kept" });
+    expect(writes(paged.rpc).map((w) => w.args._tenant_id)).not.toContain(tenant(4));
+    // A page that cannot be read stops the run, with no database text.
+    const failing = harness({ maxRows: 2, failRead: { table: "billing_line_items", n: 2 } });
+    const out = await run(failing, { guardExistingBills: undefined });
+    expect(out).toEqual({
+      kind: "fatal",
+      status: 500,
+      body: { error: "The period's tenants and bills could not be read. Nothing was written; try again.", code: "billing_bills_unreadable" },
+    });
+    expect(writes(failing.rpc)).toEqual([]);
   });
 
   it("reads only the meters of tenants it may bill", async () => {
