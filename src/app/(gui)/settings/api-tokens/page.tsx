@@ -7,6 +7,7 @@ import {
 import { SUPER_ADMIN, ORG_MANAGER, SCOPE_ORG } from "@/lib/roles";
 import type { OrgApiToken, UserRoleRecord } from "@/lib/types/domain";
 import { ApiTokensPageClient } from "./_components/api-tokens-page-client";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 type RawToken = Pick<
   OrgApiToken,
@@ -38,6 +39,7 @@ type RawToken = Pick<
  * null).not('revoked_at', null)` flip if/when needed.
  */
 export default async function SettingsApiTokensPage() {
+  await keepTenantOnlyToTenantPages();
   const supabase = await createClient();
 
   const isSuperAdmin = await currentUserIsSuperAdmin(supabase);

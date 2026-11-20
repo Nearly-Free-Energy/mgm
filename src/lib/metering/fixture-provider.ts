@@ -1,6 +1,9 @@
 import type { DeviceReading } from "@/lib/adapters/types";
+import { energySeriesAxis } from "./energy-series";
 import { MeteringError } from "./errors";
 import type {
+  DeviceEnergySeries,
+  DeviceEnergySeriesRequest,
   MeteringProvider,
   MeteringReadRequest,
   SiteSamples,
@@ -9,8 +12,8 @@ import type {
 
 /**
  * Edge ids reserved for synthetic data. The fixture provider generates site
- * samples only for devices on such edges, so it can never stand in for a
- * real meter.
+ * samples and meter energy series only for devices on such edges, so it can
+ * never stand in for a real meter.
  */
 export const SYNTHETIC_EDGE_ID_PREFIX = "SYNTHETIC-EDGE-";
 
@@ -20,6 +23,8 @@ export const isSyntheticEdgeId = (edgeId: string): boolean =>
 export type FixtureProviderOptions = {
   /** Generates site samples; without it, getSiteSamples answers 503. */
   siteSamples?: (request: SiteSamplesRequest) => SiteSamples;
+  /** Generates meter energy series; without it, getDeviceEnergySeries answers 503. */
+  energySeries?: (request: DeviceEnergySeriesRequest) => DeviceEnergySeries;
 };
 
 export type FixtureReading = {
@@ -63,6 +68,29 @@ export class FixtureMeteringProvider implements MeteringProvider {
       );
     }
     return this.options.siteSamples(request);
+  }
+
+  async getDeviceEnergySeries(request: DeviceEnergySeriesRequest): Promise<DeviceEnergySeries> {
+    // The same 400 as the OpenEMS provider for a range it would refuse.
+    energySeriesAxis(request);
+    for (const device of request.devices) {
+      if (!isSyntheticEdgeId(device.edgeOpenemsId)) {
+        throw new MeteringError(
+          `Synthetic meter energy is generated only for edges whose id starts with ${SYNTHETIC_EDGE_ID_PREFIX}`,
+          "METERING_INVALID_DATA",
+          400,
+          { deviceId: device.id, microgridId: request.microgridId }
+        );
+      }
+    }
+    if (!this.options.energySeries) {
+      throw new MeteringError(
+        "This fixture provider has no energy series generator",
+        "METERING_CONFIGURATION",
+        503
+      );
+    }
+    return this.options.energySeries(request);
   }
 
   async getReadings(request: MeteringReadRequest): Promise<DeviceReading[]> {

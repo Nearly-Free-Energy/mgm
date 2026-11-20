@@ -6,6 +6,7 @@ import { getHierarchyLevels } from "@/lib/hierarchy";
 import { requestUserCanAccessMicrogrid } from "@/lib/auth/request-access";
 import type { AvailableMeter } from "@/components/forms/TenantWizard";
 import type { BillingDeviceOption } from "@/components/TenantTable";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > Tenants (D2 / #53, upgraded in UX2 / #74).
 // Lists tenants for this microgrid and exposes the 4-step Add-Tenant
@@ -18,6 +19,7 @@ export default async function SetupTenantsPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const supabase = await createClient();
 

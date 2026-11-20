@@ -63,7 +63,7 @@ const PRIVILEGED_MODULES: Record<string, string> = {
  */
 const PRIVILEGED_REGISTRIES: Record<string, string> = {
   meteringProviders:
-    "Builds metering providers; the OpenEMS provider calls getMicrogridEmsConfig when it reads.",
+    "Builds metering providers; the OpenEMS provider calls getMicrogridEmsConfig when it reads. The tenant app's usage source builds them on a service client, so the config read takes fn_tenant_home's microgrid as its authorization.",
   mgmSurface:
     "Holds contributed loaders, signals, search and prepare functions, which compose capabilities that can build credentialed providers; a call made through it cannot be followed by import, so every caller settles the session first.",
 };
@@ -138,6 +138,16 @@ const MODULES: Record<string, Module> = {
     reason:
       "composeBilling runs authorizeOrganization (getUser) before it opens a scope, readOnly or not; BillingPlugin builds a provider in whatever scope loads it.",
   },
+  "src/lib/tenant-app/compose.ts": {
+    privilegedExports: ["TenantAppPlugin"],
+    reason:
+      "composeTenantApp runs authorizeTenant (getUser, the caller's tenant row, fn_tenant_home) before it opens a scope; TenantAppPlugin builds the usage source, which reads edges and builds the microgrid's metering provider on the service role, in whatever scope loads it. The tenant views' loaders (src/lib/tenant-app/surface/home.ts and usage.ts) import only composeTenantApp, so they inherit nothing here: their usage reads reach the service role only inside the scope it opened after that check, and the host calls them only through mgmSurface.",
+  },
+  "src/lib/tenant-app/infrastructure/usage-source.ts": {
+    privilegedExports: "all",
+    reason:
+      "Reads the unit's edges and builds the microgrid's metering provider, which decrypts its stored credential, on the service role, for the microgrid fn_tenant_home named and the device rows the tenant's own client returned; only TenantAppPlugin calls it, after composeTenantApp's authorizeTenant.",
+  },
   "src/lib/cordis/billing-review.ts": {
     privilegedExports: ["composeBillingReview", "BillingReviewPlugin"],
     reason: "composeBillingReview checks no session, so its callers must.",
@@ -187,9 +197,9 @@ const MODULES: Record<string, Module> = {
       "renderView loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load. resolveInitialView reads only the registered view definitions from the snapshot and runs no loader.",
   },
   "src/lib/gui/host/server/tenant-pages.ts": {
-    privilegedExports: ["isTenantPage"],
+    privilegedExports: ["isTenantPage", "tenantOnlyRedirect"],
     reason:
-      "Reads only the registered view definitions from the snapshot, to tell whether a path is a tenant view's page, and runs no loader.",
+      "Reads only the registered view definitions from the snapshot, to tell whether a path is a tenant view's page, and runs no loader. tenantOnlyRedirect takes the roles its caller read. keepTenantOnlyToTenantPages passes nothing on: it reads the user and their rows with getRequestUserAccess (getUser) first, and reaches the snapshot only for a signed-in person whose rows are all tenant rows.",
   },
   "src/lib/gui/host/server/go.ts": {
     privilegedExports: ["resolveGoTarget"],
@@ -243,7 +253,7 @@ const ENTRIES: Record<string, Entry> = {
   "src/app/(gui)/layout.tsx": {
     kind: "session",
     reason:
-      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; isTenantPage runs only after getUser() and runs no view loader either.",
+      "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; tenantOnlyRedirect runs only after getUser() and runs no view loader either.",
   },
   "src/app/(gui)/[...path]/page.tsx": {
     kind: "session",

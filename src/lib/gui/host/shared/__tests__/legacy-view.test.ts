@@ -147,8 +147,10 @@ describe("legacyView on every catalog page", () => {
       "/microgrids/[id]/billing/[periodId]/send": ["billing.send-queue", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payments": ["payments.bill-attempts", "billing.periods"],
       "/microgrids/[id]/billing/[periodId]/payment-setup": ["payments.payment-setup", "billing.periods"],
-      // A tenant's page: a staff manifest has no tenant entry, and /my names no place.
+      // Tenant pages: a staff manifest has no tenant entry, and /my names no place.
       "/my": ["tenant.home", null],
+      "/my/usage": ["tenant.usage-month", null],
+      "/my/usage/day": ["tenant.usage-day", null],
     };
     const served = ALL_PAGES.filter((p) => p.servedBy === "view");
     expect(served.map((p) => p.path).sort()).toEqual(Object.keys(SERVED).sort());

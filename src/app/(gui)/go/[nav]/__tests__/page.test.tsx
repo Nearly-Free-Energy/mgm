@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   resolveGoTarget: vi.fn(),
 }));
 
+// The page's first call keeps a tenant-only person to tenant pages; that is
+// tested for every page in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
+vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
+
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect, notFound: mocks.notFound }));
 vi.mock("@/lib/auth/request-access", () => ({ getRequestUserAccess: mocks.getRequestUserAccess }));
 vi.mock("@/lib/gui/host/server/go", () => ({ resolveGoTarget: mocks.resolveGoTarget }));

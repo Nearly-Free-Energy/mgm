@@ -302,7 +302,8 @@ describe("tenant views and the tenant audience", () => {
     [
       "a staff legacy entry on a tenant view's path",
       (c) => c.nav.push(legacyMy),
-      ["nav", 1, "audience"],
+      // Appended after the tenant app's own entries.
+      ["nav", TENANT_APP_SURFACE.nav!.length, "audience"],
       "a nav entry that leads to a tenant view is for the tenant audience",
     ],
     ["a tenant entry for a view that is not a tenant view", (c) => delete c.views[0].scope, ["nav", 0, "audience"], "a tenant nav entry names a tenant view"],

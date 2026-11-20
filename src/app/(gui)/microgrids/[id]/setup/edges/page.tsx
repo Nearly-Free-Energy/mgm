@@ -17,6 +17,7 @@ import {
   currentUserIsSuperAdmin,
 } from "@/lib/auth/access";
 import { EdgeRowActions } from "./edge-row-actions";
+import { keepTenantOnlyToTenantPages } from "@/lib/gui/host/server/tenant-pages";
 
 // Setup > Edges (D2 / #53, #77).
 // Lists every edge attached to this microgrid. Rows link to edge detail.
@@ -62,6 +63,7 @@ export default async function SetupEdgesPage({
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await keepTenantOnlyToTenantPages();
   const { id } = await params;
   const sp = searchParams ? await searchParams : undefined;
   const supabase = await createClient();
