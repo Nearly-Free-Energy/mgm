@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MerchantSettings } from "../merchant-settings";
 import { PaymentHistory } from "../payment-history";
+import { RECONCILE_NOTES_MAX, RECONCILE_REFERENCE_MAX } from "@/lib/payments/reconcile-limits";
+import { ReconcileAttemptBody } from "@/lib/payments/schemas";
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 const fetchMock = vi.fn();
@@ -30,20 +32,44 @@ it("shows a failed credential test without claiming the configuration was saved"
 });
 it("shows reconciliation amounts and records only the entered external adjustment", async () => {
  fetchMock.mockImplementation(async (_url, options) => response(options ? {} : history));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  fireEvent.click(screen.getByText("Payment history"));
  await screen.findByText(/Difference: 20 UGX/);
  fireEvent.change(screen.getByLabelText("External amount (negative for refund)"), { target: { value: "20" } });
  fireEvent.change(screen.getByLabelText("External reference"), { target: { value: "cash-receipt-1" } });
  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Cash collected by manager" } });
+ fireEvent.change(screen.getByLabelText("Type Akello Grace to confirm"), { target: { value: "Akello Grace" } });
  fireEvent.click(screen.getByText("Record completed adjustment"));
  await waitFor(() => expect(refresh).toHaveBeenCalled());
  const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
- expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager" });
+ expect(JSON.parse(call![1].body)).toEqual({ action: "record_external", externalAmount: 20, externalReference: "cash-receipt-1", notes: "Cash collected by manager", confirmation: { acknowledged: [], typed: "Akello Grace" } });
+});
+it("caps the reference and notes at the lengths the reconcile route accepts", async () => {
+ fetchMock.mockImplementation(async () => response(history));
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
+ fireEvent.click(screen.getByText("Payment history"));
+ await screen.findByText(/Difference: 20 UGX/);
+ expect(screen.getByLabelText("External reference").getAttribute("maxLength")).toBe(String(RECONCILE_REFERENCE_MAX));
+ expect(screen.getByLabelText("Notes").getAttribute("maxLength")).toBe(String(RECONCILE_NOTES_MAX));
+ const longest = { action: "record_external", externalAmount: 20, externalReference: "r".repeat(RECONCILE_REFERENCE_MAX), notes: "n".repeat(RECONCILE_NOTES_MAX), confirmation: { acknowledged: [], typed: "Akello Grace" } };
+ expect(ReconcileAttemptBody.safeParse(longest).success).toBe(true);
+ expect(ReconcileAttemptBody.safeParse({ ...longest, externalReference: "r".repeat(RECONCILE_REFERENCE_MAX + 1) }).success).toBe(false);
+ expect(ReconcileAttemptBody.safeParse({ ...longest, notes: "n".repeat(RECONCILE_NOTES_MAX + 1) }).success).toBe(false);
+});
+it("accepts exact receipts with the action alone", async () => {
+ fetchMock.mockImplementation(async (_url, options) => response(options ? {} : history));
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
+ fireEvent.click(screen.getByText("Payment history"));
+ await screen.findByText(/Difference: 20 UGX/);
+ fireEvent.click(screen.getByText("Accept exact receipts"));
+ await waitFor(() => expect(refresh).toHaveBeenCalled());
+ const call = fetchMock.mock.calls.find(call => call[1]?.method === "POST");
+ expect(call![0]).toBe("/api/payments/attempts/attempt-1/reconcile");
+ expect(JSON.parse(call![1].body)).toEqual({ action: "accept_exact" });
 });
 it("opens payment history as a dialog that keeps focus inside and closes on Escape", async () => {
  fetchMock.mockImplementation(async () => response(history));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  const trigger = screen.getByRole("button", { name: "Payment history" });
  fireEvent.click(trigger);
  const dialog = await screen.findByRole("dialog", { name: "Payment history" });
@@ -60,7 +86,7 @@ it("opens payment history as a dialog that keeps focus inside and closes on Esca
 it("keeps focus on Payment history after Escape while a request runs, and ignores clicks on it until the request ends", async () => {
  let finish!: () => void;
  fetchMock.mockImplementation((_url, options) => options ? new Promise(resolve => { finish = () => resolve(response({})); }) : Promise.resolve(response(history)));
- render(<PaymentHistory lineItemId="bill-1" />);
+ render(<PaymentHistory lineItemId="bill-1" tenantName="Akello Grace" />);
  const trigger = screen.getByRole("button", { name: "Payment history" });
  fireEvent.click(trigger);
  const dialog = await screen.findByRole("dialog", { name: "Payment history" });
@@ -75,7 +101,10 @@ it("keeps focus on Payment history after Escape while a request runs, and ignore
  fireEvent.click(trigger);
  expect(screen.queryByRole("dialog")).toBeNull();
  expect(fetchMock.mock.calls.length).toBe(callsBefore);
- expect(fetchMock.mock.calls.filter(call => call[1]?.method === "POST")).toHaveLength(1);
+ const posts = fetchMock.mock.calls.filter(call => call[1]?.method === "POST");
+ expect(posts).toHaveLength(1);
+ expect(posts[0][0]).toBe("/api/payments/attempts/attempt-1/refresh");
+ expect(JSON.parse(posts[0][1].body)).toEqual({});
  finish();
  await waitFor(() => expect(refresh).toHaveBeenCalled());
  await waitFor(() => expect(trigger.hasAttribute("aria-disabled")).toBe(false));

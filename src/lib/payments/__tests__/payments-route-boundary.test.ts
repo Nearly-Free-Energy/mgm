@@ -157,6 +157,8 @@ const ROUTE_PACKAGES: Record<string, string> = {
     "The database client. Check 4 reads its table writes and database function calls (`directAccess`) and its Edge Function and Auth calls (`supabaseCalls`). Wrong once a route uses a part of the client neither reads, such as Realtime channels.",
   "@supabase/ssr":
     "Builds the same Supabase client bound to the request's cookies (createServerClient). Wrong for the same reason as @supabase/supabase-js.",
+  zod:
+    "Validates the request body against a schema (src/lib/payments/schemas.ts, through parseJsonBody); pure, calls out to nothing. Wrong once a schema gains an async refinement that does I/O.",
 };
 
 /** Globals `fetch` can be reached through. */

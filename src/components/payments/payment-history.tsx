@@ -3,9 +3,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { DialogOverlay, DialogPanel } from "@/components/ui/dialog";
+import { RECONCILE_NOTES_MAX, RECONCILE_REFERENCE_MAX } from "@/lib/payments/reconcile-limits";
 import type { PaymentAttempt, PaymentReceipt } from "@/lib/payments/repository";
 
-export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
+/**
+ * `tenantName` is the bill's tenant's display name, which a person types to
+ * record a completed adjustment: the reconcile route refuses one without it
+ * (PaymentsCapability.reconcile, 428), as the GUI's typed confirmation sends it.
+ */
+export function PaymentHistory({ lineItemId, tenantName }: { lineItemId: string; tenantName: string }) {
  const router = useRouter();
  const [open, setOpen] = useState(false);
  const [attempts, setAttempts] = useState<PaymentAttempt[]>([]);
@@ -16,6 +22,7 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
  const [externalAmount, setAmount] = useState("");
  const [reference, setReference] = useState("");
  const [notes, setNotes] = useState("");
+ const [typed, setTyped] = useState("");
  async function load() {
   const response = await fetch(`/api/payments/attempts?lineItemId=${lineItemId}`);
   const value = await response.json(); if (!response.ok) throw new Error(value.error);
@@ -30,7 +37,9 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
   setBusy(true); setError("");
   try {
    if (action === "record_external" && (externalAmount.trim() === "" || !Number.isFinite(Number(externalAmount)))) throw new Error("Enter the actual externally collected amount, or a negative refund amount.");
-   const response = await fetch(`/api/payments/attempts/${attempt.id}/${action === "refresh" ? "refresh" : "reconcile"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, externalAmount: Number(externalAmount), externalReference: reference, notes }) });
+   // Each route's body (src/lib/payments/schemas.ts): refresh takes none, accepting exact receipts no amount.
+   const body = action === "refresh" ? {} : action === "accept_exact" ? { action } : { action, externalAmount: Number(externalAmount), externalReference: reference, notes, confirmation: { acknowledged: [], typed } };
+   const response = await fetch(`/api/payments/attempts/${attempt.id}/${action === "refresh" ? "refresh" : "reconcile"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
    const value = await response.json(); if (!response.ok) throw new Error(value.error);
    await load(); router.refresh();
   } catch (error) { setError(error instanceof Error ? error.message : "Payment action failed"); }
@@ -54,8 +63,9 @@ export function PaymentHistory({ lineItemId }: { lineItemId: string }) {
    {attempt.status === "needs_reconciliation" && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void act(attempt, "record_external"); }}>
     <p>Record only an externally completed collection or refund. MGM does not execute refunds here.</p>
     <label className="block">External amount (negative for refund)<input className="block rounded border p-2" type="number" step="any" required value={externalAmount} onChange={event => setAmount(event.target.value)} /></label>
-    <label className="block">External reference<input className="block rounded border p-2" required value={reference} onChange={event => setReference(event.target.value)} /></label>
-    <label className="block">Notes<textarea className="block rounded border p-2" required value={notes} onChange={event => setNotes(event.target.value)} /></label>
+    <label className="block">External reference<input className="block rounded border p-2" required maxLength={RECONCILE_REFERENCE_MAX} value={reference} onChange={event => setReference(event.target.value)} /></label>
+    <label className="block">Notes<textarea className="block rounded border p-2" required maxLength={RECONCILE_NOTES_MAX} value={notes} onChange={event => setNotes(event.target.value)} /></label>
+    <label className="block">Type {tenantName.trim()} to confirm<input className="block rounded border p-2" required autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} /></label>
     <button disabled={busy} className="rounded border p-2">Record completed adjustment</button><button type="button" disabled={busy} className="ml-2 rounded border p-2" onClick={() => act(attempt, "accept_exact")}>Accept exact receipts</button>
    </form>}
   </article>)}

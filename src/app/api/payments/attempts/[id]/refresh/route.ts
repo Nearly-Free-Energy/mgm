@@ -1,20 +1,31 @@
 /**
  * POST /api/payments/attempts/[id]/refresh
  *
- * Manager "Refresh payment status" action: server-side re-verification of
- * one attempt via GetTransactionStatus. Validates merchant reference,
- * tracking identity, amount and currency before recording payment.
+ * Manager "Refresh status" action (payments.refresh-attempt): server-side
+ * re-verification of one attempt via GetTransactionStatus. Validates
+ * merchant reference, tracking identity, amount and currency before
+ * recording payment.
+ *
+ * Body: {} (RefreshAttemptBody in src/lib/payments/schemas.ts); anything
+ * else answers 400 { error, field?, code: "invalid_body" } before the
+ * attempt is looked up.
+ *
+ * 401 without a live session, 404 for an attempt that does not exist, then
+ * whatever composePayments and refreshPaymentStatus answer (403 for
+ * another organization's attempt, 409 for an attempt with no tracking id).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { composePayments } from "@/lib/payments/compose";
+import { RefreshAttemptBody } from "@/lib/payments/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id: attemptId } = await params;
@@ -39,6 +50,8 @@ export async function POST(
       { status: 401 }
     );
   }
+  const parsed = await parseJsonBody(request, RefreshAttemptBody);
+  if (!parsed.ok) return parsed.response;
   // Resolve the owning org with the service client (RLS-independent lookup),
   // then compose with the caller session so org scope is enforced.
   const service = createServiceClient();

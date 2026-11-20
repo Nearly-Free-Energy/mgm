@@ -287,6 +287,18 @@ export const BILLING_PLUGIN: BundledPlugin = {
       path: "/microgrids/[id]/billing/[periodId]/history",
       params: { id: "microgrid", periodId: "billingPeriod" },
     },
+    // The close checklist, as the billing.close-checklist view.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/close",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
+    // The send queue, as the billing.send-queue view.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/send",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
     { path: "/microgrids/[id]/setup/rates", params: { id: "microgrid" } },
     { path: "/communities/[id]/invoice", params: { id: "community" } },
     // The savings under the Operations day, as the billing.savings view.
@@ -335,6 +347,20 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
   pages: [
     { path: "/organizations/[id]/payments", params: { id: "organization" } },
     { path: "/communities/[id]/payment", params: { id: "community" } },
+    // A billing period's bills and one bill's payment attempts, as the
+    // payments.bill-attempts view, shown as a tab of billing's period review.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payments",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
+    // The community's payment readiness, with the link to its Payment page,
+    // as the payments.payment-setup view, a section of billing's send queue.
+    {
+      path: "/microgrids/[id]/billing/[periodId]/payment-setup",
+      params: { id: "microgrid", periodId: "billingPeriod" },
+      servedBy: "view",
+    },
   ],
   tables: [
     "payment_merchant_accounts",

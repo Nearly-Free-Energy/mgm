@@ -1,9 +1,15 @@
 /**
  * A billing contribution, written against the GUI contract for tests only.
  * Nothing registers it. Its loaders and its prepare step answer 503, and its
- * actions take the schemas their routes parse with. Its paths need not be
- * pages MGM serves (the close checklist is not one), so a test that checks
- * ownership or release gives it a catalog of its own. All data is synthetic.
+ * actions take the schemas their routes parse with. Its views use the real
+ * billing contribution's ids and paths (src/lib/billing/surface.ts), whose
+ * pages the billing plugin owns in src/lib/plugins/bundled.ts, but not its
+ * keys, steps or fields: billing.close-checklist declares steps of its own
+ * here. So a test that checks ownership or release gives it a catalog of
+ * its own rather than relying on the bundled one, and a test about the real
+ * views reads BILLING_SURFACE. If a test starts comparing this fixture with
+ * the real contribution, or a fixture path stops being one the billing
+ * plugin owns, revisit this. All data is synthetic.
  */
 import { z } from "zod";
 import { ClosePeriodBody, CreatePeriodBody, GenerateBillsBody } from "@/lib/billing/schemas";
