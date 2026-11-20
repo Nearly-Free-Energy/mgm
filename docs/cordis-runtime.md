@@ -341,13 +341,16 @@ the gate's copy on its own views and leaves them out of other plugins', and
 `whilePluginOff: "enabled"`: that one is shown enabled on its own plugin's
 views and prepared, with its `available()` and `prepare` run as usual. Only
 the 409 is passed over: an unreadable gate (503, or a throw) still disables,
-refuses and leaves out everything. `gui-surface.test.ts` allows
+refuses and leaves out everything. The same 409 skips the plugin's
+watchers in the signals, unless a watcher declares `whilePluginOff:
+"checked"`; an unreadable gate lists each as unchecked. `gui-surface.test.ts` allows
 `whilePluginOff` on an action only where its `METHOD /api/route` is a
 `PaymentExemption` in `UNGATED_WRITES` naming a method that
 `capability-gating.test.ts` (`GATING`) says runs while the plugin is off, on
 a Payments or Pesapal action, so the host never offers a write its route
-refuses. It allows `attach.whilePluginOff` only on a Payments or Pesapal
-view, while every Payments method in `LOADER_READS` runs while off. The
+refuses. It allows `attach.whilePluginOff`, and a watcher's `whilePluginOff`, only on
+a Payments or Pesapal view or watcher, while every Payments method in
+`LOADER_READS` runs while off. The
 helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
 in `src/lib/runtime/__tests__/route-rules.ts`, shared with
 `route-surface.test.ts`.

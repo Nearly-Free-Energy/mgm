@@ -313,6 +313,20 @@ export type SignalDef = {
   load(req: SurfaceRequest): Promise<SignalOut[]>;
   /** Fixtures, so every GUI can be tested against the watcher's signals. */
   examples: readonly SignalOut[];
+  /**
+   * "checked": the host still runs this watcher while the plugin gate
+   * answers that its plugin is off for the organization (its 409), because
+   * what it reports can still be resolved then. A gate that cannot be read
+   * (its 503, or a throw) still lists it as unchecked, without running it.
+   *
+   * Declared, never inferred: gui-surface.test.ts allows it only on a
+   * Payments or Pesapal watcher, and only while every Payments capability
+   * method a surface module may call (LOADER_READS there) runs while the
+   * plugin is off, as `attach.whilePluginOff` on a view. If the reconcile
+   * route stops accepting reconciliation while Payments is off
+   * (docs/payments-rollout.md), remove it from `payments.reconcile`.
+   */
+  whilePluginOff?: "checked";
 };
 
 export interface Contribution {

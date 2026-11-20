@@ -6,7 +6,9 @@ import "server-only";
  * paint) and the status items the manifest carries (./manifest.ts).
  *
  * Each watcher and status loader runs only while its plugin is enabled for
- * the organization (./gate-state.ts), on its own request and client of the
+ * the organization (./gate-state.ts), or for a watcher declaring
+ * `whilePluginOff: "checked"` also while the gate answers that its plugin
+ * is off, on its own request and client of the
  * person's session (./access.ts), and within its own time budget
  * (./budget.ts). What it returns is strictly parsed, its page hrefs must be
  * released pages, its own `href` a page its plugin owns, and a proposal's
@@ -161,8 +163,8 @@ async function checkProposals(ctx: HostContext, organizationId: string, snapshot
 /**
  * The signals of the organization `requested` names when the person can see
  * it, otherwise of the first one they can (./organization.ts). A disabled
- * plugin's watchers are skipped; one whose plugin state cannot be read is
- * unchecked.
+ * plugin's watchers are skipped, unless one declares `whilePluginOff:
+ * "checked"`; one whose plugin state cannot be read is unchecked.
  */
 export async function collectSignals(ctx: HostContext, o: { requested?: string | null }): Promise<HostOutcome<Signals>> {
   requireIssued(ctx);
@@ -180,8 +182,9 @@ export async function collectSignals(ctx: HostContext, o: { requested?: string |
   const results = await Promise.all(
     snapshot.signals.map(async (entry): Promise<Watched | "off"> => {
       const state = await gate(entry.plugin).catch(() => null);
-      if (state && !state.ok && state.status === 409) return "off";
-      if (!state?.ok) return { ok: false, miss: "gate" };
+      const off = state !== null && !state.ok && state.status === 409;
+      if (off && entry.whilePluginOff !== "checked") return "off";
+      if (!off && !state?.ok) return { ok: false, miss: "gate" };
       return watch(ctx, org, entry, snapshot, gate);
     }),
   );

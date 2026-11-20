@@ -355,6 +355,9 @@ const signalDefSchema = z
     budgetMs: z.int().min(1).max(10_000).optional(),
     load: fn,
     examples: z.array(z.unknown()).min(1, "a watcher needs at least one example").readonly(),
+    // Which watchers may declare it is checked in CI (gui-surface.test.ts),
+    // which can read the capability's gating.
+    whilePluginOff: z.literal("checked").optional(),
   })
   .superRefine((w, ctx) => {
     const seen = new Set<string>();

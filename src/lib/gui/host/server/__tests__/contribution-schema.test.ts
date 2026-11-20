@@ -176,6 +176,8 @@ describe("parseContribution", () => {
     ],
     ["budgetMs over 10000", (c) => (c.signals[0].budgetMs = 20_000), ["signals", 0, "budgetMs"]],
     ["budgetMs 0", (c) => (c.signals[0].budgetMs = 0), ["signals", 0, "budgetMs"]],
+    ["a watcher's whilePluginOff of another value", (c) => (c.signals[0].whilePluginOff = true), ["signals", 0, "whilePluginOff"]],
+    ["a watcher's whilePluginOff in an attachment's word", (c) => (c.signals[0].whilePluginOff = "listed"), ["signals", 0, "whilePluginOff"]],
     ["a watcher without examples", (c) => (c.signals[0].examples = []), ["signals", 0, "examples"], "a watcher needs at least one example"],
     ["a watcher example with a source", (c) => (c.signals[0].examples[0].source = "billing.period-due"), ["signals", 0, "examples", 0], 'Unrecognized key: "source"'],
     ["a watcher example of an unknown kind", (c) => (c.signals[0].examples[0].kind = "nudge"), ["signals", 0, "examples", 0, "kind"]],

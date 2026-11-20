@@ -39,7 +39,11 @@ import "server-only";
  * each period with failures in the last week on bills still to be paid,
  * each leading to the period's payments, or to the bill when only one is
  * concerned. Each composes the capability, so it has a longer budget than
- * the host's default.
+ * the host's default. While Payments is off the host still runs
+ * `payments.reconcile` (whilePluginOff: "checked"), since the reconcile
+ * route accepts reconciliation then (its PaymentExemption), and skips
+ * `payments.failed`: no customer can pay online then, so a failure is no
+ * longer something to follow up.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { PAYMENTS_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -213,7 +217,8 @@ export const PAYMENTS_SURFACE: Contribution = {
     },
   ],
   signals: [
-    { id: RECONCILE_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadReconcileSignals, examples: RECONCILE_EXAMPLES },
+    // Reconciliation stays available while Payments is off (docs/payments-rollout.md), so held attempts are still reported then.
+    { id: RECONCILE_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadReconcileSignals, examples: RECONCILE_EXAMPLES, whilePluginOff: "checked" },
     { id: FAILED_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadFailedSignals, examples: FAILED_EXAMPLES },
   ],
 };

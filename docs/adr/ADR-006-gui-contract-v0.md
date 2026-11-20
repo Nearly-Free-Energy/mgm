@@ -122,6 +122,12 @@ read a stored credential, or to send data to another origin.
      method a surface module may call runs while the plugin is off.
      `gui-surface.test.ts` checks both. The registration check refuses
      `attach.whilePluginOff` on a section or a `vendor` view.
+   - Its watchers are not run, and are listed as neither checked nor
+     unchecked, unless the watcher declares `whilePluginOff: "checked"`;
+     an unreadable gate lists every watcher as unchecked. As with
+     `attach.whilePluginOff`, only a Payments or Pesapal watcher may
+     declare it, and only while every Payments capability method a surface
+     module may call runs while the plugin is off.
 
 9. **Signals.** A plugin reports what needs someone through watchers
    (`signals` in its contribution); `GET /api/gui/signals` and
@@ -130,8 +136,9 @@ read a stored credential, or to send data to another origin.
    - Only staff of that organization get signals. A person whose rows are
      all tenant rows gets a 403, and no watcher runs.
    - The host asks the plugin gate per watcher. Its 409 skips the watcher,
-     which is then neither checked nor unchecked; an unreadable gate lists
-     it as unchecked, without running it.
+     which is then neither checked nor unchecked, unless it declares
+     `whilePluginOff: "checked"` (decision 8); an unreadable gate lists it
+     as unchecked, without running it.
    - Each watcher runs on its own request, within its own budget (1500 ms
      unless it sets `budgetMs`). One that is late, throws, or returns
      anything the host refuses is listed as unchecked, and only its id and
@@ -176,7 +183,7 @@ Worse, or to watch:
   must check them again at run time (decision 3).
 - The import boundary rests on the test and on review. It is not process
   isolation.
-- Which actions and views may declare `whilePluginOff` (decision 8) is
+- Which actions, views and watchers may declare `whilePluginOff` (decision 8) is
   checked in CI by `gui-surface.test.ts`, not when a contribution is
   registered, because the registration check reads no test data. The route
   stays the authority, so a declaration that slipped past CI could only

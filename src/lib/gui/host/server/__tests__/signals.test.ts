@@ -186,6 +186,27 @@ describe("collectSignals", () => {
     expect(logged()).toContain("payments.failed: not checked (gate)");
   });
 
+  it('runs a watcher declaring whilePluginOff: "checked" while its plugin is off, but never while its state cannot be read', async () => {
+    const paymentsBase = { ...base, href: OWN.payments };
+    const kept = (id: string) => ({ ...watcher("payments", id, async () => [{ ...paymentsBase, id: "held", kind: "your-move" }]), whilePluginOff: "checked" }) as RegisteredSignal;
+    const hidden = vi.fn(async () => []);
+    gates.set("payments", { ok: false, status: 409, code: "payments_disabled", message: "Payments is off" });
+    use([kept("payments.reconcile"), watcher("payments", "payments.failed", hidden)]);
+    const off = await value();
+    expect([off.checked, off.unchecked, off.top.map((s) => s.id)]).toEqual([["payments.reconcile"], [], ["payments.reconcile:held"]]);
+    expect(hidden).not.toHaveBeenCalled();
+
+    const load = vi.fn(async () => []);
+    const declared = { ...watcher("payments", "payments.reconcile", load), whilePluginOff: "checked" } as RegisteredSignal;
+    gates.set("payments", { ok: false, status: 503, code: "payments_gate_unavailable", message: "?" });
+    use([declared]);
+    expect(await value()).toMatchObject({ checked: [], unchecked: ["payments.reconcile"] });
+    gates.delete("payments");
+    throwing = "payments";
+    expect(await value()).toMatchObject({ checked: [], unchecked: ["payments.reconcile"] });
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it("lists a watcher whose plugin state read throws as unchecked, without running it or repeating the error", async () => {
     throwing = "payments";
     const load = vi.fn(async () => []);

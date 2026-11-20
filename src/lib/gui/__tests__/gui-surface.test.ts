@@ -25,7 +25,10 @@
  * Signals: 10. each watcher example's href, where its signal is resolved, is
  * a released page the plugin owns, as the host requires of what the watcher
  * returns (watch in src/lib/gui/host/server/signals.ts), and every other
- * href in it is a released page.
+ * href in it is a released page; 11. a watcher declaring `whilePluginOff` is
+ * a Payments or Pesapal watcher, and every Payments capability method its
+ * surface module may call (LOADER_READS) runs while the plugin is off, as
+ * check 9 holds a view's attach.whilePluginOff.
  *
  * Each check is a function over its inputs and the self-tests feed it
  * violating fixtures, so the guard is shown to fail on kinds of entry the
@@ -362,6 +365,25 @@ function signalProblems(plugin: MgmPluginName, def: Pick<SignalDef, "id" | "exam
   return problems.map((p) => `${def.id}: ${p}`);
 }
 
+/**
+ * Check 11: a watcher the host runs while its plugin is off may call only
+ * capability methods that run then. Check 8 holds every surface module to
+ * LOADER_READS, so it is enough that every Payments method listed there runs
+ * while off, as for check 9.
+ */
+function whileOffSignalProblems(plugin: MgmPluginName, def: Pick<SignalDef, "id" | "whilePluginOff">, facts: Facts): Problems {
+  if (def.whilePluginOff === undefined) return [];
+  const problems: Problems = [];
+  if (!PAYMENT_EXEMPTION_OWNERS.has(plugin)) problems.push(`declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`);
+  const gating = facts.gating ?? paymentsGating();
+  for (const method of (facts.reads ?? LOADER_READS)[PAYMENTS_CONTRACT] ?? []) {
+    if (gating.get(method) !== WHILE_OFF) {
+      problems.push(`declares whilePluginOff, but LOADER_READS lets it call ${method}, which refuses while the plugin is off`);
+    }
+  }
+  return problems.map((p) => `${def.id}: ${p}`);
+}
+
 /** Every registered entry, with the plugin that contributed it and a name for messages. */
 function registered(s: SurfaceSnapshot): { plugin: MgmPluginName; name: string; entry: object }[] {
   return [
@@ -400,7 +422,7 @@ function surfaceProblems(snapshot: SurfaceSnapshot, facts: Facts): Problems {
   return [
     ...[...snapshot.actions.values()].flatMap(({ plugin, def }) => actionProblems(plugin, def, facts)),
     ...snapshot.views.flatMap(({ plugin, def }) => [...viewProblems(plugin, def, facts), ...whileOffViewProblems(plugin, def, facts)]),
-    ...snapshot.signals.flatMap((entry) => signalProblems(entry.plugin, entry, facts)),
+    ...snapshot.signals.flatMap((entry) => [...signalProblems(entry.plugin, entry, facts), ...whileOffSignalProblems(entry.plugin, entry, facts)]),
   ];
 }
 
@@ -800,6 +822,23 @@ describe("the GUI surface guard", () => {
     ]);
     expect(signalProblems("metering", due, facts)).toEqual([
       expect.stringMatching(/^billing\.period-due: example 0 leads to .*: \/microgrids\/\[id\]\/billing\/\[periodId\]\/close is billing's page$/),
+    ]);
+  });
+
+  it("allows a watcher's whilePluginOff only on Payments, while every Payments read runs while off", () => {
+    const declared = { id: "payments.reconcile", whilePluginOff: "checked" } as const;
+    expect(whileOffSignalProblems("payments", declared, facts)).toEqual([]);
+    expect(whileOffSignalProblems("billing", { id: "billing.period-due" }, facts)).toEqual([]);
+    for (const plugin of ["billing", "metering"] as const) {
+      expect(whileOffSignalProblems(plugin, declared, facts)).toEqual([`payments.reconcile: declares whilePluginOff, but ${plugin}'s routes carry no PaymentExemption`]);
+    }
+    const reads = { ...LOADER_READS, PaymentsCapabilityContract: ["listAttention", "ensureCheckout"] };
+    expect(whileOffSignalProblems("payments", declared, { ...facts, reads })).toEqual([
+      "payments.reconcile: declares whilePluginOff, but LOADER_READS lets it call ensureCheckout, which refuses while the plugin is off",
+    ]);
+    const refusing = new Map([...paymentsGating(), ["listAttention", "refuses-when-disabled"]]);
+    expect(whileOffSignalProblems("payments", declared, { ...facts, gating: refusing })).toEqual([
+      "payments.reconcile: declares whilePluginOff, but LOADER_READS lets it call listAttention, which refuses while the plugin is off",
     ]);
   });
 
