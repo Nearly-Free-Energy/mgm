@@ -21,8 +21,8 @@
  *   - provider selection, the EMS configuration and its decrypt: the service
  *     role, for that microgrid only;
  *   - the days the unit's primary meters are also the primary of another
- *     unit on the unit's own microgrid (listPrimaryElsewhere, for the
- *     shared-use label, D12): the tenant's client, through
+ *     unit, on any microgrid (listPrimaryElsewhere, for the shared-use
+ *     label, D12): the tenant's client, through
  *     fn_tenant_shared_meter_days, which refuses anyone but the unit's own
  *     tenant, reads the unit's links itself and returns device ids and
  *     dates, never which unit. The service role takes no part in it.
@@ -240,9 +240,11 @@ export function createTenantUsageSource(options: {
 
     async listPrimaryElsewhere({ fromDate, toDate }): Promise<PrimaryElsewhereSpan[]> {
       try {
-        if (!isCalendarDateKey(fromDate) || !isCalendarDateKey(toDate) || fromDate >= toDate) {
+        if (!isCalendarDateKey(fromDate) || !isCalendarDateKey(toDate) || fromDate > toDate) {
           throw new UsageReadError("shared-days", "invalid_date");
         }
+        // An empty range has no days; the function refuses one (22023).
+        if (fromDate === toDate) return [];
         // The tenant's own client, never the service role: the function
         // refuses anyone but the unit's own tenant, reads the unit's links
         // itself and answers device ids and dates only (its migration,

@@ -498,7 +498,6 @@ describe("the days the unit's primary meters are also the primary of another uni
     ["2026-11-01,effective_to.gt.0", "2026-12-01"],
     ["2026-11-01", "2026-12-01)"],
     ["2026-02-30", "2026-03-01"],
-    ["2026-11-01", "2026-11-01"],
     ["2026-12-01", "2026-11-01"],
   ])("rejects %s .. %s before any read", async (fromDate, toDate) => {
     const { source } = setup({ sharedDays: [] });
@@ -506,6 +505,14 @@ describe("the days the unit's primary meters are also the primary of another uni
     await expect(source.listPrimaryElsewhere({ fromDate, toDate })).rejects.toThrow();
     expect(log).toEqual([]);
     expect(errors).toHaveBeenCalledWith("[tenant-app] usage read failed", { step: "shared-days", code: "invalid_date" });
+  });
+
+  it("answers an empty range with no days, without a read", async () => {
+    const { source } = setup({ sharedDays: [row("p2", "2026-11-01", "2026-11-02")] });
+
+    await expect(source.listPrimaryElsewhere({ fromDate: "2026-11-01", toDate: "2026-11-01" })).resolves.toEqual([]);
+    expect(log).toEqual([]);
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it("rejects when the function fails, logging a step and code only", async () => {

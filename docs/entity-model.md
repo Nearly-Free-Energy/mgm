@@ -178,9 +178,9 @@ was dropped (`20261118100100_tenant_role_access.sql`).
   OpenEMS connection on the service role
   (`src/lib/tenant-app/infrastructure/usage-source.ts`); the tenant's own
   client still reads no such row. A meter that is the primary of two units
-  on the same microgrid on the same day is shown to each, labelled "Shared
+  on the same day, on any microgrid, is shown to each, labelled "Shared
   with another unit, not only yours" on those days, never as either unit's
   own use; for that, the tenant's own client asks
-  `fn_tenant_shared_meter_days` for the days, which reads the primary links
-  of other units on the unit's own microgrid in the database and returns
-  dates only, never whose they are.
+  `fn_tenant_shared_meter_days` for the days, which reads the other units'
+  primary links of the unit's meters in the database and returns dates
+  only, never whose they are.

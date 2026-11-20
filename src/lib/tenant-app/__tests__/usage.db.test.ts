@@ -23,10 +23,11 @@
  * sees S's whole use, labelled as shared, never as its own.
  *
  * Units F, G, H, J and K exercise fn_tenant_shared_meter_days directly: F
- * holds S as primary on another microgrid (linked with the service role, as
- * X is) and never counts; G holds the grid meter on C's days; H holds S
- * inside E's days; J holds meter T twice with a gap and K holds T
- * throughout.
+ * holds S as primary from 5 October on another microgrid (linked with the
+ * service role, as X is) and counts all the same, since billing bills it
+ * too (mgm#228), so D's shared days start on the 5th; G holds the grid
+ * meter on C's days; H holds S inside E's days; J holds meter T twice with
+ * a gap and K holds T throughout, until its access is removed.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
  */
@@ -37,6 +38,7 @@ import {
   createTestUser,
   LOCAL_SUPABASE_URL,
   mintServiceRoleJwt,
+  runAsDatabaseOwner,
   serviceClient,
   shouldSkip,
   type TestUser,
@@ -84,7 +86,9 @@ const EMAIL_D = "tenant-usage-d@test.local";
 const EMAIL_E = "tenant-usage-e@test.local";
 const EMAIL_H = "tenant-usage-h@test.local";
 const EMAIL_J = "tenant-usage-j@test.local";
-const EMAILS = [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E, EMAIL_H, EMAIL_J];
+const EMAIL_K = "tenant-usage-k@test.local";
+const EMAIL_MANAGER = "tenant-usage-manager@test.local";
+const EMAILS = [EMAIL_A, EMAIL_B, EMAIL_C, EMAIL_D, EMAIL_E, EMAIL_H, EMAIL_J, EMAIL_K, EMAIL_MANAGER];
 const KAMPALA = "Africa/Kampala";
 
 let tenantA: TestUser;
@@ -94,6 +98,8 @@ let tenantD: TestUser;
 let tenantE: TestUser;
 let tenantH: TestUser;
 let tenantJ: TestUser;
+let tenantK: TestUser;
+let manager: TestUser;
 
 const energySeries = vi.spyOn(FixtureMeteringProvider.prototype, "getDeviceEnergySeries");
 
@@ -174,6 +180,8 @@ beforeAll(async () => {
   tenantE = await createTestUser({ email: EMAIL_E, role: "tenant", scopeId: UNIT_E });
   tenantH = await createTestUser({ email: EMAIL_H, role: "tenant", scopeId: UNIT_H });
   tenantJ = await createTestUser({ email: EMAIL_J, role: "tenant", scopeId: UNIT_J });
+  tenantK = await createTestUser({ email: EMAIL_K, role: "tenant", scopeId: UNIT_K });
+  manager = await createTestUser({ email: EMAIL_MANAGER, role: "org_manager", scopeId: ORG });
 }, 60_000);
 
 afterAll(async () => {
@@ -187,6 +195,13 @@ beforeEach(() => {
   _resetTenantUsageCacheForTests();
   energySeries.mockClear();
 });
+
+/** The database's own UTC date, as fn_tenant_shared_meter_days takes it. */
+function databaseUtcDate(): string {
+  const result = runAsDatabaseOwner("SELECT ((now() AT TIME ZONE 'UTC')::date)::text AS today");
+  if (!result.ok) throw new Error(`[tenant-usage.db] database date: ${result.output}`);
+  return (JSON.parse(result.stdout) as { today: string }[])[0].today;
+}
 
 async function usageMonth(user: TestUser, tenantId: string, month: string): Promise<TenantUsageMonth> {
   const composed = await composeTenantApp({ supabase: user.client, tenantId });
@@ -396,22 +411,23 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       const unitE = await usageMonth(tenantE, UNIT_E, "2026-10");
       const figures = generated("2026-10-01", "2026-10-31", "day", shared);
 
-      // From the 10th, E's first day. F holds S from the 5th but is on
-      // another microgrid, so it never counts.
+      // From the 5th, F's first day: F is on another microgrid, and billing
+      // bills it for S all the same (mgm#228).
       expect(unitD.days).toEqual(
         october.map((date, i) => ({
           date,
           ...bucket(figures[i]),
-          ...(date >= "2026-10-10" && figures[i] !== null ? { shared: true } : {}),
+          ...(date >= "2026-10-05" && figures[i] !== null ? { shared: true } : {}),
         }))
       );
       // E holds S from the 10th: every day it shows is shared, with D's figures.
       expect(unitE.days.slice(9)).toEqual(unitD.days.slice(9));
       expect(unitE.days.slice(0, 9).every((d) => d.state === "no-meter")).toBe(true);
-      const sharedDays = unitD.days.filter((d) => d.shared).length;
-      expect(sharedDays).toBeGreaterThan(10);
-      expect(unitD.total).toMatchObject({ shared: sharedDays });
-      expect(unitE.total).toMatchObject({ shared: sharedDays, kwh: kwhSum(figures.slice(9)) });
+      const labelled = (month: TenantUsageMonth) => month.days.filter((d) => d.shared).length;
+      expect(labelled(unitE)).toBeGreaterThan(10);
+      expect(labelled(unitD)).toBeGreaterThanOrEqual(labelled(unitE));
+      expect(unitD.total).toMatchObject({ shared: labelled(unitD) });
+      expect(unitE.total).toMatchObject({ shared: labelled(unitE), kwh: kwhSum(figures.slice(9)) });
       // The label, as the month and the home show it.
       expect(monthSoFar(unitE, { fmt, locale: "en-GB" }).note).toContain(SHARED_USE_NOTE);
       expect(monthSoFar(unitD, { fmt, locale: "en-GB" }).note).toContain("days shared with another unit, not only yours");
@@ -423,7 +439,7 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       expect(day.hours.map((h) => h.kwh)).toEqual(generated("2026-10-12", "2026-10-12", "hour", shared));
       const model = buildUsageDayModel(day, { fmt, locale: "en-GB", links: { tenantId: UNIT_E, several: false } });
       expect(model.body.totals?.note?.text).toContain(SHARED_USE_NOTE);
-      expect(await usageDay(tenantD, UNIT_D, "2026-10-05")).not.toHaveProperty("shared");
+      expect(await usageDay(tenantD, UNIT_D, "2026-10-04")).not.toHaveProperty("shared");
     });
 
     it("labels the meter on both units' homes while both hold it", async () => {
@@ -464,10 +480,10 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       effective_to,
     });
 
-    it("answers D the days S is also E's or H's, merged, and never F's, on another microgrid", async () => {
+    it("answers D the days S is also E's, F's or H's, merged, F's though it is on another microgrid", async () => {
       const { data, error } = await sharedDays(tenantD, UNIT_D, "2026-10-01", "2026-11-01");
       expect(error).toBeNull();
-      expect(data).toEqual([span(SHARED_METER, "2026-10-10", "2026-11-01")]);
+      expect(data).toEqual([span(SHARED_METER, "2026-10-05", "2026-11-01")]);
     });
 
     it("answers E the days of its own link that D holds S too", async () => {
@@ -522,6 +538,24 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
       }
     });
 
+    it("refuses a tenant whose access to the unit was removed", async () => {
+      // K holds T throughout, so J's links are its shared days until then.
+      const before = await sharedDays(tenantK, UNIT_K, "2026-10-01", "2026-11-01");
+      expect(before.error).toBeNull();
+      expect(before.data?.length).toBeGreaterThan(0);
+
+      const listed = await manager.client.rpc("fn_tenant_access_list", { _tenant_id: UNIT_K });
+      expect(listed.error).toBeNull();
+      const access = (listed.data as { access_id: string; email: string }[]).find((row) => row.email === EMAIL_K);
+      expect(access).toBeDefined();
+      const revoked = await manager.client.rpc("fn_tenant_access_revoke", { _tenant_id: UNIT_K, _access_id: access!.access_id });
+      expect(revoked.error).toBeNull();
+
+      const { data, error } = await sharedDays(tenantK, UNIT_K, "2026-10-01", "2026-11-01");
+      expect(error?.code).toBe("42501");
+      expect(data).toBeNull();
+    });
+
     it("refuses the service role", async () => {
       const { data, error } = await (await serviceClient()).rpc("fn_tenant_shared_meter_days", {
         _tenant_id: UNIT_D,
@@ -545,15 +579,18 @@ describe.skipIf(shouldSkip())("a tenant's use, read through the database", () =>
     });
 
     it("answers no day after UTC's date + 2", async () => {
-      // The bound follows the database's UTC date; a run that straddles UTC
-      // midnight between these lines can see the next day's bound.
-      const utcToday = new Date().toISOString().slice(0, 10);
-      expect(
-        await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, 3), addDaysToDateKey(utcToday, 40))
-      ).toMatchObject({ error: null, data: [] });
-      const { data, error } = await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 40));
-      expect(error).toBeNull();
-      expect(data).toEqual([span(SHARED_METER, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 2))]);
+      // The bound follows the database's UTC date, read before and after the
+      // calls; a run that straddles UTC midnight tries once more.
+      for (let attempt = 1; ; attempt++) {
+        const utcToday = databaseUtcDate();
+        const after = await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, 3), addDaysToDateKey(utcToday, 40));
+        const within = await sharedDays(tenantD, UNIT_D, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 40));
+        if (attempt === 1 && databaseUtcDate() !== utcToday) continue;
+        expect(after).toMatchObject({ error: null, data: [] });
+        expect(within.error).toBeNull();
+        expect(within.data).toEqual([span(SHARED_METER, addDaysToDateKey(utcToday, -1), addDaysToDateKey(utcToday, 2))]);
+        return;
+      }
     });
   });
 

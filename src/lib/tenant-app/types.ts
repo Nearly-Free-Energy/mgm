@@ -55,7 +55,7 @@ export type TenantAppScope = {
  * on the home as on the month and the day: see USAGE_METER_ROLE. A
  * secondary link, which may be to another unit's primary meter, is never
  * shown (Hillary, mgm#217, 19 November). A meter that is the primary of two
- * units on the same microgrid on the same day is shown to each, labelled as
+ * units on the same day, on any microgrid, is shown to each, labelled as
  * shared (SHARED_USE_NOTE in surface/home-model.ts, D12 on mgm#217).
  */
 export const TENANT_METER_ROLES = ["primary_consumption_meter", "secondary_meter"] as const;
@@ -71,10 +71,10 @@ export type TenantMeterRole = (typeof TENANT_METER_ROLES)[number];
  * links it. Both repository reads take only these links, so the capability
  * and the usage source never see another meter. The overlap trigger and
  * exclusion constraint keep one unit to one primary link a day, but a device
- * may still be two units' primary at once. When both units are on the
- * same microgrid, each sees the meter's whole use, as billing bills each,
- * labelled on those days as shared with another unit and never as the
- * unit's own (D12, decided on mgm#217, 19 November): listPrimaryElsewhere
+ * may still be two units' primary at once, on the same microgrid or not.
+ * Each then sees the meter's whole use, as billing bills each, labelled on
+ * those days as shared with another unit and never as the unit's own (D12,
+ * decided on mgm#217, 19 November; mgm#228): listPrimaryElsewhere
  * reads the days through fn_tenant_shared_meter_days, which names this role
  * and device type in SQL. If billing ever bills another role or device
  * type, revisit this with it, and that function in a new migration.
@@ -235,8 +235,8 @@ export type TenantUsageSeriesResult =
   | { ok: false; reason: "unavailable" | "metering-off" | "unsupported" };
 
 /**
- * A day span on which a device is also the primary meter of another unit on
- * the unit's own microgrid: dates only, never whose.
+ * A day span on which a device is also the primary meter of another unit,
+ * on any microgrid: dates only, never whose.
  */
 export type PrimaryElsewhereSpan = {
   deviceId: string;
@@ -256,10 +256,10 @@ export interface TenantUsageSource {
   readSeries(request: TenantUsageSeriesRequest): Promise<TenantUsageSeriesResult>;
   /**
    * The days of [fromDate, toDate) (half-open) on which a primary
-   * consumption meter of this unit is also the primary of another unit on
-   * the unit's own microgrid (D12), merged per meter and cut to the unit's
-   * own links and to the range: device ids and dates only, never which unit
-   * or how many. Read through fn_tenant_shared_meter_days with the tenant's
+   * consumption meter of this unit is also the primary of another unit, on
+   * any microgrid (D12), merged per meter and cut to the unit's own links
+   * and to the range: device ids and dates only, never which unit or how
+   * many. An empty range answers no days without a read. Read through fn_tenant_shared_meter_days with the tenant's
    * own client, which re-reads the unit's links itself and answers no day
    * after UTC's date + 2. Rejects when the read fails: the capability then
    * fails closed, since a span missed would show shared use as the unit's

@@ -195,14 +195,14 @@ client right before each one, in place of the metering capability's
 `requirePlugin` re-check, and the tenant-app gate is asked at composition,
 in the same request. Only the unit's primary consumption meter is its use,
 on the home, the month and the day (`USAGE_METER_ROLE` in
-`src/lib/tenant-app/types.ts`). A meter that two units on the same
-microgrid hold as primary on the same day is shown to each with the label
+`src/lib/tenant-app/types.ts`). A meter that two units hold as primary on
+the same day, on the same microgrid or not, is shown to each with the label
 "Shared with another unit, not only yours" on those days (D12). For that,
 the usage source asks the database with the tenant's own client:
 `fn_tenant_shared_meter_days`, a `SECURITY DEFINER` function that answers
 only the unit's own tenant while the tenant app is on, reads the unit's
-links itself and counts only other units on the unit's own microgrid. The
-service role takes no part. That read concerns MGM's own link rows, not
+links itself and counts every other unit that holds the meter as primary,
+as billing bills each. The service role takes no part. That read concerns MGM's own link rows, not
 the backend, so it runs without the metering gate and outside the usage
 cache, on every view. It returns device ids and dates only, cut to the
 unit's own links; a tenant can call it directly, so if it ever returns a

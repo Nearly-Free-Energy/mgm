@@ -141,8 +141,8 @@ export class TenantAppCapability implements TenantAppCapabilityContract {
 
   /**
    * The days of [fromDate, toDate) on which a meter of these links is also
-   * the primary of another unit on the unit's own microgrid (D12, decided on
-   * mgm#217, 19 November). Rejects when the read fails, and the view then
+   * the primary of another unit, on any microgrid (D12, decided on mgm#217,
+   * 19 November; mgm#228). Rejects when the read fails, and the view then
    * answers meterLinksUnavailable: a span missed would show shared use as
    * the unit's own. It reads MGM's own link rows, not the metering backend,
    * so every view asks for it afresh, outside the usage throttle and its

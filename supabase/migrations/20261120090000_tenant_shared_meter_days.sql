@@ -3,8 +3,8 @@
 -- session (mgm#225).
 --
 -- The tenant app shows a meter that is the primary of two units on the
--- same microgrid on the same day to each of them, labelled "Shared with
--- another unit, not only yours". The days come from this function, which
+-- same day to each of them, labelled "Shared with another unit, not only
+-- yours". The days come from this function, which
 -- the tenant's own client calls. It is granted to authenticated and lives
 -- in public, so a tenant can also call it directly through PostgREST:
 -- every row it returns is the tenant's to read, whatever the views show,
@@ -28,10 +28,20 @@
 --     src/lib/tenant-app/types.ts and the meter billing bills the unit
 --     for; if either changes, change this function with it, in a new
 --     migration.
---   - Another unit's primary link counts only while that unit is on the
---     calling unit's own microgrid (tenants.microgrid_id), as every other
---     read of the tenant app is pinned to the microgrid fn_tenant_home
---     returns. A secondary link never counts, on either side.
+--   - Every other unit's primary link of the meter counts, whatever
+--     microgrid that unit is on (Hillary on mgm#228). Billing bills each
+--     unit that holds the meter as its primary, so a co-holder on another
+--     microgrid shares the meter's use as much as one on this microgrid,
+--     and a day missed here would show shared use as the unit's own, which
+--     D12 forbids. The answer tells the tenant only a date span on their
+--     own meter, never which unit or which microgrid. A secondary link never
+--     counts, on either side.
+--   - It answers for the unit's links in the range whenever they were made,
+--     including days before this tenant was given access to the unit. Those
+--     links are already the tenant's to read (the tenant_devices policy for
+--     tenants), and the days returned are a subset of them. If a tenant
+--     should ever see only the days since their access began, cut the
+--     range here, and in the views with it.
 --   - The range ends at the database's UTC date + 2 at the latest. The
 --     views never label a day after the microgrid's today (the home asks
 --     [today, today + 1); the month and the day label only days that have
@@ -45,10 +55,10 @@
 --     their links start or end outside the unit's own days, is returned.
 --     effective_to is never NULL.
 --
--- Running release: additive. The release before this one reads these days
--- on the service role and never calls this function. Apply this migration
--- before deploying the release that calls it: without it that release's
--- tenant views answer tenant_app_unavailable.
+-- Running release: additive. The release before this one never calls this
+-- function. Apply this migration before deploying the release that calls
+-- it, and roll that release back before dropping it: without it that
+-- release's tenant views answer tenant_app_unavailable.
 
 CREATE OR REPLACE FUNCTION public.fn_tenant_shared_meter_days(
   _tenant_id UUID,
@@ -108,16 +118,14 @@ BEGIN
             && daterange(_from_date, v_to, '[)')
   ),
   shared AS (
-    -- Other units' primary links of the same devices, on the unit's own
+    -- Every other unit's primary links of the same devices, on any
     -- microgrid, cut to the unit's own days.
     SELECT o.device_id,
            o.days * daterange(other.effective_from, other.effective_to, '[)') AS days
     FROM own o
     JOIN tenant_devices other ON other.device_id = o.device_id
-    JOIN tenants other_unit ON other_unit.id = other.tenant_id
     WHERE other.role = 'primary_consumption_meter'
       AND other.tenant_id <> _tenant_id
-      AND other_unit.microgrid_id = v_microgrid
       AND daterange(other.effective_from, other.effective_to, '[)') && o.days
   )
   SELECT s.device_id, lower(span.days), upper(span.days)
@@ -135,4 +143,4 @@ REVOKE EXECUTE ON FUNCTION public.fn_tenant_shared_meter_days(UUID, DATE, DATE) 
 GRANT  EXECUTE ON FUNCTION public.fn_tenant_shared_meter_days(UUID, DATE, DATE) TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.fn_tenant_shared_meter_days(UUID, DATE, DATE) IS
-  'The days of [_from_date, _to_date), ending at UTC''s date + 2 at the latest, on which a primary consumption meter of the caller''s own unit is also the primary of another unit on the same microgrid (D12 on mgm#217): device id and merged half-open date spans, never which unit or how many. Callable by the tenant directly through PostgREST, so every row is the tenant''s to read; a new column, a wider range or a count is a disclosure. Refuses (42501) anyone user_can_access_tenant does not answer for, the service role included, and any unit whose organization has the tenant-app plugin off. Its role and device type are USAGE_METER_ROLE and USAGE_DEVICE_TYPE in src/lib/tenant-app/types.ts; if those change, change this function in a new migration.';
+  'The days of [_from_date, _to_date), ending at UTC''s date + 2 at the latest, on which a primary consumption meter of the caller''s own unit is also the primary of another unit, on any microgrid (D12 on mgm#217, mgm#228): device id and merged half-open date spans, never which unit or how many. It answers for the unit's links in the range, including days before the caller was given access, since those links are already the caller's to read. Callable by the tenant directly through PostgREST, so every row is the tenant''s to read; a new column, a wider range or a count is a disclosure. Refuses (42501) anyone user_can_access_tenant does not answer for, the service role included, and any unit whose organization has the tenant-app plugin off. Its role and device type are USAGE_METER_ROLE and USAGE_DEVICE_TYPE in src/lib/tenant-app/types.ts; if those change, change this function in a new migration.';
