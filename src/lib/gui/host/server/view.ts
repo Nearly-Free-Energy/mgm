@@ -27,7 +27,7 @@ import { isPageHref, parseHref } from "./hrefs";
 import { resolveActions } from "./merge";
 import { viewModelSchema } from "./model-schema";
 import { selectOrganization } from "./organization";
-import { parseOrFail, strictParseModel } from "./parse";
+import { MODEL_CAPS, parseOrFail, strictParseModel } from "./parse";
 import { surfaceSnapshot } from "./snapshot";
 import type { RegisteredView, SurfaceSnapshot } from "./surface-registry";
 
@@ -51,11 +51,33 @@ export const UNIT_REQUIRED = fail(400, "gui_unit_required", "Choose which of you
  */
 export const NOT_RELEASED = fail(404, "gui_not_released", "This page is not part of the MGM release installed here.");
 
-/** The notice on a model with generated figures, unless the gate's notice is shown; it replaces a loader's own. */
+/** The notice on a model with generated figures, unless the gate's notice is shown. */
 export const SYNTHETIC_NOTICE = {
   tone: "warning",
   text: "Synthetic data: these figures are generated for demonstration, not measured.",
 } as const;
+
+type Notice = NonNullable<ViewModel["notice"]>;
+
+/**
+ * The notice a view shows: the host's own (the gate's, else the one on
+ * generated figures) and then the loader's, in one notice. Neither hides
+ * the other, so the links a loader gives beside its notice (such as the
+ * time zone nudge's Set timezone) always have their text on the page. The
+ * host's notices are warnings; a loader's danger tone outranks them. The
+ * text is cut to the model's string cap (MODEL_CAPS in ./parse.ts).
+ */
+export function shownNotice(host: Notice | undefined, own: Notice | undefined): { notice?: Notice } {
+  if (!host) return own ? { notice: own } : {};
+  if (!own) return { notice: { ...host } };
+  const text = `${host.text} ${own.text}`;
+  return {
+    notice: {
+      tone: own.tone === "danger" ? "danger" : host.tone,
+      text: text.length > MODEL_CAPS.text ? `${text.slice(0, MODEL_CAPS.text - 1)}…` : text,
+    },
+  };
+}
 /** The shortest refresh the host sends: vendor views call an outside system on every load. */
 export const MIN_REFRESH_SECONDS = { db: 15, vendor: 60 } as const;
 const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
@@ -282,7 +304,7 @@ async function dispatchTenantView(
       organizationId: null,
       gate: null,
     });
-    const { links, ...rest } = merged;
+    const { links, notice: own, ...rest } = merged;
     const live = clampLive(def);
     const out = {
       ...rest,
@@ -293,8 +315,8 @@ async function dispatchTenantView(
       trail: [],
       links: links ?? [],
       attached: [],
-      // The notice on generated figures replaces the loader's own (in rest).
-      ...(hasSynthetic(merged.body) ? { notice: { ...SYNTHETIC_NOTICE } } : {}),
+      // The notice on generated figures, then the loader's own.
+      ...shownNotice(hasSynthetic(merged.body) ? SYNTHETIC_NOTICE : undefined, own),
       ...(live ? { live } : {}),
     };
     const checked = parseOrFail(viewModelSchema, out, `view ${def.id}`);
@@ -388,7 +410,7 @@ export async function dispatchView(
       depth === 0 ? attachedViews(place) : [],
       embedViews(ctx, def.kind, merged.body, organizationId, depth),
     ]);
-    const { links, ...rest } = merged;
+    const { links, notice: own, ...rest } = merged;
     const live = clampLive(def);
     const out = {
       ...rest,
@@ -400,9 +422,8 @@ export async function dispatchView(
       trail: resolved.trail,
       links: links ?? [],
       attached,
-      // The gate's notice, else the one on generated figures, else the
-      // loader's own (in rest), so a loader cannot hide either of the host's.
-      ...(notice ? { notice } : synthetic ? { notice: { ...SYNTHETIC_NOTICE } } : {}),
+      // The gate's notice, else the one on generated figures, then the loader's own.
+      ...shownNotice(notice ?? (synthetic ? SYNTHETIC_NOTICE : undefined), own),
       ...(live ? { live } : {}),
     };
     const checked = parseOrFail(viewModelSchema, out, `view ${def.id}`);

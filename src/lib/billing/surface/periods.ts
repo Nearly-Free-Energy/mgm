@@ -9,9 +9,9 @@ import "server-only";
  * billing_line_items are FOR ALL on user_can_access_microgrid, as the legacy
  * billing page reads them. If their policies change, revisit what this
  * shows. The list loads while billing is off, and the host shows the gate's
- * notice with create disabled, in place of the view's own time zone notice.
- * The delete route is the authority on every
- * write; prepare and availability only explain a refusal before it happens.
+ * notice, followed by the view's own time zone notice, with create
+ * disabled. The delete route is the authority on every write; prepare and
+ * availability only explain a refusal before it happens.
  *
  * A refusal carries fixed copy, never a database message.
  */

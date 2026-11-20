@@ -6,8 +6,9 @@ import "server-only";
  * Delete), the empty state that owns the create action, the empty state
  * while billing is off, with create disabled and the gate's notice, and a
  * microgrid in Uganda whose billing timezone is still UTC, under the time
- * zone notice. Create starts at the previous month. Built at import the way
- * the loader builds them, with a fixed clock.
+ * zone notice, with billing on and off (the gate's notice, then the time
+ * zone notice). Create starts at the previous month. Built at import the
+ * way the loader builds them, with a fixed clock.
  */
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import { createFmt } from "@/lib/gui/fmt";
@@ -109,8 +110,11 @@ function asReceived(loaded: LoadedModel<"collection">, disabled = false): ModelO
       rows: loaded.body.rows.map((row) => ({ ...row, actions: row.actions.map(ref) })),
       empty: { title: empty.title, ...(empty.text ? { text: empty.text } : {}), ...(empty.action ? { action: ref(empty.action) } : {}) },
     },
-    // The gate's notice takes the place of the view's own (dispatchView in src/lib/gui/host/server/view.ts).
-    ...(disabled ? { notice: { tone: "warning" as const, text: BILLING_DISABLED } } : {}),
+    // The gate's notice, then the view's own, in one notice, as
+    // shownNotice in src/lib/gui/host/server/view.ts joins them.
+    ...(disabled
+      ? { notice: { tone: "warning" as const, text: loaded.notice ? `${BILLING_DISABLED} ${loaded.notice.text}` : BILLING_DISABLED } }
+      : {}),
   };
 }
 
@@ -119,4 +123,5 @@ export const PERIODS_EXAMPLES: readonly ModelOf<"collection">[] = [
   asReceived(PERIODS_LOADED_EXAMPLES[1]),
   asReceived(PERIODS_LOADED_EXAMPLES[1], true),
   asReceived(PERIODS_LOADED_EXAMPLES[2]),
+  asReceived(PERIODS_LOADED_EXAMPLES[2], true),
 ];

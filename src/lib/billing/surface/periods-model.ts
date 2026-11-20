@@ -8,7 +8,11 @@
  * replaced at the Billing path; the component stays until #201's Deletes
  * pull request. The host's catch-all serves this view outside the microgrid
  * layout, so the view repeats that layout's time zone nudge as its notice,
- * in the nudge's own copy (src/lib/timezone/nudge.ts).
+ * in the nudge's own copy (src/lib/timezone/nudge.ts). The host shows its
+ * own notices (the gate's while billing is off) before this one, not in its
+ * place (shownNotice in src/lib/gui/host/server/view.ts), so the nudge and
+ * its Set timezone link stay together; if the host starts replacing a
+ * loader's notice again, drop the link with it.
  */
 import type { LinkRef } from "@/lib/gui/contract";
 import type { Fmt, LoadedModel } from "@/lib/gui/surface";

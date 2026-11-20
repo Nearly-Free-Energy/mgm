@@ -135,16 +135,21 @@ describe("PERIODS_EXAMPLES", () => {
     for (const loaded of PERIODS_LOADED_EXAMPLES) expect(strictParseModel(view, loaded)).toMatchObject({ ok: true });
   });
 
-  it("are a list with a closed and a draft period, the empty state, the empty state while billing is off, and a UTC microgrid's nudge", () => {
+  it("are a list with a closed and a draft period, the empty state, the empty state while billing is off, and a UTC microgrid's nudge with billing on and off", () => {
     expect(PERIODS_EXAMPLES.map((e) => [e.view, e.kind, e.body.rows.length, e.notice?.tone ?? null])).toEqual([
       ["billing.periods", "collection", 2, null],
       ["billing.periods", "collection", 0, null],
       ["billing.periods", "collection", 0, "warning"],
       ["billing.periods", "collection", 1, "warning"],
+      ["billing.periods", "collection", 1, "warning"],
     ]);
-    const [list, empty, off, utc] = PERIODS_EXAMPLES;
+    const [list, empty, off, utc, utcOff] = PERIODS_EXAMPLES;
     expect(utc.notice!.text).toMatch(/^Billing timezone is still UTC\. This microgrid's address is in Uganda/);
     expect(utc.links.map((l) => l.id)).toEqual([SET_TIMEZONE_LINK]);
+    // While billing is off, the gate's notice comes first and the nudge, with its link, stays.
+    expect(utcOff.notice!.text).toBe(`${off.notice!.text} ${utc.notice!.text}`);
+    expect(utcOff.links).toEqual(utc.links);
+    expect(utcOff.actions).toMatchObject([{ action: CREATE_PERIOD_ACTION.id, enabled: false, reason: off.notice!.text }]);
     // Create starts at the previous month: in Kampala, and in UTC where the zone is still UTC.
     expect(list.actions[0].prefill).toEqual({ start_date: "2026-11-01", end_date: "2026-11-30" });
     expect(off.actions[0].prefill).toEqual(list.actions[0].prefill);

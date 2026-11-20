@@ -6,7 +6,7 @@
  * microgrid's zone, and a microgrid in Uganda still billing in UTC carries
  * the time zone nudge as the view's notice. Another organization's manager
  * gets nothing, and while billing is off the list still loads, with the
- * gate's notice (in place of the nudge) and create disabled.
+ * gate's notice (followed by the nudge, with its link) and create disabled.
  *
  * In the browser the (gui) catch-all serves /microgrids/[id]/billing through
  * the same view (its catalog page is `servedBy: "view"`), which the 360 px
@@ -148,7 +148,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
     for (const row of rows) expect(row.actions).toMatchObject([{ action: "billing.delete-period", enabled: true }]);
   });
 
-  it("shows the time zone nudge for a microgrid in Uganda that still bills in UTC, until the gate's notice takes its place", async () => {
+  it("shows the time zone nudge for a microgrid in Uganda that still bills in UTC, after the gate's notice while billing is off", async () => {
     caller = manager;
     await setBilling(true);
     const model = await (await view(`/microgrids/${UTC_MICROGRID}/billing`)).json();
@@ -160,7 +160,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the billing periods", () => {
     await setBilling(false);
     try {
       const off = await (await view(`/microgrids/${UTC_MICROGRID}/billing`)).json();
-      expect(off.notice).toMatchObject({ tone: "warning", text: expect.stringContaining("Billing is disabled") });
+      expect(off.notice).toEqual({ tone: "warning", text: expect.stringMatching(/^Billing is disabled.* Billing timezone is still UTC\. This microgrid's address is in Uganda/) });
+      expect(off.links).toEqual(model.links);
     } finally {
       await setBilling(true);
     }
