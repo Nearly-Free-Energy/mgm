@@ -1,11 +1,11 @@
-// Dashboard root page — server component tests.
+// The organization cards, the home page before Today — server component tests.
 //
 // Strategy (mirrors microgrids/[id]/__tests__/page.test.tsx):
 //   - Mock @/lib/supabase/server to return fixture microgrids and tenant
 //     counts via a fully chainable query proxy.
 //   - Call OrgCard() directly (async server component that renders the
 //     org-panel microgrid cards) and serialize the returned JSX to HTML with
-//     renderToStaticMarkup. The root DashboardPage delegates per-org data
+//     renderToStaticMarkup. OrganizationCards delegates per-org data
 //     fetching to OrgCard, so testing OrgCard exercises the card markup
 //     without the nested-async-component suspend that renderToStaticMarkup
 //     cannot await.
@@ -20,9 +20,6 @@ import type React from "react";
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockFrom = vi.fn();
-// The page's first call keeps a tenant-only person to tenant pages; that is
-// tested for every page in src/app/(gui)/__tests__/tenant-only-pages.test.tsx.
-vi.mock("@/lib/gui/host/server/tenant-pages", () => ({ keepTenantOnlyToTenantPages: async () => {} }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: mockFrom }),
@@ -30,7 +27,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 // ── Import component under test (after mocks) ─────────────────────────────────
 
-import DashboardPage, { OrgCard } from "../page";
+import { OrganizationCards, OrgCard } from "../organization-cards";
 
 // ── Query builder helpers ─────────────────────────────────────────────────────
 //
@@ -79,7 +76,7 @@ function wireFrom() {
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
-describe("DashboardPage org-panel microgrid cards", () => {
+describe("OrgCard microgrid cards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     wireFrom();
@@ -114,7 +111,7 @@ function elements(node: unknown): Node[] {
   return [el, ...elements(el.props?.children)];
 }
 
-describe("DashboardPage", () => {
+describe("OrganizationCards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFrom.mockImplementation((table: string) =>
@@ -124,7 +121,7 @@ describe("DashboardPage", () => {
 
   // The shell's navigation carries the links the quick-link row held.
   it("renders no quick-link navigation and reads no roles", async () => {
-    const tree = await DashboardPage();
+    const tree = await OrganizationCards();
     const all = elements(tree);
     expect(all.some((el) => el.type === OrgCard)).toBe(true);
     expect(all.filter((el) => el.type === "nav" || el.props?.role === "navigation")).toEqual([]);

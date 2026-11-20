@@ -1,6 +1,6 @@
 /**
- * The catch-all page: refuses a render the middleware did not see, /api and
- * unreleased paths before reading anything, checks the
+ * The catch-all page, "/" included: refuses a render the middleware did
+ * not see, /api and unreleased paths before reading anything, checks the
  * session on its own path, and hands the decoded path, the query and the
  * caller's access to renderView with the GUI MGM_GUI selects.
  */
@@ -95,6 +95,14 @@ describe("the (gui) catch-all page", () => {
     expect(await visit(["microgrids", segment, "operations"])).toBe("view");
     expect(mocks.notFound).not.toHaveBeenCalled();
     expect(mocks.renderView).toHaveBeenCalledWith(expect.objectContaining({ path: ["microgrids", id, "operations"] }));
+  });
+
+  it('serves "/", which arrives with no segments, as the view on "/"', async () => {
+    mocks.headers = new Headers({ "x-mgm-path": "/" });
+    const page = await ContributedViewPage({ params: Promise.resolve({}), searchParams: Promise.resolve({ org: "o" }) });
+    expect(page).toBe("view");
+    expect(mocks.notFound).not.toHaveBeenCalled();
+    expect(mocks.renderView).toHaveBeenCalledWith(expect.objectContaining({ path: [], search: { org: "o" }, access: SIGNED_IN }));
   });
 
   it("sends a signed-out visitor to /login without rendering a view", async () => {

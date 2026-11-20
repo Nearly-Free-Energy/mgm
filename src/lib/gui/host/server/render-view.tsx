@@ -2,8 +2,9 @@ import "server-only";
 
 /**
  * Serves a contributed view on its own page: the (gui) catch-all page
- * (src/app/(gui)/[...path]/page.tsx) calls renderView, and the (gui) layout
- * calls resolveInitialView for the shell's first paint. Only renderView loads
+ * (src/app/(gui)/[[...path]]/page.tsx, which serves "/" too) calls
+ * renderView, and the (gui) layout calls resolveInitialView for the
+ * shell's first paint. Only renderView loads
  * the view, through dispatchView (./view.ts), the code GET /api/gui/view
  * runs, so a page refuses what that route refuses; if that route adds a
  * refusal outside hostContext and dispatchView, add it here too.
@@ -15,10 +16,11 @@ import "server-only";
  * authorizes nothing.
  */
 import type { ReactNode } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { Banner } from "@/components/ui/banner";
+import { organizationExists } from "@/lib/mgm/organization-exists";
 import { matchCatalogPage, TENANT_APP_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { PUBLIC_COPY, pickPublicLanguage } from "@/lib/public-html/copy";
 import { createClient } from "@/lib/supabase/server";
@@ -27,6 +29,7 @@ import { createFmt } from "../../fmt";
 import { RawView } from "../../kit/raw-view";
 import { ViewBoundary, ViewUnavailable } from "../client/view-boundary";
 import { unloadedView } from "../shared/legacy-view";
+import { ORG_COOKIE } from "../shared/org-cookie";
 import { pickRenderer } from "../shared/pick-renderer";
 import { withUnit } from "../shared/tenant-units";
 import { hostContext, type HostContext } from "./access";
@@ -71,16 +74,24 @@ function hrefOfPath(pathWithQuery: string): string | null {
  * getRequestUserAccess (@/lib/auth/request-access) returned in this render:
  * it asks Supabase Auth with getUser(), which hostContext relies on. If it
  * stops calling getUser(), revisit.
+ *
+ * The organization the person last used (the org cookie) is passed as a
+ * hint, as the (gui) layout passes it to getManifest (manifestHints), so a
+ * view whose path names no organization, such as Today on "/", opens in the
+ * organization the shell shows. If the layout stops reading that cookie,
+ * stop passing it here too.
  */
 async function loadPageView(
   access: CurrentUserAccess,
   href: string,
 ): Promise<{ ctx: HostContext | null; out: HostOutcome<ViewModel> }> {
-  const made = hostContext(access, await headers(), {
+  const [requestHeaders, requestCookies] = await Promise.all([headers(), cookies()]);
+  const made = hostContext(access, requestHeaders, {
     newClient: createClient,
     makeFmt: (locale) => createFmt({ locale }),
   });
-  return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href) } : { ctx: null, out: made };
+  const preferred = requestCookies.get(ORG_COOKIE)?.value ?? null;
+  return made.ok ? { ctx: made.ctx, out: await dispatchView(made.ctx, href, { preferred }) } : { ctx: null, out: made };
 }
 
 /**
@@ -119,6 +130,26 @@ async function unitPicker(ctx: HostContext, href: string): Promise<ReactNode> {
       <UnitPicker choices={choices} />
     </ViewUnavailable>
   );
+}
+
+/**
+ * Where a person the host finds no organization for (gui_no_access) is
+ * sent: to /setup while no organization exists at all, the first-run path
+ * that creates one, otherwise to /no-access. The (gui) layout sends staff
+ * the same way, in the same order (organizationExists before the role
+ * check), and the page decides for itself because the layout does not run
+ * on a client-side navigation; if the layout's order or targets change,
+ * change these with them. dispatchView answers a tenant-only person 404
+ * before any organization is chosen, so this never sends a tenant to
+ * /setup. A check that fails sends the person to /no-access.
+ */
+async function noOrganizationPage(): Promise<"/setup" | "/no-access"> {
+  try {
+    return (await organizationExists()) ? "/no-access" : "/setup";
+  } catch {
+    console.error("[gui] could not check whether any organization exists");
+    return "/no-access";
+  }
 }
 
 /** The page an unreleased path gets (src/lib/public-html/not-released.ts), inside the shell. */
@@ -190,7 +221,7 @@ export async function renderView(input: {
   const { ctx, out } = await loadPageView(input.access, href);
   if (!out.ok) {
     if (out.status === 401) redirect("/login");
-    if (out.code === "gui_no_access") redirect("/no-access");
+    if (out.code === "gui_no_access") redirect(await noOrganizationPage());
     if (ctx && out.code === UNIT_REQUIRED.code) return unitPicker(ctx, href);
     if (out.code === NOT_RELEASED.code) return notReleased();
     // src/app/(gui)/not-found.tsx draws the ViewUnavailable for this one.

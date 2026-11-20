@@ -33,7 +33,6 @@ type ViewEntry = { plugin: MgmPluginName; def: Extract<NavDef, { view: string }>
  * a view takes its group along.
  */
 const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: number]> = {
-  "org.today": ["Dashboard", "operate", "today", 10],
   "community.microgrids": ["Microgrids", "operate", "sites", 20],
   "community.communities": ["Communities", "operate", "communities", 30],
   "community.tenants": ["Tenants", "operate", "tenants", 50],
@@ -54,6 +53,7 @@ const ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: n
  * entries and app/manifest.ts name these ids too.
  */
 const VIEW_ROWS: Record<string, [title: string, group: NavGroup, icon: Icon, order: number, view: string]> = {
+  "org.today": ["Today", "operate", "today", 10, "org.today"],
   "metering.operations": ["Operations", "operate", "live", 40, "metering.site-day"],
   "billing.periods": ["Billing", "money", "billing", 10, "billing.periods"],
   "tenant.home": ["My home", "operate", "tenants", 80, "tenant.home"],
@@ -72,8 +72,12 @@ const OLD_SIDEBAR: { label: string; href: string; superAdminOnly?: true }[] = [
   { label: "Settings", href: "/settings/profile" },
 ];
 
-/** Sidebar labels the dock replaces with its own entries: Settings opened Profile, beside Users and Plugins. */
-const SIDEBAR_RENAMED: Record<string, string> = { Settings: "org.profile" };
+/**
+ * Sidebar labels the dock replaces with its own entries: Settings opened
+ * Profile, beside Users and Plugins; Dashboard is Today, the view on "/"
+ * that replaced the organization cards (#201).
+ */
+const SIDEBAR_RENAMED: Record<string, string> = { Settings: "org.profile", Dashboard: "org.today" };
 
 /** The hrefs of the home page's quick-link row the shell replaced. */
 const OLD_QUICK_LINKS = ["/organizations", "/communities", "/microgrids", "/settings/plugins"];
@@ -206,9 +210,13 @@ afterAll(() => resetMgmRuntimeForTests());
 
 describe("legacy navigation", () => {
   it("keeps every link the old sidebar offered, with its label", async () => {
-    const nav = await legacyNav();
+    // A view entry's link goes to the path of the view it names.
+    const nav = [
+      ...(await legacyNav()).map((e) => ({ href: e.def.href as string, def: e.def })),
+      ...(await viewNav()).map((e) => ({ href: e.path, def: e.def })),
+    ];
     for (const link of OLD_SIDEBAR) {
-      const entry = nav.find((e) => e.def.href === link.href);
+      const entry = nav.find((e) => e.href === link.href);
       expect(entry, `no nav entry for the sidebar's ${link.label}`).toBeDefined();
       const renamed = SIDEBAR_RENAMED[link.label];
       if (renamed) expect(entry!.def.id).toBe(renamed);

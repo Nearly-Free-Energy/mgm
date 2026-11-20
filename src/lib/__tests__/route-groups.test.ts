@@ -47,7 +47,7 @@ const PAGES_OUTSIDE_GUI = [
  * every other page over it, so a second catch-all would decide which paths
  * reach it.
  */
-const CATCH_ALL_PAGES = ["(gui)/[...path]/page.tsx"];
+const CATCH_ALL_PAGES = ["(gui)/[[...path]]/page.tsx"];
 
 /**
  * The former group name must not appear in any tracked text file. Applied

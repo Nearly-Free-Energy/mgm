@@ -7,8 +7,10 @@ import "server-only";
  * plugin gate (./gate-state.ts), the loader runs on its own client of the
  * person's session (./access.ts), and what it returns is strictly parsed
  * (./parse.ts) before actions are resolved (./merge.ts) and host fields
- * are filled. A tenant view (scope "tenant") is about one of the person's
- * own units instead, and is served by dispatchTenantView.
+ * are filled. A view declaring `takesSignals` is handed the organization's
+ * signals (organizationSignals in ./signals.ts) before its loader runs. A
+ * tenant view (scope "tenant") is about one of the person's own units
+ * instead, and is served by dispatchTenantView.
  *
  * A refusal carries a status, a code and fixed copy. Nothing a loader
  * returned or threw reaches it, except a loader's own refusal message.
@@ -16,7 +18,7 @@ import "server-only";
 import { rolesIncludeStaff } from "@/lib/auth/access";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { GateDecision } from "@/lib/runtime/gate";
-import type { EntityKind, Href, ModelBase, ViewKind, ViewModel } from "../../contract";
+import type { EntityKind, Href, ModelBase, Signals, ViewKind, ViewModel } from "../../contract";
 import type { Loaded, LoadedModel, ViewDef } from "../../surface";
 import { fillPath } from "../shared/merge-actions";
 import { chooseTenantUnit, TENANT_UNIT_PARAM } from "../shared/tenant-units";
@@ -27,6 +29,7 @@ import { isPageHref, parseHref } from "./hrefs";
 import { resolveActions } from "./merge";
 import { viewModelSchema } from "./model-schema";
 import { selectOrganization } from "./organization";
+import { organizationSignals } from "./signals";
 import { MODEL_CAPS, parseOrFail, strictParseModel } from "./parse";
 import { surfaceSnapshot } from "./snapshot";
 import type { RegisteredView, SurfaceSnapshot } from "./surface-registry";
@@ -344,15 +347,34 @@ async function dispatchTenantView(
 }
 
 /**
+ * The organization's signals for a view that declares `takesSignals`, or
+ * null when they could not be collected; the loader shows that in place of
+ * the signals.
+ */
+async function takenSignals(ctx: HostContext, organizationId: string): Promise<Signals | null> {
+  try {
+    const out = await organizationSignals(ctx, organizationId);
+    return out.ok ? out.value : null;
+  } catch {
+    console.error("[gui] signals could not be collected for a view");
+    return null;
+  }
+}
+
+/**
  * The view an href names, loaded for `ctx`'s person. `depth` 1 is a view
  * loaded inside another: it lists no attached views and embeds no views.
  * `within` is the enclosing view's organization: the view loads there or
- * not at all.
+ * not at all. `preferred` is the organization the person last used (the
+ * org cookie), which a page passes so that a view whose path names no
+ * organization opens in the one the shell shows (getManifest reads the same
+ * cookie as its hint); like `?org=`, it only chooses among the
+ * organizations the person can see.
  */
 export async function dispatchView(
   ctx: HostContext,
   href: string,
-  o: { depth?: 0 | 1; within?: string | null } = {},
+  o: { depth?: 0 | 1; within?: string | null; preferred?: string | null } = {},
 ): Promise<HostOutcome<ViewModel>> {
   requireIssued(ctx);
   const depth = o.depth ?? 0;
@@ -383,7 +405,7 @@ export async function dispatchView(
   else if (organizationId === null) {
     try {
       const requested = o.within ?? parsed.search.get("org");
-      organizationId = (await selectOrganization(ctx, { requested })).organizationId;
+      organizationId = (await selectOrganization(ctx, { requested, preferred: o.preferred })).organizationId;
     } catch {
       return fail(503, "gui_unavailable", "This view could not be loaded right now.");
     }
@@ -398,12 +420,17 @@ export async function dispatchView(
   const notice = decision.ok ? undefined : { tone: "warning" as const, text: decision.message };
 
   const search = querySearch(def.query, parsed.search);
+  // The registration check allows takesSignals only on an organization's view.
+  const signals = def.takesSignals && organizationId !== null ? await takenSignals(ctx, organizationId) : undefined;
   let loaded: unknown;
   try {
     loaded =
       def.scope === "installation"
         ? await def.load(await installationRequest(ctx, params, search))
-        : await def.load(await surfaceRequest(ctx, organizationId!, params, search));
+        : await def.load({
+            ...(await surfaceRequest(ctx, organizationId!, params, search)),
+            ...(signals === undefined ? {} : { signals }),
+          });
   } catch {
     console.error(`[gui] view ${def.id}: loader failed`);
     return VIEW_FAILED;

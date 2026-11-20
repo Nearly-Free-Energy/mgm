@@ -19,7 +19,10 @@ import "server-only";
  * `billing.not-billed` view, a section of the review, with billing each of
  * them from readings typed by hand (`billing.bill-from-readings`); and the
  * savings as the `billing.savings` view, shown under the Operations day,
- * with the writes that change what it counts. A page that moves to a view
+ * with the writes that change what it counts; and each microgrid's newest
+ * period as the `billing.current-periods` view, a tile on Today (org.today)
+ * and a page of its own at /billing, which the catalog serves by the view
+ * (`servedBy: "view"`). A page that moves to a view
  * keeps its nav id. The watcher, `billing.period-due`, reports each draft
  * period whose last day has passed, leading to its close checklist, or to
  * its review while it has no bills.
@@ -64,6 +67,9 @@ import {
   SaveSavingsSettingsBody,
 } from "./schemas";
 import { closePeriodAvailable, loadCloseChecklist, prepareClosePeriod } from "./surface/close-checklist";
+import { loadCurrentPeriods } from "./surface/current-periods";
+import { CURRENT_PERIODS_EXAMPLES } from "./surface/current-periods-examples";
+import { CURRENT_PERIODS_KEYS, CURRENT_PERIODS_VIEW } from "./surface/current-periods-model";
 import { CLOSE_CHECKLIST_EXAMPLES } from "./surface/close-checklist-examples";
 import { CLOSE_CHECKLIST_STEPS, CLOSE_PERIOD_ACTION } from "./surface/close-checklist-model";
 import { SAVINGS_EXAMPLES } from "./surface/examples";
@@ -284,6 +290,22 @@ export const BILLING_SURFACE: Contribution = {
       ext: { schema: SAVINGS_EXT_SCHEMA, zod: SavingsExt },
       examples: SAVINGS_EXAMPLES,
       load: loadSavings,
+    },
+    {
+      id: CURRENT_PERIODS_VIEW,
+      kind: "collection",
+      path: "/billing",
+      params: {},
+      // A tile on Today: the host lists it with ?org= set to Today's
+      // organization (attachedViews in src/lib/gui/host/server/view.ts) and
+      // leaves it out while billing is off for it. No `agent`.
+      attach: { to: { view: "org.today" }, order: 10, hint: "tile" },
+      // Read through the person's own client (./surface/current-periods.ts);
+      // on its own page it loads while billing is off, with the gate's notice.
+      cost: "db",
+      declares: { keys: CURRENT_PERIODS_KEYS },
+      examples: CURRENT_PERIODS_EXAMPLES,
+      load: loadCurrentPeriods,
     },
   ],
   // Both human-only: no assistant proposes them (decision 6 on #115).

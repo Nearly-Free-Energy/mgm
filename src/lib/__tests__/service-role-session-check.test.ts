@@ -194,7 +194,7 @@ const MODULES: Record<string, Module> = {
   "src/lib/gui/host/server/render-view.tsx": {
     privilegedExports: ["renderView", "resolveInitialView"],
     reason:
-      "renderView loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load. resolveInitialView reads only the registered view definitions from the snapshot and runs no loader.",
+      "renderView loads a contributed view through dispatchView on a HostContext it builds from the access its caller passes, which must be getRequestUserAccess's (getUser) read in this render; with no user, hostContext refuses before any load. Only when the host found no organization for that person does it call organizationExists, which tells only whether any organization exists, to choose /setup or /no-access as the (gui) layout does. resolveInitialView reads only the registered view definitions from the snapshot and runs no loader.",
   },
   "src/lib/gui/host/server/tenant-pages.ts": {
     privilegedExports: ["isTenantPage", "tenantOnlyRedirect"],
@@ -255,7 +255,7 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "getUser() redirects to /login; organizationExists() tells only whether any organization exists, so it may run alongside. preloadManifest and getManifest read the session with getRequestUserAccess (getUser) before the manifest's reads; resolveInitialView runs only after the redirects and runs no view loader; tenantOnlyRedirect runs only after getUser() and runs no view loader either.",
   },
-  "src/app/(gui)/[...path]/page.tsx": {
+  "src/app/(gui)/[[...path]]/page.tsx": {
     kind: "session",
     reason:
       "getRequestUserAccess (getUser) redirects to /login before renderView, which loads the view for that read's user. An /api path or an unreleased one answers 404 before either.",

@@ -29,7 +29,7 @@ setup("sign-in works at 360 px", async ({ page, baseURL }) => {
   await checkNarrowPage(page, { landmarks: false });
   await page.getByRole("button", { name: "Continue" }).click();
   await page.waitForURL((url) => url.pathname === "/");
-  await expect(page.getByRole("heading", { name: "Dashboard", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
 
   await page.context().storageState({ path: path.join(AUTH_DIR, "manager.json") });
   watch.assertClean();
