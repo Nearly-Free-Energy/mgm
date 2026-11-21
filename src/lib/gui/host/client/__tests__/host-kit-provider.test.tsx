@@ -1,12 +1,13 @@
-import { render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { createElement, type ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MGM_NAVIGATION_HOLD_EVENT, MGM_NAVIGATION_SETTLED_EVENT } from "@/components/ui/navigation-progress";
 import type { Manifest, OverlayProps, Signals, ViewState } from "../../../contract";
 import { HostKitProvider } from "../host-kit-provider";
-import { useView, type KitProvider } from "../kit-provider";
+import { useSignals, useView, type KitProvider } from "../kit-provider";
 import { KitRuntimeProvider } from "../kit-runtime";
-import { initial, manifest, MG, ORG, recordingRuntime } from "./kit-test-utils";
+import { ViewBoundary } from "../view-boundary";
+import { initial, manifest, MG, model, ORG, recordingRuntime } from "./kit-test-utils";
 
 // The real KitProvider, recording the props HostKitProvider hands it.
 const seenProps = vi.hoisted(() => [] as ComponentProps<typeof KitProvider>[]);
@@ -89,13 +90,14 @@ describe("HostKitProvider", () => {
     expect(seen.at(-1)).toMatchObject({ view: null, title: "Org", trail: [{ label: "Org", href: `/organizations/${ORG}` }] });
   });
 
-  it("hands KitProvider the GUI's action slots and the signals it was given", () => {
+  it("hands KitProvider the GUI's action slots and the signals it fetched for the manifest's organization", async () => {
     const Overlay: (props: OverlayProps) => null = () => null;
     const forms = {};
-    const signals = {} as Signals;
+    const signals: Signals = { type: "signals", org: ORG, count: 2, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json(signals));
     render(
-      <KitRuntimeProvider runtime={{ ...recordingRuntime(), pathname: "/" }}>
-        <HostKitProvider manifest={withNav()} initial={initial} actions={{ Overlay, forms }} signals={signals}>
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial} actions={{ Overlay, forms }}>
           <Probe />
         </HostKitProvider>
       </KitRuntimeProvider>
@@ -103,8 +105,80 @@ describe("HostKitProvider", () => {
     const props = seenProps.at(-1)!;
     expect(props.actions?.Overlay).toBe(Overlay);
     expect(props.actions?.forms).toBe(forms);
-    expect(props.signals).toBe(signals);
     expect(typeof props.resolve).toBe("function");
+    expect(typeof props.refreshSignals).toBe("function");
+    expect(typeof props.seedSignals).toBe("function");
+    await waitFor(() => expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals));
+    expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("re-renders what reads the signals when they arrive, and not what reads the rest of the kit", async () => {
+    // A page's views read the kit and sit inside the page's Suspense
+    // boundary, which may still be hydrating when the signals land: they
+    // must not re-render then (SignalsContext in ../kit-provider.tsx).
+    const signals: Signals = { type: "signals", org: ORG, count: 3, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json(signals));
+    const viewRendered = vi.fn();
+    const seen: (Signals | null)[] = [];
+    function ViewReader() {
+      useView();
+      viewRendered();
+      return null;
+    }
+    function SignalsReader() {
+      seen.push(useSignals());
+      return null;
+    }
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial}>
+          <ViewReader />
+          <SignalsReader />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    const before = viewRendered.mock.calls.length;
+    const providerRenders = seenProps.length;
+    await waitFor(() => expect(seen.at(-1)).toEqual(signals));
+    expect(viewRendered).toHaveBeenCalledTimes(before);
+    // Nothing above the page re-renders either: the signals are a store, not state.
+    expect(seenProps.length).toBe(providerRenders);
+  });
+
+  it("takes the signals a published view's model carries instead of fetching them", async () => {
+    const signals: Signals = { type: "signals", org: ORG, count: 1, top: [], checked: ["billing.due"], unchecked: [] };
+    const fetch = vi.fn(async () => Response.json({ ...signals, count: 5 }));
+    const today = model({ view: "org.today", signals });
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/" }}>
+        <HostKitProvider manifest={withNav()} initial={initial}>
+          <ViewBoundary initial={initial} model={today} />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    await waitFor(() => expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetch).not.toHaveBeenCalled();
+    expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals);
+  });
+
+  it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", async () => {
+    const fetch = vi.fn(async () => new Response("null", { status: 404 }));
+    const tenant = withNav();
+    tenant.orgs = [];
+    render(
+      <KitRuntimeProvider runtime={{ ...recordingRuntime({ fetch }), pathname: "/my" }}>
+        <HostKitProvider manifest={tenant} initial={initial}>
+          <Probe />
+        </HostKitProvider>
+      </KitRuntimeProvider>
+    );
+    // The feed's first fetch waits a turn (signals-feed.ts), so wait past it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toBeNull();
   });
 
   it("remembers the manifest's organization in the mgm-org cookie", () => {

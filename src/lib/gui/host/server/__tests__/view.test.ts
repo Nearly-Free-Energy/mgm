@@ -530,6 +530,8 @@ describe("dispatchView for a view that takes signals", () => {
     expect((vi.mocked(w.load).mock.calls[0][0] as SurfaceRequest).organizationId).toBe(ORG_B);
     // The watcher runs on a request of its own, not the loader's.
     expect(vi.mocked(w.load).mock.calls[0][0]).not.toBe(requestOf(v));
+    // The model carries them too, so the shell need not collect them again.
+    expect(out.ok && out.value.signals).toEqual(requestOf(v).signals);
   });
 
   it("hands the loader null when the signals could not be collected, and still loads the view", async () => {
@@ -541,6 +543,7 @@ describe("dispatchView for a view that takes signals", () => {
     const out = await dispatch("/billing");
     expect(out.ok).toBe(true);
     expect(requestOf(v).signals).toBeNull();
+    expect(out.ok && "signals" in out.value).toBe(false);
     expect(logged()).not.toContain(CANARY);
   });
 
@@ -548,9 +551,11 @@ describe("dispatchView for a view that takes signals", () => {
     const v = rootView("billing.plain", "/billing");
     const w = watcher(async () => [due]);
     snapshot = { ...snapshotOf([v]), signals: [w] };
-    expect((await dispatch("/billing")).ok).toBe(true);
+    const out = await dispatch("/billing");
+    expect(out.ok).toBe(true);
     expect(w.load).not.toHaveBeenCalled();
     expect("signals" in requestOf(v)).toBe(false);
+    expect(out.ok && "signals" in out.value).toBe(false);
   });
 
   it("runs no watcher for a person with no organization to show", async () => {

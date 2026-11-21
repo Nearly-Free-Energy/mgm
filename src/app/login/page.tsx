@@ -6,8 +6,9 @@
  * through the deployment's sender, and the link's landing page
  * (/auth/confirm) signs them in on the device where they open it.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RETURN_PATH_PARAM } from "@/lib/auth/return-path";
+import { clearAppBadge } from "@/lib/gui/host/client/app-badge";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -17,6 +18,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [linkSent, setLinkSent] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Whoever arrives here is signed out (sign-out, an expired session, a 401
+  // after a write), so the installed app's badge no longer counts anything of
+  // theirs. The signals feed (src/lib/gui/host/client/signals-feed.ts) is
+  // not mounted here to set it again.
+  useEffect(() => clearAppBadge(), []);
 
   /**
    * The same-site page the middleware sent the person here from (#126),

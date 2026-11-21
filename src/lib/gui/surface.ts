@@ -112,7 +112,7 @@ export type Loaded<T> =
  * reason, tone and from fields are resolved for the person who sees it.
  */
 export type ActionLink = Pick<ActionRef, "action" | "params" | "prefill" | "provenance"> & { label?: string };
-type HostFilled = "type" | "view" | "kind" | "org" | "trail" | "attached" | "notice" | "live" | "links";
+type HostFilled = "type" | "view" | "kind" | "org" | "trail" | "attached" | "notice" | "live" | "links" | "signals";
 export type LoadedModel<K extends ViewKind> = Omit<ModelBase<K, ActionLink, unknown>, HostFilled> & {
   links?: LinkRef[];
   /**

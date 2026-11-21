@@ -92,6 +92,7 @@ type Model = {
   notice?: { text: string };
   attached: { view: string; href: string; hint: string }[];
   body: { rows: { id: string; href?: string; cells: Record<string, { text: string }> }[]; empty: { title: string } };
+  signals?: { type: string; org: string; count: number; top: { id: string }[] };
 };
 
 /** `org`: the organization the person last used, sent as the org cookie (ORG_COOKIE). */
@@ -221,6 +222,9 @@ describe.skipIf(shouldSkip())("Today through GET /api/gui/view against the datab
     // The period still running is not due.
     expect(text).not.toContain(CURRENT);
     expect(model.attached).toEqual([TILE(ORG)]);
+    // The model carries the signals it shows, for the shell's count.
+    expect(model.signals).toMatchObject({ type: "signals", org: ORG });
+    expect(model.signals!.top.map((s) => s.id)).toEqual(model.body.rows.map((r) => r.id));
     for (const id of [OTHER_ORG, OTHER_MICROGRID, OTHER_PERIOD, "Nakato Today-Canary"]) expect(text, id).not.toContain(id);
 
     const tile = await load(model.attached[0].href);
@@ -238,6 +242,7 @@ describe.skipIf(shouldSkip())("Today through GET /api/gui/view against the datab
     const { model, text } = await load(`/?org=${ORG}`);
     expect(model.org).toBe(OTHER_ORG);
     expect(model.body.rows.map((r) => r.id)).toEqual([`billing.period-due:${OTHER_PERIOD}`]);
+    expect(model.signals).toMatchObject({ org: OTHER_ORG, top: [{ id: `billing.period-due:${OTHER_PERIOD}` }] });
     expect(model.attached).toEqual([TILE(OTHER_ORG)]);
     for (const id of [ORG, MICROGRID, SEPTEMBER, CURRENT]) expect(text, id).not.toContain(id);
 

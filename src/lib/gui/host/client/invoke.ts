@@ -72,5 +72,7 @@ export async function invoke(
     ok: true,
     ...(typeof out.message === "string" ? { message: out.message.slice(0, 300) } : {}),
     ...(isHref(out.href) ? { href: out.href } : {}),
+    // The route says the write may have changed what needs someone; the host fetches the signals again.
+    ...(out.signals === true ? { signals: true as const } : {}),
   };
 }

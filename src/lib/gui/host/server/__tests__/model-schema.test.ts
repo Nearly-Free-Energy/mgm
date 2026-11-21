@@ -371,6 +371,9 @@ describe("shell shapes", () => {
     const signals = { type: "signals", org: ORG, count: 1, top: [{ ...signal, kind: "alarm" }], checked: [], unchecked: [] };
     expect(signalsSchema.safeParse({ ...signals, checked: ["billing.close"] }).success).toBe(true);
     expect(signalsSchema.safeParse({ ...signals, count: -1 }).success).toBe(false);
+    // A view that takes signals carries them in its model, held to the same schema.
+    expect(viewModelSchema.safeParse({ ...MODELS.collection, signals }).success).toBe(true);
+    expect(viewModelSchema.safeParse({ ...MODELS.collection, signals: { ...signals, count: -1 } }).success).toBe(false);
   });
 
   const manifest: Manifest = {

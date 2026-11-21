@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KitRuntimeProvider } from "../../host/client/kit-runtime";
 import { recordingRuntime } from "../../host/client/__tests__/kit-test-utils";
@@ -75,6 +75,27 @@ describe("SignOut", () => {
     expect(supabase.signOut).toHaveBeenCalledOnce();
     expect(supabase.signOut).toHaveBeenCalledWith();
     expect(document.cookie).not.toContain("mgm-org=");
+  });
+
+  it("clears the installed app's badge once the session is gone, and not when sign-out fails", async () => {
+    const clearAppBadge = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clearAppBadge", { configurable: true, value: clearAppBadge });
+    try {
+      fireEvent.click(renderSignOut());
+      await waitFor(() => expect(assign).toHaveBeenCalledWith("/login"));
+      expect(clearAppBadge).toHaveBeenCalledOnce();
+      cleanup();
+
+      clearAppBadge.mockClear();
+      supabase.signOut.mockResolvedValue(offline);
+      assign.mockClear();
+      const button = renderSignOut();
+      fireEvent.click(button);
+      await expectStillHere(button);
+      expect(clearAppBadge).not.toHaveBeenCalled();
+    } finally {
+      delete (navigator as { clearAppBadge?: unknown }).clearAppBadge;
+    }
   });
 
   it("keeps an empty live region beside the button until something goes wrong", () => {

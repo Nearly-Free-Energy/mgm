@@ -148,6 +148,7 @@ export interface ActionSpec {
   /** JSON Schema of the fields a person enters: bound fields removed, secrets marked writeOnly. */
   input: Json;
 }
+/** `signals`: the route says the write may have changed the signals, and the host fetches them again. */
 export type ActionResult =
   | { type: "result"; ok: true; message?: string; href?: Href; next?: ActionRef; signals?: true }
   | { type: "result"; ok: false; status: number; code: string; message: string; field?: string };
@@ -249,6 +250,8 @@ export interface ModelBase<K extends ViewKind, A, V> {
   live?: { refreshSeconds: number; staleAfterSeconds: number };
   /** Extra data for a bespoke renderer that reads this exact version. */
   ext?: { schema: `${Id}@${number}`; data: Json };
+  /** The organization's signals the host collected for a view that takes them (Today); the shell counts them too. */
+  signals?: Signals;
 }
 export interface EmbeddedView {
   model: ViewModel;

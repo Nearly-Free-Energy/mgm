@@ -35,6 +35,18 @@ afterEach(() => {
 });
 
 describe("LoginPage", () => {
+  it("clears the installed app's badge when it shows, whatever signed the person out", async () => {
+    const clearAppBadge = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clearAppBadge", { configurable: true, value: clearAppBadge });
+    try {
+      const { default: LoginPage } = await import("../page");
+      render(<LoginPage />);
+      expect(clearAppBadge).toHaveBeenCalledOnce();
+    } finally {
+      delete (navigator as { clearAppBadge?: unknown }).clearAppBadge;
+    }
+  });
+
   it("has no password field and no password reset link", async () => {
     const { default: LoginPage } = await import("../page");
     render(<LoginPage />);

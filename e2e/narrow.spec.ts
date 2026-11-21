@@ -16,6 +16,10 @@ test("Today, the home page, renders at 360 px", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Today", level: 1 })).toBeVisible();
   // Billing's watcher: the smoke's October period has ended, with bills, and is not closed.
   await expect(page.locator(`a[href="/microgrids/${microgridId}/billing/${periodId}/close"]`)).toBeVisible();
+  // The shell fetches the same signals after the first paint and shows their
+  // count in the tray (the installed app's badge is not checked: a headless
+  // browser has none).
+  await expect(page.getByRole("button", { name: /^Needs you: [1-9]\d*$/ })).toBeVisible();
   // Billing's tile, loaded after the first paint.
   const tile = page.locator('[data-gui-tile="billing.current-periods"]');
   await expect(tile.getByRole("heading", { name: "Current billing periods" })).toBeVisible();

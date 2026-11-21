@@ -96,7 +96,12 @@ function gate() {
  * Mounts a KitProvider (which mounts the ActionHost) on a runtime whose fetch
  * answers prepare and the write. A list is answered in order, its last reply repeating.
  */
-function mount(prepare: Reply | Reply[], write: Reply | Reply[] = { body: {} }, slots: Parameters<typeof KitProvider>[0]["actions"] = {}) {
+function mount(
+  prepare: Reply | Reply[],
+  write: Reply | Reply[] = { body: {} },
+  slots: Parameters<typeof KitProvider>[0]["actions"] = {},
+  refreshSignals?: () => void,
+) {
   const queue = (replies: Reply | Reply[]) => {
     const list = Array.isArray(replies) ? replies : [replies];
     let i = 0;
@@ -114,7 +119,7 @@ function mount(prepare: Reply | Reply[], write: Reply | Reply[] = { body: {} }, 
   const runtime = recordingRuntime({ fetch, act: hostAct });
   const { unmount } = render(
     <KitRuntimeProvider runtime={runtime}>
-      <KitProvider manifest={manifest()} initial={initial} actions={slots}>
+      <KitProvider manifest={manifest()} initial={initial} actions={slots} refreshSignals={refreshSignals}>
         {null}
       </KitProvider>
     </KitRuntimeProvider>,
@@ -498,6 +503,22 @@ describe("ActionHost", () => {
     await expect(act(ref())).resolves.toEqual({ type: "result", ok: true });
     expect(runtime.navigate).not.toHaveBeenCalled();
     expect(runtime.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("fetches the signals again after a write whose route says signals: true, and only then", async () => {
+    const refreshSignals = vi.fn();
+    mount({ body: prepared({ confirm: "none", fields: false }) }, { body: { signals: true } }, {}, refreshSignals);
+    await expect(act(ref())).resolves.toEqual({ type: "result", ok: true, signals: true });
+    expect(refreshSignals).toHaveBeenCalledOnce();
+    cleanup();
+
+    const untouched = vi.fn();
+    mount({ body: prepared({ confirm: "none", fields: false }) }, { body: { signals: "yes" } }, {}, untouched);
+    await expect(act(ref())).resolves.toEqual({ type: "result", ok: true });
+    cleanup();
+    mount({ body: prepared({ confirm: "none", fields: false }) }, { status: 409, body: { signals: true, error: "No" } }, {}, untouched);
+    await expect(act(ref())).resolves.toMatchObject({ ok: false, status: 409 });
+    expect(untouched).not.toHaveBeenCalled();
   });
 
   it("caps the route's message at 300 characters", async () => {

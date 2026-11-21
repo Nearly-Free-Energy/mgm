@@ -168,6 +168,22 @@ read a stored credential, or to send data to another origin.
      plugin is off. Each load runs every watcher, so registration refuses
      `takesSignals` on a view that is not an organization's, is attached to
      another view, or polls.
+   - The shell fetches `GET /api/gui/signals` for the organization its
+     manifest shows after the first paint, never in the manifest
+     (`src/lib/gui/host/client/signals-feed.ts`): again every five minutes
+     while the page is visible, on focus or coming back into view when the
+     last fetch is 30 s old, and after an action whose route answers
+     `signals: true`. A view that takes signals carries them in its model
+     (`signals`), and the shell takes those instead of fetching again.
+     `useSignals()` returns them, and the installed app's badge shows their
+     `count`, every signal as Today lists every signal, where the browser
+     supports the Badging API. A 401 clears both and stops fetching; a 403
+     clears both; any other failure keeps what was shown and doubles the
+     wait, up to 30 minutes. A tenant's manifest fetches nothing, and the
+     badge is cleared for it, when the organization changes, on sign-out
+     (after which the page sets it no more) and whenever /login shows.
+     The badge belongs to the installed app, not to a window: two windows
+     on different organizations show whichever fetched last.
 
 10. **The host's confirmation steps.**
    - A step's tone, and an `ActionRef`'s `tone`, come from the action's
