@@ -99,7 +99,6 @@ describe("middleware PUBLIC_PATHS", () => {
   });
   it.each([
     "/api/v1/billing/generate",
-    "/api/openems/energy",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
@@ -121,7 +120,6 @@ describe("middleware PUBLIC_PATHS", () => {
     "/microgrids/grid-1/setup/edges",
     "/microgrids/grid-1/setup/openems-backend",
     "/microgrids/grid-1/setup/tenants/hh-1",
-    "/api/billing/generate",
     "/api/billing-periods",
     "/api/billing-line-items/abc/payment-status",
     "/microgrids/grid-1/billing",
@@ -405,12 +403,12 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("keeps the operator payment-url mint session-gated", async () => {
+  it("keeps the bill's payment-status route session-gated", async () => {
     signedOut();
     const middleware = await loadMiddleware();
 
     const res = await middleware(
-      makeRequest("/api/billing-line-items/12345678-1234-1234-1234-123456789012/url")
+      makeRequest("/api/billing-line-items/12345678-1234-1234-1234-123456789012/payment-status")
     );
 
     expect(res.status).toBe(401);
@@ -459,7 +457,6 @@ describe("middleware for routes outside the installed release", () => {
 
   it.each([
     "/api/v1/billing/generate",
-    "/api/openems/energy",
     "/api/payments/status",
     "/api/",
   ])("answers an API request (%s) exactly as before", async (path) => {

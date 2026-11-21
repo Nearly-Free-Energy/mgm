@@ -530,7 +530,7 @@ describe("runGenerationFor with guardExistingBills", () => {
     );
   });
 
-  it("changes nothing without it: a paid or invoiced bill is rewritten through fn_record_line_item_with_audit, as POST /api/billing/generate does", async () => {
+  it("changes nothing without it: a paid or invoiced bill is rewritten through fn_record_line_item_with_audit, as POST /api/v1/billing/generate does", async () => {
     const h = harness();
     const by = await results(h, { guardExistingBills: undefined });
     for (const n of [5, 6, 7]) expect(by.get(tenant(n))?.kind).toBe("written");

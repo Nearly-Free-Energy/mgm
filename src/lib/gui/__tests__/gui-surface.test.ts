@@ -659,7 +659,7 @@ describe("GUI surface contributions", () => {
 // ── Self-tests: each check refuses what it should ───────────────────────────
 
 describe("the GUI surface guard", () => {
-  const [createPeriod, generateBills] = BILLING_SURFACE.actions as ActionDef[];
+  const [createPeriod, generateFromMeters] = BILLING_SURFACE.actions as ActionDef[];
   const [periods, review] = BILLING_SURFACE.views as ViewDef[];
   const facts = repoFacts();
   const quietly = <T,>(run: () => T): T => {
@@ -682,7 +682,7 @@ describe("the GUI surface guard", () => {
     // Check 2 compares by identity, so the registry must keep each action's schema object.
     expect(snapshot.actions.get(createPeriod.id)?.def.input).toBe(createPeriod.input);
     // Each action's route parses its body with the schema the fixture's
-    // action takes (CreatePeriodBody, GenerateBillsBody, ClosePeriodBody), so
+    // action takes (CreatePeriodBody, GenerateFromMetersBody, ClosePeriodBody), so
     // every action passes check 2 and only the planted view problem remains.
     expect(surfaceProblems(snapshot, facts)).toEqual([
       'billing.periods: declares "apiKey", which looks like a secret; rename it or exempt it with a reason',
@@ -736,7 +736,7 @@ describe("the GUI surface guard", () => {
     expect(check(file(), { path: "/api/edges" })).toEqual(["the route is exempt from the gate without a PaymentExemption"]);
 
     expect(check(file("await request.json();"))).toEqual(["does not parse its body with parseJsonBody(request, <schema>)"]);
-    expect(check(file(), { module: { Body: generateBills.input } })).toEqual(["input is not @/lib/billing/schemas's Body, which the route parses with"]);
+    expect(check(file(), { module: { Body: generateFromMeters.input } })).toEqual(["input is not @/lib/billing/schemas's Body, which the route parses with"]);
     expect(check(file(PARSE, IMPORTS.replace("billing/schemas", "metering/schemas")))).toEqual(["parses with Body from @/lib/metering/schemas, not from @/lib/billing/schemas"]);
     expect(check(file(`const Body = z.object({}); ${PARSE}`)))
       .toEqual(["parses with Body, which is not an imported schema", "does not parse its body with parseJsonBody(request, <schema>)"]);

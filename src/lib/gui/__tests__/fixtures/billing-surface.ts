@@ -12,7 +12,7 @@
  * plugin owns, revisit this. All data is synthetic.
  */
 import { z } from "zod";
-import { ClosePeriodBody, CreatePeriodBody, GenerateBillsBody } from "@/lib/billing/schemas";
+import { ClosePeriodBody, CreatePeriodBody, GenerateFromMetersBody } from "@/lib/billing/schemas";
 import type { ActionRef, ModelOf } from "@/lib/gui/contract";
 import type { Contribution, Loaded } from "@/lib/gui/surface";
 
@@ -223,14 +223,14 @@ export const BILLING_SURFACE: Contribution = {
       confirm: "confirm",
     },
     {
-      id: "billing.generate-bills",
-      title: "Generate bills",
+      id: "billing.generate-from-meters",
+      title: "Generate bills from meter data",
       target: "billingPeriod",
-      input: GenerateBillsBody,
+      input: GenerateFromMetersBody,
       inputVersion: 1,
       method: "POST",
-      path: "/api/billing/generate",
-      bind: { body: { billingPeriodId: "billingPeriod" } },
+      path: "/api/billing-periods/[periodId]/generate-from-meters",
+      bind: { path: { periodId: "billingPeriod" } },
       risk: "money",
       humanOnly: false,
       confirm: "confirm",

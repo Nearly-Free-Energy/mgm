@@ -4,10 +4,11 @@ import "server-only";
  * generate.ts — shared billing-line-item generation engine (#173, BC1).
  *
  * This module owns the per-tenant compute + (optionally) write loop that
- * used to live inline in `src/app/api/billing/generate/route.ts`. After BC1
- * three callers share it:
+ * used to live inline in the session route `POST /api/billing/generate`
+ * (removed once nothing called it, #201). Its unguarded callers:
  *
- *   1. `POST /api/billing/generate` — bulk OR selective (mode='write').
+ *   1. `BillingCapability.generateBills` without `expectedBill` — bulk OR
+ *      selective (mode='write').
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
  *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
@@ -18,12 +19,14 @@ import "server-only";
  *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
  *      that guard only; it does not add a tenant to the processed set.
  *
- *   2. `POST /api/billing/regenerate-preview` — same body without
- *      `seedReadings` (`PreviewBillsBody`), mode='preview'.
+ *   2. `BillingCapability.previewBills` — the same body, mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
- *   3. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
+ *   3. `POST /api/v1/billing/generate`, the public v1 API — calls the engine
+ *      directly in write mode, with manual readings and no tenant list.
+ *
+ *   4. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
  *      edit. Internally resolves `tenantIds: [<resolved>]` +
  *      `manualReadings: [<resolved>]` and calls with mode='write'.
  *
@@ -47,8 +50,8 @@ import "server-only";
  * also writes one row to billing_audit_log per call (in the same transaction).
  *
  * The legacy bulk-only delete-then-insert path is REMOVED — this is the
- * critical AC3 change. UPSERT-preserve is the only write path on POST
- * /api/billing/generate and the callers that share it.
+ * critical AC3 change. UPSERT-preserve is the only write path of the
+ * unguarded callers above.
  *
  * The guarded callers write differently. A bill that exists goes through
  * fn_regenerate_bill_with_audit, which rewrites it only as it was read. A
@@ -140,8 +143,8 @@ export type ManualReadingInput = {
  *
  * All three are sent. The derived value is what generation uses; the inputs
  * are what make a wrong seed diagnosable a year later rather than anonymous.
- * The route checks only that startKwh does not exceed dialReadingKwh
- * (GenerateBillsBody); it does not recompute startKwh from the inputs, so
+ * GenerateBillsBody checks only that startKwh does not exceed dialReadingKwh;
+ * nothing recomputes startKwh from the inputs, so
  * the client's arithmetic is trusted. If a server-side recomputation is
  * added, say so here.
  *
@@ -331,7 +334,7 @@ export type RunGenerationParams = {
    * a draft and the bill still has no invoice number and these values, under
    * locks held to commit, and writes nothing when the new figures are the
    * ones the bill already has (`kind: 'unchanged'`). Unset, as on POST
-   * /api/billing/generate, nothing here applies.
+   * /api/v1/billing/generate, nothing here applies.
    */
   expectedBill?: ExpectedBill;
   /**
@@ -369,10 +372,11 @@ export type RunGenerationParams = {
    *    bill: a close that commits after the second read above refuses the
    *    insert (`period_closed`, GENERATE_FROM_METERS_COPY.closed), and a bill
    *    another write inserted for that tenant after this run read the
-   *    period's bills (a manual reading on POST /api/billing/generate, a
+   *    period's bills (a manual reading on POST /api/v1/billing/generate, a
    *    bill from readings, or a second run overlapping this one) is left as
    *    it is (`bill_exists`), with nothing written for that tenant;
-   * POST /api/billing/generate leaves it unset and checks none of this.
+   * An unguarded run (POST /api/v1/billing/generate, generateBills without
+   * expectedBill) leaves it unset and checks none of this.
    */
   guardExistingBills?: boolean;
   /**
@@ -395,7 +399,7 @@ export type RunGenerationParams = {
    *    guardExistingBills, and the run is refused the same way, with nothing
    *    written, if it is no longer a draft;
    *  - otherwise the manual path below runs unchanged: the same tariff pin,
-   *    rounding and audit row as on POST /api/billing/generate.
+   *    rounding and audit row as on an unguarded run.
    * The insert is fn_record_first_line_item_with_audit's, as for
    * guardExistingBills above: under the period's lock it refuses a period
    * that closed after that second read (`period_closed`,
@@ -624,8 +628,9 @@ export async function runGenerationFor(
     rate_schedule_id?: string | null;
   };
 
-  // Q4=B: closed-period regenerate IS allowed via /api/billing/generate (the
-  // legacy reject removed in this ticket). PATCH /usage retains its own
+  // Q4=B: an unguarded run (POST /api/v1/billing/generate, generateBills
+  // without expectedBill) regenerates a closed period (the legacy reject was
+  // removed in #173). PATCH /usage retains its own
   // `period_closed` reject upstream — see the route handler. A guarded
   // whole-period run refuses it here, before the tariff pin, and again after
   // reading the meters, before the first write (6b below); each of its
@@ -1354,9 +1359,10 @@ export async function runGenerationFor(
     // parameter added to one is added to the other two in the same migration.
     // A guarded run's tenant with no bill as read gets one only while it
     // still has none and the period is still a draft, under the period's
-    // lock (fn_record_first_line_item_with_audit). POST /api/billing/generate
-    // keeps the upsert: its manual rows overwrite a bill, and it accepts a
-    // closed period (Q4=B).
+    // lock (fn_record_first_line_item_with_audit). An unguarded run (POST
+    // /api/v1/billing/generate, generateBills without expectedBill) keeps
+    // the upsert: its manual rows overwrite a bill, and it accepts a closed
+    // period (Q4=B).
     const firstBill = !expected && !prior && (guardExistingBills === true || newBillOnly === true);
     const recordArgs = {
       _billing_period_id: periodId,

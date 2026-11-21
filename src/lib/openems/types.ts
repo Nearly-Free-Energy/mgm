@@ -50,14 +50,6 @@ export type EnergyReading = {
   energyKwh: number | null;
 };
 
-export type DeviceEnergyResult = {
-  deviceId: string;
-  edgeId: string;
-  channelAddress: string;
-  energyWh: number | null;
-  energyKwh: number | null;
-};
-
 export type ChannelValue = {
   edgeId: string;
   channelAddress: string;

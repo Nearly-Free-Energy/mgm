@@ -28,8 +28,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   404:   line item not found / RLS-hidden
  *   409:   device_linked  (line_item.device_id != NULL OR tenant has a
  *                          primary_consumption_meter link)
- *   409:   period_closed  (per Out-of-Scope: closed-period regenerate ships
- *                          via POST /generate, not this inline-edit path)
+ *   409:   period_closed  (per Out-of-Scope: closed-period regenerate is
+ *                          not this inline-edit path's)
  *
  * Internal change: the route delegates to `runGenerationFor` with
  * `tenantIds: [<resolved>]` + `manualReadings: [<resolved>]` so that
@@ -39,9 +39,10 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *     line_item_regenerated, with previous_total_amount + new_total_amount).
  *   - UPSERT-preserve semantics for payment fields (matches the bulk path).
  *
- * Behavioral asymmetry preserved (Out of Scope): closed-period regenerate
- * ships only via POST /generate. This inline cell-edit path continues to
- * reject closed periods with 409 period_closed.
+ * Behavioral asymmetry preserved (Out of Scope): the engine regenerates a
+ * closed period on an unguarded run (POST /api/v1/billing/generate). This
+ * inline cell-edit path continues to reject closed periods with 409
+ * period_closed.
  */
 
 const UUID_RE =

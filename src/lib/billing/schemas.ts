@@ -309,20 +309,7 @@ function periodsNoManualRevert(
 }
 
 /**
- * POST /api/billing/regenerate-preview. Generation's body without
- * seedReadings: the route has never passed seeds to the preview, so it
- * refuses them rather than drop them unread. If it starts passing them,
- * parse with GenerateBillsBody instead.
- */
-export const PreviewBillsBody = z
-  .strictObject(periodsGenerationShape, { error: periodsBodyError })
-  .superRefine(periodsNoManualRevert);
-export const PREVIEW_BILLS_BODY_VERSION = 1;
-
-/**
- * POST /api/billing/generate. BillingCapability.generateBills and
- * previewBills parse with it too, for callers that reach the capability
- * without a route.
+ * The input BillingCapability.generateBills and previewBills parse with.
  */
 export const GenerateBillsBody = z
   .strictObject(
@@ -475,9 +462,9 @@ export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
  * The acknowledgement regenerating a paid bill needs on the regenerate route:
  * billing.regenerate-bill's prepare offers it
  * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
- * bill without it. POST /api/billing/generate asks for none and rewrites a
- * paid bill as well; the legacy dialogs that called it warned on the client
- * only.
+ * bill without it. POST /api/billing/generate, which the deleted legacy
+ * dialogs called, asked for none and rewrote a paid bill as well; the
+ * dialogs warned on the client only.
  */
 export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
 
@@ -500,8 +487,6 @@ export const REGENERATE_PAID_ACKNOWLEDGEMENT = "regenerate-paid-bill";
  *    whole-period run from meter data (POST
  *    /api/billing-periods/[periodId]/generate-from-meters) leaves a paid
  *    bill as it is, as it leaves an invoiced or refunded one.
- * POST /api/billing/generate, which the deleted legacy dialogs called,
- * refuses none of these: if it comes to, say so here.
  */
 export const REGENERATE_REFUSAL_COPY = {
   closed: "Bills in a closed period cannot be regenerated.",
@@ -606,8 +591,7 @@ export const RegenerateBillBody = z.strictObject(
     // The host's Confirmation (src/lib/gui/contract.ts), sent with a
     // ceremony action: billing.regenerate-bill asks a paid bill's
     // regeneration to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), and
-    // this route refuses a paid bill without it (POST /api/billing/generate
-    // does not: see REGENERATE_PAID_ACKNOWLEDGEMENT). The host hides it from
+    // this route refuses a paid bill without it. The host hides it from
     // the form. Version 2 added it. It takes no typed name: the ceremony
     // asks for none (prepareRegenerateBill), so the host sends none, and a
     // body carrying one is refused as an unknown key. If the ceremony comes
@@ -634,8 +618,8 @@ export const REGENERATE_BILL_BODY_VERSION = 2;
  * the start and end readings typed by hand for a tenant with no bill, and
  * why, as the legacy pre-flight panel's manual rows take them. The period
  * and tenant come from the path. Decimals are accepted (the bill engine
- * stores kWh to 3 places) and no upper bound is set, as on POST
- * /api/billing/generate and the regenerate route. The route checks that
+ * stores kWh to 3 places) and no upper bound is set, as in
+ * GenerateBillsBody's manual readings and on the regenerate route. The route checks that
  * end_kwh is not below start_kwh. Flat and without an object-level
  * refinement, so the kit renders it and the GUI host can check a prefill
  * (cleanPrefill in src/lib/gui/host/server/merge.ts); if a refinement is
@@ -900,7 +884,7 @@ export const V1ManualReadingBody = z
 /**
  * POST /api/v1/billing/generate. manualReadings omitted or empty bills every
  * tenant from the metering source; each reading overrides one tenant. null is
- * not "omitted" and is refused. The dashboard's GenerateBillsBody is a separate
+ * not "omitted" and is refused. The capability's GenerateBillsBody is a separate
  * contract with other messages and fields (tenantIds and the rest are dropped
  * here); do not merge the two.
  */

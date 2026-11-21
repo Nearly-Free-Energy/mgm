@@ -211,7 +211,7 @@ function handleError(
     }
     // Every other PaymentError code falls through to the 502 default
     // ("upstream failed"). We deliberately do NOT surface 403 / 503 / 400
-    // mappings used by the operator-facing /url route — public callers get
+    // mappings here, as an operator-facing route would — public callers get
     // the same opaque "couldn't retrieve" page regardless of the upstream
     // error class. The scrubbed log captures the actual code.
   }

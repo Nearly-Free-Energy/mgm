@@ -404,9 +404,9 @@ export const BILLING_SURFACE: Contribution = {
     // review shows the result once it refreshes.
     // The full-body billing.generate-bills (GenerateBillsBody on POST
     // /api/billing/generate) is no longer contributed: no interface could
-    // submit it, and that route regenerates closed periods' and paid or
-    // invoiced bills, which the review refuses bill by bill. The route stays
-    // for the legacy pre-flight panel.
+    // submit it, and that route regenerated closed periods' and paid or
+    // invoiced bills, which the review refuses bill by bill. The route went
+    // with the legacy pre-flight panel (#201's Deletes).
     {
       ...GENERATE_FROM_METERS_ACTION,
       target: "billingPeriod",

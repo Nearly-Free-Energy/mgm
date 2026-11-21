@@ -100,7 +100,7 @@ describe("SurfaceRegistry.contribute", () => {
       ["billing", "billing.period-review"],
       ["billing", "billing.close-checklist"],
     ]);
-    expect([...s.actions.keys()]).toEqual(["billing.create-period", "billing.generate-bills", "billing.close-period"]);
+    expect([...s.actions.keys()]).toEqual(["billing.create-period", "billing.generate-from-meters", "billing.close-period"]);
     expect(s.actions.get("billing.close-period")?.plugin).toBe("billing");
     expect(s.nav.map((n) => n.def.id)).toEqual(["billing.nav", "billing.tariff"]);
     expect(s.signals.map((x) => [x.plugin, x.id])).toEqual([["billing", "billing.period-due"]]);

@@ -97,9 +97,6 @@ const RELEASE_3_PAGE_ROUTES = [
 const RELEASE_3_API_ROUTES = [
   // Tariffs.
   /^\/api\/rate-schedules(?:\/[^/]+)?$/,
-  // Bill generation (write) and regeneration preview (compute).
-  /^\/api\/billing\/generate$/,
-  /^\/api\/billing\/regenerate-preview$/,
   // Read-only review preview.
   /^\/api\/billing-review\/preview$/,
   // Billing periods: manual create, draft delete + operator close; audit + CSV
@@ -130,12 +127,12 @@ const RELEASE_4_PAGE_ROUTES = [
 ];
 
 const RELEASE_4_API_ROUTES = [
-  // Stable MGM payment link + hosted-checkout mint (compat: legacy long URLs kept).
-  /^\/api\/billing-line-items\/[^/]+\/(?:pay|url)$/,
+  // Stable MGM payment link (compat: legacy long URLs kept).
+  /^\/api\/billing-line-items\/[^/]+\/pay$/,
   // Pesapal IPN webhook (unauthenticated server-to-server).
   /^\/api\/payments\/ipn$/,
-  // Payment attempts: history, refresh, reconcile, worker.
-  /^\/api\/payments\/attempts(?:\/[^/]+(?:\/(?:refresh|reconcile))?)?$/,
+  // Payment attempts: refresh, reconcile, worker.
+  /^\/api\/payments\/attempts\/[^/]+\/(?:refresh|reconcile)$/,
   /^\/api\/payments\/reconcile-worker$/,
   // Org-default merchant accounts + community overrides.
   /^\/api\/organizations\/[^/]+\/payment-accounts(?:\/[^/]+)?$/,

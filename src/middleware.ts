@@ -56,7 +56,7 @@ const MGM_PATH_MAX_LENGTH = 2048;
  * short slug is the bearer token and verification is always server-side.
  * Deliberately narrow: only the customer redirect (`/pay`, `/p/<slug>`)
  * and the IPN webhook are public. Sibling mutation routes
- * (`/url`, `/payment-status`, attempts refresh/reconcile) stay
+ * (`/payment-status`, attempts refresh/reconcile) stay
  * session-gated — guards against a broad `/api/billing-line-items/` prefix
  * silently exposing them.
  */

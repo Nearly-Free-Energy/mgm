@@ -12,9 +12,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * POST /api/billing-line-items/[lineItemId]/regenerate (#201)
  *
  * Regenerates one bill: the period review's per-bill action
- * (`billing.regenerate-bill`). A thin adapter over the same capability call
- * POST /api/billing/generate makes, for the bill's one tenant, so a per-row
- * control cannot become a whole-period run. It adds no billing logic.
+ * (`billing.regenerate-bill`). A thin adapter over BillingCapability's
+ * generateBills, for the bill's one tenant, so a per-row control cannot
+ * become a whole-period run. It adds no billing logic.
  *
  * Body (RegenerateBillBody):
  *   { readings: "edge" }                              — from the meter; a
@@ -24,15 +24,15 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
  *   route refuses a paid bill without it, and a refunded bill, an invoiced
  *   bill and a bill in a closed period outright, but only on its own
- *   requests: POST /api/billing/generate, which the deleted legacy
- *   Regenerate dialogs and Refresh Readings called, rewrites any of them
- *   with no acknowledgement (generate.ts keeps the payment columns and refuses no
- *   payment status, invoice number or closed period; on a closed period
- *   that is the legacy menu's "Logged as audit revision", and the database
- *   lets that audited write change a closed bill's amount). There the
- *   paid-bill warning was the legacy dialog's own, on the client with POST
- *   /api/billing/regenerate-preview, and nothing on the server asks for it.
- *   If generation comes to refuse any of these itself, say so here.
+ *   requests: an unguarded run (POST /api/v1/billing/generate) rewrites any
+ *   of them with no acknowledgement (generate.ts keeps the payment columns
+ *   and refuses no payment status, invoice number or closed period; on a
+ *   closed period the database lets that audited write change a closed
+ *   bill's amount). The deleted legacy Regenerate dialogs and Refresh
+ *   Readings did the same through the session route POST
+ *   /api/billing/generate, since removed, and warned of a paid bill only on
+ *   the client. If generation comes to refuse any of these itself, say so
+ *   here.
  *
  * Responses:
  *   200 → { lineItemId, totalAmount, previousTotalAmount, changed, message }
@@ -59,9 +59,6 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   500 → { error, reason: "unknown_error" } (the bill, its period or its
  *         microgrid could not be read, or nothing was written)
  *   and the capability's own refusals (plugin gate, organization scope).
- *
- * POST /api/billing/generate checks none of these (above); nothing in MGM
- * calls it since the legacy dialogs were deleted.
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -148,7 +145,7 @@ export async function POST(
   if (billError) return readFailed("Failed to look up billing line item.");
   if (!bill) return notFound();
 
-  // The organization, as POST /api/billing/generate resolves it. A failed
+  // The organization, through the period's microgrid and community. A failed
   // read is not a missing row: it answers 500, as the bill's own read does.
   const { data: period, error: periodError } = await supabase
     .from("billing_periods")

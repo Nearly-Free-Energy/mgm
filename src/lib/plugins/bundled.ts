@@ -264,7 +264,6 @@ export const BILLING_PLUGIN: BundledPlugin = {
   ],
   routes: [
     "/api/rate-schedules",
-    "/api/billing",
     "/api/billing-periods",
     "/api/billing-line-items",
     "/api/billing-review",
@@ -358,7 +357,6 @@ export const PAYMENTS_PLUGIN: BundledPlugin = {
   routes: [
     "/api/payments",
     "/api/billing-line-items/[id]/pay",
-    "/api/billing-line-items/[id]/url",
     "/api/organizations/[id]/payment-accounts",
     "/api/communities/[id]/payment",
   ],

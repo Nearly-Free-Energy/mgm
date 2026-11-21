@@ -14,13 +14,13 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * offered on each row of its Tenants not billed section
  * (src/lib/billing/surface/not-billed.ts). A thin adapter over the billing
  * capability (BillingCapability.billFromReadings), which runs the same
- * engine POST /api/billing/generate does, with that tenant's manual reading
+ * engine as POST /api/v1/billing/generate, with that tenant's manual reading
  * (newBillOnly in src/lib/billing/generate.ts). It adds no billing logic:
- * the same tariff pin, rounding and audit row. Unlike the legacy pre-flight
- * panel's manual rows on that route, it bills one tenant per request, and
+ * the same tariff pin, rounding and audit row. Unlike the deleted legacy
+ * pre-flight panel's manual rows, it bills one tenant per request, and
  * refuses a closed period and a tenant who already has a bill (whose bill is
  * changed by regenerating it, POST
- * /api/billing-line-items/[lineItemId]/regenerate), where that route
+ * /api/billing-line-items/[lineItemId]/regenerate), where the panel's route
  * overwrote the bill and accepted a closed period.
  *
  * The engine reads the period's status again just before the insert and
@@ -30,7 +30,7 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * the period's lock: a close committing after that read is refused
  * (period_closed), and so is a bill another write inserted for that tenant
  * after the engine read the period's bills (a run from meter data, POST
- * /api/billing/generate, or a second submission of this action), which is
+ * /api/v1/billing/generate, or a second submission of this action), which is
  * left as it is (has_bill). Nothing is written either way.
  *
  * Body (BillFromReadingsBody): { start_kwh, end_kwh, reason? }, kWh of 0 or

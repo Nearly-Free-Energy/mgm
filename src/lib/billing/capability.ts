@@ -735,10 +735,8 @@ export class BillingCapability implements BillingCapabilityContract {
     const { expectedBill, guardExistingBills, newBillOnly } = options;
     const inactive = this.ensureActive();
     if (inactive) return inactive;
-    // The routes parse first (generate with this schema, regenerate-preview
-    // with PreviewBillsBody, which is this one without seedReadings); this
-    // keeps a direct caller to the same rules. Preview accepts seeds here
-    // as it always has.
+    // Parsing here holds every caller, route or not, to the same rules.
+    // Preview accepts seeds as it always has.
     const body = GenerateBillsBody.safeParse(input);
     if (!body.success) {
       const issue = body.error.issues[0];

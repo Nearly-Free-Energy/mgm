@@ -13,7 +13,7 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * Generates a draft period's bills from meter data: the period review's
  * `billing.generate-from-meters`. A thin adapter over the billing
  * capability (BillingCapability.generateFromMeters), which runs the same
- * engine POST /api/billing/generate does, for every tenant of the period's
+ * engine as POST /api/v1/billing/generate, for every tenant of the period's
  * microgrid and with no readings given. It adds no billing logic. Unlike
  * that route it refuses a closed period, keeps manual bills, leaves
  * invoiced, paid and refunded bills as they are, and changes any other

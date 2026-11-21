@@ -432,11 +432,6 @@ const ENTRIES: Record<string, Entry> = {
     path: "/api/openems/channels",
     reason: "Decrypts after gateRoute only; needs a getUser-backed check before release.",
   },
-  "src/app/api/openems/energy/route.ts": {
-    kind: "unreleased",
-    path: "/api/openems/energy",
-    reason: "Decrypts after gateRoute only; needs a getUser-backed check before release.",
-  },
   "src/app/api/org-api-tokens/route.ts": {
     kind: "unreleased",
     path: "/api/org-api-tokens",
