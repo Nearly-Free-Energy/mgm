@@ -65,11 +65,6 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
   // The payment write routes below each reach one Payments capability method
   // that only reads, or keeps running while Payments or Pesapal is off by
   // design (docs/payments-rollout.md).
-  "POST /api/billing-line-items/[id]/url": {
-    reason:
-      "Returns the stable payment link without contacting the provider; checkout starts when the customer follows it, behind ensureCheckout's plugin check. Wrong once the link starts a checkout itself.",
-    reaches: "stablePaymentLink",
-  },
   "POST /api/payments/attempts/[id]/refresh": {
     reason:
       "Re-verifies an attempt already submitted to the provider; the rollout rule keeps verification available while Payments is off. Wrong once that rule changes or refresh submits anything new.",

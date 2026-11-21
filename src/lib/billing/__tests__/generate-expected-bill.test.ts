@@ -12,7 +12,7 @@
  *   - writes nothing, and reports `unchanged`, when the bill already has the
  *     figures it computed, so a repeated submit adds no audit row.
  *
- * Without `expectedBill`, as on POST /api/billing/generate, none of this
+ * Without `expectedBill`, as on POST /api/v1/billing/generate, none of this
  * applies: the same figures are written again through
  * fn_record_line_item_with_audit.
  *
@@ -310,7 +310,7 @@ describe("runGenerationFor with expectedBill", () => {
     expect(writes(h.rpc).map((w) => w.name)).toEqual(["fn_regenerate_bill_with_audit"]);
   });
 
-  it("changes nothing without expectedBill: the same figures are written again, as POST /api/billing/generate does", async () => {
+  it("changes nothing without expectedBill: the same figures are written again, as POST /api/v1/billing/generate does", async () => {
     const h = harness(manualPrior());
     const out = await run(h, manual(160));
     if (isRunGenerationFatal(out)) throw new Error(out.body.error);

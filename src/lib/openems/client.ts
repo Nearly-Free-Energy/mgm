@@ -5,7 +5,6 @@ import { validateBackendUrl } from "./backend-url";
 import type { OpenEmsAuth } from "./auth";
 import type {
   ChannelValue,
-  DeviceEnergyResult,
   EdgeConfig,
   EdgeStatus,
   JsonRpcErrorResponse,
@@ -403,72 +402,6 @@ export class OpenEmsClient implements DeviceDataAdapter {
             usageKwh: whValue !== null ? whValue / 1000 : null,
             startDate,
             endDate,
-          });
-        }
-      }
-    );
-
-    await Promise.all(edgeQueries);
-    return results;
-  }
-
-  /**
-   * Query historic energy and return detailed results with both Wh and kWh.
-   * (Formerly getMeterEnergy — renamed to getDeviceEnergy.)
-   *
-   * Channel address: `${componentId}/ActiveConsumptionEnergy` (OpenEMS convention).
-   *
-   * `timezone` (IANA name, #359) is forwarded verbatim to
-   * `queryHistoricEnergy` — same threading as `getReadings` (#355) — so
-   * OpenEMS builds the local-day window from the zone name. Defaults to
-   * "UTC" for ambient callers with no period context.
-   */
-  async getDeviceEnergy(
-    devices: DeviceConfig[],
-    startDate: string,
-    endDate: string,
-    timezone: string = "UTC"
-  ): Promise<DeviceEnergyResult[]> {
-    const edgeGroups = new Map<
-      string,
-      { deviceId: string; channelAddress: string }[]
-    >();
-
-    for (const device of devices) {
-      if (!device.edgeOpenemsId || !device.componentId) {
-        throw new OpenEmsError(
-          `Device ${device.id} has invalid config: missing edgeOpenemsId or componentId`,
-          "DEVICE_INVALID_DATA_SOURCE",
-          400
-        );
-      }
-
-      const channelAddress = consumptionChannelAddress(device.componentId);
-      const group = edgeGroups.get(device.edgeOpenemsId) ?? [];
-      group.push({ deviceId: device.id, channelAddress });
-      edgeGroups.set(device.edgeOpenemsId, group);
-    }
-
-    const results: DeviceEnergyResult[] = [];
-    const edgeQueries = Array.from(edgeGroups.entries()).map(
-      async ([edgeId, deviceInfos]) => {
-        const channels = deviceInfos.map((d) => d.channelAddress);
-        const data = await this.queryHistoricEnergy(
-          edgeId,
-          channels,
-          startDate,
-          endDate,
-          timezone
-        );
-
-        for (const deviceInfo of deviceInfos) {
-          const whValue = data[deviceInfo.channelAddress] ?? null;
-          results.push({
-            deviceId: deviceInfo.deviceId,
-            edgeId,
-            channelAddress: deviceInfo.channelAddress,
-            energyWh: whValue,
-            energyKwh: whValue !== null ? whValue / 1000 : null,
           });
         }
       }

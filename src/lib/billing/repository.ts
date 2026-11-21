@@ -198,8 +198,8 @@ export interface BillingCapabilityContract {
   previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
   /**
    * `options.expectedBill` makes the run a per-bill regeneration
-   * (RunGenerationParams.expectedBill). It is not part of the body, so POST
-   * /api/billing/generate cannot send it.
+   * (RunGenerationParams.expectedBill). It is not part of the body
+   * (GenerateBillsBody), so it never arrives in a caller's input.
    */
   generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
   /**

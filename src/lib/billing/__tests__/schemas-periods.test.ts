@@ -12,9 +12,7 @@ import {
   GENERATE_BILLS_BODY_VERSION,
   GenerateBillsBody,
   PREVIEW_BILLING_REVIEW_BODY_VERSION,
-  PREVIEW_BILLS_BODY_VERSION,
   PreviewBillingReviewBody,
-  PreviewBillsBody,
 } from "../schemas";
 
 // Seed-style ids: any hex, no RFC version or variant bits.
@@ -83,9 +81,8 @@ const MANUAL = { tenantId: TENANT, startKwh: 100, endKwh: 180, reason: "Read by 
 const SEED = { deviceId: DEVICE, dialReadingKwh: 4196, startKwh: 3982, readAt: "2026-08-20T09:00:00Z" };
 
 describe.each([
-  ["PreviewBillsBody", PreviewBillsBody],
   ["GenerateBillsBody", GenerateBillsBody],
-] as const)("%s (the keys preview and generate share)", (_name, schema) => {
+] as const)("%s (the generation keys)", (_name, schema) => {
   it.each([
     ["the period alone", { billingPeriodId: PERIOD }],
     ["an explicit empty tenant list", { billingPeriodId: PERIOD, tenantIds: [] }],
@@ -151,15 +148,6 @@ describe.each([
     for (const body of [null, [], "x", 1]) {
       expect(firstIssue(schema, body)).toEqual({ field: undefined, message: "Body must be an object" });
     }
-  });
-});
-
-describe("PreviewBillsBody", () => {
-  it("refuses seedReadings, which preview does not use", () => {
-    expect(firstIssue(PreviewBillsBody, { billingPeriodId: PERIOD, seedReadings: [SEED] })).toEqual({
-      field: undefined,
-      message: "Unknown field: seedReadings",
-    });
   });
 });
 
@@ -279,16 +267,6 @@ const CREATE_PERIOD_SHAPES: Record<number, unknown> = {
   },
 };
 
-const PREVIEW_BILLS_SHAPES: Record<number, unknown> = {
-  1: {
-    $schema: SCHEMA,
-    type: "object",
-    properties: GENERATION_PROPERTIES,
-    required: ["billingPeriodId"],
-    additionalProperties: false,
-  },
-};
-
 const GENERATE_BILLS_SHAPES: Record<number, unknown> = {
   1: {
     $schema: SCHEMA,
@@ -332,7 +310,6 @@ const PREVIEW_BILLING_REVIEW_SHAPES: Record<number, unknown> = {
 describe("pinned input versions", () => {
   it.each([
     ["CreatePeriodBody", CreatePeriodBody, CREATE_PERIOD_BODY_VERSION, CREATE_PERIOD_SHAPES, "CREATE_PERIOD_BODY_VERSION"],
-    ["PreviewBillsBody", PreviewBillsBody, PREVIEW_BILLS_BODY_VERSION, PREVIEW_BILLS_SHAPES, "PREVIEW_BILLS_BODY_VERSION"],
     ["GenerateBillsBody", GenerateBillsBody, GENERATE_BILLS_BODY_VERSION, GENERATE_BILLS_SHAPES, "GENERATE_BILLS_BODY_VERSION"],
     [
       "PreviewBillingReviewBody",
@@ -350,7 +327,6 @@ describe("pinned input versions", () => {
 
   it("starts every version at 1", () => {
     expect(CREATE_PERIOD_BODY_VERSION).toBe(1);
-    expect(PREVIEW_BILLS_BODY_VERSION).toBe(1);
     expect(GENERATE_BILLS_BODY_VERSION).toBe(1);
     expect(PREVIEW_BILLING_REVIEW_BODY_VERSION).toBe(1);
   });

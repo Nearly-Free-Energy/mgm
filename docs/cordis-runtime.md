@@ -146,8 +146,9 @@ metering write or provider call, and `requireCommunityPlugin` in
 write. They read through their Supabase repository, which also uses
 `isPluginEnabledForOrg` and rejects when the state cannot be read, and refuse
 with the same `409` or `503` before anything is written or called. Billing's
-`previewBills` saves nothing and does not re-check (see
-`POST /api/billing/regenerate-preview` below). The capabilities' unit tests
+`previewBills` saves no bills and does not re-check, though preview mode can
+re-pin an empty draft period's tariff, so a route that calls it gates itself
+(see `readOnly` below). The capabilities' unit tests
 check that each method in their `WRITES` / `GATED` tables re-checks before it
 acts; the tables are kept by hand, so a new gated method is covered only once
 it has a row there. `compose-fail-closed.test.ts` also writes through each
@@ -510,16 +511,18 @@ plugin before opening its scope (the table above; the test's `COMPOSERS` map
 is the list it checks against). `composeBillingReview` does not count, and
 neither does `composeBilling` called with `readOnly: true` (or with options
 the test cannot read statically): routes using them call `checkGate`/`gateRoute`
-themselves. `POST /api/billing/regenerate-preview` is the worked example —
-preview can re-pin an empty draft period's tariff, so it is a billing write
-even though it saves no bills. `previewBills` runs generation in preview mode,
-which skips the capability's plugin check (the capability checks only for
-generation in write mode), so the route's gate is the only check on this path.
-The route composes first, so the composer settles organization access
-(`401`/`403`) before the gate's `409`/`503` can reveal whether billing is on.
-It calls `checkGate` inside the `try` whose `finally` disposes the scope, and
-answers `404` unless the gate resolved the period to the organization the
-scope was authorized for. Its route test pins that order.
+themselves. A route that calls `previewBills` is one: preview can re-pin an
+empty draft period's tariff, so it is a billing write even though it saves no
+bills, and preview mode skips the capability's plugin check (the capability
+checks only for generation in write mode), so the route's gate is the only
+check on that path. Such a route composes first, so the composer settles
+organization access (`401`/`403`) before the gate's `409`/`503` can reveal
+whether billing is on; calls `checkGate` inside the `try` whose `finally`
+disposes the scope; and answers `404` unless the gate resolved the target to
+the organization the scope was authorized for. `POST
+/api/billing/regenerate-preview` was the worked example until it was removed
+with nothing left calling it (#201's Deletes); no route passes `readOnly`
+today.
 
 ### Payments
 

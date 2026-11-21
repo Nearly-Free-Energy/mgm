@@ -187,38 +187,3 @@ describe("routes gated by the MGM runtime", () => {
     }
   );
 });
-
-describe("POST /api/openems/energy", () => {
-  it("resolves the devices' microgrid, then stops at the gate before calling OpenEMS", async () => {
-    vi.clearAllMocks();
-    gateRoute.mockResolvedValue(
-      NextResponse.json({ error: "disabled", code: "metering_disabled" }, { status: 409 })
-    );
-    from.mockImplementationOnce((() => ({
-      select: () => ({
-        in: async () => ({
-          data: [
-            {
-              id: ID,
-              openems_component_id: "meter0",
-              edges: { openems_edge_id: "edge0", microgrid_id: ID },
-            },
-          ],
-          error: null,
-        }),
-      }),
-    })) as never);
-    const { POST } = await import("../openems/energy/route");
-    const response = await POST(
-      json("POST", { deviceIds: [ID], fromDate: "2026-09-01", toDate: "2026-09-30" })
-    );
-    expect(response.status).toBe(409);
-    expect(gateRoute).toHaveBeenCalledWith(supabase, {
-      plugin: "metering",
-      target: { kind: "microgrid", id: ID },
-      method: "POST",
-      access: "write",
-    });
-    expect(from).toHaveBeenCalledTimes(1);
-  });
-});
