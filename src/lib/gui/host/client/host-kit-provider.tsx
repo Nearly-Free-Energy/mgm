@@ -71,7 +71,7 @@ function signalsOrganization(manifest: ComponentProps<typeof KitProvider>["manif
   return manifest && manifest.orgs.some((org) => org.id === manifest.org.id) ? manifest.org.id : null;
 }
 
-export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve" | "signals" | "refreshSignals" | "seedSignals">) {
+export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, "resolve" | "signals" | "signalsSource" | "refreshSignals" | "seedSignals">) {
   const { manifest } = props;
   const organization = manifest?.org.id ?? null;
   const runtime = useKitRuntime();
@@ -112,5 +112,5 @@ export function HostKitProvider(props: Omit<ComponentProps<typeof KitProvider>, 
     },
     [],
   );
-  return <KitProvider {...props} resolve={resolve} signals={feed.signals} refreshSignals={feed.refresh} seedSignals={feed.seed} />;
+  return <KitProvider {...props} resolve={resolve} signalsSource={feed.source} refreshSignals={feed.refresh} seedSignals={feed.seed} />;
 }

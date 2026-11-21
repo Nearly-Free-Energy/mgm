@@ -108,7 +108,7 @@ describe("HostKitProvider", () => {
     expect(typeof props.resolve).toBe("function");
     expect(typeof props.refreshSignals).toBe("function");
     expect(typeof props.seedSignals).toBe("function");
-    await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
+    await waitFor(() => expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals));
     expect(fetch).toHaveBeenCalledWith(`/api/gui/signals?org=${ORG}`, expect.objectContaining({ cache: "no-store" }));
   });
 
@@ -138,8 +138,11 @@ describe("HostKitProvider", () => {
       </KitRuntimeProvider>
     );
     const before = viewRendered.mock.calls.length;
+    const providerRenders = seenProps.length;
     await waitFor(() => expect(seen.at(-1)).toEqual(signals));
     expect(viewRendered).toHaveBeenCalledTimes(before);
+    // Nothing above the page re-renders either: the signals are a store, not state.
+    expect(seenProps.length).toBe(providerRenders);
   });
 
   it("takes the signals a published view's model carries instead of fetching them", async () => {
@@ -153,10 +156,10 @@ describe("HostKitProvider", () => {
         </HostKitProvider>
       </KitRuntimeProvider>
     );
-    await waitFor(() => expect(seenProps.at(-1)!.signals).toEqual(signals));
+    await waitFor(() => expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetch).not.toHaveBeenCalled();
-    expect(seenProps.at(-1)!.signals).toEqual(signals);
+    expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toEqual(signals);
   });
 
   it("fetches no signals for a tenant manifest, whose org is a unit and not among its orgs", async () => {
@@ -175,7 +178,7 @@ describe("HostKitProvider", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     expect(fetch).not.toHaveBeenCalled();
-    expect(seenProps.at(-1)!.signals).toBeNull();
+    expect(seenProps.at(-1)!.signalsSource?.get() ?? null).toBeNull();
   });
 
   it("remembers the manifest's organization in the mgm-org cookie", () => {

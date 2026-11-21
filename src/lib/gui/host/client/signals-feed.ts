@@ -33,7 +33,7 @@
  *   fetched and no answer is applied.
  * Nothing here throws or blocks rendering.
  */
-import { startTransition, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Signals } from "../../contract";
 import { clearAppBadge, isSignedOut, setAppBadge } from "./app-badge";
 
@@ -89,8 +89,55 @@ export async function fetchSignals(fetch: Fetch, organization: string, signal?: 
 
 const visible = () => typeof document === "undefined" || document.visibilityState !== "hidden";
 
+/**
+ * The signals as a store outside React state: what useSignals() reads
+ * through useSyncExternalStore. Kept out of state and out of any context
+ * value that changes, because an update reaching the page's Suspense
+ * boundary (src/app/(gui)/loading.tsx) while it is still dehydrated makes
+ * React render it on the client and leave the streamed copy behind as a
+ * hidden duplicate of the page. The 360 px smoke found that with the
+ * signals in state, in a context of their own, and in a transition alike,
+ * and not with a fetch whose answer was dropped. Only what subscribes (the
+ * shell's tray) re-renders when the signals change.
+ */
+export interface SignalsSource {
+  get(): Signals | null;
+  subscribe(listener: () => void): () => void;
+}
+
+/** Held signals for one organization at a time; `get` answers null for any other. */
+function createHeldSignals() {
+  let held: { org: string; signals: Signals | null } | null = null;
+  let current: string | null = null;
+  const listeners = new Set<() => void>();
+  const get = (): Signals | null => (held !== null && held.org === current ? held.signals : null);
+  const change = (apply: () => void) => {
+    const before = get();
+    apply();
+    if (get() !== before) for (const listener of listeners) listener();
+  };
+  return {
+    get,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set(org: string, signals: Signals | null) {
+      change(() => (held = { org, signals }));
+    },
+    follow(org: string | null) {
+      change(() => (current = org));
+    },
+  };
+}
+
 export interface SignalsFeed {
-  signals: Signals | null;
+  /** The current signals (read when called). */
+  readonly signals: Signals | null;
+  /** The same signals as a store, for useSignals(). */
+  source: SignalsSource;
   /** Fetches the signals again at once. */
   refresh(): void;
   /** Signals the host already collected for this organization (a view's model); they count as a fetch. */
@@ -105,7 +152,7 @@ export interface SignalsFeed {
  * above.
  */
 export function useSignalsFeed(organization: string | null, fetch: Fetch): SignalsFeed {
-  const [held, setHeld] = useState<{ org: string; signals: Signals | null } | null>(null);
+  const [held] = useState(createHeldSignals);
   const fetchRef = useRef(fetch);
   useEffect(() => {
     fetchRef.current = fetch;
@@ -114,6 +161,7 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
   const previous = useRef<string | null>(null);
 
   useEffect(() => {
+    held.follow(organization);
     if (organization === null || (previous.current !== null && previous.current !== organization)) clearAppBadge();
     previous.current = organization;
     if (organization === null) return;
@@ -137,14 +185,7 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     // did not answer; the badge stays as it was.
     const nothingChecked = (signals: Signals) => signals.checked.length === 0 && signals.unchecked.length > 0;
     const show = (signals: Signals | null) => {
-      // A transition, so React hydrates the page first. The page's Suspense
-      // boundary (src/app/(gui)/loading.tsx) can still be dehydrated when an
-      // answer lands, even after the load event; a context change above it
-      // schedules it, and as an urgent update React would render it on the
-      // client and leave the streamed copy behind as a hidden duplicate
-      // (React error 421; the 360 px smoke found it, and a feed that never
-      // fetched did not).
-      startTransition(() => setHeld({ org: organization, signals }));
+      held.set(organization, signals);
       if (!signals) clearAppBadge();
       else if (!nothingChecked(signals)) setAppBadge(signals.count);
     };
@@ -206,9 +247,16 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
       window.removeEventListener("focus", ifStale);
       if (feedRef.current?.load === load) feedRef.current = null;
     };
-  }, [organization]);
+  }, [organization, held]);
 
   const refresh = useCallback(() => feedRef.current?.load(), []);
   const seed = useCallback((signals: Signals) => feedRef.current?.seed(signals), []);
-  return { signals: held !== null && held.org === organization ? held.signals : null, refresh, seed };
+  return {
+    get signals() {
+      return held.get();
+    },
+    source: held,
+    refresh,
+    seed,
+  };
 }

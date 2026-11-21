@@ -25,6 +25,7 @@ import { isHref } from "../shared/href";
 import { ActionHost, type ActionHostSlots } from "./action-host";
 import { defaultRuntime, RouterBridge, useKitRuntime, useSearchOrganization } from "./kit-runtime";
 import { usePathname } from "./navigation";
+import type { SignalsSource } from "./signals-feed";
 
 /**
  * The view for a pathname; `unplaced` when it names a place the manifest does
@@ -90,15 +91,16 @@ type KitState = {
 
 const KitContext = createContext<KitState | null>(null);
 /**
- * The signals apart from KitContext, so a new answer re-renders only what
- * reads them (the shell's tray), never the page's views. Those sit inside
- * the page's Suspense boundary (src/app/(gui)/loading.tsx), which can still
- * be hydrating or streaming when the feed's first answer lands; a change to
- * a context they read would make React render that boundary on the client
- * and leave the streamed copy behind as a hidden duplicate. If a page's view
- * comes to read the signals, keep that in mind.
+ * The signals' store (SignalsSource in ./signals-feed.ts), apart from
+ * KitContext and never a new value while the feed runs: useSignals() reads
+ * it through useSyncExternalStore, so new signals re-render only what reads
+ * them (the shell's tray), never the page's views inside the page's
+ * Suspense boundary, which may still be dehydrated when they land.
  */
-const SignalsContext = createContext<Signals | null>(null);
+const SignalsContext = createContext<SignalsSource | null>(null);
+const NO_SIGNALS: SignalsSource = { get: () => null, subscribe: () => () => {} };
+/** A store that always answers `signals`: for a static `signals` prop (tests, the conformance kit). */
+const constantSource = (signals: Signals | null): SignalsSource => ({ get: () => signals, subscribe: () => () => {} });
 
 export function useKitState(): KitState | null {
   return useContext(KitContext);
@@ -141,15 +143,18 @@ export function KitProvider(props: {
   resolve?: ResolveView;
   /** The active GUI's Overlay and forms for the page's ActionHost; the kit's are used otherwise. */
   actions?: ActionHostSlots;
-  /** What useSignals() returns; null when left out. */
+  /** What useSignals() returns; null when left out. Ignored when `signalsSource` is given. */
   signals?: Signals | null;
+  /** The signals as a store the host's feed keeps (./signals-feed.ts). */
+  signalsSource?: SignalsSource;
   /** Fetches the signals again; called after an action whose result says `signals: true`. */
   refreshSignals?: () => void;
   /** Handed the signals a published view's model carries (a view that takes signals, such as Today). */
   seedSignals?: (signals: Signals) => void;
   children: ReactNode;
 }) {
-  const { manifest, initial, resolve, actions, signals = null, refreshSignals, seedSignals, children } = props;
+  const { manifest, initial, resolve, actions, signals = null, signalsSource, refreshSignals, seedSignals, children } = props;
+  const source = useMemo(() => signalsSource ?? constantSource(signals), [signalsSource, signals]);
   const runtime = useKitRuntime();
   const pathname = usePathname();
   useSearchOrganization(manifest?.org.id ?? null);
@@ -196,7 +201,7 @@ export function KitProvider(props: {
   );
   return (
     <KitContext.Provider value={state}>
-      <SignalsContext.Provider value={signals}>
+      <SignalsContext.Provider value={source}>
         {runtime === defaultRuntime && <RouterBridge />}
         {children}
         <ActionHost
@@ -221,7 +226,8 @@ export function useManifest(): Manifest {
 
 /** The organization's signals, loaded after the first paint (./signals-feed.ts); null until then and for a tenant. */
 export function useSignals(): Signals | null {
-  return useContext(SignalsContext);
+  const source = useContext(SignalsContext) ?? NO_SIGNALS;
+  return useSyncExternalStore(source.subscribe, source.get, source.get);
 }
 
 type Scope = Partial<Record<CoreEntityKind, EntityRef>>;
