@@ -39,6 +39,19 @@ const LEGACY_COMPAT: Record<string, string> = {
   "docs/runbooks/backup-and-restore.md": "clears the legacy Vault key from a restore target, as dek.md's recovery does",
 };
 
+/**
+ * Files that name the upstream project for attribution, and why. Only the
+ * repository path `energy-iot/metering-billing-engine` is allowed there,
+ * never the inherited short name: attribution names a repository, prose
+ * uses MGM. The exception is documented in README.md § "Licence" and in
+ * mgm#38; if attribution moves elsewhere, move the entry with it.
+ */
+const UPSTREAM_ATTRIBUTION: Record<string, string> = {
+  "README.md": "names the upstream repository in the Licence section",
+  "NOTICE": "attribution notice required by EPL-2.0",
+};
+const UPSTREAM_REPOSITORY = /energy-iot\/metering-billing-engine/g;
+
 function trackedFiles(): string[] {
   return execFileSync("git", ["ls-files"], { cwd: REPO_ROOT, encoding: "utf8" })
     .split("\n")
@@ -65,7 +78,12 @@ describe("no legacy project names", () => {
           Boolean(LEGACY_COMPAT[file]) &&
           LEGACY_IDENTIFIER.test(line) &&
           !FORBIDDEN.test(line.replace(LEGACY_IDENTIFIER_ALL, ""));
-        if (FORBIDDEN.test(line) && !legacyIdentifierOnly) {
+        const attributionOnly =
+          Boolean(UPSTREAM_ATTRIBUTION[file]) &&
+          UPSTREAM_REPOSITORY.test(line) &&
+          !FORBIDDEN.test(line.replace(UPSTREAM_REPOSITORY, ""));
+        UPSTREAM_REPOSITORY.lastIndex = 0;
+        if (FORBIDDEN.test(line) && !legacyIdentifierOnly && !attributionOnly) {
           offenders.push(`${file}:${index + 1}: ${line.trim().slice(0, 100)}`);
         }
       });
@@ -80,6 +98,15 @@ describe("no legacy project names", () => {
         LEGACY_IDENTIFIER.test(readFileSync(path.join(REPO_ROOT, file), "utf8"))
     );
     expect(offenders, "Add a reasoned LEGACY_COMPAT entry or use the MGM identifier").toEqual([]);
+  });
+
+  it("lists only files that still carry the upstream attribution", () => {
+    const stale = Object.keys(UPSTREAM_ATTRIBUTION).filter((file) => {
+      const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
+      UPSTREAM_REPOSITORY.lastIndex = 0;
+      return !UPSTREAM_REPOSITORY.test(text);
+    });
+    expect(stale).toEqual([]);
   });
 
   it("lists only files that still mention a legacy identifier", () => {

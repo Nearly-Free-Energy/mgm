@@ -73,6 +73,15 @@ A bare `git rebase --signoff` adds nothing to commits already up to date, and
 a plain `git push` is rejected after a rebase. Don't `git pull` on the branch;
 it creates merge commits.
 
+## Licence of your contribution
+
+MGM is licensed under the [Eclipse Public License 2.0](LICENSE). By signing
+off a commit you certify, under the Developer Certificate of Origin, that
+you may submit it under that licence; your contribution is accepted under
+EPL-2.0 and there is no separate contributor licence agreement. That
+includes new files you add to this repository, such as a plugin. See
+`README.md` § "Licence".
+
 ## What must pass before merge
 
 Merging is a maintainer social contract: GitHub does not block a merge that
