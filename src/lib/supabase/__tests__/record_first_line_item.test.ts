@@ -19,7 +19,7 @@
  *     billing_close_totals_changed;
  *   - the insert guard refuses a signed-in caller's direct insert into a
  *     closed period, and lets through a draft's insert, the audited write of
- *     fn_record_line_item_with_audit (Q4=B on an unguarded run) and
+ *     fn_record_line_item_with_audit (Q4=B, #173) and
  *     service_role.
  *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.

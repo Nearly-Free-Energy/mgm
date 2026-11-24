@@ -2,7 +2,8 @@
  * generate-expected-bill.test.ts
  *
  * A per-bill regeneration (`expectedBill`, sent by POST
- * /api/billing-line-items/[lineItemId]/regenerate):
+ * /api/billing-line-items/[lineItemId]/regenerate and PATCH
+ * /api/billing-line-items/[lineItemId]/usage):
  *
  *   - names its bill's one tenant, or the run is refused before anything is
  *     read or written;
@@ -12,9 +13,8 @@
  *   - writes nothing, and reports `unchanged`, when the bill already has the
  *     figures it computed, so a repeated submit adds no audit row.
  *
- * Without `expectedBill` (an unguarded run), none of this
- * applies: the same figures are written again through
- * fn_record_line_item_with_audit.
+ * A write without `expectedBill`, `guardExistingBills` or `newBillOnly` is
+ * refused before anything is read (#247): no write upserts over a bill.
  *
  * Harness: a mocked Supabase client, as in generate-keeps-manual.test.ts.
  * The database side is regenerate.db.test.ts.
@@ -77,7 +77,7 @@ const edgePrior = (o: Prior = {}): Prior => ({
 function harness(prior: Prior | null, writeError: { code: string; message: string } | null = null) {
   const rpc = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name === "fn_pin_billing_period_rate_schedule") return { data: SCHEDULE_ID, error: null };
-    if (name === "fn_record_line_item_with_audit" || name === "fn_regenerate_bill_with_audit") {
+    if (name === "fn_regenerate_bill_with_audit") {
       if (writeError) return { data: null, error: writeError };
       return { data: { id: LINE_ITEM, tenant_id: args?._tenant_id, total_amount: args?._total_amount }, error: null };
     }
@@ -237,12 +237,27 @@ describe("runGenerationFor with expectedBill", () => {
     expect(Object.keys(write.args._expected as object).sort()).toEqual(
       ["device_id", "end_kwh", "entered_by_user_id", "line_item_id", "manual_reason", "payment_status", "reading_source", "start_kwh", "tier_breakdown", "total_amount", "usage_kwh"],
     );
-    // Exactly fn_record_line_item_with_audit's arguments, and _expected.
-    const recordArgs = { ...write.args };
-    delete recordArgs._expected;
-    const plain = harness(manualPrior());
-    await run(plain, manual());
-    expect(writes(plain.rpc)).toEqual([{ name: "fn_record_line_item_with_audit", args: recordArgs }]);
+    // Exactly fn_regenerate_bill_with_audit's parameters (database.gen.ts):
+    // fn_record_line_item_with_audit's, which it passes on, and _expected.
+    expect(Object.keys(write.args).sort()).toEqual([
+      "_actor_kind",
+      "_actor_ref",
+      "_actor_user_id",
+      "_audit_details",
+      "_billing_period_id",
+      "_device_id",
+      "_end_kwh",
+      "_entered_by_user_id",
+      "_expected",
+      "_manual_reason",
+      "_rate_schedule_id",
+      "_reading_source",
+      "_start_kwh",
+      "_tenant_id",
+      "_tier_breakdown",
+      "_total_amount",
+      "_usage_kwh",
+    ]);
   });
 
   it.each([
@@ -261,11 +276,11 @@ describe("runGenerationFor with expectedBill", () => {
     const out = await run(h, { ...manual(), expectedBill: EXPECTED });
     if (isRunGenerationFatal(out)) throw new Error(out.body.error);
     expect(out.results).toEqual([expect.objectContaining({ kind: "error", code: "tariff_changed" })]);
-    // A refusal token on a run without expectedBill is an ordinary failure: that function never raises it.
-    const plain = harness(manualPrior(), { code: "23514", message: "billing_line_item_changed: x" });
-    const outPlain = await run(plain, manual());
-    if (isRunGenerationFatal(outPlain)) throw new Error(outPlain.body.error);
-    expect(outPlain.results).toEqual([expect.objectContaining({ kind: "error", code: "line_item_write_failed" })]);
+    // A token the function does not raise is an ordinary failure, not a refusal.
+    const other = harness(manualPrior(), { code: "23514", message: "billing_line_item_exists: x" });
+    const outOther = await run(other, { ...manual(), expectedBill: EXPECTED });
+    if (isRunGenerationFatal(outOther)) throw new Error(outOther.body.error);
+    expect(outOther.results).toEqual([expect.objectContaining({ kind: "error", code: "line_item_write_failed" })]);
   });
 
   it("writes nothing when the manual readings, reason and person are the ones the bill has", async () => {
@@ -312,12 +327,19 @@ describe("runGenerationFor with expectedBill", () => {
     expect(writes(h.rpc).map((w) => w.name)).toEqual(["fn_regenerate_bill_with_audit"]);
   });
 
-  it("changes nothing without expectedBill: the same figures are written again, as an unguarded run does", async () => {
+  it.each([
+    ["one tenant's readings", manual(160)],
+    ["every tenant", { tenantIds: undefined }],
+  ])("refuses a write without expectedBill (%s), before reading or writing anything", async (_label, o) => {
     const h = harness(manualPrior());
-    const out = await run(h, manual(160));
-    if (isRunGenerationFatal(out)) throw new Error(out.body.error);
-    expect(out.results[0]?.kind).toBe("written");
-    expect(writes(h.rpc).map((w) => w.name)).toEqual(["fn_record_line_item_with_audit"]);
+    const from = vi.spyOn(h.supabase, "from");
+    expect(await run(h, o)).toEqual({
+      kind: "fatal",
+      status: 500,
+      body: { error: "A bill is written only as it was read, or as a tenant's first bill.", code: "unguarded_write" },
+    });
+    expect(from).not.toHaveBeenCalled();
+    expect(h.rpc).not.toHaveBeenCalled();
   });
 
   it("is ignored by a preview", async () => {

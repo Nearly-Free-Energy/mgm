@@ -351,15 +351,14 @@ describe("runGenerationFor with guardExistingBills", () => {
     expect(h.getReadings).not.toHaveBeenCalled();
   });
 
-  it("pages and stops the same way without it, in fixed copy", async () => {
-    // Every page read: the manual bill on a later page is kept, not overwritten from the meter.
+  it("pages and stops the same way in a preview, in fixed copy", async () => {
+    // Every page read: the manual bill on a later page is kept, not computed from the meter.
     const paged = harness({ maxRows: 2 });
-    const by = await results(paged, { guardExistingBills: undefined });
+    const by = await results(paged, { guardExistingBills: undefined, mode: "preview" });
     expect(by.get(tenant(4))).toMatchObject({ kind: "kept" });
-    expect(writes(paged.rpc).map((w) => w.args._tenant_id)).not.toContain(tenant(4));
     // A page that cannot be read stops the run, with no database text.
     const failing = harness({ maxRows: 2, failRead: { table: "billing_line_items", n: 2 } });
-    const out = await run(failing, { guardExistingBills: undefined });
+    const out = await run(failing, { guardExistingBills: undefined, mode: "preview" });
     expect(out).toEqual({
       kind: "fatal",
       status: 500,
@@ -457,7 +456,7 @@ describe("runGenerationFor with guardExistingBills", () => {
 
   it("says nothing of a bill on a run that does not guard existing bills", async () => {
     const h = harness({ bills: [...BILLS, edgeBill(8, { device_id: null })] });
-    const by = await results(h, { guardExistingBills: false });
+    const by = await results(h, { guardExistingBills: false, mode: "preview" });
     expect(by.get(tenant(8))).toMatchObject({ kind: "error", code: "unmetered_no_manual" });
     expect(by.get(tenant(8))).not.toHaveProperty("hadBill");
   });
@@ -530,10 +529,12 @@ describe("runGenerationFor with guardExistingBills", () => {
     );
   });
 
-  it("changes nothing without it: a paid or invoiced bill is rewritten through fn_record_line_item_with_audit, as an unguarded run does", async () => {
+  it("is what lets a whole-period run write: without it a write is refused, and a preview computes a paid or invoiced bill", async () => {
     const h = harness();
-    const by = await results(h, { guardExistingBills: undefined });
-    for (const n of [5, 6, 7]) expect(by.get(tenant(n))?.kind).toBe("written");
-    expect(writes(h.rpc).every((w) => w.name === "fn_record_line_item_with_audit")).toBe(true);
+    expect(await run(h, { guardExistingBills: undefined })).toMatchObject({ kind: "fatal", status: 500, body: { code: "unguarded_write" } });
+    expect(writes(h.rpc)).toEqual([]);
+    const by = await results(h, { guardExistingBills: undefined, mode: "preview" });
+    for (const n of [5, 6, 7]) expect(by.get(tenant(n))?.kind).toBe("preview");
+    expect(writes(h.rpc)).toEqual([]);
   });
 });

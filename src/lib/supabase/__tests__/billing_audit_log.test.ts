@@ -863,8 +863,8 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         entered_at: priorEnteredAt,
         manual_reason: "initial estimate",
       })
-      .select("id")
-      .single<{ id: string }>();
+      .select("id, payment_status")
+      .single<{ id: string; payment_status: "unpaid" }>();
     expect(priorErr).toBeNull();
     const priorLineItemId = priorRow!.id;
 
@@ -887,6 +887,22 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       ],
       mode: "write",
       actorUserId: alejandroSuperAdmin.userId,
+      // A per-bill regeneration: the seeded row as read, which every write
+      // of an existing bill names (#247).
+      expectedBill: {
+        lineItemId: priorLineItemId,
+        tenantId: FIXTURE.hhC,
+        paymentStatus: priorRow!.payment_status,
+        totalAmount: 12500,
+        usageKwh: 250,
+        startKwh: 100,
+        endKwh: 350,
+        readingSource: "manual",
+        deviceId: null,
+        tierBreakdown: [{ label: "T1", kwh: 250, amount: 12500 }],
+        enteredByUserId: alejandroSuperAdmin.userId,
+        manualReason: "initial estimate",
+      },
     });
     if ("kind" in out && out.kind === "fatal") {
       throw new Error(
@@ -955,6 +971,8 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
         },
       ],
       mode: "write",
+      // The tenant's first bill in the period, from readings typed by hand.
+      newBillOnly: true,
       actorUserId: alejandroSuperAdmin.userId,
     });
     if ("kind" in out && out.kind === "fatal") {
