@@ -41,14 +41,14 @@ npm run build
 # Generate TypeScript types from local Supabase (requires supabase start)
 npm run db:types
 
-# Generate types from cloud-linked Supabase (alternative — use when local isn't running)
+# Print the linked project's types, to compare with (never commit them as database.gen.ts)
 npm run db:types:linked
 
 # Check that database.gen.ts is in sync with the schema (run by husky pre-commit)
 npm run db:types:check
 ```
 
-**Codegen workflow:** After any schema migration (`supabase/migrations/*.sql`), run `npm run db:types` to regenerate `src/lib/types/database.gen.ts`. A husky pre-commit hook (`npm run db:types:check`) blocks commits when the generated file is out of date, and the `Test` gate regenerates it from a database built from the migrations alone and fails on any difference. The pinned Supabase CLI prints the types unformatted, so the `db:types` scripts pass them through the pinned prettier (`--no-semi`, the style postgres-meta formats with); regenerate through those scripts, not with `npx supabase gen types` alone, or the file will not match. The `--linked` variant works against the cloud project if local Supabase isn't running: `supabase link` must have been run first.
+**Codegen workflow:** After any schema migration (`supabase/migrations/*.sql`), run `npm run db:types` to regenerate `src/lib/types/database.gen.ts`. A husky pre-commit hook (`npm run db:types:check`) blocks commits when the generated file is out of date, and the `Test` gate regenerates it from a database built from the migrations alone and fails on any difference. The pinned Supabase CLI prints the types unformatted, so the `db:types` scripts (`scripts/db-types.sh`) pass them through the pinned prettier (`--no-semi`, the style postgres-meta formats with), and write the file only when every stage succeeds; regenerate through those scripts, not with `npx supabase gen types` alone, or the file will not match. Regenerate from a local database built from this branch's migrations (`supabase db reset`). `npm run db:types:linked` only prints the linked project's types, for comparison: the CLI asks Supabase's hosted generator there, and a project's schema can drift from the migrations (production has), so those types are not the committed file's.
 
 ### Running RLS Tests
 

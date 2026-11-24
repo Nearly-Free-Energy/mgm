@@ -162,11 +162,12 @@ jobs:
       # The database above was built from supabase/migrations/*.sql alone, so
       # the types generated from it are the ones the migrations make. This
       # regenerates src/lib/types/database.gen.ts in place with `npm run
-      # db:types` (the pinned CLI's output, formatted by the pinned prettier)
-      # and fails if generation fails or the file differs. So a migration
-      # cannot merge with stale types when the pre-commit check was skipped
-      # or ran against another schema. It runs straight after the start,
-      # before any later step uses the database.
+      # db:types` (scripts/db-types.sh: the pinned CLI's output, formatted by
+      # the pinned prettier) and fails if generation fails, printing the
+      # CLI's output, or if the file differs. So a migration cannot merge
+      # with stale types when the pre-commit check was skipped or ran
+      # against another schema. It runs straight after the start, before any
+      # later step uses the database.
       - name: Generated database types match the migrations
         run: |
           npm run --silent db:types
