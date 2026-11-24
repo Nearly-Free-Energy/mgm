@@ -1,15 +1,13 @@
 /**
- * next.config.ts carries the GUI stylesheet manifest into the server bundle,
- * caches the published stylesheets and sends the retired customer app's
- * pages on to the tenant app. These tests read its default export with the
- * manifest file replaced, so they need no build.
+ * next.config.ts carries the GUI stylesheet manifest into the server bundle
+ * and caches the published stylesheets. These tests read its default export
+ * with the manifest file replaced, so they need no build.
  */
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { guiStylesheetHref } from "@/lib/config/gui";
-import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { MANIFEST } from "../../../scripts/gui/build-stylesheets.mjs";
 
 const files = vi.hoisted(() => new Map<string, string>());
@@ -72,27 +70,5 @@ describe("next.config.ts and the GUI stylesheets", () => {
       },
     ]);
     expect(await nextConfig(PHASE_DEVELOPMENT_SERVER).headers?.()).toEqual([]);
-  });
-});
-
-describe("next.config.ts and the retired customer app's pages", () => {
-  it("sends /usage and /account to the tenant app with a temporary redirect, in every phase", async () => {
-    const expected = [
-      { source: "/usage", destination: "/my/usage", permanent: false },
-      { source: "/account", destination: "/my", permanent: false },
-    ];
-    expect(await nextConfig(PHASE_DEVELOPMENT_SERVER).redirects?.()).toEqual(expected);
-    files.set(MANIFEST, JSON.stringify(HASHED));
-    expect(await nextConfig(PHASE_PRODUCTION_BUILD).redirects?.()).toEqual(expected);
-  });
-
-  it("leads only from paths MGM does not serve to pages it releases", async () => {
-    const redirects = (await nextConfig(PHASE_DEVELOPMENT_SERVER).redirects?.()) ?? [];
-    expect(redirects.length).toBeGreaterThan(0);
-    for (const { source, destination } of redirects) {
-      // A released source would be a page the redirect hides.
-      expect(isReleasedRoute(source), source).toBe(false);
-      expect(isReleasedRoute(destination), destination).toBe(true);
-    }
   });
 });
