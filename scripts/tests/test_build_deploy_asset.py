@@ -397,6 +397,18 @@ def make_notices_fixture(tmp):
     chunks.mkdir(parents=True)
     (chunks / "0polyfill.js").write_bytes(polyfill)
     (chunks / "1main.js").write_text("self.main=1\n")
+    media = output / "static" / "_next" / "static" / "media"
+    media.mkdir(parents=True)
+    (media / "abc123-s.p.woff2").write_bytes(b"wOF2 fake latin\n")
+    (media / "def456-s.woff2").write_bytes(b"wOF2 fake latin-ext\n")
+    (chunks / "2app.css").write_text(
+        '@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:optional;'
+        'src:url(../media/abc123-s.p.woff2)format("woff2");unicode-range:U+0000-00FF}'
+        '@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:optional;'
+        'src:url(/_next/static/media/def456-s.woff2)format("woff2");unicode-range:U+0100-02BA}'
+        '@font-face{font-family:Inter Fallback;src:local("Arial");ascent-override:90%}'
+        'body{font-family:Inter,Inter Fallback}\n'
+    )
     write_json(project / ".next" / "build-manifest.json", {
         "polyfillFiles": ["static/chunks/0polyfill.js"], "rootMainFiles": ["static/chunks/1main.js"],
     })
@@ -408,7 +420,11 @@ def make_notices_fixture(tmp):
             {"name": "core-js", "version": "3.38.1", "license": "MIT", "texts": ["core-js-3.38.1/LICENSE"]},
             {"name": "whatwg-fetch", "version": "3.0.0", "license": "MIT", "texts": ["whatwg-fetch-3.0.0/LICENSE"]},
         ],
+    }], "fonts": [{
+        "family": "Inter", "name": "Inter", "version": "4.1", "license": "OFL-1.1", "texts": ["inter/OFL.txt"],
     }]})
+    (supplement / "inter").mkdir()
+    (supplement / "inter" / "OFL.txt").write_text("Inter font licence\n")
     (supplement / "core-js-3.38.1").mkdir()
     (supplement / "core-js-3.38.1" / "LICENSE").write_text("core-js licence\n")
     (supplement / "whatwg-fetch-3.0.0").mkdir()
@@ -452,6 +468,7 @@ class NoticesTest(unittest.TestCase):
             "argon2 0.44.0",
             "bundled 3.0.0",
             f"core-js 3.38.1 ({polyfill})",
+            "Inter 4.1 (self-hosted font, 2 files in static/_next/static/media)",
             "next 16.4.1",
             "nolicence 1.0.0",
             "react-dom-builtin 0.0.0 (part of next 16.4.1, at dist/compiled/react-dom)",
@@ -463,7 +480,7 @@ class NoticesTest(unittest.TestCase):
         self.assertNotIn("unused", text)
         self.assertNotIn("unloaded", text)
         self.assertNotIn("not-vendored", text)
-        self.assertIn("Packages: 12\n", text)
+        self.assertIn("Packages: 13\n", text)
         # A source-map path that is no installed package is reported, not listed.
         self.assertIn("skipped node_modules/src", result.stderr)
 
@@ -476,7 +493,7 @@ class NoticesTest(unittest.TestCase):
         self.assertRegex(packages["bundled 3.0.0"], r"Texts: \[\d+\] LICENSE, \[\d+\] NOTICE")
         for body in ["argon2 licence", "Apache licence text", "bundled notice", "next licence",
                      "react-dom licence", "styles licence", "builder licence", "core-js licence",
-                     "whatwg-fetch licence"]:
+                     "whatwg-fetch licence", "Inter font licence"]:
             self.assertEqual(text.count(body), 1, body)
         self.assertNotIn("license.js", text)
 
@@ -499,6 +516,29 @@ class NoticesTest(unittest.TestCase):
         for name in [f"core-js 3.38.1 ({polyfill})", f"whatwg-fetch 3.0.0 ({polyfill})"]:
             self.assertIn("Licence: MIT", packages[name])
             self.assertRegex(packages[name], r"Texts: \[\d+\] LICENSE")
+
+    def test_lists_a_self_hosted_font_family_from_the_supplement(self):
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        block = self.packages(notices.read_text())["Inter 4.1 (self-hosted font, 2 files in static/_next/static/media)"]
+        self.assertIn("Licence: OFL-1.1", block)
+        self.assertRegex(block, r"Texts: \[\d+\] OFL.txt")
+
+    def test_refuses_a_font_family_the_supplement_does_not_record(self):
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text().replace("font-family:Inter;", "font-family:Other Sans;"))
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("self-hosts the font family 'Other Sans' (static/_next/static/media/abc123-s.p.woff2, "
+                      "static/_next/static/media/def456-s.woff2)", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_a_font_file_no_font_face_rule_names(self):
+        (self.output / "static" / "_next" / "static" / "media" / "ghi789-s.woff2").write_bytes(b"wOF2 stray\n")
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("static/_next/static/media/ghi789-s.woff2: a font file that no @font-face rule", result.stderr)
+        self.assertFalse(notices.exists())
 
     def test_refuses_a_polyfill_file_the_supplement_does_not_record(self):
         chunk = self.output / "static" / "_next" / "static" / "chunks" / "0polyfill.js"

@@ -38,6 +38,13 @@ A package is listed when any of these holds:
     it and their licence files, which are kept in the same directory. A
     polyfill file whose SHA-256 it does not record stops the build until
     someone reviews the new bundle and records it.
+  - It is a font family the build self-hosts. next/font downloads the font
+    files at build time into static/media and writes an @font-face rule for
+    each into the output's CSS, naming the family and the file. The family
+    is not an npm package, so the supplement's "fonts" list records each
+    family with its licence and licence text. A family in the output's CSS
+    that the supplement does not record, or a font file in static/media that
+    no @font-face rule names, stops the build until someone records it.
 
 Client-side JavaScript has no source map in the build. Apart from the last
 two cases, its modules are found through the server-side bundles, which
@@ -68,7 +75,8 @@ wrote), as "notices": {"file": ..., "sha256": ...}; the Release workflow's
 publish job checks the notices it publishes against it.
 Exit codes: 0 written, 2 usage error, 4 a package, source map, builder,
 build manifest or the supplement could not be read, or the supplement does
-not record a polyfill file (each problem is printed), 5 writing failed.
+not record a polyfill file or a self-hosted font family (each problem is
+printed), 5 writing failed.
 """
 import argparse
 import base64
@@ -96,6 +104,10 @@ URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:(//)?")
 CSS_IMPORT = re.compile(r"""@(?:import|plugin|reference)\s+(?:url\(\s*)?["']([^"']+)["']""")
 LOAD = re.compile(r"""(?:\brequire\(\s*|\bfrom\s*|\bimport\(\s*)["']([^"'\n]+)["']""")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+FONT_FACE = re.compile(r"@font-face\s*\{([^}]*)\}")
+FONT_FAMILY = re.compile(r"""font-family\s*:\s*("[^"]*"|'[^']*'|[^;}]+)""")
+FONT_URL = re.compile(r"""url\(\s*("[^"]*"|'[^']*'|[^)]*?)\s*\)""")
+FONT_FILE = (".woff2", ".woff", ".ttf", ".otf")
 JAVASCRIPT = (".js", ".mjs", ".cjs")
 SUPPLEMENT = Path(__file__).resolve().parent / "notices-supplement"
 # Project directories that hold no stylesheet of the project's own.
@@ -604,6 +616,120 @@ def load_supplement(directory, problems):
     return bundles
 
 
+def load_font_supplement(directory, problems):
+    """Returns {CSS family name: package record} from supplement.json's fonts.
+
+    Returns None when the supplement cannot be read. The list is optional:
+    a supplement without it records no fonts.
+    """
+    index = directory / "supplement.json"
+    try:
+        with open(index, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as exc:
+        problems.append(f"{index} is unreadable: {exc}")
+        return None
+    entries = data.get("fonts", []) if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        problems.append(f"{index}: fonts is not a list")
+        return None
+    fonts = {}
+    for number, entry in enumerate(entries, 1):
+        where = f"{index}: font {number}"
+        if not (isinstance(entry, dict)
+                and all(isinstance(entry.get(f), str) and entry[f] for f in ("family", "name", "license"))
+                and isinstance(entry.get("version", ""), str)
+                and isinstance(entry.get("texts"), list) and entry["texts"]):
+            problems.append(f"{where} needs family, name, license and texts (version is optional)")
+            continue
+        texts = []
+        for name in entry["texts"]:
+            inner = posixpath.normpath(name) if isinstance(name, str) else ".."
+            if inner.startswith(("../", "/")) or inner in ("..", "."):
+                problems.append(f"{where}: {name!r} is not a file in {directory}")
+                continue
+            try:
+                raw = directory.joinpath(*split(inner)).read_bytes()
+            except OSError as exc:
+                problems.append(f"{where}: {name}: unreadable: {exc}")
+                continue
+            texts.append((posixpath.basename(inner), normalise(raw)))
+        fonts[entry["family"]] = {"name": entry["name"], "version": entry.get("version", ""),
+                                  "licence": entry["license"], "texts": sorted(texts)}
+    return fonts
+
+
+def font_faces(output, problems):
+    """Returns {family: sorted font files} from the @font-face rules in the output's CSS.
+
+    Files are output-relative POSIX paths. A rule without a url() (a local
+    fallback face) names no file and is left out. A url the output does not
+    hold is a problem.
+    """
+    static = output / "static" / "_next"
+    families = {}
+    for dirpath, dirnames, filenames in os.walk(static):
+        dirnames.sort()
+        for name in sorted(filenames):
+            if not name.endswith(".css"):
+                continue
+            path = Path(dirpath) / name
+            rel = path.relative_to(output).as_posix()
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for body in FONT_FACE.findall(text):
+                family = FONT_FAMILY.search(body)
+                urls = [u.strip("\"'") for u in FONT_URL.findall(body)]
+                urls = [u for u in urls if not URL_SCHEME.match(u) and not u.startswith("data:")]
+                if family is None or not urls:
+                    continue
+                family = family.group(1).strip().strip("\"'")
+                for url in urls:
+                    url = url.split("?", 1)[0].split("#", 1)[0]
+                    if url.startswith("/_next/"):
+                        target = posixpath.normpath("static/_next/" + url[len("/_next/"):])
+                    elif url.startswith("/"):
+                        target = posixpath.normpath("static/" + url[1:])
+                    else:
+                        target = posixpath.normpath(posixpath.join(posixpath.dirname(rel), url))
+                    if target.startswith("../") or not output.joinpath(*split(target)).is_file():
+                        problems.append(f"{rel}: @font-face for {family} names {url}, which is not in the output")
+                        continue
+                    families.setdefault(family, set()).add(target)
+    return {family: sorted(files) for family, files in families.items()}
+
+
+def add_fonts(packages, output, supplement, problems):
+    """Adds the font families the build self-hosts, from the supplement."""
+    static = output / "static" / "_next"
+    if not static.is_dir():
+        return
+    families = font_faces(output, problems)
+    named = {file for files in families.values() for file in files}
+    for dirpath, dirnames, filenames in os.walk(static):
+        dirnames.sort()
+        for name in sorted(filenames):
+            if not name.lower().endswith(FONT_FILE):
+                continue
+            rel = (Path(dirpath) / name).relative_to(output).as_posix()
+            if rel not in named:
+                problems.append(f"{rel}: a font file that no @font-face rule in the output's CSS names, "
+                                "so its family and licence are unknown")
+    fonts = load_font_supplement(supplement, problems) if families else None
+    if fonts is None:
+        return
+    for family, files in sorted(families.items()):
+        if family not in fonts:
+            problems.append(
+                f"the output's CSS self-hosts the font family {family!r} ({', '.join(files)}), and "
+                f"{supplement / 'supplement.json'} records no font with that family. Record its name, "
+                "licence and licence text there (docs/releasing.md)"
+            )
+            continue
+        count = len(files)
+        origin = f"self-hosted font, {count} file{'s' if count != 1 else ''} in static/_next/static/media"
+        merge(packages, dict(fonts[family], origin=origin))
+
+
 def add_polyfills(packages, output, project, supplement, problems):
     """Adds the packages bundled into the output's polyfill files."""
     polyfills = polyfill_files(output, project, problems)
@@ -657,6 +783,7 @@ def collect(output, project, supplement, problems):
         if record is not None:
             merge(packages, record)
     add_polyfills(packages, output, project, supplement, problems)
+    add_fonts(packages, output, supplement, problems)
     ordered = sorted(
         packages.values(),
         key=lambda p: (p["name"].lower(), p["name"], p["version"] or "", p["origin"] or ""),
@@ -698,8 +825,9 @@ def render(packages, asset, version, commit):
     lines.append(wrap(
         f"{asset}, built from commit {commit}, contains the third-party software listed below. "
         "Each package is listed with its name, version, the licence its package.json declares, "
-        "and the licence and notice files it ships. Each distinct text is printed once, in full, "
-        "under Texts, and the packages that ship it refer to it by number."
+        "and the licence and notice files it ships; a self-hosted font family is listed with its "
+        "licence and licence text. Each distinct text is printed once, in full, under Texts, and "
+        "the packages that ship it refer to it by number."
     ))
     lines += ["", f"Packages: {len(packages)}", f"Texts: {len(numbers)}", "", "Packages", "--------", ""]
     for package in packages:

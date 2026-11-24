@@ -10,5 +10,14 @@
         {"name": "whatwg-fetch", "version": "3.0.0", "license": "MIT", "texts": ["whatwg-fetch-3.0.0/LICENSE"]}
       ]
     }
+  ],
+  "fonts": [
+    {
+      "family": "Inter",
+      "name": "Inter",
+      "license": "OFL-1.1",
+      "source": "https://github.com/google/fonts/tree/main/ofl/inter",
+      "texts": ["inter/OFL.txt"]
+    }
   ]
 }

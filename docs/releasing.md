@@ -280,15 +280,17 @@ artifact holds that Linux build for a day, for inspection.
 - Every operator's verification names `.github/workflows/release.yml`
   (`--signer-workflow`). Do not move or rename it without telling them.
 - `scripts/release/third_party_notices.py` writes the notices. It finds a
-  package in the asset six ways: its files are in a function's
+  package in the asset seven ways: its files are in a function's
   `node_modules`; the build's source map for a JavaScript file in the output
   names one of its modules; one of the project's stylesheets imports it; it
   is the builder that writes the functions' launchers; it is a directory that
   Next.js vendors under `dist/compiled` and loads from another vendored
   directory already listed (the browser build of React DOM loads the
   scheduler this way); or it is bundled into Next.js's polyfill file for
-  browsers without ES module support, which the supplement below records.
-  Client-side bundles have no source maps, so apart from the last two, browser
+  browsers without ES module support, which the supplement below records;
+  or it is a font family that `next/font` self-hosts, read from the
+  `@font-face` rules in the output's CSS and recorded in the supplement's
+  `fonts` list. Client-side bundles have no source maps, so apart from the last two, browser
   code is covered through the server-rendered modules that import the same
   packages. A package that only browser code imports, and no server-rendered
   module does, is not found: check the notices of the dry run when adding
@@ -308,7 +310,16 @@ artifact holds that Linux build for a day, for inspection.
   licence file from its npm tarball of that version into the supplement, and
   replace the entry with one for the new file: the SHA-256 of
   `node_modules/next/dist/build/polyfills/polyfill-nomodule.js`, a `source`
-  link to the tag you read, and the packages.
+  link to the tag you read, and the packages. The same file's `fonts` list
+  records each font family the build self-hosts, by the family name the
+  output's `@font-face` rules use, with its licence and licence text kept
+  beside it (`inter/OFL.txt` for Inter, copied from Google Fonts, which
+  `next/font/google` downloads at build time; a font entry has no version,
+  because Google serves its current release). The build fails with exit
+  code 4 when the CSS names a family the list does not record, or when a
+  font file in `static/media` is named by no `@font-face` rule. Adding a
+  font in `src/app/layout.tsx` therefore also adds its entry and licence
+  text here.
 - `src/lib/__tests__/no-server-actions-or-draft-mode.test.ts` fails when the
   source introduces Server Actions (`"use server"`) or draft mode
   (`draftMode`). Release assets are built without installation settings, so
