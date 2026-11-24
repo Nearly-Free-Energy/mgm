@@ -24,8 +24,8 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
  *   route refuses a paid bill without it, and a refunded bill, an invoiced
  *   bill and a bill in a closed period outright, but only on its own
- *   requests: an unguarded run (POST /api/v1/billing/generate) rewrites any
- *   of them with no acknowledgement (generate.ts keeps the payment columns
+ *   requests: an unguarded run (generateBills without expectedBill)
+ *   rewrites any of them with no acknowledgement (generate.ts keeps the payment columns
  *   and refuses no payment status, invoice number or closed period; on a
  *   closed period the database lets that audited write change a closed
  *   bill's amount). The deleted legacy Regenerate dialogs and Refresh

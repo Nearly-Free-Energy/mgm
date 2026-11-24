@@ -411,7 +411,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       tenantIds: undefined,
       mode: "write",
       actorUserId: null,
-      actorKind: "customerapp",
+      actorKind: "system",
       actorRef: "cron",
     });
 

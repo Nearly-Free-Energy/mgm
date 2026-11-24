@@ -116,8 +116,7 @@ describe("isReleasedRoute", () => {
   });
 
   it.each([
-    // Customer portals and automated notifications stay gated.
-    "/api/v1/microgrids",
+    "/api/openems/status",
     "/microgrids/abc/setup/edges/edge-1/devices/extra",
     "/api/microgrids/abc/openems-backend/unknown",
     "/api/edges/edge-1/unknown",

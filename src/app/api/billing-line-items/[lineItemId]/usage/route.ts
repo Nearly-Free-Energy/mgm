@@ -40,7 +40,7 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   - UPSERT-preserve semantics for payment fields (matches the bulk path).
  *
  * Behavioral asymmetry preserved (Out of Scope): the engine regenerates a
- * closed period on an unguarded run (POST /api/v1/billing/generate). This
+ * closed period on an unguarded run (generateBills without expectedBill). This
  * inline cell-edit path continues to reject closed periods with 409
  * period_closed.
  */

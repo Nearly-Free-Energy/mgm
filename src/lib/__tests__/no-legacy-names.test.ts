@@ -18,22 +18,17 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const FORBIDDEN = /\bMBE\b|\bmbe\b|mbe-docs|mbe[-:][a-z]|energy-iot|metering-billing-engine/i;
 
 /**
- * The legacy lowercase spelling of a live identifier (`mbe_…` tokens,
- * `mbe_ems_dek`) and the legacy env var. Case-sensitive on purpose: prose
- * "MBE" is never allowed.
+ * The legacy lowercase spelling of a live identifier (`mbe_ems_dek`).
+ * Case-sensitive on purpose: prose "MBE" is never allowed.
  */
-const LEGACY_IDENTIFIER = /\bmbe(?:_|\b)|MBE_TOKEN_ENV_PREFIX/;
-const LEGACY_IDENTIFIER_ALL = /\bmbe(?:_[A-Za-z_]*)?\b|MBE_TOKEN_ENV_PREFIX/g;
+const LEGACY_IDENTIFIER = /\bmbe(?:_|\b)/;
+const LEGACY_IDENTIFIER_ALL = /\bmbe(?:_[A-Za-z_]*)?\b/g;
 
 /**
  * Files allowed to mention a legacy identifier, and why. Keep the reasons
  * current: when compatibility is dropped, delete the entry and the mention.
  */
 const LEGACY_COMPAT: Record<string, string> = {
-  "src/lib/internal-auth.ts": "accepts mbe_ API tokens and reads MBE_TOKEN_ENV_PREFIX as a fallback",
-  "src/lib/supabase/__tests__/org_api_tokens.test.ts": "proves legacy mbe_ tokens and the env fallback still work",
-  "src/lib/supabase/__tests__/customerapp_enabled.test.ts": "clears the legacy env var between tests",
-  "src/lib/supabase/__tests__/internal_auth_401_logging.test.ts": "asserts no legacy token fragment is logged",
   "src/lib/supabase/__tests__/credential_key.test.ts": "documents the legacy key name the migration copies from",
   "src/lib/__tests__/no-legacy-names.test.ts": "this guard",
   "supabase/scripts/retire-legacy-credential-key.sql": "retires the legacy Vault key only after verification",
@@ -42,7 +37,6 @@ const LEGACY_COMPAT: Record<string, string> = {
   "supabase/scripts/rotate-credential-key.sql": "keeps both Vault key names synchronized during rotation",
   "docs/runbooks/dek.md": "explains the legacy key name and how to retire it",
   "docs/runbooks/backup-and-restore.md": "clears the legacy Vault key from a restore target, as dek.md's recovery does",
-  "docs/customerapp-activation.md": "tells operators that mbe_ tokens stay valid",
 };
 
 function trackedFiles(): string[] {

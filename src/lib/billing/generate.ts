@@ -23,10 +23,7 @@ import "server-only";
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
- *   3. `POST /api/v1/billing/generate`, the public v1 API — calls the engine
- *      directly in write mode, with manual readings and no tenant list.
- *
- *   4. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
+ *   3. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
  *      edit. Internally resolves `tenantIds: [<resolved>]` +
  *      `manualReadings: [<resolved>]` and calls with mode='write'.
  *
@@ -90,11 +87,11 @@ import "server-only";
  *
  * ── INVARIANT (added 2026-05 with #250) ────────────────────────────────────
  *
- * With service-role callers (via `/api/v1/*`), RLS does NOT backstop
- * the cross-microgrid check above — it is the SOLE defense against
- * cross-microgrid tenant submission. Do NOT delete on the assumption
- * that RLS will catch it; RLS only fires for user-bound clients. See PR
- * #246 review + #250 ticket body for the original reasoning.
+ * A caller that runs the engine on a service-role client gets no RLS
+ * backstop for the cross-microgrid check above — it is then the SOLE
+ * defense against cross-microgrid tenant submission. Do NOT delete on the
+ * assumption that RLS will catch it; RLS only fires for user-bound clients.
+ * See PR #246 review + #250 ticket body for the original reasoning.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -300,19 +297,17 @@ export type RunGenerationParams = {
   /** Resolved `auth.uid()` from the route's session. Required when
    *  mode='write' (passed to RPC as actor + entered_by_user_id for manual).
    *
-   *  For non-human callers (customerapp via `/api/v1/*`, future
-   *  cron jobs, etc.) pass `null` and set `actorKind` + `actorRef`. The
-   *  DB CHECK on `billing_audit_log` enforces the (kind, user_id, ref)
-   *  shape (see migration 00041 / #250). */
+   *  For non-human callers (future cron jobs, etc.) pass `null` and set
+   *  `actorKind` + `actorRef`. The DB CHECK on `billing_audit_log`
+   *  enforces the (kind, user_id, ref) shape (see migration 00041 / #250). */
   actorUserId: string | null;
   /** Defaults to `'human'` for backwards compatibility with all existing
-   *  in-app callers (the dashboard routes). `'customerapp'` is set by
-   *  `/api/v1/*` routes; `'system'` by webhook ingestors.
-   *  See migration 00041 (#250). */
-  actorKind?: "human" | "customerapp" | "system";
-  /** Opaque caller-supplied identifier — token name for customerapp,
-   *  source key (e.g. `'pesapal_ipn'`) for system. Required by DB CHECK
-   *  whenever `actorKind != 'human'`. */
+   *  in-app callers (the dashboard routes). `'system'` is for webhook
+   *  ingestors. See migration 00041 (#250). */
+  actorKind?: "human" | "system";
+  /** Opaque caller-supplied identifier — source key (e.g.
+   *  `'pesapal_ipn'`) for system. Required by DB CHECK whenever
+   *  `actorKind != 'human'`. */
   actorRef?: string | null;
   /**
    * Explicit, request-scoped metering dependency. Billing never constructs a
@@ -333,8 +328,8 @@ export type RunGenerationParams = {
    * fn_regenerate_bill_with_audit, which refuses unless the period is still
    * a draft and the bill still has no invoice number and these values, under
    * locks held to commit, and writes nothing when the new figures are the
-   * ones the bill already has (`kind: 'unchanged'`). Unset, as on POST
-   * /api/v1/billing/generate, nothing here applies.
+   * ones the bill already has (`kind: 'unchanged'`). Unset, as on PATCH
+   * /api/billing-line-items/[lineItemId]/usage, nothing here applies.
    */
   expectedBill?: ExpectedBill;
   /**
@@ -372,11 +367,11 @@ export type RunGenerationParams = {
    *    bill: a close that commits after the second read above refuses the
    *    insert (`period_closed`, GENERATE_FROM_METERS_COPY.closed), and a bill
    *    another write inserted for that tenant after this run read the
-   *    period's bills (a manual reading on POST /api/v1/billing/generate, a
-   *    bill from readings, or a second run overlapping this one) is left as
+   *    period's bills (a manual reading through generateBills, a bill from
+   *    readings, or a second run overlapping this one) is left as
    *    it is (`bill_exists`), with nothing written for that tenant;
-   * An unguarded run (POST /api/v1/billing/generate, generateBills without
-   * expectedBill) leaves it unset and checks none of this.
+   * An unguarded run (generateBills without expectedBill) leaves it unset
+   * and checks none of this.
    */
   guardExistingBills?: boolean;
   /**
@@ -628,8 +623,8 @@ export async function runGenerationFor(
     rate_schedule_id?: string | null;
   };
 
-  // Q4=B: an unguarded run (POST /api/v1/billing/generate, generateBills
-  // without expectedBill) regenerates a closed period (the legacy reject was
+  // Q4=B: an unguarded run (generateBills without expectedBill)
+  // regenerates a closed period (the legacy reject was
   // removed in #173). PATCH /usage retains its own
   // `period_closed` reject upstream — see the route handler. A guarded
   // whole-period run refuses it here, before the tariff pin, and again after
@@ -1359,10 +1354,9 @@ export async function runGenerationFor(
     // parameter added to one is added to the other two in the same migration.
     // A guarded run's tenant with no bill as read gets one only while it
     // still has none and the period is still a draft, under the period's
-    // lock (fn_record_first_line_item_with_audit). An unguarded run (POST
-    // /api/v1/billing/generate, generateBills without expectedBill) keeps
-    // the upsert: its manual rows overwrite a bill, and it accepts a closed
-    // period (Q4=B).
+    // lock (fn_record_first_line_item_with_audit). An unguarded run
+    // (generateBills without expectedBill) keeps the upsert: its manual rows
+    // overwrite a bill, and it accepts a closed period (Q4=B).
     const firstBill = !expected && !prior && (guardExistingBills === true || newBillOnly === true);
     const recordArgs = {
       _billing_period_id: periodId,

@@ -14,8 +14,8 @@ Organization ─▶ Community ─▶ Microgrid ─▶ Edge ─▶ Device
 ```
 
 - **Organization** — the operator business (a microgrid entrepreneur or
-  developer). It is the unit of access control, plugin enablement, payment
-  merchant accounts, and API tokens.
+  developer). It is the unit of access control, plugin enablement, and payment
+  merchant accounts.
 - **Community** — a place an organization serves. Invoice branding and the
   payment-account override live here.
 - **Microgrid** — one electrical system with its own currency, timezone,

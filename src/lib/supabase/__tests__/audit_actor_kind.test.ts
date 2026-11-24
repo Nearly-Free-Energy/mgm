@@ -14,11 +14,10 @@
  *        non-human   → actor_user_id NULL,     actor_ref NOT NULL
  *
  *   3. End-to-end: `fn_record_line_item_with_audit` invoked with the
- *      widened-signature args from `/api/v1/billing/generate`
+ *      widened-signature args of a non-human caller
  *      (`_actor_user_id=NULL, _actor_kind='customerapp', _actor_ref=...`)
  *      successfully inserts a billing_line_items row AND a billing_audit_log
- *      row — no FK violation. This is the PM AC "First call to
- *      `POST /api/v1/billing/generate` succeeds end-to-end".
+ *      row — no FK violation.
  *
  *   4. Human-actor calls (the existing call-path: actor_kind defaults to
  *      `'human'`, actor_user_id non-null, actor_ref omitted) continue to
@@ -29,6 +28,11 @@
  *
  *   6. `actor_kind` outside the allowed domain (`'human' | 'customerapp' |
  *      'system'`) is rejected by the inline CHECK on the column.
+ *
+ * Nothing writes 'customerapp' since the customer-app integration was
+ * removed (migration 20261124090000), but the CHECKs still accept it for the
+ * audit rows it wrote, so these cases still describe the database. If a
+ * migration narrows the CHECKs, revisit them.
  *
  * Honors `SKIP_RLS_TESTS=1` for CI without local Supabase (same pattern as
  * payment_state_machine.test.ts).

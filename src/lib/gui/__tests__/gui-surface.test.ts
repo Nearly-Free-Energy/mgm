@@ -842,7 +842,7 @@ describe("the GUI surface guard", () => {
     const links = changed((m) => {
       m.links = [
         `/microgrids/${M}/billing`, `/api/billing-periods/${M}/export-csv`, "tel:+256700000000",
-        `/microgrids/${M}/operations`, `/api/billing-periods/${M}/close`, "/api/org-api-tokens", "/review",
+        `/microgrids/${M}/operations`, `/api/billing-periods/${M}/close`, "/api/openems/status", "/review",
       ].map(ref);
       m.body.rows[0].links = [ref(`/microgrids/${M}/operations?row`, 9)];
       // An embedded view's model is filled by the host: its links are not checked as this view's.
@@ -851,7 +851,7 @@ describe("the GUI surface guard", () => {
     expect(links.filter((p) => p.includes("links to"))).toEqual([
       `billing.periods: example 0 links to /microgrids/${M}/operations: /microgrids/[id]/operations is metering's page`,
       `billing.periods: example 0 links to /api/billing-periods/${M}/close: /api/billing-periods/[periodId]/close exports no GET`,
-      "billing.periods: example 0 links to /api/org-api-tokens: not released",
+      "billing.periods: example 0 links to /api/openems/status: not released",
       "billing.periods: example 0 links to /review: not a catalog page",
       `billing.periods: example 0 links to /microgrids/${M}/operations?row: /microgrids/[id]/operations is metering's page`,
     ]);
@@ -868,7 +868,7 @@ describe("the GUI surface guard", () => {
       `billing.period-due: example 0 leads to /microgrids/${M}/operations: /microgrids/[id]/operations is metering's page`,
     ]);
     expect(changed({ href: "/review" })).toEqual(["billing.period-due: example 0 leads to /review: not a catalog page"]);
-    expect(changed({ href: "/api/org-api-tokens" })).toEqual(["billing.period-due: example 0 leads to /api/org-api-tokens: not a page"]);
+    expect(changed({ href: "/api/openems/status" })).toEqual(["billing.period-due: example 0 leads to /api/openems/status: not a page"]);
     // An entity's own link may lead to another plugin's page, as long as it is a released page.
     expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/operations` } })).toEqual([]);
     expect(changed({ entity: { kind: "microgrid", id: M, label: "Kiwumu", href: `/microgrids/${M}/nowhere` } })).toEqual([

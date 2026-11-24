@@ -50,7 +50,6 @@ const PRIVILEGED_MODULES: Record<string, string> = {
   "src/lib/supabase/service.ts": "The service-role client, which bypasses RLS.",
   "src/lib/openems/config.ts": "Decrypts stored OpenEMS credentials on the service role.",
   "src/lib/mgm/organization-exists.ts": "Counts organizations on the service role.",
-  "src/lib/internal-auth.ts": "Resolves organization API tokens on the service role.",
 };
 
 /**
@@ -431,36 +430,6 @@ const ENTRIES: Record<string, Entry> = {
     kind: "unreleased",
     path: "/api/openems/channels",
     reason: "Decrypts after gateRoute only; needs a getUser-backed check before release.",
-  },
-  "src/app/api/org-api-tokens/route.ts": {
-    kind: "unreleased",
-    path: "/api/org-api-tokens",
-    reason: "Organization API tokens are not released.",
-  },
-  "src/app/api/org-api-tokens/[id]/regenerate/route.ts": {
-    kind: "unreleased",
-    path: "/api/org-api-tokens/token-1/regenerate",
-    reason: "Organization API tokens are not released.",
-  },
-  "src/app/api/v1/billing-periods/route.ts": {
-    kind: "unreleased",
-    path: "/api/v1/billing-periods",
-    reason: "The token-authenticated v1 API is not released.",
-  },
-  "src/app/api/v1/billing/generate/route.ts": {
-    kind: "unreleased",
-    path: "/api/v1/billing/generate",
-    reason: "The token-authenticated v1 API is not released.",
-  },
-  "src/app/api/v1/microgrids/route.ts": {
-    kind: "unreleased",
-    path: "/api/v1/microgrids",
-    reason: "The token-authenticated v1 API is not released.",
-  },
-  "src/app/api/v1/microgrids/[microgrid_id]/tenants/route.ts": {
-    kind: "unreleased",
-    path: "/api/v1/microgrids/grid-1/tenants",
-    reason: "The token-authenticated v1 API is not released.",
   },
 };
 

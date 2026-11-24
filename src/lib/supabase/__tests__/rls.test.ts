@@ -2086,7 +2086,8 @@ describe("B1 #268 — anon REVOKE on SECURITY DEFINER mutators", () => {
 //                         (the last dropped in 20261110114033)
 //   RLS helpers (5):      is_super_admin, user_can_access_{org,community,
 //                         microgrid}, user_can_see_user_profile
-//   Customerapp flag (1): customerapp_enabled_for_org
+//   Customerapp flag (1): customerapp_enabled_for_org (dropped in
+//                         20261124090000)
 //   Trigger fn (1):       fn_create_profile_on_auth_user
 //
 // For each fn: anon-RPC must be denied at the grant layer (42501); authenticated
@@ -2259,29 +2260,6 @@ describe("B2 #270 — SECURITY DEFINER anon REVOKE", () => {
     });
     expect(error).toBeNull();
     expect(data).toBe(true);
-  });
-
-  // ── 2c. customerapp_enabled_for_org ─────────────────────────────────────
-
-  it("anon RPC to customerapp_enabled_for_org is denied (42501)", async () => {
-    if (skipIfRequested()) return;
-    const anonClient = buildAnonClient();
-    const { error } = await anonClient.rpc("customerapp_enabled_for_org", {
-      _org_id: FIXTURE.orgA,
-    });
-    expectAnonDenied(error);
-  });
-
-  it("authenticated RPC to customerapp_enabled_for_org succeeds (returns boolean)", async () => {
-    if (skipIfRequested()) return;
-    const { data, error } = await userA.client.rpc("customerapp_enabled_for_org", {
-      _org_id: FIXTURE.orgA,
-    });
-    expect(error).toBeNull();
-    // Default for fixture orgs is FALSE (column default in 00044); the
-    // load-bearing assertion is "no 42501" + "boolean returned" — confirms
-    // authenticated retains EXECUTE.
-    expect(typeof data).toBe("boolean");
   });
 
   // ── 2d. Trigger function ────────────────────────────────────────────────

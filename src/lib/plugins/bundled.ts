@@ -133,7 +133,6 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     "/api/auth",
     "/api/organizations",
     "/api/users",
-    "/api/org-api-tokens",
     // The GUI host's routes, which serve every plugin's contributions to the signed-in person.
     "/api/gui",
     // The GUI host's page that opens any plugin's navigation entry by its id.
@@ -148,7 +147,6 @@ export const ORGANIZATION_DIRECTORY_PLUGIN: BundledPlugin = {
     { path: "/settings/profile", params: {} },
     { path: "/settings/users", params: {} },
     { path: "/settings/plugins", params: {} },
-    { path: "/settings/api-tokens", params: {} },
   ],
   tables: ["organizations", "user_roles", "user_profiles", "mgm_plugins", "organization_email_senders"],
 };
@@ -174,7 +172,6 @@ export const COMMUNITY_MANAGEMENT_PLUGIN: BundledPlugin = {
     "/api/communities",
     "/api/microgrids",
     "/api/tenants",
-    "/api/v1/microgrids",
   ],
   pages: [
     { path: "/communities", params: {} },
@@ -274,8 +271,6 @@ export const BILLING_PLUGIN: BundledPlugin = {
     // (solar savings, battery arbitrage) against what it pays the grid.
     "/api/microgrids/[id]/grid-tariffs",
     "/api/microgrids/[id]/savings-settings",
-    "/api/v1/billing-periods",
-    "/api/v1/billing",
   ],
   pages: [
     // Each microgrid's newest period, as the billing.current-periods view,

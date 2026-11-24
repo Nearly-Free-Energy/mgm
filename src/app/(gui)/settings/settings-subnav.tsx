@@ -17,11 +17,10 @@
  * gated per organization by the plugin service. Future `microgrid_manager`
  * may need per-role visibility — not now.
  *
- * Every tab must link to a released page: the API tokens page exists under
- * /settings/api-tokens but is not in src/lib/mgm/released-routes.ts, so
- * middleware answers it with a 404 and a tab for it would lead nowhere. Add
- * the tab back when that route is released (settings-subnav.test.tsx checks
- * every tab against isReleasedRoute).
+ * Every tab must link to a released page: middleware answers a page that is
+ * not in src/lib/mgm/released-routes.ts with a 404, so a tab for it would
+ * lead nowhere (settings-subnav.test.tsx checks every tab against
+ * isReleasedRoute).
  *
  * Tabs are next/link <Link>s, so clicks and arrow keys are client-side
  * navigations: the (gui) layout and this sub-nav stay mounted while

@@ -108,8 +108,7 @@ upgrading from the old names, in `docs/setup.md`, "Runtime configuration").
 7. **Deploy.** Separately from publishing, an operator deploys a verified
    release with their own credentials; merging to `main` deploys nothing.
    Apply database migrations before deploying the app. Follow the runbook for
-   the area (`docs/runbooks/`, `docs/payments-rollout.md`,
-   `docs/customerapp-activation.md`).
+   the area (`docs/runbooks/`, `docs/payments-rollout.md`).
 
 ## Merge controls
 

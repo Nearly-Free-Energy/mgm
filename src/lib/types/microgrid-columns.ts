@@ -44,23 +44,6 @@ export type MicrogridPublic = Omit<
   | "ems_keycloak_client_secret_encrypted"
 >;
 
-// Customerapp-boundary subset (#257). The full `MICROGRID_PUBLIC_COLUMNS`
-// above is the operator-side public projection — wide enough to power the
-// dashboard UI (20+ columns). Customerapp only needs to resolve UUIDs and
-// the display name + currency for human-facing context; surfacing the wider
-// set across the per-org token API boundary breaks the "minimum useful set,
-// not full CRUD" principle and creates a future leak risk every time a new
-// sensitive column lands on `microgrids` upstream.
-//
-// Use in `.select(...)` calls on the customerapp-facing `/api/v1/microgrids`
-// endpoint. The two constants intentionally coexist — DO NOT collapse them.
-//
-// Declared `as const` so PostgREST's type machinery can narrow
-// `.select(MICROGRID_PUBLIC_COLUMNS_FOR_CUSTOMERAPP)` to a precise
-// `Pick<Microgrid, …>` row type.
-export const MICROGRID_PUBLIC_COLUMNS_FOR_CUSTOMERAPP =
-  "id, name, currency, community_id" as const;
-
 // A narrower read than MICROGRID_PUBLIC_COLUMNS, as a projection of it: a
 // loader that needs a few columns names them through microgridPublicColumns,
 // and the compiler refuses a name the projection leaves out, so a narrower

@@ -98,7 +98,7 @@ describe("middleware PUBLIC_PATHS", () => {
     expect(res.status).toBe(200);
   });
   it.each([
-    "/api/v1/billing/generate",
+    "/api/openems/status",
   ])("returns 404 for unreleased route %s even when signed in", async (path) => {
     signedIn();
     const middleware = await loadMiddleware();
@@ -362,8 +362,7 @@ describe("middleware PUBLIC_PATHS", () => {
   // #294: /api/payments/ipn is Pesapal's IPN webhook — an unauthenticated
   // server-to-server callback with no MGM session. The middleware MUST
   // pass it through, otherwise it 401s ("Authentication required") before
-  // the route handler runs and payments never auto-mark. Same class as the
-  // /api/v1/ hotfix (#267).
+  // the route handler runs and payments never auto-mark.
   it("passes the payment webhook through without a session", async () => {
     signedOut();
     const middleware = await loadMiddleware();
@@ -428,8 +427,8 @@ describe("middleware PUBLIC_PATHS", () => {
 
 describe("middleware for routes outside the installed release", () => {
   it.each([
-    { path: "/settings/api-tokens", who: "signed in", session: signedIn },
-    { path: "/settings/api-tokens", who: "signed out", session: signedOut },
+    { path: "/settings", who: "signed in", session: signedIn },
+    { path: "/settings", who: "signed out", session: signedOut },
     { path: "/microgrids/grid-1/tenants", who: "signed in", session: signedIn },
     { path: "/admin?next=%3Cscript%3E", who: "signed out", session: signedOut },
     // Only paths under /api/ are API requests; these are page links.
@@ -456,7 +455,7 @@ describe("middleware for routes outside the installed release", () => {
   });
 
   it.each([
-    "/api/v1/billing/generate",
+    "/api/openems/status",
     "/api/payments/status",
     "/api/",
   ])("answers an API request (%s) exactly as before", async (path) => {
