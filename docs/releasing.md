@@ -28,10 +28,10 @@ back by deploying a previous version they verified.
 - **Self-contained.** `--standalone` copies every file the functions need into
   the output, so it deploys from an empty directory.
 - **Built on a GitHub-hosted Linux x86-64 runner** (`ubuntu-24.04`). The
-  build copies only the build host's native modules (MGM uses `argon2`) into
-  the functions and records the host's architecture, and Vercel runs Node.js
-  functions on Linux x86-64. The build script refuses any other host unless
-  told the build is a local test.
+  build copies only the build host's native modules into the functions and
+  records the host's architecture, and Vercel runs Node.js functions on
+  Linux x86-64. The build script refuses any other host unless told the
+  build is a local test.
 - **Free of installation settings.** It is built from the committed tree,
   with placeholder project IDs, no Vercel account or token, and an
   environment made from an allowlist. Each installation supplies its own
