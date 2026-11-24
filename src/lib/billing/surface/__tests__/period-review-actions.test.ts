@@ -25,6 +25,7 @@ import {
   REGENERATE_PAID_ACKNOWLEDGEMENT,
   REGENERATE_REFUSAL_COPY,
   RegenerateBillBody,
+  USAGE_REFUSAL_COPY,
 } from "../../schemas";
 
 const checkGate = vi.fn();
@@ -49,10 +50,12 @@ import {
   GENERATE_REFUSALS,
   generateFromMetersAvailable,
   prepareGenerateFromMeters,
+  prepareRecordUsage,
   recordUsageAvailable,
   regenerateBillAvailable,
   REGENERATE_PAID_LABEL,
-  USAGE_REASONS,
+  RECORD_USAGE_PAID_LABEL,
+  USAGE_REFUSALS,
 } from "../period-review";
 import { PERIOD_REVIEW_LOADED_EXAMPLES } from "../period-review-examples";
 
@@ -164,7 +167,7 @@ describe("the period review's actions", () => {
     expect(typeof REGENERATE.available).toBe("function");
   });
 
-  it("correct an unmetered bill's usage on the usage route, with no confirmation step", () => {
+  it("correct an unmetered bill's usage on the usage route, as a ceremony that is prepared", () => {
     expect(USAGE).toMatchObject({
       id: "billing.record-usage",
       title: "Correct usage",
@@ -173,13 +176,14 @@ describe("the period review's actions", () => {
       path: "/api/billing-line-items/[lineItemId]/usage",
       bind: { path: { lineItemId: "lineItem" } },
       risk: "money",
-      confirm: "none",
+      // A ceremony, so the host sends a paid bill's acknowledgement to the route (#247).
+      confirm: "ceremony",
       humanOnly: true,
       targeted: false,
     });
     expect(USAGE.input).toBe(LineItemUsageBody);
     expect(USAGE.inputVersion).toBe(LINE_ITEM_USAGE_BODY_VERSION);
-    expect(USAGE.prepare).toBeUndefined();
+    expect(typeof USAGE.prepare).toBe("function");
     expect(typeof USAGE.available).toBe("function");
   });
 
@@ -309,12 +313,25 @@ describe("availability", () => {
       tenant_id: tenant(n),
       device_id: null,
       start_kwh: 0,
+      payment_status: "unpaid",
+      invoice_number: null,
       billing_periods: { status, start_date: "2026-10-01", end_date: "2026-10-31" },
       ...o,
     });
     const { client, calls } = tableClient({
       billing_line_items: {
-        data: [row(1), row(2, {}, "closed"), row(3, { device_id: "e7100000-0000-4000-8006-000000000001" }), row(4), row(5, { start_kwh: null }), row(6)],
+        data: [
+          row(1),
+          row(2, {}, "closed"),
+          row(3, { device_id: "e7100000-0000-4000-8006-000000000001" }),
+          row(4),
+          row(5, { start_kwh: null }),
+          row(6),
+          row(7, { invoice_number: "EXS-2026-00001" }),
+          row(8, { payment_status: "refunded" }),
+          // Offered: the correction asks for the paid acknowledgement.
+          row(9, { payment_status: "paid" }),
+        ],
       },
       tenant_devices: {
         data: [
@@ -324,15 +341,22 @@ describe("availability", () => {
         ],
       },
     });
-    expect(await recordUsageAvailable(req(client), [1, 2, 3, 4, 5, 6].map(id).concat(GONE))).toEqual({
+    expect(await recordUsageAvailable(req(client), [1, 2, 3, 4, 5, 6, 7, 8, 9].map(id).concat(GONE))).toEqual({
       [id(1)]: true,
-      [id(2)]: USAGE_REASONS.closed,
-      [id(3)]: USAGE_REASONS.metered,
-      [id(4)]: USAGE_REASONS.metered,
-      [id(5)]: USAGE_REASONS.noStart,
+      [id(2)]: USAGE_REFUSALS.closed.message,
+      [id(3)]: USAGE_REFUSALS.metered.message,
+      [id(4)]: USAGE_REFUSALS.metered.message,
+      [id(5)]: USAGE_REFUSALS.noStart.message,
       [id(6)]: true,
+      [id(7)]: USAGE_REFUSALS.invoiced.message,
+      [id(8)]: USAGE_REFUSALS.refunded.message,
+      [id(9)]: true,
       [GONE]: BILL_REFUSALS.notFound.message,
     });
+    // The route's copy; `changed` only the write finds.
+    const { changed, ...beforeTheWrite } = USAGE_REFUSAL_COPY;
+    void changed;
+    expect(Object.fromEntries(Object.entries(USAGE_REFUSALS).map(([k, r]) => [k, r.message]))).toEqual(beforeTheWrite);
     expect(calls.map((c) => c.table)).toEqual(["billing_line_items", "tenant_devices"]);
     expect(calls[1].ops).toContainEqual(["eq", ["role", "primary_consumption_meter"]]);
   });
@@ -480,11 +504,75 @@ describe("preparing the period review's actions", () => {
     expect(out).toMatchObject({ ok: false, status: 409, message: BILL_REFUSALS.refunded.message });
   });
 
-  it("prepares a usage correction with no confirmation step", async () => {
-    const out = await prepare(onBill(USAGE.id));
+  it("prepares a usage correction with the bill's facts, and sends a body LineItemUsageBody parses", async () => {
+    const out = await prepare(onBill(USAGE.id), tables({ bill: [billRow({ usage_kwh: 12.5, invoice_number: null })] }).client);
     if (!out.ok) throw new Error(out.message);
-    expect(out.value).toMatchObject({ confirm: "none", method: "PATCH", path: `/api/billing-line-items/${BILL}/usage`, ceremony: null });
-    expect(LineItemUsageBody.parse(await sent(out.value, { usage_kwh: 12 }, "none"))).toEqual({ usage_kwh: 12 });
+    expect(out.value).toMatchObject({ confirm: "ceremony", method: "PATCH", path: `/api/billing-line-items/${BILL}/usage`, bound: {} });
+    expect(out.value.ceremony).toMatchObject({
+      statement: "Correct this bill's usage with the reading you enter.",
+      facts: [
+        { label: "Tenant", value: { t: "text", text: "Akello" } },
+        { label: "Period", value: { t: "text" } },
+        { label: "Current usage", value: { t: "energy", v: 12.5 } },
+        { label: "Current total", value: { t: "money", v: 5000, currency: "UGX" } },
+        { label: "Payment", value: { t: "status", v: "unpaid" } },
+      ],
+      warnings: [],
+      acknowledgements: [],
+    });
+    // The form never shows the confirmation: the host sends it.
+    const input = out.value.spec.input as { properties: Record<string, unknown> };
+    expect(Object.keys(input.properties)).toEqual(["usage_kwh", "end_kwh"]);
+    const body = await sent(out.value, { usage_kwh: 12 }, "ceremony", { acknowledged: [] });
+    expect(LineItemUsageBody.parse(body)).toEqual({ usage_kwh: 12, confirmation: { acknowledged: [] } });
+  });
+
+  it("shows a bill with no usage yet as empty", async () => {
+    const out = await prepare(onBill(USAGE.id), tables({ bill: [billRow({ usage_kwh: null })] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.value.ceremony?.facts.find((f) => f.label === "Current usage")?.value).toMatchObject({ t: "empty" });
+  });
+
+  it("asks a paid bill's usage correction to be acknowledged, and sends the regenerate route's acknowledgement", async () => {
+    const out = await prepare(onBill(USAGE.id), tables({ bill: [billRow({ payment_status: "paid" })] }).client);
+    if (!out.ok) throw new Error(out.message);
+    expect(out.value.ceremony).toMatchObject({
+      warnings: [],
+      acknowledgements: [{ id: REGENERATE_PAID_ACKNOWLEDGEMENT, label: RECORD_USAGE_PAID_LABEL }],
+    });
+    expect(RECORD_USAGE_PAID_LABEL).toContain("The bill is currently marked paid.");
+    const body = await sent(out.value, { end_kwh: 40 }, "ceremony", { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] });
+    expect(LineItemUsageBody.parse(body)).toEqual({ end_kwh: 40, confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] } });
+  });
+
+  it.each([
+    ["in a closed period", billRow({ payment_status: "paid" }, { status: "closed" }), [], USAGE_REFUSALS.closed],
+    ["that is invoiced", billRow({ payment_status: "paid", invoice_number: "EXS-2026-00001" }), [], USAGE_REFUSALS.invoiced],
+    ["that is refunded", billRow({ payment_status: "refunded" }), [], USAGE_REFUSALS.refunded],
+    ["from a meter", billRow({ device_id: "e7100000-0000-4000-8006-000000000001" }), [], USAGE_REFUSALS.metered],
+    [
+      "of a tenant with a meter in the period",
+      billRow(),
+      [{ tenant_id: TENANT, effective_from: "2026-10-15", effective_to: null }],
+      USAGE_REFUSALS.metered,
+    ],
+    ["with no starting reading", billRow({ start_kwh: null }), [], USAGE_REFUSALS.noStart],
+  ])("refuses to correct the usage of a bill %s, as the route does", async (_label, bill, links, refusal) => {
+    const out = await prepare(onBill(USAGE.id), tables({ bill: [bill], links }).client);
+    expect(out).toMatchObject(refusal);
+  });
+
+  it("corrects a bill whose tenant had a meter only before the period", async () => {
+    const links = [{ tenant_id: TENANT, effective_from: "2026-01-01", effective_to: "2026-10-01" }];
+    expect(await prepare(onBill(USAGE.id), tables({ links }).client)).toMatchObject({ ok: true });
+  });
+
+  it("refuses to prepare a usage correction when the meter assignments cannot be read", async () => {
+    const { client } = tableClient({
+      billing_line_items: { data: [billRow()] },
+      tenant_devices: { data: null, error: { message: "permission denied" } },
+    });
+    expect(await prepareRecordUsage(fmtReq(client), { params: { lineItemId: BILL } })).toEqual(BILL_REFUSALS.unavailable);
   });
 
   // The step never names the new status: the form can change it after prepare.

@@ -484,13 +484,17 @@ describe("buildPeriodReviewModel: each bill's actions", () => {
     expect(has({ bills: [{ ...ok, device_id: "e7500000-0000-4000-8006-000000000009" }] })).toBe(false);
     expect(has({ bills: [ok], tenants: [{ ...unmetered, meterLinkInPeriod: true }] })).toBe(false);
     expect(has({ bills: [{ ...ok, start_kwh: null }] })).toBe(false);
+    // As regenerate-bill (#247): not on an invoiced or refunded bill, but on a paid one, which the correction asks to acknowledge.
+    expect(has({ bills: [{ ...ok, invoice_number: "EXS-2026-00001" }] })).toBe(false);
+    expect(has({ bills: [{ ...ok, payment_status: "refunded" }] })).toBe(false);
+    expect(has({ bills: [{ ...ok, payment_status: "paid" }] })).toBe(true);
   });
 
-  it.each([false, true])("offers only a usage correction on a refunded unmetered draft bill (super admin: %s), as the usage route accepts one", (superAdmin) => {
+  it.each([false, true])("offers nothing on a refunded unmetered draft bill (super admin: %s), as neither regenerate nor the usage route accepts one", (superAdmin) => {
     const unmetered = tenant(5, "Unmetered", { meterLinkInPeriod: false });
     const refunded = bill(1, unmetered, { device_id: null, start_kwh: 100, payment_status: "refunded" });
     const [row] = build({ tenants: [unmetered], bills: [refunded], superAdmin }).body.rows;
-    expect(row.actions).toEqual([{ action: RECORD_USAGE_ACTION.id, params: params(refunded) }]);
+    expect(row.actions).toEqual([]);
   });
 
   it("offers each payment action with the status it sets", () => {
