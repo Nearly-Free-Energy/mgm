@@ -154,7 +154,7 @@ const TENANT_AARON: Tenant = {
   meter_serial: "SM-882104",
   meter_type: "Smart Submeter",
   customer_type: "residential",
-  primary_email: "aaron@kisakye.ug",
+  primary_email: "manager@example.org",
   primary_phone: "+256 700 000 001",
   unit_label: "House 7",
   address_line1: "Community Name",

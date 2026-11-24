@@ -508,7 +508,7 @@ describe("sanitizeFilenameSegment", () => {
     ["Sezibwa", "sezibwa"],
     [
       "Kisakye (Test with OpenEMS Integrated)",
-      "kisakye-test-with-openems-integrated",
+      "demo-test-with-openems-integrated",
     ],
     ["NFE — Pilot #1", "nfe-pilot-1"],
     ["   trim me   ", "trim-me"],

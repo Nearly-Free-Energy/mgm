@@ -145,7 +145,7 @@ describe("DELETE /api/microgrids/[id]", () => {
     configureEntityLookup({
       data: {
         id: VALID_UUID,
-        name: "Kisakye Main",
+        name: "Demo Village",
         community_id: "comm-1",
       },
       error: null,
@@ -165,7 +165,7 @@ describe("DELETE /api/microgrids/[id]", () => {
   });
 
   it("409 that says why when the database keeps the microgrid's billing", async () => {
-    const kisakye = { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" };
+    const microgrid = { id: VALID_UUID, name: "Demo Village", community_id: "comm-1" };
     const cases = [
       {
         details: "closed",
@@ -182,7 +182,7 @@ describe("DELETE /api/microgrids/[id]", () => {
     ];
     const { DELETE } = await import("../[id]/route");
     for (const refusal of cases) {
-      configureEntityLookup({ data: kisakye, error: null });
+      configureEntityLookup({ data: microgrid, error: null });
       mockRpcImpl.mockResolvedValueOnce({
         data: null,
         error: { code: "23514", message: refusal.message, details: refusal.details },
@@ -199,7 +199,7 @@ describe("DELETE /api/microgrids/[id]", () => {
     configureEntityLookup({
       data: {
         id: VALID_UUID,
-        name: "Kisakye Main",
+        name: "Demo Village",
         community_id: "comm-1",
       },
       error: null,
@@ -224,7 +224,7 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
     configureEntityLookup({
       data: {
         id: VALID_UUID,
-        name: "Kisakye Main",
+        name: "Demo Village",
         community_id: "comm-1",
       },
       error: null,
@@ -245,7 +245,7 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
 
   it("409 with the reason, and no counts, when the microgrid has a closed billing period", async () => {
     configureEntityLookup(
-      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      { data: { id: VALID_UUID, name: "Demo Village", community_id: "comm-1" }, error: null },
       {
         billing_periods: [
           { id: "period-1", status: "closed" },
@@ -269,7 +269,7 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
 
   it("409 when a draft period has recorded payments", async () => {
     configureEntityLookup(
-      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      { data: { id: VALID_UUID, name: "Demo Village", community_id: "comm-1" }, error: null },
       {
         billing_periods: [{ id: "period-3", status: "draft" }],
         // The paid bill of the draft period, and a payment event on it.
@@ -291,7 +291,7 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
 
   it("200 with the counts when its only billing is an unpaid draft", async () => {
     configureEntityLookup(
-      { data: { id: VALID_UUID, name: "Kisakye Main", community_id: "comm-1" }, error: null },
+      { data: { id: VALID_UUID, name: "Demo Village", community_id: "comm-1" }, error: null },
       { billing_periods: [{ id: "period-3", status: "draft" }] }
     );
 

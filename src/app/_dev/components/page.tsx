@@ -185,25 +185,25 @@ export default function ComponentsDevPage() {
             levels={[
               {
                 kind: "Organization",
-                label: "Kisakye Energy",
+                label: "Example Energy",
                 count: 3,
-                href: "/orgs/kisakye",
+                href: "/orgs/example",
                 active: false,
                 siblings: [
-                  { label: "Kisakye Energy", href: "/orgs/kisakye" },
+                  { label: "Example Energy", href: "/orgs/example" },
                   { label: "Luwero Solar",   href: "/orgs/luwero" },
                   { label: "Masaka Grid",    href: "/orgs/masaka" },
                 ],
               },
               {
                 kind: "Community",
-                label: "Kisakye Village",
+                label: "Demo Village",
                 count: 2,
-                href: "/orgs/kisakye/communities/kisakye-village",
+                href: "/orgs/example/communities/demo-village",
                 active: false,
                 siblings: [
-                  { label: "Kisakye Village", href: "/orgs/kisakye/communities/kisakye-village" },
-                  { label: "Kasana Town",     href: "/orgs/kisakye/communities/kasana-town" },
+                  { label: "Demo Village", href: "/orgs/example/communities/demo-village" },
+                  { label: "Kasana Town",     href: "/orgs/example/communities/kasana-town" },
                 ],
               },
               {
