@@ -5,9 +5,10 @@ import "server-only";
  *
  * This module owns the per-tenant compute + (optionally) write loop that
  * used to live inline in the session route `POST /api/billing/generate`
- * (removed once nothing called it, #201). Its unguarded callers:
+ * (removed once nothing called it, #201). Its callers:
  *
- *   1. `BillingCapability.previewBills` — mode='preview'.
+ *   1. `BillingCapability.previewBills` — mode='preview', the one unguarded
+ *      run, which writes nothing.
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
  *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
@@ -21,50 +22,44 @@ import "server-only";
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
- *   2. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
- *      edit. Internally resolves `tenantIds: [<resolved>]` +
- *      `manualReadings: [<resolved>]` and calls with mode='write'. It is the
- *      only unguarded run that writes, so the unguarded write path below
- *      stays for it alone; it refuses a closed period itself, before the
- *      run. If it moves to a guarded write, that path can go.
- *
- *   `BillingCapability.generateBills` takes the same body, in mode='write',
- *   but always with `expectedBill` (#243). Its unguarded form, which
- *   upserted over any bill in any period, served only
- *   `POST /api/v1/billing/generate`, removed with the customer app's
- *   integration (#241).
- *
- *   Two later callers rewrite an existing bill only as they read it, through
- *   fn_regenerate_bill_with_audit: `POST
- *   /api/billing-line-items/[lineItemId]/regenerate` for one bill
- *   (`expectedBill`), and `POST
- *   /api/billing-periods/[periodId]/generate-from-meters` for a whole period
- *   from meter data (`guardExistingBills`). A third bills one tenant who has
- *   no bill from readings typed by hand, and refuses one who has: `POST
+ *   Every write is guarded (mode='write' with none of the three below is
+ *   refused before anything is read, #247). Two callers rewrite one existing
+ *   bill only as they read it (`expectedBill`), with the same body as a
+ *   preview: `BillingCapability.generateBills`, for `POST
+ *   /api/billing-line-items/[lineItemId]/regenerate` (#243), and `PATCH
+ *   /api/billing-line-items/[lineItemId]/usage`, the single-cell manual
+ *   edit, which names its bill's one tenant and that tenant's manual
+ *   reading (#247). `POST
+ *   /api/billing-periods/[periodId]/generate-from-meters` runs a whole
+ *   period from meter data (`guardExistingBills`), and `POST
  *   /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings`
- *   (`newBillOnly`). Their params below say how.
+ *   bills one tenant who has no bill from readings typed by hand, and
+ *   refuses one who has (`newBillOnly`). Their params below say how.
+ *
+ *   The unguarded write, which upserted over any bill in any period, served
+ *   `POST /api/billing/generate` (#201), `POST /api/v1/billing/generate`
+ *   (#241) and, last, the usage route; it went once that route became a
+ *   per-bill regeneration (#247).
  *
  * ── Write semantics (mode='write') ──────────────────────────────────────────
  *
- * Every tenant processed goes through `fn_record_line_item_with_audit`
- * (00029), which UPSERTs by (billing_period_id, tenant_id) — preserving
- * payment_status / paid_at / paid_by_user_id / pesapal_order_id / payment_*
- * columns on UPDATE, so a regenerate doesn't clobber a paid row's audit
- * fields and doesn't cascade away its payment_events history. The function
- * also writes one row to billing_audit_log per call (in the same transaction).
+ * A bill that exists goes through fn_regenerate_bill_with_audit, which
+ * rewrites it only as it was read, and otherwise passes its arguments on to
+ * `fn_record_line_item_with_audit` (00029). That function UPSERTs by
+ * (billing_period_id, tenant_id), preserving payment_status / paid_at /
+ * paid_by_user_id / payment_* columns on UPDATE, so a regenerate doesn't
+ * clobber a paid row's audit fields and doesn't cascade away its
+ * payment_events history, and writes one row to billing_audit_log in the
+ * same transaction. A tenant with no bill as read (guardExistingBills,
+ * newBillOnly) gets one through fn_record_first_line_item_with_audit
+ * (migration 20261120130100), which inserts only while the period is a
+ * draft and the tenant has no bill, under the period's lock, and never
+ * overwrites a bill (`firstBillRefusal` maps its refusals). Both write the
+ * same columns and audit row as the upsert. The engine no longer calls
+ * fn_record_line_item_with_audit itself.
  *
  * The legacy bulk-only delete-then-insert path is REMOVED — this is the
- * critical AC3 change. UPSERT-preserve is the only write path of the
- * unguarded callers above.
- *
- * The guarded callers write differently. A bill that exists goes through
- * fn_regenerate_bill_with_audit, which rewrites it only as it was read. A
- * tenant with no bill as read (guardExistingBills, newBillOnly) gets one
- * through fn_record_first_line_item_with_audit (migration 20261120130100),
- * which inserts only while the period is a draft and the tenant has no bill,
- * under the period's lock, and never overwrites a bill (`firstBillRefusal`
- * maps its refusals). Both write the same columns and audit row as the
- * upsert.
+ * critical AC3 change.
  *
  * ── Manual rows (Q5) ───────────────────────────────────────────────────────
  *
@@ -336,8 +331,9 @@ export type RunGenerationParams = {
    * a draft and the bill still has no invoice number and these values, under
    * locks held to commit, and writes nothing when the new figures are the
    * ones the bill already has (`kind: 'unchanged'`).
-   * BillingCapability.generateBills always sets it. Unset, as on PATCH
-   * /api/billing-line-items/[lineItemId]/usage, nothing here applies.
+   * BillingCapability.generateBills and PATCH
+   * /api/billing-line-items/[lineItemId]/usage always set it. A write sets
+   * it, guardExistingBills or newBillOnly, or is refused; a preview ignores it.
    */
   expectedBill?: ExpectedBill;
   /**
@@ -378,8 +374,7 @@ export type RunGenerationParams = {
    *    period's bills (a bill from readings, or a second run overlapping
    *    this one) is left as it is (`bill_exists`), with nothing written
    *    for that tenant;
-   * An unguarded run (PATCH /api/billing-line-items/[lineItemId]/usage, or
-   * a preview) leaves it unset and checks none of this.
+   * A preview leaves it unset and checks none of this.
    */
   guardExistingBills?: boolean;
   /**
@@ -402,7 +397,7 @@ export type RunGenerationParams = {
    *    guardExistingBills, and the run is refused the same way, with nothing
    *    written, if it is no longer a draft;
    *  - otherwise the manual path below runs unchanged: the same tariff pin,
-   *    rounding and audit row as on an unguarded run.
+   *    rounding and audit row as a per-bill regeneration's.
    * The insert is fn_record_first_line_item_with_audit's, as for
    * guardExistingBills above: under the period's lock it refuses a period
    * that closed after that second read (`period_closed`,
@@ -524,8 +519,22 @@ export async function runGenerationFor(
   const seedByDevice = new Map<string, SeedReadingInput>();
   for (const s of params.seedReadings ?? []) seedByDevice.set(s.deviceId, s);
 
-  // ── 0a. A guarded whole-period run reads every tenant from its meter ───────
+  // ── 0. Every write is guarded ─────────────────────────────────────────────
+  // A write rewrites a bill only as it was read (expectedBill,
+  // guardExistingBills) or inserts a first bill (guardExistingBills,
+  // newBillOnly). A write with none of them would upsert over any bill in
+  // any period, which no caller may do any more (#247); a caller that sends
+  // one has a bug, so it is refused before anything is read.
   const guardExistingBills = params.guardExistingBills === true;
+  if (mode === "write" && params.expectedBill === undefined && !guardExistingBills && params.newBillOnly !== true) {
+    return {
+      kind: "fatal",
+      status: 500,
+      body: { error: "A bill is written only as it was read, or as a tenant's first bill.", code: "unguarded_write" },
+    };
+  }
+
+  // ── 0a. A guarded whole-period run reads every tenant from its meter ───────
   if (
     guardExistingBills &&
     (mode !== "write" ||
@@ -543,12 +552,15 @@ export async function runGenerationFor(
   }
 
   // ── 0b. A per-bill regeneration names its one tenant and nothing else ──────
+  // No other tenant in tenantIds, manualReadings or revertToEdgeTenantIds,
+  // and no seeds: it must not become a run over more than its bill.
   const expectedBill = mode === "write" ? params.expectedBill : undefined;
   if (
     expectedBill &&
     (tenantIdsParam?.length !== 1 ||
       tenantIdsParam[0] !== expectedBill.tenantId ||
       manualReadingsParam.some((m) => m.tenantId !== expectedBill.tenantId) ||
+      [...revertToEdgeSet].some((id) => id !== expectedBill.tenantId) ||
       (params.seedReadings ?? []).length > 0)
   ) {
     return {
@@ -631,11 +643,11 @@ export async function runGenerationFor(
     rate_schedule_id?: string | null;
   };
 
-  // Q4=B: an unguarded run regenerates a closed period (the legacy reject
-  // was removed in #173). Its one writer, PATCH /usage, retains its own
-  // `period_closed` reject upstream — see the route handler. A per-bill
-  // regeneration (expectedBill) refuses it under its write's lock
-  // (fn_regenerate_bill_with_audit). A guarded
+  // No write changes a closed period's bills. A preview still computes one
+  // (Q4=B, #173: the legacy reject was removed, and the upsert that wrote a
+  // closed period went in #247). A per-bill regeneration (expectedBill)
+  // refuses it under its write's lock (fn_regenerate_bill_with_audit); its
+  // callers refuse it first. A guarded
   // whole-period run refuses it here, before the tariff pin, and again after
   // reading the meters, before the first write (6b below); each of its
   // writes checks it again under the period's lock
@@ -1358,15 +1370,17 @@ export async function runGenerationFor(
     // changes with PGRST203. Any future param addition requires
     // `DROP FUNCTION IF EXISTS` in the migration BEFORE `CREATE OR REPLACE`.
     // See PR #209 / #250 for prior lessons. fn_regenerate_bill_with_audit
-    // takes the same arguments plus `_expected` and passes them on, and
-    // fn_record_first_line_item_with_audit takes the same arguments, so a
-    // parameter added to one is added to the other two in the same migration.
-    // A guarded run's tenant with no bill as read gets one only while it
-    // still has none and the period is still a draft, under the period's
-    // lock (fn_record_first_line_item_with_audit). An unguarded run (PATCH
-    // /usage) keeps the upsert: its manual row overwrites the bill, and the
-    // engine accepts a closed period (Q4=B), which that route refuses first.
-    const firstBill = !expected && !prior && (guardExistingBills === true || newBillOnly === true);
+    // takes fn_record_line_item_with_audit's arguments plus `_expected` and
+    // passes them on, and fn_record_first_line_item_with_audit takes the same
+    // arguments, so a parameter added to one is added to the other two in
+    // the same migration.
+    // Without a bill to expect, the write is a tenant's first bill: step 0
+    // refused a write with no guard, a per-bill regeneration always has one
+    // (expectedBill), a guarded whole-period run expects every bill it read,
+    // and a first bill from readings stopped above if the tenant had one. It
+    // is inserted only while the tenant still has none and the period is
+    // still a draft, under the period's lock
+    // (fn_record_first_line_item_with_audit).
     const recordArgs = {
       _billing_period_id: periodId,
       _tenant_id: hid,
@@ -1402,17 +1416,9 @@ export async function runGenerationFor(
             manual_reason: expected.manualReason,
           },
         })
-      : firstBill
-        ? await supabase.rpc("fn_record_first_line_item_with_audit", recordArgs)
-        : await supabase.rpc("fn_record_line_item_with_audit", recordArgs);
+      : await supabase.rpc("fn_record_first_line_item_with_audit", recordArgs);
 
-    const refused = rpcErr
-      ? expected
-        ? expectedBillRefusal(rpcErr)
-        : firstBill
-          ? firstBillRefusal(rpcErr, newBillOnly === true)
-          : null
-      : null;
+    const refused = rpcErr ? (expected ? expectedBillRefusal(rpcErr) : firstBillRefusal(rpcErr, newBillOnly === true)) : null;
     if (refused) {
       results.push({ kind: "error", tenantId: hid, tenantName, ...refused });
       continue;

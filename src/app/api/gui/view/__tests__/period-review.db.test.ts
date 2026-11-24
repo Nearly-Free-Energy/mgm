@@ -249,8 +249,8 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: a billing period's review", ()
     // An organization manager is not offered marking failed or refunded.
     expect(actionIds(rows)).not.toContain("billing.mark-refunded");
     expect(actionIds(rows)).not.toContain("billing.mark-failed");
-    // No regenerate and no payment change on the refunded bill; its usage can still be corrected, as legacy and the usage route allow.
-    expect(rows[3].actions.map((a) => a.action)).toEqual(["billing.record-usage"]);
+    // Nothing on the refunded bill: no regenerate, no payment change, and no usage correction, which refuses a refunded bill as regenerating does (#247).
+    expect(rows[3].actions).toEqual([]);
     // The unmetered manual bill on a draft can have its usage corrected.
     expect(rows[4].actions.map((a) => a.action)).toContain("billing.record-usage");
     // Regenerating is offered, and disabled with the route's reason on the invoiced bill only.

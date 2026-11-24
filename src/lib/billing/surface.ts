@@ -80,6 +80,7 @@ import {
   prepareMarkRefunded,
   prepareMarkUnpaid,
   prepareRegenerateBill,
+  prepareRecordUsage,
   recordUsageAvailable,
   regenerateBillAvailable,
 } from "./surface/period-review";
@@ -474,8 +475,13 @@ export const BILLING_SURFACE: Contribution = {
       prepare: prepareRegenerateBill,
       available: regenerateBillAvailable,
     },
-    // A usage correction on an unmetered draft bill. `targeted: false`: the
-    // review offers it only on the bills the usage route accepts.
+    // A usage correction on an unmetered draft bill: a per-bill
+    // regeneration from manual readings (#247). `targeted: false`: the
+    // review offers it only on the bills the usage route accepts. A
+    // ceremony, as regenerate-bill is, so the host sends the acknowledgement
+    // a paid bill's prepare asks for and the route requires (only typed and
+    // ceremony actions are sent a confirmation, invoke.ts); its tone is
+    // neutral for the same reasons as regenerate-bill's.
     {
       ...RECORD_USAGE_ACTION,
       target: "lineItem",
@@ -485,9 +491,10 @@ export const BILLING_SURFACE: Contribution = {
       path: "/api/billing-line-items/[lineItemId]/usage",
       bind: { path: { lineItemId: "lineItem" } },
       risk: "money",
-      confirm: "none",
+      confirm: "ceremony",
       humanOnly: true,
       targeted: false,
+      prepare: prepareRecordUsage,
       available: recordUsageAvailable,
     },
     // The payment-status transitions, all on one route. Each is offered only

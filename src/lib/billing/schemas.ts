@@ -375,24 +375,55 @@ const lineItemsKwh = (key: string) =>
     .number({ error: `${key} must be a finite number` })
     .min(0, { error: `${key} must be a non-negative number` });
 
+const ACKNOWLEDGED_CONFIRMATION_ERROR = "confirmation needs the acknowledgements ticked";
+
+/**
+ * The host's Confirmation (src/lib/gui/contract.ts) as a ceremony action that
+ * asks for no typed name sends it: the acknowledgements ticked. The host
+ * hides it from the form. RegenerateBillBody and LineItemUsageBody take it,
+ * for the paid-bill acknowledgement (REGENERATE_PAID_ACKNOWLEDGEMENT).
+ */
+const acknowledgedConfirmation = z
+  .strictObject(
+    {
+      acknowledged: z
+        .array(z.string({ error: ACKNOWLEDGED_CONFIRMATION_ERROR }).max(64, { error: ACKNOWLEDGED_CONFIRMATION_ERROR }), {
+          error: ACKNOWLEDGED_CONFIRMATION_ERROR,
+        })
+        .max(20, { error: ACKNOWLEDGED_CONFIRMATION_ERROR }),
+    },
+    { error: ACKNOWLEDGED_CONFIRMATION_ERROR }
+  )
+  .optional();
+
 /**
  * PATCH /api/billing-line-items/[lineItemId]/usage. The line item comes from
- * the path. At least one key is required; when both are given the route
- * takes end_kwh and ignores usage_kwh, and with end_kwh alone it refuses a
- * reading below the line item's start_kwh, which only the database knows.
+ * the path. At least one reading key is required; when both are given the
+ * route takes end_kwh and ignores usage_kwh, and with end_kwh alone it
+ * refuses a reading below the line item's start_kwh, which only the database
+ * knows.
+ *
+ * confirmation: billing.record-usage is a ceremony, and asks a paid bill's
+ * correction to be acknowledged (REGENERATE_PAID_ACKNOWLEDGEMENT), as
+ * billing.regenerate-bill asks a paid bill's regeneration; the route refuses
+ * a paid bill without it (#247). Version 2 added it. It takes no typed name:
+ * the ceremony asks for none (prepareRecordUsage), so a body carrying one is
+ * refused as an unknown key. If the ceremony comes to ask for a name, add
+ * typed here and check it in the route.
  */
 export const LineItemUsageBody = z
   .strictObject(
     {
       usage_kwh: lineItemsKwh("usage_kwh").optional().meta({ title: "Usage (kWh)" }),
       end_kwh: lineItemsKwh("end_kwh").optional().meta({ title: "Closing meter reading (kWh)" }),
+      confirmation: acknowledgedConfirmation,
     },
     { error: bodyError }
   )
   .refine((body) => body.usage_kwh !== undefined || body.end_kwh !== undefined, {
     error: "At least one of usage_kwh or end_kwh is required",
   });
-export const LINE_ITEM_USAGE_BODY_VERSION = 1;
+export const LINE_ITEM_USAGE_BODY_VERSION = 2;
 
 // The payment-status route has always said "a JSON object", with a full stop,
 // where bodyError says "an object"; it keeps its wording.
@@ -459,9 +490,10 @@ export const LineItemPaymentStatusBody = z.strictObject(
 export const LINE_ITEM_PAYMENT_STATUS_BODY_VERSION = 2;
 
 /**
- * The acknowledgement regenerating a paid bill needs on the regenerate route:
- * billing.regenerate-bill's prepare offers it
- * (src/lib/billing/surface/period-review.ts), and that route refuses a paid
+ * The acknowledgement regenerating a paid bill needs on the regenerate route,
+ * and correcting a paid bill's usage on the usage route (#247): the prepares
+ * of billing.regenerate-bill and billing.record-usage offer it
+ * (src/lib/billing/surface/period-review.ts), and both routes refuse a paid
  * bill without it. POST /api/billing/generate, which the deleted legacy
  * dialogs called, asked for none and rewrote a paid bill as well; the
  * dialogs warned on the client only.
@@ -496,6 +528,33 @@ export const REGENERATE_REFUSAL_COPY = {
   // read and the write: paid, refunded or regenerated meanwhile.
   changed: "This bill changed while it was being regenerated. Refresh it and try again.",
   paid: "This bill is marked paid, so it is regenerated only on its own, after confirming that it is paid.",
+} as const;
+
+/**
+ * Why PATCH /api/billing-line-items/[lineItemId]/usage refuses a correction,
+ * as fixed copy: the route answers with it, and billing.record-usage's
+ * availability and prepare give the same refusals before it runs
+ * (src/lib/billing/surface/period-review.ts). A correction is a per-bill
+ * regeneration from manual readings (#247), so it refuses what the
+ * regenerate route refuses, in the same order and for the same reasons
+ * (REGENERATE_REFUSAL_COPY), and then what only a usage correction needs:
+ *  - closed, invoiced, refunded: as REGENERATE_REFUSAL_COPY.
+ *  - metered: the bill is from a meter, or the tenant has a meter assigned
+ *    in the period; regenerate-bill changes such a bill.
+ *  - noStart: the bill has no starting reading for the usage to count from.
+ *  - changed: the bill changed after the route read it (a payment, a
+ *    refund, an invoice number, a regeneration); only the write finds this
+ *    (fn_regenerate_bill_with_audit).
+ * A paid bill is not refused: the person acknowledges that it is paid
+ * (REGENERATE_PAID_ACKNOWLEDGEMENT).
+ */
+export const USAGE_REFUSAL_COPY = {
+  closed: "Cannot edit a closed period",
+  invoiced: "This bill has been invoiced, so its usage cannot be corrected: its invoice number is already issued.",
+  refunded: "A refunded bill's usage cannot be corrected.",
+  metered: "Use Refresh Readings for metered tenants",
+  noStart: "A starting register reading is required before correcting this bill.",
+  changed: "This bill changed while its usage was being corrected. Refresh it and try again.",
 } as const;
 
 /**
@@ -566,8 +625,6 @@ export const BILL_FROM_READINGS_COPY = {
 export const GenerateFromMetersBody = z.strictObject({}, { error: bodyError });
 export const GENERATE_FROM_METERS_BODY_VERSION = 1;
 
-const REGENERATE_CONFIRMATION = "confirmation needs the acknowledgements ticked";
-
 /**
  * POST /api/billing-line-items/[lineItemId]/regenerate. Flat, so the kit
  * form can render it, and an object of fields, so the GUI host can check the
@@ -596,18 +653,7 @@ export const RegenerateBillBody = z.strictObject(
     // asks for none (prepareRegenerateBill), so the host sends none, and a
     // body carrying one is refused as an unknown key. If the ceremony comes
     // to ask for a name, add typed here and check it in the route.
-    confirmation: z
-      .strictObject(
-        {
-          acknowledged: z
-            .array(z.string({ error: REGENERATE_CONFIRMATION }).max(64, { error: REGENERATE_CONFIRMATION }), {
-              error: REGENERATE_CONFIRMATION,
-            })
-            .max(20, { error: REGENERATE_CONFIRMATION }),
-        },
-        { error: REGENERATE_CONFIRMATION }
-      )
-      .optional(),
+    confirmation: acknowledgedConfirmation,
   },
   { error: bodyError }
 );

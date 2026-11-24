@@ -9,9 +9,14 @@
  *   - 409: device_linked — line item still has a device_id (metered)
  *   - 409: device_linked — tenant has a primary_consumption_meter link
  *   - 409: period_closed — billing period is closed
+ *   - 409: invoiced, refunded — as the regenerate route refuses them (#247)
+ *   - 428: a paid bill without the acknowledgement (#247)
+ *   - 409: the write's refusals of a bill that changed after the read
  *   - 200: happy path with usage_kwh only — server recomputes tier_breakdown
  *   - 200: happy path with end_kwh only — server derives usage_kwh
  *   - 200: tier_breakdown + total_amount math is correct against a fixture
+ *   - 200: the bill as read, when the engine finds nothing to write
+ *   - the run is a per-bill regeneration: the bill as read is its expectedBill
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -31,6 +36,8 @@ const mockRateScheduleMaybeSingle = vi.fn();
 // and synthesize a written-result row whose calc mirrors the route's
 // derivation (manualReading.endKwh - startKwh → calculateTieredCost).
 let capturedUpdatePayload: Record<string, unknown> | null = null;
+// The engine's answer for the tenant, when a test replaces the written row.
+const engine = vi.hoisted(() => ({ result: null as Record<string, unknown> | null }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeFromImpl(): any {
@@ -103,6 +110,7 @@ vi.mock("@/lib/billing/generate", async () => {
       if (!m) {
         return { results: [] };
       }
+      if (engine.result) return { results: [{ tenantId: m.tenantId, tenantName: "Stub HH", ...engine.result }] };
       // Two-tier schedule: 0–50 kWh at 500/kWh, 51+ at 800/kWh — kept in
       // sync with FIXTURE_RATE_SCHEDULE below.
       const tiers = [
@@ -202,24 +210,57 @@ const FIXTURE_RATE_SCHEDULE = {
   created_at: "2026-01-01T00:00:00Z",
 };
 
+/** The default bill's columns, as `select("*")` reads them: an unpaid manual bill with no invoice number. */
+const BILL_COLUMNS = {
+  id: LI_UUID,
+  device_id: null,
+  start_kwh: 0,
+  end_kwh: null,
+  usage_kwh: null,
+  tenant_id: HH_UUID,
+  billing_period_id: PERIOD_UUID,
+  payment_status: "unpaid",
+  invoice_number: null,
+  // NUMERIC, which can arrive as a string.
+  total_amount: "0",
+  reading_source: "manual",
+  tier_breakdown: [],
+  entered_by_user_id: "11111111-1111-4111-8111-111111111111",
+  manual_reason: null,
+};
+const DRAFT = {
+  id: PERIOD_UUID,
+  microgrid_id: MG_UUID,
+  status: "draft",
+  start_date: "2026-04-01",
+  end_date: "2026-04-30",
+};
+/** The default bill with `o` over it, in the draft period. */
+const billRow = (o: Record<string, unknown> = {}) => ({ data: { ...BILL_COLUMNS, ...o, billing_periods: DRAFT }, error: null });
+
+async function patch(body: unknown) {
+  const { PATCH } = await import("../route");
+  return PATCH(makePatchRequest(LI_UUID, body), { params: Promise.resolve({ lineItemId: LI_UUID }) });
+}
+
+async function engineCall() {
+  const { runGenerationFor } = await import("@/lib/billing/generate");
+  return vi.mocked(runGenerationFor).mock.calls;
+}
+
 describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     canAccessMicrogridReturn = true;
     capturedUpdatePayload = null;
+    engine.result = null;
     mockFrom.mockImplementation(makeFromImpl());
 
     // Default un-metered line item (device_id null), draft period, no
     // tenant meter link, fresh rate schedule.
     mockLineItemMaybeSingle.mockResolvedValue({
       data: {
-        id: LI_UUID,
-        device_id: null,
-        start_kwh: 0,
-        end_kwh: null,
-        usage_kwh: null,
-        tenant_id: HH_UUID,
-        billing_period_id: PERIOD_UUID,
+        ...BILL_COLUMNS,
         billing_periods: {
           id: PERIOD_UUID,
           microgrid_id: MG_UUID,
@@ -347,6 +388,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
   it("409: device_linked — line item already has a device_id", async () => {
     mockLineItemMaybeSingle.mockResolvedValueOnce({
       data: {
+        ...BILL_COLUMNS,
         id: LI_UUID,
         device_id: DEVICE_UUID, // metered row — must reject manual edit
         start_kwh: 0,
@@ -410,6 +452,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
   it("409: period_closed — closed period rejects", async () => {
     mockLineItemMaybeSingle.mockResolvedValueOnce({
       data: {
+        ...BILL_COLUMNS,
         id: LI_UUID,
         device_id: null,
         start_kwh: 0,
@@ -480,6 +523,7 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     // Override start_kwh = 100, send end_kwh = 50 → derived usage = -50 → 400.
     mockLineItemMaybeSingle.mockResolvedValueOnce({
       data: {
+        ...BILL_COLUMNS,
         id: LI_UUID,
         device_id: null,
         start_kwh: 100,
@@ -508,9 +552,120 @@ describe("PATCH /api/billing-line-items/[lineItemId]/usage (#158)", () => {
     });
   });
 
+  it.each([
+    ["an invoiced bill", { invoice_number: "INV-0001" }, "invoiced", "This bill has been invoiced, so its usage cannot be corrected: its invoice number is already issued."],
+    ["a refunded bill", { payment_status: "refunded" }, "refunded", "A refunded bill's usage cannot be corrected."],
+  ])("409: refuses %s, as the regenerate route does, and writes nothing", async (_label, o, reason, error) => {
+    mockLineItemMaybeSingle.mockResolvedValueOnce(billRow(o));
+    const res = await patch({ usage_kwh: 10, confirmation: { acknowledged: ["regenerate-paid-bill"] } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error, reason });
+    expect(await engineCall()).toEqual([]);
+  });
+
+  it("refuses a closed period before an invoiced or refunded bill, and those before a metered one", async () => {
+    mockLineItemMaybeSingle.mockResolvedValueOnce({
+      data: { ...BILL_COLUMNS, invoice_number: "INV-0001", payment_status: "refunded", device_id: DEVICE_UUID, billing_periods: { ...DRAFT, status: "closed" } },
+      error: null,
+    });
+    expect((await (await patch({ usage_kwh: 10 })).json()).reason).toBe("period_closed");
+    mockLineItemMaybeSingle.mockResolvedValueOnce(billRow({ invoice_number: "INV-0001", payment_status: "refunded", device_id: DEVICE_UUID }));
+    expect((await (await patch({ usage_kwh: 10 })).json()).reason).toBe("invoiced");
+    mockLineItemMaybeSingle.mockResolvedValueOnce(billRow({ payment_status: "refunded", device_id: DEVICE_UUID }));
+    expect((await (await patch({ usage_kwh: 10 })).json()).reason).toBe("refunded");
+  });
+
+  it("428: a paid bill needs the regenerate route's acknowledgement, and nothing is written without it", async () => {
+    mockLineItemMaybeSingle.mockResolvedValue(billRow({ payment_status: "paid" }));
+    for (const confirmation of [undefined, { acknowledged: [] }, { acknowledged: ["something-else"] }]) {
+      const res = await patch({ usage_kwh: 10, ...(confirmation ? { confirmation } : {}) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "This bill is marked paid. Confirm that you want to correct its usage anyway.",
+        reason: "paid_acknowledgement_required",
+      });
+    }
+    expect(await engineCall()).toEqual([]);
+
+    const res = await patch({ usage_kwh: 10, confirmation: { acknowledged: ["regenerate-paid-bill"] } });
+    expect(res.status).toBe(200);
+    expect(await engineCall()).toHaveLength(1);
+  });
+
+  it("asks a paid bill for the acknowledgement only after the refusals, so a refused correction is not confirmed first", async () => {
+    mockLineItemMaybeSingle.mockResolvedValueOnce(billRow({ payment_status: "paid", start_kwh: null }));
+    expect((await (await patch({ usage_kwh: 10 })).json()).reason).toBe("missing_start_reading");
+    mockLineItemMaybeSingle.mockResolvedValueOnce(billRow({ payment_status: "paid", start_kwh: 100 }));
+    expect((await patch({ end_kwh: 50 })).status).toBe(400);
+  });
+
+  it("runs a per-bill regeneration for the bill's one tenant, with the bill as read as its expectedBill", async () => {
+    mockLineItemMaybeSingle.mockResolvedValueOnce(
+      billRow({
+        start_kwh: "100",
+        end_kwh: "130.5",
+        usage_kwh: "30.5",
+        total_amount: "15250",
+        tier_breakdown: [{ label: "Tier 1", kwh: 30.5, amount: 15250 }],
+        manual_reason: "dial photo",
+      }),
+    );
+    expect((await patch({ usage_kwh: 40 })).status).toBe(200);
+    const [[params]] = await engineCall();
+    expect(params).toMatchObject({
+      periodId: PERIOD_UUID,
+      tenantIds: [HH_UUID],
+      manualReadings: [{ tenantId: HH_UUID, startKwh: 100, endKwh: 140 }],
+      mode: "write",
+      actorUserId: "11111111-1111-4111-8111-111111111111",
+      expectedBill: {
+        lineItemId: LI_UUID,
+        tenantId: HH_UUID,
+        paymentStatus: "unpaid",
+        totalAmount: 15250,
+        usageKwh: 30.5,
+        startKwh: 100,
+        endKwh: 130.5,
+        readingSource: "manual",
+        deviceId: null,
+        tierBreakdown: [{ label: "Tier 1", kwh: 30.5, amount: 15250 }],
+        enteredByUserId: "11111111-1111-4111-8111-111111111111",
+        manualReason: "dial photo",
+      },
+    });
+  });
+
+  it.each([
+    ["period_closed", "Cannot edit a closed period"],
+    ["invoiced", "This bill has been invoiced, so its usage cannot be corrected: its invoice number is already issued."],
+    ["bill_changed", "This bill changed while its usage was being corrected. Refresh it and try again."],
+  ])("409: the write's refusal %s, when the bill changed after the read, in the route's copy", async (code, error) => {
+    engine.result = { kind: "error", code, error: "the engine's copy" };
+    const res = await patch({ usage_kwh: 10 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error, reason: code });
+  });
+
+  it("500 for any other write failure", async () => {
+    engine.result = { kind: "error", code: "line_item_write_failed", error: "Failed to write line item: boom" };
+    const res = await patch({ usage_kwh: 10 });
+    expect(res.status).toBe(500);
+    expect((await res.json()).reason).toBe("unknown_error");
+  });
+
+  it("200 with the bill as read when it already has these figures, and nothing was written", async () => {
+    engine.result = { kind: "unchanged", lineItemId: LI_UUID, totalAmount: 0 };
+    const res = await patch({ usage_kwh: 0 });
+    expect(res.status).toBe(200);
+    const { billing_periods, ...asRead } = billRow().data;
+    void billing_periods;
+    expect(await res.json()).toEqual({ lineItem: asRead });
+  });
+
   it("409: missing start register never becomes zero consumption baseline", async () => {
     mockLineItemMaybeSingle.mockResolvedValueOnce({
       data: {
+        ...BILL_COLUMNS,
         id: LI_UUID,
         device_id: null,
         start_kwh: null,

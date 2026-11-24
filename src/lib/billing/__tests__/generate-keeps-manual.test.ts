@@ -5,12 +5,14 @@
  * `reading_source='manual'` keeps that row unless the request re-enters it
  * (`manualReadings`) or names it in `revertToEdgeTenantIds`:
  *
- *   - a bulk run (`tenantIds` undefined, what Refresh Readings sends)
- *     reports it as `kind: 'kept'`, writes nothing for it and does not read
- *     its meter — paid or unpaid;
- *   - `revertToEdgeTenantIds` switches it back to an OpenEMS reading;
- *   - naming it in `tenantIds` without a revert is still refused with
- *     `currently_manual`.
+ *   - a whole-period run from meter data (`guardExistingBills`, what
+ *     generate-from-meters sends), or a preview of every tenant, reports it
+ *     as `kind: 'kept'`, writes nothing for it and does not read its meter
+ *     — paid or unpaid;
+ *   - `revertToEdgeTenantIds` switches it back to an OpenEMS reading, on a
+ *     per-bill regeneration (`expectedBill`) or a preview;
+ *   - a per-bill regeneration naming it without a revert is still refused
+ *     with `currently_manual`.
  *
  * Harness: a mocked Supabase client, like `generate-unmetered-skip.test.ts`,
  * so the suite runs under `SKIP_RLS_TESTS=1`. Writes are observed through
@@ -19,7 +21,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runGenerationFor, isRunGenerationFatal } from "@/lib/billing/generate";
+import { runGenerationFor, isRunGenerationFatal, type ExpectedBill } from "@/lib/billing/generate";
 import type { MeteringProvider } from "@/lib/metering/types";
 
 const MICROGRID_ID = "bbbbbbbb-bbbb-4000-8000-000000000001";
@@ -70,7 +72,7 @@ function makeSupabase(manualPaymentStatus: "paid" | "unpaid") {
     if (name === "fn_pin_billing_period_rate_schedule") {
       return { data: SCHEDULE_ID, error: null };
     }
-    if (name === "fn_record_line_item_with_audit") {
+    if (WRITES.includes(name)) {
       return {
         data: { id: `li-${String(args?._tenant_id)}`, ...args },
         error: null,
@@ -93,6 +95,8 @@ function makeSupabase(manualPaymentStatus: "paid" | "unpaid") {
         },
         error: null,
       },
+      // A whole-period run reads the status again before writing.
+      maybeSingle: { data: { status: "draft" }, error: null },
       // No earlier periods, so start_kwh comes from the usage-only path.
       list: { data: [], error: null },
     },
@@ -167,11 +171,30 @@ function makeSupabase(manualPaymentStatus: "paid" | "unpaid") {
   return { supabase, rpc, getReadings, meteringProvider };
 }
 
+/** The engine's writes: a bill as it was read, or a first bill. */
+const WRITES = ["fn_regenerate_bill_with_audit", "fn_record_first_line_item_with_audit"];
+
 function writtenTenants(rpc: ReturnType<typeof vi.fn>) {
   return rpc.mock.calls
-    .filter(([name]) => name === "fn_record_line_item_with_audit")
+    .filter(([name]) => WRITES.includes(name))
     .map(([, args]) => (args as Record<string, unknown>)._tenant_id);
 }
+
+/** The manual tenant's bill as a per-bill regeneration read it (priorItem). */
+const manualBill = (paymentStatus: "paid" | "unpaid"): ExpectedBill => ({
+  lineItemId: "li-manual",
+  tenantId: HH_MANUAL,
+  paymentStatus,
+  totalAmount: 5000,
+  usageKwh: 50,
+  startKwh: 100,
+  endKwh: 150,
+  readingSource: "manual",
+  deviceId: DEV_MANUAL,
+  tierBreakdown: [],
+  enteredByUserId: "user-1",
+  manualReason: "Read on site",
+});
 
 const ENGINE_OPTIONS = {
   periodId: PERIOD_ID,
@@ -182,7 +205,7 @@ const ENGINE_OPTIONS = {
 
 describe("runGenerationFor: manual rows on a bulk run", () => {
   it.each(["paid", "unpaid"] as const)(
-    "keeps a %s manual row and reads only the edge tenants",
+    "keeps a %s manual row on a whole-period run and reads only the edge tenants",
     async (paymentStatus) => {
       const { supabase, rpc, getReadings, meteringProvider } = makeSupabase(paymentStatus);
 
@@ -190,6 +213,7 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
         ...ENGINE_OPTIONS,
         supabase,
         mode: "write",
+        guardExistingBills: true,
         meteringProvider,
       });
 
@@ -231,7 +255,7 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
     expect(out.results.find((r) => r.tenantId === HH_EDGE)?.kind).toBe("preview");
   });
 
-  it("switches a manual row back to edge when it is named in revertToEdgeTenantIds", async () => {
+  it("switches a manual row back to edge when a per-bill regeneration names it in revertToEdgeTenantIds", async () => {
     const { supabase, rpc, getReadings, meteringProvider } = makeSupabase("paid");
 
     const out = await runGenerationFor({
@@ -240,6 +264,7 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
       mode: "write",
       tenantIds: [HH_MANUAL],
       revertToEdgeTenantIds: [HH_MANUAL],
+      expectedBill: manualBill("paid"),
       meteringProvider,
     });
 
@@ -257,7 +282,7 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
       DEV_MANUAL,
     ]);
     expect(rpc).toHaveBeenCalledWith(
-      "fn_record_line_item_with_audit",
+      "fn_regenerate_bill_with_audit",
       expect.objectContaining({
         _tenant_id: HH_MANUAL,
         _reading_source: "edge",
@@ -267,13 +292,13 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
     );
   });
 
-  it("lets a bulk run switch back the tenants it names in revertToEdgeTenantIds", async () => {
-    const { supabase, rpc, meteringProvider } = makeSupabase("unpaid");
+  it("lets a preview of every tenant switch back the tenants it names in revertToEdgeTenantIds", async () => {
+    const { supabase, rpc, getReadings, meteringProvider } = makeSupabase("unpaid");
 
     const out = await runGenerationFor({
       ...ENGINE_OPTIONS,
       supabase,
-      mode: "write",
+      mode: "preview",
       revertToEdgeTenantIds: [HH_MANUAL],
       meteringProvider,
     });
@@ -281,10 +306,12 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
     expect(isRunGenerationFatal(out)).toBe(false);
     if (isRunGenerationFatal(out)) return;
     expect(out.results.some((r) => r.kind === "kept")).toBe(false);
-    expect(writtenTenants(rpc).sort()).toEqual([HH_MANUAL, HH_EDGE].sort());
+    expect(out.results.filter((r) => r.kind === "preview").map((r) => r.tenantId).sort()).toEqual([HH_MANUAL, HH_EDGE].sort());
+    expect(getReadings.mock.calls[0][0].devices.map((d: { id: string }) => d.id).sort()).toEqual([DEV_MANUAL, DEV_EDGE].sort());
+    expect(writtenTenants(rpc)).toEqual([]);
   });
 
-  it("still refuses a manual row named in tenantIds without a revert", async () => {
+  it("still refuses a manual row a per-bill regeneration names without a revert", async () => {
     const { supabase, rpc, getReadings, meteringProvider } = makeSupabase("unpaid");
 
     const out = await runGenerationFor({
@@ -292,6 +319,7 @@ describe("runGenerationFor: manual rows on a bulk run", () => {
       supabase,
       mode: "write",
       tenantIds: [HH_MANUAL],
+      expectedBill: manualBill("unpaid"),
       meteringProvider,
     });
 
