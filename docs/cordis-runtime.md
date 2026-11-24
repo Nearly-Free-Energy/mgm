@@ -32,10 +32,9 @@ authorized and decrypted (an organization's email sender, read by
 registry keeps only the factories. Organization senders carry notices only,
 never sign-in links or codes (RFC #186 decision 5).
 Provider factories receive the client of whoever asks for a provider:
-normally the request's Supabase client, so RLS applies to the caller. Two
-callers pass a service-role client after their own check instead: the
-token-authenticated `POST /api/v1/billing/generate`, which verifies the
-token's organization first, and the tenant app's usage source
+normally the request's Supabase client, so RLS applies to the caller. One
+caller passes a service-role client after its own check instead: the tenant
+app's usage source
 (`src/lib/tenant-app/infrastructure/usage-source.ts`). A tenant's own client
 reads no `microgrids` or `edges` row, so the usage source builds the unit's
 microgrid's provider on the service role, after `composeTenantApp` has
@@ -597,27 +596,19 @@ routes must gate themselves with `checkGate`/`gateRoute`.
 
 ### Callers without a user session
 
-Two kinds of route run without a logged-in user and still enter the runtime:
-
-- **Customer-app API (`/api/v1/*`).** The per-org API token resolves the
-  organization (`resolveOrgFromToken`). Write routes check microgrid and
-  period ownership first — keeping the 404-before-403 order that hides
-  other organizations' records — then call `gateRoute` with
-  `{ kind: "organization", id: <token org> }` on the service-role client.
-  Bill generation takes its OpenEMS source from the root
-  `meteringProviders` registry, like the dashboard's billing capability.
-- **Payments webhook and worker.** These compose through
-  `composePaymentsPublic` and verify through `handleNotification`, which
-  stays available while Payments is off (see "Payments" above).
+The payments webhook and worker run without a logged-in user and still enter
+the runtime. They compose through `composePaymentsPublic` and verify through
+`handleNotification`, which stays available while Payments is off (see
+"Payments" above).
 
 The OpenEMS proxy routes (`/api/openems/*`) call the vendor with stored
 credentials, so they are gated like writes (`access: "write"`) even when
 the HTTP method is `GET`.
 
-`/api/v1/*`, `/api/openems/*` and `/api/org-api-tokens/*` are still outside
-the released-route allowlist (`src/lib/mgm/released-routes.ts`), so
-middleware answers 404 until a release opens them. They are on the runtime
-already, so opening them is an allowlist change only.
+`/api/openems/*` is still outside the released-route allowlist
+(`src/lib/mgm/released-routes.ts`), so middleware answers 404 until a release
+opens it. It is on the runtime already, so opening it is an allowlist change
+only.
 
 ## Catalog pages
 

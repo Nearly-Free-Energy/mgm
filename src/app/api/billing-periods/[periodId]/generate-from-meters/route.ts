@@ -13,9 +13,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * Generates a draft period's bills from meter data: the period review's
  * `billing.generate-from-meters`. A thin adapter over the billing
  * capability (BillingCapability.generateFromMeters), which runs the same
- * engine as POST /api/v1/billing/generate, for every tenant of the period's
+ * engine as BillingCapability.generateBills, for every tenant of the period's
  * microgrid and with no readings given. It adds no billing logic. Unlike
- * that route it refuses a closed period, keeps manual bills, leaves
+ * generateBills it refuses a closed period, keeps manual bills, leaves
  * invoiced, paid and refunded bills as they are, and changes any other
  * existing bill only as it was read (guardExistingBills in
  * src/lib/billing/generate.ts): a bill paid, invoiced or regenerated

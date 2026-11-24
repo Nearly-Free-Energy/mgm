@@ -319,8 +319,8 @@ describe("runGenerationFor with newBillOnly", () => {
     expect(r).toMatchObject({ kind: "written", tenantId: tenant(1), tenantName: "Unit 1", previousTotalAmount: null, previousReadingSource: null });
     const w = writes(h.rpc);
     expect(w.map((x) => x.name)).toEqual(["fn_record_first_line_item_with_audit"]);
-    // Usage is end − start, priced as computed and stored to 3 places, as the
-    // manual path of POST /api/v1/billing/generate does it.
+    // Usage is end − start, priced as computed and stored to 3 places, as an
+    // unguarded run's manual path does it.
     const usage = 50.377;
     const calc = calculateTieredCost(150.5 - 100.1234, TIERS, 1000, 0.18);
     expect(w[0].args).toEqual({

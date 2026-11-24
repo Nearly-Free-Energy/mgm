@@ -42,9 +42,7 @@ const HOST_PAGES: Record<string, string> = {
  * Each entry must stay a catalog page and stay unreleased, so releasing it
  * fails this test until the entry is removed.
  */
-const UNRELEASED_PAGES: Record<string, string> = {
-  "/settings/api-tokens": "Organization API tokens are not released yet.",
-};
+const UNRELEASED_PAGES: Record<string, string> = {};
 
 /**
  * The entity kind of each bracketed segment, by its name, or by the segment
@@ -68,7 +66,6 @@ const PAGE_OWNERS: Record<string, MgmPluginName> = {
   "/settings/profile": "organization-directory",
   "/settings/users": "organization-directory",
   "/settings/plugins": "organization-directory",
-  "/settings/api-tokens": "organization-directory",
   "/communities": "community-management",
   "/communities/[id]": "community-management",
   "/microgrids": "community-management",

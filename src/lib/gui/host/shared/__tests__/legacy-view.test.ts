@@ -72,7 +72,6 @@ const CURRENT_APP: Record<string, Id | null> = {
   "/settings/profile": "org.profile",
   "/settings/users": "org.users",
   "/settings/plugins": "org.plugins",
-  "/settings/api-tokens": null,
   "/communities": "community.communities",
   "/communities/[id]": "community.communities",
   "/microgrids": "community.microgrids",

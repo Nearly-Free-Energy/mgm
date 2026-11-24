@@ -797,53 +797,6 @@ export type Database = {
           },
         ]
       }
-      org_api_tokens: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          env_prefix: string
-          id: string
-          last_used_at: string | null
-          name: string
-          org_id: string
-          revoked_at: string | null
-          token_hash: string
-          token_lookup: string
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          env_prefix: string
-          id?: string
-          last_used_at?: string | null
-          name: string
-          org_id: string
-          revoked_at?: string | null
-          token_hash: string
-          token_lookup: string
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          env_prefix?: string
-          id?: string
-          last_used_at?: string | null
-          name?: string
-          org_id?: string
-          revoked_at?: string | null
-          token_hash?: string
-          token_lookup?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "org_api_tokens_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       organization_email_senders: {
         Row: {
           created_at: string
@@ -912,7 +865,6 @@ export type Database = {
           address_postal_code: string | null
           address_region: string | null
           created_at: string
-          customerapp_enabled: boolean
           id: string
           name: string
         }
@@ -924,7 +876,6 @@ export type Database = {
           address_postal_code?: string | null
           address_region?: string | null
           created_at?: string
-          customerapp_enabled?: boolean
           id?: string
           name: string
         }
@@ -936,7 +887,6 @@ export type Database = {
           address_postal_code?: string | null
           address_region?: string | null
           created_at?: string
-          customerapp_enabled?: boolean
           id?: string
           name?: string
         }
@@ -1708,10 +1658,6 @@ export type Database = {
       }
     }
     Functions: {
-      customerapp_enabled_for_org: {
-        Args: { _org_id: string }
-        Returns: boolean
-      }
       fn_apply_payment_event: {
         Args: {
           _actor_kind?: string
@@ -1942,7 +1888,6 @@ export type Database = {
           address_postal_code: string | null
           address_region: string | null
           created_at: string
-          customerapp_enabled: boolean
           id: string
           name: string
         }

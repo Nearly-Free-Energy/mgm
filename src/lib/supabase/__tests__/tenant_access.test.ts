@@ -127,7 +127,6 @@ const F = {
 };
 /** The fixture's own keys in the staff tables that have no organization column. */
 const SIGN_IN_HASH = "7e4a".repeat(16);
-const TOKEN_LOOKUP = "7e4a0001";
 const TRACKING = "tenant-access-tracking-1";
 const REFERENCE = `TA-${F.attempt}`;
 
@@ -316,15 +315,6 @@ async function insertStaffRows(svc: SupabaseClient): Promise<void> {
   ]);
   await insert(svc, "billing_audit_log", [
     { billing_period_id: F.period, event_type: "period_created", actor_kind: "system", actor_ref: "tenant-access-fixture" },
-  ]);
-  await insert(svc, "org_api_tokens", [
-    {
-      org_id: F.org,
-      name: "Tenant access token",
-      token_lookup: TOKEN_LOOKUP,
-      token_hash: "$argon2id$v=19$m=19456,t=2,p=1$placeholderforRLS",
-      env_prefix: "dev_",
-    },
   ]);
   await insert(svc, "organization_email_senders", [
     {
@@ -557,7 +547,6 @@ desc("a tenant reads nothing staff-only", () => {
     microgrid_savings_settings: `microgrid_id = '${F.microgrid}'`,
     microgrid_shared_devices: `microgrid_id = '${F.microgrid}'`,
     microgrids: `id = '${F.microgrid}'`,
-    org_api_tokens: `org_id = '${F.org}'`,
     organization_email_senders: `org_id = '${F.org}'`,
     organizations: `id = '${F.org}'`,
     payment_attempts: `line_item_id = '${F.lineItem}'`,
