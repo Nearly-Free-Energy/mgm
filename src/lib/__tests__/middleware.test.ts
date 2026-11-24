@@ -427,8 +427,9 @@ describe("middleware PUBLIC_PATHS", () => {
 
 describe("middleware for routes outside the installed release", () => {
   it.each([
-    { path: "/settings", who: "signed in", session: signedIn },
-    { path: "/settings", who: "signed out", session: signedOut },
+    // A path no page will ever have, so releasing a page cannot change it.
+    { path: "/no-such-page", who: "signed in", session: signedIn },
+    { path: "/no-such-page", who: "signed out", session: signedOut },
     { path: "/microgrids/grid-1/tenants", who: "signed in", session: signedIn },
     { path: "/admin?next=%3Cscript%3E", who: "signed out", session: signedOut },
     // Only paths under /api/ are API requests; these are page links.
