@@ -548,6 +548,21 @@ describe("BillingCapability", () => {
     );
   });
 
+  it.each([
+    ["no options", undefined],
+    ["no bill", {}],
+    ["an undefined bill", { expectedBill: undefined }],
+  ])("refuses generateBills with %s, before the engine", async (_label, options) => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    const result = await capability.generateBills(
+      { billingPeriodId: PERIOD_ID, tenantIds: [TENANT_ID] },
+      options as never,
+    );
+    expect(result).toMatchObject({ ok: false, status: 500, code: "billing_expected_bill_required" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("rejects a tenant in both manualReadings and revertToEdgeTenantIds", async () => {
     const HH = "990e8400-e29b-41d4-a716-446655440000";
     const run = vi.fn(async () => ({ results: [] }));

@@ -790,6 +790,16 @@ export class BillingCapability implements BillingCapabilityContract {
   }
 
   async generateBills(input: unknown, options: { expectedBill: ExpectedBill }) {
+    // The type requires the bill, but a cast could still omit it, and the
+    // engine would then run unguarded, over any bill in any period.
+    if (!options?.expectedBill) {
+      return {
+        ok: false as const,
+        status: 500 as const,
+        code: "billing_expected_bill_required",
+        message: "A bill can only be regenerated as it was read.",
+      };
+    }
     return this.runGeneration(input, "write", { expectedBill: options.expectedBill });
   }
 
