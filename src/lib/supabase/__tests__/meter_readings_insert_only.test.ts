@@ -138,17 +138,34 @@ afterAll(async () => {
 });
 
 describe("meter_readings: signed-in users insert and never change or remove (#35)", () => {
-  it("the authenticated role holds SELECT and INSERT only", () => {
+  it("the authenticated role holds SELECT and INSERT only, and anon holds nothing", () => {
     if (skip) return;
+    // has_any_column_privilege also sees a column-level grant, which
+    // has_table_privilege misses. A comma-separated list is true if any
+    // privilege in it is held.
     const rows = ownerRows<Record<string, boolean>>(
       `SELECT has_table_privilege('authenticated', 'public.meter_readings', 'SELECT') AS select,
               has_table_privilege('authenticated', 'public.meter_readings', 'INSERT') AS insert,
               has_table_privilege('authenticated', 'public.meter_readings', 'UPDATE') AS update,
+              has_any_column_privilege('authenticated', 'public.meter_readings', 'UPDATE') AS column_update,
               has_table_privilege('authenticated', 'public.meter_readings', 'DELETE') AS delete,
-              has_table_privilege('anon', 'public.meter_readings', 'SELECT') AS anon_select`,
+              has_table_privilege('authenticated', 'public.meter_readings', 'TRUNCATE') AS truncate,
+              has_table_privilege('anon', 'public.meter_readings',
+                'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') AS anon_any,
+              has_any_column_privilege('anon', 'public.meter_readings',
+                'SELECT, INSERT, UPDATE') AS anon_any_column`,
     );
     expect(rows).toEqual([
-      { select: true, insert: true, update: false, delete: false, anon_select: false },
+      {
+        select: true,
+        insert: true,
+        update: false,
+        column_update: false,
+        delete: false,
+        truncate: false,
+        anon_any: false,
+        anon_any_column: false,
+      },
     ]);
   });
 
@@ -200,6 +217,13 @@ describe("meter_readings: signed-in users insert and never change or remove (#35
     expect(await storedReading(id)).toBe(300);
   });
 
+  // Keep this test last: it deletes the fixture's edge, device and readings,
+  // which the tests above need.
+  //
+  // fn_entity_delete_edge is SECURITY INVOKER (20260926130210), so its
+  // DELETE on edges runs as the org manager and the cascade is the session
+  // user's own delete path. If the function becomes SECURITY DEFINER, this
+  // only shows that a definer path cascades.
   it("deleting the edge still removes its meter's readings", async () => {
     if (skip) return;
     const id = await seedReading(400, "2026-11-04T00:00:00Z");
