@@ -507,7 +507,7 @@ describe("sanitizeFilenameSegment", () => {
   it.each([
     ["Sezibwa", "sezibwa"],
     [
-      "Kisakye (Test with OpenEMS Integrated)",
+      "Demo (Test with OpenEMS Integrated)",
       "demo-test-with-openems-integrated",
     ],
     ["NFE — Pilot #1", "nfe-pilot-1"],
