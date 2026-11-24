@@ -7,8 +7,7 @@ import "server-only";
  * used to live inline in the session route `POST /api/billing/generate`
  * (removed once nothing called it, #201). Its unguarded callers:
  *
- *   1. `BillingCapability.generateBills` without `expectedBill` — bulk OR
- *      selective (mode='write').
+ *   1. `BillingCapability.previewBills` — mode='preview'.
  *      `tenantIds`: undefined → all metered/un-metered tenants on the
  *      period's microgrid; `[]` → explicit no-op; `[uuid, …]` → only those.
  *      `manualReadings`: per-tenant `{ startKwh, endKwh, reason? }`
@@ -19,13 +18,21 @@ import "server-only";
  *      be replaced by an OpenEMS reading (see "Manual rows" below). It lifts
  *      that guard only; it does not add a tenant to the processed set.
  *
- *   2. `BillingCapability.previewBills` — the same body, mode='preview'.
  *      Returns the in-memory calc + previousTotalAmount/previousPaymentStatus
  *      from the prior line item; writes nothing.
  *
- *   3. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
+ *   2. `PATCH /api/billing-line-items/[lineItemId]/usage` — single-cell manual
  *      edit. Internally resolves `tenantIds: [<resolved>]` +
- *      `manualReadings: [<resolved>]` and calls with mode='write'.
+ *      `manualReadings: [<resolved>]` and calls with mode='write'. It is the
+ *      only unguarded run that writes, so the unguarded write path below
+ *      stays for it alone; it refuses a closed period itself, before the
+ *      run. If it moves to a guarded write, that path can go.
+ *
+ *   `BillingCapability.generateBills` takes the same body, in mode='write',
+ *   but always with `expectedBill` (#243). Its unguarded form, which
+ *   upserted over any bill in any period, served only
+ *   `POST /api/v1/billing/generate`, removed with the customer app's
+ *   integration (#241).
  *
  *   Two later callers rewrite an existing bill only as they read it, through
  *   fn_regenerate_bill_with_audit: `POST
@@ -328,7 +335,8 @@ export type RunGenerationParams = {
    * fn_regenerate_bill_with_audit, which refuses unless the period is still
    * a draft and the bill still has no invoice number and these values, under
    * locks held to commit, and writes nothing when the new figures are the
-   * ones the bill already has (`kind: 'unchanged'`). Unset, as on PATCH
+   * ones the bill already has (`kind: 'unchanged'`).
+   * BillingCapability.generateBills always sets it. Unset, as on PATCH
    * /api/billing-line-items/[lineItemId]/usage, nothing here applies.
    */
   expectedBill?: ExpectedBill;
@@ -367,11 +375,11 @@ export type RunGenerationParams = {
    *    bill: a close that commits after the second read above refuses the
    *    insert (`period_closed`, GENERATE_FROM_METERS_COPY.closed), and a bill
    *    another write inserted for that tenant after this run read the
-   *    period's bills (a manual reading through generateBills, a bill from
-   *    readings, or a second run overlapping this one) is left as
-   *    it is (`bill_exists`), with nothing written for that tenant;
-   * An unguarded run (generateBills without expectedBill) leaves it unset
-   * and checks none of this.
+   *    period's bills (a bill from readings, or a second run overlapping
+   *    this one) is left as it is (`bill_exists`), with nothing written
+   *    for that tenant;
+   * An unguarded run (PATCH /api/billing-line-items/[lineItemId]/usage, or
+   * a preview) leaves it unset and checks none of this.
    */
   guardExistingBills?: boolean;
   /**
@@ -623,10 +631,11 @@ export async function runGenerationFor(
     rate_schedule_id?: string | null;
   };
 
-  // Q4=B: an unguarded run (generateBills without expectedBill)
-  // regenerates a closed period (the legacy reject was
-  // removed in #173). PATCH /usage retains its own
-  // `period_closed` reject upstream — see the route handler. A guarded
+  // Q4=B: an unguarded run regenerates a closed period (the legacy reject
+  // was removed in #173). Its one writer, PATCH /usage, retains its own
+  // `period_closed` reject upstream — see the route handler. A per-bill
+  // regeneration (expectedBill) refuses it under its write's lock
+  // (fn_regenerate_bill_with_audit). A guarded
   // whole-period run refuses it here, before the tariff pin, and again after
   // reading the meters, before the first write (6b below); each of its
   // writes checks it again under the period's lock
@@ -1354,9 +1363,9 @@ export async function runGenerationFor(
     // parameter added to one is added to the other two in the same migration.
     // A guarded run's tenant with no bill as read gets one only while it
     // still has none and the period is still a draft, under the period's
-    // lock (fn_record_first_line_item_with_audit). An unguarded run
-    // (generateBills without expectedBill) keeps the upsert: its manual rows
-    // overwrite a bill, and it accepts a closed period (Q4=B).
+    // lock (fn_record_first_line_item_with_audit). An unguarded run (PATCH
+    // /usage) keeps the upsert: its manual row overwrites the bill, and the
+    // engine accepts a closed period (Q4=B), which that route refuses first.
     const firstBill = !expected && !prior && (guardExistingBills === true || newBillOnly === true);
     const recordArgs = {
       _billing_period_id: periodId,

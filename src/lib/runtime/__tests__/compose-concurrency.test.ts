@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // order no longer matters.
 import { getMgmRuntime, resetMgmRuntimeForTests } from "../root";
 import { composeBilling } from "@/lib/billing/compose";
-import type { RunGenerationParams } from "@/lib/billing/generate";
+import type { ExpectedBill, RunGenerationParams } from "@/lib/billing/generate";
 import { composeMetering } from "@/lib/metering/compose";
 import type { MeteringReadRequest } from "@/lib/metering/types";
 import { openOrganizationScope } from "../scope";
@@ -41,6 +41,24 @@ const SITES: Record<string, { microgridId: string; periodId: string; deviceId: s
     deviceId: "550e8400-e29b-41d4-a716-4466554400b3",
   },
 };
+
+/** A bill of A's period as a per-bill regeneration read it: generateBills always takes one. */
+const TENANT_A = "550e8400-e29b-41d4-a716-4466554400a4";
+const EXPECTED_A: ExpectedBill = {
+  lineItemId: "550e8400-e29b-41d4-a716-4466554400a5",
+  tenantId: TENANT_A,
+  paymentStatus: "unpaid",
+  totalAmount: 5000,
+  usageKwh: 50,
+  startKwh: 100,
+  endKwh: 150,
+  readingSource: "edge",
+  deviceId: SITES[ORG_A].deviceId,
+  tierBreakdown: null,
+  enteredByUserId: null,
+  manualReason: null,
+};
+const REGENERATE_A = { billingPeriodId: SITES[ORG_A].periodId, tenantIds: [TENANT_A] };
 
 /** The user behind each client, and the one organization that user manages. */
 const CLIENTS: Record<string, { userId: string; orgId: string }> = {
@@ -445,9 +463,7 @@ describe("composers on the shared runtime", () => {
 
     // A's write-time re-check reads A's state through A's client, so B's
     // switch does not reach it.
-    const generated = await billingA.data.billing.generateBills({
-      billingPeriodId: SITES[ORG_A].periodId,
-    });
+    const generated = await billingA.data.billing.generateBills(REGENERATE_A, { expectedBill: EXPECTED_A });
     expect(generated, JSON.stringify(generated)).toMatchObject({ ok: true });
     expect(drain(mocks.generationRuns)).toEqual([{ client: "a", periodId: SITES[ORG_A].periodId }]);
     expect(readersByOrg()).toEqual({ [ORG_A]: ["a"] });
@@ -455,7 +471,7 @@ describe("composers on the shared runtime", () => {
     // A's own switch does reach it, before anything is generated.
     mocks.disabled.add(`${ORG_A}:billing`);
     expect(
-      await billingA.data.billing.generateBills({ billingPeriodId: SITES[ORG_A].periodId })
+      await billingA.data.billing.generateBills(REGENERATE_A, { expectedBill: EXPECTED_A })
     ).toMatchObject({ ok: false, status: 409, code: "billing_disabled" });
     expect(drain(mocks.generationRuns)).toEqual([]);
     expect(readersByOrg()).toEqual({ [ORG_A]: ["a"] });

@@ -13,10 +13,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { composeBilling } from "../compose";
 import { getMgmRuntime } from "@/lib/runtime/root";
 import type { MeteringProvider } from "@/lib/metering/types";
+import type { ExpectedBill } from "../repository";
 
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
 const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
 const PERIOD_ID = "770e8400-e29b-41d4-a716-446655440000";
+const TENANT_ID = "880e8400-e29b-41d4-a716-446655440002";
+
+/** The bill a per-bill regeneration read: generateBills always takes one. */
+const EXPECTED_BILL: ExpectedBill = {
+  lineItemId: "990e8400-e29b-41d4-a716-446655440000",
+  tenantId: TENANT_ID,
+  paymentStatus: "unpaid",
+  totalAmount: 5000,
+  usageKwh: 50,
+  startKwh: 100,
+  endKwh: 150,
+  readingSource: "edge",
+  deviceId: null,
+  tierBreakdown: null,
+  enteredByUserId: null,
+  manualReason: null,
+};
+const regenerate = { billingPeriodId: PERIOD_ID, tenantIds: [TENANT_ID] };
 
 let capturedParams: Record<string, unknown> | null = null;
 
@@ -91,7 +110,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     capturedParams = null;
   });
 
-  it("generateBills reaches the engine with effective-dated assignments required", async () => {
+  it("generateBills reaches the engine as a per-bill regeneration, with effective-dated assignments required", async () => {
     const composed = await composeBilling({
       supabase: makeSupabase(),
       organizationId: ORG_ID,
@@ -99,9 +118,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     if (!composed.ok) throw new Error("expected composition");
 
     try {
-      const result = await composed.data.billing.generateBills({
-        billingPeriodId: PERIOD_ID,
-      });
+      const result = await composed.data.billing.generateBills(regenerate, { expectedBill: EXPECTED_BILL });
       expect(result).toMatchObject({ ok: true });
     } finally {
       await composed.data.dispose();
@@ -110,6 +127,8 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     expect(capturedParams).toMatchObject({
       periodId: PERIOD_ID,
       mode: "write",
+      tenantIds: [TENANT_ID],
+      expectedBill: EXPECTED_BILL,
       requireEffectiveDatedAssignments: true,
       allowUsageOnlyReadings: true,
     });
@@ -161,7 +180,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
     if (!composed.ok) throw new Error("expected composition");
     try {
-      await composed.data.billing.generateBills({ billingPeriodId: PERIOD_ID });
+      await composed.data.billing.generateBills(regenerate, { expectedBill: EXPECTED_BILL });
       expect(capturedParams?.newBillOnly).toBeUndefined();
       await composed.data.billing.generateFromMeters(PERIOD_ID);
       expect(capturedParams?.newBillOnly).toBeUndefined();
@@ -174,7 +193,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
     if (!composed.ok) throw new Error("expected composition");
     try {
-      await composed.data.billing.generateBills({ billingPeriodId: PERIOD_ID });
+      await composed.data.billing.generateBills(regenerate, { expectedBill: EXPECTED_BILL });
     } finally {
       await composed.data.dispose();
     }
@@ -182,7 +201,6 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
   });
 
   it("generateBills passes revertToEdgeTenantIds through to the engine", async () => {
-    const HH = "880e8400-e29b-41d4-a716-446655440000";
     const composed = await composeBilling({
       supabase: makeSupabase(),
       organizationId: ORG_ID,
@@ -190,18 +208,17 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     if (!composed.ok) throw new Error("expected composition");
 
     try {
-      await composed.data.billing.generateBills({
-        billingPeriodId: PERIOD_ID,
-        tenantIds: [HH],
-        revertToEdgeTenantIds: [HH],
-      });
+      await composed.data.billing.generateBills(
+        { ...regenerate, revertToEdgeTenantIds: [TENANT_ID] },
+        { expectedBill: EXPECTED_BILL },
+      );
     } finally {
       await composed.data.dispose();
     }
 
     expect(capturedParams).toMatchObject({
-      tenantIds: [HH],
-      revertToEdgeTenantIds: [HH],
+      tenantIds: [TENANT_ID],
+      revertToEdgeTenantIds: [TENANT_ID],
     });
   });
 
@@ -237,7 +254,7 @@ describe("billing generation wiring (assignment-date enforcement)", () => {
     const composed = await composeBilling({ supabase: makeSupabase(), organizationId: ORG_ID });
     if (!composed.ok) throw new Error("expected composition");
     try {
-      await composed.data.billing.generateBills({ billingPeriodId: PERIOD_ID });
+      await composed.data.billing.generateBills(regenerate, { expectedBill: EXPECTED_BILL });
       const provider = (capturedParams as Record<string, unknown> | null)?.meteringProvider as MeteringProvider;
       await provider.getReadings({ microgridId: MG_ID, devices: [], startDate: "2026-09-01", endDate: "2026-09-30", timezone: "Africa/Kampala" });
       expect(getReadings).toHaveBeenCalledTimes(1);

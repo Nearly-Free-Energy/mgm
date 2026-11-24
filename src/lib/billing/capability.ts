@@ -789,7 +789,7 @@ export class BillingCapability implements BillingCapabilityContract {
     return this.runGeneration(input, "preview");
   }
 
-  async generateBills(input: unknown, options: { expectedBill?: ExpectedBill } = {}) {
+  async generateBills(input: unknown, options: { expectedBill: ExpectedBill }) {
     return this.runGeneration(input, "write", { expectedBill: options.expectedBill });
   }
 

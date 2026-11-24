@@ -197,11 +197,13 @@ export interface BillingCapabilityContract {
   ): Promise<BillingResult<{ period: BillingPeriodRow; unresolved: UnresolvedTenant[] }>>;
   previewBills(input: unknown): Promise<BillingResult<GenerationOutput>>;
   /**
-   * `options.expectedBill` makes the run a per-bill regeneration
-   * (RunGenerationParams.expectedBill). It is not part of the body
-   * (GenerateBillsBody), so it never arrives in a caller's input.
+   * Regenerates one bill as it was read: `options.expectedBill` makes the
+   * run a per-bill regeneration (RunGenerationParams.expectedBill), and is
+   * required, so this never rewrites a bill it has not read. It is not part
+   * of the body (GenerateBillsBody), so it never arrives in a caller's
+   * input. POST /api/billing-line-items/[lineItemId]/regenerate calls it.
    */
-  generateBills(input: unknown, options?: { expectedBill?: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
+  generateBills(input: unknown, options: { expectedBill: ExpectedBill }): Promise<BillingResult<GenerationOutput>>;
   /**
    * Generates every bill of a draft period from meter data
    * (RunGenerationParams.guardExistingBills): manual bills are kept, and
