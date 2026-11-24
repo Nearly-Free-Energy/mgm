@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BillingCapability } from "../capability";
+import { runGenerationFor } from "../generate";
 import { CLOSE_REFUSAL_COPY, fractionalTotalsMessage, parseCloseReview, type CloseReview } from "../close";
 import { PERIOD_KEPT_CLOSED_MESSAGE, PERIOD_KEPT_PAYMENTS_MESSAGE } from "../period-delete";
 import type {
@@ -561,6 +562,22 @@ describe("BillingCapability", () => {
     );
     expect(result).toMatchObject({ ok: false, status: 500, code: "billing_expected_bill_required" });
     expect(run).not.toHaveBeenCalled();
+  });
+
+  // The engine itself behind the capability (generate.ts step 0b): a
+  // per-bill regeneration names its bill's one tenant and no other, so a
+  // per-row control cannot become a run over more tenants than its bill's.
+  it.each([
+    ["no tenantIds", { billingPeriodId: PERIOD_ID }],
+    ["no tenantIds, and its tenant's reading", { billingPeriodId: PERIOD_ID, manualReadings: [{ tenantId: TENANT_ID, startKwh: 1, endKwh: 2 }] }],
+    ["another tenant switched back to edge data", { billingPeriodId: PERIOD_ID, tenantIds: [TENANT_ID], revertToEdgeTenantIds: [ITEM_ID] }],
+  ])("refuses generateBills with expectedBill and %s in the engine, before it reads anything", async (_label, input) => {
+    const supabase = { from: vi.fn(), rpc: vi.fn() };
+    const { capability } = setup({}, { run: (params) => runGenerationFor({ supabase: supabase as never, ...params }) });
+    const result = await capability.generateBills(input, { expectedBill: expectedBill(TENANT_ID) });
+    expect(result).toMatchObject({ ok: false, status: 400, code: "expected_bill_mismatch" });
+    expect(supabase.from).not.toHaveBeenCalled();
+    expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
   it("rejects a tenant in both manualReadings and revertToEdgeTenantIds", async () => {

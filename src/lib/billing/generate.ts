@@ -543,12 +543,15 @@ export async function runGenerationFor(
   }
 
   // ── 0b. A per-bill regeneration names its one tenant and nothing else ──────
+  // No other tenant in tenantIds, manualReadings or revertToEdgeTenantIds,
+  // and no seeds: it must not become a run over more than its bill.
   const expectedBill = mode === "write" ? params.expectedBill : undefined;
   if (
     expectedBill &&
     (tenantIdsParam?.length !== 1 ||
       tenantIdsParam[0] !== expectedBill.tenantId ||
       manualReadingsParam.some((m) => m.tenantId !== expectedBill.tenantId) ||
+      [...revertToEdgeSet].some((id) => id !== expectedBill.tenantId) ||
       (params.seedReadings ?? []).length > 0)
   ) {
     return {

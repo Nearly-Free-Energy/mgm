@@ -187,6 +187,8 @@ describe("runGenerationFor with expectedBill", () => {
     ["another tenant", { tenantIds: [OTHER_TENANT] }],
     ["two tenants", { tenantIds: [TENANT, OTHER_TENANT] }],
     ["another tenant's manual reading", { manualReadings: [{ tenantId: OTHER_TENANT, startKwh: 0, endKwh: 1 }] }],
+    ["another tenant switched back to edge data", { revertToEdgeTenantIds: [OTHER_TENANT] }],
+    ["its tenant and another switched back to edge data", { revertToEdgeTenantIds: [TENANT, OTHER_TENANT] }],
     ["seed readings", { seedReadings: [{ deviceId: DEVICE, dialReadingKwh: 10, readAt: "2026-04-01T00:00:00Z", startKwh: 10 }] }],
   ])("refuses a run that does not name its bill's one tenant (%s), before reading anything", async (_label, o) => {
     const h = harness(manualPrior());
