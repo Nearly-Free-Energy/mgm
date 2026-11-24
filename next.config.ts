@@ -49,19 +49,6 @@ export default function nextConfig(phase: string): NextConfig {
         },
       ];
     },
-    // The retired customer app's pages, /usage and /account, sent on to the
-    // tenant app; the query string goes with them. Its old address,
-    // portal.nearlyfreeenergy.com, redirects here keeping the path until
-    // about May 2027, so a tenant's old bookmark lands on one of these. They
-    // are temporary (307) because that redirect is; remove them when it goes.
-    // Next.js applies them before the middleware, which would answer these
-    // unreleased paths 404.
-    async redirects() {
-      return [
-        { source: "/usage", destination: "/my/usage", permanent: false },
-        { source: "/account", destination: "/my", permanent: false },
-      ];
-    },
     // PDF1b (#203): the PDF renderer registers Inter Regular/Bold via
     // `fontkit.open(<absolute-fs-path>)` at module-init (see
     // src/lib/invoices/render.tsx). Next.js's tracer cannot detect these
