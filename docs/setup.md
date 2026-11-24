@@ -26,7 +26,7 @@ cd mgm
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
-passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+passwords (RFC #186): enter `admin@example.org`, choose **Email me a sign-in
 link**, then open the email in Mailpit at
 [http://localhost:8025](http://localhost:8025) and follow its link.
 
@@ -75,7 +75,7 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
-passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+passwords (RFC #186): enter `admin@example.org`, choose **Email me a sign-in
 link**, then open the email in the local mail catcher at
 [http://127.0.0.1:54324](http://127.0.0.1:54324) and follow its link. This
 needs `MGM_SMTP_URL` and `MGM_MAIL_FROM` in `.env.local`, which
