@@ -6,6 +6,7 @@ import type {
   BillingGeneration,
   BillingRepository,
   BillingScope,
+  ExpectedBill,
 } from "../repository";
 
 const ORG_ID = "550e8400-e29b-41d4-a716-446655440000";
@@ -13,6 +14,22 @@ const MG_ID = "660e8400-e29b-41d4-a716-446655440000";
 const PERIOD_ID = "770e8400-e29b-41d4-a716-446655440000";
 const ITEM_ID = "880e8400-e29b-41d4-a716-446655440000";
 const TENANT_ID = "990e8400-e29b-41d4-a716-446655441111";
+
+/** A tenant's bill as a per-bill regeneration read it: generateBills always takes one. */
+const expectedBill = (tenantId: string): ExpectedBill => ({
+  lineItemId: ITEM_ID,
+  tenantId,
+  paymentStatus: "unpaid",
+  totalAmount: 5000,
+  usageKwh: 50,
+  startKwh: 100,
+  endKwh: 150,
+  readingSource: "edge",
+  deviceId: null,
+  tierBreakdown: null,
+  enteredByUserId: null,
+  manualReason: null,
+});
 
 const scope: BillingScope = {
   organizationId: ORG_ID,
@@ -521,26 +538,43 @@ describe("BillingCapability", () => {
     const HH = "990e8400-e29b-41d4-a716-446655440000";
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
-    const result = await capability.generateBills({
-      billingPeriodId: PERIOD_ID,
-      tenantIds: [HH],
-      revertToEdgeTenantIds: [HH],
-    });
+    const result = await capability.generateBills(
+      { billingPeriodId: PERIOD_ID, tenantIds: [HH], revertToEdgeTenantIds: [HH] },
+      { expectedBill: expectedBill(HH) },
+    );
     expect(result).toMatchObject({ ok: true });
     expect(run).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "write", revertToEdgeTenantIds: [HH] })
+      expect.objectContaining({ mode: "write", revertToEdgeTenantIds: [HH], expectedBill: expectedBill(HH) })
     );
+  });
+
+  it.each([
+    ["no options", undefined],
+    ["no bill", {}],
+    ["an undefined bill", { expectedBill: undefined }],
+  ])("refuses generateBills with %s, before the engine", async (_label, options) => {
+    const run = vi.fn(async () => ({ results: [] }));
+    const { capability } = setup({}, { run });
+    const result = await capability.generateBills(
+      { billingPeriodId: PERIOD_ID, tenantIds: [TENANT_ID] },
+      options as never,
+    );
+    expect(result).toMatchObject({ ok: false, status: 500, code: "billing_expected_bill_required" });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("rejects a tenant in both manualReadings and revertToEdgeTenantIds", async () => {
     const HH = "990e8400-e29b-41d4-a716-446655440000";
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
-    const result = await capability.generateBills({
-      billingPeriodId: PERIOD_ID,
-      manualReadings: [{ tenantId: HH, startKwh: 1, endKwh: 2 }],
-      revertToEdgeTenantIds: [HH],
-    });
+    const result = await capability.generateBills(
+      {
+        billingPeriodId: PERIOD_ID,
+        manualReadings: [{ tenantId: HH, startKwh: 1, endKwh: 2 }],
+        revertToEdgeTenantIds: [HH],
+      },
+      { expectedBill: expectedBill(HH) },
+    );
     expect(result).toMatchObject({
       ok: false,
       status: 400,
@@ -554,7 +588,9 @@ describe("BillingCapability", () => {
   it("parses generation with GenerateBillsBody, seeds included in preview", async () => {
     const run = vi.fn(async () => ({ results: [] }));
     const { capability } = setup({}, { run });
-    expect(await capability.generateBills({ billingPeriodId: PERIOD_ID, extra: 1 })).toMatchObject({
+    expect(
+      await capability.generateBills({ billingPeriodId: PERIOD_ID, extra: 1 }, { expectedBill: expectedBill(TENANT_ID) })
+    ).toMatchObject({
       status: 400,
       code: "billing_invalid_body",
       message: "Unknown field: extra",
@@ -877,7 +913,11 @@ const WRITES: { method: string; run: (capability: BillingCapability) => Promise<
   },
   { method: "closePeriod", run: (c) => c.closePeriod(PERIOD_ID, CONFIRMED) },
   { method: "deletePeriod", run: (c) => c.deletePeriod(PERIOD_ID, TYPED) },
-  { method: "generateBills", run: (c) => c.generateBills({ billingPeriodId: PERIOD_ID }) },
+  {
+    method: "generateBills",
+    run: (c) =>
+      c.generateBills({ billingPeriodId: PERIOD_ID, tenantIds: [TENANT_ID] }, { expectedBill: expectedBill(TENANT_ID) }),
+  },
   { method: "generateFromMeters", run: (c) => c.generateFromMeters(PERIOD_ID) },
   { method: "billFromReadings", run: (c) => c.billFromReadings(PERIOD_ID, TENANT_ID, { startKwh: 1, endKwh: 2 }) },
   { method: "recordManualPayment", run: (c) => c.recordManualPayment(ITEM_ID, { status: "paid" }) },

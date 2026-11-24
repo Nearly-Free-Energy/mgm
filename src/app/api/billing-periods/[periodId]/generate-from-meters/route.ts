@@ -15,9 +15,9 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  * capability (BillingCapability.generateFromMeters), which runs the same
  * engine as BillingCapability.generateBills, for every tenant of the period's
  * microgrid and with no readings given. It adds no billing logic. Unlike
- * generateBills it refuses a closed period, keeps manual bills, leaves
- * invoiced, paid and refunded bills as they are, and changes any other
- * existing bill only as it was read (guardExistingBills in
+ * the engine's unguarded run it refuses a closed period, keeps manual
+ * bills, leaves invoiced, paid and refunded bills as they are, and changes
+ * any other existing bill only as it was read (guardExistingBills in
  * src/lib/billing/generate.ts): a bill paid, invoiced or regenerated
  * meanwhile is left too, and a second run writes nothing it does not need.
  * A tenant with no meter for the period, a meter assignment gap or no meter
