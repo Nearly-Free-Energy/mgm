@@ -42,6 +42,7 @@ export type Database = {
           ip_hash: string | null
           outcome: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           email_hash: string
@@ -66,11 +67,12 @@ export type Database = {
           billing_line_item_id: string | null
           billing_period_id: string | null
           created_at: string
-          details: Json
+          details: NonNullable<Json>
           event_type: Database["public"]["Enums"]["billing_audit_event_type"]
           id: string
           org_id: string | null
         }
+        ComputedFields: never
         Insert: {
           actor_kind?: string
           actor_ref?: string | null
@@ -78,7 +80,7 @@ export type Database = {
           billing_line_item_id?: string | null
           billing_period_id?: string | null
           created_at?: string
-          details?: Json
+          details?: NonNullable<Json>
           event_type: Database["public"]["Enums"]["billing_audit_event_type"]
           id?: string
           org_id?: string | null
@@ -90,7 +92,7 @@ export type Database = {
           billing_line_item_id?: string | null
           billing_period_id?: string | null
           created_at?: string
-          details?: Json
+          details?: NonNullable<Json>
           event_type?: Database["public"]["Enums"]["billing_audit_event_type"]
           id?: string
           org_id?: string | null
@@ -142,11 +144,12 @@ export type Database = {
           short_slug: string | null
           start_kwh: number | null
           tenant_id: string
-          tier_breakdown: Json
+          tier_breakdown: NonNullable<Json>
           total_amount: number
           updated_at: string
           usage_kwh: number | null
         }
+        ComputedFields: never
         Insert: {
           billing_period_id: string
           created_at?: string
@@ -169,7 +172,7 @@ export type Database = {
           short_slug?: string | null
           start_kwh?: number | null
           tenant_id: string
-          tier_breakdown?: Json
+          tier_breakdown?: NonNullable<Json>
           total_amount?: number
           updated_at?: string
           usage_kwh?: number | null
@@ -196,7 +199,7 @@ export type Database = {
           short_slug?: string | null
           start_kwh?: number | null
           tenant_id?: string
-          tier_breakdown?: Json
+          tier_breakdown?: NonNullable<Json>
           total_amount?: number
           updated_at?: string
           usage_kwh?: number | null
@@ -244,6 +247,7 @@ export type Database = {
           status: Database["public"]["Enums"]["billing_period_status"]
           timezone: string
         }
+        ComputedFields: never
         Insert: {
           closed_at?: string | null
           created_at?: string
@@ -294,17 +298,17 @@ export type Database = {
           created_at: string
           geography_notes: string | null
           id: string
-          invoice_config: Json
+          invoice_config: NonNullable<Json>
           invoice_prefix: string | null
           name: string
           org_id: string
           payment_last_configured_at: string | null
           payment_provider:
-            | Database["public"]["Enums"]["payment_provider_type"]
-            | null
+            Database["public"]["Enums"]["payment_provider_type"] | null
           payment_provider_config: Json | null
           payment_provider_secret_encrypted: string | null
         }
+        ComputedFields: never
         Insert: {
           address_city?: string | null
           address_country?: string | null
@@ -315,14 +319,13 @@ export type Database = {
           created_at?: string
           geography_notes?: string | null
           id?: string
-          invoice_config?: Json
+          invoice_config?: NonNullable<Json>
           invoice_prefix?: string | null
           name: string
           org_id: string
           payment_last_configured_at?: string | null
           payment_provider?:
-            | Database["public"]["Enums"]["payment_provider_type"]
-            | null
+            Database["public"]["Enums"]["payment_provider_type"] | null
           payment_provider_config?: Json | null
           payment_provider_secret_encrypted?: string | null
         }
@@ -336,14 +339,13 @@ export type Database = {
           created_at?: string
           geography_notes?: string | null
           id?: string
-          invoice_config?: Json
+          invoice_config?: NonNullable<Json>
           invoice_prefix?: string | null
           name?: string
           org_id?: string
           payment_last_configured_at?: string | null
           payment_provider?:
-            | Database["public"]["Enums"]["payment_provider_type"]
-            | null
+            Database["public"]["Enums"]["payment_provider_type"] | null
           payment_provider_config?: Json | null
           payment_provider_secret_encrypted?: string | null
         }
@@ -366,6 +368,7 @@ export type Database = {
           org_id: string
           updated_at: string
         }
+        ComputedFields: never
         Insert: {
           community_id: string
           created_at?: string
@@ -408,7 +411,7 @@ export type Database = {
       }
       devices: {
         Row: {
-          config: Json
+          config: NonNullable<Json>
           created_at: string
           device_type: Database["public"]["Enums"]["device_type"]
           edge_id: string
@@ -416,8 +419,9 @@ export type Database = {
           name: string
           openems_component_id: string | null
         }
+        ComputedFields: never
         Insert: {
-          config?: Json
+          config?: NonNullable<Json>
           created_at?: string
           device_type: Database["public"]["Enums"]["device_type"]
           edge_id: string
@@ -426,7 +430,7 @@ export type Database = {
           openems_component_id?: string | null
         }
         Update: {
-          config?: Json
+          config?: NonNullable<Json>
           created_at?: string
           device_type?: Database["public"]["Enums"]["device_type"]
           edge_id?: string
@@ -453,6 +457,7 @@ export type Database = {
           openems_edge_id: string
           role: string | null
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           id?: string
@@ -481,21 +486,22 @@ export type Database = {
       }
       grid_tariffs: {
         Row: {
-          bands: Json
+          bands: NonNullable<Json>
           created_at: string
           effective_from: string
           id: string
           microgrid_id: string
         }
+        ComputedFields: never
         Insert: {
-          bands: Json
+          bands: NonNullable<Json>
           created_at?: string
           effective_from: string
           id?: string
           microgrid_id: string
         }
         Update: {
-          bands?: Json
+          bands?: NonNullable<Json>
           created_at?: string
           effective_from?: string
           id?: string
@@ -517,6 +523,7 @@ export type Database = {
           counter: number
           year: number
         }
+        ComputedFields: never
         Insert: {
           community_id: string
           counter?: number
@@ -545,6 +552,7 @@ export type Database = {
           read_at: string
           reading_kwh: number
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           device_id: string
@@ -587,6 +595,7 @@ export type Database = {
           plugin_name: string
           previous_enabled: boolean | null
         }
+        ComputedFields: never
         Insert: {
           action: string
           actor_user_id?: string | null
@@ -627,6 +636,7 @@ export type Database = {
           updated_at: string
           version: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           enabled?: boolean
@@ -663,6 +673,7 @@ export type Database = {
           solar_savings_from: string | null
           updated_at: string
         }
+        ComputedFields: never
         Insert: {
           arbitrage_from?: string | null
           microgrid_id: string
@@ -721,6 +732,7 @@ export type Database = {
           name: string
           timezone: string
         }
+        ComputedFields: never
         Insert: {
           address_city?: string | null
           address_country?: string | null
@@ -814,6 +826,7 @@ export type Database = {
           username: string
           version: number
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           from_address: string
@@ -868,6 +881,7 @@ export type Database = {
           id: string
           name: string
         }
+        ComputedFields: never
         Insert: {
           address_city?: string | null
           address_country?: string | null
@@ -917,6 +931,7 @@ export type Database = {
           status: string
           updated_at: string
         }
+        ComputedFields: never
         Insert: {
           amount: number
           bill_revision_total?: number
@@ -1011,6 +1026,7 @@ export type Database = {
           source: string
           to_status: Database["public"]["Enums"]["billing_line_item_payment_status"]
         }
+        ComputedFields: never
         Insert: {
           actor_kind?: string
           actor_ref?: string | null
@@ -1070,6 +1086,7 @@ export type Database = {
           updated_at: string
           version: number
         }
+        ComputedFields: never
         Insert: {
           base_url?: string
           consumer_key?: string
@@ -1123,21 +1140,22 @@ export type Database = {
       payment_merchant_versions: {
         Row: {
           account_id: string
-          configuration: Json
+          configuration: NonNullable<Json>
           created_at: string
           org_id: string
           version: number
         }
+        ComputedFields: never
         Insert: {
           account_id: string
-          configuration: Json
+          configuration: NonNullable<Json>
           created_at?: string
           org_id: string
           version: number
         }
         Update: {
           account_id?: string
-          configuration?: Json
+          configuration?: NonNullable<Json>
           created_at?: string
           org_id?: string
           version?: number
@@ -1170,11 +1188,12 @@ export type Database = {
           org_id: string | null
           processed_attempt_id: string | null
           provider: string
-          raw_payload: Json
+          raw_payload: NonNullable<Json>
           status: string
           tracking_id: string
           updated_at: string
         }
+        ComputedFields: never
         Insert: {
           attempt_count?: number
           created_at?: string
@@ -1185,7 +1204,7 @@ export type Database = {
           org_id?: string | null
           processed_attempt_id?: string | null
           provider?: string
-          raw_payload?: Json
+          raw_payload?: NonNullable<Json>
           status?: string
           tracking_id: string
           updated_at?: string
@@ -1200,7 +1219,7 @@ export type Database = {
           org_id?: string | null
           processed_attempt_id?: string | null
           provider?: string
-          raw_payload?: Json
+          raw_payload?: NonNullable<Json>
           status?: string
           tracking_id?: string
           updated_at?: string
@@ -1235,8 +1254,9 @@ export type Database = {
           provider: string
           provider_status: string
           provider_tracking_id: string | null
-          raw_payload: Json
+          raw_payload: NonNullable<Json>
         }
+        ComputedFields: never
         Insert: {
           amount: number
           attempt_id: string
@@ -1249,7 +1269,7 @@ export type Database = {
           provider?: string
           provider_status: string
           provider_tracking_id?: string | null
-          raw_payload?: Json
+          raw_payload?: NonNullable<Json>
         }
         Update: {
           amount?: number
@@ -1263,7 +1283,7 @@ export type Database = {
           provider?: string
           provider_status?: string
           provider_tracking_id?: string | null
-          raw_payload?: Json
+          raw_payload?: NonNullable<Json>
         }
         Relationships: [
           {
@@ -1299,6 +1319,7 @@ export type Database = {
           tenant_count: number
           unchanged_reading_count: number
         }
+        ComputedFields: never
         Insert: {
           applied_at?: string | null
           billing_period_id: string
@@ -1349,8 +1370,9 @@ export type Database = {
           service_charge: number
           service_charge_description: string | null
           tax_rate: number
-          tiers: Json
+          tiers: NonNullable<Json>
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           id?: string
@@ -1358,7 +1380,7 @@ export type Database = {
           service_charge?: number
           service_charge_description?: string | null
           tax_rate?: number
-          tiers?: Json
+          tiers?: NonNullable<Json>
         }
         Update: {
           created_at?: string
@@ -1367,7 +1389,7 @@ export type Database = {
           service_charge?: number
           service_charge_description?: string | null
           tax_rate?: number
-          tiers?: Json
+          tiers?: NonNullable<Json>
         }
         Relationships: [
           {
@@ -1384,6 +1406,7 @@ export type Database = {
           first_recorded_at: string
           user_id: string
         }
+        ComputedFields: never
         Insert: {
           first_recorded_at?: string
           user_id: string
@@ -1399,6 +1422,7 @@ export type Database = {
           first_granted_at: string
           user_id: string
         }
+        ComputedFields: never
         Insert: {
           first_granted_at?: string
           user_id: string
@@ -1419,6 +1443,7 @@ export type Database = {
           role: Database["public"]["Enums"]["tenant_device_role"]
           tenant_id: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           device_id: string
@@ -1482,6 +1507,7 @@ export type Database = {
           primary_phone: string
           unit_label: string | null
         }
+        ComputedFields: never
         Insert: {
           account_number?: string | null
           address_city?: string | null
@@ -1541,6 +1567,7 @@ export type Database = {
           updated_at: string
           user_id: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           first_name?: string | null
@@ -1571,14 +1598,15 @@ export type Database = {
           scope_type: Database["public"]["Enums"]["role_scope_type"]
           user_id: string
         }
+        ComputedFields: never
         Insert: {
           created_at?: string
           id?: string
           role: Database["public"]["Enums"]["user_role"]
           scope_id?: string | null
-          scope_microgrid_id?: string | null
-          scope_org_id?: string | null
-          scope_tenant_id?: string | null
+          scope_microgrid_id?: never
+          scope_org_id?: never
+          scope_tenant_id?: never
           scope_type: Database["public"]["Enums"]["role_scope_type"]
           user_id: string
         }
@@ -1587,9 +1615,9 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
           scope_id?: string | null
-          scope_microgrid_id?: string | null
-          scope_org_id?: string | null
-          scope_tenant_id?: string | null
+          scope_microgrid_id?: never
+          scope_org_id?: never
+          scope_tenant_id?: never
           scope_type?: Database["public"]["Enums"]["role_scope_type"]
           user_id?: string
         }
@@ -1626,19 +1654,21 @@ export type Database = {
           microgrid_id: string | null
           timestamp: string | null
         }
+        ComputedFields: never
         Relationships: []
       }
       microgrid_shared_devices: {
         Row: {
-          config: Json | null
-          created_at: string | null
-          device_type: Database["public"]["Enums"]["device_type"] | null
-          edge_id: string | null
-          id: string | null
-          microgrid_id: string | null
-          name: string | null
+          config: NonNullable<Json>
+          created_at: string
+          device_type: Database["public"]["Enums"]["device_type"]
+          edge_id: string
+          id: string
+          microgrid_id: string
+          name: string
           openems_component_id: string | null
         }
+        ComputedFields: never
         Relationships: [
           {
             foreignKeyName: "devices_edge_id_fkey"
@@ -1690,7 +1720,7 @@ export type Database = {
           short_slug: string | null
           start_kwh: number | null
           tenant_id: string
-          tier_breakdown: Json
+          tier_breakdown: NonNullable<Json>
           total_amount: number
           updated_at: string
           usage_kwh: number | null
@@ -1964,7 +1994,7 @@ export type Database = {
           org_id: string | null
           processed_attempt_id: string | null
           provider: string
-          raw_payload: Json
+          raw_payload: NonNullable<Json>
           status: string
           tracking_id: string
           updated_at: string
@@ -2039,7 +2069,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      fn_payment_run_worker: { Args: never; Returns: number }
+      fn_payment_run_worker: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
       fn_payment_save_account: {
         Args: { _account_id: string; _expected_version: number; _payload: Json }
         Returns: string
@@ -2089,7 +2122,7 @@ export type Database = {
           short_slug: string | null
           start_kwh: number | null
           tenant_id: string
-          tier_breakdown: Json
+          tier_breakdown: NonNullable<Json>
           total_amount: number
           updated_at: string
           usage_kwh: number | null
@@ -2142,7 +2175,7 @@ export type Database = {
           short_slug: string | null
           start_kwh: number | null
           tenant_id: string
-          tier_breakdown: Json
+          tier_breakdown: NonNullable<Json>
           total_amount: number
           updated_at: string
           usage_kwh: number | null
@@ -2196,7 +2229,7 @@ export type Database = {
           short_slug: string | null
           start_kwh: number | null
           tenant_id: string
-          tier_breakdown: Json
+          tier_breakdown: NonNullable<Json>
           total_amount: number
           updated_at: string
           usage_kwh: number | null
@@ -2257,7 +2290,7 @@ export type Database = {
           effective_to: string
         }[]
       }
-      is_super_admin: { Args: never; Returns: boolean }
+      is_super_admin: { Args: Record<PropertyKey, never>; Returns: boolean }
       mgm_plugin_enabled_for_org: {
         Args: { _org_id: string; _plugin_name: string }
         Returns: boolean
@@ -2293,11 +2326,7 @@ export type Database = {
         | "token_regenerated"
         | "tariff_reconciled"
       billing_line_item_payment_status:
-        | "unpaid"
-        | "paid"
-        | "failed"
-        | "refunded"
-        | "link_generated"
+        "unpaid" | "paid" | "failed" | "refunded" | "link_generated"
       billing_line_item_reading_source: "edge" | "manual"
       billing_period_status: "draft" | "closed"
       device_type:
@@ -2334,12 +2363,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2361,13 +2390,12 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2386,13 +2414,12 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2411,13 +2438,12 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2430,11 +2456,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2493,4 +2519,3 @@ export const Constants = {
     },
   },
 } as const
-

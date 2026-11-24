@@ -14,9 +14,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "gui:styles:watch": "node scripts/gui/build-stylesheets.mjs --dev --watch",
-    "db:types": "npx supabase gen types typescript --local 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > src/lib/types/database.gen.ts",
-    "db:types:linked": "npx supabase gen types typescript --linked 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > src/lib/types/database.gen.ts",
-    "db:types:check": "f=$(mktemp) || exit 1; npx supabase gen types typescript --local 2>/dev/null | grep -v '^Connecting to' | grep -v '^A new version' | grep -v '^We recommend' > \"$f\"; if [ ! -s \"$f\" ]; then rm -f \"$f\"; echo 'db:types:check: supabase not running — skipping'; elif diff \"$f\" src/lib/types/database.gen.ts; then rm -f \"$f\"; else rm -f \"$f\"; echo 'database.gen.ts is out of date — run npm run db:types'; exit 1; fi",
+    "db:types": "f=$(mktemp) || exit 1; npx supabase gen types typescript --local 2>/dev/null > \"$f\" && grep -v '^Connecting to' \"$f\" | grep -v '^A new version' | grep -v '^We recommend' | npx prettier --no-config --parser typescript --no-semi > src/lib/types/database.gen.ts; s=$?; rm -f \"$f\"; exit $s",
+    "db:types:linked": "f=$(mktemp) || exit 1; npx supabase gen types typescript --linked 2>/dev/null > \"$f\" && grep -v '^Connecting to' \"$f\" | grep -v '^A new version' | grep -v '^We recommend' | npx prettier --no-config --parser typescript --no-semi > src/lib/types/database.gen.ts; s=$?; rm -f \"$f\"; exit $s",
+    "db:types:check": "f=$(mktemp) || exit 1; if ! npx supabase gen types typescript --local 2>/dev/null > \"$f\"; then rm -f \"$f\"; echo 'db:types:check: supabase not running — skipping'; exit 0; fi; grep -v '^Connecting to' \"$f\" | grep -v '^A new version' | grep -v '^We recommend' | npx prettier --no-config --parser typescript --no-semi > \"$f.ts\"; if diff \"$f.ts\" src/lib/types/database.gen.ts; then rm -f \"$f\" \"$f.ts\"; else rm -f \"$f\" \"$f.ts\"; echo 'database.gen.ts is out of date — run npm run db:types'; exit 1; fi",
     "prepare": "husky"
   },
   "dependencies": {
@@ -59,6 +59,7 @@
     "jose": "^6.2.2",
     "jsdom": "^29.0.2",
     "pdf-parse": "^2.4.5",
+    "prettier": "3.9.10",
     "supabase": "^2.122.1",
     "tailwindcss": "^4",
     "typescript": "5.9.3",

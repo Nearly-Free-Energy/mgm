@@ -159,6 +159,22 @@ jobs:
               || echo "::warning::$image is running but not in .github/supabase-ci-images.txt (pinned CLI changed?)"
           done
 
+      # The database above was built from supabase/migrations/*.sql alone, so
+      # the types generated from it are the ones the migrations make. This
+      # regenerates src/lib/types/database.gen.ts in place with `npm run
+      # db:types` (the pinned CLI's output, formatted by the pinned prettier)
+      # and fails if generation fails or the file differs. So a migration
+      # cannot merge with stale types when the pre-commit check was skipped
+      # or ran against another schema. It runs straight after the start,
+      # before any later step uses the database.
+      - name: Generated database types match the migrations
+        run: |
+          npm run --silent db:types
+          if ! git diff --exit-code -- src/lib/types/database.gen.ts; then
+            echo "::error file=src/lib/types/database.gen.ts::database.gen.ts does not match the migrations. Run npm run db:types against a freshly reset local database and commit the result."
+            exit 1
+          fi
+
       - name: Payment integrity rehearsal
         run: |
           eval "$(npx supabase status -o env | grep '^DB_URL=')"
