@@ -84,10 +84,12 @@ says so.
      its own (#259 decision 12) that the token hook sets (shown by #268).
      The role is `NOLOGIN` and granted to `authenticator`, never made a
      member of `authenticated`, so it reads only what grants and policies
-     give it. It has no write grant on any table, so a write function it
-     can call through `PUBLIC` is refused, and no `EXECUTE` on a definer
-     function unless one is granted; a new table is out of its reach until
-     a migration grants it (#274). A table with columns outside decision
+     give it. It has no write grant on any table, so an invoker function
+     it can call through `PUBLIC` cannot write. A definer function is
+     closed to it only by that function's own `REVOKE … FROM PUBLIC`, which
+     CLAUDE.md requires of every definer function, and a guard test checks
+     the role against every definer function (ADR-008 decision 7). A new
+     table is out of its reach until a migration grants it (#274). A table with columns outside decision
      6's boundary is granted to it by column, so the database holds that
      part of the boundary beneath MGM's checks.
    - If the role is not built, #259 § 5 waits and the question returns to
@@ -209,6 +211,12 @@ says so.
      plugin is off for the organization. Turning it off stops new steps.
      Turning a capability off follows the gate's existing policy: reads of
      stored data stay available and vendor-backed reads refuse.
+   - The switch holds at MGM's routes and the bridge, not at the
+     database: an agent token reads through the database API what
+     `mgm_agent` is granted whatever the switch says, which is no more
+     than the person could already read (ADR-008, Consequences). An
+     installation that wants no assistant at all removes the agent client
+     from MGM's table.
    - Text that comes from the database or a vendor system is untrusted in
      model context: data to analyse, never instructions.
 6. **What may reach a model.** A model receives only what marked views
@@ -318,7 +326,7 @@ says so.
      | Entry | Kind | Condition |
      |---|---|---|
      | The investigation view (decision 9) | view | Marked in the pull request that builds it (A3's, #255 § 12) |
-     | `metering.site-day` | view | `billing.savings`, its attached section, is withheld, and so is its time-zone notice (item 2 of 25 November) |
+     | `metering.site-day` | view | `billing.savings`, its attached section, is withheld, and so is its time-zone notice (item 2 of 25 November). Its house meters reach it under `mgm_agent` only through a definer function that returns the house-meter ids in force for a microgrid and day, or the view says by name that house figures are not available to an assistant (ADR-008 decision 8) |
      | `metering.connection` | watcher | The only watcher that qualifies today (item 3 of 25 November); listed by tushabe's confirmation of 25 November |
      | `tenant.home`, `tenant.usage-month`, `tenant.usage-day` | view | Decision 10 |
 
@@ -352,8 +360,8 @@ says so.
     ([comment](https://github.com/Nearly-Free-Energy/mgm/issues/133#issuecomment-7166783972)).
     A tenant view is readable only by an agent client signed in as that
     tenant, so its unit label or the tenant's own name reaches only that
-    tenant's own assistant, never a staff one. **Nothing is marked until
-    #259's tenant-phase pull request (D2) lands.** Besides the contract
+    tenant's own assistant, never a staff one. **No tenant view is marked
+    until #259's tenant-phase pull request (D2) lands.** Besides the contract
     rule, CLAUDE.md and the read interface's tenant-reference refusal
     (decision 7), it does the following.
     - Meter labels: what `tenant.home` gives the read interface labels each
@@ -371,8 +379,11 @@ says so.
       `"refused"` in `ASSISTANT_READING`.
     - Policies and grants: a copy of each of the three tenant policies
       `TO mgm_agent`, the grants the tenant views' loaders need, and
-      `EXECUTE` for the role on `user_can_access_tenant` and
-      `user_is_tenant_of_device`.
+      `EXECUTE` for the role on `user_can_access_tenant`,
+      `user_is_tenant_of_device`, and the definer functions the tenant
+      loaders call with the caller's client: `fn_tenant_home`,
+      `fn_tenant_shared_meter_days` and `mgm_plugin_enabled_for_org`
+      (ADR-008 decision 7).
     - Tenant names at the database: the staff policy on `tenants` names no
       role, so once `mgm_agent` may read any column of `tenants`, a staff
       member's assistant could read every tenant's name in the
@@ -380,14 +391,17 @@ says so.
       anything on `tenants`, #274 or D2, adds a `RESTRICTIVE` policy
       `TO mgm_agent` on `tenants` that calls `user_can_access_tenant`, with
       a database test that a staff member's assistant reads no tenant
-      names. Unlike the fix #268 tested, it leaves `tenant_devices`
-      unrestricted: `metering.site-day` reads it with the caller's client
-      to find house meters
-      (`src/lib/metering/infrastructure/supabase-repository.ts:210`), and
-      its rows carry ids and dates, no names. A second test shows that a
-      staff member's assistant still gets site-day's house meters. That
-      pull request adds one policy, edits none, and updates CLAUDE.md's
-      policy section.
+      row. It adds the same policy on `tenant_devices`, as #268 tested and
+      ADR-008 decision 8 records. Restricting `tenants` alone would not
+      keep `tenant_devices` readable for a staff member's assistant: the
+      staff policy on `tenant_devices` looks up the tenant's microgrid in
+      `tenants` as the caller (`00002_rls.sql`), so it would read no link
+      either. `metering.site-day`, which reads those links with the
+      caller's client to find house meters
+      (`src/lib/metering/infrastructure/supabase-repository.ts:210`), gets
+      them under the role only as its first-list condition says (decision
+      8). That pull request adds two policies, edits none, and updates
+      CLAUDE.md's policy section.
 11. **A mark grants nothing.** It only lets an assistant read what the
     signed-in person could already read there: the view's loader, the
     plugin gate, the composers and row-level security still decide that,
@@ -465,7 +479,10 @@ Worse, or to watch:
 - #255, `docs/investigation-evidence.md` (E1, O3; §§ 2, 3, 4, 5, 8, 10,
   11, 12, 13).
 - #259 §§ 2, 4 and 5, and decision 12; arindahills's acceptance
-  (issuecomment-7153527024); #268's result (issuecomment-7168074158).
+  (issuecomment-7153527024); #268's result, posted on #259
+  (issuecomment-7168074158).
+- ADR-008 (decisions 7 and 8: the agent role, its grants and its
+  policies; #283).
 - #263, #264, #274 and #284.
 - ADR-001; ADR-006 (decisions 3, 7, 8, 9 and 10).
 - `src/lib/gui/surface.ts`, `src/lib/gui/host/server/contribution-schema.ts`,
