@@ -8,25 +8,22 @@ import {
   SYNTHETIC_EDGE_ID_PREFIX,
   isSyntheticEdgeId,
 } from "@/lib/metering/fixture-provider";
+import { RegisterEdgesBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type RegisterEdgeEntry = {
-  openems_edge_id: string;
-  name: string;
-  role?: string | null;
-};
-
-type RegisterRequestBody = {
-  edges: RegisterEdgeEntry[];
-};
 
 /**
  * POST /api/microgrids/[id]/edges/register — bulk-register discovered edges.
  *
  * Replaces the retired POST /api/edges manual-create path. Idempotent on
  * (microgrid_id, openems_edge_id) — ON CONFLICT DO UPDATE refreshes name/role.
+ *
+ * The body is `RegisterEdgesBody` (`@/lib/metering/schemas`), the
+ * `metering.register-edges` action's input: a body of another shape answers
+ * 400 `invalid_body`, with the text below for a missing `edges` array or an
+ * entry without its id or name.
  *
  * Permission: RLS-enforced (the edges INSERT policy runs
  * user_can_access_microgrid(microgrid_id)).
@@ -57,38 +54,13 @@ export async function POST(
     );
   }
 
-  let body: RegisterRequestBody;
-  try {
-    body = (await request.json()) as RegisterRequestBody;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!body || !Array.isArray(body.edges) || body.edges.length === 0) {
-    return NextResponse.json(
-      { error: "Request body must include a non-empty `edges` array" },
-      { status: 400 }
-    );
-  }
-
-  // Validate every entry before any DB write so we return all errors at once
-  // (or none, as we bail on the first malformed row).
+  // Every entry is checked before any DB write: its shape by the schema
+  // (a non-empty `edges` array of entries with a non-blank id and name),
+  // then its id's format, bailing on the first malformed row.
+  const parsed = await parseJsonBody(request, RegisterEdgesBody);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
   for (const entry of body.edges) {
-    if (
-      !entry ||
-      typeof entry.openems_edge_id !== "string" ||
-      !entry.openems_edge_id.trim() ||
-      typeof entry.name !== "string" ||
-      !entry.name.trim()
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Each edge must include non-empty openems_edge_id and name strings",
-        },
-        { status: 400 }
-      );
-    }
     if (parseOpenEmsId(entry.openems_edge_id) === null) {
       // Named, so an operator registering a batch of discovered edges can
       // tell which one to leave out. Cut to 100 characters, as discovery cuts

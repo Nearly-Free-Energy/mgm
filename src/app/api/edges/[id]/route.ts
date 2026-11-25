@@ -15,6 +15,8 @@ import {
   resolveActorRole,
   type EntityDeleteLogPayload,
 } from "@/lib/entity-deletion/shared";
+import { DeleteEdgeBody, EditEdgeBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -22,8 +24,10 @@ const UUID_RE =
 /**
  * PATCH /api/edges/[id]
  *
- * Post-#104: the body accepts only { name, role }. The following fields are
- * explicitly rejected:
+ * Post-#104: the body accepts only { name, role }: `EditEdgeBody`
+ * (`@/lib/metering/schemas`), the `metering.edit-edge` action's input. A
+ * body of another shape answers 400 `invalid_body`, and the following
+ * fields are refused with a pointer:
  *   - `data_source_type`, `openems_backend_url` — retired in #101
  *   - `openems_edge_id` — assigned by OpenEMS Discover and is not editable.
  *     Remove the edge and rediscover to link a different OpenEMS edge.
@@ -42,42 +46,11 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid edge ID — expected UUID" }, { status: 400 });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Request body must be an object" }, { status: 400 });
-  }
-
-  const { name, role } = body as Record<string, unknown>;
-
-  // Reject retired/immutable fields BEFORE the "no fields provided" check so
-  // clients passing ONLY forbidden fields get the correct pointer message.
-  const forbiddenFields = ["data_source_type", "openems_backend_url", "openems_edge_id"].filter(
-    (f) => (body as Record<string, unknown>)[f] !== undefined
-  );
-  if (forbiddenFields.length > 0) {
-    // Produce the most specific error message for the most actionable field.
-    if ((body as Record<string, unknown>)["openems_edge_id"] !== undefined) {
-      return NextResponse.json(
-        {
-          error:
-            "openems_edge_id is no longer editable via PATCH. Remove and rediscover the edge to link a different OpenEMS edge.",
-        },
-        { status: 400 }
-      );
-    }
-    return NextResponse.json(
-      {
-        error: `Legacy fields are no longer accepted: ${forbiddenFields.join(", ")}. OpenEMS is the only supported type and backend URL lives on the microgrid (see PUT /api/microgrids/[id]/openems-backend).`,
-      },
-      { status: 400 }
-    );
-  }
+  // Retired and immutable fields are refused by the schema, with the most
+  // specific pointer for the most actionable field (EditEdgeBody).
+  const parsed = await parseJsonBody(request, EditEdgeBody);
+  if (!parsed.ok) return parsed.response;
+  const { name, role } = parsed.data;
 
   // At least one supported field must be provided.
   const hasName = name !== undefined;
@@ -87,8 +60,8 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields provided to update" }, { status: 400 });
   }
 
-  // Validate fields if provided.
-  if (hasName && (typeof name !== "string" || !name.trim())) {
+  // A blank name is refused here, as it always was (422).
+  if (hasName && !name.trim()) {
     return NextResponse.json({ error: "name must be a non-empty string" }, { status: 422 });
   }
 
@@ -123,15 +96,8 @@ export async function PATCH(
   // is immutable via this endpoint (rejected above as a forbidden field).
   const updateRow: Record<string, unknown> = {};
 
-  if (hasName && typeof name === "string") updateRow.name = name.trim();
-  if (hasRole) {
-    updateRow.role =
-      role === null || (typeof role === "string" && !role.trim())
-        ? null
-        : typeof role === "string"
-        ? role.trim()
-        : null;
-  }
+  if (hasName) updateRow.name = name.trim();
+  if (hasRole) updateRow.role = role?.trim() || null;
 
   const { data, error } = await supabase
     .from("edges")
@@ -161,7 +127,7 @@ export async function PATCH(
           { status: 409 }
         );
       }
-      const edgeName = typeof name === "string" ? name.trim() : currentEdge.name;
+      const edgeName = name !== undefined ? name.trim() : currentEdge.name;
       return NextResponse.json(
         {
           error: `An edge named '${edgeName}' already exists on this microgrid.`,
@@ -194,10 +160,18 @@ export async function PATCH(
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * DELETE /api/edges/[id] — delete an edge (#89). Unchanged from the original.
+ * DELETE /api/edges/[id] — delete an edge (#89).
+ *
+ * The body is `DeleteEdgeBody` (`@/lib/metering/schemas`), the
+ * `metering.delete-edge` action's input. The Edges page confirms in the
+ * browser and sends no body, which is read as `{}` and deletes as before. A
+ * `confirmation`, as the GUI host sends for the typed step, must carry the
+ * edge's name typed, or the answer is 428 `metering_edge_name_mismatch` and
+ * nothing is deleted. Once the Edges page sends its delete through the host,
+ * require the confirmation, as DELETE /api/billing-periods/[periodId] does.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -207,6 +181,10 @@ export async function DELETE(
       status: 400,
     });
   }
+
+  const parsed = await parseJsonBody(request, DeleteEdgeBody, { whenEmpty: {} });
+  if (!parsed.ok) return parsed.response;
+  const { confirmation } = parsed.data;
 
   const supabase = await createClient();
   // MGM runtime gate: metering writes fail closed while the plugin is disabled.
@@ -242,6 +220,13 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),
       { status: 409 }
+    );
+  }
+
+  if (confirmation && confirmation.typed?.trim() !== edge.name.trim()) {
+    return NextResponse.json(
+      { ...errorBody("The name typed does not match this edge's name."), code: "metering_edge_name_mismatch" },
+      { status: 428 }
     );
   }
 

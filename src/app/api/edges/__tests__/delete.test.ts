@@ -190,6 +190,51 @@ describe("DELETE /api/edges/[id]", () => {
     expect(logged.actor_role).toBe("org_manager");
     infoSpy.mockRestore();
   });
+
+  // metering.delete-edge: the GUI host sends the typed step's confirmation.
+  describe("with the GUI host's confirmation", () => {
+    const sent = (body: unknown) =>
+      new NextRequest(`http://localhost/api/edges/${VALID_UUID}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    it("deletes when the edge's name is typed", async () => {
+      configureEdgeLookup({ data: { id: VALID_UUID, name: "Edge-1", microgrid_id: "mg-1" }, error: null });
+      mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      const { DELETE } = await import("../[id]/route");
+      const res = await DELETE(sent({ confirmation: { acknowledged: [], typed: "Edge-1" } }), {
+        params: Promise.resolve({ id: VALID_UUID }),
+      });
+      expect(res.status).toBe(204);
+      expect(mockRpcImpl).toHaveBeenCalledWith("fn_entity_delete_edge", { p_id: VALID_UUID });
+      infoSpy.mockRestore();
+    });
+
+    it("answers 428 and deletes nothing when another name, or none, is typed", async () => {
+      configureEdgeLookup({ data: { id: VALID_UUID, name: "Edge-1", microgrid_id: "mg-1" }, error: null });
+      const { DELETE } = await import("../[id]/route");
+      for (const confirmation of [{ acknowledged: [], typed: "Edge-2" }, { acknowledged: [] }]) {
+        const res = await DELETE(sent({ confirmation }), { params: Promise.resolve({ id: VALID_UUID }) });
+        expect(res.status).toBe(428);
+        expect(await res.json()).toEqual({
+          error: "The name typed does not match this edge's name.",
+          code: "metering_edge_name_mismatch",
+        });
+      }
+      expect(mockRpcImpl).not.toHaveBeenCalled();
+    });
+
+    it("answers 400 invalid_body for a body DeleteEdgeBody does not take", async () => {
+      const { DELETE } = await import("../[id]/route");
+      const res = await DELETE(sent({ name: "Edge-1" }), { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Unknown field: name", code: "invalid_body" });
+      expect(mockFromImpl).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("GET /api/edges/[id]/delete-preview", () => {

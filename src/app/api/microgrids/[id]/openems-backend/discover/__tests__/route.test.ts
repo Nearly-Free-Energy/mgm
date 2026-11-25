@@ -90,6 +90,22 @@ describe("POST /api/microgrids/[id]/openems-backend/discover", () => {
     expect(res.status).toBe(400);
   });
 
+  // metering.check-connection: the GUI host sends `{}`, the pages nothing.
+  it("refuses a body CheckConnectionBody does not take, before any read", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      new NextRequest(`http://localhost/api/microgrids/${MG_ID}/openems-backend/discover`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ edges: [] }),
+      }),
+      { params: Promise.resolve({ id: MG_ID }) }
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown field: edges", code: "invalid_body" });
+    expect(mockFrom).not.toHaveBeenCalled();
+  });
+
   it("returns 403 — and never reaches the decrypt — when the caller cannot access the microgrid (#321)", async () => {
     canAccessMicrogridReturn = false;
     getMicrogridEmsConfigMock.mockClear();

@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
 import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { SaveDevicesBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 /**
  * POST /api/devices
@@ -26,6 +25,11 @@ const UUID_RE =
  *   }>
  * }
  *
+ * Parsed with `SaveDevicesBody` (`@/lib/metering/schemas`), the
+ * `metering.save-devices` action's input: a body of another shape answers
+ * 400 `invalid_body`, with the messages below where the old checks gave
+ * them. The component id's format stays this route's own check.
+ *
  * Upsert key: (edge_id, openems_component_id)
  * On conflict: updates device_type and name (idempotent re-discovery).
  *
@@ -34,68 +38,13 @@ const UUID_RE =
  * The server client uses the caller's auth session (cookies) so RLS applies.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  // Presence, the edge's UUID, a non-empty devices array and each row's
+  // fields are the schema's; each component id's format is checked here.
+  const parsed = await parseJsonBody(request, SaveDevicesBody);
+  if (!parsed.ok) return parsed.response;
+  const { edgeId, devices } = parsed.data;
 
-  if (
-    !body ||
-    typeof body !== "object" ||
-    !("edgeId" in body) ||
-    !("devices" in body)
-  ) {
-    return NextResponse.json(
-      { error: "Request body must include edgeId and devices" },
-      { status: 400 }
-    );
-  }
-
-  const { edgeId, devices } = body as {
-    edgeId: unknown;
-    devices: unknown;
-  };
-
-  if (typeof edgeId !== "string" || !edgeId.trim()) {
-    return NextResponse.json(
-      { error: "edgeId must be a non-empty string" },
-      { status: 400 }
-    );
-  }
-
-  if (!UUID_RE.test(edgeId)) {
-    return NextResponse.json(
-      { error: "Invalid edgeId — expected UUID." },
-      { status: 400 }
-    );
-  }
-
-  if (!Array.isArray(devices) || devices.length === 0) {
-    return NextResponse.json(
-      { error: "devices must be a non-empty array" },
-      { status: 400 }
-    );
-  }
-
-  // Validate each device entry
   for (const device of devices) {
-    if (
-      typeof device !== "object" ||
-      device === null ||
-      typeof device.componentId !== "string" ||
-      typeof device.deviceType !== "string" ||
-      typeof device.name !== "string"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Each device must have componentId (string), deviceType (string), and name (string)",
-        },
-        { status: 400 }
-      );
-    }
     if (parseOpenEmsId(device.componentId) === null) {
       return NextResponse.json(
         {
@@ -117,28 +66,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (pluginGate) return pluginGate;
 
   // Build upsert rows. openems_component_id is required for OpenEMS-sourced edges.
-  const rows = (
-    devices as Array<{
-      componentId: string;
-      factoryId?: string;
-      openemsChannelAddress?: string;
-      deviceType: string;
-      name: string;
-    }>
-  ).map((d) => {
+  const rows = devices.map((d) => {
     // Checked in the loop above, so never null here.
     const componentId = parseOpenEmsId(d.componentId) as string;
     return {
       edge_id: edgeId,
       name: d.name.trim() || componentId,
-      device_type: d.deviceType as
-        | "consumption_meter"
-        | "grid_meter"
-        | "pv_meter"
-        | "battery"
-        | "inverter"
-        | "ev_charger"
-        | "other",
+      device_type: d.deviceType,
       openems_component_id: componentId,
       config: {} as Record<string, never>,
     };

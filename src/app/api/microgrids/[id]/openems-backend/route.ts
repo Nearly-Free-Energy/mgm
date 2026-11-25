@@ -14,6 +14,8 @@ import {
 import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
+import { SaveConnectionBody } from "@/lib/metering/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 // The four stored OpenEMS credentials, the same columns the guard trigger
 // names in its address rule (20261110142706).
@@ -40,7 +42,14 @@ const UUID_RE =
  *     keycloakTokenUrl?, keycloakClientId?,
  *     keycloakClientSecret?                    // direct_url only (issue #4)
  *     confirmed_name?: string                  // closed-period bypass
+ *     confirmation?: { acknowledged, typed? }  // the same, from the GUI host
  *   }
+ *
+ * Parsed with `SaveConnectionBody` (`@/lib/metering/schemas`), the
+ * `metering.save-connection` action's input: a field of the wrong type, a
+ * missing required one or an unknown one answers 400 `invalid_body`. The
+ * rules below on what each type needs, the credentials and the address stay
+ * here.
  *
  * `basicAuthUsername` / `basicAuthPassword` are optional and must be supplied
  * together — a username with no password would send `Basic <user>:` and the
@@ -57,7 +66,7 @@ const UUID_RE =
  *
  * Mandatory execution order (AC-ROUTE-1, amendments 2026-04-23 + #112):
  *
- *   1. Validate body shape → 400 on malformed.
+ *   1. Validate body shape → 400 on malformed (SaveConnectionBody).
  *      Accepts known_edge_ids as string[] (non-array → 400).
  *      backendUrl must additionally pass `validateBackendUrl` (src/lib/openems/backend-url.ts):
  *      absolute https:// URL (http:// for localhost only), no embedded
@@ -74,7 +83,8 @@ const UUID_RE =
  *   4. Mid-period lock — 3-branch decision tree:
  *        (a) draft exists            → hard 409
  *        (b) closed exists (no draft) → 409 with requires_typed_confirmation
- *                                       unless body.confirmed_name matches
+ *                                       unless body.confirmed_name, or
+ *                                       body.confirmation.typed, matches
  *        (c) no periods              → free pass
  *   5. Edge-ID validation (#112): if known_edge_ids is non-empty, build the
  *      candidate OpenEmsClientConfig (using effectiveSecret already resolved
@@ -108,35 +118,10 @@ export async function PUT(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object") {
-    return NextResponse.json(
-      { error: "Request body must be an object" },
-      { status: 400 }
-    );
-  }
-
-  const type = body.type;
-  const backendUrl = body.backendUrl;
-
-  if (type !== "cloud_aws" && type !== "direct_url") {
-    return NextResponse.json(
-      { error: "type must be 'cloud_aws' or 'direct_url'" },
-      { status: 400 }
-    );
-  }
-  if (typeof backendUrl !== "string" || !backendUrl.trim()) {
-    return NextResponse.json(
-      { error: "backendUrl is required" },
-      { status: 400 }
-    );
-  }
+  const parsed = await parseJsonBody(request, SaveConnectionBody);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
+  const { type, backendUrl } = body;
 
   // Scheme / host validation before anything is persisted or contacted
   // (src/lib/openems/backend-url.ts). Runs ahead of the permission and mid-period gates because
@@ -146,26 +131,11 @@ export async function PUT(
     return NextResponse.json({ error: urlCheck.error }, { status: 400 });
   }
 
-  // Validate known_edge_ids — must be an array of strings.
+  // known_edge_ids is an array of strings (SaveConnectionBody).
   // Server-side sanitize: trim, filter empties, dedupe (preserve first occurrence).
-  if (!Array.isArray(body.known_edge_ids)) {
-    return NextResponse.json(
-      { error: "known_edge_ids must be an array of strings" },
-      { status: 400 }
-    );
-  }
-  for (const el of body.known_edge_ids as unknown[]) {
-    if (typeof el !== "string") {
-      return NextResponse.json(
-        { error: "known_edge_ids must be an array of strings" },
-        { status: 400 }
-      );
-    }
-  }
-  const rawEdgeIds = body.known_edge_ids as string[];
   const seenEdgeIds = new Set<string>();
   const known_edge_ids: string[] = [];
-  for (const id of rawEdgeIds) {
+  for (const id of body.known_edge_ids) {
     const trimmed = id.trim();
     if (trimmed && !seenEdgeIds.has(trimmed)) {
       seenEdgeIds.add(trimmed);
@@ -178,13 +148,9 @@ export async function PUT(
   let secretAccessKey: string | undefined;
 
   if (type === "cloud_aws") {
-    region = typeof body.region === "string" ? body.region.trim() : undefined;
-    accessKeyId =
-      typeof body.accessKeyId === "string" ? body.accessKeyId.trim() : undefined;
-    secretAccessKey =
-      typeof body.secretAccessKey === "string"
-        ? body.secretAccessKey
-        : undefined;
+    region = body.region?.trim();
+    accessKeyId = body.accessKeyId?.trim();
+    secretAccessKey = body.secretAccessKey;
 
     // Region + accessKeyId are always required for cloud_aws.
     // secretAccessKey required-ness is deferred until after we know whether
@@ -218,37 +184,18 @@ export async function PUT(
   let keycloakClientSecret: string | undefined;
 
   if (type === "direct_url") {
-    basicAuthUsername =
-      typeof body.basicAuthUsername === "string"
-        ? body.basicAuthUsername.trim()
-        : undefined;
-    basicAuthPassword =
-      typeof body.basicAuthPassword === "string"
-        ? body.basicAuthPassword
-        : undefined;
+    basicAuthUsername = body.basicAuthUsername?.trim();
+    basicAuthPassword = body.basicAuthPassword;
     // Bearer token (issue #4): blank means "keep the stored token", exactly
     // like the Basic password preserve flow below. Whitespace-only is
     // treated as blank — a token of spaces authenticates nowhere.
-    bearerToken =
-      typeof body.bearerToken === "string" && body.bearerToken.trim()
-        ? body.bearerToken
-        : undefined;
+    bearerToken = body.bearerToken?.trim() ? body.bearerToken : undefined;
     // Keycloak client-credentials (issue #4 follow-up): the token URL and
     // client id are identifiers (retyping them with a blank secret preserves
     // the stored secret, mirroring Basic). All-or-nothing — validated below.
-    keycloakTokenUrl =
-      typeof body.keycloakTokenUrl === "string" && body.keycloakTokenUrl.trim()
-        ? body.keycloakTokenUrl.trim()
-        : undefined;
-    keycloakClientId =
-      typeof body.keycloakClientId === "string" && body.keycloakClientId.trim()
-        ? body.keycloakClientId.trim()
-        : undefined;
-    keycloakClientSecret =
-      typeof body.keycloakClientSecret === "string" &&
-      body.keycloakClientSecret.length > 0
-        ? body.keycloakClientSecret
-        : undefined;
+    keycloakTokenUrl = body.keycloakTokenUrl?.trim() || undefined;
+    keycloakClientId = body.keycloakClientId?.trim() || undefined;
+    keycloakClientSecret = body.keycloakClientSecret || undefined;
   }
 
   const supabase = await createClient();
@@ -556,10 +503,13 @@ export async function PUT(
 
   if (closedCount > 0) {
     // Branch (b) — type-to-confirm gate (two sub-cases).
-    //   • confirmed_name absent (or not a string) → 409 prompting the user to type.
-    //   • confirmed_name present but wrong → 400 explicit mismatch error.
-    //   • confirmed_name matches → fall through to save + discover.
-    if (typeof body.confirmed_name !== "string") {
+    //   • no name typed → 409 prompting the user to type.
+    //   • a name typed but wrong → 400 explicit mismatch error.
+    //   • the name matches → fall through to save + discover.
+    // The OpenEMS Backend page sends the name as confirmed_name; the GUI
+    // host's ceremony (metering.save-connection) as confirmation.typed.
+    const confirmedName = body.confirmed_name ?? body.confirmation?.typed;
+    if (confirmedName === undefined) {
       return NextResponse.json(
         {
           error: `This microgrid has ${closedCount} closed billing period${closedCount === 1 ? "" : "s"}. Changing the OpenEMS backend may affect historical invoice verification if edge IDs differ after rediscovery. Type the microgrid name to confirm.`,
@@ -571,7 +521,7 @@ export async function PUT(
       );
     }
 
-    if (body.confirmed_name.trim() !== mgRow.name.trim()) {
+    if (confirmedName.trim() !== mgRow.name.trim()) {
       return NextResponse.json(
         { error: "Confirmed name does not match the microgrid name." },
         { status: 400 }
