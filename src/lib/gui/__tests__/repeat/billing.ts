@@ -7,7 +7,9 @@
  *
  * Each case is sent as the person the action is offered to: a manager of the
  * organization, or a super admin for Mark as refunded and Mark as failed,
- * which the payment-status route allows no one else.
+ * which the payment-status route allows no one else (its
+ * SUPER_ADMIN_ONLY_STATUSES). If that list changes, revisit who those cases
+ * are sent as: a super admin passes either way, so the test would not say.
  */
 import { parseCloseReview, periodName } from "@/lib/billing/close";
 import type { MgmRuntime } from "@/lib/runtime/root";

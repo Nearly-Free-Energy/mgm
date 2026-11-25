@@ -108,9 +108,12 @@ const SECRET_LIKE_EXEMPTIONS: Readonly<Record<string, string>> = {};
 
 /**
  * Plugins whose actions move money or change what a tenant is billed, so a
- * repeat that writes twice is never acceptable (RFC #259 § 3). Pesapal is
- * the payment provider plugin, grouped with Payments as
- * PAYMENT_EXEMPTION_OWNERS groups it.
+ * repeat that writes twice is never acceptable (RFC #259 § 3). Pesapal
+ * contributes no action today; it is listed because its one route, the
+ * payment notification (/api/payments/ipn in its catalog entry), records a
+ * provider's notice and, once Payments verifies it, settles the bill. If
+ * Pesapal comes to own a route that neither moves money nor changes a bill,
+ * revisit.
  */
 const NO_UNSAFE_REPEAT: ReadonlySet<MgmPluginName> = new Set([BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME]);
 

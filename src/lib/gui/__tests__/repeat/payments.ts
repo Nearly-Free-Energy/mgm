@@ -75,7 +75,11 @@ let spy: MockInstance<PaymentProviderRegistry["forAccount"]> | null = null;
 export const PAYMENTS_CASES: CaseModule = {
   cases: {
     "payments.refresh-attempt": [
-      // The receipt is already recorded (ON CONFLICT DO NOTHING): 200.
+      // The receipt is already recorded: fn_payment_commit_verification
+      // inserts it ON CONFLICT DO NOTHING and returns when nothing was
+      // inserted, so the second send writes nothing: 200. If that function
+      // stops returning on a conflicting receipt, this case's second send
+      // writes, and the case fails.
       { label: "the provider reports it completed", as: "manager", params: { id: DONE }, body: () => ({}), first: 200, second: 200 },
       // The attempt is already waiting for confirmation: 200.
       {

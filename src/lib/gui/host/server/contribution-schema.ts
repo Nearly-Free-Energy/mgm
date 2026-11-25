@@ -345,9 +345,11 @@ const actionSchema = z
     confirm: confirmSchema,
     humanOnly: z.boolean(),
     // Required, so every action says what a repeat does. Which plugins may
-    // declare "unsafe" is checked in CI by gui-surface.test.ts, and that a
-    // "safe" one is safe by src/lib/gui/__tests__/repeat.db.test.ts, which
-    // sends it twice to its route; contribute() reads neither.
+    // declare "unsafe" is checked in CI by gui-surface.test.ts (check 12),
+    // and that a "safe" one is safe by
+    // src/lib/gui/__tests__/repeat.db.test.ts, which sends it twice to its
+    // route; contribute() reads neither. If either check moves or goes,
+    // revisit this and the header, which say where they are.
     repeat: repeatSchema,
     prepare: fn.optional(),
   })
