@@ -1,8 +1,8 @@
 import "server-only";
 
 /**
- * The payments watchers, `payments.reconcile` and `payments.failed`
- * (./attention-signals-model.ts).
+ * The payments watchers, `payments.reconcile`, `payments.failed` and
+ * `payments.not-submitted` (./attention-signals-model.ts).
  *
  * The attempts come from the Payments capability's listAttention (a read
  * listed in gui-surface.test.ts's LOADER_READS), composed with
@@ -16,9 +16,14 @@ import "server-only";
  * user_can_access_microgrid); if those policies change, revisit what this
  * shows. Composing on req.supabase queues that client's other queries
  * behind getUser's auth lock, so the bills are read after the capability.
+ * `payments.not-submitted` reads the communities' names the same way
+ * (communities is FOR ALL on user_can_access_org), filtered to the
+ * organization.
  *
  * When listAttention reports more attempts than it returns (`truncated`),
- * the counts cover only the most recently changed ones.
+ * the counts of `payments.reconcile` and `payments.failed` cover only the
+ * most recently changed ones. `payments.not-submitted` throws instead, so
+ * it is listed as unchecked rather than undercounting a community.
  *
  * Any refusal or failed read throws, so the host lists the watcher as
  * unchecked rather than as having nothing to report; the error itself is
@@ -26,14 +31,26 @@ import "server-only";
  */
 import type { SignalOut, SurfaceRequest } from "@/lib/gui/surface";
 import { composePayments } from "../compose";
-import type { AttentionAttempt } from "../repository";
+import { CHECKOUT_NOT_SUBMITTED, type AttentionAttempt } from "../repository";
 import type { PaymentStatus } from "../state";
-import { buildFailedSignals, buildReconcileSignals, FAILED_WINDOW_DAYS, type AttentionBill } from "./attention-signals-model";
+import {
+  buildFailedSignals,
+  buildNotSubmittedSignals,
+  buildReconcileSignals,
+  FAILED_WINDOW_DAYS,
+  NOT_SUBMITTED_THRESHOLD,
+  NOT_SUBMITTED_WINDOW_HOURS,
+  type AttentionBill,
+} from "./attention-signals-model";
 
 /** Bills read per request, so the id list stays well inside a URL. */
 const BILLS_PER_READ = 100;
 
-type Query = { status: "needs_reconciliation" } | { status: "failed"; since: string };
+type Query =
+  | { status: "needs_reconciliation" }
+  | { status: "failed"; since: string }
+  | { status: "failed"; since: string; failureCode: typeof CHECKOUT_NOT_SUBMITTED };
+type Listed = { attempts: AttentionAttempt[]; truncated: boolean };
 type Embedded<T> = T | T[] | null;
 type BillRow = {
   id: string;
@@ -48,21 +65,26 @@ type BillRow = {
 };
 const one = <T>(v: Embedded<T>): T | null => (Array.isArray(v) ? (v[0] ?? null) : v);
 
-/** Each query's attempts, in order, from one composition of the capability. */
-async function attention(req: SurfaceRequest, queries: Query[]): Promise<AttentionAttempt[][]> {
+/** Each query's answer, in order, from one composition of the capability. */
+async function listed(req: SurfaceRequest, queries: Query[]): Promise<Listed[]> {
   const composed = await composePayments({ supabase: req.supabase, organizationId: req.organizationId });
   if (!composed.ok) throw new Error(`payments watcher: the capability could not be composed (${composed.status})`);
   try {
-    const out: AttentionAttempt[][] = [];
+    const out: Listed[] = [];
     for (const query of queries) {
-      const listed = await composed.data.payments.listAttention(query);
-      if (!listed.ok) throw new Error(`payments watcher: listAttention refused (${listed.status})`);
-      out.push(listed.data.attempts);
+      const answer = await composed.data.payments.listAttention(query);
+      if (!answer.ok) throw new Error(`payments watcher: listAttention refused (${answer.status})`);
+      out.push(answer.data);
     }
     return out;
   } finally {
     await composed.data.dispose();
   }
+}
+
+/** Each query's attempts, in order, from one composition of the capability. */
+async function attention(req: SurfaceRequest, queries: Query[]): Promise<AttentionAttempt[][]> {
+  return (await listed(req, queries)).map((l) => l.attempts);
 }
 
 /** The bills the attempts are for, with their periods and microgrids, as the person's client returns them. */
@@ -111,4 +133,25 @@ export async function loadFailedSignals(req: SurfaceRequest): Promise<SignalOut[
   const [failed, held] = await attention(req, [{ status: "failed", since }, { status: "needs_reconciliation" }]);
   if (failed.length === 0) return [];
   return buildFailedSignals(req.fmt, failed, held, await readBills(req, failed));
+}
+
+/**
+ * `payments.not-submitted`: the communities where NOT_SUBMITTED_THRESHOLD or
+ * more checkouts never reached the provider in the last
+ * NOT_SUBMITTED_WINDOW_HOURS, which points at the payment account rather
+ * than at any one bill.
+ */
+export async function loadNotSubmittedSignals(req: SurfaceRequest): Promise<SignalOut[]> {
+  const since = new Date(req.now.getTime() - NOT_SUBMITTED_WINDOW_HOURS * 3_600_000).toISOString();
+  const [answer] = await listed(req, [{ status: "failed", since, failureCode: CHECKOUT_NOT_SUBMITTED }]);
+  if (answer.truncated) throw new Error("payments.not-submitted: more checkouts than one read returns");
+  const counts = new Map<string, number>();
+  for (const a of answer.attempts) if (a.communityId !== null) counts.set(a.communityId, (counts.get(a.communityId) ?? 0) + 1);
+  const ids = [...counts].filter(([, n]) => n >= NOT_SUBMITTED_THRESHOLD).map(([id]) => id);
+  if (ids.length === 0) return [];
+  // At most MAX_ATTENTION_ATTEMPTS / NOT_SUBMITTED_THRESHOLD ids, so one read stays well inside a URL.
+  const { data, error } = await req.supabase.from("communities").select("id, name").eq("org_id", req.organizationId).in("id", ids);
+  if (error) throw new Error("payments.not-submitted: the communities could not be read");
+  const names = new Map(((data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+  return buildNotSubmittedSignals(req.fmt, answer.attempts, names);
 }
