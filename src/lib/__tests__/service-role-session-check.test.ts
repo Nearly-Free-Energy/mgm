@@ -396,6 +396,16 @@ const ENTRIES: Record<string, Entry> = {
     reason:
       "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any search runs.",
   },
+  "src/app/api/gui/manifest/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any status loader runs.",
+  },
+  "src/app/api/gui/catalog/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any available() runs.",
+  },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",
     path: "/api/billing-line-items/12345678-1234-1234-1234-123456789012/pay",
