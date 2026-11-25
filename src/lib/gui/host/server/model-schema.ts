@@ -53,6 +53,7 @@ export const jsonSchema: z.ZodType<Json> = z.lazy(() =>
 const isoDateTime = z.iso.datetime({ offset: true });
 const toneSchema = z.enum(["neutral", "info", "success", "warning", "danger", "accent"]);
 export const confirmSchema = z.enum(["none", "confirm", "typed", "ceremony"]);
+export const repeatSchema = z.enum(["safe", "keyed", "unsafe"]);
 export const navGroupSchema = z.enum(["operate", "money", "configure", "system"]);
 export const iconSchema = z.enum([
   "today", "live", "sites", "communities", "tenants", "devices", "readings",

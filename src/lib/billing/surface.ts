@@ -317,6 +317,8 @@ export const BILLING_SURFACE: Contribution = {
   // PUT replaces the whole row, so saving would clear both stored dates. If
   // the host's prepare comes to supply starting values, or the route stops
   // replacing the row, revisit.
+  // Every action here is repeat "safe": src/lib/gui/__tests__/repeat.db.test.ts
+  // sends each twice to its route. If it fails for one, that one is not safe.
   actions: [
     // Human-only, as no assistant proposes a period yet (#201).
     // `targeted: false`: offered only by billing.periods, which the host now
@@ -336,6 +338,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
     // A DELETE: typed confirmation, the period's name, from prepare.
@@ -350,6 +353,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "destructive",
       confirm: "typed",
       humanOnly: true,
+      repeat: "safe",
       prepare: prepareDeletePeriod,
       available: deletePeriodAvailable,
     },
@@ -376,6 +380,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareClosePeriod,
       available: closePeriodAvailable,
@@ -419,6 +424,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareGenerateFromMeters,
       available: generateFromMetersAvailable,
@@ -448,6 +454,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareBillFromReadings,
       available: billFromReadingsAvailable,
@@ -472,6 +479,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       prepare: prepareRegenerateBill,
       available: regenerateBillAvailable,
     },
@@ -493,6 +501,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareRecordUsage,
       available: recordUsageAvailable,
@@ -530,6 +539,7 @@ export const BILLING_SURFACE: Contribution = {
         risk: "money",
         confirm,
         humanOnly: true,
+        repeat: "safe",
         targeted: false,
         prepare,
       }),
@@ -545,6 +555,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
     {
@@ -558,6 +569,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
   ],

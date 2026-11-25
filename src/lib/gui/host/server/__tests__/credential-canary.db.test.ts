@@ -427,6 +427,7 @@ describe.skipIf(shouldSkip())("credential canary", () => {
         risk: "write",
         confirm: "confirm",
         humanOnly: false,
+        repeat: "safe",
         ...over,
       } as unknown as ActionDef,
     });

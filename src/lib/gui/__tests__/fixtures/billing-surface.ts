@@ -218,6 +218,7 @@ export const BILLING_SURFACE: Contribution = {
       bind: { body: { microgrid_id: "microgrid" } },
       risk: "money",
       humanOnly: false,
+      repeat: "safe",
       confirm: "confirm",
     },
     {
@@ -231,6 +232,7 @@ export const BILLING_SURFACE: Contribution = {
       bind: { path: { periodId: "billingPeriod" } },
       risk: "money",
       humanOnly: false,
+      repeat: "safe",
       confirm: "confirm",
     },
     {
@@ -244,6 +246,7 @@ export const BILLING_SURFACE: Contribution = {
       bind: { path: { periodId: "billingPeriod" } },
       risk: "money",
       humanOnly: true,
+      repeat: "safe",
       confirm: "ceremony",
       prepare: unavailable,
     },

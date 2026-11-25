@@ -25,7 +25,7 @@ import type { ComponentType, ReactNode } from "react";
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
 
 /** The contract version (semver). A GUI declares the range it supports, such as "^0.1". */
-export const GUI_CONTRACT = "0.1.0";
+export const GUI_CONTRACT = "0.2.0";
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 
@@ -47,6 +47,21 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "accent";
 /** What a person does before a write. A GUI frames the step (GuiPlugin.Overlay) but never runs it. */
 export type Confirm = "none" | "confirm" | "typed" | "ceremony";
+/**
+ * What a second identical send of an action does (RFC #259 § 3, ADR-006
+ * decision 11), so a client that lost an answer knows whether it may send
+ * the write again.
+ *
+ * "safe": the second send writes nothing. It may answer unlike the first (a
+ * 404 once a delete has run, a 409 once a create has, a 400 `no_op`, a 200
+ * that says nothing changed), so a client that lost the first answer reads
+ * the view rather than trusting the second. "keyed": the route takes a
+ * repeat key and answers a repeat with the first result. "unsafe": a repeat
+ * may write twice.
+ *
+ * The server trusts nothing here: the route decides what a send writes.
+ */
+export type Repeat = "safe" | "keyed" | "unsafe";
 export type NavGroup = "operate" | "money" | "configure" | "system";
 /** A fixed icon vocabulary, so every GUI can map names to its own set. An unknown name renders as text. */
 export type Icon =

@@ -29,6 +29,7 @@ function action(plugin: MgmPluginName, id: Id, over: Partial<ActionDef> = {}): R
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
+    repeat: "safe",
     ...over,
   } as ActionDef;
   return { plugin, def };

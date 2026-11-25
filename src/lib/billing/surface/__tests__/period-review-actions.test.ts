@@ -137,6 +137,7 @@ describe("the period review's actions", () => {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(GENERATE.input).toBe(GenerateFromMetersBody);
@@ -159,6 +160,7 @@ describe("the period review's actions", () => {
       // A ceremony, so the host sends a paid bill's acknowledgement to the route.
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
     });
     expect(REGENERATE).not.toHaveProperty("targeted");
     expect(REGENERATE.input).toBe(RegenerateBillBody);
@@ -179,6 +181,7 @@ describe("the period review's actions", () => {
       // A ceremony, so the host sends a paid bill's acknowledgement to the route (#247).
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(USAGE.input).toBe(LineItemUsageBody);
@@ -204,6 +207,7 @@ describe("the period review's actions", () => {
       risk: "money",
       confirm,
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(def(id).input).toBe(LineItemPaymentStatusBody);

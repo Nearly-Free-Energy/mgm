@@ -8,7 +8,7 @@ export const GRIDTOP_META = {
   name: "gridtop",
   title: "Gridtop",
   version: "0.1.0",
-  contract: "^0.1",
+  contract: "^0.2",
   styles: "./styles.css",
   dependencies: ["@radix-ui/react-dialog", "clsx", "cmdk", "lucide-react"],
 } as const satisfies GuiMeta;

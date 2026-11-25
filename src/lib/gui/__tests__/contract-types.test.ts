@@ -44,7 +44,8 @@ function accept<T>(value: T): T {
 }
 
 const prepare: Prepare = async () => ({ ok: false, status: 503, message: "fixture" });
-const base = {
+/** An action's fixed fields but repeat, which the missing-repeat case leaves out. */
+const noRepeat = {
   id: "billing.x",
   title: "X",
   target: "billingPeriod",
@@ -53,6 +54,7 @@ const base = {
   path: "/api/billing-periods/[periodId]",
   bind: {},
 } as const;
+const base = { ...noRepeat, repeat: "safe" } as const;
 // Referenced only inside a loader the test never calls.
 declare const recordModel: LoadedModel<"record">;
 
@@ -97,6 +99,15 @@ describe("GUI contract types", () => {
     accept<ActionDef>({ ...base, method: "POST", risk: "external", humanOnly: false, confirm: "none", prepare });
     // @ts-expect-error a DELETE needs a typed or ceremony confirmation, even with prepare
     accept<ActionDef>({ ...base, method: "DELETE", risk: "write", humanOnly: true, confirm: "confirm", prepare });
+  });
+
+  it("refuses an action that does not say what a repeat does", () => {
+    // Left out entirely, so the case holds with or without
+    // exactOptionalPropertyTypes: the field is required, not optional.
+    // @ts-expect-error every action declares repeat
+    accept<ActionDef>({ ...noRepeat, method: "POST", risk: "write", humanOnly: true, confirm: "none" });
+    // @ts-expect-error repeat is safe, keyed or unsafe
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", repeat: "twice" });
   });
 
   it("compiles a widened humanOnly, which is why the rules need a run-time check too", () => {

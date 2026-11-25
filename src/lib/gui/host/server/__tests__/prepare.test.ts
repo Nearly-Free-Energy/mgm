@@ -47,6 +47,7 @@ function action(over: Partial<Record<keyof ActionDef, unknown>> = {}, plugin: Mg
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
+    repeat: "safe",
     ...over,
   } as unknown as ActionDef;
   return { plugin, def };

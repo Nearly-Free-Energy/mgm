@@ -218,7 +218,7 @@ const withOverlay = (frame: GuiPlugin["Overlay"]): GuiPlugin => ({ ...referenceG
 type Case = [CheckId, string, GuiPlugin, RegExp | RegExp[], RegExp?];
 
 const BROKEN: Case[] = [
-  ["version", "declares a contract range that leaves this version out", { ...referenceGui(), contract: "^0.2" }, /does not admit/],
+  ["version", "declares a contract range that leaves this version out", { ...referenceGui(), contract: "^0.3" }, /does not admit/],
   ["version", "declares a range the host cannot read", { ...referenceGui(), contract: ">=0.1" }, /does not admit/],
   ["version", "is not installed", { ...referenceGui(), name: "absent" }, /not in the installed GUI metadata/],
   ["manifests", "leaves out a nav entry", referenceGui({ dropNav: "community.communities" }), /nav entry community\.communities/],
@@ -309,7 +309,7 @@ describe("each check fails a GUI broken in the way it guards", () => {
     for (const f of found) expect(`${f.check} ${f.fixture} ${f.message}`).toMatch(/^manifests .* at 360 px status item/);
   });
 
-  it.each([["name", "other"], ["title", "Other"], ["version", "0.0.1"], ["contract", "^0.1.0"], ["styles", "./other.css"], ["dependencies", ["x"]]] as const)(
+  it.each([["name", "other"], ["title", "Other"], ["version", "0.0.1"], ["contract", "^0.2.0"], ["styles", "./other.css"], ["dependencies", ["x"]]] as const)(
     "version: a GUI whose %s differs from its installed entry",
     async (key, value) => {
       const gui = { ...referenceGui(), [key]: value } as GuiPlugin;

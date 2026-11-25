@@ -44,6 +44,7 @@ const action = (over: Record<string, unknown> = {}, plugin: MgmPluginName = "met
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
+    repeat: "safe",
     ...over,
   } as unknown as ActionDef,
 });
