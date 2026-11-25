@@ -50,12 +50,51 @@ const ANNOTATIONS: ReadonlySet<string> = new Set([
 /** A JSON Pointer reference token (RFC 6901). */
 const token = (key: string) => key.replaceAll("~", "~0").replaceAll("/", "~1");
 
+/** A JSON Schema object, as opposed to `true`, `false` or a keyword's value. */
+const isNode = (n: unknown): n is Record<string, unknown> => n !== null && typeof n === "object" && !Array.isArray(n);
+/** Whether `n` has no keyword but annotations and those in `allowed`. */
+const only = (n: Record<string, unknown>, allowed: readonly string[]) =>
+  Object.keys(n).every((k) => ANNOTATIONS.has(k) || allowed.includes(k));
+/** Whether `n` is nothing but a `$ref` to `target`. */
+const refTo = (n: unknown, target: string) => isNode(n) && n.$ref === target && only(n, ["$ref"]);
+const SCALARS = ["string", "number", "boolean", "null"];
+
+/**
+ * Whether `o`, at JSON Pointer `at`, is the union z.json() writes: each JSON
+ * scalar type with nothing else, an array of itself and an object of itself
+ * (a `$ref` back to `at`), which between them accept any JSON value.
+ */
+function isJsonUnion(o: Record<string, unknown>, at: string): boolean {
+  const members = o.anyOf;
+  if (!Array.isArray(members) || !only(o, ["anyOf", "$defs"])) return false;
+  const self = `#${at}`;
+  const typed = (t: string) => members.filter((m): m is Record<string, unknown> => isNode(m) && m.type === t);
+  const anyKey = (m: Record<string, unknown>) =>
+    !Object.hasOwn(m, "propertyNames") || (isNode(m.propertyNames) && m.propertyNames.type === "string" && only(m.propertyNames, ["type"]));
+  return (
+    SCALARS.every((t) => typed(t).some((m) => only(m, ["type"]))) &&
+    typed("array").some((m) => only(m, ["type", "items"]) && refTo(m.items, self)) &&
+    typed("object").some(
+      (m) => only(m, ["type", "propertyNames", "additionalProperties"]) && anyKey(m) && refTo(m.additionalProperties, self),
+    )
+  );
+}
+
 /**
  * The JSON Pointers of the places in a JSON Schema that accept any value:
- * `true`, or an object with no keyword but annotations, such as `{}` or the
- * `{ "writeOnly": true }` that z.unknown().meta({ writeOnly: true }) writes.
- * z.any(), z.unknown(), a loose object's or a catchall's
- * additionalProperties and a record of unknowns all describe so.
+ * - `true`, or an object with no keyword but annotations, such as `{}` or
+ *   the `{ "writeOnly": true }` that z.unknown().meta({ writeOnly: true })
+ *   writes. z.any(), z.unknown(), a loose object's or a catchall's
+ *   additionalProperties and a record of unknowns all describe so.
+ * - an object schema (`"type": "object"`) with no additionalProperties,
+ *   which JSON Schema reads as `{}`: what z.object() writes, since zod
+ *   strips a key it does not know rather than refusing it. The pointer
+ *   names the missing additionalProperties. So every object in an input is
+ *   a z.strictObject (or a record), as every contributed input is today.
+ * - the union z.json() writes (isJsonUnion above), at the pointer of the
+ *   union: at the root, or in $defs when it is a field. It is matched in
+ *   the form zod 4.6 writes, which input-spec.test.ts pins; if a zod
+ *   upgrade writes another, that test fails, and this needs the new form.
  *
  * Only schema positions are visited: each value of properties,
  * patternProperties and $defs; items and each prefixItems, anyOf, oneOf and
@@ -73,9 +112,11 @@ export function unconstrainedNodes(schema: unknown): string[] {
       if (refuse) found.push(at);
       return;
     }
-    if (node === null || typeof node !== "object" || Array.isArray(node)) return;
-    const o = node as Record<string, unknown>;
+    if (!isNode(node)) return;
+    const o = node;
     if (refuse && Object.keys(o).every((k) => ANNOTATIONS.has(k))) found.push(at);
+    if (refuse && o.type === "object" && !Object.hasOwn(o, "additionalProperties")) found.push(`${at}/additionalProperties`);
+    if (refuse && isJsonUnion(o, at)) found.push(at);
     for (const key of ["properties", "patternProperties", "$defs"]) {
       const map = o[key];
       if (map !== null && typeof map === "object" && !Array.isArray(map))

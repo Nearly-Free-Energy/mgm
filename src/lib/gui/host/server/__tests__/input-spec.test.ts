@@ -51,13 +51,28 @@ describe("unconstrainedNodes", () => {
     expect(nodes(z.strictObject({ a: z.unknown().meta({ id: "Loose" }) }))).toEqual(["/$defs/Loose"]);
   });
 
+  it("finds an object that takes keys it does not name, which z.object() writes, at its missing additionalProperties", () => {
+    expect(nodes(z.object({}))).toEqual(["/additionalProperties"]);
+    expect(nodes(z.object({ a: z.string() }))).toEqual(["/additionalProperties"]);
+    expect(nodes(z.strictObject({ a: z.object({ b: z.string() }).optional() }))).toEqual(["/properties/a/additionalProperties"]);
+    expect(nodes(z.union([z.string(), z.object({})]))).toEqual(["/anyOf/1/additionalProperties"]);
+    expect(unconstrainedNodes({ type: "object", properties: { a: { type: "string" } } })).toEqual(["/additionalProperties"]);
+  });
+
+  // Matched in the form zod writes it: if a zod upgrade writes another, this fails (unconstrainedNodes says so).
+  it("finds the union z.json() writes, which takes any JSON value, at the union", () => {
+    expect(nodes(z.json())).toEqual([""]);
+    expect(nodes(z.strictObject({ data: z.json() }))).toEqual(["/$defs/__schema0"]);
+    expect(nodes(z.strictObject({ data: z.json().nullable() }))).toEqual(["/$defs/__schema0"]);
+  });
+
   it("finds `true` in a schema position", () => {
     expect(unconstrainedNodes(true)).toEqual([""]);
     expect(unconstrainedNodes({ type: "object", additionalProperties: true })).toEqual(["/additionalProperties"]);
     expect(unconstrainedNodes({ type: "array", items: true })).toEqual(["/items"]);
     expect(unconstrainedNodes({ oneOf: [{ type: "string" }, true] })).toEqual(["/oneOf/1"]);
     expect(unconstrainedNodes({ allOf: [{}] })).toEqual(["/allOf/0"]);
-    expect(unconstrainedNodes({ type: "object", patternProperties: { "^x": {} } })).toEqual(["/patternProperties/^x"]);
+    expect(unconstrainedNodes({ type: "object", patternProperties: { "^x": {} }, additionalProperties: false })).toEqual(["/patternProperties/^x"]);
   });
 
   it("passes empty keyword maps, never, closed objects and lists, and refinements", () => {
@@ -68,8 +83,18 @@ describe("unconstrainedNodes", () => {
     expect(nodes(z.record(z.string(), z.string()))).toEqual([]);
     expect(nodes(z.tuple([z.string()]))).toEqual([]);
     expect(nodes(z.strictObject({ n: z.string() }).refine(() => true))).toEqual([]);
-    expect(nodes(z.json())).toEqual([]);
+    expect(nodes(z.record(z.enum(["a", "b"]), z.string()))).toEqual([]);
+    expect(nodes(z.strictObject({ a: z.string() }).nullable())).toEqual([]);
     expect(unconstrainedNodes({ type: "object", additionalProperties: false })).toEqual([]);
+  });
+
+  it("passes a union of every JSON type that does not take every value", () => {
+    const scalars = [z.string(), z.number(), z.boolean(), z.null()] as const;
+    expect(nodes(z.union([...scalars, z.array(z.string()), z.record(z.string(), z.string())]))).toEqual([]);
+    expect(nodes(z.union([z.string().max(9), z.number(), z.boolean(), z.null()]))).toEqual([]);
+    const json = z.toJSONSchema(z.json(), { io: "input" }) as { anyOf: Record<string, unknown>[] };
+    const keyed = { ...json, anyOf: json.anyOf.map((m) => (m.type === "object" ? { ...m, propertyNames: { type: "string", enum: ["a"] } } : m)) };
+    expect(unconstrainedNodes(keyed)).toEqual([]);
   });
 
   it("visits what the schema under not holds, though not its own empty schema", () => {

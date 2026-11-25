@@ -15,8 +15,9 @@ import "server-only";
  * levels; path segments against params and bindings; referenced entity kinds;
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
  * describe, with no part that accepts any value (unconstrainedNodes in
- * ./input-spec.ts), since the host serves that schema (describeInput) and
- * an empty one describes nothing, each refusal naming the action's id;
+ * ./input-spec.ts: so strict objects, and no z.json()), since the host
+ * serves that schema (describeInput) and an empty one describes nothing,
+ * each refusal naming the action's id;
  * examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
  * assistant reading of a view or watcher that is not on the list, of views

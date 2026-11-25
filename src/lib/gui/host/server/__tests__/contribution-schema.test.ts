@@ -318,6 +318,8 @@ describe("parseContribution", () => {
     ["an input that accepts any value", (c) => (c.actions[0].input = z.unknown()), ["actions", 0, "input"], "billing.create-period: the input accepts any value at its root; describe what it takes"],
     ["an input field that accepts any value", (c) => (c.actions[0].input = z.strictObject({ note: z.unknown().meta({ writeOnly: true }) })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /properties/note; describe what it takes"],
     ["a loose input object", (c) => (c.actions[0].input = z.looseObject({ note: z.string() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
+    ["an input object that is not strict", (c) => (c.actions[0].input = z.object({ note: z.string() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
+    ["an input field of any JSON", (c) => (c.actions[0].input = z.strictObject({ data: z.json() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /$defs/__schema0; describe what it takes"],
     ["an input with a catchall of unknowns", (c) => (c.actions[0].input = z.strictObject({ note: z.string() }).catchall(z.unknown())), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
     ["an input list of unknowns", (c) => (c.actions[0].input = z.strictObject({ tiers: z.array(z.unknown()) })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /properties/tiers/items; describe what it takes"],
     // Examples
