@@ -1,9 +1,12 @@
 /**
- * The part of the `metering.site-day@1` ext this renderer reads, as a narrow
+ * The part of the `metering.site-day@2` ext this renderer reads, as a narrow
  * structural type. The host has already parsed the ext strictly against its
  * schema (SiteDayExt in src/lib/metering/surface/site-day-ext.ts, which a GUI
  * package may not import), so this only checks the fields it uses are there.
  * Times arrive as ISO instants and are read here into milliseconds.
+ *
+ * A problem's `reason` is not read: the server picks the title, message,
+ * fix and retry for each reason, and this renderer shows those.
  */
 import type { Json, ViewModel } from "@/lib/gui/contract";
 

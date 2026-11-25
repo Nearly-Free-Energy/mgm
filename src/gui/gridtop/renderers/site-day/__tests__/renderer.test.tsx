@@ -1,5 +1,5 @@
 /**
- * Gridtop's renderer for `metering.site-day@1`: when Gridtop picks it, what
+ * Gridtop's renderer for `metering.site-day@2`: when Gridtop picks it, what
  * it draws around the tiles, how it writes, and that inside the shell
  * nothing is drawn twice.
  */
@@ -52,22 +52,23 @@ const CANCELLED: ActionResult = { type: "result", ok: false, status: 0, code: "c
 const versioned = (schema: `${string}.${string}@${number}`): ViewModel => ({ ...dayModel(), ext: { ...dayModel().ext!, schema } });
 
 describe("Gridtop's site-day renderer", () => {
-  it("is registered for version 1 in the table the window bar checks, which marks it as placing its own controls", () => {
+  it("is registered for version 2 in the table the window bar checks, which marks it as placing its own controls", () => {
     expect(GridtopGui.renderers).toBe(GRIDTOP_RENDERERS);
-    expect(GRIDTOP_RENDERERS["metering.site-day"].reads).toEqual([1]);
+    expect(GRIDTOP_RENDERERS["metering.site-day"].reads).toEqual([2]);
     expect(drawnBespoke(dayModel())).toBe(true);
-    expect(drawnBespoke(versioned("metering.site-day@2"))).toBe(false);
+    expect(drawnBespoke(versioned("metering.site-day@1"))).toBe(false);
+    expect(drawnBespoke(versioned("metering.site-day@3"))).toBe(false);
     expect(drawnBespoke({ ...dayModel(), ext: undefined })).toBe(false);
     expect(drawnBespoke({ ...dayModel(), view: "billing.periods" })).toBe(false);
     // Drawn bespoke too, but on its own page it leaves its controls to the window bar.
     expect(drawnBespoke({ view: "billing.savings", ext: { schema: "billing.savings@1", data: {} } })).toBe(false);
   });
 
-  it("draws version 1 itself, once its chunk loads, and leaves @2 or no ext to the kit's view", async () => {
+  it("draws version 2 itself, once its chunk loads, and leaves @1, @3 or no ext to the kit's view", async () => {
     unmount = (await renderInKit(<ModelView gui={GridtopGui} model={dayModel()} />)).unmount;
     await waitFor(() => expect(document.querySelector("[data-tile='solar']")).not.toBeNull());
     unmount();
-    for (const model of [versioned("metering.site-day@2"), { ...dayModel(), ext: undefined }]) {
+    for (const model of [versioned("metering.site-day@1"), versioned("metering.site-day@3"), { ...dayModel(), ext: undefined }]) {
       unmount = (await renderInKit(<ModelView gui={GridtopGui} model={model} />)).unmount;
       expect(document.querySelector("[data-tile]")).toBeNull();
       expect(document.querySelector("[data-gui-kind='metrics']")).not.toBeNull();
@@ -77,7 +78,7 @@ describe("Gridtop's site-day renderer", () => {
   });
 
   it("draws a model whose ext it cannot read with the kit's view", async () => {
-    await draw({ ...dayModel(), ext: { schema: "metering.site-day@1", data: { state: "day" } } });
+    await draw({ ...dayModel(), ext: { schema: "metering.site-day@2", data: { state: "day" } } });
     expect(document.querySelector("[data-tile]")).toBeNull();
     expect(document.querySelector("[data-gui-kind='metrics']")).not.toBeNull();
   });

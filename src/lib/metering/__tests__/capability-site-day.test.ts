@@ -408,13 +408,13 @@ describe("MeteringCapability.getSiteDay", () => {
   });
 
   describe("provider and devices", () => {
-    it("answers 503 METERING_CONFIGURATION when the provider has no getSiteSamples", async () => {
+    it("answers 503 metering_site_samples_unsupported when the provider has no getSiteSamples", async () => {
       const { capability } = setup({ getSiteSamples: null });
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
       expect(result).toMatchObject({
         ok: false,
         status: 503,
-        code: "METERING_CONFIGURATION",
+        code: "metering_site_samples_unsupported",
       });
     });
 
@@ -1201,10 +1201,10 @@ describe("MeteringCapability.getSiteDays", () => {
   });
 
   describe("provider and devices", () => {
-    it("answers 503 METERING_CONFIGURATION when the provider has no getSiteSamples", async () => {
+    it("answers 503 metering_site_samples_unsupported when the provider has no getSiteSamples", async () => {
       const { capability } = setup({ getSiteSamples: null });
       const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
-      expect(result).toMatchObject({ ok: false, status: 503, code: "METERING_CONFIGURATION" });
+      expect(result).toMatchObject({ ok: false, status: 503, code: "metering_site_samples_unsupported" });
     });
 
     it("answers 404 metering_no_site_devices without a battery or grid meter", async () => {

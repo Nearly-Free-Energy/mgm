@@ -700,11 +700,15 @@ export class MeteringCapability implements MeteringCapabilityContract {
         message: "Metering provider is not available.",
       };
     }
+    // A source that cannot read site samples at all, told apart by its code
+    // from one that is not set up (METERING_CONFIGURATION): setting it up
+    // again changes nothing. The status stays the 503 it was before the case
+    // had a code of its own; the code, not the status, says which this is.
     if (!provider.getSiteSamples) {
       return {
         ok: false as const,
         status: 503 as const,
-        code: "METERING_CONFIGURATION",
+        code: "metering_site_samples_unsupported",
         message: "This metering source does not provide site samples.",
       };
     }

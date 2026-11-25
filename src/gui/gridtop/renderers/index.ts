@@ -18,7 +18,7 @@ export const GRIDTOP_RENDERERS = {
   "billing.period-review": { reads: [1], Component: PeriodReviewRenderer },
   "billing.savings": { reads: [1], Component: SavingsRenderer },
   "billing.send-queue": { reads: [1], Component: SendQueueRenderer },
-  "metering.site-day": { reads: [1], Component: SiteDayRenderer },
+  "metering.site-day": { reads: [2], Component: SiteDayRenderer },
   "tenant.usage-month": { reads: [1], Component: UsageMonthRenderer },
   "tenant.usage-day": { reads: [1], Component: UsageDayRenderer },
 } satisfies NonNullable<GuiPlugin["renderers"]>;

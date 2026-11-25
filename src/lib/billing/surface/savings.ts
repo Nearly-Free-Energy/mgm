@@ -42,9 +42,10 @@ export function savingsRefusal({ status, code }: { status: number; code: string 
 /**
  * The failures the `metering.site-day` view above this one already shows
  * with what to do about them: no battery or grid meter, every 409 (Metering
- * off, mixed synthetic and real edges), and no usable or a rejected OpenEMS
- * connection, which the day links to Setup > OpenEMS Backend (siteDayProblem
- * in src/lib/metering/surface/site-day-model.ts). Saying it twice is noise,
+ * off, mixed synthetic and real edges), no usable or a rejected OpenEMS
+ * connection, which the day links to Setup > OpenEMS Backend, and a metering
+ * source that does not read site samples at all (siteDayProblem in
+ * src/lib/metering/surface/site-day-model.ts). Saying it twice is noise,
  * so the savings draw nothing. A passing source failure still refuses here:
  * the range read can fail when the day's read did not. If that view stops
  * showing one of these, or getSiteDays gains another 409, revisit.
@@ -53,7 +54,8 @@ const explainedAbove = (f: { status: number; code: string }) =>
   f.code === "metering_no_site_devices" ||
   f.status === 409 ||
   f.code === "METERING_CONFIGURATION" ||
-  f.code === "METERING_UNAUTHORIZED";
+  f.code === "METERING_UNAUTHORIZED" ||
+  f.code === "metering_site_samples_unsupported";
 
 const ready = (model: LoadedModel<"metrics">) => ({ ok: true, model }) as const;
 

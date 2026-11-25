@@ -22,6 +22,7 @@ const NAMES = [
   "mixed edges",
   "no OpenEMS connection",
   "a day to retry, with the time zone notice",
+  "a metering source with no site readings",
 ];
 const EXAMPLES = SITE_DAY_EXAMPLES.map((model, i) => [NAMES[i], model] as const);
 const text = () => document.body.textContent ?? "";
@@ -39,9 +40,9 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("the site-day examples in Gridtop", () => {
-  it("covers each state: three generated days, no site devices, and three problems", () => {
+  it("covers each state: three generated days, no site devices, and four problems", () => {
     expect(SITE_DAY_EXAMPLES.map((m) => (m.ext?.data as { state: string }).state)).toEqual([
-      "day", "day", "day", "no-site-devices", "problem", "problem", "problem",
+      "day", "day", "day", "no-site-devices", "problem", "problem", "problem", "problem",
     ]);
   });
 
@@ -78,6 +79,18 @@ describe("the site-day examples in Gridtop", () => {
     expect(screen.getByRole("link", { name: "Previous day" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(document.querySelector("[data-tile]")).toBeNull();
+    cleanup();
+  });
+
+  it("draws a source with no site readings with its own copy, and neither a fix nor Try again", async () => {
+    const model = SITE_DAY_EXAMPLES[7];
+    await draw(model);
+    const data = model.ext?.data as { title: string; message: string };
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe(data.title);
+    expect(text()).toContain(data.message);
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /OpenEMS connection/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Previous day" })).toBeTruthy();
     cleanup();
   });
 
