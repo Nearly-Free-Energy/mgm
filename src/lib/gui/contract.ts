@@ -553,10 +553,13 @@ export interface Confirmation {
 
 /**
  * What the host checks before an action can be sent, after A1 on #133.
- * "installed": the action's route is part of this release. "enabled": its
- * plugin is on for the organization. "configured": what the action needs is
- * set up. "healthy": what the host asked could answer. "authorized": the
- * person may send it. "state": the action's own available() for the entity.
+ * "installed": the action's route is part of this release. "enabled": the
+ * plugin gate lets the action through for the organization, because its
+ * plugin is on or because its route takes it while the plugin is off (the
+ * action declares whilePluginOff: "enabled"), so it does not by itself say
+ * the plugin is on. "configured": what the action needs is set up.
+ * "healthy": what the host asked could answer. "authorized": the person may
+ * send it. "state": the action's own available() for the entity.
  */
 export type AvailabilityCheck = "installed" | "enabled" | "configured" | "healthy" | "authorized" | "state";
 /**
