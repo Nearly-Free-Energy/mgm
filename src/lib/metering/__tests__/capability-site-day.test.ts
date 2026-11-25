@@ -361,17 +361,60 @@ describe("MeteringCapability.getSiteDay", () => {
       );
       if (!result.ok) throw new Error("expected a site day");
       expect(result.data.timezone).toBe("UTC");
+      expect(result.data.read.zone).toBe("fallback");
+    });
+
+    it("reports the microgrid's stored zone as the zone read", async () => {
+      const { capability } = setup();
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      if (!result.ok) throw new Error("expected a site day");
+      expect(result.data.read.zone).toBe("microgrid");
+    });
+
+    it("reports a stored UTC as the microgrid's zone, not the fallback", async () => {
+      const { capability } = setup({ repo: { getMicrogridTimezone: async () => "UTC" } });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: UTC_TODAY });
+      if (!result.ok) throw new Error("expected a site day");
+      expect(result.data.read.zone).toBe("microgrid");
+    });
+
+    it("answers 503 metering_timezone_unavailable, not the UTC fallback, when the zone cannot be read", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const getManagedDevices = vi.fn(async () => SITE_DEVICES);
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getMicrogridTimezone: async () => {
+            throw new Error("Could not read the microgrid's timezone: timeout");
+          },
+          getManagedDevices,
+        },
+      });
+      // A day that has started under UTC, so a fallback would have read it.
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: UTC_TODAY });
+      expect(result).toEqual({
+        ok: false,
+        status: 503,
+        code: "metering_timezone_unavailable",
+        message: "This microgrid's time zone could not be read. Try again shortly.",
+      });
+      expect(getManagedDevices).not.toHaveBeenCalled();
+      expect(getSiteSamples).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("MGM microgrid timezone could not be read", {
+        name: "Error",
+        message: "Could not read the microgrid's timezone: timeout",
+      });
+      consoleSpy.mockRestore();
     });
   });
 
   describe("provider and devices", () => {
-    it("answers 503 METERING_CONFIGURATION when the provider has no getSiteSamples", async () => {
+    it("answers 503 metering_site_samples_unsupported when the provider has no getSiteSamples", async () => {
       const { capability } = setup({ getSiteSamples: null });
       const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
       expect(result).toMatchObject({
         ok: false,
         status: 503,
-        code: "METERING_CONFIGURATION",
+        code: "metering_site_samples_unsupported",
       });
     });
 
@@ -543,6 +586,29 @@ describe("MeteringCapability.getSiteDay", () => {
       expect(getSiteSamples).not.toHaveBeenCalled();
     });
 
+    it("answers 503 metering_site_devices_unavailable, not metering_no_site_devices, when the devices cannot be read", async () => {
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getManagedDevices: async () => {
+            throw new Error("Could not read devices: timeout");
+          },
+        },
+      });
+      const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+      expect(result).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "metering_site_devices_unavailable",
+      });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+      expect(consoleSpy).toHaveBeenCalledWith("MGM site devices could not be read", {
+        name: "Error",
+        message: "Could not read devices: timeout",
+      });
+      consoleSpy.mockRestore();
+    });
+
     it("answers 503, not a site without tenant meters, when the meter links cannot be read", async () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { capability, getSiteSamples } = setup({
@@ -701,6 +767,61 @@ describe("MeteringCapability.getSiteDay", () => {
         status,
         code,
         message: "provider said no",
+      });
+    });
+
+    describe("unreadable timestamps", () => {
+      it.each([0, 3])("reports %i timestamps the provider dropped as unreadable", async (count) => {
+        const { capability } = setup({
+          getSiteSamples: async () => ({ ...emptySamples(), unreadableTimestamps: count }),
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        if (!result.ok) throw new Error("expected a site day");
+        expect(result.data.read.unreadableTimestamps).toBe(count);
+      });
+
+      it("reports one count for the whole read, the day before included", async () => {
+        const requests: SiteSamplesRequest[] = [];
+        const { capability } = setup({
+          getSiteSamples: async (request) => {
+            requests.push(request);
+            return { ...emptySamples(), unreadableTimestamps: 4 };
+          },
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        if (!result.ok) throw new Error("expected a site day");
+        expect(requests.map((r) => [r.startDate, r.endDate])).toEqual([["2026-10-31", "2026-11-01"]]);
+        expect(result.data.read.unreadableTimestamps).toBe(4);
+      });
+
+      it("reports the count as not counted, not 0, when the provider does not count them", async () => {
+        const { capability } = setup({
+          providerName: "synthetic",
+          synthetic: true,
+          selectProvider: async () => "synthetic",
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        if (!result.ok) throw new Error("expected a site day");
+        expect(result.data.read).toEqual({ zone: "microgrid", unreadableTimestamps: null });
+      });
+
+      it("answers the provider's refusal of mostly unreadable timestamps with its own code, as 503", async () => {
+        const { capability } = setup({
+          getSiteSamples: async () => {
+            throw new MeteringError(
+              "OpenEMS returned this day's data in a form MGM could not read. Try again shortly.",
+              "METERING_UNREADABLE_TIMESTAMPS",
+              502
+            );
+          },
+        });
+        const result = await capability.getSiteDay({ microgrid_id: MG_ID, date: "2026-11-01" });
+        expect(result).toEqual({
+          ok: false,
+          status: 503,
+          code: "METERING_UNREADABLE_TIMESTAMPS",
+          message: "OpenEMS returned this day's data in a form MGM could not read. Try again shortly.",
+        });
       });
     });
 
@@ -1080,10 +1201,10 @@ describe("MeteringCapability.getSiteDays", () => {
   });
 
   describe("provider and devices", () => {
-    it("answers 503 METERING_CONFIGURATION when the provider has no getSiteSamples", async () => {
+    it("answers 503 metering_site_samples_unsupported when the provider has no getSiteSamples", async () => {
       const { capability } = setup({ getSiteSamples: null });
       const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
-      expect(result).toMatchObject({ ok: false, status: 503, code: "METERING_CONFIGURATION" });
+      expect(result).toMatchObject({ ok: false, status: 503, code: "metering_site_samples_unsupported" });
     });
 
     it("answers 404 metering_no_site_devices without a battery or grid meter", async () => {
@@ -1127,6 +1248,21 @@ describe("MeteringCapability.getSiteDays", () => {
       const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
       expect(result).toMatchObject({ ok: false, status: 503, code: "metering_site_devices_unavailable" });
       expect(getSiteSamples).not.toHaveBeenCalled();
+    });
+
+    it("answers 503 metering_timezone_unavailable, not the UTC fallback, when the zone cannot be read", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const { capability, getSiteSamples } = setup({
+        repo: {
+          getMicrogridTimezone: async () => {
+            throw new Error("db down");
+          },
+        },
+      });
+      const result = await capability.getSiteDays(range("2026-11-01", "2026-11-02"));
+      expect(result).toMatchObject({ ok: false, status: 503, code: "metering_timezone_unavailable" });
+      expect(getSiteSamples).not.toHaveBeenCalled();
+      vi.mocked(console.error).mockRestore();
     });
   });
 

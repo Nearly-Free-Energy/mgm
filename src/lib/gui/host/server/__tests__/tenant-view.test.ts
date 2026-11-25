@@ -53,6 +53,7 @@ const editTenant: RegisteredAction = {
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
+    repeat: "safe",
   } as unknown as ActionDef,
 };
 

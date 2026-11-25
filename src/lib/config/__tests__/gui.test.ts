@@ -63,8 +63,8 @@ describe("readGuiName", () => {
     const stale: GuiMeta = {
       name: "stale",
       title: "Stale",
-      version: "0.2.0",
-      contract: "^0.2",
+      version: "0.3.0",
+      contract: "^0.3",
       styles: "./styles.css",
       dependencies: [],
     };
@@ -72,7 +72,7 @@ describe("readGuiName", () => {
     vi.doMock("@/gui/meta", () => ({ GUI_META: { stale } }));
     const fresh = await import("../gui");
     expect(() => fresh.readGuiName({ MGM_GUI: "stale" })).toThrow(
-      `MGM_GUI selects stale 0.2.0, which supports GUI contract ^0.2; this build provides ${GUI_CONTRACT}.`,
+      `MGM_GUI selects stale 0.3.0, which supports GUI contract ^0.3; this build provides ${GUI_CONTRACT}.`,
     );
   });
 });

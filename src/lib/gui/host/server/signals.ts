@@ -42,7 +42,7 @@ import type { HostOutcome } from "./view";
 export const SIGNAL_BUDGET_MS = 1_500;
 /** How long one status loader may take before its item is left out. */
 export const STATUS_BUDGET_MS = 800;
-/** How many signals the answer carries; `count` says how many there were. */
+/** How many signals the answer carries; `count` says how many there were, and `attention` how many of those warn or are critical. */
 export const MAX_TOP = 20;
 /** The longest one signal may be, as JSON. */
 const MAX_SIGNAL_CHARS = 4_000;
@@ -243,7 +243,9 @@ async function collectOrganizationSignals(ctx: HostContext, org: string): Promis
     }
   });
   const all = (await checkProposals(ctx, org, snapshot, found)).sort(order);
-  const signals = { type: "signals", org, count: all.length, top: all.slice(0, MAX_TOP), checked, unchecked };
+  // Counted over every signal, not `top`: the badge's number (Signals.attention) must not stop at MAX_TOP.
+  const attention = all.filter((s) => s.severity !== "info").length;
+  const signals = { type: "signals", org, count: all.length, attention, top: all.slice(0, MAX_TOP), checked, unchecked };
   const parsed = parseOrFail(signalsSchema, signals, "signals");
   return parsed.ok
     ? { ok: true, value: parsed.value }

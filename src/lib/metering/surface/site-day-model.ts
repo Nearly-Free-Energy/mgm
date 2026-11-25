@@ -5,12 +5,12 @@
  * (computeSiteDay's output), today's date in the microgrid's zone, the
  * locale and the request's Fmt. Every string the view shows is built here,
  * so any GUI can print the text as given. The chart and the evening strip,
- * which tiles cannot carry, go in the `metering.site-day@1` ext
+ * which tiles cannot carry, go in the `metering.site-day@2` ext
  * (./site-day-ext.ts) for a renderer that draws them.
  *
  * Three states, each with the day navigation: the day itself, a microgrid
- * with no battery or grid meter registered, and a day the metering source
- * could not read (a problem, with the link to its fix or another try). Each
+ * with no battery or grid meter registered, and a day that could not be read
+ * (a problem, with its reason and the link to its fix or another try). Each
  * carries the time zone nudge's warning when the microgrid's zone needs it.
  */
 import { formatRate } from "@/components/format/currency";
@@ -20,6 +20,7 @@ import { markSynthetic } from "@/lib/gui/mark-synthetic";
 import type { Fmt, LoadedModel } from "@/lib/gui/surface";
 import { addDaysToDateKey } from "@/lib/timezone/day-key";
 import type { TimezoneNudgeCopy } from "@/lib/timezone/nudge";
+import type { MeteringErrorCode } from "../errors";
 import {
   EVENING_START_HOUR,
   GRID_PRESENT_MIN_V,
@@ -32,7 +33,7 @@ import {
 import type { SiteDayExtData } from "./site-day-ext";
 
 /** The ext this model carries; its shape is SiteDayExt in ./site-day-ext.ts. */
-export const SITE_DAY_EXT_SCHEMA = "metering.site-day@1" as const;
+export const SITE_DAY_EXT_SCHEMA = "metering.site-day@2" as const;
 
 /** Every tile and series key the view emits. */
 export const SITE_DAY_KEYS = [
@@ -47,11 +48,48 @@ export const TIMEZONE_NOTICE_MAX = 600;
 export const TIMEZONE_LINK = "metering.set-timezone";
 
 /**
- * A day the metering source could not read: fixed copy, never the source's
- * message, and where the fix is. A null link means there is nothing to set
- * up, only another try.
+ * Why the day could not be read, as a closed set of stable codes a GUI or a
+ * test can tell apart without reading the copy. The `metering.site-day@2`
+ * ext carries one on every problem (./site-day-ext.ts); adding a reason is a
+ * new shape, `@3`.
+ */
+export const SITE_DAY_PROBLEM_REASONS = [
+  /** The microgrid mixes synthetic and real edges. */
+  "mixed_edges",
+  /** No usable connection to the metering source is set up. */
+  "not_configured",
+  /** The metering source refused the stored connection settings. */
+  "credentials_rejected",
+  /** The metering source cannot read a site's battery and grid at all; setting it up again changes nothing. */
+  "unsupported",
+  /** The metering source did not answer. */
+  "upstream_unavailable",
+  /** The metering source sent data MGM could not use. */
+  "invalid_data",
+  /** Most of the times the metering source sent for the day could not be read. */
+  "unreadable_timestamps",
+  /** MGM could not read the microgrid's meters from its own database. */
+  "site_devices_unavailable",
+  /** MGM could not read the microgrid's time zone from its own database. */
+  "zone_unavailable",
+  /**
+   * The capability refused the date as outside the days it reads: it worked
+   * out today in another zone than the loader did, or the date was not a day.
+   */
+  "date_out_of_range",
+  /** The day's samples could not be worked out. */
+  "day_failed",
+] as const;
+
+export type SiteDayProblemReason = (typeof SITE_DAY_PROBLEM_REASONS)[number];
+
+/**
+ * A day the metering source could not read: a stable reason, fixed copy,
+ * never the source's message, and where the fix is. A null link means there
+ * is nothing to set up, only another try or another day.
  */
 export type SiteDayProblem = {
+  reason: SiteDayProblemReason;
   tone: "warning" | "danger";
   title: string;
   message: string;
@@ -69,6 +107,7 @@ const NOT_LOADED = "Could not load this day's operations";
 
 export const SITE_DAY_PROBLEMS = {
   mixed: {
+    reason: "mixed_edges",
     tone: "warning",
     title: "Synthetic and real edges are mixed",
     message: "This microgrid mixes synthetic and real edges; keep synthetic data in its own microgrid.",
@@ -76,6 +115,7 @@ export const SITE_DAY_PROBLEMS = {
     retry: false,
   },
   noConnection: {
+    reason: "not_configured",
     tone: "danger",
     title: NOT_LOADED,
     message: "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.",
@@ -83,13 +123,65 @@ export const SITE_DAY_PROBLEMS = {
     retry: false,
   },
   rejected: {
+    reason: "credentials_rejected",
     tone: "danger",
     title: NOT_LOADED,
     message: "OpenEMS did not accept this microgrid's connection settings. Check them under Setup → OpenEMS Backend.",
     link: { label: "Check the OpenEMS connection", page: "openems-backend" },
     retry: false,
   },
+  // Nothing to set up and nothing to retry: the source this microgrid reads
+  // from has no site readings to give.
+  unsupported: {
+    reason: "unsupported",
+    tone: "warning",
+    title: "Operations are not available for this microgrid",
+    message: "This microgrid's metering source does not provide the battery and grid readings this view needs.",
+    link: null,
+    retry: false,
+  },
   unavailable: {
+    reason: "upstream_unavailable",
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "The metering source did not answer for this day. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  invalidData: {
+    reason: "invalid_data",
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "The metering source sent this day's data in a form MGM could not use. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  unreadableTimestamps: {
+    reason: "unreadable_timestamps",
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "The metering source sent times for this day that MGM could not read. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  siteDevicesUnavailable: {
+    reason: "site_devices_unavailable",
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This microgrid's meters could not be read right now. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  zoneUnavailable: {
+    reason: "zone_unavailable",
+    tone: "danger",
+    title: NOT_LOADED,
+    message: "This microgrid's time zone could not be read right now. Try again shortly.",
+    link: null,
+    retry: true,
+  },
+  dateOutOfRange: {
+    reason: "date_out_of_range",
     tone: "danger",
     title: NOT_LOADED,
     message: "This day's operations could not be loaded right now. Try again shortly.",
@@ -99,6 +191,7 @@ export const SITE_DAY_PROBLEMS = {
   // The day's samples could not be worked out. Reading them again fails the
   // same way, so the picker is the way on, as the capability's own copy says.
   dayFailed: {
+    reason: "day_failed",
     tone: "danger",
     title: NOT_LOADED,
     message: "This day's operations could not be worked out. Try another day.",
@@ -108,28 +201,56 @@ export const SITE_DAY_PROBLEMS = {
 } as const satisfies Record<string, SiteDayProblem>;
 
 /**
- * The metering source's failure as a problem the view shows, or null when
- * the failure is not the source's. Its 401 or 403 is OpenEMS refusing the
- * stored settings, not the person, so it is a problem rather than a refusal.
+ * The problem for each code a MeteringError carries (../errors.ts), so a new
+ * code fails to compile until it has one. Configuration is the one code
+ * whose problem depends on the status.
+ */
+const SOURCE_PROBLEMS: Record<MeteringErrorCode, (status: number) => SiteDayProblem> = {
+  // The synthetic provider's refusal of a microgrid with synthetic and real
+  // edges (src/lib/metering/fixture/plugin.ts) is the only 409; if its
+  // status or code changes, revisit.
+  METERING_CONFIGURATION: (status) => (status === 409 ? SITE_DAY_PROBLEMS.mixed : SITE_DAY_PROBLEMS.noConnection),
+  // OpenEMS refusing the stored settings, not the person, so a problem rather than a refusal.
+  METERING_UNAUTHORIZED: () => SITE_DAY_PROBLEMS.rejected,
+  METERING_UNAVAILABLE: () => SITE_DAY_PROBLEMS.unavailable,
+  METERING_INVALID_DATA: () => SITE_DAY_PROBLEMS.invalidData,
+  METERING_UNREADABLE_TIMESTAMPS: () => SITE_DAY_PROBLEMS.unreadableTimestamps,
+};
+
+/**
+ * getSiteDay's own failures after the plugin gate, in
+ * src/lib/metering/capability.ts: a provider with no site reader
+ * (openSiteReader), reading the site's devices (openSiteReader) or the
+ * microgrid's zone (openSiteQuery), which may pass, and computing the day
+ * (siteReadFailed), which fails the same way each time. A date the
+ * capability refuses (metering_invalid_date) can only mean it worked out
+ * today in another zone than the loader, which already clamped the date, so
+ * it is a passing failure too. None is the person's or the gate's, so the
+ * day keeps its picker. site-day-loader.test.ts reads those methods for the
+ * codes they answer and fails while one has no problem or refusal; if
+ * getSiteDay gains another such failure or renames these, add it here.
+ */
+const CAPABILITY_PROBLEMS: Readonly<Record<string, SiteDayProblem>> = {
+  metering_site_samples_unsupported: SITE_DAY_PROBLEMS.unsupported,
+  metering_site_devices_unavailable: SITE_DAY_PROBLEMS.siteDevicesUnavailable,
+  metering_timezone_unavailable: SITE_DAY_PROBLEMS.zoneUnavailable,
+  metering_invalid_date: SITE_DAY_PROBLEMS.dateOutOfRange,
+  metering_site_day_failed: SITE_DAY_PROBLEMS.dayFailed,
+};
+
+const own = (o: object, key: string) => Object.prototype.hasOwnProperty.call(o, key);
+const isMeteringErrorCode = (code: string): code is MeteringErrorCode => own(SOURCE_PROBLEMS, code);
+
+/**
+ * The failure as a problem the view shows, or null when it is not the
+ * source's or the day's and the view is refused instead. A METERING_ code
+ * this view does not know yet reads as the source not answering.
  */
 export function siteDayProblem(failure: { status: number; code: string }): SiteDayProblem | null {
   const { status, code } = failure;
-  // The synthetic provider's refusal of a microgrid with synthetic and real
-  // edges (src/lib/metering/fixture/plugin.ts); if its status or code changes, revisit.
-  if (code === "METERING_CONFIGURATION") return status === 409 ? SITE_DAY_PROBLEMS.mixed : SITE_DAY_PROBLEMS.noConnection;
-  if (code === "METERING_UNAUTHORIZED") return SITE_DAY_PROBLEMS.rejected;
+  if (isMeteringErrorCode(code)) return SOURCE_PROBLEMS[code](status);
+  if (own(CAPABILITY_PROBLEMS, code)) return CAPABILITY_PROBLEMS[code];
   if (code.startsWith("METERING_")) return SITE_DAY_PROBLEMS.unavailable;
-  // getSiteDay's own failures after the plugin gate, in
-  // src/lib/metering/capability.ts: reading the site's devices
-  // (openSiteReader), which may pass, and computing the day
-  // (siteReadFailed), which fails the same way each time. A date the
-  // capability refuses (metering_invalid_date) can only mean it worked out
-  // today in another zone than the loader, which already clamped the date,
-  // so it is a passing failure too. None is the person's or the gate's, so
-  // the day keeps its picker; if getSiteDay gains another such failure or
-  // renames these, revisit.
-  if (code === "metering_site_devices_unavailable" || code === "metering_invalid_date") return SITE_DAY_PROBLEMS.unavailable;
-  if (code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.dayFailed;
   return null;
 }
 
@@ -434,6 +555,7 @@ export function buildSiteDayProblemModel(o: {
     dayHref: dayHref(microgrid.id),
     synthetic: false,
     timezoneNotice: timezoneNotice(nudge),
+    reason: problem.reason,
     tone: problem.tone,
     title: problem.title,
     message: problem.message,

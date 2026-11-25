@@ -1,5 +1,5 @@
 /**
- * Hand-built `metering.site-day@1` models, shaped as the server builds them
+ * Hand-built `metering.site-day@2` models, shaped as the server builds them
  * (src/lib/metering/surface/site-day-model.ts, which these tests may not
  * import): a test day of 5 November 2026, with today the 7th, the microgrid
  * with nothing registered, and a day the metering source could not read.
@@ -153,7 +153,7 @@ export function dayModel(o: Options = {}): ModelOf<"metrics"> {
     attached: o.attached ?? [],
     ...(o.notice ? { notice: o.notice } : {}),
     ext: {
-      schema: "metering.site-day@1",
+      schema: "metering.site-day@2",
       data: {
         state: "day",
         date,
@@ -182,7 +182,7 @@ export function noSiteDevicesModel(o: Pick<Options, "date" | "today" | "actions"
     body: { tiles: [{ key: "setup", label: `Register the battery and grid meter`, value: text(message) }] },
     links: [{ id: "metering.edges", label: "Go to Edges", href: `/microgrids/${MG}/setup/edges` }, ...dayLinks(date, today)],
     ext: {
-      schema: "metering.site-day@1",
+      schema: "metering.site-day@2",
       data: {
         state: "no-site-devices", date, today, timezone: "Africa/Kampala", dayHref: DAY_HREF, synthetic: false, timezoneNotice: null,
         title: `Register the battery and grid meter`, message, ...o.ext,
@@ -192,22 +192,29 @@ export function noSiteDevicesModel(o: Pick<Options, "date" | "today" | "actions"
 }
 
 export const NO_CONNECTION = "This microgrid has no usable OpenEMS connection. Set it up under Setup → OpenEMS Backend.";
+export const NO_ANSWER = "The metering source did not answer for this day. Try again shortly.";
 export const BACKEND: LinkRef = { id: "metering.openems-backend", label: "Set up the OpenEMS connection", href: `/microgrids/${MG}/setup/openems-backend` };
 
-/** A day the metering source could not read: by default no OpenEMS connection, fixed under OpenEMS Backend. */
+/**
+ * A day the metering source could not read: by default no OpenEMS connection,
+ * fixed under OpenEMS Backend; with `retry`, a source that did not answer,
+ * with the loader's copy for each (SITE_DAY_PROBLEMS in
+ * src/lib/metering/surface/site-day-model.ts).
+ */
 export function problemModel(o: Pick<Options, "date" | "today" | "links" | "ext"> & { retry?: boolean } = {}): ModelOf<"metrics"> {
   const date = o.date ?? DATE;
   const today = o.today ?? TODAY;
   const title = "Could not load this day's operations";
+  const message = o.retry ? NO_ANSWER : NO_CONNECTION;
   return {
     ...dayModel({ date, today }),
-    body: { tiles: [{ key: "problem", label: title, value: text(NO_CONNECTION) }] },
+    body: { tiles: [{ key: "problem", label: title, value: text(message) }] },
     links: o.links ?? [...(o.retry ? [] : [BACKEND]), ...dayLinks(date, today)],
     ext: {
-      schema: "metering.site-day@1",
+      schema: "metering.site-day@2",
       data: {
         state: "problem", date, today, timezone: "Africa/Kampala", dayHref: DAY_HREF, synthetic: false, timezoneNotice: null,
-        tone: "danger", title, message: NO_CONNECTION, retry: o.retry === true, ...o.ext,
+        reason: o.retry ? "upstream_unavailable" : "not_configured", tone: "danger", title, message, retry: o.retry === true, ...o.ext,
       },
     },
   };

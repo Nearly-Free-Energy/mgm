@@ -23,19 +23,17 @@ import { parseJsonBody } from "@/lib/validation/parse-body";
  *   and, for a paid bill, confirmation: { acknowledged: [REGENERATE_PAID_ACKNOWLEDGEMENT] }:
  *   the acknowledgement billing.regenerate-bill's prepare asks for. This
  *   route refuses a paid bill without it, and a refunded bill, an invoiced
- *   bill and a bill in a closed period outright, but only on its own
- *   requests: the engine's one unguarded writer, PATCH
- *   /api/billing-line-items/[lineItemId]/usage, refuses only a closed
- *   period itself, and rewrites a paid, refunded or invoiced bill with no
- *   acknowledgement; if that route moves to a guarded write, revisit this
- *   (generate.ts keeps the payment columns
- *   and refuses no payment status, invoice number or closed period; on a
- *   closed period the database lets that audited write change a closed
- *   bill's amount). The deleted legacy Regenerate dialogs and Refresh
- *   Readings did the same through the session route POST
- *   /api/billing/generate, since removed, and warned of a paid bill only on
- *   the client. If generation comes to refuse any of these itself, say so
- *   here.
+ *   bill and a bill in a closed period outright. The write
+ *   (fn_regenerate_bill_with_audit) refuses a closed period and an invoiced
+ *   bill again under its locks, but no payment status: the paid and
+ *   refunded rules are this route's own. PATCH
+ *   /api/billing-line-items/[lineItemId]/usage, the other per-bill
+ *   regeneration, applies the same rules to a usage correction (#247); if
+ *   one route's rules change, revisit the other's. The deleted legacy
+ *   Regenerate dialogs and Refresh Readings rewrote any bill through the
+ *   session route POST /api/billing/generate, since removed, and warned of
+ *   a paid bill only on the client. If generation comes to refuse a payment
+ *   status itself, say so here.
  *
  * Responses:
  *   200 → { lineItemId, totalAmount, previousTotalAmount, changed, message }

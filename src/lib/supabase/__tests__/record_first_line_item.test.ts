@@ -19,7 +19,7 @@
  *     billing_close_totals_changed;
  *   - the insert guard refuses a signed-in caller's direct insert into a
  *     closed period, and lets through a draft's insert, the audited write of
- *     fn_record_line_item_with_audit (Q4=B on an unguarded run) and
+ *     fn_record_line_item_with_audit (Q4=B, #173) and
  *     service_role.
  *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.
@@ -145,7 +145,7 @@ function args(periodId: string, tenantId: string, over: Record<string, unknown> 
     _entered_by_user_id: manager.userId,
     _manual_reason: "meter offline",
     _actor_user_id: manager.userId,
-    _audit_details: { source: "record_first_line_item_test" },
+    _audit_details: null,
     _rate_schedule_id: F.rate,
     ...over,
   };
@@ -264,17 +264,22 @@ desc("20261120130100_record_first_line_item.sql", () => {
       expect(Number(first.usage_kwh)).toBe(12.346);
       expect(Number(first.total_amount)).toBe(3438);
 
+      // The details are the function's (20261124170000): the same for both
+      // writes but for the tenant's name.
+      const manual = !("_reading_source" in over);
+      const details = (tenantKey: string) => ({
+        tenant_name: `FB ${tenantKey}`,
+        previous_total_amount: null,
+        new_total_amount: 3438,
+        previous_reading_source: null,
+        new_reading_source: manual ? "manual" : "edge",
+        ...(manual ? { manual_reason: "meter offline" } : {}),
+        rate_schedule_id: F.rate,
+      });
       const audit = await auditOf(first.id);
-      expect(audit).toEqual([
-        {
-          event_type: "line_item_generated",
-          actor_user_id: manager.userId,
-          actor_kind: "human",
-          actor_ref: null,
-          details: { source: "record_first_line_item_test", rate_schedule_id: F.rate },
-        },
-      ]);
-      expect(audit).toEqual(await auditOf(upserted.id));
+      const row = { event_type: "line_item_generated", actor_user_id: manager.userId, actor_kind: "human", actor_ref: null };
+      expect(audit).toEqual([{ ...row, details: details(firstKey) }]);
+      expect(await auditOf(upserted.id)).toEqual([{ ...row, details: details(upsertKey) }]);
     });
 
     it("records a non-human actor as the upsert does", async () => {
@@ -349,7 +354,12 @@ desc("20261120130100_record_first_line_item.sql", () => {
 
     it("another organization's manager and a tenant find no period", async () => {
       for (const who of [otherManager, tenantUser]) {
-        const { data, error } = await who.client.rpc("fn_record_first_line_item_with_audit", args(F.draft, T.notMine));
+        // Entered by and naming the caller, as the function requires of a
+        // signed-in caller (20261124170000), so the period is what it misses.
+        const { data, error } = await who.client.rpc(
+          "fn_record_first_line_item_with_audit",
+          args(F.draft, T.notMine, { _entered_by_user_id: who.userId, _actor_user_id: who.userId }),
+        );
         expect(data).toBeNull();
         expect(error?.code).toBe("P0002");
         expect(error?.message).toMatch(/^billing_period_not_found/);

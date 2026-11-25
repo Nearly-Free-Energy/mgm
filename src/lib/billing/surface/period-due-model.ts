@@ -7,6 +7,10 @@ import "server-only";
  * closed and leads to its close checklist; one with none asks for its bills
  * and leads to its review, which offers generating them.
  *
+ * Severity (decided on #230): "not closed" is a warning from the day after
+ * the period's last day and critical from CRITICAL_AFTER_DAYS after it, both
+ * in the period's own zone. "Has no bills" stays a warning however old.
+ *
  * Fixed copy: the microgrid's name and the period's name, as the close
  * ceremony names it (periodName in ../close.ts). No tenant, amount or id
  * reaches the text, since an assistant may read signals (#133's data
@@ -19,6 +23,8 @@ import { periodName } from "../close";
 import { periodLabel } from "./period-label";
 
 export const PERIOD_DUE_SIGNAL = "billing.period-due";
+/** Days after a period's last day, in its zone, from which "not closed" is critical rather than a warning. */
+export const CRITICAL_AFTER_DAYS = 7;
 
 export type DuePeriodInput = {
   id: string;
@@ -39,6 +45,14 @@ export function hasEnded(period: Pick<DuePeriodInput, "endDate" | "timezone">, n
 }
 
 /**
+ * Whether an open period is CRITICAL_AFTER_DAYS or more past its last day
+ * at `now`, in its own zone; only one with bills is then critical.
+ */
+export function isOverdue(period: Pick<DuePeriodInput, "endDate" | "timezone">, now: Date): boolean {
+  return addDaysToDateKey(period.endDate, CRITICAL_AFTER_DAYS) <= dayKeyInZone(now, zoneOf(period.timezone));
+}
+
+/**
  * One signal per period whose last day has passed, oldest first, at most
  * MAX_SIGNALS_PER_SOURCE. `periods` are draft periods; any that has not
  * ended yet is left out here.
@@ -56,12 +70,13 @@ export function buildPeriodDueSignals(fmt: Fmt, periods: readonly DuePeriodInput
       return {
         id: p.id,
         kind: "your-move",
-        severity: "warn",
+        severity: p.bills > 0 && isOverdue(p, now) ? "critical" : "warn",
         title: p.bills > 0 ? `${p.microgridName}: ${name} is not closed` : `${p.microgridName}: ${name} has no bills`,
         facts: [fmt.text(label)],
         entity: { kind: "microgrid", id: p.microgridId, label: p.microgridName },
         href: p.bills > 0 ? `${base}/close` : base,
         // When the period became ready to close: the start of the day after its last, in its zone.
+        // `at` and `due` stay there once it is critical: it has been due since then.
         at: startOfDayInZone(due, zoneOf(p.timezone)).toISOString(),
         due,
       };

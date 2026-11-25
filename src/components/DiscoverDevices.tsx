@@ -14,6 +14,8 @@
  *      - inline help card below dropdown (from DEVICE_TYPE_HELP) for selectable rows
  *      - observability-only note for rows with openemsChannelAddress === null
  *      - alreadyAdded → disabled row + "Already added" chip
+ *      - a note naming any components the route skipped because MGM cannot
+ *        store their id (`skipped` in the response)
  *   3. POSTing selected rows to /api/devices (server-side transactional upsert)
  *      Selected rows with openemsChannelAddress: null are saved for observability
  *      (no billing channel) — previously these were silently excluded.
@@ -31,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DEVICE_TYPE_HELP } from "@/lib/device-type-help";
-import type { DiscoveredDevice } from "@/lib/openems/types";
+import type { DiscoveredDevice, SkippedComponent } from "@/lib/openems/types";
 import type { DeviceType } from "@/lib/types/domain";
 
 const DEVICE_TYPE_OPTIONS: DeviceType[] = [
@@ -66,6 +68,7 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
+  const [skipped, setSkipped] = useState<SkippedComponent[]>([]);
 
   // Per-row editable state (name + deviceType override)
   const [rowState, setRowState] = useState<Record<string, RowState>>({});
@@ -82,6 +85,7 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
     setDiscoverError(null);
     setSaveError(null);
     setDevices([]);
+    setSkipped([]);
     setRowState({});
     setSelected({});
     setOpenHelp(null);
@@ -100,6 +104,7 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
 
       const discovered: DiscoveredDevice[] = data.devices ?? [];
       setDevices(discovered);
+      setSkipped(data.skipped ?? []);
 
       // Initialise editable row state and selection state from discovery results
       const initial: Record<string, RowState> = {};
@@ -164,6 +169,7 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
       router.refresh();
       setPhase("idle");
       setDevices([]);
+      setSkipped([]);
       setRowState({});
       setSelected({});
     } catch {
@@ -235,6 +241,17 @@ export function DiscoverDevices({ edgeDbId, openemsEdgeId }: Props) {
       {/* Results */}
       {showResults && (
         <>
+          {skipped.length > 0 && (
+            <p className="mb-3 rounded-md border border-border bg-muted p-3 text-caption text-muted-foreground">
+              Not listed: {skipped.length} component
+              {skipped.length !== 1 ? "s" : ""} whose OpenEMS id MGM cannot
+              store (ids are 1 to 64 letters, digits, &apos;_&apos;, &apos;.&apos;,
+              &apos;:&apos; or &apos;-&apos;):{" "}
+              <span className="font-mono break-all">
+                {skipped.map((s) => s.componentId).join(", ")}
+              </span>
+            </p>
+          )}
           {devices.length === 0 ? (
             <p className="rounded-md border border-border bg-muted p-4 text-sm text-muted-foreground">
               No new components found on this edge. (Make sure the edge is

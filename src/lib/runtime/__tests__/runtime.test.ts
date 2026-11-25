@@ -3,7 +3,7 @@ import * as cordis from "cordis";
 import { Context, type Fiber, type Plugin } from "cordis";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { GRIDTOP_META } from "@/gui/gridtop/meta";
-import type { GuiMeta } from "@/lib/gui/contract";
+import { GUI_CONTRACT, type GuiMeta } from "@/lib/gui/contract";
 import type { Contribution } from "@/lib/gui/surface";
 import type { SurfaceRegistry } from "@/lib/gui/host/server/surface-registry";
 import { BILLING_SURFACE } from "@/lib/gui/__tests__/fixtures/billing-surface";
@@ -172,7 +172,7 @@ const META: GuiMeta = {
   name: "probe",
   title: "Probe",
   version: "0.1.0",
-  contract: "^0.1",
+  contract: "^0.2",
   styles: "./styles.css",
   dependencies: [],
 };
@@ -225,8 +225,8 @@ describe("the GUI surface on the root", () => {
 
   it("refuses a GUI whose range excludes the contract, or whose key differs from its name", async () => {
     await expect(
-      loadPlatformPlugins(new Context(), [CatalogPlugin, SurfacePlugin, guiInstallPlugin("probe", { ...META, contract: "^0.2" })])
-    ).rejects.toThrow('GUI "probe" supports GUI contract ^0.2; this MGM provides 0.1.0');
+      loadPlatformPlugins(new Context(), [CatalogPlugin, SurfacePlugin, guiInstallPlugin("probe", { ...META, contract: "^0.3" })])
+    ).rejects.toThrow(`GUI "probe" supports GUI contract ^0.3; this MGM provides ${GUI_CONTRACT}`);
     await expect(
       loadPlatformPlugins(new Context(), [CatalogPlugin, SurfacePlugin, guiInstallPlugin("other", META)])
     ).rejects.toThrow('GUI "other" names itself "probe" in its metadata');

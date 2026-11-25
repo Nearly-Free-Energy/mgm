@@ -138,7 +138,7 @@ const GATING = {
     gate: "available-while-disabled",
     kind: "read",
     reason:
-      "The rollout rule keeps history available, and the payments_disabled message promises reconciliation is preserved: this lists the attempts a manager still has to reconcile, and recent failures, without contacting the provider.",
+      "The rollout rule keeps history available, and the payments_disabled message promises reconciliation is preserved: this lists the attempts a manager still has to reconcile, recent failures, or only the recent checkouts never submitted, without contacting the provider or writing anything.",
     invalidatedBy:
       "the rollout rule or the payments_disabled message no longer promising history and reconciliation, or the listing contacting the provider",
     reaches: { writes: [], provider: [] },
@@ -491,7 +491,15 @@ const AVAILABLE_CALLS: Record<
   listAttention: {
     repo: {
       listAttentionAttempts: async () => [
-        { id: ATTEMPT, lineItemId: LINE_ITEM, status: "needs_reconciliation", failureCode: "balance_mismatch", updatedAt: "2026-11-19T08:00:00Z" },
+        {
+          id: ATTEMPT,
+          lineItemId: LINE_ITEM,
+          status: "needs_reconciliation",
+          failureCode: "balance_mismatch",
+          updatedAt: "2026-11-19T08:00:00Z",
+          communityId: null,
+          reachedProvider: true,
+        },
       ],
     },
     call: (cap) => cap.listAttention({ status: "needs_reconciliation" }),

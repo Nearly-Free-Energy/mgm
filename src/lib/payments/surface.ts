@@ -34,15 +34,18 @@ import "server-only";
  * revisit.
  *
  * Its watchers report what needs a manager in payments: `payments.reconcile`,
- * each period with attempts held for reconciliation, and `payments.failed`,
- * each period with failures in the last week on bills still to be paid,
- * each leading to the period's payments, or to the bill when only one is
- * concerned. Each composes the capability, so it has a longer budget than
- * the host's default. While Payments is off the host still runs
- * `payments.reconcile` (whilePluginOff: "checked"), since the reconcile
- * route accepts reconciliation then (its PaymentExemption), and skips
- * `payments.failed`: no customer can pay online then, so a failure is no
- * longer something to follow up.
+ * each period with attempts held for reconciliation (critical when one
+ * reached Pesapal, otherwise a warning), and `payments.failed`, each period
+ * with failures in the last week on bills still to be paid, each leading to
+ * the period's payments, or to the bill when only one is concerned; and
+ * `payments.not-submitted`, each community where three or more checkouts in
+ * the last day never reached Pesapal, leading to its payment setup. Each
+ * composes the capability, so it has a longer budget than the host's
+ * default. While Payments is off the host still runs `payments.reconcile`
+ * (whilePluginOff: "checked"), since the reconcile route accepts
+ * reconciliation then (its PaymentExemption), and skips `payments.failed`
+ * and `payments.not-submitted`: no customer can pay online then, so a
+ * failure is no longer something to follow up.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { PAYMENTS_PLUGIN_NAME } from "@/lib/plugins/bundled";
@@ -58,9 +61,9 @@ import {
   prepareRecordAdjustment,
   reconcileAvailable,
 } from "./surface/bill-attempts";
-import { loadFailedSignals, loadReconcileSignals } from "./surface/attention-signals";
-import { FAILED_EXAMPLES, RECONCILE_EXAMPLES } from "./surface/attention-signals-examples";
-import { FAILED_SIGNAL, RECONCILE_SIGNAL } from "./surface/attention-signals-model";
+import { loadFailedSignals, loadNotSubmittedSignals, loadReconcileSignals } from "./surface/attention-signals";
+import { FAILED_EXAMPLES, NOT_SUBMITTED_EXAMPLES, RECONCILE_EXAMPLES } from "./surface/attention-signals-examples";
+import { FAILED_SIGNAL, NOT_SUBMITTED_SIGNAL, RECONCILE_SIGNAL } from "./surface/attention-signals-model";
 import { BILL_ATTEMPTS_EXAMPLES } from "./surface/bill-attempts-examples";
 import { loadPaymentSetup } from "./surface/payment-setup";
 import { PAYMENT_SETUP_EXAMPLES } from "./surface/payment-setup-examples";
@@ -158,6 +161,8 @@ export const PAYMENTS_SURFACE: Contribution = {
   // /api/payments/attempts/[id]/reconcile" in
   // src/lib/runtime/__tests__/route-rules.ts; if one goes, drop the field
   // from its actions.
+  // Every action here is repeat "safe": src/lib/gui/__tests__/repeat.db.test.ts
+  // sends each twice to its route. If it fails for one, that one is not safe.
   actions: [
     // Asks the provider about an attempt already submitted and records only
     // what it verifies, never a figure a person enters: "write", not
@@ -174,6 +179,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       whilePluginOff: "enabled",
     },
@@ -190,6 +196,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "money",
       confirm: "typed",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareRecordAdjustment,
       available: reconcileAvailable("record"),
@@ -209,6 +216,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareAcceptReceipts,
       available: reconcileAvailable("accept"),
@@ -219,5 +227,7 @@ export const PAYMENTS_SURFACE: Contribution = {
     // Reconciliation stays available while Payments is off (docs/payments-rollout.md), so held attempts are still reported then.
     { id: RECONCILE_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadReconcileSignals, examples: RECONCILE_EXAMPLES, whilePluginOff: "checked" },
     { id: FAILED_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadFailedSignals, examples: FAILED_EXAMPLES },
+    // Hidden while Payments is off, as failures are: no checkout is started then, so none can fail to reach Pesapal.
+    { id: NOT_SUBMITTED_SIGNAL, budgetMs: ATTENTION_BUDGET_MS, load: loadNotSubmittedSignals, examples: NOT_SUBMITTED_EXAMPLES },
   ],
 };

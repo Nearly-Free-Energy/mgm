@@ -70,8 +70,33 @@ describe("LineItemUsageBody", () => {
     }
   });
 
-  it("pins the JSON Schema of version 1", () => {
-    expect(LINE_ITEM_USAGE_BODY_VERSION).toBe(1);
+  it("takes the host's confirmation, as RegenerateBillBody does, and refuses one of another shape", () => {
+    expect(LineItemUsageBody.parse({ usage_kwh: 3, confirmation: { acknowledged: ["regenerate-paid-bill"] } })).toEqual({
+      usage_kwh: 3,
+      confirmation: { acknowledged: ["regenerate-paid-bill"] },
+    });
+    for (const confirmation of [
+      true,
+      {},
+      { acknowledged: "regenerate-paid-bill" },
+      { acknowledged: [], extra: 1 },
+      // The ceremony asks for no name, so a typed one is not taken.
+      { acknowledged: [], typed: "Unit 1" },
+    ]) {
+      expect(firstIssue(LineItemUsageBody, { usage_kwh: 3, confirmation })).toMatchObject({
+        field: "confirmation",
+        message: "confirmation needs the acknowledgements ticked",
+      });
+    }
+    // A confirmation is not a reading.
+    expect(firstIssue(LineItemUsageBody, { confirmation: { acknowledged: [] } })).toEqual({
+      field: undefined,
+      message: "At least one of usage_kwh or end_kwh is required",
+    });
+  });
+
+  it("pins the JSON Schema of version 2 (version 1 had no confirmation)", () => {
+    expect(LINE_ITEM_USAGE_BODY_VERSION).toBe(2);
     // The at-least-one rule is a refine, which JSON Schema does not carry.
     expect(z.toJSONSchema(LineItemUsageBody, { io: "input" })).toEqual({
       $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -79,6 +104,14 @@ describe("LineItemUsageBody", () => {
       properties: {
         usage_kwh: { title: "Usage (kWh)", type: "number", minimum: 0 },
         end_kwh: { title: "Closing meter reading (kWh)", type: "number", minimum: 0 },
+        confirmation: {
+          type: "object",
+          properties: {
+            acknowledged: { maxItems: 20, type: "array", items: { type: "string", maxLength: 64 } },
+          },
+          required: ["acknowledged"],
+          additionalProperties: false,
+        },
       },
       additionalProperties: false,
     });

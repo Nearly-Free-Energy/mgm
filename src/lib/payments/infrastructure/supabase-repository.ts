@@ -414,9 +414,11 @@ export function createSupabasePaymentsRepository(
     },
 
     async listAttentionAttempts(input) {
+      // The tracking id and the receipts are read only to say whether the
+      // provider knows of the attempt; neither leaves this function.
       let query = supabase
         .from("payment_attempts")
-        .select("id, line_item_id, status, failure_code, updated_at")
+        .select("id, line_item_id, status, failure_code, updated_at, community_id, provider_tracking_id, payment_receipts(count)")
         .eq("org_id", input.orgId)
         .eq("status", input.status);
       if (input.since !== undefined) query = query.gte("updated_at", input.since);
@@ -425,18 +427,30 @@ export function createSupabasePaymentsRepository(
       if (input.exceptFailureCodes?.length) {
         query = query.or(`failure_code.is.null,failure_code.not.in.(${input.exceptFailureCodes.join(",")})`);
       }
+      if (input.onlyFailureCode !== undefined) query = query.eq("failure_code", input.onlyFailureCode);
       const { data, error } = await query
         .order("updated_at", { ascending: false })
         .order("id", { ascending: true })
         .limit(input.limit);
       if (error) throw new Error("Could not load payment attempts");
-      type Row = { id: string; line_item_id: string; status: AttentionAttempt["status"]; failure_code: string | null; updated_at: string };
+      type Row = {
+        id: string;
+        line_item_id: string;
+        status: AttentionAttempt["status"];
+        failure_code: string | null;
+        updated_at: string;
+        community_id: string | null;
+        provider_tracking_id: string | null;
+        payment_receipts: { count: number }[] | null;
+      };
       return ((data ?? []) as unknown as Row[]).map((row) => ({
         id: row.id,
         lineItemId: row.line_item_id,
         status: row.status,
         failureCode: row.failure_code,
         updatedAt: row.updated_at,
+        communityId: row.community_id,
+        reachedProvider: Boolean(row.provider_tracking_id) || (row.payment_receipts?.[0]?.count ?? 0) > 0,
       }));
     },
 

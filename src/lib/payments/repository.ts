@@ -125,13 +125,27 @@ export type BillSnapshot = {
   periodLabel: string;
 };
 
-/** An attempt that needs a manager's attention, as listAttention returns it: no amount, reference or provider detail. */
+/**
+ * The failure code ensureCheckout writes when the provider never accepted a
+ * checkout (no order exists there, and the customer is told to retry).
+ */
+export const CHECKOUT_NOT_SUBMITTED = "checkout_not_submitted";
+
+/**
+ * An attempt that needs a manager's attention, as listAttention returns it:
+ * no amount, reference or provider detail. `reachedProvider` says only
+ * whether the provider knows of it (a tracking id was saved, or a receipt
+ * recorded), never the id or the receipt.
+ */
 export type AttentionAttempt = {
   id: string;
   lineItemId: string;
   status: "needs_reconciliation" | "failed";
   failureCode: string | null;
   updatedAt: string;
+  /** The community the checkout was reserved for (payment_attempts.community_id); null on attempts older than that column. */
+  communityId: string | null;
+  reachedProvider: boolean;
 };
 
 /** The most attempts listAttention reads at once; `truncated` says when there were more. */
@@ -218,8 +232,9 @@ export interface PaymentsRepository {
   /**
    * The organization's attempts in `status`, most recently changed first,
    * changed at or after `since` when given, without those whose failure
-   * code is in `exceptFailureCodes`, at most `limit`; throws when the read
-   * fails, as listAttemptsForLineItem does.
+   * code is in `exceptFailureCodes`, or only those whose failure code is
+   * `onlyFailureCode`, at most `limit`; throws when the read fails, as
+   * listAttemptsForLineItem does.
    */
   listAttentionAttempts(input: {
     orgId: string;
@@ -227,6 +242,7 @@ export interface PaymentsRepository {
     since?: string;
     /** Left out; an attempt with no failure code is kept. */
     exceptFailureCodes?: readonly string[];
+    onlyFailureCode?: string;
     limit: number;
   }): Promise<AttentionAttempt[]>;
   recordReceipt(input: {
@@ -319,7 +335,11 @@ export interface PaymentsCapabilityContract {
    * "needs_reconciliation" }`, or `{ status: "failed", since }` for failures
    * changed since an instant, leaving out the failures MGM records for its
    * own bookkeeping (a checkout replaced by a newer one, or never
-   * submitted). Most recently changed first, at most MAX_ATTENTION_ATTEMPTS.
+   * submitted). `{ status: "failed", since, failureCode:
+   * CHECKOUT_NOT_SUBMITTED }` lists only the checkouts the provider never
+   * accepted, which say nothing about one bill but, repeated, about the
+   * payment account. Most recently changed first, at most
+   * MAX_ATTENTION_ATTEMPTS.
    */
   listAttention(
     input: unknown

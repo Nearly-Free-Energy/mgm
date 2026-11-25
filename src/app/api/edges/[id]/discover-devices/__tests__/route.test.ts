@@ -15,6 +15,9 @@
  *   (k) getEdgeConfig throws (edge offline) → 200 online: false, devices: []
  *   (l) Hybrid inverter edge — ESS, grid meter, backup meter, battery
  *       inverter, controller → battery, grid_meter, inverter; the rest unlisted
+ *   (m) Component ids outside the stored format → listed in `skipped`, left
+ *       out of `devices` and of the dedup query
+ *   (n) A skipped id is cut to 100 characters in the response
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -445,5 +448,87 @@ describe("GET /api/edges/[id]/discover-devices", () => {
     expect(byId.ess0.openemsChannelAddress).toBeNull();
     expect(byId.meter0.suggestedDeviceType).toBe("grid_meter");
     expect(byId.meter2.suggestedDeviceType).toBe("inverter");
+  });
+
+  // (m) Ids the database would refuse are reported, not offered for saving.
+  it("(m) lists components whose id is outside the stored format in skipped", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue(defaultEmsConfig);
+    registerEdgeLookup(true);
+    let dedupIds: string[] | null = null;
+    registerFrom(() => ({
+      select: () => ({
+        eq: () => ({
+          in: (_col: string, ids: string[]) => {
+            dedupIds = ids;
+            return Promise.resolve({ data: [], error: null });
+          },
+        }),
+      }),
+    }));
+
+    const meterFactory = "io.openems.impl.meter.consumption.ConsumptionMeter";
+    const longId = "m".repeat(65);
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: OPENEMS_EDGE_ID, online: true }]);
+    getEdgeConfigMock.mockResolvedValue({
+      components: {
+        meter0: { alias: "Fits", factoryId: meterFactory, properties: {} },
+        "meter 1": { alias: "Space", factoryId: meterFactory, properties: {} },
+        " meter2": { alias: "Leading space", factoryId: meterFactory, properties: {} },
+        "meter/3": { alias: "Slash", factoryId: meterFactory, properties: {} },
+        [longId]: { alias: "Too long", factoryId: meterFactory, properties: {} },
+      },
+      factories: {
+        [meterFactory]: {
+          natureIds: ["io.openems.edge.meter.api.ElectricityMeter"],
+        },
+      },
+    });
+
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), {
+      params: Promise.resolve({ id: EDGE_DB_ID }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.devices.map((d: { componentId: string }) => d.componentId)).toEqual([
+      "meter0",
+    ]);
+    expect(json.skipped).toEqual([
+      { componentId: "meter 1", reason: "invalid_component_id" },
+      { componentId: " meter2", reason: "invalid_component_id" },
+      { componentId: "meter/3", reason: "invalid_component_id" },
+      { componentId: longId, reason: "invalid_component_id" },
+    ]);
+    expect(dedupIds).toEqual(["meter0"]);
+  });
+
+  it("(n) cuts a skipped id to 100 characters in the response", async () => {
+    getMicrogridEmsConfigMock.mockResolvedValue(defaultEmsConfig);
+    registerEdgeLookup(true);
+
+    const meterFactory = "io.openems.impl.meter.consumption.ConsumptionMeter";
+    getEdgesStatusMock.mockResolvedValue([{ edgeId: OPENEMS_EDGE_ID, online: true }]);
+    getEdgeConfigMock.mockResolvedValue({
+      components: {
+        ["x".repeat(500)]: { alias: "Huge", factoryId: meterFactory, properties: {} },
+      },
+      factories: {
+        [meterFactory]: {
+          natureIds: ["io.openems.edge.meter.api.ElectricityMeter"],
+        },
+      },
+    });
+
+    const { GET } = await import("../route");
+    const res = await GET(makeReq(), {
+      params: Promise.resolve({ id: EDGE_DB_ID }),
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // No dedup query runs: nothing is left to look up.
+    expect(json.devices).toEqual([]);
+    expect(json.skipped).toEqual([
+      { componentId: "x".repeat(100), reason: "invalid_component_id" },
+    ]);
   });
 });

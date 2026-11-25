@@ -1,8 +1,9 @@
 /**
  * listAttention: the organization's attempts needing reconciliation, or
  * failed since an instant without the failures the capability records for
- * its own bookkeeping; its input checked, capped with `truncated`, and
- * answered while the plugins are off.
+ * its own bookkeeping, or only the checkouts never submitted when asked; its
+ * input checked, capped with `truncated`, and answered while the plugins are
+ * off.
  */
 import { describe, expect, it, vi } from "vitest";
 import { PaymentsCapability } from "../capability";
@@ -15,6 +16,8 @@ const row = (i: number, over: Partial<AttentionAttempt> = {}): AttentionAttempt 
   status: "needs_reconciliation",
   failureCode: "balance_mismatch",
   updatedAt: "2026-11-19T08:00:00.000Z",
+  communityId: null,
+  reachedProvider: false,
   ...over,
 });
 
@@ -43,6 +46,18 @@ describe("PaymentsCapability.listAttention", () => {
     });
   });
 
+  it("lists only the checkouts never submitted since an instant, when asked for that code", async () => {
+    const { cap, listAttentionAttempts } = capability();
+    expect((await cap.listAttention({ status: "failed", since: "2026-11-19T09:00:00Z", failureCode: "checkout_not_submitted" })).ok).toBe(true);
+    expect(listAttentionAttempts).toHaveBeenCalledWith({
+      orgId: ORG,
+      status: "failed",
+      since: "2026-11-19T09:00:00.000Z",
+      onlyFailureCode: "checkout_not_submitted",
+      limit: MAX_ATTENTION_ATTEMPTS + 1,
+    });
+  });
+
   it(`answers at most ${MAX_ATTENTION_ATTEMPTS}, saying when there were more`, async () => {
     const many = Array.from({ length: MAX_ATTENTION_ATTEMPTS + 1 }, (_, i) => row(i));
     const { cap } = capability({ listAttentionAttempts: async () => many });
@@ -58,6 +73,10 @@ describe("PaymentsCapability.listAttention", () => {
     ["failed since something that is not a time", { status: "failed", since: "last week" }],
     ["reconciliation with since", { status: "needs_reconciliation", since: "2026-11-13T09:00:00Z" }],
     ["an extra field", { status: "needs_reconciliation", org: "another" }],
+    ["a failure code other than checkouts never submitted", { status: "failed", since: "2026-11-13T09:00:00Z", failureCode: "provider_failed" }],
+    ["the other bookkeeping code", { status: "failed", since: "2026-11-13T09:00:00Z", failureCode: "checkout_superseded" }],
+    ["a failure code without since", { status: "failed", failureCode: "checkout_not_submitted" }],
+    ["a failure code on reconciliation", { status: "needs_reconciliation", failureCode: "checkout_not_submitted" }],
   ])("refuses %s with a 400, reading nothing", async (_label, input) => {
     const { cap, listAttentionAttempts } = capability();
     expect(await cap.listAttention(input)).toMatchObject({ ok: false, status: 400, code: "payments_invalid_attention_query" });
@@ -68,6 +87,7 @@ describe("PaymentsCapability.listAttention", () => {
     const isPaymentsEnabled = vi.fn(async () => false);
     const { cap } = capability({ isPaymentsEnabled });
     expect((await cap.listAttention({ status: "needs_reconciliation" })).ok).toBe(true);
+    expect((await cap.listAttention({ status: "failed", since: "2026-11-19T09:00:00Z", failureCode: "checkout_not_submitted" })).ok).toBe(true);
     expect(isPaymentsEnabled).not.toHaveBeenCalled();
   });
 

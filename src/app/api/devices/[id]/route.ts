@@ -4,6 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import type { DeviceType } from "@/lib/types/domain";
+import {
+  COMPONENT_ID_FORMAT_CONSTRAINT,
+  OPENEMS_ID_FORMAT_HINT,
+  isIdFormatViolation,
+} from "@/lib/openems/ids";
 
 /**
  * PATCH /api/devices/[id] — reclassify a discovered device (#151).
@@ -46,6 +51,9 @@ import type { DeviceType } from "@/lib/types/domain";
  *   route then returns 409 `device_type_changed_concurrently`. This closes
  *   the unlink-then-relink race window where a parallel
  *   PATCH /api/tenants/[id] could reclaim the just-unlinked device.
+ *
+ * A row whose stored openems_component_id is outside the format
+ * (`devices_openems_component_id_format`) → 409 `stored_id_outside_format`.
  *
  * Pattern mirrors `src/app/api/tenants/[id]/route.ts` for ALLOWED_FIELDS
  * + UUID_RE + .maybeSingle() null-as-404, with the AC-6 compare-and-set
@@ -278,6 +286,15 @@ export async function PATCH(
           reason: "rls_denied",
         },
         { status: 403 }
+      );
+    }
+    if (isIdFormatViolation(updateError, COMPONENT_ID_FORMAT_CONSTRAINT)) {
+      return NextResponse.json(
+        {
+          error: `This device's stored OpenEMS component id is not in the format MGM stores (${OPENEMS_ID_FORMAT_HINT}), so the device cannot be changed until an administrator corrects the id.`,
+          reason: "stored_id_outside_format",
+        },
+        { status: 409 }
       );
     }
     return NextResponse.json(
