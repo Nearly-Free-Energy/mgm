@@ -286,17 +286,18 @@ artifact holds that Linux build for a day, for inspection.
   is the builder that writes the functions' launchers; it is a directory that
   Next.js vendors under `dist/compiled` and loads from another vendored
   directory already listed (the browser build of React DOM loads the
-  scheduler this way); or it is bundled into Next.js's polyfill file for
+  scheduler this way); it is bundled into Next.js's polyfill file for
   browsers without ES module support, which the supplement below records;
   or it is a font family that `next/font` self-hosts, read from the
   `@font-face` rules in the output's CSS and recorded in the supplement's
-  `fonts` list. Client-side bundles have no source maps, so apart from the last two, browser
-  code is covered through the server-rendered modules that import the same
-  packages. A package that only browser code imports, and no server-rendered
-  module does, is not found: check the notices of the dry run when adding
-  one. The build fails, rather than leaving a package out, when a function's
-  source map, a package's `package.json` or the build manifest cannot be
-  read.
+  `fonts` list. Client-side bundles have no source maps, so apart from the
+  vendored scheduler and the polyfill file, browser code is covered through
+  the server-rendered modules that import the same packages. A package that
+  only browser code imports, and no server-rendered module does, is not
+  found: check the notices of the dry run when adding one. The build fails,
+  rather than leaving a package out, when a function's source map, a
+  package's `package.json`, the build manifest, or a stylesheet or directory
+  under `static/_next` cannot be read.
 - `scripts/release/notices-supplement/` lists the packages bundled into
   Next.js's polyfill file, which has no source map and whose packages are not
   installed. `supplement.json` records each reviewed file by SHA-256, with
@@ -315,11 +316,17 @@ artifact holds that Linux build for a day, for inspection.
   output's `@font-face` rules use, with its licence and licence text kept
   beside it (`inter/OFL.txt` for Inter, copied from Google Fonts, which
   `next/font/google` downloads at build time; a font entry has no version,
-  because Google serves its current release). The build fails with exit
-  code 4 when the CSS names a family the list does not record, or when a
-  font file in `static/media` is named by no `@font-face` rule. Adding a
-  font in `src/app/layout.tsx` therefore also adds its entry and licence
-  text here.
+  because Google serves its current release). Family names match ignoring
+  case and runs of spaces, a little looser than CSS, which folds only ASCII
+  case and keeps the spaces inside a quoted name. A font embedded in the CSS
+  as a `data:` url counts as self-hosted and needs its entry too; a rule
+  that names only `local(…)` faces or remote urls ships no font. The build
+  fails with exit code 4 when the CSS names a family the list does not
+  record, when a font file in `static/media` is named by no `@font-face`
+  rule, or when a stylesheet or directory under `static/_next` cannot be
+  read. Adding a font in
+  `src/app/layout.tsx` therefore also adds its entry and licence text
+  here.
 - `src/lib/__tests__/no-server-actions-or-draft-mode.test.ts` fails when the
   source introduces Server Actions (`"use server"`) or draft mode
   (`draftMode`). Release assets are built without installation settings, so

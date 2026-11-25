@@ -421,7 +421,7 @@ def make_notices_fixture(tmp):
             {"name": "whatwg-fetch", "version": "3.0.0", "license": "MIT", "texts": ["whatwg-fetch-3.0.0/LICENSE"]},
         ],
     }], "fonts": [{
-        "family": "Inter", "name": "Inter", "version": "4.1", "license": "OFL-1.1", "texts": ["inter/OFL.txt"],
+        "family": "Inter", "name": "Inter", "license": "OFL-1.1", "texts": ["inter/OFL.txt"],
     }]})
     (supplement / "inter").mkdir()
     (supplement / "inter" / "OFL.txt").write_text("Inter font licence\n")
@@ -430,6 +430,10 @@ def make_notices_fixture(tmp):
     (supplement / "whatwg-fetch-3.0.0").mkdir()
     (supplement / "whatwg-fetch-3.0.0" / "LICENSE").write_text("whatwg-fetch licence\n")
     return output, project, supplement
+
+
+# How the fixture's Inter is listed: no version, as the shipped supplement records it.
+INTER = "Inter (self-hosted font, 2 files in static/_next/static/media)"
 
 
 class NoticesTest(unittest.TestCase):
@@ -450,6 +454,18 @@ class NoticesTest(unittest.TestCase):
         )
         return result, notices
 
+    def edit_fonts(self, change):
+        """Changes the fixture supplement's fonts list in place."""
+        index = self.supplement / "supplement.json"
+        data = json.loads(index.read_text())
+        change(data["fonts"])
+        write_json(index, data)
+
+    def text_number(self, lines, label):
+        """The number of the text the package line `label` cites first."""
+        block = lines[lines.index(label):]
+        return re.search(r"Texts: \[(\d+)\]", "\n".join(block[:4])).group(1)
+
     def packages(self, text):
         listed = text.split("\nPackages\n--------\n\n", 1)[1].split("\nTexts\n-----\n", 1)[0]
         return {block.split("\n", 1)[0]: block for block in listed.strip().split("\n\n")}
@@ -468,7 +484,7 @@ class NoticesTest(unittest.TestCase):
             "argon2 0.44.0",
             "bundled 3.0.0",
             f"core-js 3.38.1 ({polyfill})",
-            "Inter 4.1 (self-hosted font, 2 files in static/_next/static/media)",
+            INTER,
             "next 16.4.1",
             "nolicence 1.0.0",
             "react-dom-builtin 0.0.0 (part of next 16.4.1, at dist/compiled/react-dom)",
@@ -520,9 +536,113 @@ class NoticesTest(unittest.TestCase):
     def test_lists_a_self_hosted_font_family_from_the_supplement(self):
         result, notices = self.write()
         self.assertEqual(result.returncode, 0, result.stderr)
-        block = self.packages(notices.read_text())["Inter 4.1 (self-hosted font, 2 files in static/_next/static/media)"]
+        block = self.packages(notices.read_text())[INTER]
         self.assertIn("Licence: OFL-1.1", block)
         self.assertRegex(block, r"Texts: \[\d+\] OFL.txt")
+
+    def test_lists_a_font_family_without_a_version_on_one_line(self):
+        # The shipped supplement records Inter with no version, so its line is
+        # the name and the origin, with no empty version between them.
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = notices.read_text()
+        lines = text.splitlines()
+        self.assertIn(INTER, lines)
+        # The text's heading wraps at 72 columns after the label.
+        self.assertIn(f"\n[{self.text_number(lines, INTER)}] {INTER}:\n    OFL.txt\n", text)
+        for stray in ("Inter  ", "Inter None", "Inter ()", "Inter (self-hosted font, 2 files in static/_next/static/media) "):
+            self.assertNotIn(stray, text)
+
+    def test_lists_a_font_family_with_its_version_when_the_supplement_records_one(self):
+        self.edit_fonts(lambda fonts: fonts[0].update(version="4.1"))
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Inter 4.1 (self-hosted font, 2 files in static/_next/static/media)",
+                      notices.read_text().splitlines())
+
+    def test_matches_font_families_ignoring_case_and_runs_of_spaces(self):
+        # These rules match the supplement's "Inter Display". The match is a
+        # little looser than CSS, which keeps spaces inside a quoted name.
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        text = css.read_text().replace("font-family:Inter;", "font-family:inter  display;", 1)
+        css.write_text(text.replace("font-family:Inter;", "font-family:'INTER DISPLAY';", 1))
+        self.edit_fonts(lambda fonts: fonts[0].update(family="Inter Display", name="Inter Display"))
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Inter Display (self-hosted font, 2 files in static/_next/static/media)",
+                      notices.read_text().splitlines())
+
+    def test_refuses_a_family_the_supplement_records_twice(self):
+        self.edit_fonts(lambda fonts: fonts.append(dict(fonts[0], family="INTER")))
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("font 2 records the family 'INTER' a second time", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_names_each_directory_that_holds_a_familys_files(self):
+        fonts = self.output / "static" / "_next" / "static" / "fonts"
+        fonts.mkdir()
+        os.replace(self.output / "static" / "_next" / "static" / "media" / "def456-s.woff2", fonts / "def456-s.woff2")
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text().replace("/_next/static/media/def456", "/_next/static/fonts/def456"))
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Inter (self-hosted font, 2 files in static/_next/static/fonts, static/_next/static/media)",
+                      notices.read_text().splitlines())
+
+    def test_counts_a_font_embedded_as_a_data_url(self):
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text() + '@font-face{font-family:Inter;src:url(data:font/woff2;base64,d09GMg==)}\n')
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Inter (self-hosted font, 2 files in static/_next/static/media, 1 embedded in the CSS as "
+                      "data: urls)", notices.read_text().splitlines())
+
+    def test_refuses_an_embedded_font_whose_family_the_supplement_does_not_record(self):
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text() + '@font-face{font-family:"Icons";src:url("data:font/woff2;base64,d09GMg==")}\n')
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("self-hosts the font family 'Icons' (1 data: url(s))", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_ignores_a_rule_that_names_only_a_remote_font(self):
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text() + '@font-face{font-family:Remote;src:url(https://fonts.example/r.woff2)}\n')
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Remote", notices.read_text())
+
+    def test_ignores_a_rule_that_names_only_a_protocol_relative_font(self):
+        css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
+        css.write_text(css.read_text() + '@font-face{font-family:Remote;src:url(//fonts.example/r.woff2)}\n')
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Remote", notices.read_text())
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a directory whatever its mode")
+    def test_refuses_a_directory_it_cannot_read(self):
+        hidden = self.output / "static" / "_next" / "static" / "hidden"
+        hidden.mkdir()
+        hidden.chmod(0)
+        self.addCleanup(hidden.chmod, 0o755)
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("static/_next/static/hidden: unreadable, so the fonts and stylesheets in it cannot be "
+                      "checked", result.stderr)
+        self.assertEqual(result.stderr.count("static/_next/static/hidden: unreadable"), 1, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(notices.exists())
+
+    def test_refuses_a_stylesheet_it_cannot_read(self):
+        # A dangling link stands for any stylesheet that cannot be read.
+        (self.output / "static" / "_next" / "static" / "chunks" / "3gone.css").symlink_to(self.tmp / "missing.css")
+        result, notices = self.write()
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertIn("static/_next/static/chunks/3gone.css: unreadable, so its @font-face rules cannot be "
+                      "checked", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse(notices.exists())
 
     def test_refuses_a_font_family_the_supplement_does_not_record(self):
         css = self.output / "static" / "_next" / "static" / "chunks" / "2app.css"
@@ -586,6 +706,12 @@ class NoticesTest(unittest.TestCase):
                 self.assertTrue(package["name"] and package["version"] and package["license"], package)
                 for text in package["texts"]:
                     self.assertIn("Copyright", (directory / text).read_text(), text)
+        fonts = json.loads((directory / "supplement.json").read_text())["fonts"]
+        self.assertTrue(fonts)
+        for font in fonts:
+            self.assertTrue(font["family"] and font["name"] and font["license"], font)
+            for text in font["texts"]:
+                self.assertIn("Copyright", (directory / text).read_text(), text)
 
     def test_prints_identical_texts_once(self):
         result, notices = self.write()
