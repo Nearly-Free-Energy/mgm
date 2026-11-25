@@ -238,8 +238,12 @@ export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "ref
   "tenant-app": "refused",
 };
 
-/** The entity kinds whose records an assistant may never read through a view's path. */
-const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>([
+/**
+ * The entity kinds whose records an assistant may never read: through a
+ * view's path here, and as a reference in what a view or watcher emits
+ * (./assistant-references.ts).
+ */
+export const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>([
   "tenant",
   "device",
   "rateSchedule",

@@ -31,6 +31,7 @@ import { resolveActions } from "./merge";
 import { viewModelSchema } from "./model-schema";
 import { selectOrganization } from "./organization";
 import { organizationSignals } from "./signals";
+import { matchView } from "./match-view";
 import { MODEL_CAPS, parseOrFail, strictParseModel } from "./parse";
 import { surfaceSnapshot } from "./snapshot";
 import type { RegisteredView, SurfaceSnapshot } from "./surface-registry";
@@ -39,6 +40,8 @@ export type HostFailure = { ok: false; status: number; code: string; message: st
 export type HostOutcome<T> = { ok: true; value: T } | HostFailure;
 /** Whether a view, by id, may be served on this dispatch (dispatchView's `o.admit`). */
 export type Admit = (viewId: Id) => boolean;
+
+export { matchView };
 
 const fail = (status: number, code: string, message: string): HostFailure => ({ ok: false, status, code, message });
 const NOT_FOUND = fail(404, "gui_not_found", "This page could not be found.");
@@ -104,38 +107,6 @@ export const WITHHELD_EMBED = { type: "values", values: [{ t: "text", text: "Wit
 export const NOT_LISTED = fail(403, "assistant_not_listed", "This view is not one an assistant may read.");
 
 const isCore = (kind: EntityKind): kind is CoreEntityKind => (CORE_ENTITY_KINDS as readonly string[]).includes(kind);
-
-/**
- * The view whose path fits `path`, with its segment values decoded. Where two
- * fit, a fixed segment beats a bracketed one at the first position they
- * differ, as matchCatalogPage (src/lib/plugins/bundled.ts) ranks pages.
- */
-export function matchView(
-  views: readonly RegisteredView[],
-  path: string,
-): { view: RegisteredView; values: Record<string, string> } | undefined {
-  let parts: string[];
-  try {
-    parts = path.split("/").filter(Boolean).map(decodeURIComponent);
-  } catch {
-    return undefined;
-  }
-  let best: { view: RegisteredView; values: Record<string, string>; rank: string } | undefined;
-  for (const view of views) {
-    const segments = view.def.path.split("/").filter(Boolean);
-    if (segments.length !== parts.length) continue;
-    const values: Record<string, string> = {};
-    let rank = "";
-    const fits = segments.every((segment, i) => {
-      const name = /^\[(.+)\]$/.exec(segment)?.[1];
-      rank += name ? "0" : "1";
-      if (name) values[name] = parts[i];
-      return name !== undefined || segment === parts[i];
-    });
-    if (fits && (!best || rank > best.rank)) best = { view, values, rank };
-  }
-  return best && { view: best.view, values: best.values };
-}
 
 /** The search parameters a view's loader reads: only the names in its `query`. */
 function querySearch(names: readonly string[] | undefined, search: URLSearchParams): URLSearchParams {
