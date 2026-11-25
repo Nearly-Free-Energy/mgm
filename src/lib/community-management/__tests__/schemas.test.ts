@@ -33,6 +33,14 @@ import {
   CreateCommunityBody,
   CreateMicrogridBody,
   CreateTenantBody,
+  DELETE_COMMUNITY_BODY_VERSION,
+  DELETE_MICROGRID_BODY_VERSION,
+  DELETE_TENANT_BODY_VERSION,
+  DeleteCommunityBody,
+  DeleteMicrogridBody,
+  DeleteTenantBody,
+  REVOKE_TENANT_ACCESS_BODY_VERSION,
+  RevokeTenantAccessBody,
   TENANT_ACCESS_GRANT_BODY_VERSION,
   TenantAccessGrantBody,
   UPDATE_COMMUNITY_BODY_VERSION,
@@ -379,6 +387,28 @@ describe("each described route's schema keeps the route's own answers", () => {
   });
 });
 
+describe("the delete bodies", () => {
+  it.each([
+    ["DeleteCommunityBody", DeleteCommunityBody],
+    ["DeleteMicrogridBody", DeleteMicrogridBody],
+    ["DeleteTenantBody", DeleteTenantBody],
+  ] as const)("%s takes no confirmation, or one with the typed name", (_name, schema) => {
+    expect(schema.parse({})).toEqual({});
+    expect(schema.parse({ confirmation: { acknowledged: [], typed: "Kisakye" } })).toEqual({
+      confirmation: { acknowledged: [], typed: "Kisakye" },
+    });
+    expect(schema.safeParse({ confirmation: { typed: "Kisakye" } }).success).toBe(false);
+    expect(schema.safeParse({ confirmation: { acknowledged: [], typed: "x".repeat(201) } }).success).toBe(false);
+    expect(schema.safeParse({ name: "Kisakye" }).success).toBe(false);
+  });
+
+  it("RevokeTenantAccessBody takes no confirmation, or one with nothing typed", () => {
+    expect(RevokeTenantAccessBody.parse({})).toEqual({});
+    expect(RevokeTenantAccessBody.parse({ confirmation: { acknowledged: [] } })).toEqual({ confirmation: { acknowledged: [] } });
+    expect(RevokeTenantAccessBody.safeParse({ confirmation: { acknowledged: [], typed: "a@example.test" } }).success).toBe(false);
+  });
+});
+
 // ── Pinned input versions ──
 
 const SCHEMA = "https://json-schema.org/draft/2020-12/schema";
@@ -400,6 +430,21 @@ const TIMEZONE_SHAPE = {
   description: "An IANA zone id, such as Africa/Kampala, or UTC.",
 };
 const GUID = "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$";
+const confirmationShape = (typed: boolean) => ({
+  type: "object",
+  properties: {
+    acknowledged: { type: "array", maxItems: 20, items: { type: "string", maxLength: 64 } },
+    ...(typed ? { typed: { type: "string", maxLength: 200 } } : {}),
+  },
+  required: ["acknowledged"],
+  additionalProperties: false,
+});
+const deleteShape = (typed: boolean) => ({
+  $schema: SCHEMA,
+  type: "object",
+  properties: { confirmation: confirmationShape(typed) },
+  additionalProperties: false,
+});
 const limited = (max: number, title: string) => ({ anyOf: [{ type: "string", maxLength: max }, { type: "null" }], title });
 const CUSTOMER_TYPES = { type: "string", enum: ["residential", "commercial"] };
 
@@ -522,6 +567,10 @@ const SHAPES: Record<string, Record<number, unknown>> = {
       additionalProperties: false,
     },
   },
+  DeleteCommunityBody: { 1: deleteShape(true) },
+  DeleteMicrogridBody: { 1: deleteShape(true) },
+  DeleteTenantBody: { 1: deleteShape(true) },
+  RevokeTenantAccessBody: { 1: deleteShape(false) },
 };
 
 describe("pinned input versions", () => {
@@ -533,6 +582,10 @@ describe("pinned input versions", () => {
     ["CreateTenantBody", CreateTenantBody, CREATE_TENANT_BODY_VERSION, "CREATE_TENANT_BODY_VERSION"],
     ["UpdateTenantBody", UpdateTenantBody, UPDATE_TENANT_BODY_VERSION, "UPDATE_TENANT_BODY_VERSION"],
     ["TenantAccessGrantBody", TenantAccessGrantBody, TENANT_ACCESS_GRANT_BODY_VERSION, "TENANT_ACCESS_GRANT_BODY_VERSION"],
+    ["DeleteCommunityBody", DeleteCommunityBody, DELETE_COMMUNITY_BODY_VERSION, "DELETE_COMMUNITY_BODY_VERSION"],
+    ["DeleteMicrogridBody", DeleteMicrogridBody, DELETE_MICROGRID_BODY_VERSION, "DELETE_MICROGRID_BODY_VERSION"],
+    ["DeleteTenantBody", DeleteTenantBody, DELETE_TENANT_BODY_VERSION, "DELETE_TENANT_BODY_VERSION"],
+    ["RevokeTenantAccessBody", RevokeTenantAccessBody, REVOKE_TENANT_ACCESS_BODY_VERSION, "REVOKE_TENANT_ACCESS_BODY_VERSION"],
   ] as const)("%s matches the shape pinned for its version", (name, schema, version, constant) => {
     expect(version).toBe(1);
     expect(

@@ -669,3 +669,61 @@ describe("DELETE /api/tenants/[id]", () => {
     expect(mockTenantsDeleteSingle).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("DELETE /api/tenants/[id] with the GUI host's typed confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentUser = { id: "user-1" };
+    roleRows = [{ user_id: "user-1", role: "org_manager", scope_type: "org", scope_id: ORG_ID }];
+    pluginEnabled = true;
+    billingLineItemCount = 0;
+    mockTenantsFetchSingle.mockReset().mockResolvedValue({
+      data: { id: HH_UUID, display_name: "Block A, Unit 1", microgrid_id: MG_UUID },
+      error: null,
+    });
+    mockTenantsDeleteSingle.mockReset().mockResolvedValue({ data: [{ id: HH_UUID }], error: null });
+  });
+
+  const withBody = (body: string) =>
+    new NextRequest(`http://localhost/api/tenants/${HH_UUID}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+  const confirmed = (typed: string) => withBody(JSON.stringify({ confirmation: { acknowledged: [], typed } }));
+
+  it("204: deletes when the name typed is the tenant's, ignoring case and spacing", async () => {
+    const { DELETE } = await import("../route");
+    const res = await DELETE(confirmed("block a,  unit 1"), { params: Promise.resolve({ id: HH_UUID }) });
+    expect(res.status).toBe(204);
+    expect(mockTenantsDeleteSingle).toHaveBeenCalledTimes(1);
+  });
+
+  it("428: deletes nothing when the name typed is another", async () => {
+    const { DELETE } = await import("../route");
+    const res = await DELETE(confirmed("Block A"), { params: Promise.resolve({ id: HH_UUID }) });
+    expect(res.status).toBe(428);
+    expect(await res.json()).toEqual({
+      error: "Type the tenant's name, Block A, Unit 1, to delete it.",
+      code: "tenant_delete_name_mismatch",
+      field: "confirmation",
+    });
+    expect(mockTenantsDeleteSingle).not.toHaveBeenCalled();
+  });
+
+  it("403: still refuses a caller with no role before reading the confirmation", async () => {
+    roleRows = [];
+    const { DELETE } = await import("../route");
+    const res = await DELETE(confirmed("Block A"), { params: Promise.resolve({ id: HH_UUID }) });
+    expect(res.status).toBe(403);
+    expect(mockTenantsDeleteSingle).not.toHaveBeenCalled();
+  });
+
+  it("400: a body that is not a confirmation deletes nothing", async () => {
+    const { DELETE } = await import("../route");
+    const res = await DELETE(withBody(JSON.stringify({ typed: "Block A, Unit 1" })), { params: Promise.resolve({ id: HH_UUID }) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("invalid_body");
+    expect(mockTenantsDeleteSingle).not.toHaveBeenCalled();
+  });
+});

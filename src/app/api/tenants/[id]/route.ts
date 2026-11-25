@@ -5,10 +5,12 @@ import {
   type CommunityManagementError,
 } from "@/lib/community-management";
 import {
+  DeleteTenantBody,
   UPDATE_TENANT_REFUSALS,
   UpdateTenantBody,
 } from "@/lib/community-management/schemas";
 import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 
 function mapError(error: CommunityManagementError): NextResponse {
   const { ok, status, code, message, field, reason } = error;
@@ -105,15 +107,23 @@ export async function PATCH(
 }
 
 /**
- * DELETE /api/tenants/[id]
+ * DELETE /api/tenants/[id], as `community.delete-tenant`.
  *
  * Released deletions route through the community-management Cordis
  * capability — the previous browser-side direct table delete is replaced by
  * this endpoint. Safeguard: tenants with billing history are refused
  * (409) because line items cascade off the tenant row.
+ *
+ * Confirmation: `community.delete-tenant` is a typed action, so the GUI host
+ * sends DeleteTenantBody's `confirmation`, the name the person typed, and a
+ * name that is not the tenant's answers 428 `tenant_delete_name_mismatch`
+ * with nothing deleted. A request with no body, as the tenants page's
+ * delete dialog sends (TenantTable), is not asked for one: requiring it
+ * would change that page. If the page comes to send the confirmation,
+ * require it.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -125,12 +135,19 @@ export async function DELETE(
     );
   }
 
+  // A DELETE often has no body; an empty one is read as no confirmation.
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: DeleteTenantBody.parse({}) } as const)
+    : await parseJsonBody(request, DeleteTenantBody);
+  if (!parsed.ok) return parsed.response;
+
   const supabase = await createClient();
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("id, microgrid_id")
+    .select("id, microgrid_id, display_name")
     .eq("id", id)
-    .maybeSingle<{ id: string; microgrid_id: string }>();
+    .maybeSingle<{ id: string; microgrid_id: string; display_name: string }>();
   if (!tenant) {
     return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
   }
@@ -160,6 +177,17 @@ export async function DELETE(
   if (!composed.ok) return mapError(composed);
 
   try {
+    const { confirmation } = parsed.data;
+    if (confirmation && !typedNameMatches(confirmation.typed, tenant.display_name ?? "")) {
+      return NextResponse.json(
+        {
+          error: `Type the tenant's name, ${tenant.display_name}, to delete it.`,
+          code: "tenant_delete_name_mismatch",
+          field: "confirmation",
+        },
+        { status: 428 }
+      );
+    }
     const result =
       await composed.data.communityManagement.deleteTenant(id);
     if (!result.ok) return mapError(result);

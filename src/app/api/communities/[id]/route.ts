@@ -7,12 +7,14 @@ import {
   type CommunityManagementError,
 } from "@/lib/community-management";
 import {
+  DeleteCommunityBody,
   UPDATE_COMMUNITY_REFUSALS,
   UpdateCommunityBody,
 } from "@/lib/community-management/schemas";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import { gateRoute } from "@/lib/runtime/gate";
 import { parseJsonBody } from "@/lib/validation/parse-body";
+import { typedNameMatches } from "@/lib/validation/typed-name";
 import {
   errorBody,
   mapPgError,
@@ -116,6 +118,14 @@ export async function PATCH(
  *
  * Idempotency: first-delete wins, repeats 404 (AC-ROUTE-7).
  *
+ * Confirmation: `community.delete-community` is a typed action, so the GUI
+ * host sends DeleteCommunityBody's `confirmation`, the name the person
+ * typed, and a name that is not the community's answers 428
+ * `community_delete_name_mismatch` with nothing deleted. A request with no
+ * body, as the community page's delete dialog sends after its own typed
+ * check (DeleteEntityButton), is not asked for one: requiring it would
+ * change that page. If the page comes to send the confirmation, require it.
+ *
  * Cascade chain: communities → microgrids → (edges/devices/tenants/
  * billing_periods/billing_line_items/rate_schedules/tenant_devices), and
  * tenants → user_roles for the tenant role rows (scope_tenant_id, migration
@@ -129,7 +139,7 @@ export async function PATCH(
  * layouts are busted so nested nav + top-level community list refresh.
  */
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
@@ -140,6 +150,13 @@ export async function DELETE(
       { status: 400 }
     );
   }
+
+  // A DELETE often has no body; an empty one is read as no confirmation.
+  const empty = (await request.clone().text()).trim() === "";
+  const parsed = empty
+    ? ({ ok: true, data: DeleteCommunityBody.parse({}) } as const)
+    : await parseJsonBody(request, DeleteCommunityBody);
+  if (!parsed.ok) return parsed.response;
 
   const supabase = await createClient();
 
@@ -173,6 +190,17 @@ export async function DELETE(
     return NextResponse.json(
       errorBody("Unnamed entity cannot be typed-to-confirm."),
       { status: 409 }
+    );
+  }
+  const { confirmation } = parsed.data;
+  if (confirmation && !typedNameMatches(confirmation.typed, community.name)) {
+    return NextResponse.json(
+      {
+        error: `Type the community's name, ${community.name}, to delete it.`,
+        code: "community_delete_name_mismatch",
+        field: "confirmation",
+      },
+      { status: 428 }
     );
   }
 

@@ -239,3 +239,55 @@ describe("GET /api/communities/[id]/delete-preview", () => {
     );
   });
 });
+
+describe("DELETE /api/communities/[id] with the GUI host's typed confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    canAccessReturn = true;
+    pluginEnabled = true;
+    getUserReturn = { user: { id: "user-1" } };
+    configureEntityLookup({ data: { id: VALID_UUID, name: "Kisakye East", org_id: "org-1" }, error: null });
+  });
+
+  const withBody = (body: string) =>
+    new NextRequest(`http://localhost/api/communities/${VALID_UUID}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+  const confirmed = (typed: string) => withBody(JSON.stringify({ confirmation: { acknowledged: [], typed } }));
+
+  it("deletes when the name typed is the community's, ignoring case and spacing", async () => {
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed("  kisakye   EAST "), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(res.status).toBe(204);
+    expect(mockRpcImpl).toHaveBeenCalledWith("fn_entity_delete_community", { p_id: VALID_UUID });
+    infoSpy.mockRestore();
+  });
+
+  it("answers 428 and deletes nothing when the name typed is another, or none was typed", async () => {
+    const { DELETE } = await import("../[id]/route");
+    for (const request of [confirmed("Kisakye"), withBody(JSON.stringify({ confirmation: { acknowledged: [] } }))]) {
+      const res = await DELETE(request, { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the community's name, Kisakye East, to delete it.",
+        code: "community_delete_name_mismatch",
+        field: "confirmation",
+      });
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 invalid_body for a body that is not a confirmation, and deletes nothing", async () => {
+    const { DELETE } = await import("../[id]/route");
+    for (const body of ["{not json", JSON.stringify({ name: "Kisakye East" })]) {
+      const res = await DELETE(withBody(body), { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(400);
+      expect((await res.json()).code).toBe("invalid_body");
+    }
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+});

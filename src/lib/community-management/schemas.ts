@@ -452,3 +452,65 @@ export const TenantAccessGrantBody = z.strictObject(
 );
 export type TenantAccessGrantBody = z.output<typeof TenantAccessGrantBody>;
 export const TENANT_ACCESS_GRANT_BODY_VERSION = 1;
+
+// ── Deletes ──
+
+const acknowledged = (message: string) =>
+  z.array(z.string({ error: message }).max(64, { error: message }), { error: message }).max(20, { error: message });
+
+/**
+ * The host's Confirmation (src/lib/gui/contract.ts) for a typed delete: the
+ * name the person typed. Optional: the pages that delete send no body, so
+ * the route checks a confirmation only when one is sent.
+ */
+const typedConfirmation = (message: string) =>
+  z
+    .strictObject(
+      { acknowledged: acknowledged(message), typed: z.string({ error: message }).max(200, { error: message }).optional() },
+      { error: message }
+    )
+    .optional();
+
+/**
+ * DELETE /api/communities/[id]. The community comes from the path.
+ * `confirmation` is a typed action's: the community's name, which the route
+ * checks when one is sent.
+ */
+export const DeleteCommunityBody = z.strictObject(
+  { confirmation: typedConfirmation("confirmation needs the community's name, typed") },
+  { error: bodyError }
+);
+export const DELETE_COMMUNITY_BODY_VERSION = 1;
+
+/** DELETE /api/microgrids/[id], as DeleteCommunityBody: the microgrid's name, typed. */
+export const DeleteMicrogridBody = z.strictObject(
+  { confirmation: typedConfirmation("confirmation needs the microgrid's name, typed") },
+  { error: bodyError }
+);
+export const DELETE_MICROGRID_BODY_VERSION = 1;
+
+/** DELETE /api/tenants/[id], as DeleteCommunityBody: the tenant's name, typed. */
+export const DeleteTenantBody = z.strictObject(
+  { confirmation: typedConfirmation("confirmation needs the tenant's name, typed") },
+  { error: bodyError }
+);
+export const DELETE_TENANT_BODY_VERSION = 1;
+
+const REVOKE_CONFIRMATION = "confirmation is a removal's, with nothing to tick or type";
+
+/**
+ * DELETE /api/tenants/[id]/access/[accessId]. The unit and the access come
+ * from the path. `confirmation` is a ceremony's with nothing to tick or
+ * type (community.revoke-tenant-access's prepare asks for neither), so the
+ * route has nothing in it to check. If that prepare comes to ask for
+ * something, add it here, bump the version and check it in the route.
+ */
+export const RevokeTenantAccessBody = z.strictObject(
+  {
+    confirmation: z
+      .strictObject({ acknowledged: acknowledged(REVOKE_CONFIRMATION) }, { error: REVOKE_CONFIRMATION })
+      .optional(),
+  },
+  { error: bodyError }
+);
+export const REVOKE_TENANT_ACCESS_BODY_VERSION = 1;

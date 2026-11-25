@@ -306,3 +306,53 @@ describe("GET /api/microgrids/[id]/delete-preview", () => {
     expect(json.descendant_counts.billing_periods_with_payments).toBe(0);
   });
 });
+
+describe("DELETE /api/microgrids/[id] with the GUI host's typed confirmation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    canAccessReturn = true;
+    pluginEnabled = true;
+    getUserReturn = { user: { id: "user-1" } };
+    configureEntityLookup({ data: { id: VALID_UUID, name: "Demo Microgrid", community_id: "comm-1" }, error: null });
+  });
+
+  const withBody = (body: string) =>
+    new NextRequest(`http://localhost/api/microgrids/${VALID_UUID}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+  const confirmed = (typed: string) => withBody(JSON.stringify({ confirmation: { acknowledged: [], typed } }));
+
+  it("deletes when the name typed is the microgrid's, ignoring case and spacing", async () => {
+    mockRpcImpl.mockResolvedValueOnce({ data: 1, error: null });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed("demo  microgrid"), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(res.status).toBe(204);
+    expect(mockRpcImpl).toHaveBeenCalledWith("fn_entity_delete_microgrid", { p_id: VALID_UUID });
+    infoSpy.mockRestore();
+  });
+
+  it("answers 428 and deletes nothing when the name typed is another", async () => {
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(confirmed("Demo"), { params: Promise.resolve({ id: VALID_UUID }) });
+    expect(res.status).toBe(428);
+    expect(await res.json()).toEqual({
+      error: "Type the microgrid's name, Demo Microgrid, to delete it.",
+      code: "microgrid_delete_name_mismatch",
+      field: "confirmation",
+    });
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 invalid_body for a body that is not a confirmation, and deletes nothing", async () => {
+    const { DELETE } = await import("../[id]/route");
+    const res = await DELETE(withBody(JSON.stringify({ confirmation: { typed: "Demo Microgrid" } })), {
+      params: Promise.resolve({ id: VALID_UUID }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("invalid_body");
+    expect(mockRpcImpl).not.toHaveBeenCalled();
+  });
+});
