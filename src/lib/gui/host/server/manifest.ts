@@ -319,8 +319,11 @@ export function readManifestQuery(search: URLSearchParams): HostOutcome<{ path: 
  * The manifest for `ctx`'s person, as the (gui) layout builds it: with the
  * interface this installation renders (readGuiName, as the layout reads it)
  * and the same hints. A refusal is buildManifest's. An MGM_GUI that names no
- * usable interface, which the layout answers with a 500, is a 500 here too,
- * with the setting's value kept out of the answer and the log.
+ * usable interface, which the layout (src/app/(gui)/layout.tsx) answers
+ * with a 500, is a 500 here too, with the setting's value kept out of the
+ * answer and the log. If the layout comes to read the interface or the
+ * hints another way, change this with it, so the route keeps serving what
+ * the page gets.
  */
 export async function serveManifest(
   ctx: HostContext,

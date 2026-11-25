@@ -161,7 +161,9 @@ async function draftOf(
   const reasons: Reason[] = [];
   const unchecked = new Set<AvailabilityCheck>(["configured", "authorized"]);
 
-  // "0" for a segment not given: every released pattern takes any id there.
+  // "0" for a segment not given: every released API pattern takes any id
+  // there ([^/]+ in src/lib/mgm/released-routes.ts). If one comes to check
+  // an id's shape, fill each segment with an id of its kind instead.
   const path = (params && fillPath(def.path, params)) ?? def.path.replace(/\[[^\]]+\]/g, "0");
   const unreleased = releaseFailure(path);
   if (unreleased) reasons.push({ check: unreleased.check, code: unreleased.code, message: unreleased.message });

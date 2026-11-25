@@ -63,7 +63,8 @@ const token = (key: string) => key.replaceAll("~", "~0").replaceAll("/", "~1");
  * `{}` is z.never() and is not refused, though what it holds is visited. A
  * keyword's map is not a schema, so z.strictObject({}), whose properties is
  * `{}`, passes. Keywords not listed (if, contains, propertyNames and the
- * rest) are not visited; zod writes none of them with an unknown inside.
+ * rest) are not visited: zod 4.6 writes none of them with an unknown
+ * inside. If a zod upgrade does, visit them too.
  */
 export function unconstrainedNodes(schema: unknown): string[] {
   const found: string[] = [];
