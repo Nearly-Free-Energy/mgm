@@ -4,6 +4,11 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import {
+  UPDATE_TENANT_REFUSALS,
+  UpdateTenantBody,
+} from "@/lib/community-management/schemas";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 
 function mapError(error: CommunityManagementError): NextResponse {
   const { ok, status, code, message, field, reason } = error;
@@ -23,7 +28,11 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * PATCH /api/tenants/[id]
+ * PATCH /api/tenants/[id], as `community.update-tenant`.
+ *
+ * The body is UpdateTenantBody (src/lib/community-management/schemas.ts),
+ * refused with this route's own answers (UPDATE_TENANT_REFUSALS) before the
+ * tenant is read.
  *
  * Released mutations route through the community-management Cordis
  * capability. The route resolves the parent organization needed for the
@@ -45,12 +54,9 @@ export async function PATCH(
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateTenantBody, UPDATE_TENANT_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   const { data: tenant } = await supabase

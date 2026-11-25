@@ -6,8 +6,13 @@ import {
   composeCommunityManagement,
   type CommunityManagementError,
 } from "@/lib/community-management";
+import {
+  UPDATE_MICROGRID_REFUSALS,
+  UpdateMicrogridBody,
+} from "@/lib/community-management/schemas";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import { gateRoute } from "@/lib/runtime/gate";
+import { parseJsonBody } from "@/lib/validation/parse-body";
 import {
   errorBody,
   mapPgError,
@@ -31,11 +36,15 @@ function mapError(error: CommunityManagementError): NextResponse {
 }
 
 /**
- * PATCH /api/microgrids/[id] — update a microgrid (#76).
+ * PATCH /api/microgrids/[id] — update a microgrid (#76), as
+ * `community.update-microgrid`.
  *
- * Dirty-fields semantics: only keys present in body are applied.
- * Re-parenting via `community_id` is NOT supported through this endpoint —
- * ignored if present (would be a "move" feature, deferred).
+ * Dirty-fields semantics: only keys present in body are applied. The body
+ * is UpdateMicrogridBody (src/lib/community-management/schemas.ts), refused
+ * with this route's own answers (UPDATE_MICROGRID_REFUSALS). Re-parenting
+ * via `community_id` is NOT supported through this endpoint (it would be a
+ * "move" feature, deferred): the schema refuses the key, which the route
+ * ignored before it parsed with a schema.
  *
  * Released mutations route through the community-management Cordis
  * capability. The route resolves the parent organization needed for the
@@ -61,12 +70,9 @@ export async function PATCH(
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, UpdateMicrogridBody, UPDATE_MICROGRID_REFUSALS);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.data;
 
   const supabase = await createClient();
   const { data: microgrid } = await supabase
