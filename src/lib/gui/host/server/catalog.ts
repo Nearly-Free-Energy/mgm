@@ -8,8 +8,8 @@ import "server-only";
  * A1) calls the same code.
  *
  * Every registered action is listed, in catalog order and then by id, as
- * the view merge appends them (appendTargetedActions in
- * ../shared/merge-actions.ts). One whose plugin is off is listed
+ * the view merge appends them: both sort with byCatalogOrder
+ * (../shared/merge-actions.ts). One whose plugin is off is listed
  * unavailable, with the gate's own code and copy, never left out. Given
  * entities (`entity=<kind>:<id>`), only the actions offered on one of their
  * kinds are listed, and each is asked its own available() about its entity.
@@ -43,7 +43,7 @@ import {
   type EntityKind,
   type Id,
 } from "../../contract";
-import { catalogIndex, fillPath, idFits } from "../shared/merge-actions";
+import { byCatalogOrder, fillPath, idFits } from "../shared/merge-actions";
 import { tenantUnitIds } from "../shared/tenant-units";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
 import { gateRefusal, releaseFailure } from "./availability";
@@ -87,7 +87,6 @@ const OUTPUT_INVALID = fail(500, "gui_output_invalid", "The actions could not be
 const CHECKS: readonly AvailabilityCheck[] = ["installed", "enabled", "configured", "healthy", "authorized", "state"];
 
 const isCore = (kind: EntityKind) => (CORE_ENTITY_KINDS as readonly string[]).includes(kind);
-const byId = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
 
 /** The query with a core kind's id and the organization lowercased, or null when it breaks a rule. */
 function checkedQuery(q: CatalogQuery): Required<CatalogQuery> | null {
@@ -272,7 +271,7 @@ export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery):
   const gate = pluginGate(ctx, orgId);
   const listed = [...snapshot.actions.values()]
     .filter(({ def }) => byKind.size === 0 || byKind.has(def.target))
-    .sort((x, y) => catalogIndex(x.plugin) - catalogIndex(y.plugin) || byId(x.def.id, y.def.id));
+    .sort(byCatalogOrder);
   const drafts = await Promise.all(listed.map((registered) => draftOf(registered, byKind, gate)));
 
   const targets = new Map<Id, Set<string>>();
