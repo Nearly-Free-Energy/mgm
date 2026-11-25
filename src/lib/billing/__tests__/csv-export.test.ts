@@ -62,7 +62,7 @@ function makeRow(overrides: Partial<CsvExportRow> = {}): CsvExportRow {
     device: { openems_component_id: "meter0" },
     lineItem: {
       id: "00000000-0000-0000-0000-000000000001",
-      invoice_number: "NFE-2026-00001",
+      invoice_number: "EX-2026-00001",
       created_at: "2026-04-30T08:30:00Z",
       start_kwh: 100,
       end_kwh: 180,
@@ -81,7 +81,7 @@ function makeRow(overrides: Partial<CsvExportRow> = {}): CsvExportRow {
 
 function makeInput(overrides: Partial<CsvExportInput> = {}): CsvExportInput {
   return {
-    microgrid: { name: "Sezibwa", currency: "UGX" },
+    microgrid: { name: "Demo Microgrid", currency: "UGX" },
     period: {
       id: "00000000-0000-0000-0000-0000000000aa",
       start_date: "2026-04-01",
@@ -505,12 +505,12 @@ describe("buildBillingPeriodCsv — sort stability", () => {
 
 describe("sanitizeFilenameSegment", () => {
   it.each([
-    ["Sezibwa", "sezibwa"],
+    ["Demo", "demo"],
     [
       "Demo (Test with OpenEMS Integrated)",
       "demo-test-with-openems-integrated",
     ],
-    ["NFE — Pilot #1", "nfe-pilot-1"],
+    ["Org — Pilot #1", "org-pilot-1"],
     ["   trim me   ", "trim-me"],
   ])("%s → %s", (input, expected) => {
     expect(sanitizeFilenameSegment(input)).toBe(expected);
@@ -521,11 +521,11 @@ describe("buildCsvFilename", () => {
   it("emits <slug>-billing-period-<start>-to-<end>.csv", () => {
     expect(
       buildCsvFilename({
-        microgridName: "Sezibwa",
+        microgridName: "Demo Microgrid",
         startDate: "2026-04-01",
         endDate: "2026-04-30",
       }),
-    ).toBe("sezibwa-billing-period-2026-04-01-to-2026-04-30.csv");
+    ).toBe("demo-microgrid-billing-period-2026-04-01-to-2026-04-30.csv");
   });
 });
 
@@ -568,7 +568,7 @@ describe("buildBillingPeriodCsv — #232 OpenEMS Meter ID rename + Meter Serial 
 });
 
 describe("buildBillingPeriodCsv — #232 display-side rounding masks float-dust", () => {
-  it("dusty Tier 2 / Usage / Total stored values serialize clean (Arthur / Peter fixtures)", () => {
+  it("dusty Tier 2 / Usage / Total stored values serialize clean (#232 fixtures)", () => {
     // Composite fixture mirroring the dust patterns from the issue.
     const dustyRow = makeRow({
       tenant: { ...makeRow().tenant, display_name: "Dusty Row" },
@@ -579,7 +579,7 @@ describe("buildBillingPeriodCsv — #232 display-side rounding masks float-dust"
         usage_kwh: 178.35000000000002,
         tier_breakdown: [
           { label: "Tier 1", kwh: 50, amount: 25000 },
-          // Arthur's dust: tiny non-zero kWh + sub-integer UGX
+          // Tier 2 dust: tiny non-zero kWh + sub-integer UGX
           { label: "Tier 2", kwh: 0.11700000000000088, amount: 88.47540000000068 },
         ],
         total_amount: 10807.000972000002,

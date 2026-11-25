@@ -41,27 +41,27 @@ import type {
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const NFE_INVOICE_CONFIG = {
+const SELLER_INVOICE_CONFIG = {
   seller: {
-    legal_name: "WattWorks Foundation Limited",
-    trade_name: "Nearly Free Energy",
+    legal_name: "Example Energy Ltd",
+    trade_name: "Example Energy",
     tax_ids: [
-      { label: "BRN", value: "80034460247370" },
-      { label: "TIN", value: "1049957756" },
+      { label: "BRN", value: "80000000000001" },
+      { label: "TIN", value: "1000000001" },
     ],
     address_lines: [
       "Plot / Address Line Here",
       "Kampala / Nansana, Uganda",
     ],
-    contact_email: "billing@nearlyfreeenergy.com",
-    contact_phone: "+256 762 860 576",
+    contact_email: "billing@example.org",
+    contact_phone: "+256 700 000 002",
   },
   branding: {
     tagline: "Customer Energy Bill",
     primary_color: "#163a5f",
     accent_color: "#2f7d32",
     document_title: "Invoice",
-    whatsapp_number: "+256 762 860 576",
+    whatsapp_number: "+256 700 000 002",
   },
   payment: {
     due_days_after_issue: 8,
@@ -92,7 +92,7 @@ const RATE_SCHEDULE: RateSchedule = {
   created_at: "2026-04-01T00:00:00.000Z",
 } as RateSchedule;
 
-// F6 regression fixture (#224): NFE-2026-00003 reproduces Aaron's Tier 2 math
+// F6 regression fixture (#224): EX-2026-00003 reproduces the bill's Tier 2 math
 // "0.117 × 756.20 = 88.4754 → 88" reconciliation. Sub-15 max_kwh forces the
 // 15.117 usage to spill into Tier 2 by 0.117 kWh.
 const RATE_SCHEDULE_REGRESSION: RateSchedule = {
@@ -110,8 +110,8 @@ const RATE_SCHEDULE_REGRESSION: RateSchedule = {
 
 const ORG: Organization = {
   id: "org-1",
-  name: "WattWorks Foundation Limited",
-  slug: "wattworks",
+  name: "Example Energy Ltd",
+  slug: "example-energy",
   created_at: "2026-01-01T00:00:00.000Z",
 } as unknown as Organization;
 
@@ -119,8 +119,8 @@ const COMMUNITY_FULL: Community = {
   id: "comm-1",
   org_id: "org-1",
   name: "Nansana",
-  invoice_prefix: "NFE",
-  invoice_config: NFE_INVOICE_CONFIG as unknown as Community["invoice_config"],
+  invoice_prefix: "EX",
+  invoice_config: SELLER_INVOICE_CONFIG as unknown as Community["invoice_config"],
   created_at: "2026-01-01T00:00:00.000Z",
   payment_provider: "pesapal",
   payment_provider_config: { account: "x" },
@@ -146,15 +146,15 @@ const COMMUNITY_NO_PROVIDER: Community = {
   payment_provider_config: null,
 };
 
-const TENANT_AARON: Tenant = {
+const TENANT_SAMPLE: Tenant = {
   id: "hh-1",
   microgrid_id: "mg-1",
-  display_name: "Aaron Tushabe",
+  display_name: "Sample Tenant",
   account_number: "ACC-00492",
   meter_serial: "SM-882104",
   meter_type: "Smart Submeter",
   customer_type: "residential",
-  primary_email: "manager@example.org",
+  primary_email: "tenant@example.org",
   primary_phone: "+256 700 000 001",
   unit_label: "House 7",
   address_line1: "Community Name",
@@ -193,7 +193,7 @@ function makeLineItem(overrides: Partial<BillingLineItem> = {}): BillingLineItem
       { label: "Tier 3", kwh: 0, amount: 0 },
     ],
     payment_status: "unpaid",
-    invoice_number: "NFE-2026-00421",
+    invoice_number: "EX-2026-00421",
     pesapal_redirect_url: "https://pay.pesapal.com/abc",
     pesapal_order_id: "ORD-1",
     paid_at: null,
@@ -279,12 +279,12 @@ function maybeAssertByteStability(fixtureName: string, buf: Buffer): void {
 function buildF1Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem(),
-    tenant: TENANT_AARON,
+    tenant: TENANT_SAMPLE,
     community: COMMUNITY_FULL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
     paymentRedirectUrl: "http://localhost:3000/api/billing-line-items/li-1/pay",
-    invoiceNumber: "NFE-2026-00421",
+    invoiceNumber: "EX-2026-00421",
     logoBytes: loadLogoBytes(),
     meterDevice: METER_DEVICE,
     enteredByUserName: null,
@@ -299,12 +299,12 @@ function buildF1Input(): RenderInvoiceInput {
 function buildF2Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem(),
-    tenant: { ...TENANT_AARON, account_number: null, meter_serial: null },
+    tenant: { ...TENANT_SAMPLE, account_number: null, meter_serial: null },
     community: COMMUNITY_MINIMAL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
     paymentRedirectUrl: "http://localhost:3000/api/billing-line-items/li-1/pay",
-    invoiceNumber: "WW-2026-00001",
+    invoiceNumber: "EX-2026-00001",
     logoBytes: null,
     meterDevice: null,
     enteredByUserName: null,
@@ -319,18 +319,18 @@ function buildF3Input(): RenderInvoiceInput {
     lineItem: makeLineItem({
       reading_source: "manual",
       entered_at: "2026-04-22T10:00:00.000Z",
-      entered_by_user_id: "user-aaron",
+      entered_by_user_id: "user-manager",
       manual_reason: "End-of-month manual read",
     }),
-    tenant: TENANT_AARON,
+    tenant: TENANT_SAMPLE,
     community: COMMUNITY_FULL,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
     paymentRedirectUrl: "http://localhost:3000/api/billing-line-items/li-1/pay",
-    invoiceNumber: "NFE-2026-00422",
+    invoiceNumber: "EX-2026-00422",
     logoBytes: null,
     meterDevice: METER_DEVICE,
-    enteredByUserName: "Aaron Tushabe",
+    enteredByUserName: "Sample Manager",
     currency: "UGX",
     billingPeriodStart: "2026-04-01",
     billingPeriodEnd: "2026-04-30",
@@ -340,12 +340,12 @@ function buildF3Input(): RenderInvoiceInput {
 function buildF4Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem({ pesapal_redirect_url: null, pesapal_order_id: null }),
-    tenant: TENANT_AARON,
+    tenant: TENANT_SAMPLE,
     community: COMMUNITY_NO_PROVIDER,
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
     paymentRedirectUrl: null, // no provider configured
-    invoiceNumber: "NFE-2026-00423",
+    invoiceNumber: "EX-2026-00423",
     logoBytes: null,
     meterDevice: METER_DEVICE,
     enteredByUserName: null,
@@ -358,12 +358,12 @@ function buildF4Input(): RenderInvoiceInput {
 function buildF5Input(): RenderInvoiceInput {
   return {
     lineItem: makeLineItem({ pesapal_redirect_url: null, pesapal_order_id: null }),
-    tenant: TENANT_AARON,
+    tenant: TENANT_SAMPLE,
     community: COMMUNITY_FULL, // provider IS configured
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE,
     paymentRedirectUrl: null, // …but the renderer received null anyway
-    invoiceNumber: "NFE-2026-00424",
+    invoiceNumber: "EX-2026-00424",
     logoBytes: null,
     meterDevice: METER_DEVICE,
     enteredByUserName: null,
@@ -373,7 +373,7 @@ function buildF5Input(): RenderInvoiceInput {
   };
 }
 
-// F6 (#224 regression): reproduces Arthur Bamwite's NFE-2026-00003 — the
+// F6 (#224 regression): reproduces the bill in #224 as EX-2026-00003 — the
 // stored Tier 2 usage of 0.117 kWh at rate 756.2 UGX/kWh must display so
 // that 0.117 × 756.20 ≈ 88 UGX reconciles for the customer.
 function buildF6Input(): RenderInvoiceInput {
@@ -388,14 +388,14 @@ function buildF6Input(): RenderInvoiceInput {
       ],
       // 3750 + 88.4754 + 10000 service_charge ≈ 13838 (no tax)
       total_amount: 13838,
-      invoice_number: "NFE-2026-00003",
+      invoice_number: "EX-2026-00003",
     }),
-    tenant: TENANT_AARON,
+    tenant: TENANT_SAMPLE,
     community: COMMUNITY_MINIMAL, // tax hidden — keep focus on rate/usage math
     organization: ORG,
     ratesSchedule: RATE_SCHEDULE_REGRESSION,
     paymentRedirectUrl: null,
-    invoiceNumber: "NFE-2026-00003",
+    invoiceNumber: "EX-2026-00003",
     logoBytes: null,
     meterDevice: METER_DEVICE,
     enteredByUserName: null,
@@ -424,9 +424,9 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     writeFileSync(VISUAL_REFERENCE_PATH, buf);
 
     await expectStructuralPdfShape(buf, [
-      "NFE-2026-00421",
-      "WattWorks Foundation Limited",
-      "Aaron Tushabe",
+      "EX-2026-00421",
+      "Example Energy Ltd",
+      "Sample Tenant",
       "Edge reading captured",
       "Pay Now",
       "VAT",
@@ -448,9 +448,9 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     await expectStructuralPdfShape(
       buf,
       [
-        "WW-2026-00001",
+        "EX-2026-00001",
         // Falls back to org name when seller.legal_name is absent.
-        "WattWorks Foundation Limited",
+        "Example Energy Ltd",
       ],
       ["VAT @ 18%"], // tax section hidden
     );
@@ -463,8 +463,8 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     const buf = await renderInvoicePdf(input);
 
     await expectStructuralPdfShape(buf, [
-      "NFE-2026-00422",
-      "Manual entry by Aaron Tushabe",
+      "EX-2026-00422",
+      "Manual entry by Sample Manager",
       "End-of-month manual read",
     ]);
 
@@ -479,7 +479,7 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
       // Card-header text is rendered uppercase via textTransform; assert
       // against the rendered form, not the JSX literal.
       buf,
-      ["NFE-2026-00423", "CUSTOMER SUPPORT"],
+      ["EX-2026-00423", "CUSTOMER SUPPORT"],
       ["Pay Now", "PAYMENT INFORMATION"], // card omitted
     );
 
@@ -492,21 +492,21 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
 
     await expectStructuralPdfShape(
       buf,
-      ["NFE-2026-00424"],
+      ["EX-2026-00424"],
       ["Pay Now"], // paymentRedirectUrl=null → card omitted
     );
 
     maybeAssertByteStability("no-line-item-payment-link", buf);
   });
 
-  it("F6 regression #224 — NFE-2026-00003 Tier 2 reconciles 0.117 × 756.20 to 88", async () => {
+  it("F6 regression #224 — EX-2026-00003 Tier 2 reconciles 0.117 × 756.20 to 88", async () => {
     const input = buildF6Input();
     const buf = await renderInvoicePdf(input);
 
     await expectStructuralPdfShape(
       buf,
       [
-        "NFE-2026-00003",
+        "EX-2026-00003",
         // Tier 2 usage cell — preserved at digits:3, not rounded to "0.12".
         "0.117",
         // Current Reading / Total Consumption preserved at digits:3.
@@ -537,7 +537,7 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     expect(reconcile(0.117, 756.20, 88)).toBe(true);
     expect(reconcile(15.000, 250.00, 3750)).toBe(true);
 
-    maybeAssertByteStability("regression-nfe-2026-00003", buf);
+    maybeAssertByteStability("regression-ex-2026-00003", buf);
   });
 
   // ── #358 — per-period timezone on the invoice PDF ──────────────────────────
@@ -546,7 +546,7 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     const input = { ...buildF1Input(), logoBytes: null };
     delete (input as Partial<RenderInvoiceInput>).billingPeriodTimezone;
     const buf = await renderInvoicePdf(input);
-    await expectStructuralPdfShape(buf, ["NFE-2026-00421"], ["Africa/Kampala"]);
+    await expectStructuralPdfShape(buf, ["EX-2026-00421"], ["Africa/Kampala"]);
   });
 
   it("#358 HARD guard: the stamped zone labels the range but never shifts the window dates", async () => {
@@ -575,8 +575,8 @@ describe("renderInvoicePdf — fixtures (#203 PDF1b)", () => {
     const broken = {
       ...COMMUNITY_FULL,
       invoice_config: {
-        ...NFE_INVOICE_CONFIG,
-        branding: { ...NFE_INVOICE_CONFIG.branding, primary_color: "#abc" },
+        ...SELLER_INVOICE_CONFIG,
+        branding: { ...SELLER_INVOICE_CONFIG.branding, primary_color: "#abc" },
       } as unknown as Community["invoice_config"],
     };
     await expect(

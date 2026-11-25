@@ -127,8 +127,8 @@ export default function ComponentsDevPage() {
           <ConfirmDialog
             open={confirmTypedOpen}
             onOpenChange={setConfirmTypedOpen}
-            title="Delete microgrid “Demo Village”?"
-            description={`This cannot be undone. Type “Demo Village” to confirm.`}
+            title="Delete microgrid “Demo Microgrid”?"
+            description={`This cannot be undone. Type “Demo Microgrid” to confirm.`}
             body={
               <ul className="my-2 list-disc space-y-0.5 pl-5">
                 <li>1 edge</li>
@@ -143,7 +143,7 @@ export default function ComponentsDevPage() {
             tone="destructive"
             requireTypedConfirmation={{
               label: "Type microgrid name to confirm",
-              expected: "Demo Village",
+              expected: "Demo Microgrid",
             }}
             onConfirm={() => new Promise((res) => setTimeout(res, 800))}
           />
