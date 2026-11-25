@@ -6,7 +6,8 @@
  */
 import { isDeepStrictEqual } from "node:util";
 import { setViewportWidth } from "@/test/gui-setup";
-import { GUI_CONTRACT, GUI_KINDS_SINCE, type ActionRef, type GuiPlugin, type Value, type ViewModel } from "../contract";
+import { GUI_CONTRACT, GUI_KINDS_SINCE, type ActionRef, type Value, type ViewModel } from "../contract";
+import type { GuiPlugin } from "../contract-react";
 import { parseCaretRange, satisfiesContract } from "../host/shared/contract-range";
 import { controlName, CONTROLS, crawl, enabled, type Reachable } from "./crawl";
 import { WIDTHS, type CheckId, type Finding } from "./findings";

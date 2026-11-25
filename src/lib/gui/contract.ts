@@ -7,7 +7,9 @@
  * server-only): views with loaders, actions bound to its existing API routes,
  * navigation, signals and search. A GUI plugin presents what it is given,
  * through the types in this file and the kit (GuiKit). This file is
- * client-safe: it imports only types, from react and from the plugin catalog.
+ * client-safe: it imports only types, and only from the plugin catalog, so a
+ * client that is not a GUI type-checks it without React. The kit and
+ * GUI-plugin types, which name React types, are in ./contract-react.ts.
  *
  * Nothing here is a rule the server trusts. The middleware, the routes and the
  * database keep enforcing released routes, the plugin gate, roles and
@@ -23,7 +25,6 @@
  * supports. Through 0.x the contract is experimental: a minor version may
  * change shapes, and a patch only adds optional fields, kinds or values.
  */
-import type { ComponentType, ReactNode } from "react";
 import type { CoreEntityKind, MgmPluginName } from "@/lib/plugins/bundled";
 
 /** The contract version (semver). A GUI declares the range it supports, such as "^0.1". */
@@ -47,7 +48,7 @@ export type OutHref = `https://wa.me/${string}` | `tel:${string}` | `sms:${strin
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 /** Meaning, not colour. `accent` marks a label, never a state. */
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "accent";
-/** What a person does before a write. A GUI frames the step (GuiPlugin.Overlay) but never runs it. */
+/** What a person does before a write. A GUI frames the step (GuiPlugin.Overlay, ./contract-react.ts) but never runs it. */
 export type Confirm = "none" | "confirm" | "typed" | "ceremony";
 /**
  * What a second identical send of an action does (RFC #259 § 3, ADR-006
@@ -390,9 +391,9 @@ export interface ViewState extends InitialView {
   choices(kind: CoreEntityKind): EntityRef[];
 }
 
-// ── The kit: the only I/O a GUI has ────────────────────────────────────────
-// A runtime implements GuiKit with `satisfies GuiKit`, so its shape is
-// versioned with these types.
+// ── The kit's state ─────────────────────────────────────────────────────────
+// What the kit (GuiKit, in ./contract-react.ts) hands a GUI. These name no
+// React type, so they stay here.
 
 export interface LiveState {
   model: ViewModel;
@@ -406,53 +407,11 @@ export interface FeedState {
   send(text: string): Promise<ActionResult>;
   stop(): void;
 }
-export interface LinkProps {
-  href: Href;
-  children: ReactNode;
-  className?: string;
-  current?: boolean;
-}
-export interface GuiKit {
-  useManifest(): Manifest;
-  useView(): ViewState;
-  useSignals(): Signals | null;
-  useLive(model: ViewModel): LiveState;
-  useFeed(href: Href): FeedState;
-  loadView(href: Href): Promise<ViewModel | ActionResult>;
-  search(query: string, prefix: "@" | "#"): Promise<EntityHit[]>;
-  Link: ComponentType<LinkProps>;
-  navigate(href: Href): void;
-  refresh(): void;
-  usePathname(): string;
-  /** GUI-owned interface state, such as a selection. `ui.*` parameters never reach a loader. */
-  useUiParam(name: `ui.${string}`): [string | null, (value: string | null) => void];
-  /**
-   * The only way to write: the kit runs the form, the confirmation step and
-   * the request. Resolves { ok: false, status: 0, code: "cancelled" } when the
-   * person cancels.
-   */
-  act(ref: ActionRef, options?: { initial?: Json }): Promise<ActionResult>;
-  open(link: LinkRef): Promise<void>;
-  /** Renders all five kinds; a GUI may use it as its View. */
-  KitView: SyncComponent<ViewProps>;
-  /** The fallback for a kind a GUI does not know. */
-  RawView: SyncComponent<ViewProps>;
-  SignOut: ComponentType<{ className?: string }>;
-}
 
-// ── What a GUI plugin implements ───────────────────────────────────────────
+// ── What a GUI plugin is handed and declares ───────────────────────────────
+// The component types (GuiPlugin, ShellProps, OverlayProps) are in
+// ./contract-react.ts; the props and metadata below name no React type.
 
-/** A component that renders synchronously, so it works in the browser, in jsdom and inside embeds. */
-export type SyncNode = Exclude<ReactNode, Promise<unknown>>;
-export type SyncComponent<P> = (props: P) => SyncNode;
-/** Shell and PublicFrame may be server components. */
-type MaybeServer<P> = (props: P) => ReactNode | Promise<ReactNode>;
-
-export interface ShellProps {
-  manifest: Manifest;
-  initial: InitialView;
-  children: ReactNode;
-}
 export interface ViewProps {
   model: ViewModel;
 }
@@ -472,26 +431,6 @@ export interface FormProps {
   submit(body: Json): void;
   cancel(): void;
 }
-export interface OverlayProps {
-  title: string;
-  /** "danger" for a DELETE or destructive action, "neutral" for every other, typed and ceremony included. */
-  tone: "neutral" | "danger";
-  role: "form" | "confirm";
-  onDismiss(): void;
-  /**
-   * Where the kit's step goes; the GUI frames it (dialog, sheet, page) and
-   * never alters it. It is an empty slot with no props: the host renders the
-   * step into it through a portal, so the step's React events and context do
-   * not pass through the Overlay, and an Overlay that closes on an outside
-   * click judges "outside" by DOM containment. Put it inside the dialog's
-   * content element itself (for Radix, inside Dialog.Content), not in a
-   * portal of its own: a modal dialog hides everything outside its content
-   * from assistive tech and counts presses there as outside. Holds while ActionHost
-   * (host/client/action-host.tsx) portals the step; if the Overlay is ever
-   * handed the step itself, revisit.
-   */
-  children: ReactNode;
-}
 export type PublicPage =
   | "login" | "forgot-password" | "reset-password" | "accept-invite" | "no-access" | "setup";
 
@@ -507,23 +446,6 @@ export interface GuiMeta {
   styles: string;
   /** The npm packages the GUI's code imports, so each can be reviewed. */
   dependencies: readonly string[];
-}
-/** A GUI: its metadata plus its components. */
-export interface GuiPlugin extends GuiMeta {
-  /** Must: the persistent layout. */
-  Shell: MaybeServer<ShellProps>;
-  /** Must: renders all five kinds (kit.KitView counts). */
-  View: SyncComponent<ViewProps>;
-  /** May: bespoke renderers by view id, each listing the `ext` versions it reads. */
-  renderers?: Partial<Record<Id, { reads: readonly number[]; Component: SyncComponent<ViewProps> }>>;
-  /** May: bespoke forms by action id, for `none` and `confirm` actions only. */
-  forms?: Partial<Record<Id, { reads: readonly number[]; Component: SyncComponent<FormProps> }>>;
-  /** May: frames the kit's forms and confirmation steps. */
-  Overlay?: SyncComponent<OverlayProps>;
-  /** May: otherwise a neutral skeleton. */
-  Loading?: SyncComponent<Record<string, never>>;
-  /** May: a server component around the sign-in pages, with no client imports. */
-  PublicFrame?: MaybeServer<{ page: PublicPage; children: ReactNode }>;
 }
 
 /**

@@ -11,7 +11,8 @@
 import { act, fireEvent, queryAllByRole, render, waitFor } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
 import { setViewportWidth } from "@/test/gui-setup";
-import type { ActionRef, GuiPlugin, OverlayProps, PublicPage, SyncComponent } from "../contract";
+import type { ActionRef, PublicPage } from "../contract";
+import type { GuiPlugin, OverlayProps, SyncComponent } from "../contract-react";
 import { KitProvider } from "../host/client/kit-provider";
 import { hostAct, KitRuntimeProvider } from "../host/client/kit-runtime";
 import type { PreparedAction } from "../host/server/prepare";

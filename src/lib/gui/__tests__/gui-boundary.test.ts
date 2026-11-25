@@ -18,12 +18,13 @@
  *      file is in server/, client/ or shared/ ("host-layout").
  *   5. client-reach: no file a browser can load imports surface.ts, fmt.ts or
  *      host/server/. Browser entry points are files with "use client",
- *      contract.ts, host/client/, host/shared/, src/components/ and the GUI
- *      packages under src/gui/. Reachability follows `@/` and relative
+ *      contract.ts, contract-react.ts, host/client/, host/shared/,
+ *      src/components/ and the GUI packages under src/gui/. Reachability follows `@/` and relative
  *      imports, re-exports and import(); type-only imports are skipped,
  *      because the compiler erases them.
  *   6. gui-imports: a GUI package (src/gui/<name>/) imports only the
- *      contract, the kit, react, react-dom, its own files, and the npm
+ *      contract (contract.ts and contract-react.ts), the kit, react,
+ *      react-dom, its own files, and the npm
  *      packages listed for it in REVIEWED_PACKAGES. It imports no stylesheet:
  *      GuiMeta.styles names it and the host links it.
  *   7. gui-meta: GUI metadata is read at start-up without React.
@@ -42,7 +43,7 @@
  *      are client references.
  *  11. gui-installed: src/gui/installed.ts, the GUIs' entry points by name,
  *      imports only ./<name> package entries and types from ./meta and the
- *      contract. Only host pages import it: server files under src/app/,
+ *      contract (contract.ts and contract-react.ts). Only host pages import it: server files under src/app/,
  *      and test code. So a GUI's components reach the pages that render it
  *      and no other module.
  *
@@ -66,6 +67,8 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 const CONTRACT = "src/lib/gui/contract.ts";
+/** The contract's kit and GUI-plugin types, which name React types. */
+const CONTRACT_REACT = "src/lib/gui/contract-react.ts";
 const SERVER_ONLY_FILES = ["src/lib/gui/surface.ts", "src/lib/gui/fmt.ts", "src/lib/gui/assistant-reads.ts"];
 const HOST = "src/lib/gui/host/";
 const HOST_SERVER = `${HOST}server/`;
@@ -81,7 +84,14 @@ const HOST_PAGES = "src/app/";
 const CONTRACT_TYPE_SOURCES = ["react", "@/lib/plugins/bundled"];
 
 /** What any GUI package may import, besides its own files and its reviewed packages. */
-const GUI_ALLOWED = ["@/lib/gui/contract", "@/lib/gui/kit", "react", "react/jsx-runtime", "react-dom"];
+const GUI_ALLOWED = [
+  "@/lib/gui/contract",
+  "@/lib/gui/contract-react",
+  "@/lib/gui/kit",
+  "react",
+  "react/jsx-runtime",
+  "react-dom",
+];
 
 /** What a GUI package's test files may import besides GUI_ALLOWED; also any @testing-library/ package. */
 const GUI_TEST_ALLOWED = ["@/lib/gui/conformance", "vitest"];
@@ -288,6 +298,7 @@ function isBrowserEntry(file: string, source: ts.SourceFile): boolean {
   return (
     directives(source).includes("use client") ||
     file === CONTRACT ||
+    file === CONTRACT_REACT ||
     file.startsWith(HOST_CLIENT) ||
     file.startsWith(HOST_SHARED) ||
     file.startsWith("src/components/") ||
@@ -423,11 +434,12 @@ function boundaryViolations(
           const typeFrom = (specifier: string) => imported.declaredTypeOnly && imported.specifier === specifier;
           // ./meta is a file, not a package, so its values stay out.
           const entry = /^\.\/[a-z0-9][a-z0-9-]*$/.test(imported.specifier) && imported.specifier !== "./meta";
-          if (!typeFrom("@/lib/gui/contract") && !typeFrom("./meta") && !entry) {
+          const contractType = typeFrom("@/lib/gui/contract") || typeFrom("@/lib/gui/contract-react");
+          if (!contractType && !typeFrom("./meta") && !entry) {
             report(
               "gui-installed",
               file,
-              `imports ${imported.specifier || "a computed module"}; it may import only ./<name> package entries and types from ./meta and @/lib/gui/contract`,
+              `imports ${imported.specifier || "a computed module"}; it may import only ./<name> package entries and types from ./meta, @/lib/gui/contract and @/lib/gui/contract-react`,
             );
           }
         }
@@ -885,11 +897,12 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       );
     });
 
-    it("treats host/client, host/shared, contract.ts, components and GUI packages as browser entry points", () => {
+    it("treats host/client, host/shared, the contract files, components and GUI packages as browser entry points", () => {
       const entries = [
         `${HOST_CLIENT}a.tsx`,
         `${HOST_SHARED}a.ts`,
         CONTRACT,
+        CONTRACT_REACT,
         "src/components/plain.tsx",
         "src/gui/probe/index.ts",
       ];
@@ -939,7 +952,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       expect(
         check({
           "src/gui/probe/index.tsx": [
-            'import type { GuiPlugin } from "@/lib/gui/contract";',
+            'import type { GuiPlugin } from "@/lib/gui/contract-react";',
+            'import type { ViewProps } from "@/lib/gui/contract";',
             'import { KitView } from "@/lib/gui/kit";',
             'import { useState } from "react";',
             'import { createPortal } from "react-dom";',
@@ -1181,7 +1195,8 @@ describe("the boundary checker catches each violation (self-tests)", () => {
 
   describe("gui-installed", () => {
     const installed = [
-      'import type { GuiPlugin } from "@/lib/gui/contract";',
+      'import type { GuiPlugin } from "@/lib/gui/contract-react";',
+      'import type { GuiMeta } from "@/lib/gui/contract";',
       'import type { GuiName } from "./meta";',
       'import { ProbeGui } from "./probe";',
       "export const INSTALLED_GUIS: Record<GuiName, GuiPlugin> = { probe: ProbeGui };",
@@ -1203,6 +1218,7 @@ describe("the boundary checker catches each violation (self-tests)", () => {
       for (const source of [
         'import { GUI_META } from "./meta";',
         'import { GUI_CONTRACT } from "@/lib/gui/contract";',
+        'import { type GuiPlugin } from "@/lib/gui/contract-react";',
         'import { Shell } from "./probe/shell";',
         'import { kit } from "@/lib/gui/kit";',
         "const probe = await import(name);",

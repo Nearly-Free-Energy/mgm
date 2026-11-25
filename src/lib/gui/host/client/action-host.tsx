@@ -72,12 +72,10 @@ import type {
   Confirm,
   Confirmation,
   FormProps,
-  GuiPlugin,
   Json,
-  OverlayProps,
-  SyncComponent,
   ViewModel,
 } from "../../contract";
+import type { GuiPlugin, OverlayProps, SyncComponent } from "../../contract-react";
 import type { PreparedAction } from "../server/prepare";
 import { failureOf, invoke } from "./invoke";
 import { mountActionHost, useKitRuntime, type KitRuntime } from "./kit-runtime";

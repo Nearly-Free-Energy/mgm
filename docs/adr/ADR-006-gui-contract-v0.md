@@ -27,12 +27,13 @@ read a stored credential, or to send data to another origin.
 
 ## Decision
 
-1. **The contract is two TypeScript modules.**
+1. **The contract is three TypeScript modules.**
    - `src/lib/gui/contract.ts` is client-safe. It holds what an interface
      renders: formatted values, the five view kinds and their models, links,
-     action references, signals, the manifest, the kit interface
-     (`GuiKit`) and what an interface plugin implements (`GuiPlugin`,
-     `GuiMeta`). It imports only types, from `react` and the plugin catalog.
+     action references, signals, the manifest, the props and state the kit
+     hands an interface, and an interface's metadata (`GuiMeta`). It
+     imports only types, and only from the plugin catalog, so a client that
+     is not an interface type-checks it without React.
      It also carries the answers the host's routes give a client that is
      not an interface, such as the CLI, which may import only this file
      (RFC #259 §§ 3-4): the action catalog (`ActionCatalog`, served by
@@ -42,6 +43,11 @@ read a stored credential, or to send data to another origin.
      refusal into the `ActionResult` an interface always got. Each has a
      strict schema in `src/lib/gui/host/server/model-schema.ts`, as every
      shape a browser receives does.
+   - `src/lib/gui/contract-react.ts` is client-safe too. It holds the types
+     that name React types: the kit interface (`GuiKit`), what an interface
+     plugin implements (`GuiPlugin`), and the kit's component props
+     (`LinkProps`, `ShellProps`, `OverlayProps`, `SyncComponent`). It
+     imports only types, from `react` and `contract.ts`.
    - `src/lib/gui/surface.ts` is server-only. It holds what a capability
      contributes: views with loaders, actions bound to its existing API
      routes with a confirmation level, navigation entries, signals, status
@@ -103,6 +109,9 @@ read a stored credential, or to send data to another origin.
      shape an interface receives changed, so a patch was enough. It also
      covers `Signals.attention` (#230), an optional field added while the
      contract read 0.2.0.
+   - A1-5 on #133 moved the types that name React types to
+     `contract-react.ts` (decision 1). No shape changed and interfaces are
+     compiled in (decision 2), so `GUI_CONTRACT` stayed 0.2.1.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -370,7 +379,8 @@ Worse, or to watch:
 
 ## References
 
-- `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
+- `src/lib/gui/contract.ts`, `src/lib/gui/contract-react.ts`,
+  `src/lib/gui/surface.ts`
 - `src/lib/gui/host/client/action-host.tsx`,
   `src/lib/gui/host/server/prepare.ts` (decision 10)
 - `src/lib/gui/__tests__/repeat.db.test.ts`, `src/lib/gui/__tests__/repeat/`

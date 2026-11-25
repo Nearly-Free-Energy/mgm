@@ -1,7 +1,8 @@
 import { act as flush, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Children, cloneElement, isValidElement, useEffect, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActionRef, ActionResult, FormProps, Json, OverlayProps } from "../../../contract";
+import type { ActionRef, ActionResult, FormProps, Json } from "../../../contract";
+import type { OverlayProps } from "../../../contract-react";
 import type { PreparedAction } from "../../server/prepare";
 import { KitProvider } from "../kit-provider";
 import { act, hostAct, KitRuntimeProvider } from "../kit-runtime";
