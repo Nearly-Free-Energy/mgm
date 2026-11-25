@@ -5,7 +5,8 @@
 Accepted by tushabe on 25 November 2026, after the changes arindahills
 asked for were made
 ([review](https://github.com/Nearly-Free-Energy/mgm/pull/261#pullrequestreview-6063252173)).
-It records what #133 settled for
+Corrected on 25 November 2026 to agree with ADR-008 (#290):
+decisions 1, 5, 8 and 10. It records what #133 settled for
 agentic operation through milestone A3, the decisions recorded on #133
 on 25 November 2026, and what #259, accepted that day, settles for an
 agent client. On that day the A0 owner moved this ADR ahead of A0's
@@ -80,6 +81,9 @@ says so.
      signed-in person, with no worker and no service role. MGM's routes
      refuse it everything but the catalog and the view route for marked
      views (#259 § 2).
+     A marked view's loader may still read on the server after a
+     `getUser()`-backed check, as it does for a browser session (decision
+     8): that read belongs to the view, not to the agent client.
    - Its token reaches the database as `mgm_agent`, a select-only role of
      its own (#259 decision 12) that the token hook sets (shown by #268).
      The role is `NOLOGIN` and granted to `authenticator`, never made a
@@ -91,7 +95,11 @@ says so.
      the role against every definer function (ADR-008 decision 7). A new
      table is out of its reach until a migration grants it (#274). A table with columns outside decision
      6's boundary is granted to it by column, so the database holds that
-     part of the boundary beneath MGM's checks.
+     part of the boundary beneath MGM's checks. The one exception is
+     `user_roles`, granted whole under a `RESTRICTIVE` policy that limits
+     the role to `user_id = auth.uid()`, so the only user id it reads there
+     is the caller's own, which no loader puts into a model (ADR-008
+     decision 8).
    - If the role is not built, #259 § 5 waits and the question returns to
      #259 § 2, so no agent client reads anything.
    - Unattended work needs its own reviewed design for worker identity,
@@ -315,7 +323,10 @@ says so.
      get code-owner review. That is still a social contract (#30), but it
      covers what the pin cannot see.
    - Before a listed view is served to an agent client, its loader reads
-     only columns granted to `mgm_agent` (decision 1). Both listed views
+     under `mgm_agent` only columns granted to it (decision 1). Anything
+     more it reads on the server after a `getUser()`-backed check, as it
+     does for a browser session, and it puts only values inside decision 6
+     into its model (ADR-008 decision 7). Both listed views
      that exist today select `devices.name`
      (`src/lib/metering/infrastructure/supabase-repository.ts:170`,
      `src/lib/tenant-app/infrastructure/supabase-repository.ts:85`), which
@@ -326,7 +337,7 @@ says so.
      | Entry | Kind | Condition |
      |---|---|---|
      | The investigation view (decision 9) | view | Marked in the pull request that builds it (A3's, #255 § 12) |
-     | `metering.site-day` | view | `billing.savings`, its attached section, is withheld, and so is its time-zone notice (item 2 of 25 November). Its house meters reach it under `mgm_agent` only through a definer function that returns the house-meter ids in force for a microgrid and day, or the view says by name that house figures are not available to an assistant (ADR-008 decision 8) |
+     | `metering.site-day` | view | `billing.savings`, its attached section, is withheld, and so is its time-zone notice (item 2 of 25 November). Its house meters reach it under `mgm_agent` only through a definer function that checks `user_can_access_microgrid` for the caller and returns the house-meter ids in force for that microgrid and day, or the view says by name that house figures are not available to an assistant (ADR-008 decision 8) |
      | `metering.connection` | watcher | The only watcher that qualifies today (item 3 of 25 November); listed by tushabe's confirmation of 25 November |
      | `tenant.home`, `tenant.usage-month`, `tenant.usage-day` | view | Decision 10 |
 
@@ -388,7 +399,7 @@ says so.
       role, so once `mgm_agent` may read any column of `tenants`, a staff
       member's assistant could read every tenant's name in the
       organization (#268). Whichever pull request first grants `mgm_agent`
-      anything on `tenants`, #274 or D2, adds a `RESTRICTIVE` policy
+      anything on `tenants` or `tenant_devices` adds a `RESTRICTIVE` policy
       `TO mgm_agent` on `tenants` that calls `user_can_access_tenant`, with
       a database test that a staff member's assistant reads no tenant
       row. It adds the same policy on `tenant_devices`, as #268 tested and
