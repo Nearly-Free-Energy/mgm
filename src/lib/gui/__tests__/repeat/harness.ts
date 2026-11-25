@@ -4,9 +4,10 @@
  *
  * Each plugin with "safe" actions has a case module beside this file
  * (./billing.ts, ./payments.ts). A module seeds its own organization under
- * its own UUID prefix, names the route handlers its cases are sent to, and
- * lists one or more cases for each of its "safe" actions. A plugin that
- * contributes its first "safe" action adds a module, and the test lists it.
+ * its own UUID prefix and lists one or more cases for each of its "safe"
+ * actions. A case names no route: it is sent to the handler its action's own
+ * method and path name (handlerFor). A plugin that contributes its first
+ * "safe" action adds a module, and the test lists it.
  */
 import { NextRequest } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -21,6 +22,22 @@ import { serviceClient, type TestUser } from "@/lib/supabase/__tests__/rls.helpe
  * the cases test checks against the action's bind.path.
  */
 export type Handler = (request: NextRequest, context: { params: Promise<never> }) => Promise<Response>;
+
+/**
+ * The handler Next.js calls for the action: the export named by its method in
+ * src/app<path>/route.ts, imported by that path, so no list kept by hand can
+ * send a case to another route. That file is where App Router serves the
+ * path from while no route group or rewrite sits under src/app/api, as
+ * gui-surface.test.ts also assumes when it holds each action to its route
+ * file; if one comes to, revisit both. Throws when there is no such file,
+ * and answers null when it has no such export.
+ */
+export async function handlerFor(def: Pick<ActionDef, "method" | "path">): Promise<Handler | null> {
+  const specifier = `@/app${def.path}/route`;
+  const route = (await import(/* @vite-ignore */ specifier)) as Record<string, unknown>;
+  const handler = route[def.method];
+  return typeof handler === "function" ? (handler as Handler) : null;
+}
 
 /** Who sends a case: the person the action is offered to. */
 export type Caller = "manager" | "superAdmin";
@@ -65,16 +82,12 @@ export interface Fixture {
 }
 
 export interface CaseModule {
-  /** Each handler a case is sent to, keyed "METHOD /api/route" as the action names it. */
-  handlers: Readonly<Record<string, Handler>>;
   /** The cases of each "safe" action of the module's plugin. */
   cases: Readonly<Partial<Record<Id, readonly Case[]>>>;
   /** Removes what seed wrote, and what an earlier run left; safe to call twice. */
   cleanup(runtime: MgmRuntime): Promise<void>;
   seed(runtime: MgmRuntime): Promise<Fixture>;
 }
-
-export const routeKey = (def: Pick<ActionDef, "method" | "path">) => `${def.method} ${def.path}`;
 
 /** The action's path with its segments filled. */
 export function fillPath(path: string, params: Readonly<Record<string, string>>): string {

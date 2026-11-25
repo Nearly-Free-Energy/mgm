@@ -20,7 +20,8 @@
  *
  * The first block needs no database: every "safe" action has a case in its
  * plugin's module and every case a "safe" action, nothing is "keyed" yet,
- * and each case goes to its action's own route with its path segments.
+ * and each case's action has a route file exporting its method, the handler
+ * the case is sent to (handlerFor), with the case filling its path segments.
  * Self-fixturing; the database block honours SKIP_RLS_TESTS=1.
  */
 import { afterAll, beforeAll, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -43,7 +44,7 @@ import {
   shouldSkip,
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
-import { absentIgnores, routeKey, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
+import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
@@ -81,18 +82,22 @@ describe("the twice-sent cases", () => {
 
   it("send each case to its action's own route, with the action's path segments", async () => {
     const actions = new Map((await registered()).map((a) => [a.def.id as string, a.def]));
-    const problems = allCases.flatMap(({ module, id, c, name }) => {
-      const def = actions.get(id);
-      if (!def) return [`${name}: no such action`];
-      const out: string[] = [];
-      if (!module.handlers[routeKey(def)]) out.push(`${name}: no handler for ${routeKey(def)}`);
-      const segments = Object.keys(def.bind.path ?? {}).sort();
-      if (JSON.stringify(Object.keys(c.params).sort()) !== JSON.stringify(segments)) {
-        out.push(`${name}: params ${Object.keys(c.params).join(", ")} are not bind.path's ${segments.join(", ")}`);
-      }
-      return out;
-    });
-    expect(problems).toEqual([]);
+    const problems = await Promise.all(
+      allCases.map(async ({ id, c, name }) => {
+        const def = actions.get(id);
+        if (!def) return [`${name}: no such action`];
+        const out: string[] = [];
+        const handler = await handlerFor(def).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+        if (typeof handler === "string") out.push(`${name}: no route file for ${def.path}: ${handler}`);
+        else if (!handler) out.push(`${name}: src/app${def.path}/route.ts exports no ${def.method}`);
+        const segments = Object.keys(def.bind.path ?? {}).sort();
+        if (JSON.stringify(Object.keys(c.params).sort()) !== JSON.stringify(segments)) {
+          out.push(`${name}: params ${Object.keys(c.params).join(", ")} are not bind.path's ${segments.join(", ")}`);
+        }
+        return out;
+      }),
+    );
+    expect(problems.flat()).toEqual([]);
   });
 
   it("drop an ignored column from the row it names only, and refuse one no row has", () => {
@@ -148,12 +153,12 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     vi.unstubAllEnvs();
   }, 180_000);
 
-  it.each(allCases.map((r) => [r.name, r] as const))("%s", async (_name, { plugin, module, id, c }) => {
+  it.each(allCases.map((r) => [r.name, r] as const))("%s", async (_name, { plugin, id, c }) => {
     const def = (await getMgmRuntime()).mgmSurface.snapshot().actions.get(id as `${string}.${string}`)?.def;
     if (!def) throw new Error(`[repeat.db] no action ${id}`);
     const fixture = fixtures.get(plugin);
     const caller = fixture?.users[c.as];
-    const handler = module.handlers[routeKey(def)];
+    const handler = await handlerFor(def);
     if (!fixture || !caller || !handler) throw new Error(`[repeat.db] ${id}: no fixture, ${c.as} or handler`);
     session.caller = caller;
 

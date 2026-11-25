@@ -9,16 +9,6 @@
  * organization, or a super admin for Mark as refunded and Mark as failed,
  * which the payment-status route allows no one else.
  */
-import { DELETE as deletePeriod } from "@/app/api/billing-periods/[periodId]/route";
-import { POST as closePeriod } from "@/app/api/billing-periods/[periodId]/close/route";
-import { POST as generateFromMeters } from "@/app/api/billing-periods/[periodId]/generate-from-meters/route";
-import { POST as billFromReadings } from "@/app/api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings/route";
-import { POST as createPeriod } from "@/app/api/billing-periods/route";
-import { PATCH as paymentStatus } from "@/app/api/billing-line-items/[lineItemId]/payment-status/route";
-import { POST as regenerateBill } from "@/app/api/billing-line-items/[lineItemId]/regenerate/route";
-import { PATCH as recordUsage } from "@/app/api/billing-line-items/[lineItemId]/usage/route";
-import { POST as addGridTariff } from "@/app/api/microgrids/[id]/grid-tariffs/route";
-import { PUT as saveSavingsSettings } from "@/app/api/microgrids/[id]/savings-settings/route";
 import { parseCloseReview, periodName } from "@/lib/billing/close";
 import type { MgmRuntime } from "@/lib/runtime/root";
 import { cleanupTestData, createTestUser, serviceClient } from "@/lib/supabase/__tests__/rls.helpers";
@@ -58,18 +48,6 @@ const paymentCase = (n: number, as: Case["as"], body: Record<string, unknown>): 
 let unregister: (() => void) | null = null;
 
 export const BILLING_CASES: CaseModule = {
-  handlers: {
-    "POST /api/billing-periods": createPeriod,
-    "DELETE /api/billing-periods/[periodId]": deletePeriod,
-    "POST /api/billing-periods/[periodId]/close": closePeriod,
-    "POST /api/billing-periods/[periodId]/generate-from-meters": generateFromMeters,
-    "POST /api/billing-periods/[periodId]/tenants/[tenantId]/bill-from-readings": billFromReadings,
-    "POST /api/billing-line-items/[lineItemId]/regenerate": regenerateBill,
-    "PATCH /api/billing-line-items/[lineItemId]/usage": recordUsage,
-    "PATCH /api/billing-line-items/[lineItemId]/payment-status": paymentStatus,
-    "PUT /api/microgrids/[id]/savings-settings": saveSavingsSettings,
-    "POST /api/microgrids/[id]/grid-tariffs": addGridTariff,
-  },
   cases: {
     // The second send overlaps the period the first created: 409.
     "billing.create-period": [

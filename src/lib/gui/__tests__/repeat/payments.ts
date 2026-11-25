@@ -12,8 +12,6 @@
  * Supabase.
  */
 import { vi, type MockInstance } from "vitest";
-import { POST as reconcileAttempt } from "@/app/api/payments/attempts/[id]/reconcile/route";
-import { POST as refreshAttempt } from "@/app/api/payments/attempts/[id]/refresh/route";
 import type { PaymentProviderClient, TransactionSnapshot } from "@/lib/payments/providers/types";
 import type { MgmRuntime } from "@/lib/runtime/root";
 import type { PaymentProviderRegistry } from "@/lib/runtime/services";
@@ -75,10 +73,6 @@ const stub: PaymentProviderClient = {
 let spy: MockInstance<PaymentProviderRegistry["forAccount"]> | null = null;
 
 export const PAYMENTS_CASES: CaseModule = {
-  handlers: {
-    "POST /api/payments/attempts/[id]/refresh": refreshAttempt,
-    "POST /api/payments/attempts/[id]/reconcile": reconcileAttempt,
-  },
   cases: {
     "payments.refresh-attempt": [
       // The receipt is already recorded (ON CONFLICT DO NOTHING): 200.
