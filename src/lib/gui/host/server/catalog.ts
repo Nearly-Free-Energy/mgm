@@ -14,12 +14,15 @@ import "server-only";
  * entities (`entity=<kind>:<id>`), only the actions offered on one of their
  * kinds are listed, and each is asked its own available() about its entity.
  *
- * Each check (AvailabilityCheck in ../../contract.ts) is answered as prepare
- * (./prepare.ts) answers it, through the same helpers:
+ * Each check (AvailabilityCheck in ../../contract.ts) is answered:
  * - installed: the route, filled from the entities or as a pattern, is
- *   released (releaseFailure in ./availability.ts);
+ *   released (releaseFailure in ./availability.ts). Prepare (./prepare.ts)
+ *   decides the same question with isReleasedRoute but answers it 404
+ *   gui_not_found, so for one unreleased action the catalog says
+ *   gui_not_released and prepare gui_not_found; if prepare comes to call
+ *   releaseFailure, the two agree;
  * - enabled and healthy: the plugin gate, asked as a write, as the action's
- *   route asks it (gateRefusal);
+ *   route asks it, through gateRefusal, as prepare answers them;
  * - state: the action's available(), within the view merge's budget
  *   (askAvailability in ./merge.ts); one that is late, throws or answers
  *   nothing usable fails healthy instead, as gui_availability_unchecked.

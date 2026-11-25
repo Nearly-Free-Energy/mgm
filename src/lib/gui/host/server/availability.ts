@@ -3,9 +3,15 @@ import "server-only";
 /**
  * The checks the host makes before it offers an action, each answered as a
  * refusal or nothing: whether the action's route is part of this release,
- * and what the plugin gate answers for the action's plugin. Prepare
- * (./prepare.ts) refuses with them, and the action catalog (./catalog.ts)
- * lists them as each action's reasons.
+ * and what the plugin gate answers for the action's plugin. The action
+ * catalog (./catalog.ts) lists both as each action's reasons. Prepare
+ * (./prepare.ts) refuses with gateRefusal only: an action whose route is not
+ * released it answers with its own NOT_FOUND (404 gui_not_found), as it
+ * answers an action no plugin contributes, so the catalog's
+ * gui_not_released is not what prepare sends for the same action. If prepare
+ * comes to call releaseFailure, its 404's code changes to gui_not_released:
+ * change the `installed` row of the catalog's table in
+ * docs/cordis-runtime.md, which notes the difference.
  *
  * Takes the gate's decision as an argument and never names the registry, so
  * it stays unprivileged.
@@ -60,8 +66,10 @@ export function gateRefusal(
 /**
  * A refusal when the route `path` is not part of the release installed here
  * (src/lib/mgm/released-routes.ts). Its code is the one a view whose page is
- * not released answers with (NOT_RELEASED in ./view.ts), so a client reads
- * one code for "not part of this release"; if that one changes, change this.
+ * not released answers with (NOT_RELEASED in ./view.ts), so the catalog and
+ * the view route say "not part of this release" with one code; if that one
+ * changes, change this. Prepare does not call it (see above), and answers
+ * such an action with gui_not_found.
  */
 export function releaseFailure(path: string): CheckFailure | null {
   if (isReleasedRoute(path)) return null;

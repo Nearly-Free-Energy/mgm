@@ -332,7 +332,7 @@ that nothing refused it:
 
 | Check | Refused with | When |
 |---|---|---|
-| `installed` | `gui_not_released` | its route, filled or as a pattern, is not released |
+| `installed` | `gui_not_released` | its route, filled or as a pattern, is not released (`POST /api/gui/prepare` answers the same action 404 `gui_not_found`, as it answers one that does not exist) |
 | `enabled` | the gate's code and copy, such as `billing_disabled` | its plugin is off, unless it declares `whilePluginOff: "enabled"` |
 | `healthy` | `<plugin>_gate_unavailable` (hyphens as underscores) | the gate could not be read or threw; `enabled` is then undecided |
 | `healthy` | `gui_availability_unchecked` | `available()` was late, threw, or gave no usable answer; `state` is then undecided |
