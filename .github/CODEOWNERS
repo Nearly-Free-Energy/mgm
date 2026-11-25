@@ -15,17 +15,17 @@
 # Database migrations. 00002_rls.sql holds the RLS helper functions
 # (is_super_admin, user_can_access_org, user_can_access_microgrid), so it is
 # covered by this line.
-/supabase/migrations/                  @tushabe @arindahills
-/supabase/migrations.sha256            @tushabe @arindahills
+/supabase/migrations/                  @tushabe @arindahills @dismasfriday
+/supabase/migrations.sha256            @tushabe @arindahills @dismasfriday
 
 # Role constants that mirror the user_role enum the RLS helpers evaluate.
-/src/lib/roles.ts                      @tushabe @arindahills
+/src/lib/roles.ts                      @tushabe @arindahills @dismasfriday
 
 # Cordis runtime gate: root context, request scopes, and the plugin gate, plus
 # the plugin catalog. plugins/bundled.ts holds the `core` flags and the
 # route-ownership table that the runtime gate and the route-surface test read.
-/src/lib/runtime/                      @tushabe @arindahills
-/src/lib/plugins/                      @tushabe @arindahills
+/src/lib/runtime/                      @tushabe @arindahills @dismasfriday
+/src/lib/plugins/                      @tushabe @arindahills @dismasfriday
 
 # GUI contract: the types GUIs and capability plugins build against, the
 # host that serves them, the kit interface packages import, and the type and
@@ -35,33 +35,33 @@
 # once. If that allowlist stops naming anything under src/lib/gui, revisit.
 # Also the list of compiled-in GUIs the runtime root installs at start-up,
 # and the test that checks each entry in that list.
-/src/lib/gui/                          @tushabe @arindahills
+/src/lib/gui/                          @tushabe @arindahills @dismasfriday
 # The conformance kit every interface plugin runs in its tests. Listed on its
 # own so it stays owned if the line above is ever narrowed.
-/src/lib/gui/conformance/              @tushabe @arindahills
-/src/gui/meta.ts                       @tushabe @arindahills
+/src/lib/gui/conformance/              @tushabe @arindahills @dismasfriday
+/src/gui/meta.ts                       @tushabe @arindahills @dismasfriday
 # The compiled-in GUIs' entry points, which host pages render.
-/src/gui/installed.ts                  @tushabe @arindahills
-/src/gui/__tests__/installed-guis.test.ts @tushabe @arindahills
+/src/gui/installed.ts                  @tushabe @arindahills @dismasfriday
+/src/gui/__tests__/installed-guis.test.ts @tushabe @arindahills @dismasfriday
 
 # The MGM_GUI setting: which compiled-in GUI serves the installation's pages.
-/src/lib/config/gui.ts                 @tushabe @arindahills
+/src/lib/config/gui.ts                 @tushabe @arindahills @dismasfriday
 
 # The GUI host's routes, and the layout that checks the session, sends
 # signed-out, first-run and revoked users on, and renders the selected GUI's
 # shell (decision 4 on #115).
-/src/app/api/gui/                      @tushabe @arindahills
-/src/app/(gui)/layout.tsx              @tushabe @arindahills
+/src/app/api/gui/                      @tushabe @arindahills @dismasfriday
+/src/app/(gui)/layout.tsx              @tushabe @arindahills @dismasfriday
 
 # Request middleware and the released-route allowlist it enforces.
-/src/middleware.ts                     @tushabe @arindahills
-/src/lib/mgm/released-routes.ts        @tushabe @arindahills
+/src/middleware.ts                     @tushabe @arindahills @dismasfriday
+/src/lib/mgm/released-routes.ts        @tushabe @arindahills @dismasfriday
 # The content security policy middleware sets on every page.
-/src/lib/mgm/content-security-policy.ts @tushabe @arindahills
+/src/lib/mgm/content-security-policy.ts @tushabe @arindahills @dismasfriday
 
 # CI workflows, and this file.
-/.github/workflows/                    @tushabe @arindahills
-/.github/CODEOWNERS                    @tushabe @arindahills
+/.github/workflows/                    @tushabe @arindahills @dismasfriday
+/.github/CODEOWNERS                    @tushabe @arindahills @dismasfriday
 
 # What the Release workflow runs to build the published deployment asset.
-/scripts/release/                      @tushabe @arindahills
+/scripts/release/                      @tushabe @arindahills @dismasfriday
