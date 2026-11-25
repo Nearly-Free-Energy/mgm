@@ -317,8 +317,23 @@ page, or leads anywhere but a page its own plugin owns, and when it returns
 more than `MAX_SIGNALS_PER_SOURCE` (50, in `src/lib/gui/surface.ts`), so a
 watcher caps itself, most urgent first. It sends each id prefixed with the
 watcher's (`<watcher id>:<id>`). Watchers run on every load of the signals,
-which an interface may poll, so they read the database only: a watcher that
-would need a vendor call needs a cached read first. Each declares examples,
+which an interface may poll, so they read the database, with one kind of
+exception (ADR-006 decision 9): a cached provider read made through the
+capability after its composer has authorized the organization, with a TTL
+cache, a bounded number of reads at once, a timeout within the watcher's
+budget, and only while its plugin is on. `metering.edge-status` is the one
+such watcher: after reading the organization's microgrids with an OpenEMS
+backend and edges, it composes metering and asks each backend which
+gateways (edges) are online, through a per-process cache keyed by microgrid
+(`src/lib/metering/infrastructure/edge-status-cache.ts`: five minutes, a
+failure one minute, reads under way shared, at most four at once, each
+timing out at 2 s within its 3 s budget). An organization with no such
+microgrid composes nothing and calls no backend, so a local database and
+the browser smoke stay deterministic. A microgrid whose read fails or times
+out is reported as such, a signal about that site, and the watcher is
+unchecked only when the organization's own database reads fail. It reports
+offline gateways only; a meter that stopped reporting while its gateway is
+online needs per-component reads and is follow-up work. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
 own released pages. Severities follow fixed rules, listed in ADR-006
 decision 9; the installed app's badge counts only the `warn` and `critical`

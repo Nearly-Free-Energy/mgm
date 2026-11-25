@@ -167,14 +167,34 @@ read a stored credential, or to send data to another origin.
      three or more checkouts in a community that never reached Pesapal in
      the last 24 hours (`payments.not-submitted`), which say something about
      the payment account rather than a bill. A metering connection check
-     that failed is a warning (`metering.connection`).
+     that failed is a warning (`metering.connection`). A microgrid with one
+     or more OpenEMS gateways (edges) offline now is a warning, one signal
+     per microgrid however many are offline, and so is a microgrid whose
+     gateways' status could not be read because the read failed, timed out
+     or could not start within the budget (`metering.edge-status`, mgm#287).
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
-     fails. It reads the database only, since every load of the signals
-     runs every watcher. It aggregates (one signal per period or site, not
-     per bill), writes fixed copy with values formatted on the server, and
-     names no tenant, because an assistant may read signals later (#133's
-     data boundary).
+     fails. It reads the database, since every load of the signals runs
+     every watcher, with one exception, decided on #230 (decision 3): a
+     cached provider read through its capability, made only after the
+     capability's composer has authorized the organization, through a cache
+     with a TTL, with a bounded number of reads at once, each with a timeout
+     within the watcher's budget, and only while its plugin is on (the host
+     skips it otherwise, and the composer checks again). A failed provider
+     read for one site is a signal about that site, with fixed copy, not a
+     missing answer: the watcher is unchecked only when its database reads
+     or its composition fail. The read is a listed capability read
+     (`LOADER_READS` in `gui-surface.test.ts`), and nothing the provider
+     says reaches the signal but counts. `metering.edge-status` is the one
+     such watcher (`docs/cordis-runtime.md` § "GUI surface"): five minutes'
+     TTL, a failure kept one minute, four reads at once, a 2 s timeout
+     within a 3 s budget; it reports offline gateways only, since a quiet
+     meter needs per-component reads. No scheduled writer replaces it: on
+     Vercel Hobby crons run about daily.
+   - A watcher aggregates (one signal per period or site, not per bill),
+     writes fixed copy with values formatted on the server, and names no
+     tenant, because an assistant may read signals later (#133's data
+     boundary).
    - Each watcher declares examples. Registration parses them;
      `gui-surface.test.ts` holds their links to the plugin's own released
      pages.
