@@ -3,10 +3,10 @@
  * decision 11), sent twice to its own route against a live database, as the
  * person it is offered to. The first send must write. The second, an
  * identical request, must leave every row the snapshot reads
- * (./repeat/harness.ts) as the first left it, apart from the columns its
- * case lists in `ignore`, each of one row and with why. It may answer unlike
- * the first. This is the evidence for each "safe" declaration: where a case
- * fails, the action is not "safe".
+ * (./repeat/harness.ts) as the first left it. Both are judged apart from
+ * the columns the case lists in `ignore`, each of one row and with why. The
+ * second may answer unlike the first. This is the evidence for each "safe"
+ * declaration: where a case fails, the action is not "safe".
  *
  * The sends are one after the other, so this shows nothing about two copies
  * sent at once: those rest on each route's own locks. Outside state is held
@@ -165,7 +165,9 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     const first = await send(handler, def, c.params, body);
     expect(first.status, first.text).toBe(c.first);
     const once = await snapshot(fixture.orgId);
-    expect(once, "the first send must write, or the case shows nothing").not.toEqual(before);
+    // Compared as the second send is, so a first send that moved only an
+    // ignored column does not count as having written.
+    expect(without(once, c.ignore), "the first send must write, or the case shows nothing").not.toEqual(without(before, c.ignore));
 
     const second = await send(handler, def, c.params, body);
     expect(second.status, second.text).toBe(c.second);

@@ -33,7 +33,7 @@ export interface Case {
   params: Readonly<Record<string, string>>;
   /** The body, built once just before the first send and sent unchanged both times. */
   body: (caller: TestUser) => unknown;
-  /** The status the first send answers; it must also change the snapshot. */
+  /** The status the first send answers; it must also change the snapshot, beyond the columns in `ignore`. */
   first: number;
   /** The status the second, identical send answers; it must leave the snapshot as the first left it. */
   second: number;
