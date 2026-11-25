@@ -1,8 +1,11 @@
 # ADR-007: Agentic operation through A3, and the model data boundary
 
-## Status: Proposed
+## Status: Accepted
 
-For review by Hillary (arindahills). It records what #133 settled for
+Accepted by tushabe on 25 November 2026, after the changes arindahills
+asked for were made
+([review](https://github.com/Nearly-Free-Energy/mgm/pull/261#pullrequestreview-6063252173)).
+It records what #133 settled for
 agentic operation through milestone A3, the decisions recorded on #133
 on 25 November 2026, and what #259, accepted that day, settles for an
 agent client. On that day the A0 owner moved this ADR ahead of A0's
@@ -306,7 +309,7 @@ says so.
    - Before a listed view is served to an agent client, its loader reads
      only columns granted to `mgm_agent` (decision 1). Both listed views
      that exist today select `devices.name`
-     (`src/lib/metering/infrastructure/supabase-repository.ts:162`,
+     (`src/lib/metering/infrastructure/supabase-repository.ts:170`,
      `src/lib/tenant-app/infrastructure/supabase-repository.ts:85`), which
      the role is never granted, so their entries' pull requests change
      those reads.
@@ -380,7 +383,7 @@ says so.
       names. Unlike the fix #268 tested, it leaves `tenant_devices`
       unrestricted: `metering.site-day` reads it with the caller's client
       to find house meters
-      (`src/lib/metering/infrastructure/supabase-repository.ts:205`), and
+      (`src/lib/metering/infrastructure/supabase-repository.ts:210`), and
       its rows carry ids and dates, no names. A second test shows that a
       staff member's assistant still gets site-day's house meters. That
       pull request adds one policy, edits none, and updates CLAUDE.md's
@@ -394,8 +397,10 @@ says so.
 
 - #255's open questions keep the owners named there. Q10 (an evidence
   view, its scope, and the time-zone notice) is settled by decisions 8 and
-  9. Q6 (retention by delete on write) and Q7 (cascade on microgrid
-  deletion) await the second code owner's answer on #255.
+  9. tushabe answered Q6 (retention by delete on write) and Q7 (cascade
+  on microgrid deletion) as proposed on 25 November 2026
+  ([comment](https://github.com/Nearly-Free-Energy/mgm/pull/255#issuecomment-7152066520)),
+  and asked arindahills to confirm or object there.
 - How the read interface recognises a tenant, billing period or payment
   reference (entity references, links, or both, and which core kinds) is
   defined by the A1 pull request that builds it, under code-owner review.
