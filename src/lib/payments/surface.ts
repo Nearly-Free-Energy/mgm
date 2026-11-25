@@ -158,6 +158,8 @@ export const PAYMENTS_SURFACE: Contribution = {
   // /api/payments/attempts/[id]/reconcile" in
   // src/lib/runtime/__tests__/route-rules.ts; if one goes, drop the field
   // from its actions.
+  // Every action here is repeat "safe": src/lib/gui/__tests__/repeat.db.test.ts
+  // sends each twice to its route. If it fails for one, that one is not safe.
   actions: [
     // Asks the provider about an attempt already submitted and records only
     // what it verifies, never a figure a person enters: "write", not
@@ -174,6 +176,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       whilePluginOff: "enabled",
     },
@@ -190,6 +193,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "money",
       confirm: "typed",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareRecordAdjustment,
       available: reconcileAvailable("record"),
@@ -209,6 +213,7 @@ export const PAYMENTS_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareAcceptReceipts,
       available: reconcileAvailable("accept"),

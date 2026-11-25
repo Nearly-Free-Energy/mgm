@@ -33,6 +33,7 @@ import type {
   ModelBase,
   ModelOf,
   NavGroup,
+  Repeat,
   SignalOf,
   Signals,
   StatusItemOf,
@@ -219,6 +220,19 @@ type ActionBase = {
   /** The zod schema the route parses its body with. */
   input: ZodType;
   inputVersion: number;
+  /**
+   * What a second identical send does (Repeat in ./contract). Required, so
+   * every action says.
+   *
+   * Each "safe" action has a case in src/lib/gui/__tests__/repeat.db.test.ts,
+   * which sends it twice to its route against a database and fails if the
+   * second send changes a row. A billing, payments or Pesapal action is
+   * never "unsafe" (gui-surface.test.ts, check 12) unless
+   * src/lib/gui/__tests__/repeat/exemptions.ts names the issue building its
+   * repeat key. No route takes a repeat key yet, so the twice-sent test
+   * refuses "keyed". If either test stops checking this, revisit.
+   */
+  repeat: Repeat;
   /** An existing route.ts exporting `method`, owned by this plugin and released. */
   path: string;
   /** Filled from the entity and hidden in forms. */

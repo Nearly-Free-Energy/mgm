@@ -52,6 +52,7 @@ const base = {
   inputVersion: 1,
   path: "/api/billing-periods/[periodId]",
   bind: {},
+  repeat: "safe",
 } as const;
 // Referenced only inside a loader the test never calls.
 declare const recordModel: LoadedModel<"record">;
@@ -97,6 +98,14 @@ describe("GUI contract types", () => {
     accept<ActionDef>({ ...base, method: "POST", risk: "external", humanOnly: false, confirm: "none", prepare });
     // @ts-expect-error a DELETE needs a typed or ceremony confirmation, even with prepare
     accept<ActionDef>({ ...base, method: "DELETE", risk: "write", humanOnly: true, confirm: "confirm", prepare });
+  });
+
+  it("refuses an action that does not say what a repeat does", () => {
+    // Left out, as undefined is: the field is required, not optional.
+    // @ts-expect-error every action declares repeat
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", repeat: undefined });
+    // @ts-expect-error repeat is safe, keyed or unsafe
+    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", repeat: "twice" });
   });
 
   it("compiles a widened humanOnly, which is why the rules need a run-time check too", () => {

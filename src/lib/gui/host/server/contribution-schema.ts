@@ -19,13 +19,15 @@ import "server-only";
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
  * of cost "db"; `takesSignals` only on an organization's view that is not
- * attached and does not poll.
+ * attached and does not poll; every action's `repeat`.
  *
  * Not checked here, because one contribution cannot show them: one
  * contribution per plugin, ids unique across plugins, an attach target in
  * another plugin, released routes and per-organization plugin state. Nor
  * which actions and views may declare `whilePluginOff`, which needs the
- * route exemptions and the capability's gating (gui-surface.test.ts).
+ * route exemptions and the capability's gating (gui-surface.test.ts). Nor
+ * which plugins' actions may declare repeat "unsafe" (gui-surface.test.ts),
+ * nor whether a "safe" one is (repeat.db.test.ts).
  */
 import { z } from "zod";
 import { CORE_ENTITY_KINDS, getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
@@ -40,6 +42,7 @@ import {
   idSchema,
   modelSchema,
   navGroupSchema,
+  repeatSchema,
   signalOutSchema,
 } from "./model-schema";
 
@@ -341,6 +344,11 @@ const actionSchema = z
     risk: z.enum(["write", "money", "external", "destructive"]),
     confirm: confirmSchema,
     humanOnly: z.boolean(),
+    // Required, so every action says what a repeat does. Which plugins may
+    // declare "unsafe" is checked in CI by gui-surface.test.ts, and that a
+    // "safe" one is safe by src/lib/gui/__tests__/repeat.db.test.ts, which
+    // sends it twice to its route; contribute() reads neither.
+    repeat: repeatSchema,
     prepare: fn.optional(),
   })
   .superRefine((a, ctx) => {

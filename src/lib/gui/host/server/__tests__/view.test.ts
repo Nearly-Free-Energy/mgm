@@ -65,6 +65,7 @@ function action(plugin: MgmPluginName, id: string, path: string): RegisteredActi
     risk: "write",
     confirm: "confirm",
     humanOnly: false,
+    repeat: "safe",
   } as unknown as ActionDef;
   return { plugin, def };
 }
