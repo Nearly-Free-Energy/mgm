@@ -16,8 +16,8 @@ One disposable installation with `MGM_METERING_FIXTURES` on (docs/setup.md, "Syn
 |---|---|
 | `SITE_FIXTURE_SEED` | `mgm-fixture-site-v1` |
 | Resolution | 5 minutes |
-| Organization A | `00000000-0000-4000-8000-0000000c00a0`, every plugin at its default |
-| Organization B | `00000000-0000-4000-8000-0000000c00b0`, metering turned off (case C14) |
+| Organization A | `00000000-0000-4000-8000-0000000c00a0`. On: community management, metering, billing, payments, Pesapal, and the operations plugin once A2 adds it (turned on if it ships off by default). Off: the tenant app and the assistant; A3's agent arm turns the assistant on here |
+| Organization B | `00000000-0000-4000-8000-0000000c00b0`, for case C14. On: community management and the operations plugin. Off: metering and every plugin that depends on it (billing, payments, Pesapal, the tenant app), since Settings → Plugins refuses to turn metering off while a dependent is on (`validatePluginToggle`), and the assistant |
 | One community per organization | `…0000000c00a1` and `…0000000c00b1` |
 | Microgrid *n* (n = 1…10, hexadecimal) | `00000000-0000-4000-8000-0000000c00nn`; microgrid 0a is organization B's, all others organization A's |
 | Time zone | `Africa/Kampala`, except microgrid 02 (`Europe/London`) and microgrid 06 (`Not/AZone`, stored as text; `openSiteQuery` falls back to UTC for a zone it cannot use) |
@@ -32,11 +32,14 @@ Every microgrid starts from the full set below; §2 lists each microgrid's chang
 | `01` | `battery` | `ess0` | none |
 | `02` | `grid_meter` | `meter0` | none |
 | `03` | `inverter` | `inverter0` | none |
+| `04` | `pv_meter` | `meter4` | none |
 | `11` | `consumption_meter` | `meter1` | Unit 1's primary consumption meter from 2026-01-01, open-ended |
 | `12` | `consumption_meter` | `meter2` | Unit 2's, as above |
 | `13` | `consumption_meter` | `meter3` | Unit 3's, as above |
 
-Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgrid, with no contact details. Device names do not affect the cases (one device per site type, so `pickSiteSources` never chooses by name) and never reach evidence.
+Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgrid, with no contact details. Device names do not affect the cases (one device per site type, so `pickSiteSources` never chooses by name) and never reach evidence. The solar meter changes no figure in §2: the generator draws the same numbers with or without it, and solar output does not decide whether a bin is online.
+
+**Legacy rows.** C09, C11 and C23 need a device with no component id. `trg_device_openems_component_valid` refuses that on every insert and update since `00018`, and #258's format check refuses an empty string, but rows written before `00018` can still hold `NULL`, and the capability reads them as unreadable devices. The seed script writes these rows as such legacy rows: on the disposable installation only, it inserts them with that trigger disabled for the one statement (the column's CHECK allows `NULL`), and says so in its output. Nothing else in the set bypasses a check.
 
 ### Variants
 
@@ -46,14 +49,14 @@ Units are `tenants` rows named `Unit 1` to `Unit 3` on the device's own microgri
 | 02 | zone `Europe/London` | C06 |
 | 03 | no battery | C07 |
 | 04 | no grid meter | C08 |
-| 05 | meter `13` has no component id | C09 |
+| 05 | meter `13` has no component id (a legacy row) | C09 |
 | 06 | zone `Not/AZone` | C10 |
-| 07 | adds device `04`, `pv_meter`, with no component id | C11 |
+| 07 | solar meter `04` has no component id (a legacy row) | C11 |
 | 08 | no battery and no grid meter | C12 |
 | 09 | a second, real edge `edge0` | C13 |
 | 0a | in organization B, where metering is off | C14 |
 
-Pending cases (§2) get microgrids `…0c0011` onwards, pinned when their scenarios land.
+Pending cases (§2) get microgrids `0b` onwards, in the same hexadecimal numbering, pinned when their scenarios land.
 
 ### Rules that keep the set deterministic
 
@@ -65,31 +68,31 @@ Two pieces of code make the set usable, and both are tasks in the A1/A2 split, n
 
 ## 2. Cases
 
-Mechanism: **exists** is a generator scenario, a source configuration or a refusal that `main` produces today; **pending** needs a fixture scenario from evidence §11 change 6, or another named change, before it can run.
+Mechanism: **exists** is a generator scenario, a source configuration (including a legacy row, §1) or a refusal that `main` produces today; **pending** needs a fixture scenario from evidence §11 change 6, or another named change, before it can run.
 
-Positions are minutes after the local day's start, `[start, end)`, as in evidence §4. "Summary" lists the `summary` figures that differ from a clear day: `darkMin` 0, `noDataMin` 0, `knownMin` 1440, `lightsOnPct` 100, `cutMin` 0, `metersLeftOut` 0.
+Ranges are minutes after the local day's start, `[start, end)`, as in evidence §4, where a position is a bin and a range is in minutes. "Summary" lists the `summary` figures that differ from a clear day: `darkMin` 0, `darkInferredMin` 0, `noDataMin` 0, `knownMin` 1440, `lightsOnPct` 100, `cutMin` 0, `metersLeftOut` 0. Energy is given to three decimals, unrounded beyond that; the regeneration test compares it within 0.0005 kWh, and `lightsOnPct` within 0.005.
 
 ### Normal behaviour
 
 | Case | Microgrid, date | Mechanism | Expected evidence | Expected result |
 |---|---|---|---|---|
-| C01 Clear day | 01, 2026-09-04 | exists: `clear` | No range items. Summary: as clear; `tenantMetersEveningKwh` 6.72 | `answered`, no findings |
-| C02 Evening cut, battery carries the load | 01, 2026-09-01 | exists: `evening-cut` | No range items: the grid was cut at [1150, 1240) (19:10–20:40) but the battery never reached its floor. Summary: `cutMin` 90; `tenantMetersEveningKwh` 6.77 | `answered`, no findings |
-| C03 Long cut, dark after the cut | 01, 2026-09-02 | exists: `long-cut-dark` | `dark_cut` [[1185, 1350]] (19:45–22:30), decided by a 0 V reading inside the cut that began at 1110. Summary: `darkMin` 165, `darkInferredMin` 0, `lightsOnPct` 88.54, `cutMin` 240; `tenantMetersEveningKwh` 3.08 | `answered`; findings `dark_known_cut` |
-| C04 Battery floor at dawn | 01, 2026-10-01 | exists: `floor-at-dawn` | `dark_lowbat` [[300, 390]] (05:00–06:30), decided by the last SoC, at the 15% floor. Summary: `darkMin` 90, `darkInferredMin` 90, `lightsOnPct` 93.75, `cutMin` 90; `tenantMetersEveningKwh` 6.71 | `answered`; findings `dark_low_battery` (§4, example 1) |
-| C05 Gateway gap | 01, 2026-09-15 | exists: `gateway-gap` | `no_data` [[600, 645]] (10:00–10:45), `ruledOut` the last voltage and SoC before it. Summary: `noDataMin` 45, `knownMin` 1395; `tenantMetersEveningKwh` 6.68 | `answered`; findings `no_data`; hypothesis `gateway_or_link_down`, `confirmBy` `provider_history`. 45 minutes is under rule R3's 120 |
-| C06 Clock-change day | 02, 2026-10-25 | exists: `clear` in `Europe/London`, which leaves summer time that day | `window.bins` 300. Summary: `knownMin` 1500; `tenantMetersEveningKwh` 6.63 | `answered`, no findings |
-| C11 Solar meter without identifiers | 07, 2026-09-01 | exists: configuration | `src_pv` `unavailable`, `source_not_readable`. Otherwise clear; `tenantMetersEveningKwh` 6.68 | `answered`, no findings: an unreadable solar meter limits nothing (evidence §5) |
+| C01 Clear day | 01, 2026-09-04 | exists: `clear` | No range items. Summary: as clear; `tenantMetersEveningKwh` 6.715 | `answered`, no findings |
+| C02 Evening cut, battery carries the load | 01, 2026-09-01 | exists: `evening-cut` | No range items: the grid was cut at [1150, 1240) (19:10–20:40) but the battery never reached its floor. Summary: `cutMin` 90; `tenantMetersEveningKwh` 6.773 | `answered`, no findings |
+| C03 Long cut, dark after the cut | 01, 2026-09-02 | exists: `long-cut-dark` | `dark_cut` [[1185, 1350]] (19:45–22:30), decided by a 0 V reading inside the cut that began at 1110. Summary: `darkMin` 165, `darkInferredMin` 0, `lightsOnPct` 88.54, `cutMin` 240; `tenantMetersEveningKwh` 3.077 | `answered`; findings `dark_known_cut` |
+| C04 Battery floor at dawn | 01, 2026-10-01 | exists: `floor-at-dawn` | `dark_lowbat` [[300, 390]] (05:00–06:30), decided by the last SoC, at the 15% floor. Summary: `darkMin` 90, `darkInferredMin` 90, `lightsOnPct` 93.75, `cutMin` 90; `tenantMetersEveningKwh` 6.711 | `answered`; findings `dark_low_battery` (§4, example 1) |
+| C05 Gateway gap | 01, 2026-09-15 | exists: `gateway-gap` | `no_data` [[600, 645]] (10:00–10:45), `ruledOut` the last voltage and SoC before it. Summary: `noDataMin` 45, `knownMin` 1395; `tenantMetersEveningKwh` 6.684 | `answered`; findings `no_data`; hypothesis `gateway_or_link_down`, `confirmBy` `provider_history`. 45 minutes is under rule R3's 120 |
+| C06 Clock-change day | 02, 2026-10-25 | exists: `clear` in `Europe/London`, which leaves summer time that day | `window.bins` 300. Summary: `knownMin` 1500; `tenantMetersEveningKwh` 6.632 | `answered`, no findings |
+| C11 Solar meter without identifiers | 07, 2026-09-01 | exists: configuration (a legacy row) | `src_pv` `unavailable`, `source_not_readable`, where every other case reads it. Otherwise clear; `tenantMetersEveningKwh` 6.679 | `answered`, no findings: an unreadable solar meter limits nothing (evidence §5) |
 | C22 Flat meter over the evening | pending | pending: a tenant meter whose counter does not move in the evening | The meter counted at 0 kWh, in `meter_readings` with no outcome | `answered`, no findings (evidence Q9) |
 
 ### Insufficient evidence
 
 | Case | Microgrid, date | Mechanism | Expected evidence | Expected result |
 |---|---|---|---|---|
-| C07 No battery registered, gap at the floor | 03, 2026-09-11 | exists: configuration on a `floor-at-dawn` day | `src_battery` `unavailable`. The day has a gap at [300, 390), so `dark_lowbat`, `dark_after_lowbat` and `no_data` are stored `unavailable`, `input_unavailable`, `in: ["src_battery"]`; `dark_cut` has no range and is left out. Summary: `darkMin`, `noDataMin`, `knownMin` and `lightsOnPct` `null`; `cutMin` 0; `tenantMetersEveningKwh` 6.73. (`computeSiteDay` alone reads the gap as 90 minutes of no-data time, since without a battery nothing says it was dark.) | `evidence_limited`; findings `source_unreadable` |
-| C08 No grid meter, dark evening | 04, 2026-09-03 | exists: configuration on a `long-cut-dark` day | `src_grid` `unavailable`. The day has a gap at [1180, 1350), so all four range items are stored `unavailable`, `in: ["src_grid"]`. Summary: range figures `null`, `cutMin` `null`; `tenantMetersEveningKwh` 2.99 | `evidence_limited`; findings `source_unreadable` (§4, example 2). Without the grid meter nothing tells a cut from a battery at its floor |
-| C09 Linked meter without identifiers | 05, 2026-09-03 | exists: configuration | `m_unreadable` with device `…0c0513`. Summary: `metersLeftOut` 1, `tenantMetersEveningKwh` 6.73 (two meters) | `evidence_limited`; findings `meter_unreadable` |
-| C10 No usable stored zone | 06, 2026-09-01 | exists: configuration | `window.zone` `fallback`, `caveat` `["zone_fallback"]`; the day is read in UTC. Otherwise clear; `tenantMetersEveningKwh` 6.74 | `evidence_limited`, no findings (the caveat alone limits the answer) |
+| C07 No battery registered, gap at the floor | 03, 2026-09-11 | exists: configuration on a `floor-at-dawn` day | `src_battery` `unavailable`. The day has a gap at [300, 390), so `dark_lowbat`, `dark_after_lowbat` and `no_data` are stored `unavailable`, `input_unavailable`, `in: ["src_battery"]`; `dark_cut` has no range and is left out. Summary: `darkMin`, `darkInferredMin`, `noDataMin`, `knownMin`, `lightsOnPct` and `cutMin` `null` (rule Z: `cutMin` counts inferred-dark bins, which rest on `src_battery`); `tenantMetersEveningKwh` 6.734. (`computeSiteDay` alone reads the gap as 90 minutes of no-data time and `cutMin` as 0, since without a battery nothing says it was dark; the day had a real cut from 05:00 to 06:30, which C04 shows with a battery.) | `evidence_limited`; findings `source_unreadable` |
+| C08 No grid meter, dark evening | 04, 2026-09-03 | exists: configuration on a `long-cut-dark` day | `src_grid` `unavailable`. The day has a gap at [1180, 1350), so all four range items are stored `unavailable`, `in: ["src_grid"]`. Summary: range figures `null`, `cutMin` `null`; `tenantMetersEveningKwh` 2.985 | `evidence_limited`; findings `source_unreadable` (§4, example 2). Without the grid meter nothing tells a cut from a battery at its floor |
+| C09 Linked meter without identifiers | 05, 2026-09-03 | exists: configuration (a legacy row) | `m_unreadable` with device `…0c0513`. Summary: `metersLeftOut` 1, `tenantMetersEveningKwh` 6.725 (two meters) | `evidence_limited`; findings `meter_unreadable` |
+| C10 No usable stored zone | 06, 2026-09-01 | exists: configuration | `window.zone` `fallback`, `caveat` `["zone_fallback"]`; the day is read in UTC. Otherwise clear; `tenantMetersEveningKwh` 6.738 | `evidence_limited`, no findings (the caveat alone limits the answer) |
 | C12 No battery or grid meter | 08, 2026-09-01 | exists: refusal `metering_no_site_devices` | A refused read: `read` with reason `no_site_devices` | `evidence_limited`; findings `refusal` |
 | C13 Synthetic and real edges | 09, 2026-09-01 | exists: refusal, `METERING_CONFIGURATION` 409 | `read` with reason `mixed_edges` | `evidence_limited`; findings `refusal` |
 | C14 Metering off | 0a, 2026-09-01 | exists: refusal `metering_disabled` | `read` with reason `metering_disabled` | `evidence_limited`; findings `refusal` |
@@ -100,15 +103,15 @@ Positions are minutes after the local day's start, `[start, end)`, as in evidenc
 | Case | Microgrid, date | Mechanism | Expected evidence | Expected result |
 |---|---|---|---|---|
 | C15 Meter silent at the evening's start | pending | pending: one tenant meter reports nothing from 17:20 to 18:05, which covers the whole start search (bins 209–216, 17:25 to 18:05; evidence §4 `meter_window`) | `meter_readings` with `start` `null` for that meter; `meter_outcomes` `no_start` | `escalation`, `field_technician` (R2); findings `meter_no_reading`; hypothesis `meter_comms_loss`, supported by the other meters' readings in the same bins |
-| C16 Meter silent at the end, gateway down too | pending | pending: one meter silent from 23:20, and a site-wide gap from 23:20 to midnight | That meter `no_end`; `no_data` covering its end window | `evidence_limited` (a contested hypothesis); findings `meter_no_reading` and `no_data`; `meter_comms_loss` with the `no_data` range in `against`, and `gateway_or_link_down`. The contradictory-evidence case |
+| C16 Gateway down at the evening's end | pending | pending: a site-wide gap from 23:20 to midnight, which nulls every series and every house counter | All three meters `no_end`; `no_data` [[1400, 1440]], covering their end window | `evidence_limited` (a contested hypothesis); findings `meter_no_reading`, citing the three meters, and `no_data`; `meter_comms_loss` with the `no_data` range in `against`, and `gateway_or_link_down`. The contradictory-evidence case: 40 minutes is under R3, and R2 does not apply to a contested hypothesis |
 | C17 Evening counter reset | pending | pending: one meter's counter resets at 20:00 | That meter's `end` below its `start`; `meter_outcomes` `backwards` | `escalation`, `field_technician` (R1); findings `meter_backwards`; hypothesis `meter_counter_reset_or_replaced` (§4, example 3) |
-| C18 Some unreadable timestamps | pending | pending: 20 of the day's timestamps unreadable, 14:00–15:40 | `timestamps.dropped` 20; `no_data` over the dropped bins | `escalation`, `ems_vendor` (R4); findings `unreadable_timestamps` and `no_data`; hypothesis `gap_from_unreadable_timestamps` |
+| C18 Some unreadable timestamps | pending | pending: 30 of the day's timestamps unreadable, 14:00–16:30 | `timestamps.dropped` 30; `no_data` [[840, 990]]; `noDataMin` 150 | `escalation`, `ems_vendor`: R3 and R4 both apply, and the order (§3) picks R4's role. Findings `unreadable_timestamps` and `no_data`; hypothesis `gap_from_unreadable_timestamps`. The case that tests the order |
 | C19 Mostly unreadable timestamps | pending | pending: more than half the timestamps unreadable | A refused read: `read` with reason `provider_unreadable_timestamps` | `escalation`, `ems_vendor` (R4); findings `unreadable_timestamps` |
-| C21 Gap across midnight | pending | pending: a site-wide gap from the previous day's 23:00 to 03:00 | `no_data` from position 0 to 180, `ruledOut` from the carry-in | `escalation`, `field_technician` (R3); findings `no_data`; hypothesis `gateway_or_link_down` |
-| C23 Two meter problems on one day | pending (half exists) | meter `13` without identifiers (configuration) and a counter reset on meter `12` (pending) | `m_unreadable` and `meter_outcomes` `backwards` | `escalation`, `field_technician` (R1); findings `meter_backwards` and `meter_unreadable` |
-| C24 Provider returns data MGM cannot use | pending | pending: the provider answers with series of the wrong length | A refused read, `provider_invalid_data` | `escalation`, `ems_vendor` (R5); findings `refusal` |
+| C21 Gap across midnight | pending | pending: a site-wide gap from the previous day's 23:00 to 03:00 | `no_data` [[0, 180]], `ruledOut` from the carry-in | `escalation`, `field_technician` (R3); findings `no_data`; hypothesis `gateway_or_link_down` |
+| C23 Two meter problems on one day | pending (half exists) | meter `13` without identifiers (a legacy row) and a counter reset on meter `12` (pending) | `m_unreadable` and `meter_outcomes` `backwards` | `escalation`, `field_technician` (R1); findings `meter_backwards` and `meter_unreadable` |
+| C24 Provider refuses its data as invalid | pending | pending: the fixture provider refuses the read with `METERING_INVALID_DATA` (no site-day path checks a series' length, so a short series would read as null bins instead) | A refused read, `provider_invalid_data` | `escalation`, `ems_vendor` (R5); findings `refusal` |
 
-That is 24 labelled cases: 14 exist today and 10 are pending. Every slice category of evidence §7 appears, and so does every outcome and every escalation role but `mgm_maintainer`, which only a defect in MGM produces (R6) and which no fixture should simulate.
+That is 24 labelled cases: 14 exist today and 10 are pending. Every slice category of evidence §7 appears, and so does every outcome and every escalation role but `mgm_maintainer`. R6 gives that role refusals MGM cannot explain, from a defect in MGM or a provider code it does not know, and no fixture simulates them.
 
 ### Operation cases, for A2's tests
 
@@ -120,7 +123,7 @@ These exercise the operation rather than an answer, so they are A2's database-ba
 | The zone changed after creation | The capture stores nothing and the operation fails `window_changed` |
 | A retry with the same attempt key | The stored record, whatever the operation's state |
 | Three refused reads | The third fails the operation, `no_successful_read` |
-| A snapshot over 128 KiB (about 500 tenant meters) | The operation fails, `evidence_too_large` |
+| A capture whose content is over 128 KiB (counted as evidence §8 counts it; on fixture-shaped values that takes far more meters than §8's high-precision estimate) | The operation fails, `evidence_too_large` |
 | Cancelled, then a capture | Refused; the operation stays `cancelled` |
 | Running for 90 days | The next creation's retention pass ends it as `expired` |
 
@@ -135,7 +138,7 @@ Evidence §5 sets the outcome: `escalation` when `escalateTo` names a role; else
 | R3 | A `no_data` finding when `summary.noDataMin` is at least 120 | `field_technician`: two hours without data from the whole site is more than a link dropping out |
 | R4 | An `unreadable_timestamps` finding, from dropped timestamps or the refusal | `ems_vendor` |
 | R5 | A `refusal` finding with reason `provider_invalid_data` | `ems_vendor` |
-| R6 | A `refusal` finding with reason `calculation_failed`, `internal_error` or `unknown_refusal` | `mgm_maintainer` |
+| R6 | A `refusal` finding with reason `calculation_failed`, `internal_error`, `request_invalid` (on the capture path only a defect in MGM produces it) or `unknown_refusal` | `mgm_maintainer` |
 
 When several rules apply, the result names one role, in this order: `mgm_maintainer`, `ems_vendor`, `field_technician`, since a defect in MGM or in the data path can produce what looks like a site fault. Nothing else escalates. A dark day, an unreadable source or meter, and the other refusals are configuration or explanation the operator acts on directly, so they are `answered` or `evidence_limited`.
 
@@ -206,12 +209,12 @@ The manual baseline is the first of A3's three arms: an operator answering each 
 
 #133 asks A0 to ratify or amend A3's proposed acceptance against these cases. Ratified with these amendments by tushabe on 25 November 2026, and recorded in #133's A3 section:
 
-1. **At least 20 labelled synthetic scenarios.** Ratified: 24, in §2. Amend its list: "missing/stale samples" becomes "missing samples", because the slice reads only finished days (evidence §3 O2), so no sample can be stale. "Mixed units/time zones" becomes "time zones (a clock-change day and a zone fallback)", because units are fixed by the provider contract and the evidence schema (evidence §4), and a unit error is a provider defect for the provider's own tests, not an investigation case.
+1. **At least 20 labelled synthetic scenarios.** Ratified: 24, in §2, of which at least 20 must be runnable before the comparison (item 6). Amend its list: "missing/stale samples" becomes "missing samples", because the slice reads only finished days (evidence §3 O2), so no sample can be stale. "Mixed units/time zones" becomes "time zones (a clock-change day and a zone fallback)", because units are fixed by the provider contract and the evidence schema (evidence §4), and a unit error is a provider defect for the provider's own tests, not an investigation case.
 2. **Public cases and answers.** Ratified; this document is that.
 3. **Every reported numerical fact has a reference.** Ratified. A result holds no figures of its own (evidence §2, rule N), so this applies to A3's model text: each figure in it must resolve to a citation, or be shown as unverified.
 4. **Scope, gating, cancellation and human-only tests.** Ratified, with §2's operation cases among them.
 5. **The operator rubric.** Per case, outcome and role exact, findings and hypotheses as sets, and unsupported claims counted. Correct abstention means `evidence_limited` where §2 expects it, without a guessed cause. The rubric is agreed before the first model run.
-6. **Three arms on the same cases.** Ratified, with §5 as the manual arm. A case pending at comparison time is left out of all three arms, and the evidence packet lists it.
+6. **Three arms on the same cases.** Ratified, with §5 as the manual arm. The comparison waits until at least 20 cases are runnable, covering each outcome (`answered`, `evidence_limited`, `escalation`), both escalation roles a fixture produces (`field_technician`, `ems_vendor`), a provider failure and the contradictory-evidence case (C16). Today's 14 runnable cases have no escalation and no provider failure, so the pending scenarios come first. A case still pending then is left out of all three arms, and the evidence packet lists it.
 7. **Release only if the agent beats the deterministic investigator.** Ratified.
 8. **Failure keeps the agent experimental and read-only.** Ratified.
 
