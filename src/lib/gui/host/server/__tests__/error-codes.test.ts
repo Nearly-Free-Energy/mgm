@@ -4,9 +4,11 @@
  * - every `gui_` code written in the host's server modules and its routes
  *   (src/app/api/gui/) is listed, every listed one is written, and a status
  *   written beside a code, as `fail(404, "gui_not_found"` or
- *   `status: 503, code: "gui_unavailable"`, is one listed for it. A status
- *   the code takes at run time (a loader's or an action's own) is not
- *   written beside it, so its statuses are listed by hand;
+ *   `status: 503, code: "gui_unavailable"`, is one listed for it. The
+ *   modules that only list or describe the codes (DESCRIBING) are not read:
+ *   they name every code, so reading them would find each one written. A
+ *   status the code takes at run time (a loader's or an action's own) is
+ *   not written beside it, so its statuses are listed by hand;
  * - the gate refuses with the codes gateCode names;
  * - parseJsonBody refuses with the code BODY_CODES names, at its status.
  */
@@ -23,6 +25,14 @@ import { BODY_CODES, GATE_CODES, HOST_CODES, gateCode, listedCodes, type HostCod
 const REPO = path.resolve(__dirname, "../../../../../..");
 const HOST_SERVER = "src/lib/gui/host/server";
 const HOST_ROUTES = "src/app/api/gui";
+/**
+ * The host's modules that name codes to list or describe them, not to
+ * answer them: the list itself, and the OpenAPI document's HOST_ROUTES,
+ * which openapi.test.ts requires to name every code. A code they alone
+ * write is answered by nothing. If another module comes to name codes only
+ * to describe them, add it here.
+ */
+const DESCRIBING: ReadonlySet<string> = new Set([`${HOST_SERVER}/error-codes.ts`, `${HOST_SERVER}/openapi.ts`]);
 
 /** Every non-test source file of the host's server side and its routes, by repository path. */
 function hostSources(): Map<string, string> {
@@ -62,11 +72,15 @@ function writtenStatuses(sources: ReadonlyMap<string, string>): { file: string; 
   return found;
 }
 
-/** Problems between the list and what the sources write. */
+/** `sources` without the modules that only list or describe the codes. */
+const answering = (sources: ReadonlyMap<string, string>) => new Map([...sources].filter(([file]) => !DESCRIBING.has(file)));
+
+/** Problems between the list and what the sources, other than DESCRIBING, write. */
 function listProblems(
   listed: Readonly<Record<string, { status: readonly number[] }>>,
-  sources: ReadonlyMap<string, string>,
+  all: ReadonlyMap<string, string>,
 ): string[] {
+  const sources = answering(all);
   const written = writtenCodes(sources);
   const problems: string[] = [];
   for (const [code, files] of written) {
@@ -86,7 +100,9 @@ describe("the host's codes", () => {
     const sources = hostSources();
     expect(listProblems(HOST_CODES, sources)).toEqual([]);
     // The status check is not vacuous: the host writes most codes beside their status.
-    expect(writtenStatuses(sources).length).toBeGreaterThan(Object.keys(HOST_CODES).length);
+    expect(writtenStatuses(answering(sources)).length).toBeGreaterThan(Object.keys(HOST_CODES).length);
+    // Each describing module is still where it was, so leaving it out still leaves something out.
+    for (const file of DESCRIBING) expect(sources.has(file), file).toBe(true);
   });
 
   it("finds the codes and statuses it checks, in each form the host writes them", () => {
@@ -103,6 +119,17 @@ describe("the host's codes", () => {
     expect(listProblems(listed, sources)).toEqual([
       "a.ts answers gui_bad_request with 400, which HOST_CODES does not list for it",
       "gui_made_up (written in b.ts) is not in HOST_CODES",
+      "gui_spare is listed but written nowhere",
+    ]);
+  });
+
+  it("does not count a code that only the list or the document names as written", () => {
+    const sources = new Map([
+      ["a.ts", 'return fail(404, "gui_not_found", "…");'],
+      [`${HOST_SERVER}/openapi.ts`, 'codes: ["gui_not_found", "gui_spare"],'],
+      [`${HOST_SERVER}/error-codes.ts`, 'const x = "gui_spare";'],
+    ]);
+    expect(listProblems({ gui_not_found: { status: [404] }, gui_spare: { status: [500] } }, sources)).toEqual([
       "gui_spare is listed but written nowhere",
     ]);
   });

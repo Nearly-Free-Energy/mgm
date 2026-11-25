@@ -12,8 +12,8 @@ import "server-only";
  *   in a HostFailureBody (../../contract.ts), and the reasons the action
  *   catalog gives for an action it cannot offer. error-codes.test.ts fails
  *   while a `gui_` code written in the host's server modules or routes is
- *   missing here, one here is written nowhere, or one is written beside a
- *   status not listed for it.
+ *   missing here, one here is written nowhere but here and in ./openapi.ts,
+ *   or one is written beside a status not listed for it.
  * - GATE_CODES: the plugin gate's two refusals (src/lib/runtime/gate.ts),
  *   one code of each per non-core plugin, which a gated action route and the
  *   host answer with, and the catalog gives as reasons.
