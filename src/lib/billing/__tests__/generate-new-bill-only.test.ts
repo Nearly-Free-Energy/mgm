@@ -336,14 +336,8 @@ describe("runGenerationFor with newBillOnly", () => {
       _entered_by_user_id: USER,
       _manual_reason: "Meter read on site",
       _actor_user_id: USER,
-      _audit_details: {
-        tenant_name: "Unit 1",
-        previous_total_amount: null,
-        new_total_amount: calc.totalAmount,
-        previous_reading_source: null,
-        new_reading_source: "manual",
-        manual_reason: "Meter read on site",
-      },
+      // Built by the function (20261124170000).
+      _audit_details: null,
       _rate_schedule_id: SCHEDULE_ID,
       _actor_kind: "human",
       _actor_ref: null,

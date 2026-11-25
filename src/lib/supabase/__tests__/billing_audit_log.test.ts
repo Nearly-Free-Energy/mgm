@@ -739,36 +739,40 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     expect(after?.payment_notes).toBe(paidBefore?.payment_notes);
   });
 
-  // ── #218: previous_snapshot capture (RPC pass-through, builder, absence) ───
+  // ── #218: previous_snapshot capture (function-built, builder, absence) ─────
   //
   // Three orthogonal axes:
-  //   (a) RPC pass-through — caller-built JSONB lands byte-for-byte in
-  //       billing_audit_log.details (the RPC treats the blob as opaque).
-  //   (b) Builder end-to-end — runGenerationFor (real, no mock) populates
-  //       previous_snapshot from the prior row on UPDATE; naming-clash
-  //       contract (top-level manual_reason = NEW; previous_snapshot.
-  //       manual_reason = PREVIOUS) is preserved.
+  //   (a) The function builds previous_snapshot from the row it replaces,
+  //       read under its lock in the same transaction (20261124170000), when
+  //       it is given no details.
+  //   (b) Builder end-to-end — runGenerationFor (real, no mock) sends no
+  //       details, and the audit row's previous_snapshot is the prior row as
+  //       stored; naming-clash contract (top-level manual_reason = NEW;
+  //       previous_snapshot.manual_reason = PREVIOUS) is preserved.
   //   (c) Absence — fresh INSERT (no prior) does NOT include
   //       previous_snapshot.
+  // A signed-in caller's forged details, and service_role's details written
+  // as given, are in billing_audit_log_writers.test.ts.
 
-  it("fn_record_line_item_with_audit: round-trips _audit_details.previous_snapshot byte-for-byte (RPC pass-through, #218)", async () => {
+  /** A bill as stored, in the shape of details.previous_snapshot. */
+  async function storedSnapshot(periodId: string, tenantId: string) {
+    const svc = await serviceClient();
+    const { data, error } = await svc
+      .from("billing_line_items")
+      .select("start_kwh, end_kwh, usage_kwh, tier_breakdown, device_id, entered_by_user_id, entered_at, manual_reason")
+      .eq("billing_period_id", periodId)
+      .eq("tenant_id", tenantId)
+      .single();
+    expect(error).toBeNull();
+    return data;
+  }
+
+  it("fn_record_line_item_with_audit: builds previous_snapshot from the row it replaces (#218, 20261124170000)", async () => {
     const svc = await serviceClient();
 
-    // Build a hand-crafted previous_snapshot JSONB. We use the existing A
-    // fixture's deviceA UUID inside the snapshot just so the value is a
-    // realistic UUID; the snapshot is just data — the RPC doesn't FK-check
-    // device_id inside the JSONB.
-    const seededEnteredAt = "2026-04-15T08:30:00.000Z";
-    const seededSnapshot = {
-      start_kwh: 100,
-      end_kwh: 350,
-      usage_kwh: 250,
-      tier_breakdown: [{ label: "T1", kwh: 250, amount: 12500 }],
-      device_id: FIXTURE.deviceA,
-      entered_by_user_id: alejandroSuperAdmin.userId,
-      entered_at: seededEnteredAt,
-      manual_reason: "initial estimate",
-    };
+    // The bill the earlier cases left for (periodA, hhA), as stored.
+    const prior = await storedSnapshot(FIXTURE.periodA, FIXTURE.hhA);
+    expect(prior).toBeTruthy();
 
     const { error } = await svc.rpc("fn_record_line_item_with_audit", {
       _billing_period_id: FIXTURE.periodA,
@@ -784,15 +788,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       _entered_by_user_id: alejandroSuperAdmin.userId,
       _manual_reason: "corrected",
       _actor_user_id: alejandroSuperAdmin.userId,
-      _audit_details: {
-        tenant_name: "BC1 Tenant A",
-        previous_total_amount: 12500,
-        new_total_amount: 15000,
-        previous_reading_source: "manual",
-        new_reading_source: "manual",
-        manual_reason: "corrected",
-        previous_snapshot: seededSnapshot,
-      },
+      _audit_details: null,
     });
     expect(error).toBeNull();
 
@@ -805,34 +801,20 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const details = lastAudit?.[0]?.details as Record<string, unknown>;
     const snap = details?.previous_snapshot as Record<string, unknown>;
 
-    expect(snap).toBeTruthy();
-    expect(snap.start_kwh).toBe(100);
-    expect(snap.end_kwh).toBe(350);
-    expect(snap.usage_kwh).toBe(250);
-    expect(snap.device_id).toBe(FIXTURE.deviceA);
-    expect(snap.entered_by_user_id).toBe(alejandroSuperAdmin.userId);
-    expect(snap.manual_reason).toBe("initial estimate");
-    expect(snap.tier_breakdown).toEqual([
-      { label: "T1", kwh: 250, amount: 12500 },
-    ]);
-    // TIMESTAMPTZ → JSON; Postgres may add microsecond precision absent in
-    // JS Date.toISOString(). Compare via Date round-trip equality.
-    expect(new Date(snap.entered_at as string).toISOString()).toBe(
-      new Date(seededEnteredAt).toISOString()
-    );
+    // Every key, as the row stood before this write.
+    expect(snap).toEqual(prior);
 
-    // Top-level keys (humanizer reads these, not the snapshot's keys) are
-    // preserved alongside the additive previous_snapshot field.
+    // Top-level keys (humanizer reads these, not the snapshot's keys).
+    expect(details.tenant_name).toBe("BC1 Tenant A");
     expect(details.new_total_amount).toBe(15000);
-    expect(details.previous_total_amount).toBe(12500);
+    expect(details.new_reading_source).toBe("manual");
     expect(details.manual_reason).toBe("corrected");
 
     // Naming-clash contract: top-level manual_reason is the NEW reason;
     // previous_snapshot.manual_reason is the PREVIOUS reason. Distinct keys.
     expect(details.manual_reason).not.toBe(snap.manual_reason);
 
-    // Payment keys are NOT present in the snapshot — the test caller didn't
-    // put them in, and the RPC doesn't add them.
+    // Payment keys are NOT in the snapshot.
     expect(snap).not.toHaveProperty("payment_status");
     expect(snap).not.toHaveProperty("paid_at");
     expect(snap).not.toHaveProperty("paid_by_user_id");
@@ -867,6 +849,7 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
       .single<{ id: string; payment_status: "unpaid" }>();
     expect(priorErr).toBeNull();
     const priorLineItemId = priorRow!.id;
+    const prior = await storedSnapshot(FIXTURE.periodC, FIXTURE.hhC);
 
     // Now call runGenerationFor (the real function) as the super_admin so
     // the RPC's SECURITY INVOKER + RLS-INSERT-WITH-CHECK fires under a
@@ -925,9 +908,9 @@ desc("00029_billing_line_item_source_and_audit.sql (#173)", () => {
     const details = lastAudit?.[0]?.details as Record<string, unknown>;
     const snap = details?.previous_snapshot as Record<string, unknown>;
 
-    // Snapshot reflects the seeded prior row (pre-overwrite state).
-    expect(snap).toBeTruthy();
-    // Numeric coercion: builder uses Number(x)-or-null.
+    // Snapshot is the seeded prior row as stored (pre-overwrite state),
+    // built by the write function (20261124170000).
+    expect(snap).toEqual(prior);
     expect(snap.start_kwh).toBe(100);
     expect(snap.end_kwh).toBe(350);
     expect(snap.usage_kwh).toBe(250);
