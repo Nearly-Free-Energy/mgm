@@ -3,6 +3,11 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({ service: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/lib/supabase/service", () => ({ createServiceClient: mocks.service }));
 vi.mock("@/lib/payments/compose", () => ({ composePaymentsPublic: vi.fn() }));
+vi.mock("@/lib/security/constant-time", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/security/constant-time")>();
+  return { ...actual, secretMatches: vi.fn(actual.secretMatches) };
+});
+import { secretMatches } from "@/lib/security/constant-time";
 import { POST } from "../route";
 beforeEach(() => { vi.clearAllMocks(); mocks.rpc.mockResolvedValue({ data: [], error: null }); mocks.service.mockReturnValue({ rpc: mocks.rpc, from: () => { const query = { select: () => query, in: () => query, not: () => query, limit: async () => ({ data: [] }) }; return query; } }); });
 afterEach(() => vi.unstubAllEnvs());
@@ -31,4 +36,12 @@ it("accepts the configured secret with surrounding whitespace trimmed from the s
   vi.stubEnv("PAYMENTS_WORKER_SECRET", "  test-worker-secret\n");
   expect((await POST(new NextRequest("https://mgm.test/api/payments/reconcile-worker", { method: "POST", headers: { "x-payments-worker-secret": "test-worker-secret" } }))).status).toBe(200);
   expect(mocks.rpc).toHaveBeenCalledWith("fn_payment_due_notifications", { _limit: 50 });
+});
+it("checks the header with the constant-time comparison", async () => {
+  vi.stubEnv("PAYMENTS_WORKER_SECRET", "test-worker-secret");
+  for (const header of ["test-worker-secret-and-more", "test-worker-secreT", "test-worker-secret"]) {
+    await POST(new NextRequest("https://mgm.test/api/payments/reconcile-worker", { method: "POST", headers: { "x-payments-worker-secret": header } }));
+    expect(vi.mocked(secretMatches)).toHaveBeenLastCalledWith("test-worker-secret", header);
+  }
+  expect(vi.mocked(secretMatches)).toHaveBeenCalledTimes(3);
 });
