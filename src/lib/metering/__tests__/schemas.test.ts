@@ -100,7 +100,9 @@ describe("SaveConnectionBody", () => {
         confirmed_name: {
           type: "string",
           title: "Microgrid name, typed",
-          description: "Confirms a save on a microgrid with closed billing periods, as confirmation.typed does",
+          deprecated: true,
+          description:
+            "The OpenEMS Backend page's field. Other clients send the name in confirmation.typed, which the route reads instead whenever a confirmation is sent.",
         },
         confirmation: CONFIRMATION,
       },

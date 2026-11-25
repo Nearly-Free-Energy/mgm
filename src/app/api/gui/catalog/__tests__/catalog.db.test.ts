@@ -220,7 +220,16 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
     }
     // The host sends the ceremony's confirmation itself, so no form asks for it.
     expect(Object.keys(properties)).not.toContain("confirmation");
-    expect(save).toMatchObject({ method: "PUT", confirm: "ceremony", humanOnly: true, repeat: "unsafe", bind: { path: { id: "microgrid" }, body: {} } });
+    expect(save).toMatchObject({
+      method: "PUT",
+      confirm: "ceremony",
+      humanOnly: true,
+      repeat: "unsafe",
+      bind: { path: { id: "microgrid" }, body: {} },
+      prepareAgainOn: ["metering_connection_name_required"],
+    });
+    // The page's own field is described, and marked deprecated.
+    expect(properties.confirmed_name).toMatchObject({ type: "string", deprecated: true });
   });
 
   it("lists billing's actions unavailable with the gate's code and copy while billing is off", async () => {

@@ -75,7 +75,8 @@ const EDGE_IDS = "known_edge_ids must be an array of strings";
  *
  * The microgrid's name, typed, confirms a save on a microgrid with closed
  * billing periods: in `confirmation.typed`, as the host's ceremony sends it,
- * or in `confirmed_name`, as the OpenEMS Backend page does.
+ * or in `confirmed_name`, as the OpenEMS Backend page does. A request that
+ * sends a confirmation is read by it alone.
  */
 export const SaveConnectionBody = z.strictObject(
   {
@@ -103,10 +104,16 @@ export const SaveConnectionBody = z.strictObject(
     keycloakTokenUrl: text("keycloakTokenUrl").meta({ title: "Keycloak token address" }).optional(),
     keycloakClientId: text("keycloakClientId").meta({ title: "Keycloak client id" }).optional(),
     keycloakClientSecret: credential("keycloakClientSecret", "Keycloak client secret"),
+    // The page's own field, kept for it. describeInput hides only bound
+    // fields and `confirmation`, so a form drawn from the catalog shows this
+    // one too: marked deprecated, and the route reads it only when no
+    // confirmation is sent, so a blank one cannot override the host's step.
     confirmed_name: text("confirmed_name")
       .meta({
         title: "Microgrid name, typed",
-        description: "Confirms a save on a microgrid with closed billing periods, as confirmation.typed does",
+        deprecated: true,
+        description:
+          "The OpenEMS Backend page's field. Other clients send the name in confirmation.typed, which the route reads instead whenever a confirmation is sent.",
       })
       .optional(),
     confirmation: typedConfirmation,

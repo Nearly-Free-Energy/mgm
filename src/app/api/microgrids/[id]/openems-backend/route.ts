@@ -508,11 +508,17 @@ export async function PUT(
     //   • the name matches → fall through to save + discover.
     // The OpenEMS Backend page sends the name as confirmed_name; the GUI
     // host's ceremony (metering.save-connection) as confirmation.typed.
-    const confirmedName = body.confirmed_name ?? body.confirmation?.typed;
+    // A request carrying a confirmation is read by it alone, so a
+    // confirmed_name sent beside it (a blank form field, say) cannot
+    // override the name the person typed in the host's step.
+    const confirmedName = body.confirmation ? body.confirmation.typed : body.confirmed_name;
     if (confirmedName === undefined) {
       return NextResponse.json(
         {
           error: `This microgrid has ${closedCount} closed billing period${closedCount === 1 ? "" : "s"}. Changing the OpenEMS backend may affect historical invoice verification if edge IDs differ after rediscovery. Type the microgrid name to confirm.`,
+          // save-connection's prepareAgainOn: the host prepares again and
+          // shows the typed step, as for a period closed since prepare.
+          code: "metering_connection_name_required",
           requires_typed_confirmation: { entity_name: mgRow.name },
           draft_count: draftCount,
           closed_count: closedCount,

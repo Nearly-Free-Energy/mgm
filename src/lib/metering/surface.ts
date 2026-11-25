@@ -133,7 +133,9 @@ export const METERING_SURFACE: Contribution = {
     // has closed billing periods, and refuses while it has a draft one
     // (prepareSaveConnection). The ceremony names no credential: the four
     // are write-only in SaveConnectionBody, so no form or catalog carries a
-    // value of theirs.
+    // value of theirs. A period closed after prepare showed no typed step
+    // gets the route's 409 metering_connection_name_required, on which the
+    // host prepares again and shows it.
     {
       ...SAVE_CONNECTION_ACTION,
       target: "microgrid",
@@ -148,6 +150,7 @@ export const METERING_SURFACE: Contribution = {
       repeat: "unsafe",
       targeted: false,
       prepare: prepareSaveConnection,
+      prepareAgainOn: ["metering_connection_name_required"],
     },
     // Discover: checks the saved connection, records the result where the
     // metering.connection watcher reads it, and answers with the edges the
