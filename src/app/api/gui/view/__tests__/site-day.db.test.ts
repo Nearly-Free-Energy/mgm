@@ -80,7 +80,7 @@ describe.skipIf(shouldSkip())("GET /api/gui/view: the Operations day", () => {
       title: "Operations",
       entity: { kind: "microgrid", id: MICROGRID, label: "Synthetic site" },
       notice: SYNTHETIC_NOTICE,
-      ext: { schema: "metering.site-day@1", data: { state: "day", date: "2026-11-01", synthetic: true } },
+      ext: { schema: "metering.site-day@2", data: { state: "day", date: "2026-11-01", synthetic: true } },
     });
     const tiles = model.body.tiles as { key: string; value: { synthetic?: true } }[];
     expect(tiles.map((t) => t.key)).toEqual(SITE_DAY_KEYS.filter((k) => k !== "soc" && k !== "setup" && k !== "problem"));

@@ -1,13 +1,17 @@
 /**
  * The `metering.site-day` loader: the organization and client come from the
  * request, the day from `?date=`, every composition is disposed, refusals
- * and the metering source's problems carry fixed copy, the time zone notice
- * shows in every state, and only the capability's read is used.
+ * and problems carry fixed copy, each problem carries its reason, every code
+ * getSiteDay can answer reaches a declared state, the time zone notice shows
+ * in every state, and only the capability's read is used.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
 import type { Fmt, SurfaceRequest } from "@/lib/gui/surface";
+import { METERING_ERROR_CODES } from "../../errors";
 import { generateSiteSamples } from "../../fixture/site-samples";
 import { computeSiteDay } from "../../site-operations";
 
@@ -15,7 +19,7 @@ const composeMetering = vi.fn();
 vi.mock("@/lib/metering/compose", () => ({ composeMetering: (...args: unknown[]) => composeMetering(...args) }));
 
 import { loadSiteDay, SITE_DAY_REFUSALS, siteDayRefusal } from "../site-day";
-import { SITE_DAY_PROBLEMS, siteDayProblem } from "../site-day-model";
+import { SITE_DAY_PROBLEM_REASONS, SITE_DAY_PROBLEMS, siteDayProblem, type SiteDayProblemReason } from "../site-day-model";
 
 const ORG = "e7500000-0000-4000-8000-000000000001";
 const MG = "e7500000-0000-4000-8000-0000000000a1";
@@ -229,10 +233,11 @@ describe("loadSiteDay when the metering source cannot read the day", () => {
   });
 
   it.each([
-    [503, "metering_site_devices_unavailable", "unavailable", true],
-    [503, "metering_timezone_unavailable", "unavailable", true],
-    [422, "metering_invalid_date", "unavailable", true],
+    [503, "metering_site_devices_unavailable", "siteDevicesUnavailable", true],
+    [503, "metering_timezone_unavailable", "zoneUnavailable", true],
+    [422, "metering_invalid_date", "dateOutOfRange", true],
     [500, "metering_site_day_failed", "dayFailed", false],
+    [503, "metering_site_samples_unsupported", "unsupported", false],
   ] as const)("keeps the day navigation when getSiteDay fails after the gate (%i %s)", async (status, code, problem, retry) => {
     fails(status, code);
     const out = await loadSiteDay(request("date=2026-11-01"));
@@ -247,6 +252,184 @@ describe("loadSiteDay when the metering source cannot read the day", () => {
     expect(await loadSiteDay(request())).toEqual(SITE_DAY_REFUSALS.forbidden);
     fails(409, "metering_disabled");
     expect(await loadSiteDay(request())).toEqual(SITE_DAY_REFUSALS.disabled);
+  });
+});
+
+describe("loadSiteDay's problem reasons", () => {
+  const fails = (status: number, code: string) => getSiteDay.mockResolvedValue({ ok: false, status, code, message: UPSTREAM });
+  const reasonOf = (out: Awaited<ReturnType<typeof loadSiteDay>>) => (out.ok ? (out.model.ext?.data as { reason?: string }).reason : undefined);
+
+  // One failure per reason, as getSiteDay answers it.
+  it.each([
+    ["mixed_edges", 409, "METERING_CONFIGURATION"],
+    ["not_configured", 503, "METERING_CONFIGURATION"],
+    ["credentials_rejected", 401, "METERING_UNAUTHORIZED"],
+    ["unsupported", 503, "metering_site_samples_unsupported"],
+    ["upstream_unavailable", 503, "METERING_UNAVAILABLE"],
+    ["invalid_data", 503, "METERING_INVALID_DATA"],
+    ["unreadable_timestamps", 503, "METERING_UNREADABLE_TIMESTAMPS"],
+    ["site_devices_unavailable", 503, "metering_site_devices_unavailable"],
+    ["zone_unavailable", 503, "metering_timezone_unavailable"],
+    ["date_out_of_range", 422, "metering_invalid_date"],
+    ["day_failed", 500, "metering_site_day_failed"],
+  ] as const satisfies readonly (readonly [SiteDayProblemReason, number, string])[])(
+    "shows %s, with its own copy and never the source's",
+    async (reason, status, code) => {
+      fails(status, code);
+      const out = await loadSiteDay(request("date=2026-11-01"));
+      if (!out.ok) throw new Error("refused");
+      const problem = Object.values(SITE_DAY_PROBLEMS).find((p) => p.reason === reason)!;
+      expect(out.model.ext?.data).toMatchObject({ state: "problem", reason, title: problem.title, message: problem.message, retry: problem.retry });
+      expect(out.model.links?.map((l) => l.id)).toEqual(expect.arrayContaining(["metering.day-previous"]));
+      expect(JSON.stringify(out)).not.toContain(UPSTREAM);
+    },
+  );
+
+  it("tells a source that cannot read site samples from one that is not set up, and from one that did not answer", async () => {
+    fails(503, "metering_site_samples_unsupported");
+    const unsupported = await loadSiteDay(request("date=2026-11-01"));
+    fails(503, "METERING_CONFIGURATION");
+    const notConfigured = await loadSiteDay(request("date=2026-11-01"));
+    fails(503, "METERING_UNAVAILABLE");
+    const unavailable = await loadSiteDay(request("date=2026-11-01"));
+    expect([unsupported, notConfigured, unavailable].map(reasonOf)).toEqual(["unsupported", "not_configured", "upstream_unavailable"]);
+    if (!unsupported.ok || !notConfigured.ok || !unavailable.ok) throw new Error("refused");
+    // Nothing to set up and nothing to retry; the others link their fix or retry.
+    expect(unsupported.model.ext?.data).toMatchObject({ retry: false });
+    expect(unsupported.model.links?.map((l) => l.id)).not.toContain("metering.openems-backend");
+    expect(notConfigured.model.links?.[0].id).toBe("metering.openems-backend");
+    expect(unavailable.model.ext?.data).toMatchObject({ retry: true });
+  });
+});
+
+/**
+ * The codes getSiteDay can answer, read from src/lib/metering/capability.ts:
+ * every metering_ or METERING_ string in getSiteDay and the methods and
+ * module-level `function` declarations it calls by name, followed through
+ * `this.<method>(` and `<function>(`, and every MeteringError code, which
+ * fromMeteringError passes on from the provider and its selection. A code
+ * built at run time, one passed in from a module this does not read, or one
+ * in a module-level arrow function would be missed; if capability.ts starts
+ * doing any of these, revisit.
+ */
+function siteDayCodes(): Set<string> {
+  const source = readFileSync(join(process.cwd(), "src", "lib", "metering", "capability.ts"), "utf8");
+  // The constructor's fields the methods call; they hold no codes of their own.
+  const fields = new Set(["isActive", "selectProvider"]);
+  const functions = new Set([...source.matchAll(/\n(?:export )?(?:async )?function (\w+)\(/g)].map((m) => m[1]));
+  const seen = new Set<string>();
+  const codes = new Set<string>(METERING_ERROR_CODES);
+  const visit = (name: string, kind: "method" | "function") => {
+    if (seen.has(`${kind}:${name}`)) return;
+    seen.add(`${kind}:${name}`);
+    const body = bodyOf(source, name, kind);
+    for (const m of body.matchAll(/"(metering_[a-z_]+|METERING_[A-Z_]+)"/g)) codes.add(m[1]);
+    for (const m of body.matchAll(/\bthis\.(\w+)\(/g)) if (!fields.has(m[1])) visit(m[1], "method");
+    for (const m of body.matchAll(/(?<![.\w])(\w+)\(/g)) if (functions.has(m[1])) visit(m[1], "function");
+  };
+  visit("getSiteDay", "method");
+  return codes;
+}
+
+/**
+ * The text of a class method's or module-level function's body, with
+ * comments removed, found by its name. It throws rather than guess when a
+ * string never closes or the body never ends, so a scan that lost its place
+ * fails instead of reading too little.
+ */
+function bodyOf(source: string, name: string, kind: "method" | "function"): string {
+  const head = new RegExp(
+    kind === "method" ? `\\n  (?:private |public )?(?:async )?${name}\\(` : `\\n(?:export )?(?:async )?function ${name}\\(`,
+  ).exec(source);
+  if (!head) throw new Error(`capability.ts has no ${kind} ${name}; if it moved, revisit siteDayCodes`);
+  const text = stripComments(source.slice(head.index + head[0].length));
+  const lost = (what: string): never => {
+    throw new Error(`could not read the body of ${name} in capability.ts (${what}); revisit bodyOf`);
+  };
+  // Past the parameters, then the return type, to the body's opening brace.
+  let i = 0;
+  for (let depth = 1; depth > 0; i++) {
+    if (i >= text.length) lost("its parameters never close");
+    depth += text[i] === "(" ? 1 : text[i] === ")" ? -1 : 0;
+  }
+  for (let angle = 0; ; i++) {
+    if (i >= text.length) lost("no opening brace");
+    if (text.startsWith("=>", i)) i++;
+    else if (text[i] === "<") angle++;
+    else if (text[i] === ">") angle--;
+    else if (text[i] === "{" && angle === 0) break;
+  }
+  const start = i;
+  for (let depth = 0; ; i++) {
+    if (i >= text.length) lost("its braces never close");
+    if (text[i] === '"' || text[i] === "'" || text[i] === "`") {
+      const quote = text[i];
+      for (i++; text[i] !== quote; i++) {
+        if (i >= text.length) lost("a string never closes");
+        if (text[i] === "\\") i++;
+      }
+    } else if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return text.slice(start, i + 1);
+  }
+}
+
+/** Comments out, strings kept, so an apostrophe in a comment is not read as a quote. */
+function stripComments(text: string): string {
+  return text.replace(/("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (_, str) => str ?? "");
+}
+
+describe("every code getSiteDay can answer", () => {
+  type Outcome = { problem: SiteDayProblemReason } | { setup: true } | { refusal: keyof typeof SITE_DAY_REFUSALS };
+  // Each with the status the capability answers it with. A METERING_ code's
+  // status is the provider's; the view reads it only for configuration.
+  const OUTCOMES: Record<string, [number, Outcome]> = {
+    metering_composition_disposed: [500, { refusal: "failed" }],
+    metering_invalid_query: [400, { refusal: "notFound" }],
+    metering_invalid_microgrid: [400, { refusal: "notFound" }],
+    metering_scope_mismatch: [403, { refusal: "forbidden" }],
+    metering_gate_unavailable: [503, { refusal: "unavailable" }],
+    metering_disabled: [409, { refusal: "disabled" }],
+    metering_timezone_unavailable: [503, { problem: "zone_unavailable" }],
+    metering_invalid_date: [422, { problem: "date_out_of_range" }],
+    metering_site_samples_unsupported: [503, { problem: "unsupported" }],
+    metering_site_devices_unavailable: [503, { problem: "site_devices_unavailable" }],
+    metering_no_site_devices: [404, { setup: true }],
+    metering_site_day_failed: [500, { problem: "day_failed" }],
+    METERING_CONFIGURATION: [503, { problem: "not_configured" }],
+    METERING_UNAUTHORIZED: [401, { problem: "credentials_rejected" }],
+    METERING_UNAVAILABLE: [503, { problem: "upstream_unavailable" }],
+    METERING_INVALID_DATA: [503, { problem: "invalid_data" }],
+    METERING_UNREADABLE_TIMESTAMPS: [503, { problem: "unreadable_timestamps" }],
+  };
+
+  it("are read from bodies the scan can find the end of, or it fails", () => {
+    const source = "\nfunction ok(a: string): string {\n  return \"{\";\n}\nfunction open(): void {\n  const s = \"never closed;\n}\n";
+    expect(bodyOf(source, "ok", "function")).toBe('{\n  return "{";\n}');
+    expect(() => bodyOf(source, "open", "function")).toThrow("a string never closes");
+    expect(() => bodyOf("\n  async run(): void {\n  if (x) {\n", "run", "method")).toThrow("its braces never close");
+    expect(() => bodyOf(source, "missing", "method")).toThrow("capability.ts has no method missing");
+  });
+
+  it("are the codes this view has an outcome for, no more and no fewer", () => {
+    expect([...siteDayCodes()].sort()).toEqual(Object.keys(OUTCOMES).sort());
+  });
+
+  it.each(Object.entries(OUTCOMES))("%s reaches its declared state", async (code, [status, outcome]) => {
+    getSiteDay.mockResolvedValue({ ok: false, status, code, message: UPSTREAM });
+    const out = await loadSiteDay(request("date=2026-11-01"));
+    if ("refusal" in outcome) return expect(out).toEqual(SITE_DAY_REFUSALS[outcome.refusal]);
+    if (!out.ok) throw new Error(`${code} was refused`);
+    const data = out.model.ext?.data as { state: string; reason?: string };
+    if ("setup" in outcome) return expect(data.state).toBe("no-site-devices");
+    expect(data).toMatchObject({ state: "problem", reason: outcome.problem });
+    expect(SITE_DAY_PROBLEM_REASONS).toContain(data.reason);
+  });
+
+  it("leave no declared reason unreached", () => {
+    const reached = new Set(Object.values(OUTCOMES).flatMap(([, o]) => ("problem" in o ? [o.problem] : [])));
+    // Mixed edges is configuration's 409, the synthetic provider's refusal.
+    reached.add(siteDayProblem({ status: 409, code: "METERING_CONFIGURATION" })!.reason);
+    expect([...reached].sort()).toEqual([...SITE_DAY_PROBLEM_REASONS].sort());
   });
 });
 
@@ -286,16 +469,27 @@ describe("siteDayProblem", () => {
   it.each([
     [409, "METERING_CONFIGURATION", "mixed"],
     [503, "METERING_CONFIGURATION", "noConnection"],
+    [422, "METERING_CONFIGURATION", "noConnection"],
     [401, "METERING_UNAUTHORIZED", "rejected"],
     [403, "METERING_UNAUTHORIZED", "rejected"],
-    [404, "METERING_INVALID_DATA", "unavailable"],
+    [503, "METERING_UNAVAILABLE", "unavailable"],
+    [400, "METERING_INVALID_DATA", "invalidData"],
+    [503, "METERING_INVALID_DATA", "invalidData"],
+    [503, "METERING_UNREADABLE_TIMESTAMPS", "unreadableTimestamps"],
+    // A source code this view does not know yet reads as the source not answering.
     [502, "METERING_UPSTREAM", "unavailable"],
-    [503, "metering_site_devices_unavailable", "unavailable"],
-    [503, "metering_timezone_unavailable", "unavailable"],
+    [503, "metering_site_samples_unsupported", "unsupported"],
+    [503, "metering_site_devices_unavailable", "siteDevicesUnavailable"],
+    [503, "metering_timezone_unavailable", "zoneUnavailable"],
     [500, "metering_site_day_failed", "dayFailed"],
-    [422, "metering_invalid_date", "unavailable"],
+    [422, "metering_invalid_date", "dateOutOfRange"],
   ] as const)("maps %i %s to %s", (status, code, problem) => {
     expect(siteDayProblem({ status, code })).toBe(SITE_DAY_PROBLEMS[problem]);
+  });
+
+  it("reads only a code's own keys, not what an object inherits", () => {
+    expect(siteDayProblem({ status: 500, code: "toString" })).toBeNull();
+    expect(siteDayProblem({ status: 500, code: "__proto__" })).toBeNull();
   });
 
   it.each([
