@@ -10,7 +10,8 @@ import "server-only";
  * listed does not lift that check's other refusals: a view or watcher of a
  * plugin whose reading is refused there (billing, payments, Pesapal, the
  * tenant app), a view whose path names a tenant, device or billing or
- * payment record, a view that takes signals, a tenant view and a view
+ * payment record, a view that takes signals, a view that declares a key
+ * prefix, a tenant view and a view
  * reached from configure or system navigation are refused the mark whether
  * listed or not.
  *

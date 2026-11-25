@@ -19,8 +19,8 @@ import "server-only";
  * assistant reading of a view or watcher that is not on the list, of views
  * reached from configure or system navigation, of billing's, payments',
  * Pesapal's or the tenant app's views and watchers, of views whose path
- * names a tenant, a device or a billing or payment record, or of views that
- * take signals;
+ * names a tenant, a device or a billing or payment record, of views that
+ * take signals, or of views that declare a key prefix;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
  * of cost "db"; `takesSignals` only on an organization's view that is not
@@ -208,7 +208,9 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
  *   and payment references; the tenant app is about a tenant's own unit;
  * - a view whose path names a tenant, a device, or a billing or payment
  *   record (ASSISTANT_REFUSED_KINDS);
- * - a view that takes signals, which carries every watcher's answer.
+ * - a view that takes signals, which carries every watcher's answer;
+ * - a view that declares a key prefix, whose keys the list's review cannot
+ *   see.
  *
  * ASSISTANT_READING is keyed by every plugin name, so a new or renamed
  * plugin does not type-check until someone decides whether its views and
@@ -339,6 +341,14 @@ const viewSchema = z
       for (const k of new Set(Object.values(v.params)))
         if (ASSISTANT_REFUSED_KINDS.has(k)) add(ctx, ["agent"], `a view whose path names a ${k} cannot be read by an assistant`);
       if (v.takesSignals) add(ctx, ["agent"], "a view that takes signals cannot be read by an assistant");
+      // A prefix admits keys nobody listed, so a key added under it would
+      // reach an assistant with no change under src/lib/gui (ADR-007
+      // decision 8): a view an assistant reads names every key it declares.
+      // A tenant view has its one refusal above. If tenant views may be
+      // listed (decision 10), drop the scope exemption here: tenant.home
+      // declares the `meter.` prefix and is refused until it names its keys.
+      if (v.scope !== "tenant" && (v.declares.prefixes?.length ?? 0) > 0)
+        add(ctx, ["agent"], "a view an assistant may read declares its keys by name, not by prefix");
     }
     // Which views may declare it is checked in CI (gui-surface.test.ts),
     // which can read the route exemptions and the capability's gating; here

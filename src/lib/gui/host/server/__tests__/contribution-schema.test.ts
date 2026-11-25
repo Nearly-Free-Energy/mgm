@@ -493,12 +493,37 @@ describe("assistant reading", () => {
       expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
     });
 
+    it("refuses the mark on a listed view that declares a key prefix", () => {
+      const error = refusal(
+        (c) => {
+          c.views[0].declares.prefixes = ["reading."];
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([
+        issue(["views", 0, "agent"], "a view an assistant may read declares its keys by name, not by prefix"),
+      ]);
+    });
+
+    it("accepts the mark on a listed view whose prefix list is empty", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      c.views[0].declares.prefixes = [];
+      marked(c);
+      expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
+    });
+
     // ADR-007 decision 10 may let tenant views be listed (#259 § 5); the pull
     // request that does changes this.
     it.each([
       ["unlisted", undefined],
       ["listed", [{ kind: "view", id: TENANT_APP_SURFACE.views![0].id }] as const],
     ])("gives a marked tenant view, %s, one refusal", (_listed, reads) => {
+      // tenant.home declares a key prefix, so this also pins that the prefix
+      // refusal leaves a tenant view to its own.
+      expect(TENANT_APP_SURFACE.views![0].declares.prefixes?.length).toBeGreaterThan(0);
       const error = refusal(marked, CATALOG, TENANT_APP_SURFACE, reads);
       expect(error.issues).toEqual([issue(["views", 0, "agent"], "a tenant view cannot be read by an assistant")]);
     });
