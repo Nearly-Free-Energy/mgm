@@ -164,6 +164,29 @@ describe("collectSignals", () => {
     expect([out.count, out.top.length]).toEqual([30, MAX_TOP]);
   });
 
+  it(`counts the warn and critical signals as attention over every signal, not only the first ${MAX_TOP}`, async () => {
+    use([
+      watcher("metering", "metering.many", async () => [
+        ...Array.from({ length: 5 }, (_, i) => ({ ...base, id: `c${i}`, kind: "alarm", severity: "critical" })),
+        ...Array.from({ length: 18 }, (_, i) => ({ ...base, id: `w${i}`, kind: "your-move", severity: "warn" })),
+        ...Array.from({ length: 7 }, (_, i) => ({ ...base, id: `i${i}`, kind: "info", severity: "info" })),
+      ]),
+    ]);
+    const out = await value();
+    expect([out.count, out.attention, out.top.length]).toEqual([30, 23, MAX_TOP]);
+    // The first MAX_TOP hold no info signal, so attention is not read off `top`.
+    expect(out.top.filter((s) => s.severity !== "info")).toHaveLength(MAX_TOP);
+  });
+
+  it("counts no attention when every signal is info, and none when there are none", async () => {
+    use([watcher("metering", "metering.quiet", async () => [{ ...base, id: "a", kind: "info", severity: "info" }])]);
+    const out = await value();
+    expect([out.count, out.attention]).toEqual([1, 0]);
+    use([watcher("metering", "metering.none", async () => [])]);
+    const none = await value();
+    expect([none.count, none.attention]).toEqual([0, 0]);
+  });
+
   it("lists a watcher that misses its own budget, or the default one, as unchecked, without holding the others", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const after = (ms: number) => () => new Promise<unknown>((resolve) => setTimeout(() => resolve([]), ms));

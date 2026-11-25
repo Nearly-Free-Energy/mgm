@@ -6,7 +6,8 @@
  * the manifest), again every few minutes while the page is visible, when the
  * page comes back into view or focus, and when an action's result says
  * `signals: true`. What it holds is what the kit's useSignals() returns, and
- * its count is the installed app's badge (./app-badge.ts).
+ * its warnings and critical signals are the installed app's badge
+ * (./app-badge.ts).
  *
  * A view that takes signals (Today) carries the ones the host collected for
  * it in its model, and KitProvider hands them to `seed`: they count as a
@@ -14,11 +15,13 @@
  * did. The first fetch waits a turn after mounting for that reason; if the
  * view's model stops carrying `signals`, the feed simply fetches.
  *
- * The badge counts every signal, as Today lists every signal and the tray
- * shows `count`: one number for "what needs you" wherever it appears. If
- * Today starts leaving out a severity, decide whether the badge follows.
- * The badge belongs to the installed app, not to a tab, so two windows on
- * different organizations show whichever fetched last.
+ * The badge counts the warn and critical signals (`attention`, which the
+ * host counts over every signal, not only `top`), decided on #230: info
+ * signals still show in the tray, whose number stays `count`, and on Today,
+ * but do not put a number on the icon. An answer without `attention` (from
+ * a host before it) falls back to `count`. The badge belongs to the
+ * installed app, not to a tab, so two windows on different organizations
+ * show whichever fetched last.
  *
  * Failing quietly, by rule:
  * - 401 (signed out) clears the signals and the badge and stops fetching
@@ -48,6 +51,10 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export type SignalsAnswer = { kind: "signals"; signals: Signals } | { kind: "none" } | { kind: "signed-out" } | { kind: "keep" };
 
 const isIdList = (v: unknown) => Array.isArray(v) && v.every((id) => typeof id === "string");
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+/** The badge's number: the warn and critical signals, or every signal when the answer does not say. */
+export const badgeCount = (signals: Signals): number => (isCount(signals.attention) ? signals.attention : signals.count);
 
 /** Whether `signals` are `organization`'s. */
 const sameOrg = (signals: Signals, organization: string) => signals.org.toLowerCase() === organization.toLowerCase();
@@ -187,7 +194,7 @@ export function useSignalsFeed(organization: string | null, fetch: Fetch): Signa
     const show = (signals: Signals | null) => {
       held.set(organization, signals);
       if (!signals) clearAppBadge();
-      else if (!nothingChecked(signals)) setAppBadge(signals.count);
+      else if (!nothingChecked(signals)) setAppBadge(badgeCount(signals));
     };
     const load = () => {
       if (stopped || isSignedOut()) return;
