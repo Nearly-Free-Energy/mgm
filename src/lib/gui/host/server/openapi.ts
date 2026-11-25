@@ -613,6 +613,13 @@ const METHOD_ORDER = ["get", "post", "put", "patch", "delete"];
  * and through 0.x a minor version may change shapes (../../contract.ts), so
  * the API is experimental. Leaving 0.x throws here, so that someone decides
  * what the document promises from then on.
+ *
+ * GUI_CONTRACT versions the contract's shapes only. Actions, their routes
+ * and their codes come and go with MGM releases while it stays, and an
+ * action's input carries its own `inputVersion` (ActionDef in
+ * ../../surface.ts), so the text says so rather than letting `info.version`
+ * stand for the whole document. If `info.version` comes to be the release's
+ * version, or GUI_CONTRACT to change with every action, revisit it.
  */
 function stability(): { label: string; text: string } {
   if (!GUI_CONTRACT.startsWith("0.")) {
@@ -620,7 +627,10 @@ function stability(): { label: string; text: string } {
   }
   return {
     label: "experimental",
-    text: `**Experimental while GUI_CONTRACT is 0.x.** \`info.version\` is GUI_CONTRACT, ${GUI_CONTRACT} here. Until 1.0 a minor version may change any shape in this document, and a patch only adds optional fields, kinds or values.`,
+    text: [
+      `**Experimental while GUI_CONTRACT is 0.x.** \`info.version\` is GUI_CONTRACT, ${GUI_CONTRACT} here. It versions the shapes the GUI contract defines: what the host's routes take and answer, and how the catalog describes an action. Until 1.0 a minor version may change any of those shapes, and a patch only adds optional fields, kinds or values.`,
+      "It does not version what the document lists. Actions, their routes and the codes they answer are added and changed from one MGM release to the next while GUI_CONTRACT stays the same, and an action's body is its own: each action gives the version of its input as `inputVersion`, under `x-mgm-actions`. Read the document of the MGM release you call.",
+    ].join("\n\n"),
   };
 }
 

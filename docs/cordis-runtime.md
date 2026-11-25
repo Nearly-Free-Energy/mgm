@@ -581,7 +581,10 @@ generated from the runtime root's surface snapshot by `openApiDocument`
 
 `info.version` is `GUI_CONTRACT`, and the document says the API is
 experimental while that is 0.x; the generator throws once it is not, so
-the stability statement is decided again then. It is deterministic, so one
+the stability statement is decided again then. It says too what that
+version does not cover: the actions, routes and codes the document lists
+change from one release to the next while `GUI_CONTRACT` stays, and an
+action's body is versioned by its own `inputVersion`. It is deterministic, so one
 commit always generates the same file. `npm run api:openapi` writes it,
 and `src/lib/gui/host/server/__tests__/openapi.test.ts`, in the `Test`
 gate, fails while the committed file differs from what the registry

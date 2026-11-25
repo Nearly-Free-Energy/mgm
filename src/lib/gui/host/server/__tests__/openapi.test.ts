@@ -219,6 +219,9 @@ describe("the OpenAPI document", () => {
     expect(GUI_CONTRACT.startsWith("0.")).toBe(true);
     expect(info["x-mgm-stability"]).toBe("experimental");
     expect(info.description).toContain("Experimental while GUI_CONTRACT is 0.x");
+    // GUI_CONTRACT does not version the actions listed, nor an action's body.
+    expect(info.description).toContain("It does not version what the document lists");
+    expect(info.description).toContain("`inputVersion`");
   });
 });
 
