@@ -215,7 +215,6 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
         expect(a.availability.available, id).toBe(false);
         expect(a.availability.reasons, id).toEqual([{ check: "enabled", code: "billing_disabled", message: copy }]);
       }
-      for (const id of KEPT_WHILE_PAYMENTS_OFF) expect(actions.get(id)!.availability.available, id).toBe(true);
     } finally {
       await setPlugin("billing", null);
     }
@@ -225,9 +224,23 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
     caller = manager;
     await setPlugin("payments", false);
     try {
+      // The control: the gate, asked as the host asks it, reads Payments as
+      // off, so an action listed with no reason was let through by its
+      // whilePluginOff, not by a gate that never saw the row.
+      const { gate } = await getMgmRuntime();
+      const decision = await gate.check(manager.client, {
+        plugin: "payments",
+        target: { kind: "organization", id: ORG },
+        method: "GET",
+        access: "write",
+      });
+      expect(decision).toEqual({ ok: false, status: 409, code: "payments_disabled", message: gate.disabledMessage("payments") });
+
       const actions = byId((await answer()).body);
       expect([...actions.values()].filter((a) => a.plugin === "payments").map((a) => a.id).sort()).toEqual(KEPT_WHILE_PAYMENTS_OFF);
-      for (const id of KEPT_WHILE_PAYMENTS_OFF) expect(actions.get(id)!.availability, id).toMatchObject({ available: true, reasons: [] });
+      for (const id of KEPT_WHILE_PAYMENTS_OFF) {
+        expect(actions.get(id)!.availability, id).toEqual({ available: true, reasons: [], unchecked: ["configured", "authorized", "state"] });
+      }
     } finally {
       await setPlugin("payments", null);
     }
