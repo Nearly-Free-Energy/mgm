@@ -84,7 +84,8 @@ export function shownNotice(host: Notice | undefined, own: Notice | undefined): 
 }
 /** The shortest refresh the host sends: vendor views call an outside system on every load. */
 export const MIN_REFRESH_SECONDS = { db: 15, vendor: 60 } as const;
-const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
+/** The statuses a view's loader may refuse with; any other is answered gui_output_invalid. */
+export const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
 const MAX_MESSAGE = 300;
 const NOT_AVAILABLE = { type: "values", values: [{ t: "text", text: "Not available" }] } as const;
 

@@ -37,6 +37,8 @@ import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { codePrefix } from "@/lib/runtime/gate";
 import type { AvailabilityCheck } from "../../contract";
 import { TENANT_UNIT_PARAM } from "../shared/tenant-units";
+import { REFUSAL_STATUSES } from "./prepare";
+import { LOADER_STATUSES } from "./view";
 
 export type CodeEntry = {
   /** The HTTP statuses a refusal with this code comes with; empty when it is only ever a catalog reason. */
@@ -46,10 +48,18 @@ export type CodeEntry = {
   meaning: string;
 };
 
+/**
+ * The statuses a contribution's own refusal is passed on with, under its
+ * `gui_…_refused` code: those its host module accepts, but 404, which both
+ * answer `gui_not_found` (prepare.ts and view.ts map it so). If either
+ * stops mapping 404 so, revisit.
+ */
+const passedOn = (accepted: ReadonlySet<number>): number[] => [...accepted].filter((s) => s !== 404).sort((a, b) => a - b);
+
 /** The GUI host's own codes. A new one goes here in the change that first answers it. */
 export const HOST_CODES = {
   gui_action_refused: {
-    status: [403, 409, 500, 503],
+    status: passedOn(REFUSAL_STATUSES),
     meaning:
       "The action's own prepare refused it, for a reason other than not finding its record. The status and the message are the action's.",
   },
@@ -121,7 +131,7 @@ export const HOST_CODES = {
     meaning: "The view's loader threw, or the view could not be completed.",
   },
   gui_view_refused: {
-    status: [403, 409, 500, 503],
+    status: passedOn(LOADER_STATUSES),
     meaning:
       "The view's loader refused, for a reason other than not finding its record. The status and the message are the loader's.",
   },

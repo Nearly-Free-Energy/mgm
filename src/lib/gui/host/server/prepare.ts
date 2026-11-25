@@ -36,7 +36,8 @@ import type { HostFailure, HostOutcome } from "./view";
 /** The largest prepare request body, in bytes. */
 export const MAX_PREPARE_BYTES = 16 * 1024;
 const MAX_MESSAGE = 300;
-const REFUSAL_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
+/** The statuses an action's own prepare may refuse with; any other is answered gui_output_invalid. */
+export const REFUSAL_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
 
 const fail = (status: number, code: string, message: string): HostFailure => ({ ok: false, status, code, message });
 const BAD_REQUEST = fail(400, "gui_bad_request", "The request is not valid.");
