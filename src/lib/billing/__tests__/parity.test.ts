@@ -179,8 +179,8 @@ function contributedAction(a: ParityAction): ActionDef | undefined {
 /**
  * The JSON Schema of what a person fills for `def`: its input with the bound
  * fields and `confirmation` removed, as the host prepares it for the kit
- * (inputSpec in src/lib/gui/host/server/prepare.ts). If the host comes to
- * hide other fields, revisit.
+ * (describeInput in src/lib/gui/host/server/input-spec.ts). If the host
+ * comes to hide other fields, revisit.
  */
 function personInput(def: ActionDef): Json {
   const schema = JSON.parse(JSON.stringify(z.toJSONSchema(def.input, { io: "input" }))) as Record<string, Json>;

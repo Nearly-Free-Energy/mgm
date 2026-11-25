@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import type { GateDecision } from "@/lib/runtime/gate";
 import type { UserRoleRecord } from "@/lib/types/domain";
-import type { CatalogEntry } from "../../../contract";
+import { GUI_CONTRACT, type CatalogEntry } from "../../../contract";
 import type { ActionDef } from "../../../surface";
 import type { RegisteredAction, SurfaceSnapshot } from "../surface-registry";
 
@@ -164,7 +164,7 @@ afterEach(() => {
 describe("buildActionCatalog for an organization", () => {
   it("lists every action in catalog order and then by id, each with the same keys", async () => {
     const out = await ok();
-    expect(out).toMatchObject({ type: "catalog", contract: "0.2.1", org: ORG_A, entities: [] });
+    expect(out).toMatchObject({ type: "catalog", contract: GUI_CONTRACT, org: ORG_A, entities: [] });
     expect(out.actions.map((a) => a.id)).toEqual([
       "billing.bill-from-readings",
       "billing.close-period",
@@ -404,7 +404,7 @@ describe("buildActionCatalog on entities", () => {
 describe("buildActionCatalog for a person who reaches no organization", () => {
   it("gives a person whose rows are all tenant rows no actions, reading nothing and asking no gate", async () => {
     roles = [tenantOf(HOUSE)];
-    expect(await catalog()).toEqual({ ok: true, value: { type: "catalog", contract: "0.2.1", org: null, entities: [], actions: [] } });
+    expect(await catalog()).toEqual({ ok: true, value: { type: "catalog", contract: GUI_CONTRACT, org: null, entities: [], actions: [] } });
     expect(newClient).not.toHaveBeenCalled();
     expect(checkGate).not.toHaveBeenCalled();
     expect(takeSnapshot).not.toHaveBeenCalled();
@@ -420,7 +420,7 @@ describe("buildActionCatalog for a person who reaches no organization", () => {
   it("gives staff who see no organization but hold a unit no actions, as the manifest gives them the tenant one", async () => {
     roles = [managerOf(ORG_B), tenantOf(HOUSE)];
     tables.organizations = { data: [] };
-    expect(await catalog()).toEqual({ ok: true, value: { type: "catalog", contract: "0.2.1", org: null, entities: [], actions: [] } });
+    expect(await catalog()).toEqual({ ok: true, value: { type: "catalog", contract: GUI_CONTRACT, org: null, entities: [], actions: [] } });
     expect(checkGate).not.toHaveBeenCalled();
   });
 

@@ -234,7 +234,7 @@ function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Dr
  * joins the agent clients' allow-list (RFC #259 § 2: Track A and D1), refuse
  * an agent client `entity=` of the tenant, billingPeriod, lineItem and
  * paymentAttempt kinds, or give it the organization's catalog only: #133's
- * A0 data boundary keeps household, billing and payment references from any
+ * A0 data boundary keeps tenant, billing and payment references from any
  * model.
  */
 export async function buildActionCatalog(ctx: HostContext, input: CatalogQuery): Promise<HostOutcome<ActionCatalog>> {

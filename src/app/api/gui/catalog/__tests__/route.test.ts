@@ -8,6 +8,7 @@
  */
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GUI_CONTRACT } from "@/lib/gui/contract";
 
 const ORG = "e7100000-0000-4000-8003-000000000001";
 const ORG2 = "e7100000-0000-4000-8003-000000000002";
@@ -89,7 +90,7 @@ describe("GET /api/gui/catalog", () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store, private");
-    expect(await res.json()).toEqual({ type: "catalog", contract: "0.2.1", org: ORG, entities: [], actions: [] });
+    expect(await res.json()).toEqual({ type: "catalog", contract: GUI_CONTRACT, org: ORG, entities: [], actions: [] });
   });
 
   it("answers for the organization org names, else the last used one", async () => {
@@ -104,7 +105,7 @@ describe("GET /api/gui/catalog", () => {
     roles = [{ role: "tenant", scope_type: "tenant", scope_id: UNIT }];
     const res = await get();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ type: "catalog", contract: "0.2.1", org: null, entities: [], actions: [] });
+    expect(await res.json()).toEqual({ type: "catalog", contract: GUI_CONTRACT, org: null, entities: [], actions: [] });
     expect(checkGate).not.toHaveBeenCalled();
     expect(surfaceSnapshot).not.toHaveBeenCalled();
     await expectFailure(await get(`?entity=tenant:${UNIT}`), 404, "gui_not_found");
