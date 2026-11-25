@@ -19,7 +19,7 @@ import "server-only";
 import { rolesIncludeStaff } from "@/lib/auth/access";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
 import type { GateDecision } from "@/lib/runtime/gate";
-import type { EntityKind, Href, ModelBase, Signals, ViewKind, ViewModel } from "../../contract";
+import type { EntityKind, Href, Id, ModelBase, Signals, ViewKind, ViewModel } from "../../contract";
 import type { Loaded, LoadedModel, ViewDef } from "../../surface";
 import { fillPath } from "../shared/merge-actions";
 import { chooseTenantUnit, TENANT_UNIT_PARAM } from "../shared/tenant-units";
@@ -37,6 +37,8 @@ import type { RegisteredView, SurfaceSnapshot } from "./surface-registry";
 
 export type HostFailure = { ok: false; status: number; code: string; message: string };
 export type HostOutcome<T> = { ok: true; value: T } | HostFailure;
+/** Whether a view, by id, may be served on this dispatch (dispatchView's `o.admit`). */
+export type Admit = (viewId: Id) => boolean;
 
 const fail = (status: number, code: string, message: string): HostFailure => ({ ok: false, status, code, message });
 const NOT_FOUND = fail(404, "gui_not_found", "This page could not be found.");
@@ -87,6 +89,19 @@ export const MIN_REFRESH_SECONDS = { db: 15, vendor: 60 } as const;
 const LOADER_STATUSES: ReadonlySet<number> = new Set([403, 404, 409, 500, 503]);
 const MAX_MESSAGE = 300;
 const NOT_AVAILABLE = { type: "values", values: [{ t: "text", text: "Not available" }] } as const;
+/**
+ * What a feed's view embed becomes when the dispatch's `admit` refuses the
+ * view it names: fixed copy, and the embedded view is never loaded. The
+ * assistant read interface (./assistant-read.ts) recognises it by value to
+ * record the withholding, so it must stay distinct from NOT_AVAILABLE.
+ */
+export const WITHHELD_EMBED = { type: "values", values: [{ t: "text", text: "Withheld from the assistant" }] } as const;
+/**
+ * A view `admit` refuses (dispatchView's `o.admit`): one an assistant may not
+ * read, because it is not both marked `agent: "read"` and on the code-owned
+ * list (src/lib/gui/assistant-reads.ts).
+ */
+export const NOT_LISTED = fail(403, "assistant_not_listed", "This view is not one an assistant may read.");
 
 const isCore = (kind: EntityKind): kind is CoreEntityKind => (CORE_ENTITY_KINDS as readonly string[]).includes(kind);
 
@@ -180,6 +195,29 @@ type Place = {
 };
 
 /**
+ * The views that attach to `def`: those whose `attach.to` is its entity
+ * kind or names it, never itself. attachedViews lists them; the assistant
+ * read interface (./assistant-read.ts) withholds every one it may not read.
+ */
+export function attachmentCandidates(views: readonly RegisteredView[], def: ViewDef): RegisteredView[] {
+  const kind = def.entity === undefined ? undefined : def.params[def.entity];
+  return views.filter(({ def: other }) => {
+    const to = other.attach?.to;
+    if (other.id === def.id || to === undefined) return false;
+    return typeof to === "string" ? to === kind : to.view === def.id;
+  });
+}
+
+/** An attached view's title: its nav entry's, else its first example's, else its id. */
+export function attachmentTitle(snapshot: SurfaceSnapshot, view: RegisteredView): string {
+  return (
+    snapshot.nav.find((n) => "view" in n.def && n.def.view === view.def.id)?.def.title ??
+    view.def.examples[0]?.title ??
+    view.def.id
+  );
+}
+
+/**
  * Views attached to this one's entity kind or to this view, other than
  * itself: each with its path filled from the same entities, released, and
  * its plugin enabled (a section, and a tab or tile declaring
@@ -190,16 +228,11 @@ type Place = {
  */
 async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unknown>["attached"]> {
   const { def } = p.view;
-  const kind = def.entity === undefined ? undefined : def.params[def.entity];
   const kindIds = new Map<EntityKind, string>();
   for (const [name, k] of Object.entries(def.params)) kindIds.set(k, p.params[name]);
   for (const [k, ref] of Object.entries(p.scope)) if (ref) kindIds.set(k as CoreEntityKind, ref.id);
 
-  const candidates = p.snapshot.views.filter(({ def: other }) => {
-    const to = other.attach?.to;
-    if (other.id === def.id || to === undefined) return false;
-    return typeof to === "string" ? to === kind : to.view === def.id;
-  });
+  const candidates = attachmentCandidates(p.snapshot.views, def);
   const shown = await Promise.all(
     candidates.map(async (other) => {
       const params: Record<string, string> = {};
@@ -229,10 +262,7 @@ async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unk
       const attach = other.def.attach!;
       const listedWhileOff = attach.hint === "section" || attach.whilePluginOff === "listed";
       if (!decision.ok && !(decision.status === 409 && listedWhileOff)) return null;
-      const title =
-        p.snapshot.nav.find((n) => "view" in n.def && n.def.view === other.def.id)?.def.title ??
-        other.def.examples[0]?.title ??
-        other.def.id;
+      const title = attachmentTitle(p.snapshot, other);
       return { order: attach.order, entry: { view: other.def.id, title, href: href as Href, hint: attach.hint } };
     }),
   );
@@ -244,9 +274,20 @@ async function attachedViews(p: Place): Promise<ModelBase<ViewKind, unknown, unk
 
 /**
  * A feed's body with each view embed loaded at depth 1, in the same
- * organization, or shown as "Not available". Other bodies are returned as given.
+ * organization, or shown as "Not available". With `admit`, an embed naming a
+ * view it refuses is not loaded and becomes WITHHELD_EMBED, and the embeds
+ * that load are dispatched with the same `admit`. Other bodies are returned
+ * as given.
  */
-async function embedViews<B>(ctx: HostContext, kind: ViewKind, body: B, org: string | null, depth: 0 | 1): Promise<B> {
+async function embedViews<B>(
+  ctx: HostContext,
+  snapshot: SurfaceSnapshot,
+  kind: ViewKind,
+  body: B,
+  org: string | null,
+  depth: 0 | 1,
+  admit: Admit | undefined,
+): Promise<B> {
   if (kind !== "feed") return body;
   type Entry = { embed?: { type: string; href?: string } };
   const feed = body as B & { entries: Entry[] };
@@ -254,7 +295,12 @@ async function embedViews<B>(ctx: HostContext, kind: ViewKind, body: B, org: str
     feed.entries.map(async (entry) => {
       const embed = entry.embed;
       if (embed?.type !== "view" || embed.href === undefined) return entry;
-      const out = depth === 0 ? await dispatchView(ctx, embed.href, { depth: 1, within: org }) : null;
+      if (admit) {
+        const path = parseHref(embed.href)?.path;
+        const named = path === undefined ? undefined : matchView(snapshot.views, path);
+        if (named && !admit(named.view.def.id)) return { ...entry, embed: structuredClone(WITHHELD_EMBED) };
+      }
+      const out = depth === 0 ? await dispatchView(ctx, embed.href, { depth: 1, within: org, ...(admit ? { admit } : {}) }) : null;
       const loaded = out?.ok && out.value.org === org ? { type: "view", href: embed.href, model: out.value } : null;
       return { ...entry, embed: loaded ?? structuredClone(NOT_AVAILABLE) };
     }),
@@ -371,11 +417,18 @@ async function takenSignals(ctx: HostContext, organizationId: string): Promise<S
  * organization opens in the one the shell shows (getManifest reads the same
  * cookie as its hint); like `?org=`, it only chooses among the
  * organizations the person can see.
+ *
+ * `admit` is for the assistant read interface (./assistant-read.ts), which
+ * passes whether a view id is one an assistant may read: a view it refuses
+ * is refused as NOT_LISTED before anything is read, and a feed's embed of
+ * one is withheld (embedViews). Left out, every view is admitted, as for a
+ * page. It decides nothing about attached views, which are only listed here;
+ * the read interface withholds those itself.
  */
 export async function dispatchView(
   ctx: HostContext,
   href: string,
-  o: { depth?: 0 | 1; within?: string | null; preferred?: string | null } = {},
+  o: { depth?: 0 | 1; within?: string | null; preferred?: string | null; admit?: Admit } = {},
 ): Promise<HostOutcome<ViewModel>> {
   requireIssued(ctx);
   const depth = o.depth ?? 0;
@@ -387,6 +440,7 @@ export async function dispatchView(
   if (!match) return NOT_FOUND;
   const { view } = match;
   const def = view.def;
+  if (o.admit && !o.admit(def.id)) return NOT_LISTED;
   if (def.scope === "tenant") return dispatchTenantView(ctx, view, def, parsed.search, depth);
   // Every other view is staff's: about an organization, or the whole
   // installation. A person with only tenant rows (RFC mgm#197) gets the
@@ -452,7 +506,7 @@ export async function dispatchView(
     const place: Place = { snapshot, view, params, search: parsed.search, scope: resolved.scope, organizationId, gate };
     const [attached, body] = await Promise.all([
       depth === 0 ? attachedViews(place) : [],
-      embedViews(ctx, def.kind, merged.body, organizationId, depth),
+      embedViews(ctx, snapshot, def.kind, merged.body, organizationId, depth, o.admit),
     ]);
     const { links, notice: own, ...rest } = merged;
     const live = clampLive(def);
