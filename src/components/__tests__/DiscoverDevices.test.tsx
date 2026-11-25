@@ -10,6 +10,7 @@
  *   (e) null-channel rows: observability note shown; rows are selectable and included in save (#122)
  *   (f) checkbox selection state — tick/untick updates pending count and save payload
  *   (g) mixed billable + non-billable + already-added renders all in one list
+ *   (h) components the route skipped are named in a note, not offered as rows
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -614,6 +615,43 @@ describe("DiscoverDevices", () => {
         const inputAfter = screen.getByPlaceholderText("Enter device name") as HTMLInputElement;
         expect(inputAfter.value).toBe("My Meter");
       });
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // (h) Skipped components
+  // ──────────────────────────────────────────────────────────────────────────
+  describe("(h) skipped components", () => {
+    it("names the skipped components and offers only the listed ones", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...mockDiscoverResponse([makeDevice("meter0")]),
+          skipped: [{ componentId: "meter 1", reason: "invalid_component_id" }],
+        }),
+      } as Response);
+
+      render(<DiscoverDevices {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /discover devices/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Not listed: 1 component/)).toBeDefined();
+        expect(screen.getByText("meter 1")).toBeDefined();
+        expect(screen.getByRole("button", { name: /add 1 device/i })).toBeDefined();
+      });
+    });
+
+    it("shows no note when the response has no skipped list", async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockDiscoverResponse([makeDevice("meter0")]),
+      } as Response);
+
+      render(<DiscoverDevices {...defaultProps} />);
+      fireEvent.click(screen.getByRole("button", { name: /discover devices/i }));
+
+      await waitFor(() => screen.getByRole("button", { name: /add 1 device/i }));
+      expect(screen.queryByText(/Not listed:/)).toBeNull();
     });
   });
 });

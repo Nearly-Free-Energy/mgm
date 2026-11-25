@@ -159,6 +159,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
       loadPowerW: [900, 950],
       pvPowerW: [2_000, 0],
       houseEnergyWh: {},
+      unreadableTimestamps: 0,
     });
   });
 
@@ -282,6 +283,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     expect(samples.timestamps).toEqual([T0, T0 + 2 * FIVE_MIN]);
     expect(samples.batterySocPct).toEqual([10, 12]);
+    expect(samples.unreadableTimestamps).toBe(1);
   });
 
   it("drops a timestamp with no zone or offset rather than read it in the server's zone", async () => {
@@ -312,9 +314,58 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
 
     expect(samples.timestamps).toEqual([T0]);
     expect(samples.batterySocPct).toEqual([10]);
+    expect(samples.unreadableTimestamps).toBe(1);
   });
 
-  it("fails with METERING_INVALID_DATA, not an empty day, when most timestamps are unreadable", async () => {
+  it("counts an unreadable timestamp once however many responses repeat it, and each distinct one", async () => {
+    clearPilotEnv();
+    // Two edges, and on edge-a a site batch and a house batch: "bad bin"
+    // comes back three times, "worse bin" once.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const rpc = sent(init);
+      if (rpc.edgeId === "edge-a" && rpc.inner.params.channels.includes("ess0/Soc")) {
+        return response({
+          timestamps: [T0, "bad bin", T0 + 2 * FIVE_MIN],
+          data: { "ess0/Soc": [60, 61, 62], "ess0/ActivePower": [1, 2, 3] },
+        });
+      }
+      if (rpc.edgeId === "edge-a") {
+        return response({
+          timestamps: [T0, "bad bin", T0 + 2 * FIVE_MIN],
+          data: { "meter1/ActiveConsumptionEnergy": [100, 110, 120] },
+        });
+      }
+      return response({
+        timestamps: [T0, "bad bin", "worse bin", T0 + 3 * FIVE_MIN, T0 + 4 * FIVE_MIN],
+        data: { "meter0/ActivePower": [5, 6, 7, 8, 9] },
+      });
+    });
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-a", "ess0"),
+      gridMeter: device("grid-id", "edge-b", "meter0"),
+      houseMeters: [device("house-1", "edge-a", "meter1")],
+    }));
+
+    expect(samples.unreadableTimestamps).toBe(2);
+    expect(samples.timestamps).toEqual([T0, T0 + 2 * FIVE_MIN, T0 + 3 * FIVE_MIN, T0 + 4 * FIVE_MIN]);
+  });
+
+  it("counts no unreadable timestamps when every one is read", async () => {
+    clearPilotEnv();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
+      timestamps: [T0, T0 + FIVE_MIN],
+      data: { "ess0/Soc": [10, 11] },
+    }));
+
+    const samples = await new OpenEmsMeteringProvider({} as never).getSiteSamples(siteRequest({
+      battery: device("battery-id", "edge-1", "ess0"),
+    }));
+
+    expect(samples.unreadableTimestamps).toBe(0);
+  });
+
+  it("fails with METERING_UNREADABLE_TIMESTAMPS, not an empty day, when most timestamps are unreadable", async () => {
     clearPilotEnv();
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response({
@@ -327,7 +378,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
     })).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(MeteringError);
-    expect(error).toMatchObject({ code: "METERING_INVALID_DATA", statusCode: 502 });
+    expect(error).toMatchObject({ code: "METERING_UNREADABLE_TIMESTAMPS", statusCode: 502 });
     expect((error as MeteringError).message).toBe(
       "OpenEMS returned this day's data in a form MGM could not read. Try again shortly."
     );
@@ -481,6 +532,7 @@ describe("OpenEmsMeteringProvider.getSiteSamples", () => {
       loadPowerW: [],
       pvPowerW: [],
       houseEnergyWh: {},
+      unreadableTimestamps: 0,
     });
   });
 

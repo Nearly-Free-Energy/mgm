@@ -31,7 +31,7 @@ describe("METERING_SURFACE", () => {
       attach: { to: "microgrid", order: 10, hint: "tab" },
       cost: "vendor",
       declares: { keys: SITE_DAY_KEYS },
-      ext: { schema: "metering.site-day@1" },
+      ext: { schema: "metering.site-day@2" },
       load: loadSiteDay,
     });
     // Not polled, and not readable by an assistant.
@@ -65,7 +65,7 @@ describe("the site-day examples", () => {
     for (const model of SITE_DAY_LOADED_EXAMPLES) expect(strictParseModel(view, model)).toMatchObject({ ok: true });
   });
 
-  it("are a normal day, a day with cuts and dark time, a site with no battery, no site devices, and three problems", () => {
+  it("are a normal day, a day with cuts and dark time, a site with no battery, no site devices, and four problems", () => {
     expect(tile(0, "cuts")?.value.text).toBe("0");
     expect(tile(0, "lights-on")).not.toHaveProperty("status");
     expect(Number(tile(1, "cuts")?.value.text)).toBeGreaterThan(0);
@@ -76,14 +76,18 @@ describe("the site-day examples", () => {
     expect(SITE_DAY_LOADED_EXAMPLES[3].links?.[0].id).toBe("metering.edges");
     // Each generated day links to the page that holds the microgrid's Edit, as the loader's day does.
     for (const i of [0, 1, 2]) expect(SITE_DAY_LOADED_EXAMPLES[i].links?.at(-1)?.id).toBe("metering.microgrid-setup");
-    // A problem fixed under Edges, one fixed under OpenEMS Backend, and one only retried, which carries the time zone notice.
-    const data = (i: number) => SITE_DAY_LOADED_EXAMPLES[i].ext?.data as { state: string; retry?: boolean; timezoneNotice: unknown };
-    for (const i of [4, 5, 6]) expect(tiles(i).map((t) => t.key)).toEqual(["problem"]);
+    // A problem fixed under Edges, one fixed under OpenEMS Backend, one only
+    // retried, which carries the time zone notice, and one from a source with
+    // no site readings, which has nothing to set up or retry.
+    const data = (i: number) => SITE_DAY_LOADED_EXAMPLES[i].ext?.data as { state: string; reason?: string; retry?: boolean; timezoneNotice: unknown };
+    for (const i of [4, 5, 6, 7]) expect(tiles(i).map((t) => t.key)).toEqual(["problem"]);
     expect(SITE_DAY_LOADED_EXAMPLES[4].links?.[0].id).toBe("metering.edges");
     expect(SITE_DAY_LOADED_EXAMPLES[5].links?.[0].id).toBe("metering.openems-backend");
-    expect([4, 5, 6].map((i) => data(i).retry)).toEqual([false, false, true]);
+    expect([4, 5, 6, 7].map((i) => data(i).reason)).toEqual(["mixed_edges", "not_configured", "upstream_unavailable", "unsupported"]);
+    expect([4, 5, 6, 7].map((i) => data(i).retry)).toEqual([false, false, true, false]);
     expect(SITE_DAY_LOADED_EXAMPLES[6].links?.map((l) => l.id)).toContain("metering.set-timezone");
-    expect(SITE_DAY_LOADED_EXAMPLES.map((_, i) => data(i).timezoneNotice !== null)).toEqual([false, false, false, false, false, false, true]);
+    expect(SITE_DAY_LOADED_EXAMPLES[7].links?.map((l) => l.id)).not.toContain("metering.openems-backend");
+    expect(SITE_DAY_LOADED_EXAMPLES.map((_, i) => data(i).timezoneNotice !== null)).toEqual([false, false, false, false, false, false, true, false]);
   });
 
   it("mark generated days synthetic, with the notice the host adds", () => {

@@ -333,6 +333,16 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+The reverse direction is checked by
+`src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
+under `src/app/api` on a released path is named by an action, or listed in
+`UNDESCRIBED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`), either as
+permanent, with the reason the route is not a person's action, or as not yet
+described, with the issue in `DESCRIBING_ISSUES` that will describe it.
+Unlike the gate rule (§ "The gate"), it covers core plugins. It finds
+handlers with the TypeScript AST and checks that the gate rule's handler
+finder sees each of them.
+
 While a plugin is off for an organization (the gate's 409, asked as a write
 by `pluginGate` in `src/lib/gui/host/server/gate-state.ts`), the host still
 serves its views of cost `db`, with the gate's notice followed by the
@@ -607,8 +617,12 @@ the HTTP method is `GET`.
 
 `/api/openems/*` is still outside the released-route allowlist
 (`src/lib/mgm/released-routes.ts`), so middleware answers 404 until a release
-opens it. It is on the runtime already, so opening it is an allowlist change
-only.
+opens it. It is on the runtime already, so opening it is an allowlist change,
+provided each of its write handlers is named by an action or listed in
+`UNDESCRIBED_WRITES`, as `described-writes.test.ts` requires of every
+released write handler (§ "GUI surface"). Its one write handler today,
+`POST /api/openems/channels`, is listed already; if a handler is added there,
+or that entry goes, revisit this.
 
 ## Catalog pages
 

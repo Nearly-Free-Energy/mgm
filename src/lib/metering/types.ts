@@ -135,6 +135,13 @@ export type SiteSamples = {
    * the others, all null when the meter gave nothing.
    */
   houseEnergyWh: Record<string, (number | null)[]>;
+  /**
+   * How many distinct timestamps the source sent that could not be read as
+   * instants, dropped with their values. Set only by a provider that counts
+   * them; absent means not counted (a generated source makes its own
+   * instants), never that none were dropped.
+   */
+  unreadableTimestamps?: number;
 };
 
 /**

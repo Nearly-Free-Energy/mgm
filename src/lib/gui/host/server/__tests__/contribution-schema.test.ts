@@ -4,7 +4,11 @@ import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type MgmPluginName } from "@/l
 import type { Contribution } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import { TENANT_APP_SURFACE } from "@/lib/tenant-app/surface";
+import { METERING_SURFACE } from "@/lib/metering/surface";
+import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
+import { ASSISTANT_READS, type AssistantRead } from "../../../assistant-reads";
 import {
+  ASSISTANT_READING,
   SurfaceContributionError,
   contributionSchema,
   parseContribution,
@@ -35,11 +39,16 @@ function copy<T>(v: T): T {
   return v;
 }
 
-function refusal(change: (c: Draft) => void, catalog = CATALOG, base: object = BILLING_SURFACE) {
+function refusal(
+  change: (c: Draft) => void,
+  catalog = CATALOG,
+  base: object = BILLING_SURFACE,
+  reads?: readonly AssistantRead[],
+) {
   const c = copy(base) as Draft;
   change(c);
   try {
-    parseContribution(c, catalog);
+    parseContribution(c, catalog, reads);
   } catch (error) {
     if (error instanceof SurfaceContributionError) return error;
     throw error;
@@ -272,10 +281,6 @@ describe("parseContribution", () => {
     // Navigation
     ["a nav entry naming a missing view", (c) => (c.nav[0].view = "billing.nope"), ["nav", 0, "view"], '"billing.nope" is not a view in this contribution'],
     ["a legacy entry whose needs miss a segment", (c) => (c.nav[1].needs = []), ["nav", 1, "needs"], "needs must name one kind for each segment of the href"],
-    ["assistant reading of a configure view", (c) => (c.nav[0].group = "configure"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a system view", (c) => (c.nav[0].group = "system"), ["views", 0, "agent"], "a view reached from system navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a configure legacy href", (c) => (c.nav[1].href = "/microgrids/[id]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a legacy href with renamed placeholders", (c) => (c.nav[1].href = "/microgrids/[microgridId]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
     ["a view path another plugin owns", (c) => (c.views[0].path = "/microgrids/[id]/operations"), ["views", 0, "path"], "the catalog gives /microgrids/[id]/operations to metering"],
     ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/tenants"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/tenants to community-management"],
@@ -371,6 +376,197 @@ describe("tenant views and the tenant audience", () => {
   it.each(cases)("refuses %s", (_rule, change, path, message) => {
     const error = refusal(change, CATALOG, TENANT_APP_SURFACE);
     expect(error.issues).toContainEqual(expect.objectContaining(message === undefined ? { path } : { path, message }));
+  });
+});
+
+describe("assistant reading", () => {
+  /** METERING_SURFACE with the mark on its one view, metering.site-day. */
+  const marked = (c: Draft) => (c.views[0].agent = "read");
+  /** METERING_SURFACE with the mark on its one watcher, metering.connection. */
+  const watched = (c: Draft) => (c.signals[0].agent = "read");
+  const issue = (path: PropertyKey[], message: string) => expect.objectContaining({ path, message });
+  const unlisted = (noun: string, id: string) =>
+    `"${id}" is not on the list of ${noun} an assistant may read (src/lib/gui/assistant-reads.ts)`;
+  /** Any refusal by the list. */
+  const onList = expect.objectContaining({ message: expect.stringContaining("is not on the list") });
+  const SITE_DAY: readonly AssistantRead[] = [{ kind: "view", id: "metering.site-day" }];
+  const CONNECTION: readonly AssistantRead[] = [{ kind: "watcher", id: "metering.connection" }];
+
+  it("lists nothing yet", () => {
+    // ADR-007 decision 8: the list starts empty, and A1's pull requests add
+    // its first entries, one each, with the mark. Each of them changes this.
+    expect(ASSISTANT_READS).toEqual([]);
+  });
+
+  describe("views", () => {
+    it("accepts the mark on a listed view about an organization's records that takes no signals", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      marked(c);
+      expect(c.views[0].params).toEqual({ id: "microgrid" });
+      expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
+    });
+
+    it("refuses the mark on a view that is not on the list", () => {
+      const error = refusal(marked, CATALOG, METERING_SURFACE);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
+
+    it("refuses the mark on a view listed as a watcher", () => {
+      const error = refusal(marked, CATALOG, METERING_SURFACE, [{ kind: "watcher", id: "metering.site-day" }]);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], unlisted("views", "metering.site-day"))]);
+    });
+
+    it("refuses the mark on each of billing's views, even listed", () => {
+      const listed = BILLING_SURFACE.views!.map((v) => ({ kind: "view" as const, id: v.id }));
+      const error = refusal((c) => c.views.forEach((v: Draft) => (v.agent = "read")), CATALOG, BILLING_SURFACE, listed);
+      for (const i of BILLING_SURFACE.views!.keys())
+        expect(error.issues).toContainEqual(issue(["views", i, "agent"], "a billing view cannot be read by an assistant"));
+      expect(error.issues).not.toContainEqual(onList);
+    });
+
+    it("refuses the mark on payments' views, even listed", () => {
+      const error = refusal(marked, CATALOG, PAYMENTS_SURFACE, [{ kind: "view", id: PAYMENTS_SURFACE.views![0].id }]);
+      expect(error.issues).toContainEqual(issue(["views", 0, "agent"], "a payments view cannot be read by an assistant"));
+      expect(error.issues).not.toContainEqual(onList);
+    });
+
+    // Decided by the contributing plugin, whatever the view's id: the same view
+    // contributed by each of these is refused, alongside the alias and
+    // ownership issues it also raises there.
+    it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
+      "refuses the mark on a listed view contributed by %s",
+      (plugin) => {
+        const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE, SITE_DAY);
+        expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
+      },
+    );
+
+    it.each(["tenant", "device", "rateSchedule", "billingPeriod", "lineItem", "paymentAttempt"])(
+      "refuses the mark on a listed view whose path names a %s",
+      (kind) => {
+        const error = refusal(
+          (c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c),
+          CATALOG,
+          METERING_SURFACE,
+          SITE_DAY,
+        );
+        expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
+      },
+    );
+
+    // A listed view of a plugin whose views may be listed, so the navigation
+    // it is reached from is the only thing that refuses the mark. nav[2] is
+    // metering's configure legacy entry, pointed here at site-day's own path.
+    it.each([
+      ["configure navigation", (c: Draft) => Object.assign(c.nav[0], { group: "configure" }), "configure"],
+      ["system navigation", (c: Draft) => Object.assign(c.nav[0], { group: "system" }), "system"],
+      ["a configure legacy href", (c: Draft) => Object.assign(c.nav[2], { href: "/microgrids/[id]/operations" }), "configure"],
+      [
+        "a configure legacy href with renamed placeholders",
+        (c: Draft) => Object.assign(c.nav[2], { href: "/microgrids/[microgridId]/operations" }),
+        "configure",
+      ],
+    ] as const)("refuses the mark on a listed view reached from %s", (_where, reach, group) => {
+      const error = refusal(
+        (c) => {
+          reach(c);
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view reached from ${group} navigation cannot be read by an assistant`)]);
+    });
+
+    it("refuses the mark on a listed view that takes signals", () => {
+      const error = refusal(
+        (c) => {
+          delete c.views[0].attach;
+          Object.assign(c.views[0], { takesSignals: true });
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
+    });
+
+    it("refuses the mark on a listed view that declares a key prefix", () => {
+      const error = refusal(
+        (c) => {
+          c.views[0].declares.prefixes = ["reading."];
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([
+        issue(["views", 0, "agent"], "a view an assistant may read declares its keys by name, not by prefix"),
+      ]);
+    });
+
+    it("accepts the mark on a listed view whose prefix list is empty", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      c.views[0].declares.prefixes = [];
+      marked(c);
+      expect(parseContribution(c, CATALOG, SITE_DAY).contribution.views?.[0].agent).toBe("read");
+    });
+
+    // ADR-007 decision 10 may let tenant views be listed (#259 § 5); the pull
+    // request that does changes this.
+    it.each([
+      ["unlisted", undefined],
+      ["listed", [{ kind: "view", id: TENANT_APP_SURFACE.views![0].id }] as const],
+    ])("gives a marked tenant view, %s, one refusal", (_listed, reads) => {
+      // tenant.home declares a key prefix, so this also pins that the prefix
+      // refusal leaves a tenant view to its own.
+      expect(TENANT_APP_SURFACE.views![0].declares.prefixes?.length).toBeGreaterThan(0);
+      const error = refusal(marked, CATALOG, TENANT_APP_SURFACE, reads);
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], "a tenant view cannot be read by an assistant")]);
+    });
+  });
+
+  describe("watchers", () => {
+    it("accepts the mark on a listed watcher", () => {
+      const c = copy(METERING_SURFACE) as Draft;
+      watched(c);
+      expect(parseContribution(c, CATALOG, CONNECTION).contribution.signals?.[0].agent).toBe("read");
+    });
+
+    it("refuses the mark on a watcher that is not on the list", () => {
+      const error = refusal(watched, CATALOG, METERING_SURFACE);
+      expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
+    });
+
+    it("refuses the mark on a watcher listed as a view", () => {
+      const error = refusal(watched, CATALOG, METERING_SURFACE, [{ kind: "view", id: "metering.connection" }]);
+      expect(error.issues).toEqual([issue(["signals", 0, "agent"], unlisted("watchers", "metering.connection"))]);
+    });
+
+    it.each([
+      ["billing", BILLING_SURFACE],
+      ["payments", PAYMENTS_SURFACE],
+    ] as const)("refuses the mark on every %s watcher, even listed", (plugin, base) => {
+      const listed = base.signals!.map((s) => ({ kind: "watcher" as const, id: s.id }));
+      const error = refusal((c) => c.signals.forEach((s: Draft) => (s.agent = "read")), CATALOG, base, listed);
+      expect(error.issues).toEqual(
+        base.signals!.map((_, i) => issue(["signals", i, "agent"], `a ${plugin} watcher cannot be read by an assistant`)),
+      );
+    });
+
+    it("refuses a mark other than read", () => {
+      const error = refusal((c) => (c.signals[0].agent = "write"), CATALOG, METERING_SURFACE, CONNECTION);
+      expect(error.issues).toContainEqual(expect.objectContaining({ path: ["signals", 0, "agent"] }));
+    });
+  });
+
+  it("has a decision for every plugin in the catalog, and none for a plugin outside it", () => {
+    // A new plugin needs a decision before its views can be marked or refused
+    // on purpose; one missing here is refused at registration.
+    expect(Object.keys(ASSISTANT_READING).sort()).toEqual(MGM_BUNDLED_PLUGINS.map((p) => p.name).sort());
   });
 });
 

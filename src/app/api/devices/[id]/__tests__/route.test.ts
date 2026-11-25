@@ -21,6 +21,8 @@
  *   - Reclassify a non-consumption_meter device with no primary link → 200
  *   - Reclassify consumption_meter → consumption_meter (no type change) does
  *     NOT trigger AC-CASCADE
+ *   - A stored component id outside the format refused by its CHECK → 409
+ *     stored_id_outside_format; any other check_violation stays 500
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -434,6 +436,41 @@ describe("PATCH /api/devices/[id]", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.reason).toBe("device_type_changed_concurrently");
+  });
+
+  it("409: stored component id outside the format → stored_id_outside_format", async () => {
+    mockDevicesUpdateSingle.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23514",
+        message:
+          'new row for relation "devices" violates check constraint "devices_openems_component_id_format"',
+      },
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makeRequest(DEVICE_UUID, { name: "Renamed" }), {
+      params: Promise.resolve({ id: DEVICE_UUID }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("stored_id_outside_format");
+    expect(json.error).not.toContain("violates check constraint");
+  });
+
+  it("500: a check_violation of another constraint is not read as the id format", async () => {
+    mockDevicesUpdateSingle.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23514",
+        message:
+          'new row for relation "devices" violates check constraint "devices_some_other_check"',
+      },
+    });
+    const { PATCH } = await import("../route");
+    const res = await PATCH(makeRequest(DEVICE_UUID, { name: "Renamed" }), {
+      params: Promise.resolve({ id: DEVICE_UUID }),
+    });
+    expect(res.status).toBe(500);
   });
 
   it("200: reclassify a non-consumption_meter device with no primary link", async () => {

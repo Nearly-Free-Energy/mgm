@@ -30,6 +30,12 @@ function toError(error: { code?: string; message?: string }): RepositoryError {
   return { code: error.code, message: error.message ?? "Unknown database error" };
 }
 
+/** A failed read as the error a repository method throws. */
+function readFailed(what: string, error: { code?: string; message?: string }): Error {
+  const { code, message } = toError(error);
+  return new Error(`Could not read ${what}: ${message}${code ? ` (${code})` : ""}`);
+}
+
 export function createSupabaseMeteringRepository(
   supabase: SupabaseClient
 ): MeteringRepository {
@@ -142,25 +148,28 @@ export function createSupabaseMeteringRepository(
     },
 
     async getMicrogridTimezone(microgridId: string) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("microgrids")
         .select("timezone")
         .eq("id", microgridId)
-        .maybeSingle<{ timezone: string }>();
+        .maybeSingle<{ timezone: string | null }>();
+      if (error) throw readFailed("the microgrid's timezone", error);
       return data?.timezone ?? null;
     },
 
     async getManagedDevices(microgridId: string) {
-      const { data: edges } = await supabase
+      const { data: edges, error: edgesError } = await supabase
         .from("edges")
         .select("id, openems_edge_id")
         .eq("microgrid_id", microgridId);
+      if (edgesError) throw readFailed("edges", edgesError);
       const edgeIds = (edges ?? []).map((e) => e.id);
       if (edgeIds.length === 0) return [];
-      const { data: devices } = await supabase
+      const { data: devices, error: devicesError } = await supabase
         .from("devices")
         .select("id, edge_id, name, device_type, openems_component_id")
         .in("edge_id", edgeIds);
+      if (devicesError) throw readFailed("devices", devicesError);
       const edgeOpenemsById = new Map(
         (edges ?? []).map((e) => [e.id, e.openems_edge_id as string])
       );
@@ -182,22 +191,18 @@ export function createSupabaseMeteringRepository(
 
     async getHouseMeterIds(microgridId: string, date: string) {
       if (!DATE_KEY_RE.test(date)) throw new Error(`Invalid date key: ${date}`);
-      const failed = (what: string, error: { code?: string; message?: string }) => {
-        const { code, message } = toError(error);
-        return new Error(`Could not read ${what}: ${message}${code ? ` (${code})` : ""}`);
-      };
       const { data: edges, error: edgesError } = await supabase
         .from("edges")
         .select("id")
         .eq("microgrid_id", microgridId);
-      if (edgesError) throw failed("edges", edgesError);
+      if (edgesError) throw readFailed("edges", edgesError);
       const edgeIds = (edges ?? []).map((e) => e.id as string);
       if (edgeIds.length === 0) return [];
       const { data: devices, error: devicesError } = await supabase
         .from("devices")
         .select("id")
         .in("edge_id", edgeIds);
-      if (devicesError) throw failed("devices", devicesError);
+      if (devicesError) throw readFailed("devices", devicesError);
       const deviceIds = (devices ?? []).map((d) => d.id as string);
       if (deviceIds.length === 0) return [];
       // Links in force on `date`: half-open periods, as 00058 defines them.
@@ -208,7 +213,7 @@ export function createSupabaseMeteringRepository(
         .in("role", HOUSE_METER_ROLES)
         .lte("effective_from", date)
         .or(`effective_to.is.null,effective_to.gt.${date}`);
-      if (linksError) throw failed("tenant meter links", linksError);
+      if (linksError) throw readFailed("tenant meter links", linksError);
       return [...new Set(((links ?? []) as { device_id: string }[]).map((l) => l.device_id))];
     },
 

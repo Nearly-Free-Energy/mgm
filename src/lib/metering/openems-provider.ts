@@ -582,12 +582,19 @@ async function getOpenEmsSiteSamples(
   // One value per (edge, channel, instant), keyed by bin start.
   const values = new Map<string, Map<number, number>>();
   const instants = new Set<number>();
+  // The raw timestamps dropped as unreadable, each once however many
+  // responses repeat it (an edge's site and house batches, one-channel
+  // retries).
+  const dropped = new Set<number | string>();
   await Promise.all([...batches.values()].map(async ({ edgeId, channels }) => {
     for (const set of await querySiteEdge(client, edgeId, channels, request, signal)) {
       const times = set.timestamps.map(toEpochMs);
       const unreadable = times.filter((time) => time === null).length;
       // A response whose instants mostly cannot be read is not an empty
-      // day: say so rather than show the day as missing data.
+      // day: say so rather than show the day as missing data. It has its
+      // own code, so it is not taken for other data MGM could not use; the
+      // tenant usage read (getOpenEmsEnergySeries) refuses the same case as
+      // METERING_INVALID_DATA. A minority is dropped and counted below.
       if (set.timestamps.length && unreadable * 2 > set.timestamps.length) {
         console.error("MGM site samples: unreadable OpenEMS timestamps", {
           edgeId,
@@ -600,11 +607,14 @@ async function getOpenEmsSiteSamples(
         });
         throw new MeteringError(
           "OpenEMS returned this day's data in a form MGM could not read. Try again shortly.",
-          "METERING_INVALID_DATA",
+          "METERING_UNREADABLE_TIMESTAMPS",
           502,
           { edgeId, count: set.timestamps.length, unreadable }
         );
       }
+      set.timestamps.forEach((raw, i) => {
+        if (times[i] === null) dropped.add(raw);
+      });
       for (const time of times) if (time !== null) instants.add(time);
       for (const channel of channels) {
         const series = set.data[channel];
@@ -655,6 +665,7 @@ async function getOpenEmsSiteSamples(
         read(meter, "ActiveConsumptionEnergy"),
       ])
     ),
+    unreadableTimestamps: dropped.size,
   };
 }
 

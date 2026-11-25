@@ -1,8 +1,14 @@
 /**
- * The `metering.site-day@1` ext: what a bespoke renderer of the Operations
+ * The `metering.site-day@2` ext: what a bespoke renderer of the Operations
  * day needs beyond the tiles and the battery series, such as the chart's
  * bands, the evening strip and the footnotes, the time zone notice, and
  * which state the view is in.
+ *
+ * Version 2 adds the problem state's `reason`, from SITE_DAY_PROBLEM_REASONS
+ * in ./site-day-model.ts; the rest is version 1's shape. A renderer names
+ * the versions it reads (`reads` in the GUI contract), and these objects are
+ * strict, so a reader that checks the shape would refuse a field it does not
+ * know: a new field or reason is a new version, even an optional one.
  *
  * Strict objects at every depth and every array capped, so the host's ext
  * check (strictProblems in src/lib/gui/host/server/contribution-schema.ts)
@@ -11,14 +17,14 @@
  * MAX_EVENING_BINS in ../site-operations.ts). computeSiteDay refuses a day
  * with more bins than those bounds, so any day it returns fits; if it stops
  * refusing them, these caps no longer hold. Every label is formatted on the server; a renderer formats
- * nothing. Times are ISO 8601 instants. A change to this shape is `@2`,
+ * nothing. Times are ISO 8601 instants. A change to this shape is `@3`,
  * named by SITE_DAY_EXT_SCHEMA in ./site-day-model.ts (kept there so the
  * model, which a client component imports for formatDuration, needs no zod).
  */
 import { z } from "zod";
 import { isSameOriginPath } from "@/lib/gui/host/shared/href";
 import { isSiteResolution, MAX_DAY_BINS, MAX_EVENING_BINS } from "../site-operations";
-import { TIMEZONE_NOTICE_MAX } from "./site-day-model";
+import { SITE_DAY_PROBLEM_REASONS, TIMEZONE_NOTICE_MAX } from "./site-day-model";
 
 const iso = z.iso.datetime({ offset: true });
 const label = (max: number) => z.string().max(max);
@@ -90,10 +96,12 @@ export const SiteDayExt = z.discriminatedUnion("state", [
     title: label(200),
     message: label(400),
   }),
-  /** The metering source could not read the day. The fix's link, when there is one, is among the model's links. */
+  /** The day could not be read. The fix's link, when there is one, is among the model's links. */
   z.strictObject({
     state: z.literal("problem"),
     ...common,
+    /** Why, as a stable code; `title` and `message` are the copy to show for it. */
+    reason: z.enum(SITE_DAY_PROBLEM_REASONS),
     tone: z.enum(["warning", "danger"]),
     title: label(200),
     message: label(400),
