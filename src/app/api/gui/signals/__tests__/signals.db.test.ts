@@ -1,14 +1,16 @@
 /**
  * GET /api/gui/signals collects the real contributed watchers through the
- * host against the local database: billing's overdue periods, metering's
- * failed connection checks, and payments held for reconciliation or
- * recently failed, all read with the caller's own session. Another
- * organization's manager, and a super admin acting in another organization,
- * get none of this organization's signals; a person whose rows are all
- * tenant rows gets a 403 and no watcher runs. While billing is off its
- * watcher is skipped; while Payments is off reconciliation is still
- * reported and failures are not. A period ending today in its own zone is
- * not yet due. No tenant's name reaches the answer. Nothing here calls
+ * host against the local database: billing's overdue periods (critical a
+ * week after their end) and microgrids with metered tenants and no period
+ * for last month, metering's failed connection checks, and payments held
+ * for reconciliation, recently failed, or checkouts that never reached
+ * Pesapal, all read with the caller's own session. Another organization's
+ * manager, and a super admin acting in another organization, get none of
+ * this organization's signals; a person whose rows are all tenant rows gets
+ * a 403 and no watcher runs. While billing is off its watchers are skipped;
+ * while Payments is off reconciliation is still reported and failures and
+ * checkouts never submitted are not. A period ending today in its own zone
+ * is not yet due. No tenant's name reaches the answer. Nothing here calls
  * out: every request goes to the local Supabase.
  *
  * Requires a running local Supabase (same harness as rls.test.ts).
@@ -43,6 +45,10 @@ const COMMUNITY = "e8700000-0000-4000-8001-000000000001";
 const OTHER_COMMUNITY = "e8700000-0000-4000-8001-000000000002";
 const MICROGRID = "e8700000-0000-4000-8002-000000000001";
 const OTHER_MICROGRID = "e8700000-0000-4000-8002-000000000002";
+/** A microgrid of this organization with a metered tenant and no billing period at all. */
+const UNBILLED = "e8700000-0000-4000-8002-000000000003";
+const EDGE = "e8700000-0000-4000-8009-000000000001";
+const DEVICE = "e8700000-0000-4000-800a-000000000001";
 const SCHEDULE = "e8700000-0000-4000-8006-000000000001";
 const MERCHANT = "e8700000-0000-4000-8007-000000000001";
 /** October: ended, two bills, one payment held and one failed. */
@@ -56,20 +62,33 @@ const BILL_HELD = "e8700000-0000-4000-8005-000000000001";
 const BILL_FAILED = "e8700000-0000-4000-8005-000000000002";
 const HELD = "e8700000-0000-4000-8008-000000000001";
 const FAILED = "e8700000-0000-4000-8008-000000000002";
+/** Three checkouts that never reached Pesapal, in this organization's community. */
+const UNSUBMITTED = [3, 4, 5].map((n) => `e8700000-0000-4000-8008-00000000000${n}`);
 const TENANT_NAME = "Nakato Signals-Canary";
 const EMAIL = "gui-signals-manager@test.local";
 const OTHER_EMAIL = "gui-signals-other@test.local";
 const ADMIN_EMAIL = "gui-signals-admin@test.local";
 const TENANT_EMAIL = "gui-signals-tenant@test.local";
 
+/**
+ * Whether last month's missing period is reported for UNBILLED today: from
+ * the 2nd of the month in its zone (billing.period-missing). Read when the
+ * file loads; a run that crosses midnight of the 2nd in Kampala may see it
+ * change.
+ */
+const REPORTS_MISSING = Number(dayKeyInZone(new Date(), "Africa/Kampala").slice(8, 10)) >= 2;
+
 /** Every signal id this organization's data gives rise to, by watcher. */
-const IDS = {
+const IDS: Record<string, string[]> = {
   "billing.period-due": [`billing.period-due:${SEPTEMBER}`, `billing.period-due:${OCTOBER}`],
+  "billing.period-missing": REPORTS_MISSING ? [`billing.period-missing:${UNBILLED}`] : [],
   "metering.connection": [`metering.connection:${MICROGRID}`],
   "payments.reconcile": [`payments.reconcile:${OCTOBER}`],
   "payments.failed": [`payments.failed:${OCTOBER}`],
-} as const;
+  "payments.not-submitted": [`payments.not-submitted:${COMMUNITY}`],
+};
 const ALL_IDS: string[] = Object.values(IDS).flat();
+const WATCHERS = Object.keys(IDS).sort();
 
 let manager: TestUser;
 let other: TestUser;
@@ -78,7 +97,7 @@ let tenantUser: TestUser;
 let fetchSpy: { mock: { calls: Parameters<typeof fetch>[] }; mockRestore(): void };
 
 type Signal = { id: string; source: string; severity: string; kind: string; title: string; href: string; entity?: { id: string } };
-type Answer = { org: string; count: number; top: Signal[]; checked: string[]; unchecked: string[] };
+type Answer = { org: string; count: number; attention?: number; top: Signal[]; checked: string[]; unchecked: string[] };
 
 const signals = (org?: string) =>
   GET(new NextRequest(`http://localhost/api/gui/signals${org ? `?org=${org}` : ""}`, { headers: { "accept-language": "en-GB" } }));
@@ -179,16 +198,21 @@ beforeAll(async () => {
           ems_last_discover_error: "canary-vendor-error-text",
         },
         { id: OTHER_MICROGRID, community_id: OTHER_COMMUNITY, name: "Other signals site", currency: "UGX", timezone: "Africa/Kampala" },
+        { id: UNBILLED, community_id: COMMUNITY, name: "Unbilled site", currency: "UGX", timezone: "Africa/Kampala" },
       ],
     ],
+    ["edges", { id: EDGE, microgrid_id: UNBILLED, name: "Unbilled edge", openems_edge_id: "signals-unbilled-edge" }],
+    ["devices", { id: DEVICE, edge_id: EDGE, name: "Unbilled meter", device_type: "consumption_meter", openems_component_id: "meter9" }],
     ["rate_schedules", { id: SCHEDULE, microgrid_id: MICROGRID, tiers: [{ label: "T1", min_kwh: 0, max_kwh: null, rate_per_kwh: 500 }], service_charge: 0, tax_rate: 0 }],
     [
       "tenants",
       [
         { id: tenant(1), microgrid_id: MICROGRID, display_name: TENANT_NAME, primary_phone: "+256700000901" },
         { id: tenant(2), microgrid_id: MICROGRID, display_name: `${TENANT_NAME} Two`, primary_phone: "+256700000902" },
+        { id: tenant(3), microgrid_id: UNBILLED, display_name: `${TENANT_NAME} Three`, primary_phone: "+256700000903" },
       ],
     ],
+    ["tenant_devices", { tenant_id: tenant(3), device_id: DEVICE, role: "primary_consumption_meter", effective_from: "2026-01-01" }],
     [
       "billing_periods",
       [
@@ -204,6 +228,16 @@ beforeAll(async () => {
       [
         attempt(HELD, BILL_HELD, { status: "needs_reconciliation", provider_tracking_id: "trk-signals", failure_code: "balance_mismatch" }),
         attempt(FAILED, BILL_FAILED, { status: "failed", failure_code: "provider_failed", failure_message: "canary-provider-message" }),
+        // Two hours back: inside the watcher's 24 hours, and older than FAILED's updated_at (Postgres now()),
+        // so of the two undated warnings payments.failed is the newer whichever clock runs ahead.
+        ...UNSUBMITTED.map((id) =>
+          attempt(id, BILL_FAILED, {
+            status: "failed",
+            failure_code: "checkout_not_submitted",
+            failure_message: "canary-not-submitted-message",
+            updated_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+          }),
+        ),
       ],
     ],
   ];
@@ -232,21 +266,36 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
     caller = manager;
     const { body, text } = await answer(ORG);
     expect(body.org).toBe(ORG);
-    expect([...body.checked].sort()).toEqual(["billing.period-due", "metering.connection", "payments.failed", "payments.reconcile"]);
+    expect([...body.checked].sort()).toEqual(WATCHERS);
     expect(body.unchecked).toEqual([]);
     expect(ours(body)).toEqual([...ALL_IDS].sort());
     expect(body.count).toBe(ALL_IDS.length);
+    // Two critical signals; the rest warn and none is info, so the badge counts them all.
+    expect(body.attention).toBe(ALL_IDS.length);
     expect(body.top.map((s) => [s.id, s.severity, s.title, s.href])).toEqual([
+      // October ended more than seven days ago in Kampala, so its close is critical; dated, it comes before the undated reconciliation.
+      [`billing.period-due:${OCTOBER}`, "critical", "Signals site: October 2026 is not closed", `/microgrids/${MICROGRID}/billing/${OCTOBER}/close`],
+      // The held attempt has a tracking id, so money may have reached Pesapal.
       [`payments.reconcile:${OCTOBER}`, "critical", "Signals site: 1 payment in October 2026 needs reconciliation", `/microgrids/${MICROGRID}/billing/${OCTOBER}/payments?bill=${BILL_HELD}`],
       // An alarm comes first among the warnings, ahead of dated ones (order() in signals.ts).
       expect.arrayContaining([`metering.connection:${MICROGRID}`, "warn", "Signals site: OpenEMS could not be reached"]),
       [`billing.period-due:${SEPTEMBER}`, "warn", "Signals site: September 2026 has no bills", `/microgrids/${MICROGRID}/billing/${SEPTEMBER}`],
-      [`billing.period-due:${OCTOBER}`, "warn", "Signals site: October 2026 is not closed", `/microgrids/${MICROGRID}/billing/${OCTOBER}/close`],
+      ...(REPORTS_MISSING
+        ? [[`billing.period-missing:${UNBILLED}`, "warn", expect.stringMatching(/^Unbilled site: no billing period for \w+ \d{4}$/), `/microgrids/${UNBILLED}/billing`]]
+        : []),
       expect.arrayContaining([`payments.failed:${OCTOBER}`, "warn", "Signals site: 1 payment failed in October 2026"]),
+      [
+        `payments.not-submitted:${COMMUNITY}`,
+        "warn",
+        "GUI Signals Community: 3 checkouts did not reach Pesapal in the last 24 hours",
+        `/communities/${COMMUNITY}/payment`,
+      ],
     ]);
     // The period ending today in Kampala is not yet due.
     expect(text).not.toContain(RUNNING);
-    for (const secret of [TENANT_NAME, "canary-vendor-error-text", "canary-provider-message", "trk-signals", MERCHANT]) expect(text, secret).not.toContain(secret);
+    for (const secret of [TENANT_NAME, "canary-vendor-error-text", "canary-provider-message", "canary-not-submitted-message", "trk-signals", MERCHANT, ...UNSUBMITTED]) {
+      expect(text, secret).not.toContain(secret);
+    }
     // Every request went to the local Supabase.
     expect(fetchSpy.mock.calls.every(([input]) => String(input instanceof Request ? input.url : input).startsWith(LOCAL_SUPABASE_URL))).toBe(true);
   });
@@ -276,27 +325,30 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
     for (const id of [ORG, OCTOBER, MICROGRID]) expect(text).not.toContain(id);
   });
 
-  it("skips billing's watcher while billing is off", async () => {
+  it("skips billing's watchers while billing is off", async () => {
     caller = manager;
     await setPlugin("billing", false);
     try {
       const { body } = await answer(ORG);
-      expect(ours(body)).toEqual([...IDS["metering.connection"], ...IDS["payments.failed"], ...IDS["payments.reconcile"]].sort());
-      expect(body.checked).not.toContain("billing.period-due");
-      expect(body.unchecked).not.toContain("billing.period-due");
+      expect(ours(body)).toEqual(
+        [...IDS["metering.connection"], ...IDS["payments.failed"], ...IDS["payments.reconcile"], ...IDS["payments.not-submitted"]].sort(),
+      );
+      for (const id of ["billing.period-due", "billing.period-missing"]) expect([...body.checked, ...body.unchecked]).not.toContain(id);
     } finally {
       await setPlugin("billing", true);
     }
   });
 
-  it("still reports reconciliation while Payments is off, and no longer failures", async () => {
+  it("still reports reconciliation while Payments is off, and no longer failures or checkouts never submitted", async () => {
     caller = manager;
     await setPlugin("payments", false);
     try {
       const { body } = await answer(ORG);
-      expect(ours(body)).toEqual([...IDS["billing.period-due"], ...IDS["metering.connection"], ...IDS["payments.reconcile"]].sort());
+      expect(ours(body)).toEqual(
+        [...IDS["billing.period-due"], ...IDS["billing.period-missing"], ...IDS["metering.connection"], ...IDS["payments.reconcile"]].sort(),
+      );
       expect(body.checked).toContain("payments.reconcile");
-      expect([...body.checked, ...body.unchecked]).not.toContain("payments.failed");
+      for (const id of ["payments.failed", "payments.not-submitted"]) expect([...body.checked, ...body.unchecked]).not.toContain(id);
     } finally {
       await setPlugin("payments", true);
     }

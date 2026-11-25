@@ -148,6 +148,24 @@ read a stored credential, or to send data to another origin.
      schema, repeats an id, links anywhere but a released page, or leads
      (`href`) anywhere but a page its own plugin owns, or when it holds
      more than 50 signals. It sends each id prefixed with the watcher's.
+   - The answer carries the first 20 signals, most severe first (`top`),
+     how many there were (`count`), and how many of them are `warn` or
+     `critical` (`attention`, optional since it was added within 0.1),
+     both counted over every signal, not only `top`.
+   - A watcher sets each signal's severity by fixed rules, decided on #230:
+     a billing period with bills not closed is a warning from the day after
+     its last day and critical seven days after it, in the period's own
+     zone, and one with no bills stays a warning (`billing.period-due`); a
+     microgrid with metered tenants last month and no period for it is a
+     warning from the 2nd of the month in its zone
+     (`billing.period-missing`); attempts held for reconciliation are
+     critical only when one reached Pesapal (a tracking id or a receipt),
+     otherwise a warning (`payments.reconcile`); failures on bills still
+     unpaid in the last week are a warning (`payments.failed`), and so are
+     three or more checkouts in a community that never reached Pesapal in
+     the last 24 hours (`payments.not-submitted`), which say something about
+     the payment account rather than a bill. A metering connection check
+     that failed is a warning (`metering.connection`).
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
      fails. It reads the database only, since every load of the signals
@@ -176,8 +194,10 @@ read a stored credential, or to send data to another origin.
      `signals: true`. A view that takes signals carries them in its model
      (`signals`), and the shell takes those instead of fetching again.
      `useSignals()` returns them, and the installed app's badge shows their
-     `count`, every signal as Today lists every signal, where the browser
-     supports the Badging API. A 401 clears both and stops fetching; a 403
+     `attention`, the warn and critical signals, where the browser supports
+     the Badging API (or `count` from an answer without it). Info signals
+     still show in the tray, whose number is `count`, and on Today, but put
+     no number on the icon (#230). A 401 clears both and stops fetching; a 403
      clears both; any other failure keeps what was shown and doubles the
      wait, up to 30 minutes. A tenant's manifest fetches nothing, and the
      badge is cleared for it, when the organization changes, on sign-out

@@ -303,7 +303,8 @@ capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
 
 A watcher (`signals` in a contribution) reports what needs someone in one
-organization: a period not closed, a payment held for reconciliation. The
+organization: a period not closed, a month with no period, a payment held for
+reconciliation, checkouts that never reached the provider. The
 host runs it only for a person with a staff role in that organization (a
 person whose rows are all tenant rows gets a 403 and no watcher runs), on a
 request of its own, so it reads through the person's own client or a
@@ -319,7 +320,10 @@ watcher's (`<watcher id>:<id>`). Watchers run on every load of the signals,
 which an interface may poll, so they read the database only: a watcher that
 would need a vendor call needs a cached read first. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
-own released pages.
+own released pages. Severities follow fixed rules, listed in ADR-006
+decision 9; the installed app's badge counts only the `warn` and `critical`
+signals (`attention` in the answer), while the tray and Today show every
+one.
 
 What a contribution names is checked in CI by
 `src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
