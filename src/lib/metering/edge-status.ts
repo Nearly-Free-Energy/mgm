@@ -36,14 +36,19 @@ export type EdgeStatusOutcome =
    * is kept, so a failing backend is not asked again on every poll.
    */
   | { microgridId: string; state: "failed"; readAt: string }
-  /** Not read within the time the watcher allowed, and not remembered: the next load asks again. */
+  /**
+   * No answer by the deadline. A read that had started goes on to its own
+   * timeout and its answer is kept for the next load; one still waiting for
+   * a slot never starts.
+   */
   | { microgridId: string; state: "late" };
 
 export interface MeteringEdgeStatusCapabilityContract {
   /**
-   * One outcome per site, in the order given, never starting a backend read
-   * that could not finish by `deadlineMs` (epoch milliseconds). It throws
-   * nothing for a backend's failure: that is the site's outcome.
+   * One outcome per site, in the order given, by `deadlineMs` (epoch
+   * milliseconds). Sites with no kept answer are read first, then the
+   * stalest, and no read starts after the deadline. It throws nothing for a
+   * backend's failure: that is the site's outcome.
    */
   getEdgeStatuses(sites: readonly EdgeStatusSite[], deadlineMs: number): Promise<EdgeStatusOutcome[]>;
 }

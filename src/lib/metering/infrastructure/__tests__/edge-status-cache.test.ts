@@ -2,18 +2,22 @@
  * The edge-status cache: a fresh answer is served without a read for five
  * minutes, a failure for one; a changed set of edges reads again; concurrent
  * callers share one read; a read times out at its own limit even when it
- * ignores its signal; no read starts that could not time out by the
- * caller's deadline, and waiting for someone else's read stops there too.
+ * ignores its signal; at most EDGE_STATUS_CONCURRENCY reads run at once in
+ * the process, and one still waiting for a slot at its caller's deadline
+ * never starts; a read under way at the deadline answers "late" and keeps
+ * its answer for the next caller.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EDGE_STATUS_CACHE_MAX,
+  EDGE_STATUS_CONCURRENCY,
   EDGE_STATUS_FAILURE_MS,
   EDGE_STATUS_FRESH_MS,
   EDGE_STATUS_READ_TIMEOUT_MS,
   _resetEdgeStatusCacheForTests,
   cachedEdgeStatus,
   fingerprintOf,
+  lastReadAt,
   summarize,
   type EdgeStatusRead,
 } from "../edge-status-cache";
@@ -121,14 +125,65 @@ describe("cachedEdgeStatus", () => {
     expect(read).toHaveBeenCalledTimes(1);
   });
 
-  it("starts no read that could not time out by the deadline, and remembers nothing for it", async () => {
+  it("starts no read once the deadline has passed, and remembers nothing for it", async () => {
     const read = answering(ONE_OFF);
-    const tight = { deadlineMs: Date.now() + EDGE_STATUS_READ_TIMEOUT_MS - 1, now };
-    expect(await cachedEdgeStatus(MG, EDGES, read, tight)).toEqual({ state: "late" });
+    expect(await cachedEdgeStatus(MG, EDGES, read, { deadlineMs: Date.now(), now })).toEqual({ state: "late" });
     expect(read).not.toHaveBeenCalled();
-    const exact = { deadlineMs: Date.now() + EDGE_STATUS_READ_TIMEOUT_MS, now };
-    expect(await cachedEdgeStatus(MG, EDGES, read, exact)).toMatchObject({ state: "read" });
+    expect(lastReadAt(MG, EDGES)).toBeNull();
+    expect(await cachedEdgeStatus(MG, EDGES, read, { deadlineMs: Date.now() + 1, now })).toMatchObject({ state: "read" });
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers late when its own read outlives the deadline, and serves that read's answer to the next caller", async () => {
+    const read = vi.fn(() => new Promise<EdgeStatusRead>((resolve) => setTimeout(() => resolve(ONE_OFF), 1_500)));
+    const pending = cachedEdgeStatus(MG, EDGES, read, { deadlineMs: Date.now() + 500, now });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await pending).toEqual({ state: "late" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lastReadAt(MG, EDGES)).toBe(Date.now());
+    expect(await cachedEdgeStatus(MG, EDGES, read, { deadlineMs: Date.now(), now })).toMatchObject({ state: "read", offline: 1 });
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it(`runs at most ${EDGE_STATUS_CONCURRENCY} reads at once, starts the next in order as one ends, and drops one still waiting at its deadline`, async () => {
+    const finishes: (() => void)[] = [];
+    const started: string[] = [];
+    const reading = (id: string) => () =>
+      new Promise<EdgeStatusRead>((resolve) => {
+        started.push(id);
+        finishes.push(() => resolve(ONE_OFF));
+      });
+    const ids = Array.from({ length: EDGE_STATUS_CONCURRENCY + 2 }, (_, i) => `mg-${i}`);
+    const answers = ids.map((id, i) =>
+      // The last waits only 100 ms for a slot.
+      cachedEdgeStatus(id, EDGES, reading(id), i === ids.length - 1 ? { deadlineMs: Date.now() + 100, now } : roomy()),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).toEqual(ids.slice(0, EDGE_STATUS_CONCURRENCY));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await answers[ids.length - 1]).toEqual({ state: "late" });
+    finishes[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).toEqual(ids.slice(0, EDGE_STATUS_CONCURRENCY + 1));
+    finishes.slice(1).forEach((finish) => finish());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).not.toContain(ids[ids.length - 1]);
+    expect((await Promise.all(answers.slice(0, -1))).map((a) => a.state)).toEqual(Array(EDGE_STATUS_CONCURRENCY + 1).fill("read"));
+    // Every slot is free again.
+    const more = Array.from({ length: EDGE_STATUS_CONCURRENCY }, (_, i) => cachedEdgeStatus(`again-${i}`, EDGES, reading(`again-${i}`), roomy()));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started.filter((id) => id.startsWith("again-"))).toHaveLength(EDGE_STATUS_CONCURRENCY);
+    finishes.splice(0).forEach((finish) => finish());
+    await Promise.all(more);
+  });
+
+  it("tells when a microgrid's kept answer for these edges was read, fresh or not", async () => {
+    expect(lastReadAt(MG, EDGES)).toBeNull();
+    await cachedEdgeStatus(MG, EDGES, answering(ONE_OFF), roomy());
+    const readAt = Date.now();
+    vi.advanceTimersByTime(EDGE_STATUS_FRESH_MS * 2);
+    expect(lastReadAt(MG, [...EDGES].reverse())).toBe(readAt);
+    expect(lastReadAt(MG, ["edge0"])).toBeNull();
   });
 
   it("serves a fresh answer past the deadline, since it needs no read", async () => {

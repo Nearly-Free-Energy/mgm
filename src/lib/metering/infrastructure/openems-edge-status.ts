@@ -20,15 +20,20 @@ import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import type { MeteringComposition } from "../compose";
 import type { EdgeStatusOutcome, EdgeStatusSite, MeteringEdgeStatusCapabilityContract } from "../edge-status";
-import { cachedEdgeStatus, type EdgeStatusRead } from "./edge-status-cache";
+import { cachedEdgeStatus, lastReadAt, type EdgeStatusRead } from "./edge-status-cache";
 
 /**
- * Microgrids read at once by one call. An organization with more waits for
- * a free slot, and a microgrid whose turn comes too late to finish by the
- * deadline is "late" this time and read on a later load, when the others
- * come from the cache.
+ * The order one call asks for its sites in: those with no kept answer
+ * first, then the stalest kept answer or failure, then the rest, the order
+ * given breaking ties. Reads wait for the process's slots in this order
+ * (EDGE_STATUS_CONCURRENCY in ./edge-status-cache.ts), so when not every
+ * site can be read before the deadline, the next load starts where this one
+ * stopped instead of at the first site again.
  */
-export const EDGE_STATUS_CONCURRENCY = 4;
+export function readingOrder(sites: readonly EdgeStatusSite[]): number[] {
+  const kept = sites.map((s) => lastReadAt(s.microgridId, s.edgeIds) ?? -Infinity);
+  return sites.map((_, i) => i).sort((a, b) => kept[a] - kept[b] || a - b);
+}
 
 /** The read of one microgrid's edges, as the cache calls it. Exported for tests. */
 export function openEmsEdgeStatusRead(supabase: SupabaseClient, microgridId: string, edgeIds: readonly string[]) {
@@ -69,10 +74,10 @@ export function createEdgeStatusReader(
   return {
     async getEdgeStatuses(sites: readonly EdgeStatusSite[], deadlineMs: number): Promise<EdgeStatusOutcome[]> {
       const out: EdgeStatusOutcome[] = new Array(sites.length);
-      let next = 0;
-      const worker = async () => {
-        while (next < sites.length) {
-          const i = next++;
+      // Every site asks at once, in reading order; the cache's process-wide
+      // slots decide how many reads run, so overlapping calls share the bound.
+      await Promise.all(
+        readingOrder(sites).map(async (i) => {
           const { microgridId, edgeIds } = sites[i];
           const read = makeRead(supabase, microgridId, edgeIds);
           const logged = async (signal: AbortSignal) => {
@@ -91,9 +96,8 @@ export function createEdgeStatusReader(
               : answer.state === "failed"
                 ? { microgridId, state: "failed", readAt: new Date(answer.readAt).toISOString() }
                 : { microgridId, state: "read", total: answer.total, offline: answer.offline, readAt: new Date(answer.readAt).toISOString() };
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(EDGE_STATUS_CONCURRENCY, sites.length) }, worker));
+        }),
+      );
       return out;
     },
   };
