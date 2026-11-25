@@ -5,6 +5,7 @@ import {
   COMPONENT_ID_FORMAT_CONSTRAINT,
   EDGE_ID_FORMAT_CONSTRAINT,
   OPENEMS_ID_PATTERN,
+  firstDuplicateOpenEmsId,
   isIdFormatViolation,
   openEmsIdSchema,
   parseOpenEmsId,
@@ -82,6 +83,34 @@ describe("parseOpenEmsId", () => {
 
   it.each([undefined, null, 7, {}, ["edge0"]])("refuses %j", (value) => {
     expect(parseOpenEmsId(value)).toBeNull();
+  });
+});
+
+describe("firstDuplicateOpenEmsId", () => {
+  it("is null when every id is named once", () => {
+    expect(firstDuplicateOpenEmsId(["meter0", "meter1", "ess0"])).toBeNull();
+    expect(firstDuplicateOpenEmsId([])).toBeNull();
+  });
+
+  it("names an id given twice", () => {
+    expect(firstDuplicateOpenEmsId(["meter0", "meter1", "meter0"])).toBe("meter0");
+  });
+
+  it("names, trimmed, two ids that differ only by surrounding spaces", () => {
+    expect(firstDuplicateOpenEmsId(["meter0", " meter0"])).toBe("meter0");
+    expect(firstDuplicateOpenEmsId(["\tedge0 ", "edge0"])).toBe("edge0");
+  });
+
+  it("names the first id to repeat", () => {
+    expect(firstDuplicateOpenEmsId(["a", "b", "b", "a"])).toBe("b");
+  });
+
+  it("compares case, as the unique constraints do", () => {
+    expect(firstDuplicateOpenEmsId(["Meter0", "meter0"])).toBeNull();
+  });
+
+  it("passes over values outside the stored format", () => {
+    expect(firstDuplicateOpenEmsId(["meter 0", "meter 0", 7, 7, null])).toBeNull();
   });
 });
 
