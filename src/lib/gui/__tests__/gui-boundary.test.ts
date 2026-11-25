@@ -66,7 +66,7 @@ import { describe, expect, it } from "vitest";
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 
 const CONTRACT = "src/lib/gui/contract.ts";
-const SERVER_ONLY_FILES = ["src/lib/gui/surface.ts", "src/lib/gui/fmt.ts"];
+const SERVER_ONLY_FILES = ["src/lib/gui/surface.ts", "src/lib/gui/fmt.ts", "src/lib/gui/assistant-reads.ts"];
 const HOST = "src/lib/gui/host/";
 const HOST_SERVER = `${HOST}server/`;
 const HOST_CLIENT = `${HOST}client/`;

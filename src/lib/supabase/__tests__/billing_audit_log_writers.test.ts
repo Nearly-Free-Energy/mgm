@@ -16,6 +16,16 @@
  *   - the setting is cleared when a function returns, so a direct insert
  *     later in the same transaction is refused.
  *
+ * And, for migration 20261124170000, the same two functions called by the
+ * manager:
+ *   - a manual bill entered by another user, or by nobody, is refused and
+ *     the call writes nothing; one entered by the manager is written;
+ *   - the audit row's details are the function's: built from the bill and
+ *     the bill it replaces (previous_snapshot as stored), whatever the
+ *     caller sends; a key an app never sent, or details that are not an
+ *     object, are refused and the call writes nothing;
+ *   - service_role still writes the entered-by and details it is given.
+ *
  * Self-fixturing; honors `SKIP_RLS_TESTS=1` for runs without local Supabase.
  */
 
@@ -50,6 +60,10 @@ const F = {
   draft: "a0d17000-0000-4000-8006-000000000001",
   // A draft the direct inserts name.
   direct: "a0d17000-0000-4000-8006-000000000002",
+  // A draft the manager bills with forged inputs (20261124170000).
+  inputs: "a0d17000-0000-4000-8006-000000000003",
+  // A draft every refused call names; it never gets a bill.
+  refused: "a0d17000-0000-4000-8006-000000000004",
 };
 
 const STAMP = Date.now();
@@ -73,12 +87,13 @@ async function insertOrThrow(
   }
 }
 
-async function auditRows(filter: { period?: string; lineItem?: string; marker?: string }) {
+async function auditRows(filter: { period?: string; lineItem?: string; marker?: string; reason?: string }) {
   const svc = await serviceClient();
   let query = svc.from("billing_audit_log").select("event_type, actor_user_id, actor_kind, actor_ref, details");
   if (filter.period) query = query.eq("billing_period_id", filter.period);
   if (filter.lineItem) query = query.eq("billing_line_item_id", filter.lineItem);
   if (filter.marker) query = query.eq("details->>marker", filter.marker);
+  if (filter.reason) query = query.eq("details->>manual_reason", filter.reason);
   const { data, error } = await query.order("created_at");
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -99,10 +114,51 @@ function billArgs(over: Record<string, unknown> = {}) {
     _entered_by_user_id: manager.userId,
     _manual_reason: "meter offline",
     _actor_user_id: manager.userId,
-    _audit_details: { source: "billing_audit_log_writers_test" },
+    _audit_details: null,
     _rate_schedule_id: F.rate,
     ...over,
   };
+}
+
+/** The details the functions build for billArgs' bill (20261124170000). */
+function builtDetails(over: Record<string, unknown> = {}) {
+  return {
+    tenant_name: "AW Tenant",
+    previous_total_amount: null,
+    new_total_amount: 2500,
+    previous_reading_source: null,
+    new_reading_source: "manual",
+    manual_reason: "meter offline",
+    rate_schedule_id: F.rate,
+    ...over,
+  };
+}
+
+type Refusal = { code?: string; message?: string; details?: string } | null;
+
+function expectEnteredByRefused(error: Refusal) {
+  expect(error?.code).toBe("42501");
+  expect(error?.message).toMatch(/^billing_entered_by_is_caller/);
+  expect(error?.details).toBe("entered_by_is_caller");
+}
+
+function expectDetailsRefused(error: Refusal) {
+  expect(error?.code).toBe("42501");
+  expect(error?.message).toMatch(/^billing_audit_details_from_function/);
+  expect(error?.details).toBe("audit_details_from_function");
+}
+
+/** A bill as stored, in the shape of details.previous_snapshot. */
+async function snapshotOf(lineItemId: string) {
+  const svc = await serviceClient();
+  const { data, error } = await svc
+    .from("billing_line_items")
+    .select("start_kwh, end_kwh, usage_kwh, tier_breakdown, device_id, entered_by_user_id, entered_at, manual_reason, total_amount, reading_source")
+    .eq("id", lineItemId)
+    .single();
+  if (error) throw new Error(error.message);
+  const { total_amount, reading_source, ...snapshot } = data;
+  return { snapshot, total_amount: Number(total_amount), reading_source };
 }
 
 function expectActorRefused(error: { code?: string; message?: string; details?: string } | null) {
@@ -164,6 +220,8 @@ desc("20261124160000_billing_audit_log_written_by_functions.sql", () => {
     await insertOrThrow(svc, "billing_periods", [
       { id: F.draft, microgrid_id: F.mg, start_date: "2025-01-01", end_date: "2025-01-31", rate_schedule_id: F.rate },
       { id: F.direct, microgrid_id: F.mg, start_date: "2025-02-01", end_date: "2025-02-28", rate_schedule_id: F.rate },
+      { id: F.inputs, microgrid_id: F.mg, start_date: "2025-05-01", end_date: "2025-05-31", rate_schedule_id: F.rate },
+      { id: F.refused, microgrid_id: F.mg, start_date: "2025-06-01", end_date: "2025-06-30", rate_schedule_id: F.rate },
     ]);
 
     manager = await createTestUser({ email: EMAIL.manager, role: "org_manager", scopeId: F.org });
@@ -220,12 +278,12 @@ desc("20261124160000_billing_audit_log_written_by_functions.sql", () => {
       const marker = `actor-new-${fn}-${label}`;
       const { data, error } = await manager.client.rpc(
         fn,
-        billArgs({ _billing_period_id: F.direct, _audit_details: { marker }, ...actor() }),
+        billArgs({ _billing_period_id: F.direct, _manual_reason: marker, ...actor() }),
       );
       expect(data).toBeNull();
       expectActorRefused(error);
       expect(await billsOf(F.direct)).toEqual([]);
-      expect(await auditRows({ marker })).toEqual([]);
+      expect(await auditRows({ reason: marker })).toEqual([]);
     });
 
     it.each(ACTORS)("fn_record_line_item_with_audit on an existing bill, %s: refused, bill unchanged", async (label, actor) => {
@@ -244,12 +302,133 @@ desc("20261124160000_billing_audit_log_written_by_functions.sql", () => {
       // The bill's current figures: a regeneration that changes nothing.
       const { data, error } = await manager.client.rpc(
         "fn_record_line_item_with_audit",
-        billArgs({ _billing_period_id: F.direct, _audit_details: { marker }, ...actor() }),
+        billArgs({ _billing_period_id: F.direct, _manual_reason: marker, ...actor() }),
       );
       expect(data).toBeNull();
       expectActorRefused(error);
       expect(await billsOf(F.direct)).toEqual([before]);
       expect(await auditRows({ lineItem: before.id })).toEqual(auditBefore);
+    });
+  });
+
+  describe("the line-item functions, called by an org manager, record who entered the bill and build its audit details (20261124170000)", () => {
+    const FUNCTIONS = ["fn_record_first_line_item_with_audit", "fn_record_line_item_with_audit"] as const;
+
+    async function expectNothingWritten() {
+      expect(await billsOf(F.refused)).toEqual([]);
+      expect(await auditRows({ period: F.refused })).toEqual([]);
+    }
+
+    const ENTERED_BY = [
+      ["another user", () => other.userId],
+      ["nobody", () => null],
+    ] as const;
+    it.each(FUNCTIONS.flatMap((fn) => ENTERED_BY.map(([label, who]) => [fn, label, who] as const)))(
+      "%s, a manual bill entered by %s: refused, nothing written",
+      async (fn, _label, who) => {
+        const { data, error } = await manager.client.rpc(
+          fn,
+          billArgs({ _billing_period_id: F.refused, _entered_by_user_id: who() }),
+        );
+        expect(data).toBeNull();
+        expectEnteredByRefused(error);
+        await expectNothingWritten();
+      },
+    );
+
+    const DETAILS = [
+      ["a key no app sends", { marker: "forged" }],
+      ["a key no app sends beside the ones it did", { tenant_name: "Forged", period_was_closed: true }],
+      ["details that are not an object", ["forged"]],
+    ] as const;
+    it.each(FUNCTIONS.flatMap((fn) => DETAILS.map(([label, details]) => [fn, label, details] as const)))(
+      "%s, %s: refused, nothing written",
+      async (fn, _label, details) => {
+        const { data, error } = await manager.client.rpc(
+          fn,
+          billArgs({ _billing_period_id: F.refused, _audit_details: details }),
+        );
+        expect(data).toBeNull();
+        expectDetailsRefused(error);
+        await expectNothingWritten();
+      },
+    );
+
+    let billId: string;
+
+    it("a manual bill entered by the manager is written, entered by the manager", async () => {
+      const { data, error } = await manager.client.rpc(
+        "fn_record_first_line_item_with_audit",
+        billArgs({ _billing_period_id: F.inputs }),
+      );
+      expect(error).toBeNull();
+      billId = (data as { id: string; entered_by_user_id: string }).id;
+      expect((data as { entered_by_user_id: string }).entered_by_user_id).toBe(manager.userId);
+      expect(await auditRows({ lineItem: billId })).toMatchObject([{ details: builtDetails() }]);
+    });
+
+    it("forged values for the keys an app sent are replaced by the function's, previous_snapshot included", async () => {
+      const prior = await snapshotOf(billId);
+      const { error } = await manager.client.rpc(
+        "fn_record_line_item_with_audit",
+        billArgs({
+          _billing_period_id: F.inputs,
+          _usage_kwh: 12,
+          _end_kwh: 112,
+          _total_amount: 3000,
+          _manual_reason: "re-read",
+          _audit_details: {
+            tenant_name: "Forged",
+            previous_total_amount: 1,
+            new_total_amount: 2,
+            previous_reading_source: "edge",
+            new_reading_source: "edge",
+            manual_reason: "forged",
+            previous_snapshot: { start_kwh: 0, end_kwh: 0, usage_kwh: 0, entered_by_user_id: other.userId, manual_reason: "forged" },
+          },
+        }),
+      );
+      expect(error).toBeNull();
+      const rows = await auditRows({ lineItem: billId });
+      expect(rows.map((r) => r.event_type)).toEqual(["line_item_generated", "line_item_regenerated"]);
+      expect(rows[1].details).toEqual(
+        builtDetails({
+          previous_total_amount: 2500,
+          previous_reading_source: "manual",
+          new_total_amount: 3000,
+          manual_reason: "re-read",
+          previous_snapshot: prior.snapshot,
+        }),
+      );
+      expect(prior.snapshot).toMatchObject({ start_kwh: 100, end_kwh: 110, usage_kwh: 10, entered_by_user_id: manager.userId, manual_reason: "meter offline" });
+    });
+
+    it("service_role still writes the entered-by and details it is given", async () => {
+      const svc = await serviceClient();
+      const forged = { marker: "service-role", previous_snapshot: { manual_reason: "given" } };
+      const { data, error } = await svc.rpc(
+        "fn_record_line_item_with_audit",
+        billArgs({
+          _billing_period_id: F.inputs,
+          _usage_kwh: 14,
+          _end_kwh: 114,
+          _total_amount: 3500,
+          _entered_by_user_id: other.userId,
+          _actor_user_id: other.userId,
+          _audit_details: forged,
+        }),
+      );
+      expect(error).toBeNull();
+      expect((data as { entered_by_user_id: string }).entered_by_user_id).toBe(other.userId);
+      expect(await auditRows({ marker: "service-role" })).toEqual([
+        {
+          event_type: "line_item_regenerated",
+          actor_user_id: other.userId,
+          actor_kind: "human",
+          actor_ref: null,
+          details: { ...forged, rate_schedule_id: F.rate },
+        },
+      ]);
     });
   });
 
@@ -285,12 +464,13 @@ desc("20261124160000_billing_audit_log_written_by_functions.sql", () => {
           actor_user_id: manager.userId,
           actor_kind: "human",
           actor_ref: null,
-          details: { source: "billing_audit_log_writers_test", rate_schedule_id: F.rate },
+          details: builtDetails(),
         },
       ]);
     });
 
     it("fn_record_line_item_with_audit: line_item_regenerated", async () => {
+      const prior = await snapshotOf(billId);
       const { data, error } = await manager.client.rpc(
         "fn_record_line_item_with_audit",
         billArgs({ _usage_kwh: 12, _end_kwh: 112, _total_amount: 3000 }),
@@ -300,6 +480,14 @@ desc("20261124160000_billing_audit_log_written_by_functions.sql", () => {
       const rows = await auditRows({ lineItem: billId });
       expect(rows.map((r) => r.event_type)).toEqual(["line_item_generated", "line_item_regenerated"]);
       expect(rows[1]).toMatchObject({ actor_user_id: manager.userId, actor_kind: "human" });
+      expect(rows[1].details).toEqual(
+        builtDetails({
+          previous_total_amount: prior.total_amount,
+          previous_reading_source: prior.reading_source,
+          new_total_amount: 3000,
+          previous_snapshot: prior.snapshot,
+        }),
+      );
     });
 
     it("fn_close_billing_period: period_closed", async () => {

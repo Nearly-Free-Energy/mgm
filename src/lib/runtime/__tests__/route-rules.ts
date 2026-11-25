@@ -1,20 +1,38 @@
 /**
- * What route-surface.test.ts knows about route files that gui-surface.test.ts
- * (src/lib/gui/__tests__) needs too: the gate exemptions, which plugins may
- * hold a PaymentExemption, the Payments capability's gating as
- * capability-gating.test.ts classifies it, and how a handler's code is found.
- * gui-surface.test.ts reads the exemptions and the gating to decide which
- * actions and views may declare `whilePluginOff` (src/lib/gui/surface.ts).
- * Kept here so neither test imports the other, which would run its tests
- * twice.
+ * The route lists and route-file helpers the route tests share:
+ * route-surface.test.ts and described-writes.test.ts (both here), and
+ * gui-surface.test.ts (src/lib/gui/__tests__).
+ *
+ * - The gate exemptions (UNGATED_WRITES), which plugins may hold a
+ *   PaymentExemption, and the Payments capability's gating as
+ *   capability-gating.test.ts classifies it. gui-surface.test.ts reads the
+ *   exemptions and the gating to decide which actions and views may declare
+ *   `whilePluginOff` (src/lib/gui/surface.ts).
+ * - The write routes no action describes (UNDESCRIBED_WRITES), and the
+ *   issues that will describe them (DESCRIBING_ISSUES).
+ * - How the route files under src/app/api are found (`apiRouteFiles`), and
+ *   how a route file's handlers and their code are found.
+ *
+ * Kept here so no test imports another, which would run its tests twice.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
 import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
-import { PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME } from "@/lib/plugins/bundled";
+import {
+  BILLING_PLUGIN_NAME,
+  COMMUNITY_MANAGEMENT_PLUGIN_NAME,
+  METERING_PLUGIN_NAME,
+  ORGANIZATION_DIRECTORY_PLUGIN_NAME,
+  PAYMENTS_PLUGIN_NAME,
+  PESAPAL_PLUGIN_NAME,
+  type MgmPluginName,
+} from "@/lib/plugins/bundled";
 
-/** A handler's key in UNGATED_WRITES: `METHOD /api/route`, every bracket spelled `[id]`. */
+/**
+ * A handler's key in UNGATED_WRITES and UNDESCRIBED_WRITES: `METHOD /api/route`,
+ * every bracket spelled `[id]`.
+ */
 export function exemptionKey(method: string, route: string): string {
   return `${method} ${route.replace(/\[[^\]]+\]/g, "[id]")}`;
 }
@@ -88,6 +106,150 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
 };
 
 /**
+ * The issues that describe the write routes still in UNDESCRIBED_WRITES, each
+ * with the plugins whose routes it describes. An issue leaves this map in the
+ * pull request that removes its last entry; described-writes.test.ts fails
+ * while an issue stays with no entry, so after that nothing can be listed
+ * under it.
+ */
+export const DESCRIBING_ISSUES = {
+  /** ACM B4: describe community management's actions. */
+  "#278": [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
+  /** ACM B5: describe metering's actions. */
+  "#279": [METERING_PLUGIN_NAME],
+  /** ACM B6: describe the remaining billing and payments routes. */
+  "#280": [BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME],
+  /** ACM B7: describe the organization directory's and users' actions. */
+  "#281": [ORGANIZATION_DIRECTORY_PLUGIN_NAME],
+} as const satisfies Record<`#${number}`, readonly MgmPluginName[]>;
+
+/**
+ * Why no action names a write route. `permanent`: the route is not a
+ * person's action, and its reason says why and what would make that wrong
+ * ("Wrong once …", which described-writes.test.ts requires).
+ * `not-yet-described`: the issue that will describe it.
+ */
+export type UndescribedWrite =
+  | { kind: "permanent"; reason: string }
+  | { kind: "not-yet-described"; issue: keyof typeof DESCRIBING_ISSUES };
+
+/**
+ * Write handlers that no action names (RFC #259 § 3, "Coverage is a build
+ * rule"). described-writes.test.ts holds every POST, PUT, PATCH and DELETE
+ * handler under src/app/api on a released path to an action whose method and
+ * path name it, or to an entry here, keyed as UNGATED_WRITES is. An entry may
+ * name a handler that is not released yet.
+ *
+ * A `not-yet-described` entry's issue must list the route's owner in
+ * DESCRIBING_ISSUES. The pull request that describes the route removes its
+ * entry: the test fails while an action names a listed route. A new entry of
+ * either kind is a change to a code-owned file, and that review is what keeps
+ * a new route from being parked here under an open issue; the test checks the
+ * issue's plugins, not when the route was written.
+ *
+ * One block per kind and per issue, each sorted by route, and a route's
+ * methods in the order POST, PUT, PATCH, DELETE, so the pull requests for
+ * each issue touch only their own lines.
+ */
+export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
+  // ── Permanent: not a person's action ──
+  "POST /api/auth/sign-in-link": {
+    kind: "permanent",
+    reason:
+      "Emails a sign-in link to someone who has no session yet (RFC #186), while an action is offered to a signed-in person. Wrong once it reads the caller's session.",
+  },
+  "POST /api/gui/prepare": {
+    kind: "permanent",
+    reason:
+      "The GUI host's own step: builds an action's form and confirmation and writes nothing, and the action's write goes to the action's own route. Wrong once prepare writes.",
+  },
+  "POST /api/mgm/bootstrap": {
+    kind: "permanent",
+    reason:
+      "First-run setup: creates the first organization for the holder of the deployment's bootstrap token, before any organization exists to offer an action in, and answers 409 after. Wrong once it acts after the first organization exists.",
+  },
+  "POST /api/payments/ipn": {
+    kind: "permanent",
+    reason:
+      "The payment provider's server-to-server notification, sent with no session; no person sends it. Wrong once it reads the caller's session or acts for a signed-in person.",
+  },
+  "POST /api/payments/reconcile-worker": {
+    kind: "permanent",
+    reason:
+      "The scheduled worker that retries stored provider notifications, authenticated by its header secret with no session. Wrong once a signed-in person can run it.",
+  },
+
+  // ── Not yet described: #278 (ACM B4), community management ──
+  "POST /api/communities": { kind: "not-yet-described", issue: "#278" },
+  "PATCH /api/communities/[id]": { kind: "not-yet-described", issue: "#278" },
+  "DELETE /api/communities/[id]": { kind: "not-yet-described", issue: "#278" },
+  "POST /api/microgrids": { kind: "not-yet-described", issue: "#278" },
+  "PATCH /api/microgrids/[id]": { kind: "not-yet-described", issue: "#278" },
+  "DELETE /api/microgrids/[id]": { kind: "not-yet-described", issue: "#278" },
+  "PATCH /api/tenants/[id]": { kind: "not-yet-described", issue: "#278" },
+  "DELETE /api/tenants/[id]": { kind: "not-yet-described", issue: "#278" },
+  "POST /api/tenants/[id]/access": { kind: "not-yet-described", issue: "#278" },
+  "DELETE /api/tenants/[id]/access/[id]": { kind: "not-yet-described", issue: "#278" },
+  "POST /api/tenants/with-meter": { kind: "not-yet-described", issue: "#278" },
+
+  // ── Not yet described: #279 (ACM B5), metering ──
+  // Two of these routes cannot become actions as they stand.
+  // `POST /api/openems/channels` is not released: released-routes.ts does not
+  // open /api/openems/*, and gui-surface.test.ts refuses an action on an
+  // unreleased route (check 4), so describing it means releasing
+  // /api/openems/* first. It is listed so #279 decides it with the rest of
+  // metering's routes. `POST /api/edges` is retired (it always answers 410)
+  // and carries a plain-string gate exemption in UNGATED_WRITES above, and
+  // gui-surface.test.ts refuses an action on such a route (check 3). If
+  // released-routes.ts opens /api/openems/*, or check 3 or 4 changes, revisit
+  // this note.
+  "POST /api/devices": { kind: "not-yet-described", issue: "#279" },
+  "PATCH /api/devices/[id]": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/edges": { kind: "not-yet-described", issue: "#279" },
+  "PATCH /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
+  "DELETE /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/meter-readings/opening": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/metering/readings": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/microgrids/[id]/edges/register": { kind: "not-yet-described", issue: "#279" },
+  "PUT /api/microgrids/[id]/openems-backend": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/microgrids/[id]/openems-backend/discover": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/microgrids/[id]/openems-backend/test": { kind: "not-yet-described", issue: "#279" },
+  "POST /api/openems/channels": { kind: "not-yet-described", issue: "#279" },
+
+  // ── Not yet described: #280 (ACM B6), billing, payments and Pesapal ──
+  // Five of these routes carry a plain-string gate exemption in UNGATED_WRITES
+  // above: invoice-preview, the payment stub, the override PUT and DELETE, and
+  // payment-accounts. gui-surface.test.ts refuses an action on such a route
+  // (check 3), so describing one means gating its route first, or, for a
+  // Payments or Pesapal route, giving it a PaymentExemption. If check 3 stops
+  // refusing a plain-string exemption, revisit this note.
+  "POST /api/billing-review/preview": { kind: "not-yet-described", issue: "#280" },
+  "PATCH /api/communities/[id]/invoice-config": { kind: "not-yet-described", issue: "#280" },
+  "POST /api/communities/[id]/invoice-logo": { kind: "not-yet-described", issue: "#280" },
+  "POST /api/communities/[id]/invoice-preview": { kind: "not-yet-described", issue: "#280" },
+  "PUT /api/communities/[id]/payment": { kind: "not-yet-described", issue: "#280" },
+  "PUT /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#280" },
+  "DELETE /api/communities/[id]/payment/override": { kind: "not-yet-described", issue: "#280" },
+  "DELETE /api/microgrids/[id]/grid-tariffs/[id]": { kind: "not-yet-described", issue: "#280" },
+  "POST /api/organizations/[id]/payment-accounts": { kind: "not-yet-described", issue: "#280" },
+  "POST /api/rate-schedules": { kind: "not-yet-described", issue: "#280" },
+  "PUT /api/rate-schedules/[id]": { kind: "not-yet-described", issue: "#280" },
+
+  // ── Not yet described: #281 (ACM B7), organization directory and users ──
+  "POST /api/organizations": { kind: "not-yet-described", issue: "#281" },
+  "PATCH /api/organizations/[id]": { kind: "not-yet-described", issue: "#281" },
+  "DELETE /api/organizations/[id]": { kind: "not-yet-described", issue: "#281" },
+  "PUT /api/organizations/[id]/email-sender": { kind: "not-yet-described", issue: "#281" },
+  "DELETE /api/organizations/[id]/email-sender": { kind: "not-yet-described", issue: "#281" },
+  "PATCH /api/organizations/[id]/plugins": { kind: "not-yet-described", issue: "#281" },
+  "DELETE /api/users/[id]": { kind: "not-yet-described", issue: "#281" },
+  "PATCH /api/users/[id]/profile": { kind: "not-yet-described", issue: "#281" },
+  "POST /api/users/[id]/resend-invite": { kind: "not-yet-described", issue: "#281" },
+  "PATCH /api/users/[id]/role": { kind: "not-yet-described", issue: "#281" },
+  "POST /api/users/invite": { kind: "not-yet-described", issue: "#281" },
+};
+
+/**
  * The name a property key spells (`readOnly`, `"readOnly"`, `["readOnly"]`
  * all → `readOnly`); null when it cannot be known statically.
  */
@@ -149,6 +311,58 @@ export const PAYMENT_EXEMPTION_OWNERS: ReadonlySet<string> = new Set<string>([PA
 
 const HANDLER_RE =
   /^export\s+(?:(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\b|(?:const|let)\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\s*=\s*([A-Za-z_$][\w$]*)\s*;)/gm;
+
+/** The HTTP methods of a write handler. */
+export const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const APP = path.resolve(__dirname, "..", "..", "..", "app");
+
+/** A route file under src/app/api: its route as spelled there (`/api/tenants/[id]`) and its source. */
+export type RouteFile = { route: string; text: string };
+
+/** Every `route.ts` under src/app/api, outside `__tests__` folders. */
+export function apiRouteFiles(dir = path.join(APP, "api")): RouteFile[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return entry.name === "__tests__" ? [] : apiRouteFiles(path.join(dir, entry.name));
+    if (!entry.isFile() || entry.name !== "route.ts") return [];
+    return [{ route: `/${path.relative(APP, dir).split(path.sep).join("/")}`, text: readFileSync(path.join(dir, entry.name), "utf8") }];
+  });
+}
+
+/**
+ * The write methods a route file exports, read with the TypeScript AST so
+ * that every export form counts: `export [async] function M`,
+ * `export const M =` with any initializer (a named function, an arrow
+ * function, a factory call), a destructured `export const { M } =`, and
+ * `export { h as M }` with or without `from`. `handlerSources` below finds
+ * only the first form and `export const M = name;` (HANDLER_RE);
+ * described-writes.test.ts checks that it finds every method this does.
+ * Throws on `export * from`, which hides what the file exports.
+ */
+export function exportedWriteMethods(text: string): Set<string> {
+  const file = ts.createSourceFile("route.ts", text, ts.ScriptTarget.Latest, true);
+  const names: string[] = [];
+  const bind = (name: ts.BindingName): void => {
+    if (ts.isIdentifier(name)) names.push(name.text);
+    else for (const element of name.elements) if (!ts.isOmittedExpression(element)) bind(element.name);
+  };
+  for (const statement of file.statements) {
+    const exported = ts.canHaveModifiers(statement) &&
+      (ts.getModifiers(statement) ?? []).some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+    if (ts.isFunctionDeclaration(statement) && exported && statement.name) names.push(statement.name.text);
+    else if (ts.isVariableStatement(statement) && exported) statement.declarationList.declarations.forEach((d) => bind(d.name));
+    else if (ts.isExportDeclaration(statement) && !statement.isTypeOnly) {
+      if (!statement.exportClause) {
+        throw new Error(`\`${statement.getText(file)}\` hides which handlers the route exports; export them by name`);
+      }
+      // `export * as ns from` exports one namespace object, never a handler.
+      if (ts.isNamedExports(statement.exportClause)) {
+        for (const specifier of statement.exportClause.elements) if (!specifier.isTypeOnly) names.push(specifier.name.text);
+      }
+    }
+  }
+  return new Set(names.filter((name) => WRITE_METHODS.has(name)));
+}
 
 /** Top-level declarations: `name → source text` (functions and arrow consts). */
 function topLevelBlocks(source: string): Map<string, string> {

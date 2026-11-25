@@ -120,15 +120,21 @@ export function siteDayProblem(failure: { status: number; code: string }): SiteD
   if (code === "METERING_UNAUTHORIZED") return SITE_DAY_PROBLEMS.rejected;
   if (code.startsWith("METERING_")) return SITE_DAY_PROBLEMS.unavailable;
   // getSiteDay's own failures after the plugin gate, in
-  // src/lib/metering/capability.ts: reading the site's devices
-  // (openSiteReader), which may pass, and computing the day
-  // (siteReadFailed), which fails the same way each time. A date the
-  // capability refuses (metering_invalid_date) can only mean it worked out
-  // today in another zone than the loader, which already clamped the date,
-  // so it is a passing failure too. None is the person's or the gate's, so
-  // the day keeps its picker; if getSiteDay gains another such failure or
-  // renames these, revisit.
-  if (code === "metering_site_devices_unavailable" || code === "metering_invalid_date") return SITE_DAY_PROBLEMS.unavailable;
+  // src/lib/metering/capability.ts: reading the microgrid's stored zone
+  // (openSiteQuery, metering_timezone_unavailable) and the site's devices
+  // (openSiteReader, metering_site_devices_unavailable), which may pass,
+  // and computing the day (siteReadFailed), which fails the same way each
+  // time. A date the capability refuses (metering_invalid_date) can only
+  // mean it worked out today in another zone than the loader, which already
+  // clamped the date, so it is a passing failure too. None is the person's
+  // or the gate's, so the day keeps its picker; if getSiteDay gains another
+  // such failure or renames these, revisit.
+  if (
+    code === "metering_site_devices_unavailable" ||
+    code === "metering_timezone_unavailable" ||
+    code === "metering_invalid_date"
+  )
+    return SITE_DAY_PROBLEMS.unavailable;
   if (code === "metering_site_day_failed") return SITE_DAY_PROBLEMS.dayFailed;
   return null;
 }

@@ -15,7 +15,7 @@ import type {
   DeviceConsumption,
   DiscoveredMeter,
 } from "./types";
-import type { SiteDayOperations } from "./site-operations";
+import type { SiteDayOperations, SiteDayRead } from "./site-operations";
 export type { MeteringProviderName } from "./registry";
 
 export type MeteringScope = {
@@ -88,7 +88,17 @@ export interface MeteringRepository {
     deviceId: string
   ): Promise<{ deviceId: string; microgridId: string; orgId: string } | null>;
   getStoredConnection(microgridId: string): Promise<StoredConnection | null>;
+  /**
+   * The microgrid's stored zone, as stored (not validated); null when the
+   * microgrid has none or is not found. Throws when the read fails, so a
+   * failed read is not mistaken for a microgrid without a zone.
+   */
   getMicrogridTimezone(microgridId: string): Promise<string | null>;
+  /**
+   * The microgrid's devices with their OpenEMS ids. Empty when it has none;
+   * throws when a read fails, so a failed read is not mistaken for a
+   * microgrid without devices.
+   */
   getManagedDevices(microgridId: string): Promise<ManagedDevice[]>;
   /**
    * Ids of this microgrid's devices linked to a tenant as its primary or
@@ -157,7 +167,7 @@ export interface MeteringCapabilityContract {
   recordOpeningRegister(
     input: unknown
   ): Promise<MeteringResult<{ id: string }>>;
-  getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>>;
+  getSiteDay(query: unknown): Promise<MeteringResult<SiteDayRead>>;
   /** Query `{ microgrid_id, start_date, end_date }`; one entry per day, in order. */
   getSiteDays(query: unknown): Promise<MeteringResult<SiteDayOperations[]>>;
 }
