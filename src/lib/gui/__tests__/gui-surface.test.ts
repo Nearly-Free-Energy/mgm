@@ -128,6 +128,8 @@ const LOADER_READS: Readonly<Record<string, readonly string[]>> = {
   BillingCapabilityContract: ["getPeriodSummary", "listTariffs"],
   CommunityManagementCapabilityContract: ["resolveHierarchy"],
   MeteringCapabilityContract: ["getAssignmentHistory", "getConsumption", "getSiteDay", "getSiteDays"],
+  // The metering.edge-status watcher's cached backend read (ADR-006 decision 9), handed out only for a composition.
+  MeteringEdgeStatusCapabilityContract: ["getEdgeStatuses"],
   PaymentsCapabilityContract: ["getReadiness", "listAttention", "listHistory"],
   TenantAppCapabilityContract: ["getHome", "getUsageDay", "getUsageMonth"],
 };
