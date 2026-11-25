@@ -84,6 +84,8 @@ read a stored credential, or to send data to another origin.
    - Through 0.x a minor version may change shapes, and a patch only adds
      optional fields, kinds or values. Every compiled-in interface is
      checked against a change in the same pull request.
+   - 0.2.0 added the required `repeat` on every action (decision 11), the
+     first change of shape since 0.1.0.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -214,6 +216,36 @@ read a stored credential, or to send data to another origin.
      status: the plugin gate's own 409 must never prepare again. The route
      stays the authority and checks the confirmation again on every write.
 
+11. **What a repeat does.** Each action declares `repeat` (RFC #259 § 3),
+   so a client that lost an answer knows whether it may send the write
+   again.
+   - `"safe"`: a second identical send writes nothing. Its answer may
+     differ from the first's (a 404 once a delete has run, a 409 once a
+     create has, a 400 `no_op`, a 200 that says nothing changed), so a
+     client that lost the first answer reads the view rather than trusting
+     the second. Safety is judged right after the first send, with outside
+     state (meter data, a provider's answer) unchanged. A timestamp a route
+     stamps on every write and nothing reads may move; the test lists each
+     such column with its case and its reason.
+   - `"keyed"`: the route takes a repeat key and answers a repeat with the
+     first result. No route takes one yet, and where a key's record is kept
+     is open on #259, so the twice-sent test refuses `"keyed"` until a
+     route takes a key and a case can send it.
+   - `"unsafe"`: a repeat may write twice.
+   - The field is required: `tsc` refuses an action without it, and so does
+     registration. `src/lib/gui/__tests__/repeat.db.test.ts` sends every
+     `"safe"` action twice to its route against a database, as the person
+     it is offered to, and fails if the second send changes a row it reads.
+     A new `"safe"` action gets a case in its plugin's module there.
+   - `gui-surface.test.ts` (check 12) refuses `"unsafe"` on a billing,
+     payments or Pesapal action, unless `REPEAT_KEY_PENDING`
+     (`src/lib/gui/__tests__/repeat/exemptions.ts`) lists it with the issue
+     building its repeat key: an action that failed the twice-sent test
+     declares `"unsafe"` until that key lands.
+   - The field informs a client and changes nothing the host does: the kit
+     never sends a write on its own (decision 10), and the routes decide
+     what each send writes.
+
 ## Consequences
 
 Better:
@@ -250,12 +282,16 @@ Worse, or to watch:
   a helper module that asks it is caught for the reconcile route by its
   database test, which posts with Payments off, and for the other exempt
   routes by review.
-- That each `prepareAgainOn` code is one its route answers (decision 9) is
+- That each `prepareAgainOn` code is one its route answers (decision 10) is
   checked in CI by `gui-surface.test.ts`, which looks for the code written
   in the route file or in a source file under `src/lib`, not when a
   contribution is registered. A code that slipped past CI could only leave
   the host showing the old step again with the route's message, as it does
   for any other refusal.
+- The twice-sent test (decision 11) sends one copy after another and sees
+  only the tables its snapshot reads. Two copies sent at once rest on each
+  route's own locks, and a route that starts writing another table escapes
+  the test until the snapshot reads that table.
 - When this was recorded, the repository held the two contract files and
   their tests, and nothing imported them. The run-time checks in decision 3
   arrive with the code that reads contributions, each with its own tests.
@@ -274,7 +310,9 @@ Worse, or to watch:
 
 - `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
 - `src/lib/gui/host/client/action-host.tsx`,
-  `src/lib/gui/host/server/prepare.ts` (decision 9)
+  `src/lib/gui/host/server/prepare.ts` (decision 10)
+- `src/lib/gui/__tests__/repeat.db.test.ts`, `src/lib/gui/__tests__/repeat/`
+  (decision 11)
 - `src/lib/gui/__tests__/contract-types.test.ts`,
   `src/lib/gui/__tests__/gui-boundary.test.ts`
 - `docs/cordis-runtime.md`; CLAUDE.md, "Cordis runtime"

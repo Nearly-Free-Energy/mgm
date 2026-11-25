@@ -359,6 +359,20 @@ helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
 in `src/lib/runtime/__tests__/route-rules.ts`, shared with
 `route-surface.test.ts`.
 
+Every action declares `repeat`, what a second identical send does (ADR-006
+decision 11): `"safe"` (it writes nothing, though it may answer unlike the
+first), `"keyed"` (the route takes a repeat key) or `"unsafe"` (it may write
+twice). Registration requires the field. `gui-surface.test.ts` (check 12)
+refuses `"unsafe"` on a billing, payments or Pesapal action unless
+`REPEAT_KEY_PENDING` (`src/lib/gui/__tests__/repeat/exemptions.ts`) names the
+issue building its repeat key. `src/lib/gui/__tests__/repeat.db.test.ts` is
+the evidence for each `"safe"`: it sends the action twice to its route
+against a database, as the person it is offered to, and fails if the second
+send changes a row of the tables its snapshot reads, apart from the
+timestamp columns a case lists with its reason. Every `"safe"` action has a
+case there, in its plugin's module under `src/lib/gui/__tests__/repeat/`, and
+the test refuses `"keyed"` until a route takes a key.
+
 A view is about an organization's records unless it says otherwise:
 `scope: "installation"` serves an installation-wide view (no organization),
 and `scope: "tenant"` a view about one unit the caller rents (RFC mgm#197 §
