@@ -281,10 +281,6 @@ describe("parseContribution", () => {
     // Navigation
     ["a nav entry naming a missing view", (c) => (c.nav[0].view = "billing.nope"), ["nav", 0, "view"], '"billing.nope" is not a view in this contribution'],
     ["a legacy entry whose needs miss a segment", (c) => (c.nav[1].needs = []), ["nav", 1, "needs"], "needs must name one kind for each segment of the href"],
-    ["assistant reading of a configure view", (c) => Object.assign(c.nav[0], { group: "configure" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a system view", (c) => Object.assign(c.nav[0], { group: "system" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from system navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a configure legacy href", (c) => Object.assign(c.nav[1], { href: "/microgrids/[id]/billing" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a legacy href with renamed placeholders", (c) => Object.assign(c.nav[1], { href: "/microgrids/[microgridId]/billing" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
     ["a view path another plugin owns", (c) => (c.views[0].path = "/microgrids/[id]/operations"), ["views", 0, "path"], "the catalog gives /microgrids/[id]/operations to metering"],
     ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/tenants"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/tenants to community-management"],
@@ -457,6 +453,31 @@ describe("assistant reading", () => {
         expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
       },
     );
+
+    // A listed view of a plugin whose views may be listed, so the navigation
+    // it is reached from is the only thing that refuses the mark. nav[2] is
+    // metering's configure legacy entry, pointed here at site-day's own path.
+    it.each([
+      ["configure navigation", (c: Draft) => Object.assign(c.nav[0], { group: "configure" }), "configure"],
+      ["system navigation", (c: Draft) => Object.assign(c.nav[0], { group: "system" }), "system"],
+      ["a configure legacy href", (c: Draft) => Object.assign(c.nav[2], { href: "/microgrids/[id]/operations" }), "configure"],
+      [
+        "a configure legacy href with renamed placeholders",
+        (c: Draft) => Object.assign(c.nav[2], { href: "/microgrids/[microgridId]/operations" }),
+        "configure",
+      ],
+    ] as const)("refuses the mark on a listed view reached from %s", (_where, reach, group) => {
+      const error = refusal(
+        (c) => {
+          reach(c);
+          marked(c);
+        },
+        CATALOG,
+        METERING_SURFACE,
+        SITE_DAY,
+      );
+      expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view reached from ${group} navigation cannot be read by an assistant`)]);
+    });
 
     it("refuses the mark on a listed view that takes signals", () => {
       const error = refusal(
