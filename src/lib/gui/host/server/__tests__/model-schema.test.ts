@@ -21,6 +21,7 @@ import type {
   EntityHit,
   EntityRef,
   GuiMeta,
+  HostFailureBody,
   Href,
   Id,
   InitialView,
@@ -56,6 +57,7 @@ import {
   entityHitSchema,
   entityRefSchema,
   guiMetaSchema,
+  hostFailureBodySchema,
   hrefSchema,
   idSchema,
   initialViewSchema,
@@ -140,6 +142,7 @@ describe("model schemas match the contract types", () => {
     expectTypeOf<Same<Out<typeof catalogAvailabilitySchema>, CatalogAvailability>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof catalogEntrySchema>, CatalogEntry>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof actionCatalogSchema>, ActionCatalog>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof hostFailureBodySchema>, HostFailureBody>>().toEqualTypeOf<true>();
     // The check itself tells types apart.
     expectTypeOf<Same<{ a: string }, { a: string; b?: true }>>().toEqualTypeOf<false>();
   });
@@ -532,5 +535,24 @@ describe("the action catalog", () => {
     expect(catalogEntrySchema.safeParse({ ...entry, path: "/microgrids/[id]" }).success).toBe(false);
     expect(catalogEntrySchema.safeParse({ ...entry, path: "/api/billing-periods/../close" }).success).toBe(false);
     expect(catalogEntrySchema.safeParse({ ...entry, plugin: "sms-reminders" }).success).toBe(false);
+  });
+});
+
+describe("a host route's refusal", () => {
+  const refusal: HostFailureBody = { type: "result", ok: false, status: 404, code: "gui_not_found", message: "Not here.", error: "Not here." };
+
+  it("accepts ActionResult's failure with error carrying the message", () => {
+    expect(hostFailureBodySchema.parse(refusal)).toEqual(refusal);
+    expect(hostFailureBodySchema.safeParse({ ...refusal, field: "org" }).success).toBe(true);
+  });
+
+  it("refuses one without error, with other text in it, with a status that is not an error, or with more keys", () => {
+    expect(hostFailureBodySchema.safeParse({ ...refusal, error: undefined }).success).toBe(false);
+    expect(issues(hostFailureBodySchema, { ...refusal, error: "Elsewhere." })).toContainEqual({ code: "custom", path: "error" });
+    expect(hostFailureBodySchema.safeParse({ ...refusal, status: 0, code: "cancelled" }).success).toBe(false);
+    expect(hostFailureBodySchema.safeParse({ ...refusal, status: 200 }).success).toBe(false);
+    expect(issues(hostFailureBodySchema, { ...refusal, detail: "x" })).toContainEqual({ code: "unrecognized_keys", path: "" });
+    // ActionResult's own schema stays without `error`: the kit gives a GUI the failure without it.
+    expect(actionResultSchema.safeParse(refusal).success).toBe(false);
   });
 });

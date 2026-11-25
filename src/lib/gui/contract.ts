@@ -548,8 +548,10 @@ export interface Confirmation {
 }
 
 // ── The described API (RFC #259 § 3): answers to a client that is not a GUI ─
-// GET /api/gui/catalog answers an ActionCatalog. A GUI never receives these:
-// a GUI gets ActionRefs in its view models and ActionSpecs through prepare.
+// GET /api/gui/catalog answers an ActionCatalog, and every GUI host route a
+// refusal with a HostFailureBody. A GUI never receives these: a GUI gets
+// ActionRefs in its view models, ActionSpecs through prepare, and each
+// failure as the ActionResult the kit makes of it.
 
 /**
  * What the host checks before an action can be sent, after A1 on #133.
@@ -616,3 +618,14 @@ export interface ActionCatalog {
   entities: { kind: EntityKind; id: string }[];
   actions: CatalogEntry[];
 }
+/**
+ * What every GUI host route (src/app/api/gui/) answers a refusal with:
+ * ActionResult's failure, with `error` carrying the same text as `message`,
+ * so it also has the `{ error, code }` shape the plugin gate and the action
+ * routes answer with. A client reads `code`, which is stable, and shows
+ * `error`. The kit reads this body and gives a GUI an ActionResult without
+ * `error` (failureOf in host/client/invoke.ts, loadView in
+ * host/client/kit-runtime.tsx); if the kit comes to pass the body on as it
+ * came, a GUI's ActionResult gains `error`, so revisit both types then.
+ */
+export type HostFailureBody = Extract<ActionResult, { ok: false }> & { error: string };

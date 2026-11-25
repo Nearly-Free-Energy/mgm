@@ -36,7 +36,10 @@ read a stored credential, or to send data to another origin.
      It also carries the answers the host's routes give a client that is
      not an interface, such as the CLI, which may import only this file
      (RFC #259 §§ 3-4): the action catalog (`ActionCatalog`, served by
-     `GET /api/gui/catalog`). An interface never receives these. Each has a
+     `GET /api/gui/catalog`) and the refusal every host route answers with
+     (`HostFailureBody`: `ActionResult`'s failure with `error`, the same
+     text as `message`). An interface never receives these: the kit turns a
+     refusal into the `ActionResult` an interface always got. Each has a
      strict schema in `src/lib/gui/host/server/model-schema.ts`, as every
      shape a browser receives does.
    - `src/lib/gui/surface.ts` is server-only. It holds what a capability
@@ -92,9 +95,12 @@ read a stored credential, or to send data to another origin.
      checked against a change in the same pull request.
    - 0.2.0 added the required `repeat` on every action (decision 11), the
      first change of shape since 0.1.0.
-   - 0.2.1 added the action catalog's types (decision 1). They are new
-     answers that no interface receives, so no shape changed and a patch
-     was enough.
+   - 0.2.1 added the action catalog's types and `HostFailureBody`
+     (decision 1). The catalog is a new answer. The refusal body every host
+     route sends gained `error` beside `message`, a key added to an answer
+     whose type was not in the contract before; the kit reads it and gives
+     an interface the `ActionResult` it always did, without `error`. No
+     shape an interface receives changed, so a patch was enough.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.

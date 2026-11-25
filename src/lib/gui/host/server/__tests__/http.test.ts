@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
 
 import { NO_STORE, hostFailure, hostOutcome } from "../http";
+import { hostFailureBodySchema } from "../model-schema";
 
 describe("hostOutcome", () => {
   it("answers a success as uncacheable JSON", async () => {
@@ -30,7 +31,9 @@ describe("hostOutcome", () => {
     const res = hostFailure(401, "gui_unauthenticated", "Sign in to continue.");
     expect(res.status).toBe(401);
     expect(res.headers.get("cache-control")).toBe(NO_STORE);
-    expect(await res.json()).toEqual({
+    const body = await res.json();
+    expect(hostFailureBodySchema.safeParse(body).success).toBe(true);
+    expect(body).toEqual({
       type: "result",
       ok: false,
       status: 401,

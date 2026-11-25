@@ -347,7 +347,8 @@ refused it. The request itself is refused with `gui_unauthenticated` (401),
 `gui_manifest_failed` (500, also when `MGM_GUI` names no usable interface).
 
 Every host route answers a refusal in `ActionResult`'s failure shape with
-`error` beside `message`, carrying the same text (`hostFailure` in
+`error` beside `message`, carrying the same text (`HostFailureBody` in
+`src/lib/gui/contract.ts`, sent by `hostFailure` in
 `src/lib/gui/host/server/http.ts`), so it also has the `{ error, code }`
 shape of the gate and the action routes. A client reads `code`, which is
 stable, and shows `error`.

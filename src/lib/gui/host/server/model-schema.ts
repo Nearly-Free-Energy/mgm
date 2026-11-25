@@ -167,6 +167,16 @@ export const actionSpecSchema = z.strictObject({
   input: jsonSchema,
 });
 
+const actionFailureSchema = z.strictObject({
+  type: z.literal("result"),
+  ok: z.literal(false),
+  // 0 when the person cancelled; otherwise the HTTP status.
+  status: z.int().min(0).max(599),
+  code: z.string().min(1),
+  message: z.string(),
+  field: z.string().optional(),
+});
+
 export const actionResultSchema = z.discriminatedUnion("ok", [
   z.strictObject({
     type: z.literal("result"),
@@ -176,16 +186,13 @@ export const actionResultSchema = z.discriminatedUnion("ok", [
     next: actionRefSchema.optional(),
     signals: z.literal(true).optional(),
   }),
-  z.strictObject({
-    type: z.literal("result"),
-    ok: z.literal(false),
-    // 0 when the person cancelled; otherwise the HTTP status.
-    status: z.int().min(0).max(599),
-    code: z.string().min(1),
-    message: z.string(),
-    field: z.string().optional(),
-  }),
+  actionFailureSchema,
 ]);
+
+/** A GUI host route's refusal: an HTTP error status, and `error` the same text as `message`. */
+export const hostFailureBodySchema = actionFailureSchema
+  .extend({ status: z.int().min(400).max(599), error: z.string() })
+  .refine((b) => b.error === b.message, { message: "error carries the text of message", path: ["error"] });
 
 // ── The five view kinds ─────────────────────────────────────────────────────
 
