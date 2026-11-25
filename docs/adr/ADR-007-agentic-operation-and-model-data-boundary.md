@@ -3,8 +3,9 @@
 ## Status: Proposed
 
 For review by Hillary (arindahills). It records what #133 settled for
-agentic operation through milestone A3, and the decisions recorded on #133
-on 25 November 2026. On that day the A0 owner moved this ADR ahead of A0's
+agentic operation through milestone A3, the decisions recorded on #133
+on 25 November 2026, and what #259, accepted that day, settles for an
+agent client. On that day the A0 owner moved this ADR ahead of A0's
 cases, example answers, fixture set and manual baseline. The cases still
 ratify A3's acceptance, and may amend this ADR when they do.
 
@@ -24,11 +25,7 @@ and no assistant:
 
 - A view may declare `agent: "read"`; nothing else lets an assistant read
   it (`src/lib/gui/surface.ts:166-167`). No registered contribution
-  declares it. The shared test fixture
-  `src/lib/gui/__tests__/fixtures/billing-surface.ts` marks two billing
-  views (`billing.periods` at :179, and `billing.period-review`, which has
-  a billing-period segment, at :191), and the tests of the configure and
-  system refusals depend on that mark.
+  declares it; only a billing test fixture does.
 - Registration refuses the mark on a tenant view
   (`src/lib/gui/host/server/contribution-schema.ts:262-266`; the type says
   `agent?: never`, `surface.ts:194-201`) and on a view reached from
@@ -62,10 +59,11 @@ Whatever this ADR adds must keep these where they are, as #133 does:
 
 ## Decision
 
-Decisions 1 to 5 restate what #133 settled. Decisions 6 to 11 record the
-model data boundary. The items decided on #133 on 25 November 2026 are
-cited as "item N of 25 November" wherever they apply. Where this ADR words
-or proposes something those sources left to it, it says so.
+Decisions 1 to 5 restate what #133 settled, with what #259 adds for an
+agent client. Decisions 6 to 11 record the model data boundary. The items
+decided on #133 on 25 November 2026 are cited as "item N of 25 November".
+Where this ADR words or proposes something #133 or #259 left to it, it
+says so.
 
 1. **Through A3 an agent acts only as the signed-in operator.**
    - It has that person's access and nothing more, and never runs on the
@@ -75,6 +73,22 @@ or proposes something those sources left to it, it says so.
      records never hold a user token or request context.
    - Through A3 there is no background worker, queue or delegated
      identity, and process-local Cordis events are notifications only.
+   - An agent client (#259 § 2) is not a delegated identity: it is the
+     signed-in person, with no worker and no service role. MGM's routes
+     refuse it everything but the catalog and the view route for marked
+     views (#259 § 2).
+   - Its token reaches the database as `mgm_agent`, a select-only role of
+     its own (#259 decision 12) that the token hook sets (shown by #268).
+     The role is `NOLOGIN` and granted to `authenticator`, never made a
+     member of `authenticated`, so it reads only what grants and policies
+     give it. It has no write grant on any table, so a write function it
+     can call through `PUBLIC` is refused, and no `EXECUTE` on a definer
+     function unless one is granted; a new table is out of its reach until
+     a migration grants it (#274). A table with columns outside decision
+     6's boundary is granted to it by column, so the database holds that
+     part of the boundary beneath MGM's checks.
+   - If the role is not built, #259 § 5 waits and the question returns to
+     #259 § 2, so no agent client reads anything.
    - Unattended work needs its own reviewed design for worker identity,
      queueing and settlement before it is built. That review starts from
      two fixed points: a new role value with its own row-level-security
@@ -108,29 +122,43 @@ or proposes something those sources left to it, it says so.
      checks in SQL what a direct call over PostgREST would otherwise skip:
      the caller's access through `user_can_access_microgrid`, the
      operations plugin's state through `mgm_plugin_enabled_for_org`, the
-     operation's state, and the content's shape and size. These functions
-     are the operations capability's boundary in the database: a direct
-     call enters the capability there, under the same access and gate
-     checks the composer applies, so the rule that every mutation enters
-     its owning capability holds for both ways in. One write is an
-     exception, as #255 sets out (E1, O3, § 8). While Q6 (retention by
-     delete on write) stands as proposed, create also runs the retention
-     pass. That pass ends and deletes expired operations across all
-     organizations. It skips the caller-access and operation-state checks,
-     records no actor and returns nothing about what it changed. It is the
-     only write that touches operations the caller may not read. If Q6
-     settles on another mechanism, this exception changes with it.
+     operation's state, and the content's shape and size. So a direct call
+     enters the capability under the composer's checks.
+   - One write is an exception, as #255 sets out (E1, O3, § 8). While Q6
+     (retention by delete on write) stands as proposed, create also runs
+     the retention pass, which ends and deletes expired operations across
+     all organizations. It skips the caller-access and operation-state
+     checks, records no actor, returns nothing about what it changed, and
+     is the only write that touches operations the caller may not read.
+     Proposed here: each call deletes at most a fixed number of rows, so no
+     caller pays for a backlog, and the function pins `search_path =
+     public, pg_temp`. If Q6 settles on another mechanism, this exception
+     changes with it.
    - Proposed here, as #255 § 10 asks, for the reviewer: the tables' policy
-     shape is **read-only to the API roles**. Each has one `FOR SELECT`
-     policy for `authenticated` that calls `user_can_access_microgrid` with
-     the row's microgrid id, and no INSERT, UPDATE or DELETE policy; the
-     migration revokes INSERT, UPDATE and DELETE from `authenticated`; the
-     write functions are `SECURITY DEFINER`, follow CLAUDE.md's grant
-     convention, and decide by the caller only through `auth.uid()` and
-     the helpers. No helper body changes. This is a third shape beside the
-     `FOR ALL` staff policies and the `FOR SELECT` tenant policies, so
-     CLAUDE.md names it, and its policy counts change, in the commit that
-     adds the migration.
+     shape is **read-only to the API roles**, with each grant naming its
+     role:
+     - Each table has one `FOR SELECT` policy `TO authenticated, mgm_agent`
+       that calls `user_can_access_microgrid` with the row's microgrid id,
+       and no INSERT, UPDATE or DELETE policy.
+     - `authenticated` is granted SELECT and has INSERT, UPDATE and DELETE
+       revoked. `mgm_agent` is granted SELECT by column, without the
+       capturer column or any other staff user id (decision 6), and
+       `EXECUTE` on `user_can_access_microgrid`, the one helper the policy
+       calls; the helpers that one calls run as their owner.
+     - The write functions are `SECURITY DEFINER`. They revoke `EXECUTE`
+       from `PUBLIC` and `anon` as CLAUDE.md requires, grant it to
+       `authenticated`, and revoke it from `service_role` explicitly unless
+       A2 gives the structural reason to keep it. `mgm_agent` is not a
+       member of `authenticated`, so it gets none. They decide by the
+       caller only through `auth.uid()` and the helpers.
+     - No operations table joins the `supabase_realtime` publication
+       until what `mgm_agent` may receive from it is decided (#268).
+     - No helper body changes, and CLAUDE.md names this third policy shape
+       beside the `FOR ALL` staff policies and the `FOR SELECT` tenant
+       policies.
+     - If `mgm_agent` is not built (decision 1), the policies are
+       `TO authenticated` alone, and no restrictive policy keyed on the
+       client's id takes the role's place (#259 decision 12).
    - Left to A2, as #255 leaves them: whether the service role may call
      the write functions (with the structural reason CLAUDE.md asks for),
      whether the operations plugin is off by default, and how the
@@ -154,7 +182,11 @@ or proposes something those sources left to it, it says so.
      (ADR-006 decision 10) stay (#133): an assistant may propose only an
      action whose `humanOnly` is false, a proposal is not authority to
      execute, and autonomous writes need their own reviewed contract. No
-     GUI flag enables them.
+     GUI flag enables them. Since #259 § 4 (accepted 25 November 2026, and
+     #133 edited to match), "human-only" means refused to an agent client,
+     by the client's kind at the server and the database rather than by a
+     prompt, so a person may run such an action from the CLI as from the
+     browser.
 5. **The assistant is an optional plugin, off until an operator turns it
    on, and each of its steps is gated like a write.**
    - It is a non-core plugin. Its model provider registers only when the
@@ -220,25 +252,24 @@ or proposes something those sources left to it, it says so.
    out. Edge and component ids come from the database or a vendor, so they
    stay untrusted text in model context (decision 5) even when their shape
    is checked.
-7. **Three checks hold the boundary, all in place before the first view or
-   watcher is marked.**
+7. **Three checks in MGM hold the boundary, all in place before the first
+   view or watcher is marked.** `mgm_agent`'s grants hold it beneath them
+   at the database (decision 1).
    - **The contribution check.** Registration refuses the mark, beyond what
      it refuses today, on any view or watcher of the billing and payments
      plugins (item 3 of 25 November for watchers), on a view with a tenant
-     or device segment in its path, and on a view that takes signals.
-     Today's home page is such a view and carries a billing tile; signals
-     reach an assistant through marked watchers instead (decision 8). It
+     or device segment in its path, and on a view that takes signals. It
      also refuses the mark on a view or watcher that is not on the
-     code-owned list, and refuses a marked view whose declaration differs
-     from its list entry (decision 8). The check reads only the
-     contribution, the catalog and that list, so it stays deterministic
-     (ADR-006 decision 3).
-   - **The read interface A1 adds.** It serves only marked views, embedded
-     and attached views included, and refuses a model that carries a
-     reference to a tenant, a billing period or a payment, except that a
-     tenant view served to an agent client signed in as that tenant may
-     carry a reference to that tenant (decision 10). An unmarked
-     view attached to or embedded in a marked view is left out of what an
+     code-owned list, on a marked view whose declaration differs from its
+     list entry, and on a view that declares a key prefix (decision 8).
+     The check reads only the contribution, the catalog and that list, so
+     it stays deterministic (ADR-006 decision 3).
+   - **The read interface A1 adds.** It serves only marked views, and that
+     applies to embedded and attached views too. It refuses a model that
+     carries a reference to a tenant, a billing period or a payment, except
+     that a tenant view served to an agent client signed in as that tenant
+     may carry a reference to that tenant (decision 10). An unmarked view
+     attached to or embedded in a marked view is left out of what an
      assistant reads, with a note that a section was withheld, and the
      marked view is still served (item 2 of 25 November). The same holds
      for signals: only a marked watcher's signals reach an assistant.
@@ -249,21 +280,36 @@ or proposes something those sources left to it, it says so.
    - A watcher takes the same `agent: "read"` mark as a view (item 3 of 25
      November).
    - Confirmed by tushabe on 25 November 2026: the list is one constant
-     under `src/lib/gui/`, which is code-owned (ADR-006 decision 7), holding the ids of marked views and
-     marked watchers. It starts empty. Each entry is added in its own pull
-     request, reviewed by a code owner against decisions 6 and 7, and
-     marks the view or watcher in the same commit. Removing an entry
-     removes the mark.
+     under `src/lib/gui/`, which is code-owned (ADR-006 decision 7),
+     holding the ids of marked views and marked watchers. It starts empty.
+     Each entry is added in its own pull request, reviewed by a code owner
+     against decisions 6 and 7, and marks the view or watcher in the same
+     commit. Removing an entry removes the mark.
    - Proposed here: each view entry pins the view's declaration: its
-     `declares.keys`, its `declares.prefixes`, its `ext.schema` id, and
-     the key paths of its `ext.zod` schema (found by the same structural
-     walk `strictProblems` makes in `contribution-schema.ts`). The
-     contribution check refuses a marked view whose declaration differs
-     from its entry, so widening a marked view needs an edit under
-     `src/lib/gui/`, reviewed by a code owner against decisions 6 and 7,
-     like a new entry. A watcher entry pins only its id: a signal's fields
-     are fixed by the contract (`SignalOut`, `src/lib/gui/surface.ts`),
-     which is already code-owned.
+     `declares.keys`, its `ext.schema` id, and the key paths of its
+     `ext.zod` schema (found by the same structural walk `strictProblems`
+     makes in `contribution-schema.ts`). The contribution check refuses a
+     marked view whose declaration differs from its entry, so widening a
+     marked view needs an edit under `src/lib/gui/`, reviewed like a new
+     entry. The pin lands with the list's first entry at the latest.
+   - A listed view declares every key by name. The contribution check
+     refuses the mark on a view that declares a key prefix (#284), since a
+     key added under a prefix would reach a model with no edit under
+     `src/lib/gui/`.
+   - A watcher entry pins only its id: a signal's fields are fixed by the
+     contract (`SignalOut`, `src/lib/gui/surface.ts`), which is already
+     code-owned, and its facts are values with no keys of their own.
+   - Each entry's pull request adds the view's or watcher's surface and
+     model files to `.github/CODEOWNERS`, so later edits to what they emit
+     get code-owner review. That is still a social contract (#30), but it
+     covers what the pin cannot see.
+   - Before a listed view is served to an agent client, its loader reads
+     only columns granted to `mgm_agent` (decision 1). Both listed views
+     that exist today select `devices.name`
+     (`src/lib/metering/infrastructure/supabase-repository.ts:162`,
+     `src/lib/tenant-app/infrastructure/supabase-repository.ts:85`), which
+     the role is never granted, so their entries' pull requests change
+     those reads.
    - The first list, approved here for those pull requests:
 
      | Entry | Kind | Condition |
@@ -295,33 +341,50 @@ or proposes something those sources left to it, it says so.
      Revisit before evidence is used as proof against its own capturer, or
      before anything captures evidence without a signed-in person; either
      needs a server-held attestation (#255 § 12).
-10. **Tenant views are listed on a condition** (item 6 of 25 November).
-    `tenant.home`, `tenant.usage-month` and `tenant.usage-day` are on the
-    first list only if a code owner accepts #259 § 5, which makes a tenant
-    view readable only by an agent client signed in as that tenant. Their
-    unit label or the tenant's own name then reaches only that tenant's
-    own assistant, never a staff one. They are marked in code when #259's
-    tenant phase starts, in one pull request that changes, together: the
-    tenant rule in `contribution-schema.ts` and its test, `surface.ts`, the
-    read interface's tenant-reference refusal (decision 7, the second
-    check) and its test, `tenant.home`'s meter labels, the tenant app's
-    surface comment and CLAUDE.md. The same change edits #133's A0
-    sentences that keep a tenant's name, contact details and payment data
-    from any model and refuse a model carrying a tenant, billing-period or
-    payment reference, as item 5 of 25 November did for the plugin
-    invariant.
-    - The meter labels: before `tenant.home` is marked, what it gives the
-      read interface labels each meter by its component id and type, as
-      decision 6 requires, not by `devices.name`
-      (`src/lib/tenant-app/surface/home-model.ts:65`). Item 6's exception
-      covers the unit label and the tenant's own name only, and a shared
-      meter can be named after another unit's tenant. That pull request
-      chooses how: relabel the meter fields, or withhold the label from
-      what the read interface returns. Its test is that no `devices.name`
-      reaches the read interface's output.
-    - If § 5 is not accepted, none of these edits is made, the views come
-      off the list, and today's rule (no tenant view is ever marked)
-      stands.
+10. **Tenant views are on the first list** (item 6 of 25 November).
+    arindahills accepted #259 as code owner on 25 November 2026, § 4 and
+    § 5 included
+    ([review](https://github.com/Nearly-Free-Energy/mgm/issues/259#issuecomment-7153527024)),
+    and tushabe added two sentences to #133 to match that day
+    ([comment](https://github.com/Nearly-Free-Energy/mgm/issues/133#issuecomment-7166783972)).
+    A tenant view is readable only by an agent client signed in as that
+    tenant, so its unit label or the tenant's own name reaches only that
+    tenant's own assistant, never a staff one. **Nothing is marked until
+    #259's tenant-phase pull request (D2) lands.** Besides the contract
+    rule, CLAUDE.md and the read interface's tenant-reference refusal
+    (decision 7), it does the following.
+    - Meter labels: what `tenant.home` gives the read interface labels each
+      meter by its component id and type, never by `devices.name`
+      (`src/lib/tenant-app/surface/home-model.ts:65`), and its loader stops
+      selecting that column for an agent client (decision 8). Item 6's
+      exception covers the unit label and the tenant's own name only, and a
+      shared meter can be named after another unit's tenant. Its test is
+      that no `devices.name` reaches the read interface's output.
+    - Meter keys: `tenant.home` declares its meters under the prefix
+      `meter.` (`src/lib/tenant-app/surface.ts:78`), which decision 8
+      refuses on a listed view. D2 gives the meters fixed keys or takes them
+      out of the view, and removes what #284 keeps for tenant views until
+      then: the prefix rule's tenant exemption and the tenant app's
+      `"refused"` in `ASSISTANT_READING`.
+    - Policies and grants: a copy of each of the three tenant policies
+      `TO mgm_agent`, the grants the tenant views' loaders need, and
+      `EXECUTE` for the role on `user_can_access_tenant` and
+      `user_is_tenant_of_device`.
+    - Tenant names at the database: the staff policy on `tenants` names no
+      role, so once `mgm_agent` may read any column of `tenants`, a staff
+      member's assistant could read every tenant's name in the
+      organization (#268). Whichever pull request first grants `mgm_agent`
+      anything on `tenants`, #274 or D2, adds a `RESTRICTIVE` policy
+      `TO mgm_agent` on `tenants` that calls `user_can_access_tenant`, with
+      a database test that a staff member's assistant reads no tenant
+      names. Unlike the fix #268 tested, it leaves `tenant_devices`
+      unrestricted: `metering.site-day` reads it with the caller's client
+      to find house meters
+      (`src/lib/metering/infrastructure/supabase-repository.ts:205`), and
+      its rows carry ids and dates, no names. A second test shows that a
+      staff member's assistant still gets site-day's house meters. That
+      pull request adds one policy, edits none, and updates CLAUDE.md's
+      policy section.
 11. **A mark grants nothing.** It only lets an assistant read what the
     signed-in person could already read there: the view's loader, the
     plugin gate, the composers and row-level security still decide that,
@@ -333,17 +396,9 @@ or proposes something those sources left to it, it says so.
   view, its scope, and the time-zone notice) is settled by decisions 8 and
   9. Q6 (retention by delete on write) and Q7 (cascade on microgrid
   deletion) await the second code owner's answer on #255.
-- #255 § 8 reads Supabase's free-plan size limit in two ways and takes the
-  stricter one. Both readings are checked again before this ADR is
-  accepted.
 - How the read interface recognises a tenant, billing period or payment
   reference (entity references, links, or both, and which core kinds) is
   defined by the A1 pull request that builds it, under code-owner review.
-- #259 § 4 proposes rewording what "human-only" means once a terminal can
-  run every action. This ADR does not decide it; until a code owner
-  accepts it, #133's wording stands.
-- The cases, example answers, fixture set and manual baseline come after
-  this ADR. Ratifying A3's acceptance against them may amend it.
 
 ## Consequences
 
@@ -352,9 +407,6 @@ Better:
 - An assistant reads the same views a person sees, through the same host
   checks, so it gains no read path a person lacks, and the data it may see
   is a short, reviewed list rather than whatever a loader happens to emit.
-- An organization decides whether its data goes to a model provider;
-  installing a model credential changes nothing until an operator turns
-  the assistant on.
 - A marked view keeps working when a section attached to it is withheld,
   so one billing section does not keep `metering.site-day` from an
   assistant.
@@ -364,83 +416,21 @@ Better:
 Worse, or to watch:
 
 - Coupling to view shapes: a change to a marked view's model changes what
-  a model sees. Widening a marked view's declaration needs a code-owned
-  edit, because the contribution check compares it with the view's list
-  entry (decision 8). Three things the pin cannot see are caught only by
-  review, in paths that are not code-owned (`src/lib/metering/`,
-  `src/lib/tenant-app/`): new text in a key already declared, a new key
-  under a declared prefix (`tenant.home` declares one), and the text a
-  marked watcher writes into its signals. Give a listed view a prefix only
-  where every key under it is the same kind of value. If a marked view's
-  loader starts filling an existing key from a different column, revisit
-  its entry. An entry's pull request may also add the view's or watcher's
-  surface and model files to `.github/CODEOWNERS`, so edits to their
-  content get code-owner review too; that is still a social contract
-  (#30), but it covers what the pin cannot.
-- The boundary rests on three checks, two of them code (registration and
-  the read interface) and one review. Text typed into a field of a marked
-  view is caught only by review.
+  a model sees. Review alone catches new text in a declared key and the
+  text a marked watcher writes into its signals (decision 8). If a marked
+  view's loader starts filling an existing key from a different column,
+  revisit its entry.
 - Decision 10 conflicts with today's code (`surface.ts:194-201`,
   `contribution-schema.ts:265`, `src/lib/tenant-app/surface.ts:19-21`) and
-  with CLAUDE.md's tenant-view rule until #259 § 5 is accepted and its pull
-  request lands. Until then the code wins.
-- `tenant.home` labels each meter with `devices.name` today
-  (`src/lib/tenant-app/surface/home-model.ts:65`). Marking it under
-  decision 10 first means changing those labels, or withholding them from
-  the read interface. The meter name a tenant sees in the GUI may then
-  differ from what their assistant is given. If a tenant view is ever
-  readable by anyone but its tenant, revisit decisions 6 and 10.
+  with CLAUDE.md's tenant-view rule until #259's tenant-phase pull request
+  (D2) lands. Until then the code wins.
+- The meter name a tenant sees in the GUI may differ from what their
+  assistant is given (decision 10). If a tenant view is ever readable by
+  anyone but its tenant, revisit decisions 6 and 10.
 - The investigation view's path has a segment of a plugin's own kind, and
   catalog pages take only core kinds today (`bundled.ts:61-72`); every
   microgrid page is spelled `/microgrids/[id]/…`. Its catalog entry (A3's,
   #255 § 12) needs both settled, under code-owner review.
-
-What A1 builds first, as ordinary pull requests that need no further
-decision here:
-
-- The contribution check of decision 7: refuse the mark on billing and
-  payments views and watchers, on tenant and device segments and on views
-  that take signals; add the mark to watchers; add the empty, code-owned
-  list. These paths are code-owned. The declaration pin of decision 8
-  lands with the list or, at the latest, with its first entry. The pull
-  request also takes the mark off the billing fixture's views and moves
-  the configure and system refusal cases
-  (`src/lib/gui/host/server/__tests__/contribution-schema.test.ts:275-278`)
-  onto a non-billing test contribution whose view is on the list (or the
-  list's test seam). Otherwise the fixture's own acceptance test (:82-86)
-  and the suites that register the fixture fail, and those four cases
-  lose their subject.
-- `metering.site-day`'s failure reasons tell an unsupported provider from
-  an unconfigured one. Metering's codes do not do that today. A provider
-  that cannot serve site samples (`src/lib/metering/capability.ts:633-639`),
-  one that cannot be selected or resolved (`:612-630`), and a microgrid
-  with no OpenEMS configuration (the provider's own failure, passed
-  through `fromMeteringError` at `:214-224`) all answer
-  `METERING_CONFIGURATION` with status 503, and
-  `src/lib/metering/__tests__/capability-site-day.test.ts:368-384` and
-  `:1083-1086` pin that shared shape. So the pull request first gives the
-  unsupported case its own code in the capability (`src/lib/metering/` is
-  not code-owned). Then `siteDayProblem`
-  (`src/lib/metering/surface/site-day-model.ts:115-133`) keeps each of
-  metering's codes instead of merging them: today :119 sends every non-409
-  `METERING_CONFIGURATION` to `noConnection`, and :121 sends every other
-  `METERING_*` code to `unavailable`. This closes one of the two gaps the
-  A0 status map records against A1's exit criterion that unavailable,
-  disabled, stale and unsupported outcomes are told apart: on
-  `metering.site-day` an unsupported provider reads as unconfigured. The
-  other gap remains, since `metering.site-day` declares no staleness (no
-  `live`), which A1 adds separately. The device-query fix below keeps a
-  failed read from appearing as no devices.
-- The two metering reads #255 § 11 changes: a failed device query is
-  refused rather than read as no devices; a failed time-zone read is
-  refused, while a missing or invalid stored zone still falls back to UTC
-  and `openSiteQuery` reports that it did
-  (`src/lib/metering/infrastructure/supabase-repository.ts:144-181`,
-  `capability.ts:585-586`).
-
-When this was recorded, no view or watcher was marked, no assistant or
-operations plugin existed, and none of the checks in decision 7 beyond
-today's two refusals was built.
 
 ## Alternatives considered
 
@@ -457,9 +447,6 @@ today's two refusals was built.
 - **The assistant on wherever a model credential is set.** Refused (item 5
   of 25 November): the credential is the installation's, the data is each
   organization's.
-- **Device names in model context.** Refused: a meter may be named after
-  the tenant whose primary meter it is, and a shared meter after another
-  unit's tenant, so this holds in tenant views too.
 - **Server-held attestation of evidence now.** Deferred (item 7 of 25
   November): it needs an owner, a runbook entry and a reconciliation with
   "nothing on the service role".
@@ -472,7 +459,9 @@ today's two refusals was built.
   (issuecomment-7149087376).
 - #255, `docs/investigation-evidence.md` (E1, O3; §§ 2, 3, 4, 5, 8, 10,
   11, 12, 13).
-- #259 §§ 2, 4 and 5.
+- #259 §§ 2, 4 and 5, and decision 12; arindahills's acceptance
+  (issuecomment-7153527024); #268's result (issuecomment-7168074158).
+- #263, #264, #274 and #284.
 - ADR-001; ADR-006 (decisions 3, 7, 8, 9 and 10).
 - `src/lib/gui/surface.ts`, `src/lib/gui/host/server/contribution-schema.ts`,
   `src/lib/gui/host/server/view.ts`, `src/lib/gui/host/server/signals.ts`,
