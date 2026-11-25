@@ -125,7 +125,8 @@ export const DESCRIBING_ISSUES = {
 /**
  * Why no action names a write route. `permanent`: the route is not a
  * person's action, and its reason says why and what would make that wrong
- * ("Wrong once …"). `not-yet-described`: the issue that will describe it.
+ * ("Wrong once …", which described-writes.test.ts requires).
+ * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
   | { kind: "permanent"; reason: string }

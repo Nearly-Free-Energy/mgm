@@ -17,7 +17,8 @@
  *
  * It also refuses an entry an action now names, an entry whose handler is
  * gone, an entry not keyed as `exemptionKey` spells it, a permanent entry
- * with no reason, a not-yet-described entry whose issue does not list the
+ * whose reason is blank or does not say what would make it wrong
+ * ("Wrong once …"), a not-yet-described entry whose issue does not list the
  * route's owner, and an issue no entry names. An entry may name a handler
  * that is not released yet, so releasing a route decides nothing new when
  * its entry is already there.
@@ -86,6 +87,10 @@ const filled = (route: string) => route.replace(/\[[^\]]+\]/g, "0");
 /** `METHOD /api/route` of a write method. */
 const KEY_FORM = /^([A-Z]+) (\/api(?:\/[^\s/]+)+)$/;
 
+/** A permanent reason names what would make it wrong, so a reader knows what to check. */
+const WRONG_ONCE = /\bWrong once\b/;
+const WRONG_ONCE_PROBLEM = 'a permanent entry\'s reason says what would make it wrong ("Wrong once …")';
+
 function coverageProblems(f: Facts): string[] {
   const problems: string[] = [];
   const handlers = new Map(f.handlers.map((handler) => [handler.key, handler]));
@@ -119,6 +124,7 @@ function coverageProblems(f: Facts): string[] {
     }
     if (entry.kind === "permanent") {
       if (!entry.reason?.trim()) problems.push(`${key}: a permanent entry needs its reason`);
+      else if (!WRONG_ONCE.test(entry.reason)) problems.push(`${key}: ${WRONG_ONCE_PROBLEM}`);
     } else if (entry.kind === "not-yet-described") {
       const owner = f.owner(handler.route) ?? "no owner";
       const plugins = entry.issue === undefined ? undefined : issues.get(entry.issue);
@@ -278,6 +284,9 @@ describe("the described-writes guard", () => {
     ]);
     expect(coverageProblems(facts({ undescribed: { "POST /api/things": { kind: "exempt", reason: "Because." } }, released: () => false })))
       .toEqual(['POST /api/things: kind "exempt" is neither "permanent" nor "not-yet-described"']);
+    // A permanent reason says what would make it wrong.
+    expect(coverageProblems(facts({ undescribed: { "POST /api/things": { kind: "permanent", reason: "Not a person's action." } }, released: () => false })))
+      .toEqual([`POST /api/things: ${WRONG_ONCE_PROBLEM}`]);
   });
 
   it("finds a write handler in every export form, and only write handlers", () => {
