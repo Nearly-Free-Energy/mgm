@@ -15,6 +15,7 @@ import "server-only";
 import type { Ceremony } from "@/lib/gui/contract";
 import type { Loaded, SurfaceRequest } from "@/lib/gui/surface";
 import { countEntityDescendants } from "@/lib/entity-descendants";
+import { CONNECTION_DRAFT_PERIOD_REFUSAL, EDGE_UNNAMED_REFUSAL, connectionClosedPeriodsWarning } from "../copy";
 
 type Refusal = Extract<Loaded<never>, { ok: false }>;
 
@@ -33,13 +34,8 @@ export const RECORD_OPENING_REGISTER_ACTION = {
 export const SAVE_CONNECTION_REFUSALS = {
   notFound: { ok: false, status: 404, message: "This microgrid could not be found." },
   unavailable: { ok: false, status: 503, message: "Could not check this microgrid's billing periods right now. Try again shortly." },
-  // The route's own copy for its hard 409 (PUT /api/microgrids/[id]/openems-backend, branch (a)).
-  draft: {
-    ok: false,
-    status: 409,
-    message:
-      "Close or delete the draft period first. Changing the OpenEMS backend requires rediscovering devices and would invalidate readings from the current period.",
-  },
+  // The route's hard 409 (PUT /api/microgrids/[id]/openems-backend, branch (a)), from ../copy.
+  draft: { ok: false, status: 409, message: CONNECTION_DRAFT_PERIOD_REFUSAL },
 } as const satisfies Record<string, Refusal>;
 
 /** What the save does, in the ceremony's statement. */
@@ -88,13 +84,8 @@ export async function prepareSaveConnection(
         { label: "Microgrid", value: req.fmt.text(name) },
         { label: "Backend saved now", value: req.fmt.text(microgrid.ems_backend_url ?? "None") },
       ],
-      // The route's own warning for branch (b).
-      warnings:
-        closed > 0
-          ? [
-              `This microgrid has ${closed} closed billing period${closed === 1 ? "" : "s"}. Changing the OpenEMS backend may affect historical invoice verification if edge IDs differ after rediscovery. Type the microgrid name to confirm.`,
-            ]
-          : [],
+      // The route's 409 for branch (b), from ../copy.
+      warnings: closed > 0 ? [connectionClosedPeriodsWarning(closed)] : [],
       acknowledgements: [],
       ...(closed > 0 ? { typed: name } : {}),
     },
@@ -104,8 +95,8 @@ export async function prepareSaveConnection(
 export const DELETE_EDGE_REFUSALS = {
   notFound: { ok: false, status: 404, message: "Edge not found." },
   unavailable: { ok: false, status: 503, message: "Could not load this edge right now. Try again shortly." },
-  // The route's own copy for an edge with no name to type.
-  unnamed: { ok: false, status: 409, message: "Unnamed entity cannot be typed-to-confirm." },
+  // The route's 409 for an edge with no name to type, from ../copy.
+  unnamed: { ok: false, status: 409, message: EDGE_UNNAMED_REFUSAL },
 } as const satisfies Record<string, Refusal>;
 
 /**

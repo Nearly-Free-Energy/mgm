@@ -16,6 +16,7 @@ import {
   type EntityDeleteLogPayload,
 } from "@/lib/entity-deletion/shared";
 import { DeleteEdgeBody, EditEdgeBody } from "@/lib/metering/schemas";
+import { EDGE_UNNAMED_REFUSAL } from "@/lib/metering/copy";
 import { parseJsonBody } from "@/lib/validation/parse-body";
 
 const UUID_RE =
@@ -223,10 +224,7 @@ export async function DELETE(
   }
 
   if (!edge.name || !edge.name.trim()) {
-    return NextResponse.json(
-      errorBody("Unnamed entity cannot be typed-to-confirm."),
-      { status: 409 }
-    );
+    return NextResponse.json(errorBody(EDGE_UNNAMED_REFUSAL), { status: 409 });
   }
 
   if (!confirmation && !parsed.empty) {

@@ -15,6 +15,7 @@ import { validateBackendUrl } from "@/lib/openems/backend-url";
 import { scrubSecretValues } from "@/lib/logging/scrub-secrets";
 import { listOpenEmsEdges } from "@/lib/openems/edge-discovery";
 import { SaveConnectionBody } from "@/lib/metering/schemas";
+import { CONNECTION_DRAFT_PERIOD_REFUSAL, connectionClosedPeriodsWarning } from "@/lib/metering/copy";
 import { parseJsonBody } from "@/lib/validation/parse-body";
 
 // The four stored OpenEMS credentials, the same columns the guard trigger
@@ -492,8 +493,7 @@ export async function PUT(
     // Branch (a) — hard 409.
     return NextResponse.json(
       {
-        error:
-          "Close or delete the draft period first. Changing the OpenEMS backend requires rediscovering devices and would invalidate readings from the current period.",
+        error: CONNECTION_DRAFT_PERIOD_REFUSAL,
         draft_count: draftCount,
         closed_count: closedCount,
       },
@@ -515,7 +515,7 @@ export async function PUT(
     if (confirmedName === undefined) {
       return NextResponse.json(
         {
-          error: `This microgrid has ${closedCount} closed billing period${closedCount === 1 ? "" : "s"}. Changing the OpenEMS backend may affect historical invoice verification if edge IDs differ after rediscovery. Type the microgrid name to confirm.`,
+          error: connectionClosedPeriodsWarning(closedCount),
           // save-connection's prepareAgainOn: the host prepares again and
           // shows the typed step, as for a period closed since prepare.
           code: "metering_connection_name_required",
