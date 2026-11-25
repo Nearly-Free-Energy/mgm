@@ -29,7 +29,8 @@
  * exported in a form it does not read.
  *
  * Scope: route files under src/app/api, and only their write methods,
- * because an action is never a GET (`WriteMethod` in src/lib/gui/surface.ts).
+ * because an action is never a GET (`ActionDef["method"]` in
+ * src/lib/gui/surface.ts).
  * `POST /payment/callback` (src/app/payment/callback/route.ts) is outside
  * src/app/api and only renders a page. Revisit if actions gain GET, if a
  * route file outside src/app/api starts writing, or if released-routes.ts
