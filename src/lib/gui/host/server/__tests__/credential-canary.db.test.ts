@@ -519,9 +519,10 @@ describe.skipIf(shouldSkip())("credential canary", () => {
       expect(scanAll(results)).toThrow(basic);
     });
 
+    // A plugin's own kind, which the canary never seeds, so this holds whatever core kinds it comes to seed.
     it("refuses a view whose path names a kind with no seeded row", async () => {
-      const fixture = surface([view("acme.tariff", "/tariffs/[id]", { id: "rateSchedule" }, () => ok("Battery"))]);
-      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "rateSchedule"');
+      const fixture = surface([view("acme.widgets", "/widgets/[id]", { id: "acme.widget" }, () => ok("Battery"))]);
+      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "acme.widget"');
     });
 
     it("refuses a view whose loader did not run", async () => {
