@@ -228,17 +228,22 @@ beforeAll(async () => {
       [
         attempt(HELD, BILL_HELD, { status: "needs_reconciliation", provider_tracking_id: "trk-signals", failure_code: "balance_mismatch" }),
         attempt(FAILED, BILL_FAILED, { status: "failed", failure_code: "provider_failed", failure_message: "canary-provider-message" }),
-        // Two hours back: inside the watcher's 24 hours, and older than FAILED's updated_at (Postgres now()),
-        // so of the two undated warnings payments.failed is the newer whichever clock runs ahead.
-        ...UNSUBMITTED.map((id) =>
-          attempt(id, BILL_FAILED, {
-            status: "failed",
-            failure_code: "checkout_not_submitted",
-            failure_message: "canary-not-submitted-message",
-            updated_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
-          }),
-        ),
       ],
+    ],
+    // A separate insert: a multi-row insert sends the union of its rows' keys, so HELD and FAILED
+    // would get updated_at null. Two hours back: inside the watcher's 24 hours, and older than
+    // FAILED's updated_at (Postgres now()), so of the two undated warnings payments.failed is the
+    // newer whichever clock runs ahead.
+    [
+      "payment_attempts",
+      UNSUBMITTED.map((id) =>
+        attempt(id, BILL_FAILED, {
+          status: "failed",
+          failure_code: "checkout_not_submitted",
+          failure_message: "canary-not-submitted-message",
+          updated_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+        }),
+      ),
     ],
   ];
   for (const [table, value] of rows) {

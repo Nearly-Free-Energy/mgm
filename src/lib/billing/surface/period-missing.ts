@@ -34,8 +34,15 @@ import { buildPeriodMissingSignals, expectedMonth, periodTouches, type MissingMi
 
 /** The most microgrids one organization may have for this watcher to check them all. */
 const MICROGRID_ROWS = 500;
-/** The most periods with a day in last month the organization may have for one read. */
-const PERIOD_ROWS = 2_000;
+/**
+ * The most periods with a day in last month the organization may have for one
+ * read. Below PostgREST's row cap (`max_rows = 1000` in supabase/config.toml,
+ * as on the hosted project), which would cut a longer answer short without an
+ * error: a read of PERIOD_ROWS + 1 rows must be able to come back whole, so a
+ * full one is reported as unchecked rather than taken for missing periods. If
+ * that cap is lowered, lower this below it.
+ */
+const PERIOD_ROWS = 999;
 /** Microgrids whose tenants are read at once. */
 const TENANT_READS_AT_ONCE = 10;
 /**

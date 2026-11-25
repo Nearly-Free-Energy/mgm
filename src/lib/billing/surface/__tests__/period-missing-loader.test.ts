@@ -94,7 +94,7 @@ describe("loadPeriodMissing", () => {
         ["eq", ["microgrids.communities.org_id", ORG]],
         ["lte", ["start_date", "2026-10-31"]],
         ["gte", ["end_date", "2026-10-01"]],
-        ["limit", [2001]],
+        ["limit", [1000]],
       ],
     });
     expect(calls.slice(2).map((call) => call.table)).toEqual(["tenant_devices", "tenant_devices"]);
@@ -152,7 +152,7 @@ describe("loadPeriodMissing", () => {
     await expect(loadPeriodMissing(req(client((t) => (t === "microgrids" ? ok(many) : ok([]))).client))).rejects.toThrow(
       "billing.period-missing: too many microgrids to check",
     );
-    const periods = Array.from({ length: 2001 }, () => ({ microgrid_id: NORTH, start_date: "2026-10-01", end_date: "2026-10-31" }));
+    const periods = Array.from({ length: 1000 }, () => ({ microgrid_id: NORTH, start_date: "2026-10-01", end_date: "2026-10-31" }));
     await expect(loadPeriodMissing(req(client((t) => (t === "microgrids" ? ok(MICROGRIDS) : ok(periods))).client))).rejects.toThrow(
       "billing.period-missing: too many periods to check",
     );
