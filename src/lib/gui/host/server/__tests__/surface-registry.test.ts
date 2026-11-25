@@ -5,7 +5,7 @@ import {
   type BundledPlugin,
   type MgmPluginName,
 } from "@/lib/plugins/bundled";
-import type { GuiMeta } from "../../../contract";
+import { GUI_CONTRACT, type GuiMeta } from "../../../contract";
 import type { Contribution } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import { SurfaceContributionError, type SurfaceCatalog } from "../contribution-schema";
@@ -79,7 +79,7 @@ const META: GuiMeta = {
   name: "probe",
   title: "Probe",
   version: "0.1.0",
-  contract: "^0.1",
+  contract: "^0.2",
   styles: "./styles.css",
   dependencies: [],
 };
@@ -229,8 +229,8 @@ describe("SurfaceRegistry.install", () => {
 
   it("refuses a range that excludes the contract, naming the GUI and both versions", () => {
     const registry = new SurfaceRegistry(CATALOG);
-    expect(() => registry.install({ ...META, contract: "^0.2" })).toThrow(
-      'GUI "probe" supports GUI contract ^0.2; this MGM provides 0.1.0',
+    expect(() => registry.install({ ...META, contract: "^0.3" })).toThrow(
+      `GUI "probe" supports GUI contract ^0.3; this MGM provides ${GUI_CONTRACT}`,
     );
     expect(registry.gui("probe")).toBeUndefined();
   });

@@ -11,7 +11,7 @@ export const REFERENCE_META = {
   name: "reference",
   title: "Reference",
   version: "0.0.0",
-  contract: "^0.1",
+  contract: "^0.2",
   styles: "./styles.css",
   dependencies: [],
 } as const satisfies GuiMeta;

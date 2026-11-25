@@ -25,7 +25,7 @@ import type { ComponentType, ReactNode } from "react";
 import type { CoreEntityKind } from "@/lib/plugins/bundled";
 
 /** The contract version (semver). A GUI declares the range it supports, such as "^0.1". */
-export const GUI_CONTRACT = "0.1.0";
+export const GUI_CONTRACT = "0.2.0";
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 
