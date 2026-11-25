@@ -326,8 +326,15 @@ such watcher: after reading the organization's microgrids with an OpenEMS
 backend and edges, it composes metering and asks each backend which
 gateways (edges) are online, through a per-process cache keyed by microgrid
 (`src/lib/metering/infrastructure/edge-status-cache.ts`: five minutes, a
-failure one minute, reads under way shared, at most four at once, each
-timing out at 2 s within its 3 s budget). An organization with no such
+failure one minute, reads under way shared, at most four at once in the
+process across every caller, each timing out at 2 s within its 3 s budget).
+It examines every such microgrid up to 500, and is unchecked past that. It
+reads microgrids never read first, then those read longest ago, so
+successive loads rotate through an organization too large to read in one
+budget. A read still under way at the deadline is reported as not read for
+this load and finishes into the cache for the next; one that never got a
+slot leaves nothing behind. It returns at most 50 signals, offline gateways
+ahead of statuses that could not be read. An organization with no such
 microgrid composes nothing and calls no backend, so a local database and
 the browser smoke stay deterministic. A microgrid whose read fails or times
 out is reported as such, a signal about that site, and the watcher is

@@ -171,7 +171,9 @@ read a stored credential, or to send data to another origin.
      or more OpenEMS gateways (edges) offline now is a warning, one signal
      per microgrid however many are offline, and so is a microgrid whose
      gateways' status could not be read because the read failed, timed out
-     or could not start within the budget (`metering.edge-status`, mgm#287).
+     or gave no answer within the budget (`metering.edge-status`, mgm#287).
+     When more than 50 are found, offline gateways are kept ahead of
+     statuses that could not be read.
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
      fails. It reads the database, since every load of the signals runs
@@ -187,10 +189,13 @@ read a stored credential, or to send data to another origin.
      (`LOADER_READS` in `gui-surface.test.ts`), and nothing the provider
      says reaches the signal but counts. `metering.edge-status` is the one
      such watcher (`docs/cordis-runtime.md` § "GUI surface"): five minutes'
-     TTL, a failure kept one minute, four reads at once, a 2 s timeout
-     within a 3 s budget; it reports offline gateways only, since a quiet
-     meter needs per-component reads. No scheduled writer replaces it: on
-     Vercel Hobby crons run about daily.
+     TTL, a failure kept one minute, four reads at once in each process, a
+     2 s timeout within a 3 s budget, every microgrid of the organization
+     examined up to 500 (unchecked past that), those never read or read
+     longest ago first, and a read under way at the deadline kept for the
+     next load; it reports offline gateways only, since a quiet meter needs
+     per-component reads. No scheduled writer replaces it: on Vercel Hobby
+     crons run about daily.
    - A watcher aggregates (one signal per period or site, not per bill),
      writes fixed copy with values formatted on the server, and names no
      tenant, because an assistant may read signals later (#133's data
