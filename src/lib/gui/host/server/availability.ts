@@ -4,7 +4,8 @@ import "server-only";
  * The checks the host makes before it offers an action, each answered as a
  * refusal or nothing: whether the action's route is part of this release,
  * and what the plugin gate answers for the action's plugin. Prepare
- * (./prepare.ts) refuses with them.
+ * (./prepare.ts) refuses with them, and the action catalog (./catalog.ts)
+ * lists them as each action's reasons.
  *
  * Takes the gate's decision as an argument and never names the registry, so
  * it stays unprivileged.
@@ -12,10 +13,16 @@ import "server-only";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { codePrefix, type GateDecision } from "@/lib/runtime/gate";
+import type { AvailabilityCheck } from "../../contract";
 import type { ActionDef } from "../../surface";
 
 /** One check that refused an action: which, and the status, code and copy it refused with. */
-export type CheckFailure = { check: "installed" | "enabled" | "healthy"; status: number; code: string; message: string };
+export type CheckFailure = {
+  check: Extract<AvailabilityCheck, "installed" | "enabled" | "healthy">;
+  status: number;
+  code: string;
+  message: string;
+};
 
 /**
  * What the plugin gate's decision means for one action of `plugin`, or null

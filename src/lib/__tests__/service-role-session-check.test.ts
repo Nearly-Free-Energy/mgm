@@ -175,6 +175,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Runs a contributed action's available() and prepare from the snapshot. prepareAction takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
+  "src/lib/gui/host/server/catalog.ts": {
+    privilegedExports: ["buildActionCatalog"],
+    reason:
+      "Reads the snapshot and runs contributed actions' available() from it. buildActionCatalog takes a HostContext, which hostContext issues only from a getUser()-backed access read. readCatalogQuery reads only the search parameters.",
+  },
   "src/lib/gui/host/server/signals.ts": {
     privilegedExports: ["collectSignals"],
     reason:
