@@ -35,8 +35,6 @@
  * route file outside src/app/api starts writing, or if released-routes.ts
  * starts deciding release per method.
  */
-import { readdirSync, readFileSync } from "node:fs";
-import * as path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
 import { getRouteOwner } from "@/lib/plugins/bundled";
@@ -45,14 +43,13 @@ import {
   DESCRIBING_ISSUES,
   UNDESCRIBED_WRITES,
   WRITE_METHODS,
+  apiRouteFiles,
   exemptionKey,
   exportedWriteMethods,
   handlerSources,
+  type RouteFile,
 } from "./route-rules";
 
-const APP = path.resolve(__dirname, "..", "..", "..", "app");
-
-type RouteFile = { route: string; text: string };
 type WriteHandler = { key: string; route: string };
 /** An entry as this test reads it: loose, so a fixture can hold what `UndescribedWrite` refuses. */
 type Entry = { kind: string; reason?: string; issue?: string };
@@ -64,15 +61,6 @@ interface Facts {
   issues: Readonly<Record<string, readonly string[]>>;
   released(path: string): boolean;
   owner(route: string): string | undefined;
-}
-
-/** The route files under src/app/api, each with its route as spelled there (`/api/tenants/[id]`). */
-function routeFiles(dir = path.join(APP, "api")): RouteFile[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.isDirectory()) return entry.name === "__tests__" ? [] : routeFiles(path.join(dir, entry.name));
-    if (!entry.isFile() || entry.name !== "route.ts") return [];
-    return [{ route: `/${path.relative(APP, dir).split(path.sep).join("/")}`, text: readFileSync(path.join(dir, entry.name), "utf8") }];
-  });
 }
 
 function writeHandlers(files: readonly RouteFile[]): WriteHandler[] {
@@ -176,7 +164,7 @@ async function repoFacts(files: readonly RouteFile[]): Promise<Facts> {
 
 describe("described writes", () => {
   afterAll(() => resetMgmRuntimeForTests());
-  const files = routeFiles();
+  const files = apiRouteFiles();
 
   it("hold every released write handler to an action or an entry with its reason", async () => {
     expect(

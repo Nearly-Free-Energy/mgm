@@ -10,11 +10,12 @@
  *   `whilePluginOff` (src/lib/gui/surface.ts).
  * - The write routes no action describes (UNDESCRIBED_WRITES), and the
  *   issues that will describe them (DESCRIBING_ISSUES).
- * - How a route file's handlers and their code are found.
+ * - How the route files under src/app/api are found (`apiRouteFiles`), and
+ *   how a route file's handlers and their code are found.
  *
  * Kept here so no test imports another, which would run its tests twice.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import ts from "typescript";
 import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
@@ -313,6 +314,20 @@ const HANDLER_RE =
 
 /** The HTTP methods of a write handler. */
 export const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const APP = path.resolve(__dirname, "..", "..", "..", "app");
+
+/** A route file under src/app/api: its route as spelled there (`/api/tenants/[id]`) and its source. */
+export type RouteFile = { route: string; text: string };
+
+/** Every `route.ts` under src/app/api, outside `__tests__` folders. */
+export function apiRouteFiles(dir = path.join(APP, "api")): RouteFile[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return entry.name === "__tests__" ? [] : apiRouteFiles(path.join(dir, entry.name));
+    if (!entry.isFile() || entry.name !== "route.ts") return [];
+    return [{ route: `/${path.relative(APP, dir).split(path.sep).join("/")}`, text: readFileSync(path.join(dir, entry.name), "utf8") }];
+  });
+}
 
 /**
  * The write methods a route file exports, read with the TypeScript AST so
