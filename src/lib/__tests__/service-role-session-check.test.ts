@@ -191,9 +191,9 @@ const MODULES: Record<string, Module> = {
       "Reads the snapshot and runs contributed searches from it. runSearch takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
   "src/lib/gui/host/server/manifest.ts": {
-    privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
+    privilegedExports: ["buildManifest", "getManifest", "preloadManifest", "serveManifest"],
     reason:
-      "Reads the snapshot and runs contributed status loaders from it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
+      "Reads the snapshot and runs contributed status loaders from it. buildManifest and serveManifest take a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All four are listed, so a page or route that imports any of them is itself listed. readManifestQuery reads only the search parameters.",
   },
   "src/lib/gui/host/server/render-view.tsx": {
     privilegedExports: ["renderView", "resolveInitialView"],

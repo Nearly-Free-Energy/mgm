@@ -17,27 +17,34 @@ import "server-only";
  * no organization, since all their rows are tenant rows, gets the tenant
  * manifest (buildTenantManifestModel): their units and those entries, and
  * nothing of an organization.
+ *
+ * GET /api/gui/manifest serves the same manifest the (gui) layout renders
+ * (serveManifest below): the same builder, interface and hints.
  */
 import { cache } from "react";
 import { headers } from "next/headers";
 import { rolesIncludeStaff, rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { getRequestUserAccess } from "@/lib/auth/request-access";
+import { readGuiName } from "@/lib/config/gui";
 import { MGM_BUNDLED_PLUGINS, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
 import { createClient } from "@/lib/supabase/server";
 import type { Manifest } from "../../contract";
 import { createFmt } from "../../fmt";
+import { requestedOrganization } from "../shared/manifest-hints";
 import { buildManifestModel, buildTenantManifestModel, livePlugins, MAX_PLACES_PER_KIND } from "../shared/manifest-model";
 import { chooseTenantUnit, tenantUnitIds, unitsNamedBy } from "../shared/tenant-units";
 import { hostContext, requireIssued, type HostContext, type HostRefusal } from "./access";
 import { resolveSegments, type Scope } from "./entities";
 import { pluginGate, unitOrganizationPlugins } from "./gate-state";
+import { isPageHref } from "./hrefs";
 import { manifestSchema } from "./model-schema";
-import { pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
+import { organizationHint, pickOrganization, visibleOrganizations, type OrganizationHints } from "./organization";
 import { parseOrFail } from "./parse";
 import { collectStatus } from "./signals";
 import { surfaceSnapshot } from "./snapshot";
 import type { SurfaceSnapshot } from "./surface-registry";
 import { readTenantUnits, type HostUnit } from "./units";
+import type { HostFailure, HostOutcome } from "./view";
 
 export { STATUS_BUDGET_MS } from "./signals";
 
@@ -277,4 +284,62 @@ export const getManifest = cache(
  */
 export function preloadManifest(gui: string, path: string | null, requested: string | null, preferred: string | null): void {
   getManifest(gui, path, requested, preferred).catch(() => {});
+}
+
+const MANIFEST_BAD_REQUEST: HostFailure = {
+  ok: false,
+  status: 400,
+  code: "gui_bad_request",
+  message: "The manifest takes path, a released page on this site, and org, and nothing else.",
+};
+const MANIFEST_FAILED: HostFailure = { ok: false, status: 500, code: "gui_manifest_failed", message: "The manifest could not be built." };
+
+/**
+ * GET /api/gui/manifest's query: `path`, a released page on this site with
+ * its own query, and `org`, a UUID, each at most once. Any other key is a
+ * 400, so a mistyped parameter fails rather than answering for something
+ * else. The organization asked for is `org`, else the path's own `?org=`,
+ * as the (gui) layout takes it from the page's path (manifestHints in
+ * ../shared/manifest-hints.ts); like there, it only chooses among the
+ * organizations the person sees.
+ */
+export function readManifestQuery(search: URLSearchParams): HostOutcome<{ path: string | null; requested: string | null }> {
+  for (const key of search.keys()) if (key !== "path" && key !== "org") return MANIFEST_BAD_REQUEST;
+  const paths = search.getAll("path");
+  const orgs = search.getAll("org");
+  if (paths.length > 1 || orgs.length > 1) return MANIFEST_BAD_REQUEST;
+  const path = paths[0] ?? null;
+  if (path !== null && !isPageHref(path)) return MANIFEST_BAD_REQUEST;
+  const org = orgs[0] ?? null;
+  if (org !== null && organizationHint(org) !== org.toLowerCase()) return MANIFEST_BAD_REQUEST;
+  return { ok: true, value: { path, requested: org?.toLowerCase() ?? requestedOrganization(path) } };
+}
+
+/**
+ * The manifest for `ctx`'s person, as the (gui) layout builds it: with the
+ * interface this installation renders (readGuiName, as the layout reads it)
+ * and the same hints. A refusal is buildManifest's. An MGM_GUI that names no
+ * usable interface, which the layout answers with a 500, is a 500 here too,
+ * with the setting's value kept out of the answer and the log.
+ */
+export async function serveManifest(
+  ctx: HostContext,
+  o: { path?: string | null } & Omit<OrganizationHints, "fromPath">,
+): Promise<HostOutcome<Manifest>> {
+  requireIssued(ctx);
+  let gui: string;
+  try {
+    gui = readGuiName();
+  } catch {
+    console.error("[gui] manifest: MGM_GUI names no interface this build can serve");
+    return MANIFEST_FAILED;
+  }
+  let out: ManifestOutcome;
+  try {
+    out = await buildManifest(ctx, { gui, ...o });
+  } catch {
+    console.error("[gui] manifest could not be built");
+    return MANIFEST_FAILED;
+  }
+  return out.ok ? { ok: true, value: out.manifest } : out;
 }
