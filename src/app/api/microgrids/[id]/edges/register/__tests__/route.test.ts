@@ -3,6 +3,8 @@
  *
  * Covers:
  *   - 400 bad UUID / empty body / malformed entries
+ *   - openems_edge_id format: trimmed and stored; outside the pattern → 400
+ *     `invalid_edge_id`
  *   - 403 on RLS violation
  *   - 401 without a signed-in user, before the synthetic-id refusal
  *   - 400 for a reserved SYNTHETIC-EDGE- id unless MGM_METERING_FIXTURES is on
@@ -247,6 +249,68 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
         { params: Promise.resolve({ id: MG_ID }) }
       );
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe("openems_edge_id format", () => {
+    it("stores the trimmed id", async () => {
+      registerFrom(() => ({
+        select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      }));
+      const upsert = vi.fn(() => ({
+        select: () => Promise.resolve({ data: [], error: null }),
+      }));
+      registerFrom(() => ({ upsert }));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: "  fems:edge_0.a-1  ", name: "Edge" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(200);
+      expect(upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ openems_edge_id: "fems:edge_0.a-1" })],
+        { onConflict: "microgrid_id,openems_edge_id" }
+      );
+    });
+
+    it("accepts an id of exactly 64 characters", async () => {
+      registerFrom(() => ({
+        select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }),
+      }));
+      registerFrom(() => ({
+        upsert: () => ({ select: () => Promise.resolve({ data: [], error: null }) }),
+      }));
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: "e".repeat(64), name: "Edge" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it.each([
+      ["a space inside", "edge 0"],
+      ["a slash", "edge/0"],
+      ["a comma", "edge0,edge1"],
+      ["a non-ASCII letter", "édge0"],
+      ["65 characters", "e".repeat(65)],
+    ])("refuses an id with %s with 400 invalid_edge_id before any read", async (_label, id) => {
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({
+          edges: [
+            { openems_edge_id: "edge0", name: "Edge 0" },
+            { openems_edge_id: id, name: "Edge 1" },
+          ],
+        }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.reason).toBe("invalid_edge_id");
+      expect(json.field).toBe("openems_edge_id");
+      expect(gateRoute).not.toHaveBeenCalled();
+      expect(mockFrom).not.toHaveBeenCalled();
     });
   });
 });

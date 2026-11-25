@@ -83,10 +83,23 @@ export type DiscoveredDevice = {
   alreadyAdded?: boolean;
 };
 
+/**
+ * A component OpenEMS reported with a supported nature that Discover leaves
+ * out of `devices`, because MGM would refuse to store its id
+ * (`OPENEMS_ID_PATTERN` in `@/lib/openems/ids`). `componentId` is the id as
+ * OpenEMS sent it, cut to 100 characters.
+ */
+export type SkippedComponent = {
+  componentId: string;
+  reason: "invalid_component_id";
+};
+
 /** Single-edge discovery result (F #57) — flat, not wrapped in an array */
 export type EdgeDiscoveryResponse = {
   edgeId: string;
   online: boolean;
   devices: DiscoveredDevice[];
+  /** Components left out of `devices`; absent or empty when none were. */
+  skipped?: SkippedComponent[];
 };
 

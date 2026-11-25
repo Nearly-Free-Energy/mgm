@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
 import { meteringFixturesEnabled } from "@/lib/config/metering-fixtures";
+import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
 import {
   SYNTHETIC_EDGE_ID_PREFIX,
   isSyntheticEdgeId,
@@ -29,6 +30,10 @@ type RegisterRequestBody = {
  *
  * Permission: RLS-enforced (the edges INSERT policy runs
  * user_can_access_microgrid(microgrid_id)).
+ *
+ * Each openems_edge_id is trimmed and must fit OPENEMS_ID_PATTERN
+ * (`@/lib/openems/ids`), else 400 `invalid_edge_id` with
+ * `field: "openems_edge_id"`.
  *
  * Ids starting with SYNTHETIC-EDGE- are refused (400) unless
  * MGM_METERING_FIXTURES is on. That refusal comes after the route checks the
@@ -83,6 +88,16 @@ export async function POST(
         { status: 400 }
       );
     }
+    if (parseOpenEmsId(entry.openems_edge_id) === null) {
+      return NextResponse.json(
+        {
+          error: `openems_edge_id must be ${OPENEMS_ID_FORMAT_HINT}.`,
+          field: "openems_edge_id",
+          reason: "invalid_edge_id",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const supabase = await createClient();
@@ -99,8 +114,10 @@ export async function POST(
   // This route is the only place the prefix is refused. MGM_METERING_FIXTURES
   // is an environment variable the database never sees, so a direct insert or
   // update under RLS still accepts the prefix (docs/setup.md § "Synthetic site
-  // data"). If a migration adds a rule on edges.openems_edge_id, or another
-  // route starts writing it, revisit.
+  // data"). The database's format CHECK on edges.openems_edge_id
+  // (20261124160100) accepts the prefix like any other id. If a migration adds
+  // a rule on the prefix itself, or another route starts writing the column,
+  // revisit.
   if (!meteringFixturesEnabled() && body.edges.some((e) => isSyntheticEdgeId(e.openems_edge_id.trim()))) {
     return NextResponse.json(
       {
