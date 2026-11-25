@@ -58,6 +58,13 @@ import "server-only";
  * same columns and audit row as the upsert. The engine no longer calls
  * fn_record_line_item_with_audit itself.
  *
+ * The audit row's details (LineItemRegeneratedDetails, previous_snapshot
+ * included) are built by those functions from the bill they write and the
+ * bill it replaces, read under their own lock (migration
+ * 20261124170000), so the engine sends `_audit_details: null`. For a
+ * signed-in caller they also require the manual bill's
+ * `_entered_by_user_id` and the actor to be the caller.
+ *
  * The legacy bulk-only delete-then-insert path is REMOVED — this is the
  * critical AC3 change.
  *
@@ -111,7 +118,6 @@ import type {
   TierConfig,
   BillingLineItemPaymentStatus,
 } from "@/lib/types/domain";
-import type { LineItemRegeneratedDetails } from "@/lib/types/billing-audit";
 import { coversPeriod, overlapsPeriod } from "./meter-coverage";
 import { BILL_FROM_READINGS_COPY, GENERATE_FROM_METERS_COPY, REGENERATE_REFUSAL_COPY } from "./schemas";
 import { chunked, pageAfter, readAllPages } from "./surface/pages";
@@ -473,20 +479,16 @@ type PriorItem = {
   reading_source: ReadingSource;
   end_kwh: number | null;
   device_id: string | null;
-  // ── New for #218 (previous-snapshot capture) ─────────────────────────────
-  // Required to build `auditDetails.previous_snapshot` for the
-  // `line_item_regenerated` event. The SELECT at :362 must read these too —
-  // the explicit `as unknown as PriorItem[]` cast at :366 suppresses
-  // PostgREST's inferred shape, so widening this type without widening the
+  // Read for sameBill and expectedFromPrior, which compare every column the
+  // write sets. The SELECT below must read these too: readAllPages<PriorItem>
+  // does not check the shape, so widening this type without widening the
   // SELECT would compile but resolve `undefined` at runtime.
   start_kwh: number | null;
   usage_kwh: number | null;
-  /** JSONB — shape is `TierBreakdown[]` in the live row but we keep it
-   *  `unknown` here to match the audit-snapshot contract (round-trip,
-   *  no validation). */
+  /** JSONB — shape is `TierBreakdown[]` in the live row; kept `unknown`
+   *  and compared as stored. */
   tier_breakdown: unknown;
   entered_by_user_id: string | null;
-  entered_at: string | null;
   manual_reason: string | null;
   /** Read for `guardExistingBills`, which leaves an invoiced bill alone. */
   invoice_number: string | null;
@@ -876,11 +878,11 @@ export async function runGenerationFor(
       supabase
         .from("billing_line_items")
         .select(
-          // The trailing fields (start_kwh, usage_kwh, tier_breakdown,
-          // entered_by_user_id, entered_at, manual_reason) are read for #218's
-          // `previous_snapshot` audit-details capture — the RPC overwrites them
-          // on UPSERT-UPDATE, so we must read them BEFORE calling the RPC.
-          "id, tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, entered_at, manual_reason, invoice_number",
+          // start_kwh, usage_kwh, tier_breakdown, entered_by_user_id and
+          // manual_reason are read for sameBill and expectedFromPrior. The
+          // audit row's previous_snapshot is built by the write function
+          // from the bill as it stands under its lock (20261124170000).
+          "id, tenant_id, total_amount, payment_status, reading_source, end_kwh, device_id, start_kwh, usage_kwh, tier_breakdown, entered_by_user_id, manual_reason, invoice_number",
           { count: "exact" },
         )
         .eq("billing_period_id", periodId),
@@ -1332,39 +1334,6 @@ export async function runGenerationFor(
       continue;
     }
 
-    const auditDetails: LineItemRegeneratedDetails = {
-      tenant_name: tenantName,
-      previous_total_amount: previousTotalAmount,
-      new_total_amount: calc.totalAmount,
-      previous_reading_source: prior?.reading_source ?? null,
-      new_reading_source: readingSource,
-      ...(readingSource === "manual" && manualReason
-        ? { manual_reason: manualReason }
-        : {}),
-      // #218: capture the reading-side snapshot of the row immediately BEFORE
-      // this regeneration overwrites it. Present only on UPDATE (when prior
-      // exists); absent on fresh INSERT. Numerics use `Number(x)`-or-null
-      // coercion to match the existing previous_total_amount precision
-      // pattern above. Note: `previous_snapshot.manual_reason` is the
-      // PREVIOUS reason, distinct from the top-level `manual_reason` (NEW).
-      ...(prior
-        ? {
-            previous_snapshot: {
-              start_kwh:
-                prior.start_kwh != null ? Number(prior.start_kwh) : null,
-              end_kwh: prior.end_kwh != null ? Number(prior.end_kwh) : null,
-              usage_kwh:
-                prior.usage_kwh != null ? Number(prior.usage_kwh) : null,
-              tier_breakdown: prior.tier_breakdown,
-              device_id: prior.device_id,
-              entered_by_user_id: prior.entered_by_user_id,
-              entered_at: prior.entered_at,
-              manual_reason: prior.manual_reason,
-            },
-          }
-        : {}),
-    };
-
     // SIGNATURE NOTE: this RPC's signature was widened in #250 (actor_kind,
     // actor_ref). PostgREST overload-resolution will reject DROP-less signature
     // changes with PGRST203. Any future param addition requires
@@ -1394,7 +1363,10 @@ export async function runGenerationFor(
       _entered_by_user_id: actorUserId,
       _manual_reason: manualReason,
       _actor_user_id: actorUserId,
-      _audit_details: auditDetails as unknown as Record<string, unknown>,
+      // Built by the function from the bill it writes and the one it
+      // replaces (20261124170000); a signed-in caller's details may carry
+      // no key of their own.
+      _audit_details: null,
       _rate_schedule_id: rateScheduleId,
       _actor_kind: actorKind,
       _actor_ref: actorRef,

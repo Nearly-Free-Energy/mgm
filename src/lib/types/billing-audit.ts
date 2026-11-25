@@ -2,9 +2,10 @@
  * billing-audit.ts — types for the billing audit trail (#173, BC1).
  *
  * Two surfaces consume these:
- *   1. The internal RPC writer (fn_record_line_item_with_audit) — needs the
- *      `LineItemRegeneratedDetails` shape so the route handler can pre-build
- *      the `details` JSONB before calling RPC.
+ *   1. The writers (fn_record_line_item_with_audit and
+ *      fn_record_first_line_item_with_audit), which build the
+ *      `LineItemRegeneratedDetails` shape themselves (migration
+ *      20261124170000); the type records what they write.
  *   2. The audit-log read endpoint (GET /api/billing-periods/[id]/audit-log)
  *      — UNIONs `billing_audit_log` rows with `payment_events` rows and
  *      surfaces a normalized `BillingAuditLogEntry` shape to BC4.
@@ -44,10 +45,13 @@ export type BillingAuditEventType =
 
 /**
  * Shape of `billing_audit_log.details` for the
- * `line_item_generated` / `line_item_regenerated` event types. Pre-built by
- * the route handler and passed verbatim to fn_record_line_item_with_audit's
- * `_audit_details` parameter (the SQL function appends `period_was_closed`
- * when applicable).
+ * `line_item_generated` / `line_item_regenerated` event types. Built by
+ * fn_record_line_item_with_audit and fn_record_first_line_item_with_audit
+ * from the bill they write, the bill it replaces and the tenant (migration
+ * 20261124170000), with `rate_schedule_id` and, when applicable,
+ * `period_was_closed`. Rows written before that migration were built by
+ * runGenerationFor to the same shape. If the functions' jsonb_build_object
+ * changes, change this type with it.
  */
 export type LineItemRegeneratedDetails = {
   /** tenant.display_name snapshotted at write time — survives line-item delete. */
@@ -72,18 +76,15 @@ export type LineItemRegeneratedDetails = {
    *  absent on fresh INSERT. Optional for backward-compat with audit rows
    *  written before this field was introduced (#218).
    *
-   *  Provenance: added by the CALLER (runGenerationFor) before the RPC
-   *  call, NOT by the RPC. Contrast `period_was_closed` above, which is
-   *  added by the RPC (00029:291 jsonb merge). Both keys land in the
-   *  same JSONB blob. */
+   *  Provenance: built by the write function from the row it replaces,
+   *  read under its lock in the same transaction (20261124170000). */
   previous_snapshot?: PreviousReadingSnapshot;
 };
 
 /** Pre-overwrite snapshot of the reading-side columns on a billing_line_items
- *  row. Captured by runGenerationFor and persisted into
- *  billing_audit_log.details.previous_snapshot for line_item_regenerated
- *  events. Numerics are coerced to JS Number to match the existing
- *  previous_total_amount pattern (see #218 Dev Notes for precision tradeoff). */
+ *  row, persisted into billing_audit_log.details.previous_snapshot for
+ *  line_item_regenerated events by the write function. Numerics are the
+ *  stored NUMERIC values, which reach JS as numbers. */
 export type PreviousReadingSnapshot = {
   /** previous billing_line_items.start_kwh (NUMERIC → JS Number) */
   start_kwh: number | null;
