@@ -44,7 +44,8 @@ function accept<T>(value: T): T {
 }
 
 const prepare: Prepare = async () => ({ ok: false, status: 503, message: "fixture" });
-const base = {
+/** An action's fixed fields but repeat, which the missing-repeat case leaves out. */
+const noRepeat = {
   id: "billing.x",
   title: "X",
   target: "billingPeriod",
@@ -52,8 +53,8 @@ const base = {
   inputVersion: 1,
   path: "/api/billing-periods/[periodId]",
   bind: {},
-  repeat: "safe",
 } as const;
+const base = { ...noRepeat, repeat: "safe" } as const;
 // Referenced only inside a loader the test never calls.
 declare const recordModel: LoadedModel<"record">;
 
@@ -101,9 +102,10 @@ describe("GUI contract types", () => {
   });
 
   it("refuses an action that does not say what a repeat does", () => {
-    // Left out, as undefined is: the field is required, not optional.
+    // Left out entirely, so the case holds with or without
+    // exactOptionalPropertyTypes: the field is required, not optional.
     // @ts-expect-error every action declares repeat
-    accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", repeat: undefined });
+    accept<ActionDef>({ ...noRepeat, method: "POST", risk: "write", humanOnly: true, confirm: "none" });
     // @ts-expect-error repeat is safe, keyed or unsafe
     accept<ActionDef>({ ...base, method: "POST", risk: "write", humanOnly: true, confirm: "none", repeat: "twice" });
   });
