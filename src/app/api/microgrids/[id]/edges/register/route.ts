@@ -3,7 +3,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
 import { meteringFixturesEnabled } from "@/lib/config/metering-fixtures";
-import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
+import {
+  OPENEMS_ID_FORMAT_HINT,
+  firstDuplicateOpenEmsId,
+  parseOpenEmsId,
+} from "@/lib/openems/ids";
 import {
   SYNTHETIC_EDGE_ID_PREFIX,
   isSyntheticEdgeId,
@@ -34,7 +38,9 @@ type RegisterRequestBody = {
  * Each openems_edge_id is trimmed and must fit OPENEMS_ID_PATTERN
  * (`@/lib/openems/ids`), else 400 `invalid_edge_id` with
  * `field: "openems_edge_id"` and the refused id (trimmed, cut to 100
- * characters) in `openems_edge_id` and `error`.
+ * characters) in `openems_edge_id` and `error`. An id named twice in one
+ * body, after trimming, is refused the same way with 400
+ * `duplicate_edge_id`, before any database call.
  *
  * Ids starting with SYNTHETIC-EDGE- are refused (400) unless
  * MGM_METERING_FIXTURES is on. That refusal comes after the route checks the
@@ -104,6 +110,19 @@ export async function POST(
         { status: 400 }
       );
     }
+  }
+
+  const duplicateId = firstDuplicateOpenEmsId(body.edges.map((e) => e.openems_edge_id));
+  if (duplicateId !== null) {
+    return NextResponse.json(
+      {
+        error: `Edge id '${duplicateId}' is named more than once (ids are trimmed before saving). Register each edge once.`,
+        field: "openems_edge_id",
+        reason: "duplicate_edge_id",
+        openems_edge_id: duplicateId,
+      },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
