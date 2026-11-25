@@ -61,3 +61,6 @@ supabase/migrations/00003_seed.sql
 /playwright-report/
 /blob-report/
 /e2e/.auth/
+
+# Python bytecode (scripts/release, scripts/tests)
+__pycache__/
