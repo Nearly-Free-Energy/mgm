@@ -1,0 +1,21 @@
+MGM - Microgrid Manager
+Copyright (c) 2026 the MGM contributors
+
+Licensed under the Eclipse Public License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file or at
+https://www.eclipse.org/legal/epl-2.0/
+
+MGM is derived from energy-iot/metering-billing-engine
+(https://github.com/energy-iot/metering-billing-engine), which is
+licensed under the Eclipse Public License, Version 2.0. The copyright in
+the code taken from it remains with its authors.
+
+No Secondary Licenses (EPL-2.0 Section 3.2, Exhibit A) are designated for
+this Program.
+
+Third-party software bundled into a published release is listed, with the
+text of each package's licence, in the mgm-third-party-notices-<version>.txt
+file published beside that release's asset. The Inter typeface, self-hosted
+at build time, is licensed under the SIL Open Font License, Version 1.1. It
+is not yet listed in that file; see
+https://github.com/Nearly-Free-Energy/mgm/issues/37.

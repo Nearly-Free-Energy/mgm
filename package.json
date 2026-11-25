@@ -2,6 +2,11 @@
   "name": "mgm",
   "version": "0.1.0",
   "private": true,
+  "license": "EPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nearly-Free-Energy/mgm.git"
+  },
   "engines": {
     "node": ">=24 <25"
   },
