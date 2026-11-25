@@ -459,7 +459,7 @@ describe("SITE_DAY_PROBLEMS", () => {
     ["unreadable_timestamps", null, true],
     ["site_devices_unavailable", null, true],
     ["zone_unavailable", null, true],
-    ["date_not_started", null, true],
+    ["date_out_of_range", null, true],
     ["day_failed", null, false],
   ] as const)("%s links %s and retries: %s", (reason, page, retry) => {
     const problem = problems.find((p) => p.reason === reason)!;

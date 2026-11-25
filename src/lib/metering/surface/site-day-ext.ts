@@ -5,8 +5,8 @@
  * which state the view is in.
  *
  * Version 2 adds the problem state's `reason`, from SITE_DAY_PROBLEM_REASONS
- * in ./site-day-model.ts; the rest is version 1's shape. A renderer reads
- * one exact version (`reads` in the GUI contract), and these objects are
+ * in ./site-day-model.ts; the rest is version 1's shape. A renderer names
+ * the versions it reads (`reads` in the GUI contract), and these objects are
  * strict, so a reader that checks the shape would refuse a field it does not
  * know: a new field or reason is a new version, even an optional one.
  *

@@ -72,8 +72,11 @@ export const SITE_DAY_PROBLEM_REASONS = [
   "site_devices_unavailable",
   /** MGM could not read the microgrid's time zone from its own database. */
   "zone_unavailable",
-  /** The capability worked out today differently from the loader, so the day was not yet one it reads. */
-  "date_not_started",
+  /**
+   * The capability refused the date as outside the days it reads: it worked
+   * out today in another zone than the loader did, or the date was not a day.
+   */
+  "date_out_of_range",
   /** The day's samples could not be worked out. */
   "day_failed",
 ] as const;
@@ -177,8 +180,8 @@ export const SITE_DAY_PROBLEMS = {
     link: null,
     retry: true,
   },
-  dateNotStarted: {
-    reason: "date_not_started",
+  dateOutOfRange: {
+    reason: "date_out_of_range",
     tone: "danger",
     title: NOT_LOADED,
     message: "This day's operations could not be loaded right now. Try again shortly.",
@@ -231,7 +234,7 @@ const CAPABILITY_PROBLEMS: Readonly<Record<string, SiteDayProblem>> = {
   metering_site_samples_unsupported: SITE_DAY_PROBLEMS.unsupported,
   metering_site_devices_unavailable: SITE_DAY_PROBLEMS.siteDevicesUnavailable,
   metering_timezone_unavailable: SITE_DAY_PROBLEMS.zoneUnavailable,
-  metering_invalid_date: SITE_DAY_PROBLEMS.dateNotStarted,
+  metering_invalid_date: SITE_DAY_PROBLEMS.dateOutOfRange,
   metering_site_day_failed: SITE_DAY_PROBLEMS.dayFailed,
 };
 

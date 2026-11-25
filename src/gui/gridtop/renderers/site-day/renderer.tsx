@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Gridtop's renderer for `metering.site-day@2`, the Operations day, loaded
+ * Gridtop's renderer for `metering.site-day@1` and `@2` (./ext.ts says
+ * why both), the Operations day, loaded
  * on its own by ./index.tsx: the notices, the day picker, then the day (six
  * tiles, the battery chart, the evening strip and the notes), what to
  * register, or the problem that kept the day from being read, and the

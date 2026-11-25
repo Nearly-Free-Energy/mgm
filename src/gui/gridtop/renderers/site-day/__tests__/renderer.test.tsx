@@ -6,7 +6,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelView, POKE_ACTION, POKE_LABEL, renderInKit, renderShell, withPoke, type Recorded } from "@/lib/gui/conformance";
-import type { ActionRef, ActionResult, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
+import type { ActionRef, ActionResult, Json, LinkRef, ViewModel, ViewState } from "@/lib/gui/contract";
 import { kit } from "@/lib/gui/kit";
 import { GridtopGui } from "../../..";
 import { EAST, EAST_TRAIL, KASANA, ORG, placesFixture } from "../../../__tests__/places-fixture";
@@ -16,6 +16,7 @@ import { SiteDayView } from "../renderer";
 import {
   BACKEND,
   MG,
+  NO_ANSWER,
   NO_CONNECTION,
   NOTES,
   SET_TIMEZONE,
@@ -52,11 +53,12 @@ const CANCELLED: ActionResult = { type: "result", ok: false, status: 0, code: "c
 const versioned = (schema: `${string}.${string}@${number}`): ViewModel => ({ ...dayModel(), ext: { ...dayModel().ext!, schema } });
 
 describe("Gridtop's site-day renderer", () => {
-  it("is registered for version 2 in the table the window bar checks, which marks it as placing its own controls", () => {
+  it("is registered for versions 1 and 2 in the table the window bar checks, which marks it as placing its own controls", () => {
     expect(GridtopGui.renderers).toBe(GRIDTOP_RENDERERS);
-    expect(GRIDTOP_RENDERERS["metering.site-day"].reads).toEqual([2]);
+    expect(GRIDTOP_RENDERERS["metering.site-day"].reads).toEqual([1, 2]);
     expect(drawnBespoke(dayModel())).toBe(true);
-    expect(drawnBespoke(versioned("metering.site-day@1"))).toBe(false);
+    expect(drawnBespoke(versioned("metering.site-day@1"))).toBe(true);
+    expect(drawnBespoke(versioned("metering.site-day@0"))).toBe(false);
     expect(drawnBespoke(versioned("metering.site-day@3"))).toBe(false);
     expect(drawnBespoke({ ...dayModel(), ext: undefined })).toBe(false);
     expect(drawnBespoke({ ...dayModel(), view: "billing.periods" })).toBe(false);
@@ -64,11 +66,13 @@ describe("Gridtop's site-day renderer", () => {
     expect(drawnBespoke({ view: "billing.savings", ext: { schema: "billing.savings@1", data: {} } })).toBe(false);
   });
 
-  it("draws version 2 itself, once its chunk loads, and leaves @1, @3 or no ext to the kit's view", async () => {
-    unmount = (await renderInKit(<ModelView gui={GridtopGui} model={dayModel()} />)).unmount;
-    await waitFor(() => expect(document.querySelector("[data-tile='solar']")).not.toBeNull());
-    unmount();
-    for (const model of [versioned("metering.site-day@1"), versioned("metering.site-day@3"), { ...dayModel(), ext: undefined }]) {
+  it("draws versions 1 and 2 itself, once its chunk loads, and leaves @0, @3 or no ext to the kit's view", async () => {
+    for (const model of [dayModel(), versioned("metering.site-day@1")]) {
+      unmount = (await renderInKit(<ModelView gui={GridtopGui} model={model} />)).unmount;
+      await waitFor(() => expect(document.querySelector("[data-tile='solar']")).not.toBeNull());
+      unmount();
+    }
+    for (const model of [versioned("metering.site-day@0"), versioned("metering.site-day@3"), { ...dayModel(), ext: undefined }]) {
       unmount = (await renderInKit(<ModelView gui={GridtopGui} model={model} />)).unmount;
       expect(document.querySelector("[data-tile]")).toBeNull();
       expect(document.querySelector("[data-gui-kind='metrics']")).not.toBeNull();
@@ -117,8 +121,19 @@ describe("Gridtop's site-day renderer", () => {
   it("reads the ext as the server sends it", () => {
     expect(readSiteDayExt(dayModel().ext)).toMatchObject({ state: "day", date: "2026-11-05", dayHref: `/microgrids/${MG}/operations`, timezoneNotice: null });
     expect(readSiteDayExt(noSiteDevicesModel().ext)).toMatchObject({ state: "no-site-devices" });
-    expect(readSiteDayExt(problemModel({ retry: true }).ext)).toMatchObject({ state: "problem", tone: "danger", message: NO_CONNECTION, retry: true });
+    expect(readSiteDayExt(problemModel({ retry: true }).ext)).toMatchObject({ state: "problem", tone: "danger", message: NO_ANSWER, retry: true });
     expect(readSiteDayExt(dayModel({ ext: { timezoneNotice: TIMEZONE_NOTICE } }).ext)).toMatchObject({ timezoneNotice: TIMEZONE_NOTICE });
+  });
+
+  it("reads and draws a version 1 problem, which has no reason", async () => {
+    const problem = problemModel();
+    const data = { ...(problem.ext!.data as { [key: string]: Json }) };
+    delete data.reason;
+    const v1: ViewModel = { ...problem, ext: { schema: "metering.site-day@1", data } };
+    expect(readSiteDayExt(v1.ext)).toMatchObject({ state: "problem", message: NO_CONNECTION, retry: false });
+    expect(drawnBespoke(v1)).toBe(true);
+    await draw(v1);
+    expect(text()).toContain(NO_CONNECTION);
   });
 
   it("draws the battery chart and the evening strip between the tiles and the notes, from the soc series", async () => {
@@ -299,6 +314,7 @@ describe("Gridtop's site-day renderer", () => {
     const rendered = await renderInKit(<SiteDayView model={problemModel({ retry: true })} kit={{ ...kit, refresh }} />);
     unmount = rendered.unmount;
     expect(screen.queryByRole("link", { name: BACKEND.label })).toBeNull();
+    expect(text()).toContain(NO_ANSWER);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Try again" })));
     expect(refresh).toHaveBeenCalledOnce();
     expect(rendered.log.act).toEqual([]);
