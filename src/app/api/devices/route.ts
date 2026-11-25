@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { gateRoute } from "@/lib/runtime/gate";
+import { OPENEMS_ID_FORMAT_HINT, parseOpenEmsId } from "@/lib/openems/ids";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -15,7 +16,9 @@ const UUID_RE =
  * {
  *   edgeId: string;          // DB UUID of the edge (NOT the OpenEMS edge ID string)
  *   devices: Array<{
- *     componentId: string;   // OpenEMS component ID (e.g. "meter0")
+ *     componentId: string;   // OpenEMS component ID (e.g. "meter0"); trimmed,
+ *                            // then must fit OPENEMS_ID_PATTERN, else 400
+ *                            // `invalid_component_id`
  *     factoryId: string;     // OpenEMS factory ID
  *     openemsChannelAddress: string;
  *     deviceType: string;    // device_type enum value
@@ -93,6 +96,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
+    if (parseOpenEmsId(device.componentId) === null) {
+      return NextResponse.json(
+        {
+          error: `componentId must be ${OPENEMS_ID_FORMAT_HINT}.`,
+          reason: "invalid_component_id",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   const supabase = await createClient();
@@ -113,20 +125,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       deviceType: string;
       name: string;
     }>
-  ).map((d) => ({
-    edge_id: edgeId,
-    name: d.name.trim() || d.componentId,
-    device_type: d.deviceType as
-      | "consumption_meter"
-      | "grid_meter"
-      | "pv_meter"
-      | "battery"
-      | "inverter"
-      | "ev_charger"
-      | "other",
-    openems_component_id: d.componentId,
-    config: {} as Record<string, never>,
-  }));
+  ).map((d) => {
+    // Checked in the loop above, so never null here.
+    const componentId = parseOpenEmsId(d.componentId) as string;
+    return {
+      edge_id: edgeId,
+      name: d.name.trim() || componentId,
+      device_type: d.deviceType as
+        | "consumption_meter"
+        | "grid_meter"
+        | "pv_meter"
+        | "battery"
+        | "inverter"
+        | "ev_charger"
+        | "other",
+      openems_component_id: componentId,
+      config: {} as Record<string, never>,
+    };
+  });
 
   // Upsert: INSERT ... ON CONFLICT (edge_id, openems_component_id) DO UPDATE
   // The UNIQUE constraint on devices(edge_id, openems_component_id) was added in

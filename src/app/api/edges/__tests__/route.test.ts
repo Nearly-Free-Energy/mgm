@@ -9,6 +9,8 @@
  *   - Missing all fields → 400
  *   - Empty name → 422
  *   - RLS violation on update → 403
+ *   - Stored openems_edge_id outside the format refused by its CHECK → 409
+ *     stored_id_outside_format
  *   - Bad UUID → 400
  */
 
@@ -197,5 +199,29 @@ describe("PATCH /api/edges/[id]", () => {
       params: Promise.resolve({ id: EDGE_UUID }),
     });
     expect(res.status).toBe(403);
+  });
+
+  it("returns 409 stored_id_outside_format when the stored edge id fails its CHECK (23514)", async () => {
+    getChain.single.mockResolvedValueOnce({
+      data: { id: EDGE_UUID, name: "Old" },
+      error: null,
+    });
+    patchChain.single.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "23514",
+        message:
+          'new row for relation "edges" violates check constraint "edges_openems_edge_id_format"',
+      },
+    });
+
+    const { PATCH } = await import("../[id]/route");
+    const res = await PATCH(makePatchRequest(EDGE_UUID, { name: "x" }), {
+      params: Promise.resolve({ id: EDGE_UUID }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.reason).toBe("stored_id_outside_format");
+    expect(json.error).not.toContain("violates check constraint");
   });
 });
