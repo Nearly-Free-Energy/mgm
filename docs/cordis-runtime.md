@@ -592,8 +592,11 @@ generates, while a registered action or a host route file
 (`src/app/api/gui/`) is not described, or while the gate's codes on an
 action route disagree with `UNGATED_WRITES`. The generator runs under
 vitest rather than as a script, because it needs the runtime root's
-modules resolved as the tests resolve them. Publishing the document with
-each release is not done yet (#282).
+modules resolved as the tests resolve them. Anything the generator reads
+changes the file, a route's release and `GUI_CONTRACT` included, so a
+merge conflict in it is resolved by taking either side and running
+`npm run api:openapi` again. Publishing the document with each release is
+not done yet (#282).
 
 ## The gate
 

@@ -161,7 +161,7 @@ describe("the OpenAPI document", () => {
       const text = readFileSync(path.join(REPO, "src/app", def.path, "route.ts"), "utf8");
       return readsEmpty.test(handlerSources(text).get(def.method) ?? "") ? [key] : [];
     });
-    expect([...EMPTY_BODY_ROUTES].sort()).toEqual(reading.sort());
+    expect([...EMPTY_BODY_ROUTES].sort(), "EMPTY_BODY_ROUTES (openapi.ts) names the action routes that read an empty body as {}").toEqual(reading.sort());
     for (const { method, op } of operations(doc)) {
       const actions = op["x-mgm-actions"];
       if (!actions) continue;
