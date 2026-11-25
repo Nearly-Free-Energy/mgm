@@ -33,7 +33,8 @@ type RegisterRequestBody = {
  *
  * Each openems_edge_id is trimmed and must fit OPENEMS_ID_PATTERN
  * (`@/lib/openems/ids`), else 400 `invalid_edge_id` with
- * `field: "openems_edge_id"`.
+ * `field: "openems_edge_id"` and the refused id (trimmed, cut to 100
+ * characters) in `openems_edge_id` and `error`.
  *
  * Ids starting with SYNTHETIC-EDGE- are refused (400) unless
  * MGM_METERING_FIXTURES is on. That refusal comes after the route checks the
@@ -89,11 +90,16 @@ export async function POST(
       );
     }
     if (parseOpenEmsId(entry.openems_edge_id) === null) {
+      // Named, so an operator registering a batch of discovered edges can
+      // tell which one to leave out. Cut to 100 characters, as discovery cuts
+      // a skipped component id.
+      const shown = entry.openems_edge_id.trim().slice(0, 100);
       return NextResponse.json(
         {
-          error: `openems_edge_id must be ${OPENEMS_ID_FORMAT_HINT}.`,
+          error: `Edge id '${shown}' cannot be registered: ids are ${OPENEMS_ID_FORMAT_HINT}.`,
           field: "openems_edge_id",
           reason: "invalid_edge_id",
+          openems_edge_id: shown,
         },
         { status: 400 }
       );

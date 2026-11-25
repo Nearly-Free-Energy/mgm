@@ -2,7 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
 import {
+  COMPONENT_ID_FORMAT_CONSTRAINT,
+  EDGE_ID_FORMAT_CONSTRAINT,
   OPENEMS_ID_PATTERN,
+  isIdFormatViolation,
   openEmsIdSchema,
   parseOpenEmsId,
 } from "../ids";
@@ -80,4 +83,31 @@ describe("parseOpenEmsId", () => {
   it.each([undefined, null, 7, {}, ["edge0"]])("refuses %j", (value) => {
     expect(parseOpenEmsId(value)).toBeNull();
   });
+});
+
+describe("isIdFormatViolation", () => {
+  const edgeError = {
+    code: "23514",
+    message:
+      'new row for relation "edges" violates check constraint "edges_openems_edge_id_format"',
+  };
+
+  it("is true for a check_violation naming the constraint", () => {
+    expect(isIdFormatViolation(edgeError, EDGE_ID_FORMAT_CONSTRAINT)).toBe(true);
+  });
+
+  it("is false for the other constraint, another code or no error", () => {
+    expect(isIdFormatViolation(edgeError, COMPONENT_ID_FORMAT_CONSTRAINT)).toBe(false);
+    expect(
+      isIdFormatViolation({ ...edgeError, code: "23505" }, EDGE_ID_FORMAT_CONSTRAINT)
+    ).toBe(false);
+    expect(isIdFormatViolation(null, EDGE_ID_FORMAT_CONSTRAINT)).toBe(false);
+  });
+
+  it.each([EDGE_ID_FORMAT_CONSTRAINT, COMPONENT_ID_FORMAT_CONSTRAINT])(
+    "names a constraint the migrations add: %s",
+    (constraint) => {
+      expect(() => newestSqlPattern(constraint)).not.toThrow();
+    }
+  );
 });

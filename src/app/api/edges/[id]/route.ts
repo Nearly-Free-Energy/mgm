@@ -5,6 +5,11 @@ import { gateRoute } from "@/lib/runtime/gate";
 import { currentUserCanAccessMicrogrid } from "@/lib/auth/access";
 import { countEntityDescendants } from "@/lib/entity-descendants";
 import {
+  EDGE_ID_FORMAT_CONSTRAINT,
+  OPENEMS_ID_FORMAT_HINT,
+  isIdFormatViolation,
+} from "@/lib/openems/ids";
+import {
   errorBody,
   mapPgError,
   resolveActorRole,
@@ -24,6 +29,8 @@ const UUID_RE =
  *     Remove the edge and rediscover to link a different OpenEMS edge.
  *
  * Authorization enforced by RLS on `edges`. Postgres `42501` → HTTP 403.
+ * A row whose stored openems_edge_id is outside the format
+ * (`edges_openems_edge_id_format`) → 409 `stored_id_outside_format`.
  */
 export async function PATCH(
   request: NextRequest,
@@ -158,6 +165,16 @@ export async function PATCH(
       return NextResponse.json(
         {
           error: `An edge named '${edgeName}' already exists on this microgrid.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (isIdFormatViolation(error, EDGE_ID_FORMAT_CONSTRAINT)) {
+      return NextResponse.json(
+        {
+          error: `This edge's stored OpenEMS edge id is not in the format MGM stores (${OPENEMS_ID_FORMAT_HINT}), so the edge cannot be changed until an administrator corrects the id.`,
+          reason: "stored_id_outside_format",
         },
         { status: 409 }
       );

@@ -4,7 +4,7 @@
  * Covers:
  *   - 400 bad UUID / empty body / malformed entries
  *   - openems_edge_id format: trimmed and stored; outside the pattern → 400
- *     `invalid_edge_id`
+ *     `invalid_edge_id`, naming the refused id
  *   - 403 on RLS violation
  *   - 401 without a signed-in user, before the synthetic-id refusal
  *   - 400 for a reserved SYNTHETIC-EDGE- id unless MGM_METERING_FIXTURES is on
@@ -309,8 +309,22 @@ describe("POST /api/microgrids/[id]/edges/register", () => {
       const json = await res.json();
       expect(json.reason).toBe("invalid_edge_id");
       expect(json.field).toBe("openems_edge_id");
+      expect(json.openems_edge_id).toBe(id);
+      expect(json.error).toContain(`'${id}'`);
       expect(gateRoute).not.toHaveBeenCalled();
       expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it("names the refused id trimmed and cut to 100 characters", async () => {
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeReq({ edges: [{ openems_edge_id: `  ${"x".repeat(150)}/  `, name: "Edge" }] }),
+        { params: Promise.resolve({ id: MG_ID }) }
+      );
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.openems_edge_id).toBe("x".repeat(100));
+      expect(json.error).toContain(`'${"x".repeat(100)}'`);
     });
   });
 });
