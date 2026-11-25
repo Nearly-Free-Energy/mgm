@@ -236,10 +236,18 @@ const DeviceRow = z.strictObject(
 );
 
 /**
- * POST /api/devices: save devices discovered on an edge, or reclassify and
- * rename those already saved. `edgeId` is the edge's own id (bound by the
- * host), not OpenEMS's. The component id's format is the route's rule
- * (`invalid_component_id`).
+ * POST /api/devices: save devices newly discovered on an edge. `edgeId` is
+ * the edge's own id (bound by the host), not OpenEMS's. The component id's
+ * format is the route's rule (`invalid_component_id`).
+ *
+ * The pages send only devices not saved yet: the Edges page and the tenant
+ * form's meter picker leave out each one discover-devices marks
+ * `alreadyAdded`. The route upserts on (edge, component id), so a row for a
+ * device already saved replaces its type and name without the checks
+ * PATCH /api/devices/[id] makes, which is how a saved device is changed
+ * (metering.edit-device). So this is described as saving new devices only;
+ * if the route comes to refuse rows already saved, or to check them as the
+ * PATCH does, revisit.
  */
 export const SaveDevicesBody = z.strictObject(
   {
@@ -251,7 +259,10 @@ export const SaveDevicesBody = z.strictObject(
     devices: z
       .array(DeviceRow, { error: (issue) => (issue.input === undefined ? DEVICES_PRESENCE : DEVICES) })
       .min(1, { error: DEVICES })
-      .meta({ title: "Devices" }),
+      .meta({
+        title: "Devices",
+        description: "Devices discovered on the edge and not saved yet. Change a saved device with metering.edit-device.",
+      }),
   },
   { error: (issue) => (issue.code === "unrecognized_keys" ? unknownField(issue) : DEVICES_PRESENCE) }
 );

@@ -23,7 +23,7 @@ export const CHECK_CONNECTION_ACTION = { id: "metering.check-connection", title:
 export const REGISTER_EDGES_ACTION = { id: "metering.register-edges", title: "Register edges" } as const;
 export const EDIT_EDGE_ACTION = { id: "metering.edit-edge", title: "Edit edge" } as const;
 export const DELETE_EDGE_ACTION = { id: "metering.delete-edge", title: "Delete edge" } as const;
-export const SAVE_DEVICES_ACTION = { id: "metering.save-devices", title: "Save discovered devices" } as const;
+export const SAVE_DEVICES_ACTION = { id: "metering.save-devices", title: "Save newly discovered devices" } as const;
 export const EDIT_DEVICE_ACTION = { id: "metering.edit-device", title: "Edit device" } as const;
 export const RECORD_OPENING_REGISTER_ACTION = {
   id: "metering.record-opening-register",
