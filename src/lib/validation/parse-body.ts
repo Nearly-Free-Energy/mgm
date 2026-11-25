@@ -1,17 +1,29 @@
 import { NextResponse } from "next/server";
 import type { z } from "zod";
 
-export type ParsedBody<T> = { ok: true; data: T } | { ok: false; response: NextResponse };
+/**
+ * `empty`: the request had no body and was read as `options.whenEmpty`, so a
+ * route can tell a caller that sent nothing from one that sent `{}`. Absent
+ * otherwise.
+ */
+export type ParsedBody<T> = { ok: true; data: T; empty?: true } | { ok: false; response: NextResponse };
 
 /** How a route reads a body that its existing callers send in a shape of their own. */
 export interface ParseBodyOptions {
   /**
-   * What a request with no body at all (zero bytes) is read as, then parsed
-   * with the schema like any other body. Without it such a request is
-   * refused as "Invalid JSON body". For a route whose existing callers send
-   * nothing, such as a page's bare DELETE, while the GUI host always sends a
-   * JSON object (invoke in src/lib/gui/host/client/invoke.ts). Whitespace
-   * is not an empty body.
+   * What a request with no body is read as, then parsed with the schema like
+   * any other body; the result says `empty: true`. Without it such a request
+   * is refused as "Invalid JSON body". For a route whose existing callers
+   * send nothing, such as a page's bare DELETE.
+   *
+   * A body of nothing but whitespace is no body, the rule DELETE
+   * /api/billing-periods/[periodId] applies inline: if either rule changes,
+   * change the other with it, so a route reads an empty body one way.
+   *
+   * The GUI host sends a JSON object with every write (invoke in
+   * src/lib/gui/host/client/invoke.ts), so a route can tell the host's
+   * request from a page's bare one by `empty`. If invoke stops sending a
+   * JSON object for every write, revisit each route that reads `empty`.
    */
   whenEmpty?: unknown;
   /**
@@ -45,10 +57,12 @@ export async function parseJsonBody<S extends z.ZodType>(
   options: ParseBodyOptions = {}
 ): Promise<ParsedBody<z.output<S>>> {
   let body: unknown;
+  let empty = false;
   try {
     if (Object.hasOwn(options, "whenEmpty")) {
       const text = await request.text();
-      body = text === "" ? options.whenEmpty : JSON.parse(text);
+      empty = text.trim() === "";
+      body = empty ? options.whenEmpty : JSON.parse(text);
     } else {
       body = await request.json();
     }
@@ -56,7 +70,7 @@ export async function parseJsonBody<S extends z.ZodType>(
     return invalid("Invalid JSON body");
   }
   const parsed = schema.safeParse(body);
-  if (parsed.success) return { ok: true, data: parsed.data };
+  if (parsed.success) return empty ? { ok: true, data: parsed.data, empty: true } : { ok: true, data: parsed.data };
   const issue = parsed.error.issues[0];
   return invalid(
     issue.message,

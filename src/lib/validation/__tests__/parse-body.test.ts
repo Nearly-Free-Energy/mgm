@@ -55,22 +55,27 @@ describe("parseJsonBody", () => {
     });
   });
 
-  it("reads a request with no body as whenEmpty, and only when it is given", async () => {
+  it("reads a request with no body as whenEmpty, says it was empty, and only when it is given", async () => {
     const Empty = z.strictObject({ confirmation: z.strictObject({ typed: z.string() }).optional() });
     const bare = () => new Request("http://localhost/api/thing", { method: "DELETE" });
-    expect(await parseJsonBody(bare(), Empty, { whenEmpty: {} })).toEqual({ ok: true, data: {} });
+    expect(await parseJsonBody(bare(), Empty, { whenEmpty: {} })).toEqual({ ok: true, data: {}, empty: true });
+    // Whitespace is no body, as DELETE /api/billing-periods/[periodId] reads one.
+    for (const body of [" ", "\n\t "]) {
+      expect(await parseJsonBody(request(body), Empty, { whenEmpty: {} })).toEqual({ ok: true, data: {}, empty: true });
+    }
     // Without the option, as before: no body is not JSON.
     const refused = await parseJsonBody(bare(), Empty);
     if (refused.ok) throw new Error("expected a failure");
     expect(await refused.response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
-    // A body that is sent is parsed as usual, and whitespace is not an empty body.
+    // A body that is sent is parsed as usual and is not empty, `{}` included.
     const typed = await parseJsonBody(request(JSON.stringify({ confirmation: { typed: "x" } })), Empty, { whenEmpty: {} });
     expect(typed).toEqual({ ok: true, data: { confirmation: { typed: "x" } } });
-    for (const body of [" ", "{not json"]) {
-      const result = await parseJsonBody(request(body), Empty, { whenEmpty: {} });
-      if (result.ok) throw new Error(`expected a failure for ${JSON.stringify(body)}`);
-      expect(await result.response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
-    }
+    const object = await parseJsonBody(request("{}"), Empty, { whenEmpty: {} });
+    expect(object).toEqual({ ok: true, data: {} });
+    expect(object).not.toHaveProperty("empty");
+    const bad = await parseJsonBody(request("{not json"), Empty, { whenEmpty: {} });
+    if (bad.ok) throw new Error("expected a failure");
+    expect(await bad.response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
     // whenEmpty is parsed with the schema too.
     expect((await parseJsonBody(bare(), Empty, { whenEmpty: { other: 1 } })).ok).toBe(false);
   });
