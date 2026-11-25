@@ -341,10 +341,8 @@ that nothing refused it:
 
 `state` is also undecided without entities, when a bound kind is not
 given, when the action has no `available()`, and when an earlier check
-refused it. The request itself is refused with `gui_unauthenticated` (401),
-`gui_no_access` (403), `gui_bad_request` (400), `gui_not_found` (404),
-`gui_unavailable` (503), `gui_output_invalid` (500) or, for the manifest,
-`gui_manifest_failed` (500, also when `MGM_GUI` names no usable interface).
+refused it. The request itself is refused with one of the host's codes
+below, such as `gui_not_found` for an `org` the person cannot see.
 
 Every host route answers a refusal in `ActionResult`'s failure shape with
 `error` beside `message`, carrying the same text (`HostFailureBody` in
@@ -352,6 +350,21 @@ Every host route answers a refusal in `ActionResult`'s failure shape with
 `src/lib/gui/host/server/http.ts`), so it also has the `{ error, code }`
 shape of the gate and the action routes. A client reads `code`, which is
 stable, and shows `error`.
+
+The described API's error codes are listed in one place,
+`src/lib/gui/host/server/error-codes.ts`, each with what it means and the
+statuses it comes with: the host's `gui_` codes, the catalog's reasons
+among them; the gate's two refusals, `<plugin>_disabled` (409) and
+`<plugin>_gate_unavailable` (503); and `invalid_body` (400), which
+`parseJsonBody` answers on every action route. An action route's other
+codes are its own and are not listed yet, since no field of an action
+names them. `error-codes.test.ts` fails while a `gui_` code written in the
+host's server modules or routes is missing from the list, a listed one is
+written nowhere, or a status written beside a code is not listed for it,
+and it asks the gate and `parseJsonBody` for theirs. Two answers come from
+middleware before any route and carry no code: a 401 `{ error }` for an
+API request with no session, and a plain-text 404 for a path not
+released.
 
 A watcher (`signals` in a contribution) reports what needs someone in one
 organization: a period not closed, a month with no period, a payment held for
@@ -532,6 +545,42 @@ its microgrid added where two of their units would read alike
 rather than failing the others. Choosing another unit changes only `?unit=`,
 so `HostKitProvider` rebuilds the manifest for it, as it does for `?org=`,
 and the shell's context, clock and remembered unit follow.
+
+### The OpenAPI document
+
+`docs/api/openapi.json` is an OpenAPI 3.1 document of the described API,
+generated from the runtime root's surface snapshot by `openApiDocument`
+(`src/lib/gui/host/server/openapi.ts`):
+
+- one operation per action route, however many actions are sent to it:
+  its path parameters, each of the kind its actions bind; the whole body
+  the route parses (`describeBody`, bound fields and `confirmation`
+  included); the codes it refuses with, `invalid_body`, the gate's two
+  unless its actions declare `whilePluginOff`, and its `prepareAgainOn`
+  codes; and under `x-mgm-actions` each action as the catalog describes it
+  (`describeAction`), so the two cannot disagree. A write's answer and
+  the route's own codes are not described yet;
+- one operation per host route (`HOST_ROUTES` in the same file), its
+  answer described by the strict schema the host parses it with, and the
+  codes it refuses with;
+- `x-mgm-error-codes`, the list from `error-codes.ts`, and on each
+  response the codes it carries (`x-mgm-codes`);
+- `x-mgm-released` on each operation, false for a route middleware does
+  not serve in this build: the catalog and the manifest until the CLI
+  ships (RFC #259 § 7).
+
+`info.version` is `GUI_CONTRACT`, and the document says the API is
+experimental while that is 0.x; the generator throws once it is not, so
+the stability statement is decided again then. It is deterministic, so one
+commit always generates the same file. `npm run api:openapi` writes it,
+and `src/lib/gui/host/server/__tests__/openapi.test.ts`, in the `Test`
+gate, fails while the committed file differs from what the registry
+generates, while a registered action or a host route file
+(`src/app/api/gui/`) is not described, or while the gate's codes on an
+action route disagree with `UNGATED_WRITES`. The generator runs under
+vitest rather than as a script, because it needs the runtime root's
+modules resolved as the tests resolve them. Publishing the document with
+each release is not done yet (#282).
 
 ## The gate
 
