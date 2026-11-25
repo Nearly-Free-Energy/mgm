@@ -18,9 +18,10 @@ Phase 0 ran on a throwaway local stack built from main at 3a5ae4e. Versions: Sup
 
 **Supabase Auth v2.198.0 (16 November 2026) changed what some of this rests on, and phase 0 did not run it.**
 
-- v2.197.0, which CI and local development run, accepts a client's token on every user endpoint of Supabase Auth's own API, as it accepts a browser session's.
+- v2.197.0, which CI and local development ran when this was written, accepts a client's token on every user endpoint of Supabase Auth's own API, as it accepts a browser session's.
 - v2.198.0 refuses client tokens on every user endpoint but `GET /user`. Its source marks that one as a temporary exception and points clients to `GET /oauth/userinfo`.
 - A hosted project may already run v2.198.0 or later.
+- CI and local development have run v2.198.0 since #294 (see the amendment at the end).
 
 ## Decision
 
@@ -124,3 +125,9 @@ Phase 0 ran on a throwaway local stack built from main at 3a5ae4e. Versions: Sup
 - RFC #259 and its phase 0 results; #267, #268.
 - ADR-006 (the GUI contract), ADR-007 (agentic operation and the model data boundary, #261, #288).
 - RFC #186 (sign-in by email link), RFC #197 (tenant access).
+
+## Amendment (25 Nov 2026): CI and local development on Auth v2.198.0
+
+#294 moved the pinned Supabase CLI from 2.122.1 to 3.4.0. CI and the stack `supabase start` runs locally now use Supabase Auth v2.198.0 (`ghcr.io/supabase/gotrue:v2.198.0` in `.github/supabase-ci-images.txt`), and the same change moved the Docker mode (`./setup.sh --docker`, `docker-compose.yml`) from v2.187.0 to v2.198.0. So the first half of decision 1's precondition holds: both ways this repository starts Supabase Auth, the pinned CLI and the Docker mode, run a version that refuses client tokens on Supabase Auth's user endpoints. A contributor who runs a global CLI older than 3.4 instead of the pinned one still gets v2.197.0 (`docs/setup.md`). The `Test` gate's check that `PUT /user` and `DELETE /user/oauth/grants` refuse a client's token is still #270's to add. Phase 0's results above were taken on v2.197.0 and CLI 2.122.1 and are not re-run by this change.
+
+Whoever changes the pinned CLI or the Docker mode's Auth image keeps both at v2.198.0 or later; the CLI's pin is the `gotrue` line of `.github/supabase-ci-images.txt`, regenerated with each CLI upgrade (ADR-004).

@@ -68,7 +68,7 @@ Runs local Supabase via CLI with hot reload and full dev tooling.
 | Node.js | 24 (see `.nvmrc`) | `nvm install` or `fnm install` (reads `.nvmrc`), or `brew install node@24` (keg-only: add it to your `PATH`). `brew install node` installs the newest release, not 24. |
 | npm | 9+ | Bundled with Node.js |
 | Docker Desktop | 4.0+ | [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/) |
-| Supabase CLI | 2.75+ | `brew install supabase/tap/supabase` or [docs](https://supabase.com/docs/guides/cli/getting-started) |
+| Supabase CLI | 3.4+ (`package-lock.json` pins 3.4.0, which `npx supabase` runs) | `brew install supabase/tap/supabase` or [docs](https://supabase.com/docs/guides/cli/getting-started) |
 
 ### Quick Start — Local Supabase (recommended)
 
@@ -407,7 +407,7 @@ After `./setup.sh` in local mode, these services are running:
 |---------|-----|-------------|
 | API (PostgREST) | http://127.0.0.1:54321 | REST API used by the app |
 | Studio | http://127.0.0.1:54323 | Database admin UI |
-| Inbucket | http://127.0.0.1:54324 | Email testing (catches auth emails) |
+| Mailpit | http://127.0.0.1:54324 | Email testing (catches auth emails) |
 | Database | postgresql://postgres:postgres@127.0.0.1:54322/postgres | Direct psql access |
 
 ### Useful commands
@@ -446,8 +446,8 @@ MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start
 MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
 
 # 3. Get the JWT secret (needed to mint impersonation JWTs)
-supabase status | grep "JWT secret"
-# Output: JWT secret: super-secret-jwt-token-with-at-least-32-characters-long
+supabase status -o env | grep '^JWT_SECRET='
+# Output: JWT_SECRET="super-secret-jwt-token-with-at-least-32-characters-long"
 
 # 4. Add SUPABASE_JWT_SECRET to .env.local
 echo 'SUPABASE_JWT_SECRET=super-secret-jwt-token-with-at-least-32-characters-long' >> .env.local
@@ -594,6 +594,7 @@ If using local/dev mode, run `npm run dev` after setup.
 | `function gen_salt(unknown) does not exist` | Verify seed.sql uses `extensions.crypt()` / `extensions.gen_salt()`. Run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply. |
 | `.env.local already exists` | Use `./setup.sh --force` to overwrite |
 | `[mgm] NEXT_PUBLIC_… is set but no longer read` at `npm run dev` | Rename the variable in `.env.local` ([Upgrading from v0.0.1 or v0.0.2](#upgrading-from-v001-or-v002)), or rerun `./setup.sh --force` (in local mode this also resets the local database) |
+| `inbucket in supabase/config.toml is no longer supported` | The branch predates the move to Supabase CLI 3, which renamed the section to `[local_smtp]`. Run that branch's pinned CLI (`npx supabase`), or rebase it on `main`. |
 | `No credential encryption key` from `supabase start` or `supabase db reset` | Local database: rerun with `MGM_ALLOW_DEV_CREDENTIAL_KEY=1`. Shared database: follow [docs/runbooks/dek.md](runbooks/dek.md) |
 | No sign-in email arrives | Check the server log for `auth.sign_in_link`: `no_access` means the address has no MGM role (run `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset`, or `./setup.sh --docker --force` in docker mode, to re-seed the admin user); `send_failed` with a setting name means `MGM_SMTP_URL` or `MGM_MAIL_FROM` is missing; `limited` means wait a minute (1 a minute, 5 an hour per address). In production, if a super admin must get in before the mail server is fixed, follow `docs/runbooks/emergency-sign-in.md` |
 | `Failed to reach OpenEMS at localhost:8075` | Start the docker-openems stack first (see Full-Stack Setup) |

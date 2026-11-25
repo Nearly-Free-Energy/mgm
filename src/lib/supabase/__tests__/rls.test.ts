@@ -7,7 +7,7 @@
  *   1. Local Supabase CLI running: `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase start`
  *      (then `MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset` to re-apply
  *      migrations), or `./setup.sh`
- *   2. SUPABASE_JWT_SECRET set in .env.local (get from: `supabase status | grep 'JWT secret'`)
+ *   2. SUPABASE_JWT_SECRET set in .env.local (get from: `supabase status -o env | grep '^JWT_SECRET='`)
  *   3. MGM_PUBLIC_SUPABASE_ANON_KEY set in .env.local (written by ./setup.sh)
  *
  * Opt-out:

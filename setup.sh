@@ -278,7 +278,7 @@ ENVEOF
   log ""
   log "  App:         http://localhost:3000"
   log "  Studio:      http://127.0.0.1:54323"
-  log "  Inbucket:    http://127.0.0.1:54324"
+  log "  Mailpit:     http://127.0.0.1:54324"
   log "  Database:    postgresql://postgres:postgres@127.0.0.1:54322/postgres"
   log ""
   log "  Sign in as:  admin@example.org (email link; docs/setup.md)"
