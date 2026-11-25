@@ -1,8 +1,9 @@
 /**
  * The `billing.period-due` signals: a draft period counts once its last day
- * has passed in its own time zone; one with bills asks to be closed, one
- * without asks for its bills; oldest first, capped; fixed copy with no
- * tenant, amount or id in the text.
+ * has passed in its own time zone; one with bills asks to be closed, a
+ * warning that turns critical seven days after its last day in that zone,
+ * and one without asks for its bills, a warning however old; oldest first,
+ * capped; fixed copy with no tenant, amount or id in the text.
  */
 import { describe, expect, it } from "vitest";
 import { createFmt } from "@/lib/gui/fmt";
@@ -10,7 +11,7 @@ import { signalOutSchema } from "@/lib/gui/host/server/model-schema";
 import { MAX_SIGNALS_PER_SOURCE } from "@/lib/gui/surface";
 import { addDaysToDateKey } from "@/lib/timezone/day-key";
 import { PERIOD_DUE_EXAMPLES } from "../period-due-examples";
-import { buildPeriodDueSignals, hasEnded, type DuePeriodInput } from "../period-due-model";
+import { buildPeriodDueSignals, CRITICAL_AFTER_DAYS, hasEnded, isOverdue, type DuePeriodInput } from "../period-due-model";
 
 const fmt = createFmt({ locale: "en-GB" });
 const MG = "e7f00000-0000-4000-8000-0000000000a1";
@@ -41,11 +42,38 @@ describe("hasEnded", () => {
   });
 });
 
+describe("isOverdue", () => {
+  it("is seven days after the period's last day", () => {
+    expect(CRITICAL_AFTER_DAYS).toBe(7);
+  });
+
+  it("turns at midnight seven days after the last day east of UTC (Kampala, UTC+3)", () => {
+    // 2026-11-06T21:00Z is midnight of 7 November in Kampala.
+    expect(isOverdue(period(), new Date("2026-11-06T20:59:59Z"))).toBe(false);
+    expect(isOverdue(period(), new Date("2026-11-06T21:00:00Z"))).toBe(true);
+  });
+
+  it("turns at midnight seven days after the last day west of UTC (Los Angeles, UTC-8 in November)", () => {
+    const la = period({ timezone: "America/Los_Angeles" });
+    // 2026-11-07T08:00Z is midnight of 7 November in Los Angeles; by then it is already 7 November in UTC.
+    expect(isOverdue(la, new Date("2026-11-07T07:59:59Z"))).toBe(false);
+    expect(isOverdue(la, new Date("2026-11-07T08:00:00Z"))).toBe(true);
+  });
+
+  it("reads a zone the runtime cannot resolve as UTC", () => {
+    expect(isOverdue(period({ timezone: "Kampala" }), new Date("2026-11-06T23:59:59Z"))).toBe(false);
+    expect(isOverdue(period({ timezone: "Kampala" }), new Date("2026-11-07T00:00:00Z"))).toBe(true);
+  });
+});
+
 describe("buildPeriodDueSignals", () => {
   const NOW = new Date("2026-11-20T09:00:00Z");
+  /** The last instant October's close is a warning in Kampala, and the first it is critical. */
+  const LAST_WARN = new Date("2026-11-06T20:59:59Z");
+  const FIRST_CRITICAL = new Date("2026-11-06T21:00:00Z");
 
-  it("asks to close a period with bills, at its close checklist", () => {
-    expect(buildPeriodDueSignals(fmt, [period()], NOW)).toEqual([
+  it("asks to close a period with bills, at its close checklist, as a warning in its first week", () => {
+    expect(buildPeriodDueSignals(fmt, [period()], LAST_WARN)).toEqual([
       {
         id: "e7f00000-0000-4000-8000-0000000000b1",
         kind: "your-move",
@@ -58,6 +86,27 @@ describe("buildPeriodDueSignals", () => {
         due: "2026-11-01",
       },
     ]);
+  });
+
+  it("makes it critical from seven days after its last day, with the same copy, link, at and due", () => {
+    const [warn] = buildPeriodDueSignals(fmt, [period()], LAST_WARN);
+    const [critical] = buildPeriodDueSignals(fmt, [period()], FIRST_CRITICAL);
+    expect(critical).toEqual({ ...warn, severity: "critical" });
+    expect(buildPeriodDueSignals(fmt, [period()], NOW)[0].severity).toBe("critical");
+  });
+
+  it("escalates in each period's own zone: at one instant, Kampala's is critical and Los Angeles' is not yet", () => {
+    // 2026-11-07T05:00Z: 7 November 08:00 in Kampala, 6 November 21:00 in Los Angeles.
+    const at = new Date("2026-11-07T05:00:00Z");
+    const out = buildPeriodDueSignals(fmt, [period({ id: "east" }), period({ id: "west", timezone: "America/Los_Angeles" })], at);
+    expect(out.map((s) => [s.id, s.severity])).toEqual([
+      ["east", "critical"],
+      ["west", "warn"],
+    ]);
+  });
+
+  it("keeps a period with no bills a warning however old", () => {
+    expect(buildPeriodDueSignals(fmt, [period({ bills: 0 })], NOW)[0].severity).toBe("warn");
   });
 
   it("asks for the bills of a period with none, at its review", () => {
@@ -103,6 +152,10 @@ describe("buildPeriodDueSignals", () => {
     for (const s of [...buildPeriodDueSignals(fmt, [period(), period({ id: "x", bills: 0 })], NOW), ...PERIOD_DUE_EXAMPLES]) {
       expect(signalOutSchema.safeParse(s).success).toBe(true);
     }
-    expect(PERIOD_DUE_EXAMPLES.map((s) => s.title)).toEqual(["Kiwumu: September 2026 has no bills", "Kiwumu: October 2026 is not closed"]);
+    expect(PERIOD_DUE_EXAMPLES.map((s) => [s.severity, s.title])).toEqual([
+      ["warn", "Kiwumu: September 2026 has no bills"],
+      ["critical", "Kiwumu: October 2026 is not closed"],
+      ["warn", "Kiwumu: 1 to 15 November 2026 is not closed"],
+    ]);
   });
 });
