@@ -150,11 +150,15 @@ describe("the body parser's code", () => {
 });
 
 describe("listedCodes", () => {
-  it("lists each code once, sorted, with the gate's for the plugins named", () => {
-    const codes = listedCodes(["billing", "payments", "billing"]).map((c) => c.code);
+  it("lists every host and body code, and the gate's codes asked for, each once and sorted", () => {
+    const codes = listedCodes([
+      ["billing", "disabled"],
+      ["payments", "unavailable"],
+      ["billing", "disabled"],
+    ]).map((c) => c.code);
     expect(codes).toEqual([...codes].sort());
     expect(new Set(codes).size).toBe(codes.length);
-    expect(codes).toEqual(expect.arrayContaining(["billing_disabled", "payments_gate_unavailable", "invalid_body", ...Object.keys(HOST_CODES)]));
-    expect(codes).not.toContain("metering_disabled");
+    expect(codes.filter((c) => !Object.hasOwn(HOST_CODES, c))).toEqual(["billing_disabled", "invalid_body", "payments_gate_unavailable"]);
+    expect(codes).toEqual(expect.arrayContaining(Object.keys(HOST_CODES)));
   });
 });

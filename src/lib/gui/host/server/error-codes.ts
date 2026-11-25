@@ -170,20 +170,21 @@ export const BODY_CODES = {
 export type ListedCode = CodeEntry & { code: string };
 
 /**
- * Every code above, with the gate's for each plugin in `plugins`, sorted by
- * code: the list the OpenAPI document publishes.
+ * Every host and body code above, and the gate's code for each plugin and
+ * refusal in `gates`, each once, sorted by code: the list the OpenAPI
+ * document publishes, given the gate refusals its routes answer.
  */
-export function listedCodes(plugins: readonly MgmPluginName[]): ListedCode[] {
+export function listedCodes(gates: Iterable<readonly [MgmPluginName, GateRefusal]>): ListedCode[] {
   const entry = (code: string, e: CodeEntry): ListedCode => ({
     code,
     status: [...e.status],
     ...(e.reasons ? { reasons: [...e.reasons] } : {}),
     meaning: e.meaning,
   });
-  const refusals = Object.keys(GATE_CODES) as GateRefusal[];
+  const gate = new Map([...gates].map(([plugin, refusal]) => [gateCode(plugin, refusal), entry(gateCode(plugin, refusal), GATE_CODES[refusal])]));
   const all = [
     ...Object.entries(HOST_CODES).map(([code, e]) => entry(code, e)),
-    ...[...new Set(plugins)].flatMap((plugin) => refusals.map((r) => entry(gateCode(plugin, r), GATE_CODES[r]))),
+    ...gate.values(),
     ...Object.entries(BODY_CODES).map(([code, e]) => entry(code, e)),
   ];
   return all.sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
