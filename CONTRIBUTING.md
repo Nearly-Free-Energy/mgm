@@ -79,8 +79,11 @@ MGM is licensed under the [Eclipse Public License 2.0](LICENSE). By signing
 off a commit you certify, under the Developer Certificate of Origin, that
 you may submit it under that licence; your contribution is accepted under
 EPL-2.0 and there is no separate contributor licence agreement. That
-includes new files you add to this repository, such as a plugin. See
-`README.md` § "Licence".
+includes new files you add to this repository, such as a plugin. A plugin
+distributed separately, outside this repository, carries the licence its
+author chooses, unless it copies MGM code. Distributing it together with
+MGM requires that the terms of both licences can be met. See `README.md`
+§ "Licence".
 
 ## What must pass before merge
 

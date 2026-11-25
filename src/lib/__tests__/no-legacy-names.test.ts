@@ -43,12 +43,13 @@ const LEGACY_COMPAT: Record<string, string> = {
  * Files that name the upstream project for attribution, and why. Only the
  * repository path `energy-iot/metering-billing-engine` is allowed there,
  * never the inherited short name: attribution names a repository, prose
- * uses MGM. The exception is documented in README.md § "Licence" and in
- * mgm#38; if attribution moves elsewhere, move the entry with it.
+ * uses MGM. The attribution is in README.md's "## Licence" section and in
+ * NOTICE, as decided on mgm#38. If either file stops carrying it, or the
+ * README heading is renamed, update this list and this comment with it.
  */
 const UPSTREAM_ATTRIBUTION: Record<string, string> = {
   "README.md": "names the upstream repository in the Licence section",
-  "NOTICE": "attribution notice required by EPL-2.0",
+  "NOTICE": "keeps the upstream attribution, which EPL-2.0 § 3.3 forbids removing",
 };
 const UPSTREAM_REPOSITORY = /energy-iot\/metering-billing-engine/g;
 
@@ -100,7 +101,9 @@ describe("no legacy project names", () => {
     expect(offenders, "Add a reasoned LEGACY_COMPAT entry or use the MGM identifier").toEqual([]);
   });
 
-  it("lists only files that still carry the upstream attribution", () => {
+  it("lists only scanned files that still carry the upstream attribution", () => {
+    // NOTICE has no extension, so check that the scan reaches every listed file.
+    expect(files).toEqual(expect.arrayContaining(Object.keys(UPSTREAM_ATTRIBUTION)));
     const stale = Object.keys(UPSTREAM_ATTRIBUTION).filter((file) => {
       const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
       UPSTREAM_REPOSITORY.lastIndex = 0;

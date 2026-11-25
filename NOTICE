@@ -16,4 +16,6 @@ this Program.
 Third-party software bundled into a published release is listed, with the
 text of each package's licence, in the mgm-third-party-notices-<version>.txt
 file published beside that release's asset. The Inter typeface, self-hosted
-at build time, is licensed under the SIL Open Font License, Version 1.1.
+at build time, is licensed under the SIL Open Font License, Version 1.1. It
+is not yet listed in that file; see
+https://github.com/Nearly-Free-Energy/mgm/issues/37.
