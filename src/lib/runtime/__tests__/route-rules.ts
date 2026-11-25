@@ -154,7 +154,7 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/auth/sign-in-link": {
     kind: "permanent",
     reason:
-      "Emails a sign-in link to someone who has no session yet (RFC #186), while an action is offered to a signed-in person. Wrong once the route serves a signed-in caller.",
+      "Emails a sign-in link to someone who has no session yet (RFC #186), while an action is offered to a signed-in person. Wrong once it reads the caller's session.",
   },
   "POST /api/gui/prepare": {
     kind: "permanent",
@@ -169,7 +169,7 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/payments/ipn": {
     kind: "permanent",
     reason:
-      "The payment provider's server-to-server notification, sent with no session; no person sends it. Wrong once a signed-in person can send it.",
+      "The payment provider's server-to-server notification, sent with no session; no person sends it. Wrong once it reads the caller's session or acts for a signed-in person.",
   },
   "POST /api/payments/reconcile-worker": {
     kind: "permanent",
