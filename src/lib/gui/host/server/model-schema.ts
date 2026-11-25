@@ -1,10 +1,11 @@
 import "server-only";
 
 /**
- * Strict schemas for every shape the GUI contract sends to a browser: view
- * models and what they carry, action specs and results, the confirmation
- * step, signals, status items, search hits, the manifest, the shell's initial
- * view and a GUI's metadata.
+ * Strict schemas for every shape the GUI contract sends to a browser or
+ * another client: view models and what they carry, action specs and
+ * results, the confirmation step, signals, status items, search hits, the
+ * manifest, the shell's initial view, a GUI's metadata and the action
+ * catalog.
  *
  * Every object is strict, so a key the contract does not name is refused at
  * any depth, and nothing is stripped. Each schema's output type equals its
@@ -17,7 +18,7 @@ import "server-only";
  * top of these schemas.
  */
 import { z } from "zod";
-import { CORE_ENTITY_KINDS } from "@/lib/plugins/bundled";
+import { CORE_ENTITY_KINDS, MGM_BUNDLED_PLUGINS, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { Json, Signals, ViewKind, ViewModel } from "../../contract";
 import { CARET_RANGE_RE } from "../shared/contract-range";
 import { OUT_HREF_PATTERNS, isSameOriginPath } from "../shared/href";
@@ -64,6 +65,13 @@ export const iconSchema = z.enum([
 const coreEntityKindSchema = z.enum(CORE_ENTITY_KINDS);
 /** A core kind, or a plugin's own kind written like an id ("sms-reminders.send"). */
 export const entityKindSchema = z.union([coreEntityKindSchema, idSchema]);
+/**
+ * "/", or segments of lowercase words and [name] placeholders: a page or API
+ * route as a contribution names it, such as /api/billing-periods/[periodId].
+ */
+export const routePattern = z
+  .string()
+  .regex(/^\/$|^(?:\/(?:[a-z0-9_][a-z0-9_-]*|\[[A-Za-z][A-Za-z0-9_]*\]))+$/, "Expected a route such as /microgrids/[id]");
 
 export const entityRefSchema = z.strictObject({
   kind: entityKindSchema,
@@ -159,6 +167,16 @@ export const actionSpecSchema = z.strictObject({
   input: jsonSchema,
 });
 
+const actionFailureSchema = z.strictObject({
+  type: z.literal("result"),
+  ok: z.literal(false),
+  // 0 when the person cancelled; otherwise the HTTP status.
+  status: z.int().min(0).max(599),
+  code: z.string().min(1),
+  message: z.string(),
+  field: z.string().optional(),
+});
+
 export const actionResultSchema = z.discriminatedUnion("ok", [
   z.strictObject({
     type: z.literal("result"),
@@ -168,16 +186,13 @@ export const actionResultSchema = z.discriminatedUnion("ok", [
     next: actionRefSchema.optional(),
     signals: z.literal(true).optional(),
   }),
-  z.strictObject({
-    type: z.literal("result"),
-    ok: z.literal(false),
-    // 0 when the person cancelled; otherwise the HTTP status.
-    status: z.int().min(0).max(599),
-    code: z.string().min(1),
-    message: z.string(),
-    field: z.string().optional(),
-  }),
+  actionFailureSchema,
 ]);
+
+/** A GUI host route's refusal: an HTTP error status, and `error` the same text as `message`. */
+export const hostFailureBodySchema = actionFailureSchema
+  .extend({ status: z.int().min(400).max(599), error: z.string() })
+  .refine((b) => b.error === b.message, { message: "error carries the text of message", path: ["error"] });
 
 // ── The five view kinds ─────────────────────────────────────────────────────
 
@@ -510,4 +525,46 @@ export const guiMetaSchema = z.strictObject({
     .array(z.string().min(1))
     .refine((d) => new Set(d).size === d.length, "Each dependency is listed once")
     .readonly(),
+});
+
+// ── The described API: the action catalog ──────────────────────────────────
+
+const pluginNameSchema = z.enum(MGM_BUNDLED_PLUGINS.map((p) => p.name) as [MgmPluginName, ...MgmPluginName[]]);
+
+export const availabilityCheckSchema = z.enum(["installed", "enabled", "configured", "healthy", "authorized", "state"]);
+
+export const catalogAvailabilitySchema = z.strictObject({
+  available: z.boolean(),
+  reasons: z.array(z.strictObject({ check: availabilityCheckSchema, code: z.string().min(1), message: z.string() })),
+  unchecked: z.array(availabilityCheckSchema),
+});
+
+const kindMap = z.record(z.string(), entityKindSchema);
+
+export const catalogEntrySchema = z.strictObject({
+  id: idSchema,
+  title: z.string(),
+  plugin: pluginNameSchema,
+  target: entityKindSchema,
+  method: z.enum(["POST", "PUT", "PATCH", "DELETE"]),
+  path: routePattern.refine((p) => p.startsWith("/api/"), "Expected an API route"),
+  bind: z.strictObject({ path: kindMap, body: kindMap }),
+  params: z.record(z.string(), z.string()).optional(),
+  input: jsonSchema,
+  inputVersion: z.int().positive(),
+  risk: z.enum(["write", "money", "external", "destructive"]),
+  confirm: confirmSchema,
+  humanOnly: z.boolean(),
+  targeted: z.boolean(),
+  prepareAgainOn: z.array(z.string()).max(8),
+  repeat: repeatSchema,
+  availability: catalogAvailabilitySchema,
+});
+
+export const actionCatalogSchema = z.strictObject({
+  type: z.literal("catalog"),
+  contract: z.string().regex(SEMVER_RE),
+  org: z.string().min(1).nullable(),
+  entities: z.array(z.strictObject({ kind: entityKindSchema, id: z.string().min(1) })),
+  actions: z.array(catalogEntrySchema),
 });

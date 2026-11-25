@@ -150,9 +150,11 @@ describe("isReleasedRoute", () => {
     // The pre-#50 tenants URL has no page and no released route; it stays a
     // 404. Tenants live under setup/tenants.
     "/microgrids/abc/tenants",
-    // The GUI host releases one route at a time.
+    // The GUI host releases one route at a time. The manifest and the
+    // catalog stay unreleased until the CLI ships (RFC #259 § 7).
     "/api/gui",
     "/api/gui/manifest",
+    "/api/gui/catalog",
     "/api/gui/view/extra",
     "/api/gui/prepare/x",
     "/api/gui/signals/x",

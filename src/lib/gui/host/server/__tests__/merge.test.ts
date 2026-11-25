@@ -5,7 +5,7 @@ import type { MgmPluginName } from "@/lib/plugins/bundled";
 import type { Id } from "../../../contract";
 import type { ActionDef, ActionLink, LoadedModel, SurfaceRequest } from "../../../surface";
 import type { GateDecision } from "@/lib/runtime/gate";
-import { AVAILABILITY_BUDGET_MS, UNCHECKED_REASON, resolveActions, type MergeContext } from "../merge";
+import { AVAILABILITY_BUDGET_MS, UNCHECKED_REASON, askAvailability, resolveActions, type MergeContext } from "../merge";
 import type { RegisteredAction, RegisteredView } from "../surface-registry";
 import { ORG_A, contextFor, managerOf, superAdmin } from "./host-fakes";
 
@@ -503,5 +503,39 @@ describe("resolveActions: availability", () => {
     expect(available).not.toHaveBeenCalled();
     const rows = out.kind === "collection" ? out.body.rows : [];
     expect(rows[0].actions[0]).toMatchObject({ enabled: false, reason: UNCHECKED_REASON });
+  });
+});
+
+describe("askAvailability", () => {
+  it("tags each answer, so no reason a contribution writes reads as not checked", async () => {
+    const H3 = "e7100000-0000-4000-8000-0000000000b3";
+    const H4 = "e7100000-0000-4000-8000-0000000000b4";
+    const available = vi.fn<Available>(async () => ({ [H1]: "unchecked", [H2]: UNCHECKED_REASON, [H3]: true }));
+    const assign = action("metering", "metering.assign", { available });
+    const request = vi.fn(async () => ({}) as SurfaceRequest);
+    const answers = await askAvailability(new Map([[assign.def.id, assign]]), new Map([[assign.def.id, new Set([H1, H2, H3, H4])]]), request);
+    expect(request).toHaveBeenCalledOnce();
+    expect(Object.fromEntries(answers.get("metering.assign")!)).toEqual({
+      [H1]: { kind: "refused", reason: "unchecked" },
+      [H2]: { kind: "refused", reason: UNCHECKED_REASON },
+      [H3]: { kind: "ok" },
+      // An id the answer leaves out was not checked.
+      [H4]: { kind: "unchecked" },
+    });
+  });
+
+  it("files every id of a call that throws as not checked, and asks nothing for no targets", async () => {
+    const available = vi.fn<Available>(async () => {
+      throw new Error("secret detail");
+    });
+    const assign = action("metering", "metering.assign", { available });
+    const request = vi.fn(async () => ({}) as SurfaceRequest);
+    const actions = new Map([[assign.def.id, assign]]);
+    const answers = await askAvailability(actions, new Map([[assign.def.id, new Set([H1, H2])]]), request);
+    expect(Object.fromEntries(answers.get("metering.assign")!)).toEqual({ [H1]: { kind: "unchecked" }, [H2]: { kind: "unchecked" } });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("secret detail");
+    request.mockClear();
+    expect((await askAvailability(actions, new Map(), request)).size).toBe(0);
+    expect(request).not.toHaveBeenCalled();
   });
 });

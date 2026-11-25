@@ -26,7 +26,7 @@ function firstIssue(schema: z.ZodType, input: unknown) {
 
 const json = (schema: z.ZodType) => JSON.parse(JSON.stringify(z.toJSONSchema(schema, { io: "input" })));
 
-/** What a person fills, as the host hands it to the kit: `confirmation` removed (inputSpec in prepare.ts). */
+/** What a person fills, as the host hands it to the kit: `confirmation` removed (describeInput in src/lib/gui/host/server/input-spec.ts). */
 function personInput(schema: z.ZodType): Json {
   const s = json(schema) as { properties: Record<string, Json>; required?: string[] };
   delete s.properties.confirmation;

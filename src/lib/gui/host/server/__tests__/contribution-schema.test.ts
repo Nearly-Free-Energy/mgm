@@ -101,6 +101,18 @@ describe("parseContribution", () => {
     expect(() => parseContribution(c, CATALOG)).not.toThrow();
   });
 
+  it("accepts an input with no fields, or none but the host's confirmation, and one with a never", () => {
+    for (const input of [
+      z.strictObject({}),
+      z.strictObject({ confirmation: z.strictObject({ acknowledged: z.array(z.string()) }).optional() }),
+      z.strictObject({ gone: z.never().optional() }),
+    ]) {
+      const c = copy(BILLING_SURFACE) as Draft;
+      c.actions[0].input = input;
+      expect(() => parseContribution(c, CATALOG)).not.toThrow();
+    }
+  });
+
   it("accepts an action offered only on its own plugin's views", () => {
     const c = copy(BILLING_SURFACE) as Draft;
     c.actions[0].targeted = false;
@@ -302,7 +314,14 @@ describe("parseContribution", () => {
     ],
     // Schemas
     ["a loose ext schema", (c) => (c.views[1].ext.zod = z.object({ tariffVersion: z.number() })), ["views", 1, "ext", "zod"], "ext objects must be strict (z.strictObject)"],
-    ["an input JSON Schema cannot describe", (c) => (c.actions[0].input = z.strictObject({ at: z.date() })), ["actions", 0, "input"], "the input cannot be described as JSON Schema: Date cannot be represented in JSON Schema"],
+    ["an input JSON Schema cannot describe", (c) => (c.actions[0].input = z.strictObject({ at: z.date() })), ["actions", 0, "input"], "billing.create-period: the input cannot be described as JSON Schema: Date cannot be represented in JSON Schema"],
+    ["an input that accepts any value", (c) => (c.actions[0].input = z.unknown()), ["actions", 0, "input"], "billing.create-period: the input accepts any value at its root; describe what it takes"],
+    ["an input field that accepts any value", (c) => (c.actions[0].input = z.strictObject({ note: z.unknown().meta({ writeOnly: true }) })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /properties/note; describe what it takes"],
+    ["a loose input object", (c) => (c.actions[0].input = z.looseObject({ note: z.string() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
+    ["an input object that is not strict", (c) => (c.actions[0].input = z.object({ note: z.string() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
+    ["an input field of any JSON", (c) => (c.actions[0].input = z.strictObject({ data: z.json() })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /$defs/__schema0; describe what it takes"],
+    ["an input with a catchall of unknowns", (c) => (c.actions[0].input = z.strictObject({ note: z.string() }).catchall(z.unknown())), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /additionalProperties; describe what it takes"],
+    ["an input list of unknowns", (c) => (c.actions[0].input = z.strictObject({ tiers: z.array(z.unknown()) })), ["actions", 0, "input"], "billing.create-period: the input accepts any value at /properties/tiers/items; describe what it takes"],
     // Examples
     ["a view without examples", (c) => (c.views[0].examples = []), ["views", 0, "examples"], "a view needs at least one example"],
     ["an example of another view", (c) => (c.views[0].examples[0].view = "billing.period-review"), ["views", 0, "examples", 0, "view"], "an example must name its view, billing.periods"],

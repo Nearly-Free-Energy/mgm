@@ -33,6 +33,15 @@ read a stored credential, or to send data to another origin.
      action references, signals, the manifest, the kit interface
      (`GuiKit`) and what an interface plugin implements (`GuiPlugin`,
      `GuiMeta`). It imports only types, from `react` and the plugin catalog.
+     It also carries the answers the host's routes give a client that is
+     not an interface, such as the CLI, which may import only this file
+     (RFC #259 §§ 3-4): the action catalog (`ActionCatalog`, served by
+     `GET /api/gui/catalog`) and the refusal every host route answers with
+     (`HostFailureBody`: `ActionResult`'s failure with `error`, the same
+     text as `message`). An interface never receives these: the kit turns a
+     refusal into the `ActionResult` an interface always got. Each has a
+     strict schema in `src/lib/gui/host/server/model-schema.ts`, as every
+     shape a browser receives does.
    - `src/lib/gui/surface.ts` is server-only. It holds what a capability
      contributes: views with loaders, actions bound to its existing API
      routes with a confirmation level, navigation entries, signals, status
@@ -86,6 +95,14 @@ read a stored credential, or to send data to another origin.
      checked against a change in the same pull request.
    - 0.2.0 added the required `repeat` on every action (decision 11), the
      first change of shape since 0.1.0.
+   - 0.2.1 added the action catalog's types and `HostFailureBody`
+     (decision 1). The catalog is a new answer. The refusal body every host
+     route sends gained `error` beside `message`, a key added to an answer
+     whose type was not in the contract before; the kit reads it and gives
+     an interface the `ActionResult` it always did, without `error`. No
+     shape an interface receives changed, so a patch was enough. It also
+     covers `Signals.attention` (#230), an optional field added while the
+     contract read 0.2.0.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -152,7 +169,7 @@ read a stored credential, or to send data to another origin.
      more than 50 signals. It sends each id prefixed with the watcher's.
    - The answer carries the first 20 signals, most severe first (`top`),
      how many there were (`count`), and how many of them are `warn` or
-     `critical` (`attention`, optional since it was added within 0.1),
+     `critical` (`attention`, optional since it was added in 0.2.1),
      both counted over every signal, not only `top`.
    - A watcher sets each signal's severity by fixed rules, decided on #230:
      a billing period with bills not closed is a warning from the day after

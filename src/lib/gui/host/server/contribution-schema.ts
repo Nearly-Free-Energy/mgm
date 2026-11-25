@@ -14,7 +14,11 @@ import "server-only";
  * ids carry its alias and are unique within the contribution; confirmation
  * levels; path segments against params and bindings; referenced entity kinds;
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
- * describe; examples against the model schemas and the declared keys, and a
+ * describe, with no part that accepts any value (unconstrainedNodes in
+ * ./input-spec.ts: so strict objects, and no z.json()), since the host
+ * serves that schema (describeInput) and an empty one describes nothing,
+ * each refusal naming the action's id;
+ * examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
  * assistant reading of a view or watcher that is not on the list, of views
  * reached from configure or system navigation, of billing's, payments',
@@ -49,8 +53,10 @@ import {
   modelSchema,
   navGroupSchema,
   repeatSchema,
+  routePattern,
   signalOutSchema,
 } from "./model-schema";
+import { unconstrainedNodes } from "./input-spec";
 
 /** What the parse reads from the catalog: the plugins, their aliases and routes. */
 export type SurfaceCatalog = Pick<MgmCatalog, "plugins">;
@@ -84,10 +90,6 @@ function add(ctx: Ctx, path: Path, message: string) {
 
 const fn = z.custom<(...args: never[]) => unknown>((v) => typeof v === "function", "Expected a function");
 const zodType = z.custom<z.ZodType>((v) => v instanceof z.ZodType, "Expected a zod schema");
-/** "/", or segments of lowercase words and [name] placeholders. */
-const routePattern = z
-  .string()
-  .regex(/^\/$|^(?:\/(?:[a-z0-9_][a-z0-9_-]*|\[[A-Za-z][A-Za-z0-9_]*\]))+$/, "Expected a route such as /microgrids/[id]");
 const kindMap = z.record(z.string(), entityKindSchema);
 
 /** A route with its placeholder names dropped: /x/[id] and /x/[microgridId] are one route. */
@@ -444,10 +446,14 @@ const actionSchema = z
       if (new Set(a.prepareAgainOn).size !== a.prepareAgainOn.length) add(ctx, ["prepareAgainOn"], "a code is listed twice");
     }
     checkSegments(ctx, a.path, Object.keys(a.bind.path ?? {}), ["bind", "path"], "bind.path");
+    let described: unknown;
     try {
-      z.toJSONSchema(a.input, { io: "input" });
+      described = z.toJSONSchema(a.input, { io: "input" });
     } catch (error) {
-      add(ctx, ["input"], `the input cannot be described as JSON Schema: ${(error as Error).message}`);
+      add(ctx, ["input"], `${a.id}: the input cannot be described as JSON Schema: ${(error as Error).message}`);
+    }
+    for (const at of described === undefined ? [] : unconstrainedNodes(described)) {
+      add(ctx, ["input"], `${a.id}: the input accepts any value at ${at || "its root"}; describe what it takes`);
     }
   });
 

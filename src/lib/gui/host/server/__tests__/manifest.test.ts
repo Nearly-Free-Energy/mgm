@@ -22,7 +22,7 @@ const createClient = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => createClient() }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "accept-language": "en-UG" }) }));
 
-import { STATUS_BUDGET_MS, buildManifest, getManifest, preloadManifest } from "../manifest";
+import { STATUS_BUDGET_MS, buildManifest, getManifest, preloadManifest, readManifestQuery, serveManifest } from "../manifest";
 import { ORG_A, ORG_B, contextFor, managerOf, superAdmin, tableClient, tenantHomes, tenantOf } from "./host-fakes";
 
 const COMMUNITY = "e7100000-0000-4000-8001-000000000001";
@@ -523,5 +523,84 @@ describe("getManifest", () => {
     getRequestUserAccess.mockReset().mockResolvedValue({ user: null, roles: [] });
     preloadManifest("gridtop", "/settings/profile", null, null);
     expect(getRequestUserAccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("serveManifest", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("builds the manifest with the interface this installation renders, and the hints given", async () => {
+    vi.stubEnv("MGM_GUI", "gridtop");
+    const { client } = tables([{ id: ORG_A, name: "Org A" }, { id: ORG_B, name: "Org B" }]);
+    const ctx = contextFor([managerOf(ORG_A), managerOf(ORG_B)], async () => client);
+    const out = await serveManifest(ctx, { requested: ORG_B, preferred: ORG_A });
+    expect(out.ok && out.value).toMatchObject({ type: "manifest", gui: "gridtop", org: { id: ORG_B } });
+    // Unset selects the default interface, as the layout reads it.
+    vi.stubEnv("MGM_GUI", "");
+    const unset = await serveManifest(ctx, {});
+    expect(unset.ok && unset.value.gui).toBe("gridtop");
+  });
+
+  it("answers 500 for an MGM_GUI that names no interface, keeping the value out of the answer and the log", async () => {
+    vi.stubEnv("MGM_GUI", "CANARY-gui-a41f");
+    const newClient = vi.fn();
+    const out = await serveManifest(contextFor([managerOf(ORG_A)], newClient), {});
+    expect(out).toEqual({ ok: false, status: 500, code: "gui_manifest_failed", message: "The manifest could not be built." });
+    expect(inspect(errors.mock.calls)).not.toContain("CANARY");
+    expect(newClient).not.toHaveBeenCalled();
+  });
+
+  it("passes buildManifest's refusal on, and answers 500 when it throws", async () => {
+    const { client } = tables([]);
+    expect(await serveManifest(contextFor([managerOf(ORG_A)], async () => client), {})).toMatchObject({
+      ok: false,
+      status: 403,
+      code: "gui_no_access",
+    });
+    const broken = tableClient({ organizations: { data: null, error: { message: "CANARY-db" } } }).client;
+    const out = await serveManifest(contextFor([managerOf(ORG_A)], async () => broken), {});
+    expect(out).toEqual({ ok: false, status: 500, code: "gui_manifest_failed", message: "The manifest could not be built." });
+    expect(inspect(errors.mock.calls)).not.toContain("CANARY");
+  });
+
+  it("gives a tenant-only person the tenant manifest, with no organization", async () => {
+    const UNIT = "e7100000-0000-4000-8004-0000000000a1";
+    const { client } = tableClient({ user_profiles: { data: [] } }, tenantHomes([{ id: UNIT, name: "Nakato", orgId: ORG_A }]));
+    const out = await serveManifest(contextFor([tenantOf(UNIT)], async () => client), {});
+    expect(out.ok && out.value).toMatchObject({ org: { id: UNIT }, orgs: [] });
+    expect(resolveTargetOrganization).not.toHaveBeenCalled();
+  });
+
+  it("refuses a context hostContext did not issue, before reading anything", async () => {
+    await expect(serveManifest({ ...contextFor([managerOf(ORG_A)]) }, {})).rejects.toThrow(/did not issue/);
+    expect(takeSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("readManifestQuery", () => {
+  const read = (search: string) => readManifestQuery(new URLSearchParams(search));
+
+  it("reads a released page and an organization, the path's own ?org= when org is not given", () => {
+    expect(read("")).toEqual({ ok: true, value: { path: null, requested: null } });
+    expect(read(`path=/settings/users&org=${ORG_A.toUpperCase()}`)).toEqual({ ok: true, value: { path: "/settings/users", requested: ORG_A } });
+    const path = `/?org=${ORG_B}`;
+    expect(read(new URLSearchParams({ path }).toString())).toEqual({ ok: true, value: { path, requested: ORG_B } });
+    expect(read(new URLSearchParams({ path, org: ORG_A }).toString())).toEqual({ ok: true, value: { path, requested: ORG_A } });
+  });
+
+  it.each([
+    ["an unknown key", "orgs=x"],
+    ["a ui.* key", "ui.tab=1"],
+    ["an org that is not a UUID", "org=org-a"],
+    ["two orgs", `org=${ORG_A}&org=${ORG_B}`],
+    ["two paths", "path=/&path=/settings/users"],
+    ["a protocol-relative path", "path=//evil.example/x"],
+    ["an absolute URL", "path=https://evil.example/"],
+    ["an API path", "path=/api/gui/view"],
+    ["a page that is not released", "path=/not-a-page"],
+  ])("refuses %s with 400", (_name, search) => {
+    expect(read(search)).toMatchObject({ ok: false, status: 400, code: "gui_bad_request" });
   });
 });

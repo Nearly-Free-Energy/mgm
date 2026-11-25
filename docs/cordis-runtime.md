@@ -302,6 +302,57 @@ the others. The registry is privileged in
 capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
 
+Two more host routes describe MGM to a client other than the page, such as
+the CLI (RFC #259 § 3). Both are GET, read only, and stay out of
+`GUI_HOST_API_ROUTES` (`src/lib/mgm/released-routes.ts`) until the CLI ships
+(RFC #259 § 7), so a released installation answers 404 for them; tests call
+the handlers directly. Each takes only the parameters below, and any other
+key is a 400.
+
+- `GET /api/gui/manifest?path=<page>&org=<id>` answers the manifest the
+  (gui) layout renders, from the same `buildManifest`, with the interface
+  `MGM_GUI` selects and the same hints: `org`, else the `?org=` of `path`
+  (a released page on this site), then the org cookie. Views reach it as
+  navigation entries, as the page gets them.
+- `GET /api/gui/catalog?org=<id>`, or `?entity=<kind>:<id>` up to four
+  times, each of another kind, answers an `ActionCatalog`
+  (`src/lib/gui/contract.ts`): every registered action, in catalog order
+  and then by id, with its route pattern, bind, input JSON Schema (as
+  prepare serves it), confirmation, `targeted`, `repeat` and availability.
+  An `org` the person cannot see is a 404; without one, the org cookie and
+  then the first organization choose. Entities decide the organization, as
+  a view's path does, and limit the list to actions offered on their kinds,
+  each filled and asked its own `available()`. A person who reaches no
+  organization but holds a unit, or whose rows are all tenant rows, gets no
+  actions, since every action is a staff route.
+
+An entry's `availability` lists each check that refused it in `reasons`,
+and each check not decided in `unchecked`, so `available: true` means only
+that nothing refused it:
+
+| Check | Refused with | When |
+|---|---|---|
+| `installed` | `gui_not_released` | its route, filled or as a pattern, is not released (`POST /api/gui/prepare` answers the same action 404 `gui_not_found`, as it answers one that does not exist) |
+| `enabled` | the gate's code and copy, such as `billing_disabled` | its plugin is off, unless it declares `whilePluginOff: "enabled"` |
+| `healthy` | `<plugin>_gate_unavailable` (hyphens as underscores) | the gate could not be read or threw; `enabled` is then undecided |
+| `healthy` | `gui_availability_unchecked` | `available()` was late, threw, or gave no usable answer; `state` is then undecided |
+| `state` | `gui_action_unavailable`, with the action's own reason | `available()` said no |
+| `configured`, `authorized` | never | always undecided: no contract field models configuration, and a route may check its own roles (the payment-status route refuses `failed` and `refunded` to anyone but a super admin) |
+
+`state` is also undecided without entities, when a bound kind is not
+given, when the action has no `available()`, and when an earlier check
+refused it. The request itself is refused with `gui_unauthenticated` (401),
+`gui_no_access` (403), `gui_bad_request` (400), `gui_not_found` (404),
+`gui_unavailable` (503), `gui_output_invalid` (500) or, for the manifest,
+`gui_manifest_failed` (500, also when `MGM_GUI` names no usable interface).
+
+Every host route answers a refusal in `ActionResult`'s failure shape with
+`error` beside `message`, carrying the same text (`HostFailureBody` in
+`src/lib/gui/contract.ts`, sent by `hostFailure` in
+`src/lib/gui/host/server/http.ts`), so it also has the `{ error, code }`
+shape of the gate and the action routes. A client reads `code`, which is
+stable, and shows `error`.
+
 A watcher (`signals` in a contribution) reports what needs someone in one
 organization: a period not closed, a month with no period, a payment held for
 reconciliation, checkouts that never reached the provider. The

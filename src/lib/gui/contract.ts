@@ -1,5 +1,7 @@
 /**
- * MGM GUI contract v0 (experimental): the types a GUI renders.
+ * MGM GUI contract v0 (experimental): the types a GUI renders, and the
+ * answers the GUI host's routes give a client that is not a GUI, such as
+ * the CLI (the described API, RFC #259 § 3, at the end of this file).
  *
  * A capability plugin describes its screens as data (src/lib/gui/surface.ts,
  * server-only): views with loaders, actions bound to its existing API routes,
@@ -13,8 +15,8 @@
  * the right thing the easy thing, and src/lib/gui/__tests__/contract-types.test.ts
  * pins the rules they express.
  *
- * Each shape a browser receives also has a strict schema in
- * src/lib/gui/host/server/model-schema.ts. Its test fails to compile while a
+ * Each shape a browser or another client receives also has a strict schema
+ * in src/lib/gui/host/server/model-schema.ts. Its test fails to compile while a
  * schema and its type here differ, so change them together.
  *
  * Versioning: GUI_CONTRACT is semver, and a GUI declares the caret range it
@@ -22,10 +24,10 @@
  * change shapes, and a patch only adds optional fields, kinds or values.
  */
 import type { ComponentType, ReactNode } from "react";
-import type { CoreEntityKind } from "@/lib/plugins/bundled";
+import type { CoreEntityKind, MgmPluginName } from "@/lib/plugins/bundled";
 
 /** The contract version (semver). A GUI declares the range it supports, such as "^0.1". */
-export const GUI_CONTRACT = "0.2.0";
+export const GUI_CONTRACT = "0.2.1";
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 
@@ -312,7 +314,7 @@ export interface Signals {
   /**
    * How many of the `count` signals are `warn` or `critical`: what the
    * installed app's badge shows, since info signals show in the tray and on
-   * Today but not on the icon (#230). Optional, added within 0.1 as a patch
+   * Today but not on the icon (#230). Optional, added in 0.2.1 as a patch
    * may add fields (ADR-006 decision 6): a GUI that finds none uses `count`.
    */
   attention?: number;
@@ -544,3 +546,86 @@ export interface Confirmation {
   acknowledged: string[];
   typed?: string;
 }
+
+// ── The described API (RFC #259 § 3): answers to a client that is not a GUI ─
+// GET /api/gui/catalog answers an ActionCatalog, and every GUI host route a
+// refusal with a HostFailureBody. A GUI never receives these: a GUI gets
+// ActionRefs in its view models, ActionSpecs through prepare, and each
+// failure as the ActionResult the kit makes of it.
+
+/**
+ * What the host checks before an action can be sent, after A1 on #133.
+ * "installed": the action's route is part of this release. "enabled": the
+ * plugin gate lets the action through for the organization, because its
+ * plugin is on or because its route takes it while the plugin is off (the
+ * action declares whilePluginOff: "enabled"), so it does not by itself say
+ * the plugin is on. "configured": what the action needs is set up.
+ * "healthy": what the host asked could answer. "authorized": the person may
+ * send it. "state": the action's own available() for the entity.
+ */
+export type AvailabilityCheck = "installed" | "enabled" | "configured" | "healthy" | "authorized" | "state";
+/**
+ * Whether an action can be sent now. `available` is true when no check
+ * refused it, never that every check passed: `unchecked` names the checks
+ * that were not decided, so a client never reads one as passed. The route
+ * still decides; this only says what the host could tell beforehand.
+ */
+export interface CatalogAvailability {
+  available: boolean;
+  /** Each check that refused, with a stable code and the copy the host shows a person. */
+  reasons: { check: AvailabilityCheck; code: string; message: string }[];
+  unchecked: AvailabilityCheck[];
+}
+/** One contributed action, as a client other than a GUI needs it to prepare and send it. */
+export interface CatalogEntry {
+  id: Id;
+  title: string;
+  /** The plugin that contributed it. */
+  plugin: MgmPluginName;
+  /** The kind of entity it is offered on. */
+  target: EntityKind;
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
+  /** The route pattern, such as /api/billing-periods/[periodId]/close. */
+  path: string;
+  /** Which kind each path segment and bound body field takes. */
+  bind: { path: Record<string, EntityKind>; body: Record<string, EntityKind> };
+  /** Each bound field filled from the entities asked about, when all of them were given. */
+  params?: Record<string, string>;
+  /** JSON Schema of the fields a person enters, as prepare serves it (ActionSpec.input). */
+  input: Json;
+  inputVersion: number;
+  risk: "write" | "money" | "external" | "destructive";
+  confirm: Confirm;
+  /** Only a person may start it; it is never proposed. */
+  humanOnly: boolean;
+  /**
+   * false: offered only where a view's loader links it, which supplies its
+   * starting values. Start it from that view's ActionRef, not from here.
+   */
+  targeted: boolean;
+  /** The route's 409 codes on which the action is prepared again. */
+  prepareAgainOn: string[];
+  repeat: Repeat;
+  availability: CatalogAvailability;
+}
+/** The actions the signed-in person may see, in one organization, optionally on given entities. */
+export interface ActionCatalog {
+  type: "catalog";
+  contract: string;
+  /** The organization the answer is for, or null for a person who reaches none. */
+  org: string | null;
+  /** The entities asked about, by kind and id only. */
+  entities: { kind: EntityKind; id: string }[];
+  actions: CatalogEntry[];
+}
+/**
+ * What every GUI host route (src/app/api/gui/) answers a refusal with:
+ * ActionResult's failure, with `error` carrying the same text as `message`,
+ * so it also has the `{ error, code }` shape the plugin gate and the action
+ * routes answer with. A client reads `code`, which is stable, and shows
+ * `error`. The kit reads this body and gives a GUI an ActionResult without
+ * `error` (failureOf in host/client/invoke.ts, loadView in
+ * host/client/kit-runtime.tsx); if the kit comes to pass the body on as it
+ * came, a GUI's ActionResult gains `error`, so revisit both types then.
+ */
+export type HostFailureBody = Extract<ActionResult, { ok: false }> & { error: string };

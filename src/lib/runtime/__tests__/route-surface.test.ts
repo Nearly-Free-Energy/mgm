@@ -52,6 +52,8 @@ const HOST_READ_ROUTES: Record<string, string> = {
   "POST /api/gui/prepare": "Builds an action's form and confirmation; writes nothing. If prepare ever writes, it leaves this list.",
   "GET /api/gui/signals": "Collects contributed watchers' signals for the caller's organization.",
   "GET /api/gui/search": "Runs contributed searches for the caller's organization.",
+  "GET /api/gui/manifest": "Serves the caller's manifest, as the (gui) layout renders it.",
+  "GET /api/gui/catalog": "Describes contributed actions and asks their available(); writes nothing, and never prepares or sends one.",
 };
 /** What a GUI host route may import: the session, its client, and the host's server modules. */
 const HOST_ROUTE_IMPORT = /^(?:next\/server|@\/lib\/supabase\/server|@\/lib\/auth\/access|@\/lib\/gui\/host\/server\/[a-z-]+)$/;

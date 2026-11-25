@@ -90,8 +90,10 @@ const DISABLED_MESSAGES: Partial<Record<MgmPluginName, string>> = {
 /**
  * Error-code prefix per plugin: its name with hyphens as underscores, e.g.
  * `billing_disabled`, `community_management_disabled`, `tenant_app_disabled`.
+ * Exported so the GUI host names a gate that throws with the code of the
+ * gate's own 503 (gateRefusal in src/lib/gui/host/server/availability.ts).
  */
-function codePrefix(plugin: MgmPluginName): string {
+export function codePrefix(plugin: MgmPluginName): string {
   return plugin.replaceAll("-", "_");
 }
 

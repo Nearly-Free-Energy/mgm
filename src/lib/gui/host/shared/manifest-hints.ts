@@ -18,8 +18,8 @@ export interface ManifestHints {
   preferred: string | null;
 }
 
-/** The `?org=` of a path with its query, or null. */
-function requestedOrganization(path: string | null): string | null {
+/** The `?org=` of a path with its query, or null. GET /api/gui/manifest reads its `path` with it too (readManifestQuery). */
+export function requestedOrganization(path: string | null): string | null {
   const query = path?.split("#", 1)[0].split("?")[1];
   return query ? new URLSearchParams(query).get("org") : null;
 }

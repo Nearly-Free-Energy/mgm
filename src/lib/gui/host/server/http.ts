@@ -9,7 +9,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { CurrentUserAccess } from "@/lib/auth/access";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionResult } from "../../contract";
+import type { HostFailureBody } from "../../contract";
 import { createFmt } from "../../fmt";
 import { hostContext } from "./access";
 
@@ -27,9 +27,19 @@ export function hostJson(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, { status, headers: { "Cache-Control": NO_STORE } });
 }
 
-/** A refusal in ActionResult's failure shape, which the kit already reads. */
+/**
+ * A refusal as a HostFailureBody (../../contract.ts): ActionResult's failure
+ * shape, which the kit already reads, with `error` beside `message`,
+ * carrying the same text, so every host failure also has the
+ * `{ error, code }` shape the plugin gate and the action routes answer with
+ * (gateResponse in src/lib/runtime/gate.ts), and a client other than a GUI
+ * reads one shape across MGM's routes (#275). failureOf
+ * (../client/invoke.ts) reads `error` before `message`, and loadView
+ * (../client/kit-runtime.tsx) reads only `error`; if the two keys could
+ * ever differ, revisit which one each reads.
+ */
 export function hostFailure(status: number, code: string, message: string): NextResponse {
-  const body: ActionResult = { type: "result", ok: false, status, code, message };
+  const body: HostFailureBody = { type: "result", ok: false, status, code, message, error: message };
   return hostJson(body, status);
 }
 

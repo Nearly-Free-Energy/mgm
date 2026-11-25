@@ -23,8 +23,10 @@ import type { ActionDef, Loaded } from "../../surface";
 import { isApiPath } from "../shared/href";
 import { actionTone, fillPath, idFits } from "../shared/merge-actions";
 import { requireIssued, surfaceRequest, type HostContext } from "./access";
+import { gateRefusal } from "./availability";
 import { resolveSegments, type Segment } from "./entities";
 import { pluginGate } from "./gate-state";
+import { describeInput } from "./input-spec";
 import { checkAvailability, cleanPrefill } from "./merge";
 import { actionSpecSchema, ceremonySchema, confirmSchema, idSchema, jsonSchema, provenanceSchema } from "./model-schema";
 import { parseOrFail } from "./parse";
@@ -102,22 +104,6 @@ export async function readPrepareBody(request: Request): Promise<{ ok: true; val
   } catch {
     return BAD_REQUEST;
   }
-}
-
-/**
- * The JSON Schema of the fields a person enters: the input's, with bound
- * fields and `confirmation` (sent by the host's confirmation step) removed.
- * writeOnly marks stay, so a form never prefills or shows a secret.
- */
-function inputSpec(def: ActionDef, bound: readonly string[]): Json {
-  // Through JSON, so only JSON is kept: zod adds a non-enumerable "~standard" property.
-  const schema = JSON.parse(JSON.stringify(z.toJSONSchema(def.input, { io: "input" }))) as Record<string, unknown>;
-  const hidden = new Set([...bound, "confirmation"]);
-  if (schema.properties !== null && typeof schema.properties === "object") {
-    schema.properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !hidden.has(k)));
-  }
-  if (Array.isArray(schema.required)) schema.required = schema.required.filter((k) => !hidden.has(k as string));
-  return schema as Json;
 }
 
 /** The action's confirmation, from its own prepare, or a refusal. */
@@ -205,20 +191,11 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
   const organizationId = resolved.organizationId;
   if (organizationId === null) return NOT_FOUND;
 
-  // The gate asked as a write, as the action's route will ask it.
-  const decision = await pluginGate(ctx, organizationId)(plugin).catch(() => null);
-  if (decision === null) {
-    return fail(503, `${plugin}_gate_unavailable`, "Could not check whether this part of MGM is enabled.");
-  }
-  // An action declaring whilePluginOff: "enabled" goes to a route that
-  // accepts it while its plugin is off (a PaymentExemption in UNGATED_WRITES,
-  // which gui-surface.test.ts requires, on a route file route-surface.test.ts
-  // holds to no gate call), so the gate's 409 does not refuse
-  // it here; any other answer still does. Availability and its own prepare
-  // still run. If the route starts gating, remove the field.
-  if (!decision.ok && !(decision.status === 409 && def.whilePluginOff === "enabled")) {
-    return fail(decision.status, decision.code, decision.message);
-  }
+  // The gate asked as a write, as the action's route will ask it. An action
+  // declaring whilePluginOff: "enabled" passes its 409 (gateRefusal says
+  // why); its availability and its own prepare still run.
+  const refused = gateRefusal(await pluginGate(ctx, organizationId)(plugin).catch(() => null), def, plugin);
+  if (refused) return fail(refused.status, refused.code, refused.message);
 
   const ref: ActionRef = { action, params, label: def.title, enabled: true };
   const [checked] = (
@@ -231,7 +208,7 @@ export async function prepareAction(ctx: HostContext, input: unknown): Promise<H
 
   let spec: Json;
   try {
-    spec = inputSpec(def, binds.map(([name]) => name));
+    spec = describeInput(def);
   } catch {
     // The contribution check refuses an input with no JSON Schema form.
     console.error(`[gui] action ${def.id}: input has no JSON Schema form`);

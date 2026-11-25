@@ -175,6 +175,11 @@ const MODULES: Record<string, Module> = {
     reason:
       "Runs a contributed action's available() and prepare from the snapshot. prepareAction takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
+  "src/lib/gui/host/server/catalog.ts": {
+    privilegedExports: ["buildActionCatalog"],
+    reason:
+      "Reads the snapshot and runs contributed actions' available() from it. buildActionCatalog takes a HostContext, which hostContext issues only from a getUser()-backed access read. readCatalogQuery reads only the search parameters.",
+  },
   "src/lib/gui/host/server/signals.ts": {
     privilegedExports: ["collectSignals"],
     reason:
@@ -186,9 +191,9 @@ const MODULES: Record<string, Module> = {
       "Reads the snapshot and runs contributed searches from it. runSearch takes a HostContext, which hostContext issues only from a getUser()-backed access read.",
   },
   "src/lib/gui/host/server/manifest.ts": {
-    privilegedExports: ["buildManifest", "getManifest", "preloadManifest"],
+    privilegedExports: ["buildManifest", "getManifest", "preloadManifest", "serveManifest"],
     reason:
-      "Reads the snapshot and runs contributed status loaders from it. buildManifest takes a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All three are listed, so a page that imports any of them is itself listed.",
+      "Reads the snapshot and runs contributed status loaders from it. buildManifest and serveManifest take a HostContext, which hostContext issues only from a getUser()-backed access read; getManifest and preloadManifest read the session with getRequestUserAccess first. All four are listed, so a page or route that imports any of them is itself listed. readManifestQuery reads only the search parameters.",
   },
   "src/lib/gui/host/server/render-view.tsx": {
     privilegedExports: ["renderView", "resolveInitialView"],
@@ -390,6 +395,16 @@ const ENTRIES: Record<string, Entry> = {
     kind: "session",
     reason:
       "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any search runs.",
+  },
+  "src/app/api/gui/manifest/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any status loader runs.",
+  },
+  "src/app/api/gui/catalog/route.ts": {
+    kind: "session",
+    reason:
+      "getCurrentUserAccess (getUser) answers 401 or 403 before the query is read, the snapshot is read or any available() runs.",
   },
   "src/app/api/billing-line-items/[lineItemId]/pay/route.ts": {
     kind: "public",

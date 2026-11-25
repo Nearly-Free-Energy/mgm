@@ -46,10 +46,21 @@ export type DropReason = "unknown" | "params" | "unbound" | "unreleased" | "disa
 /** An action left out of the model, or (for "prefill") left without its prefill. Ids only, never values. */
 export type Dropped = { action: string; reason: DropReason };
 
-const catalogIndex = (plugin: MgmPluginName) => {
+/** A plugin's position in the catalog (MGM_BUNDLED_PLUGINS), which orders other plugins' actions. */
+export const catalogIndex = (plugin: MgmPluginName) => {
   const i = MGM_BUNDLED_PLUGINS.findIndex((p) => p.name === plugin);
   return i < 0 ? MGM_BUNDLED_PLUGINS.length : i;
 };
+const byId = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+type Ordered = { plugin: MgmPluginName; def: { id: string } };
+/**
+ * Actions in catalog order and then by id: the order appendTargetedActions
+ * appends other plugins' actions in, and the order the action catalog lists
+ * every action in (buildActionCatalog in ../server/catalog.ts), which sorts
+ * with this rather than a copy of it.
+ */
+export const byCatalogOrder = (x: Ordered, y: Ordered) =>
+  catalogIndex(x.plugin) - catalogIndex(y.plugin) || byId(x.def.id, y.def.id);
 const displayName = (plugin: MgmPluginName) =>
   MGM_BUNDLED_PLUGINS.find((p) => p.name === plugin)?.displayName ?? plugin;
 
@@ -191,7 +202,6 @@ export function mapActionSlots<A, B, V>(model: ActionSlots<A, V>, f: (a: A) => B
   return { ...model, body, actions: list(model.actions) } as unknown as ActionSlots<B, V>;
 }
 
-const byId = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
 const sameLabel = (label: string) => label.trim().toLowerCase();
 
 /**
@@ -212,7 +222,7 @@ export function appendTargetedActions<V, M extends ActionSlots<ActionRef, V>>(
   const dropped: Dropped[] = [];
   const foreign = input.actions
     .filter((a) => a.plugin !== input.plugin && a.def.targeted !== false)
-    .sort((x, y) => catalogIndex(x.plugin) - catalogIndex(y.plugin) || byId(x.def.id, y.def.id));
+    .sort(byCatalogOrder);
 
   const targeted = (entities: readonly (EntityRef | undefined)[]) =>
     foreign.flatMap((a) => {
