@@ -23,7 +23,7 @@
  */
 import { z } from "zod";
 import { OPENEMS_ID_FORMAT_HINT } from "@/lib/openems/ids";
-import { DEVICE_TYPE_VALUES, MICROGRID_EMS_TYPE_VALUES } from "@/lib/types/domain";
+import { DEVICE_TYPE_VALUES, type MicrogridEmsType } from "@/lib/types/domain";
 
 type ObjectIssue = { code: string; keys?: string[] };
 const unknownField = (issue: ObjectIssue) => `Unknown field: ${(issue.keys ?? []).join(", ")}`;
@@ -65,6 +65,15 @@ const credential = (field: string, title: string) =>
 const EDGE_IDS = "known_edge_ids must be an array of strings";
 
 /**
+ * The connection types PUT /api/microgrids/[id]/openems-backend has a branch
+ * for, written out rather than read from the microgrid_ems_type enum, so a
+ * value the enum gains is refused, as the route refused any other value
+ * before it parsed with this schema. If the route gains a branch for a new
+ * type, add it here, and bump the input's version.
+ */
+const CONNECTION_TYPES = ["cloud_aws", "direct_url"] as const satisfies readonly MicrogridEmsType[];
+
+/**
  * PUT /api/microgrids/[id]/openems-backend: test, save and discover the
  * microgrid's OpenEMS connection. The microgrid comes from the path.
  *
@@ -81,7 +90,7 @@ const EDGE_IDS = "known_edge_ids must be an array of strings";
 export const SaveConnectionBody = z.strictObject(
   {
     type: z
-      .enum(MICROGRID_EMS_TYPE_VALUES, { error: "type must be 'cloud_aws' or 'direct_url'" })
+      .enum(CONNECTION_TYPES, { error: "type must be 'cloud_aws' or 'direct_url'" })
       .meta({ title: "Connection type" }),
     backendUrl: z
       .string({ error: "backendUrl is required" })
