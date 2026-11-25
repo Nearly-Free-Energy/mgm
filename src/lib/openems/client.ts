@@ -239,12 +239,15 @@ export class OpenEmsClient implements DeviceDataAdapter {
   }
 
   /**
-   * Get online/offline status for a list of edges.
+   * Get online/offline status for a list of edges. `options` as for
+   * queryHistoricSamples: a timeout of this request's own, or a signal to
+   * give up on; neither set waits as long as the platform allows.
    */
-  async getEdgesStatus(edgeIds: string[]): Promise<EdgeStatus[]> {
+  async getEdgesStatus(edgeIds: string[], options: RpcOptions = {}): Promise<EdgeStatus[]> {
     const result = await this.rpc<Record<string, { online: boolean }>>(
       "getEdgesStatus",
-      { edgeIds }
+      { edgeIds },
+      options
     );
 
     return Object.entries(result).map(([edgeId, status]) => ({
