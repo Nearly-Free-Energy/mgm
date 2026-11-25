@@ -15,6 +15,8 @@ import {
   computeSiteDay,
   SITE_DAYS_MAX,
   type SiteDayOperations,
+  type SiteDayRead,
+  type SiteDayReadFacts,
   type SiteSourceAvailability,
 } from "./site-operations";
 import { addDaysToDateKey, dayKeyInZone, isCalendarDateKey } from "@/lib/timezone/day-key";
@@ -225,6 +227,49 @@ export class MeteringCapability implements MeteringCapabilityContract {
     };
   }
 
+  /**
+   * A repository read that threw, as a 503: the database did not answer, so
+   * the request may pass on another try. Logged by name and message only.
+   */
+  private repositoryReadFailed(
+    error: unknown,
+    what: string,
+    code: string,
+    message: string
+  ): Extract<MeteringResult<never>, { ok: false }> {
+    console.error(`MGM ${what} could not be read`, {
+      name: error instanceof Error ? error.name : typeof error,
+      message: error instanceof Error ? error.message : "non-Error thrown",
+    });
+    return { ok: false as const, status: 503 as const, code, message };
+  }
+
+  /** The microgrid's devices, or the 503 that a failed read answers outside the site reads. */
+  private async readManagedDevices(
+    microgridId: string
+  ): Promise<{ ok: true; devices: ManagedDevice[] } | Extract<MeteringResult<never>, { ok: false }>> {
+    try {
+      return { ok: true, devices: await this.repo.getManagedDevices(microgridId) };
+    } catch (error) {
+      return this.repositoryReadFailed(
+        error,
+        "devices",
+        "metering_devices_unavailable",
+        "This microgrid's meters could not be read. Try again shortly."
+      );
+    }
+  }
+
+  /** The 503 a failed read of the microgrid's stored zone answers. */
+  private timezoneReadFailed(error: unknown) {
+    return this.repositoryReadFailed(
+      error,
+      "microgrid timezone",
+      "metering_timezone_unavailable",
+      "This microgrid's time zone could not be read. Try again shortly."
+    );
+  }
+
   async testConnection(
     microgridId: string,
     candidate?: StoredConnectionCandidate
@@ -255,9 +300,10 @@ export class MeteringCapability implements MeteringCapabilityContract {
     if (gated) return gated;
     try {
       const edges = await this.connection.discover(microgridId);
-      const managed = await this.repo.getManagedDevices(microgridId);
+      const managed = await this.readManagedDevices(microgridId);
+      if (!managed.ok) return managed;
       const registered = new Set(
-        managed.map((d) => `${d.edgeOpenemsId}/${d.componentId}`)
+        managed.devices.map((d) => `${d.edgeOpenemsId}/${d.componentId}`)
       );
       const out: DiscoveredMeter[] = [];
       for (const edge of edges) {
@@ -321,7 +367,11 @@ export class MeteringCapability implements MeteringCapabilityContract {
         };
       }
     } else {
-      timezone = (await this.repo.getMicrogridTimezone(microgridId)) ?? "UTC";
+      try {
+        timezone = (await this.repo.getMicrogridTimezone(microgridId)) ?? "UTC";
+      } catch (error) {
+        return this.timezoneReadFailed(error);
+      }
     }
 
     const providerName =
@@ -349,7 +399,9 @@ export class MeteringCapability implements MeteringCapabilityContract {
       };
     }
 
-    const managed = await this.repo.getManagedDevices(microgridId);
+    const read = await this.readManagedDevices(microgridId);
+    if (!read.ok) return read;
+    const managed = read.devices;
     const byId = new Map(managed.map((d) => [d.id, d]));
     const requestedIds = new Set<string>();
     if (Array.isArray(q.device_ids)) {
@@ -444,8 +496,9 @@ export class MeteringCapability implements MeteringCapabilityContract {
     // Reads stay available while the plugin is disabled — only scope applies.
 
     const links = await this.repo.getAssignmentLinks(tenantId);
-    const managed = await this.repo.getManagedDevices(resolved.microgridId);
-    const names = new Map(managed.map((d) => [d.id, d.name]));
+    const managed = await this.readManagedDevices(resolved.microgridId);
+    if (!managed.ok) return managed;
+    const names = new Map(managed.devices.map((d) => [d.id, d.name]));
     const { sorted, gaps } = computeAssignmentGaps(links);
     const entries: AssignmentHistoryEntry[] = sorted.map((link, index) => ({
       deviceId: link.deviceId,
@@ -552,7 +605,9 @@ export class MeteringCapability implements MeteringCapabilityContract {
   /**
    * The checks every site read shares, up to the date: disposal, query
    * shape, microgrid scope, the plugin gate, then the microgrid's timezone
-   * and the clock the dates are checked against.
+   * and the clock the dates are checked against. A microgrid with no valid
+   * stored zone is read in UTC, and `zone` says so; a failed read of the
+   * zone refuses the read rather than fall back.
    */
   private async openSiteQuery(query: unknown): Promise<
     | Extract<MeteringResult<never>, { ok: false }>
@@ -561,6 +616,7 @@ export class MeteringCapability implements MeteringCapabilityContract {
         q: Record<string, unknown>;
         microgridId: string;
         timezone: string;
+        zone: SiteDayReadFacts["zone"];
         nowMs: number;
         today: string;
       }
@@ -582,10 +638,24 @@ export class MeteringCapability implements MeteringCapabilityContract {
     const gated = await this.requirePlugin();
     if (gated) return gated;
 
-    const stored = await this.repo.getMicrogridTimezone(microgridId);
-    const timezone = stored && !validateTimezone(stored) ? stored : "UTC";
+    let stored: string | null;
+    try {
+      stored = await this.repo.getMicrogridTimezone(microgridId);
+    } catch (error) {
+      return this.timezoneReadFailed(error);
+    }
+    const valid = stored && !validateTimezone(stored) ? stored : null;
+    const timezone = valid ?? "UTC";
     const nowMs = Date.now();
-    return { ok: true, q, microgridId, timezone, nowMs, today: dayKeyInZone(nowMs, timezone) };
+    return {
+      ok: true,
+      q,
+      microgridId,
+      timezone,
+      zone: valid ? "microgrid" : "fallback",
+      nowMs,
+      today: dayKeyInZone(nowMs, timezone),
+    };
   }
 
   /**
@@ -647,16 +717,12 @@ export class MeteringCapability implements MeteringCapabilityContract {
         houseDate === null ? Promise.resolve([]) : this.repo.getHouseMeterIds(microgridId, houseDate),
       ]);
     } catch (error) {
-      console.error("MGM site devices could not be read", {
-        name: error instanceof Error ? error.name : typeof error,
-        message: error instanceof Error ? error.message : "non-Error thrown",
-      });
-      return {
-        ok: false as const,
-        status: 503 as const,
-        code: "metering_site_devices_unavailable",
-        message: "This microgrid's meters could not be read. Try again shortly.",
-      };
+      return this.repositoryReadFailed(
+        error,
+        "site devices",
+        "metering_site_devices_unavailable",
+        "This microgrid's meters could not be read. Try again shortly."
+      );
     }
     const sources = pickSiteSources(devices, houseMeterIds);
     const availability = {
@@ -707,12 +773,17 @@ export class MeteringCapability implements MeteringCapabilityContract {
    * One local day of the site's battery, grid and supply (the daily
    * operations view). Query: `{ microgrid_id, date: "YYYY-MM-DD" }`; the day
    * is in the microgrid's timezone. Reads the vendor, so it is gated like
-   * `getConsumption`.
+   * `getConsumption`. `read` says whether the zone was the microgrid's or
+   * the UTC fallback, and how many timestamps the provider dropped as
+   * unreadable over its read of this day and the day before, when it counts
+   * them. That window holds only while the read below starts at
+   * `addDaysToDateKey(date, -1)`; if the carry-in window changes, revisit
+   * the count's description in SiteDayReadFacts.
    */
-  async getSiteDay(query: unknown): Promise<MeteringResult<SiteDayOperations>> {
+  async getSiteDay(query: unknown): Promise<MeteringResult<SiteDayRead>> {
     const opened = await this.openSiteQuery(query);
     if (!opened.ok) return opened;
-    const { q, microgridId, timezone, nowMs, today } = opened;
+    const { q, microgridId, timezone, zone, nowMs, today } = opened;
     const date = typeof q.date === "string" ? q.date : "";
     if (!isCalendarDateKey(date) || date > today) {
       return {
@@ -745,9 +816,13 @@ export class MeteringCapability implements MeteringCapabilityContract {
         resolutionMinutes: SITE_RESOLUTION_MINUTES,
         nowMs,
       });
+      const read: SiteDayReadFacts = {
+        zone,
+        unreadableTimestamps: samples.unreadableTimestamps ?? null,
+      };
       return {
         ok: true as const,
-        data: reader.synthetic ? { ...day, synthetic: true as const } : day,
+        data: { ...day, ...(reader.synthetic ? { synthetic: true as const } : {}), read },
       };
     } catch (error) {
       return this.siteReadFailed(

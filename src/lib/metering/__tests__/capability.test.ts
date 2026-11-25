@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeteringCapability } from "../capability";
 import { MeteringRegistry } from "../registry";
 import { FixtureMeteringProvider } from "../fixture-provider";
@@ -234,6 +234,87 @@ describe("MeteringCapability", () => {
       ok: false,
       status: 422,
       code: "metering_invalid_range",
+    });
+  });
+
+  describe("when a repository read fails", () => {
+    const throwing = (message: string) => async () => {
+      throw new Error(message);
+    };
+    const consumption = {
+      microgrid_id: MG_ID,
+      start_date: "2026-09-01",
+      end_date: "2026-09-30",
+      provider: "fixture",
+    };
+
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("answers consumption with 503 metering_devices_unavailable, not metering_no_devices", async () => {
+      const { capability, registry } = setup({ getManagedDevices: throwing("Could not read devices: timeout") });
+      const resolve = vi.spyOn(registry, "resolve");
+      const getReadings = vi.fn();
+      resolve.mockReturnValue({ getReadings });
+      expect(await capability.getConsumption(consumption)).toEqual({
+        ok: false,
+        status: 503,
+        code: "metering_devices_unavailable",
+        message: "This microgrid's meters could not be read. Try again shortly.",
+      });
+      expect(getReadings).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith("MGM devices could not be read", {
+        name: "Error",
+        message: "Could not read devices: timeout",
+      });
+    });
+
+    it("answers consumption with 503 metering_timezone_unavailable, not the UTC fallback, when no zone is given", async () => {
+      const getManagedDevices = vi.fn(async () => []);
+      const { capability } = setup({
+        getMicrogridTimezone: throwing("Could not read the microgrid's timezone: timeout"),
+        getManagedDevices,
+      });
+      expect(await capability.getConsumption(consumption)).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "metering_timezone_unavailable",
+      });
+      expect(getManagedDevices).not.toHaveBeenCalled();
+    });
+
+    it("does not read the stored zone when the query gives one", async () => {
+      const getMicrogridTimezone = vi.fn(throwing("not called"));
+      const { capability } = setup({ getMicrogridTimezone });
+      const result = await capability.getConsumption({ ...consumption, timezone: "Africa/Kampala" });
+      expect(result.ok).toBe(true);
+      expect(getMicrogridTimezone).not.toHaveBeenCalled();
+    });
+
+    it("answers assignment history with 503 metering_devices_unavailable, not ids for names", async () => {
+      const { capability } = setup({ getManagedDevices: throwing("Could not read edges: timeout") });
+      expect(await capability.getAssignmentHistory(HH_ID)).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "metering_devices_unavailable",
+      });
+    });
+
+    it("answers discovery with 503 metering_devices_unavailable, not every meter unregistered", async () => {
+      const { capability } = setup(
+        { getManagedDevices: throwing("Could not read devices: timeout") },
+        { discover: async () => [{ edgeId: "edge0", online: true, components: [{ id: "meter0", name: "Meter" }] }] }
+      );
+      expect(await capability.discoverMeters(MG_ID)).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "metering_devices_unavailable",
+      });
     });
   });
 

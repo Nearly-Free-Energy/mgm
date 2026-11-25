@@ -237,6 +237,31 @@ export type SiteDayOperations = {
   flows: SiteFlow[];
 };
 
+/**
+ * How one site day was read, which the figures alone do not show. The
+ * capability's getSiteDay fills it; computeSiteDay knows none of it.
+ */
+export type SiteDayReadFacts = {
+  /**
+   * `microgrid` when the day is in the microgrid's stored zone; `fallback`
+   * when none is stored or it is not a valid zone, so the day was read in
+   * UTC and every time in it is off by the zone's offset.
+   */
+  zone: "microgrid" | "fallback";
+  /**
+   * Timestamps the provider dropped as unreadable across the read this day
+   * was worked out from (SiteSamples `unreadableTimestamps`). getSiteDay
+   * (./capability.ts) reads the day before as well, for its carry-in, so
+   * this counts both days as one figure; it cannot be split, because an
+   * unreadable timestamp has no instant to place on a day. If that read's
+   * window changes, revisit. Null when the provider does not count them.
+   */
+  unreadableTimestamps: number | null;
+};
+
+/** One site day as getSiteDay answers it. */
+export type SiteDayRead = SiteDayOperations & { read: SiteDayReadFacts };
+
 type Bin = {
   startMs: number;
   online: boolean;
