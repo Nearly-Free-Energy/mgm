@@ -4,7 +4,10 @@ import { MGM_BUNDLED_PLUGINS, type BundledPlugin, type MgmPluginName } from "@/l
 import type { Contribution } from "../../../surface";
 import { BILLING_SURFACE } from "../../../__tests__/fixtures/billing-surface";
 import { TENANT_APP_SURFACE } from "@/lib/tenant-app/surface";
+import { METERING_SURFACE } from "@/lib/metering/surface";
+import { PAYMENTS_SURFACE } from "@/lib/payments/surface";
 import {
+  ASSISTANT_READING,
   SurfaceContributionError,
   contributionSchema,
   parseContribution,
@@ -272,10 +275,10 @@ describe("parseContribution", () => {
     // Navigation
     ["a nav entry naming a missing view", (c) => (c.nav[0].view = "billing.nope"), ["nav", 0, "view"], '"billing.nope" is not a view in this contribution'],
     ["a legacy entry whose needs miss a segment", (c) => (c.nav[1].needs = []), ["nav", 1, "needs"], "needs must name one kind for each segment of the href"],
-    ["assistant reading of a configure view", (c) => (c.nav[0].group = "configure"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a system view", (c) => (c.nav[0].group = "system"), ["views", 0, "agent"], "a view reached from system navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a configure legacy href", (c) => (c.nav[1].href = "/microgrids/[id]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
-    ["assistant reading of a view on a legacy href with renamed placeholders", (c) => (c.nav[1].href = "/microgrids/[microgridId]/billing"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
+    ["assistant reading of a configure view", (c) => Object.assign(c.nav[0], { group: "configure" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
+    ["assistant reading of a system view", (c) => Object.assign(c.nav[0], { group: "system" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from system navigation cannot be read by an assistant"],
+    ["assistant reading of a view on a configure legacy href", (c) => Object.assign(c.nav[1], { href: "/microgrids/[id]/billing" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
+    ["assistant reading of a view on a legacy href with renamed placeholders", (c) => Object.assign(c.nav[1], { href: "/microgrids/[microgridId]/billing" }) && (c.views[0].agent = "read"), ["views", 0, "agent"], "a view reached from configure navigation cannot be read by an assistant"],
     // Ownership
     ["a view path another plugin owns", (c) => (c.views[0].path = "/microgrids/[id]/operations"), ["views", 0, "path"], "the catalog gives /microgrids/[id]/operations to metering"],
     ["a legacy href another plugin owns", (c) => (c.nav[1].href = "/microgrids/[id]/setup/tenants"), ["nav", 1, "href"], "the catalog gives /microgrids/[id]/setup/tenants to community-management"],
@@ -371,6 +374,65 @@ describe("tenant views and the tenant audience", () => {
   it.each(cases)("refuses %s", (_rule, change, path, message) => {
     const error = refusal(change, CATALOG, TENANT_APP_SURFACE);
     expect(error.issues).toContainEqual(expect.objectContaining(message === undefined ? { path } : { path, message }));
+  });
+});
+
+describe("assistant reading", () => {
+  /** METERING_SURFACE with the mark on its one view, metering.site-day. */
+  const marked = (c: Draft) => (c.views[0].agent = "read");
+  const issue = (path: PropertyKey[], message: string) => expect.objectContaining({ path, message });
+
+  it("accepts the mark on a view about an organization's records that takes no signals", () => {
+    const c = copy(METERING_SURFACE) as Draft;
+    marked(c);
+    expect(c.views[0].params).toEqual({ id: "microgrid" });
+    expect(parseContribution(c, CATALOG).contribution.views?.[0].agent).toBe("read");
+  });
+
+  it("refuses the mark on each of billing's views", () => {
+    const error = refusal((c) => c.views.forEach((v: Draft) => (v.agent = "read")));
+    for (const i of BILLING_SURFACE.views!.keys())
+      expect(error.issues).toContainEqual(issue(["views", i, "agent"], "a billing view cannot be read by an assistant"));
+  });
+
+  it("refuses the mark on payments' views", () => {
+    const error = refusal(marked, CATALOG, PAYMENTS_SURFACE);
+    expect(error.issues).toContainEqual(issue(["views", 0, "agent"], "a payments view cannot be read by an assistant"));
+  });
+
+  // Decided by the contributing plugin, whatever the view's id: the same view
+  // contributed by each of these is refused, alongside the alias and
+  // ownership issues it also raises there.
+  it.each(["billing", "payments", "pesapal", "tenant-app", "sms-reminders"])(
+    "refuses the mark on a view contributed by %s",
+    (plugin) => {
+      const error = refusal((c) => Object.assign(c, { plugin }) && marked(c), CATALOG, METERING_SURFACE);
+      expect(error.issues).toContainEqual(issue(["views", 0, "agent"], `a ${plugin} view cannot be read by an assistant`));
+    },
+  );
+
+  it.each(["tenant", "device"])("refuses the mark on a view whose path names a %s", (kind) => {
+    const error = refusal((c) => Object.assign(c.views[0], { params: { id: kind } }) && marked(c), CATALOG, METERING_SURFACE);
+    expect(error.issues).toEqual([issue(["views", 0, "agent"], `a view whose path names a ${kind} cannot be read by an assistant`)]);
+  });
+
+  it("refuses the mark on a view that takes signals", () => {
+    const error = refusal(
+      (c) => {
+        delete c.views[0].attach;
+        Object.assign(c.views[0], { takesSignals: true });
+        marked(c);
+      },
+      CATALOG,
+      METERING_SURFACE,
+    );
+    expect(error.issues).toEqual([issue(["views", 0, "agent"], "a view that takes signals cannot be read by an assistant")]);
+  });
+
+  it("has a decision for every plugin in the catalog, and none for a plugin outside it", () => {
+    // A new plugin needs a decision before its views can be marked or refused
+    // on purpose; one missing here is refused at registration.
+    expect(Object.keys(ASSISTANT_READING).sort()).toEqual(MGM_BUNDLED_PLUGINS.map((p) => p.name).sort());
   });
 });
 

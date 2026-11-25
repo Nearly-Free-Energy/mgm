@@ -163,7 +163,11 @@ interface ViewDefBase<K extends ViewKind> {
   };
   /** "vendor": the loader calls an outside system, so it is gated like a write and polled sparingly. */
   cost: "db" | "vendor";
-  /** Deny by default: only this lets an assistant read the view. */
+  /**
+   * Deny by default: only this lets an assistant read the view.
+   * contribution-schema.ts refuses it where #133's data boundary keeps the
+   * view from an assistant (ASSISTANT_READING there).
+   */
   agent?: "read";
   /**
    * true: before the loader runs, the host collects the organization's

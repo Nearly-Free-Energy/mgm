@@ -15,7 +15,9 @@ import "server-only";
  * route ownership; strict `ext` schemas; action inputs that JSON Schema can
  * describe; examples against the model schemas and the declared keys, and a
  * watcher's examples against the signal schema; no
- * assistant reading of views reached from configure or system navigation;
+ * assistant reading of views reached from configure or system navigation,
+ * of billing's, payments' or Pesapal's views, of views whose path names a
+ * tenant or a device, or of views that take signals;
  * tenant views without segments, attachments or assistant reading, reached
  * only from tenant navigation; `attach.whilePluginOff` only on a tab or tile
  * of cost "db"; `takesSignals` only on an organization's view that is not
@@ -28,7 +30,7 @@ import "server-only";
  * route exemptions and the capability's gating (gui-surface.test.ts).
  */
 import { z } from "zod";
-import { CORE_ENTITY_KINDS, getRouteOwner, type MgmPluginName } from "@/lib/plugins/bundled";
+import { CORE_ENTITY_KINDS, getRouteOwner, type CoreEntityKind, type MgmPluginName } from "@/lib/plugins/bundled";
 import type { MgmCatalog } from "@/lib/runtime/services";
 import type { Contribution } from "../../surface";
 import type { BodiesOf, ViewKind, ViewModel } from "../../contract";
@@ -184,6 +186,45 @@ export function strictProblems(schema: z.ZodType): { path: Path; message: string
   return problems;
 }
 
+// ── Assistant reading ───────────────────────────────────────────────────────
+
+/*
+ * `agent: "read"` is the only thing that lets an assistant read a view
+ * (ViewDef in ../../surface.ts), and #133's data boundary keeps from any
+ * assistant tenants' names and units, bills and payment references, the
+ * identifiers of single devices, and every watcher's signals together. So
+ * the mark is refused, besides on tenant views and on views reached from
+ * configure or system navigation, on:
+ *
+ * - every view of a plugin below marked "refused": billing (billing-review
+ *   is a service of the billing plugin, so whatever it shows is contributed
+ *   as billing), payments and Pesapal carry bills, tenants and payment
+ *   references; the tenant app is about a tenant's own unit;
+ * - a view whose path names a tenant or a device (ASSISTANT_REFUSED_KINDS);
+ * - a view that takes signals, which carries every watcher's answer.
+ *
+ * The list is keyed by every plugin name, so a new or renamed plugin does
+ * not type-check until someone decides whether its views may be marked, and
+ * contribution-schema.test.ts fails while it and the catalog differ. A name
+ * missing from it at run time is refused. "per view" leaves the decision to
+ * each view and the rules on kinds and signals: those plugins' views carry
+ * neither bills nor payments. If a plugin's views come to carry them, or the
+ * host's read interface gains its own refusal per model (which would make
+ * these refusals a second copy of it), revisit this list and those rules.
+ */
+export const ASSISTANT_READING: Readonly<Record<MgmPluginName, "per view" | "refused">> = {
+  "organization-directory": "per view",
+  "community-management": "per view",
+  metering: "per view",
+  billing: "refused",
+  payments: "refused",
+  pesapal: "refused",
+  "tenant-app": "refused",
+};
+
+/** The entity kinds whose records an assistant may never read through a view's path. */
+const ASSISTANT_REFUSED_KINDS: ReadonlySet<string> = new Set<CoreEntityKind>(["tenant", "device"]);
+
 // ── Views ───────────────────────────────────────────────────────────────────
 
 /** A model's kind and body, whatever its action shape: a GUI's model or a loader's. */
@@ -273,6 +314,12 @@ const viewSchema = z
         add(ctx, ["takesSignals"], "only an organization's view takes its signals");
       if (v.attach !== undefined) add(ctx, ["takesSignals"], "a view that takes signals is never attached to another view");
       if (v.live !== undefined) add(ctx, ["takesSignals"], "a view that takes signals does not poll");
+    }
+    // The plugin rule needs the catalog, so it is in checkContribution.
+    if (v.agent === "read") {
+      for (const k of new Set(Object.values(v.params)))
+        if (ASSISTANT_REFUSED_KINDS.has(k)) add(ctx, ["agent"], `a view whose path names a ${k} cannot be read by an assistant`);
+      if (v.takesSignals) add(ctx, ["agent"], "a view that takes signals cannot be read by an assistant");
     }
     // Which views may declare it is checked in CI (gui-surface.test.ts),
     // which can read the route exemptions and the capability's gating; here
@@ -453,6 +500,8 @@ function checkContribution(c: Shape, catalog: SurfaceCatalog, ctx: Ctx) {
     else paths.set(routeKey(v.path), v.path);
     for (const [key, k] of Object.entries(v.params)) kind(k, ["views", i, "params", key]);
     if (typeof v.attach?.to === "string") kind(v.attach.to, ["views", i, "attach", "to"]);
+    if (v.agent === "read" && ASSISTANT_READING[c.plugin as MgmPluginName] !== "per view")
+      add(ctx, ["views", i, "agent"], `a ${c.plugin} view cannot be read by an assistant`);
     if (v.ext && !v.ext.schema.startsWith(`${entry.alias}.`))
       add(ctx, ["views", i, "ext", "schema"], `"${v.ext.schema}" must start with the alias "${entry.alias}."`);
   });
