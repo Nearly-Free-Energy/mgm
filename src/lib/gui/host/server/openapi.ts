@@ -338,7 +338,7 @@ export const HOST_ROUTES: readonly HostRoute[] = [
     summary: "The actions the person may see, and whether each can be sent now",
     description: [
       "Every action contributed to the organization, in catalog order and then by id, with its route, its input as JSON Schema and whether it is available, and why not. Reads only: it asks each action's own `available()`, but never prepares or sends one.",
-      "Takes `org`, or up to four `entity=<kind>:<id>`, each of another kind, and nothing else. Entities decide the organization and limit the list to the actions offered on their kinds. A person who reaches no organization but rents a unit, or whose roles are all tenant roles, gets no actions.",
+      `Takes \`org\`, or up to ${MAX_CATALOG_ENTITIES} \`entity=<kind>:<id>\`, each of another kind, and nothing else. Entities decide the organization and limit the list to the actions offered on their kinds. A person who reaches no organization but rents a unit, or whose roles are all tenant roles, gets no actions.`,
       ORG_HINT,
     ].join("\n\n"),
     query: [
