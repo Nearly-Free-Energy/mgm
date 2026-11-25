@@ -10,7 +10,8 @@ import "server-only";
  * reads the last check's stored result rather than asking OpenEMS. That is
  * why it reports a failed check, not stale readings: whether an edge is
  * online or a meter has reported lately is known only by asking OpenEMS.
- * A cached read of that is follow-up work. The columns read are in
+ * Offline edges are the `metering.edge-status` watcher's, from a cached
+ * read (./edge-status-signals.ts); a quiet meter is follow-up work. The columns read are in
  * MICROGRID_PUBLIC_COLUMNS (@/lib/types/microgrid-columns); the error text
  * is not read, since the signal's copy is fixed. The organization filter is
  * explicit, because a super admin's row-level security shows every

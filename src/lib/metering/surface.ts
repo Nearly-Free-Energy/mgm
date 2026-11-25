@@ -7,14 +7,19 @@ import "server-only";
  * labels the current chrome uses. A page that moves to a view keeps its nav
  * id, so the Operations entry is still `metering.operations`.
  * `metering.live` is reserved for a later live view of a microgrid. Its
- * watcher, `metering.connection`, reports each microgrid whose last OpenEMS
- * connection check failed, leading to its OpenEMS Backend page.
+ * watchers: `metering.connection` reports each microgrid whose last OpenEMS
+ * connection check failed, leading to its OpenEMS Backend page, and
+ * `metering.edge-status` each microgrid with a gateway offline now, or whose
+ * gateways' status could not be read, from a cached read of the backend.
  */
 import type { Contribution } from "@/lib/gui/surface";
 import { METERING_PLUGIN_NAME } from "@/lib/plugins/bundled";
 import { loadConnectionSignals } from "./surface/connection-signals";
 import { CONNECTION_EXAMPLES } from "./surface/connection-signals-examples";
 import { CONNECTION_SIGNAL } from "./surface/connection-signals-model";
+import { EDGE_STATUS_BUDGET_MS, loadEdgeStatusSignals } from "./surface/edge-status-signals";
+import { EDGE_STATUS_EXAMPLES } from "./surface/edge-status-signals-examples";
+import { EDGE_STATUS_SIGNAL } from "./surface/edge-status-signals-model";
 import { SITE_DAY_EXAMPLES } from "./surface/examples";
 import { loadSiteDay } from "./surface/site-day";
 import { SiteDayExt } from "./surface/site-day-ext";
@@ -71,5 +76,9 @@ export const METERING_SURFACE: Contribution = {
       load: loadSiteDay,
     },
   ],
-  signals: [{ id: CONNECTION_SIGNAL, load: loadConnectionSignals, examples: CONNECTION_EXAMPLES }],
+  signals: [
+    { id: CONNECTION_SIGNAL, load: loadConnectionSignals, examples: CONNECTION_EXAMPLES },
+    // A cached backend read within its own budget (ADR-006 decision 9).
+    { id: EDGE_STATUS_SIGNAL, budgetMs: EDGE_STATUS_BUDGET_MS, load: loadEdgeStatusSignals, examples: EDGE_STATUS_EXAMPLES },
+  ],
 };

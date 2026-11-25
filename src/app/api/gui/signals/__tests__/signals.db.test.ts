@@ -2,12 +2,14 @@
  * GET /api/gui/signals collects the real contributed watchers through the
  * host against the local database: billing's overdue periods (critical a
  * week after their end) and microgrids with metered tenants and no period
- * for last month, metering's failed connection checks, and payments held
+ * for last month, metering's failed connection checks (its edge-status
+ * watcher runs and finds nothing: no microgrid here has both a backend and
+ * an edge, so it composes nothing and calls no backend), and payments held
  * for reconciliation, recently failed, or checkouts that never reached
  * Pesapal, all read with the caller's own session. Another organization's
  * manager, and a super admin acting in another organization, get none of
  * this organization's signals; a person whose rows are all tenant rows gets
- * a 403 and no watcher runs. While billing is off its watchers are skipped;
+ * a 403 and no watcher runs. While billing or metering is off its watchers are skipped;
  * while Payments is off reconciliation is still reported and failures and
  * checkouts never submitted are not. A period ending today in its own zone
  * is not yet due. No tenant's name reaches the answer. Nothing here calls
@@ -83,6 +85,8 @@ const IDS: Record<string, string[]> = {
   "billing.period-due": [`billing.period-due:${SEPTEMBER}`, `billing.period-due:${OCTOBER}`],
   "billing.period-missing": REPORTS_MISSING ? [`billing.period-missing:${UNBILLED}`] : [],
   "metering.connection": [`metering.connection:${MICROGRID}`],
+  // MICROGRID has a backend and no edge, UNBILLED an edge and no backend: neither is asked about.
+  "metering.edge-status": [],
   "payments.reconcile": [`payments.reconcile:${OCTOBER}`],
   "payments.failed": [`payments.failed:${OCTOBER}`],
   "payments.not-submitted": [`payments.not-submitted:${COMMUNITY}`],
@@ -108,7 +112,7 @@ async function answer(org?: string): Promise<{ body: Answer; text: string }> {
   return { body: JSON.parse(text) as Answer, text };
 }
 
-async function setPlugin(plugin: "billing" | "payments", enabled: boolean) {
+async function setPlugin(plugin: "billing" | "metering" | "payments", enabled: boolean) {
   const svc = await serviceClient();
   const { error } = await svc.from("mgm_plugins").upsert({ org_id: ORG, plugin_name: plugin, version: "0.1.0", enabled }, { onConflict: "org_id,plugin_name" });
   if (error) throw new Error(`[signals.db] mgm_plugins: ${error.message}`);
@@ -341,6 +345,19 @@ describe.skipIf(shouldSkip())("GET /api/gui/signals against the database", () =>
       for (const id of ["billing.period-due", "billing.period-missing"]) expect([...body.checked, ...body.unchecked]).not.toContain(id);
     } finally {
       await setPlugin("billing", true);
+    }
+  });
+
+  it("skips metering's watchers while metering is off", async () => {
+    caller = manager;
+    await setPlugin("metering", false);
+    try {
+      const { body } = await answer(ORG);
+      // Only metering's own watchers are asserted: what billing reports while the plugin it depends on is off is its own rule.
+      expect(body.top.filter((s) => s.source.startsWith("metering."))).toEqual([]);
+      for (const id of ["metering.connection", "metering.edge-status"]) expect([...body.checked, ...body.unchecked]).not.toContain(id);
+    } finally {
+      await setPlugin("metering", true);
     }
   });
 
