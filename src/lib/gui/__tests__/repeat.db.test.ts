@@ -34,6 +34,9 @@ vi.mock("@/lib/supabase/server", () => ({
     return session.caller.client;
   },
 }));
+// The community management routes refresh pages they change, which needs a
+// Next.js request; sent here as plain handlers, there is none.
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
@@ -44,11 +47,13 @@ import {
   shouldSkip,
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
+import { COMMUNITY_MANAGEMENT_CASES } from "./repeat/community-management";
 import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
 const MODULES: Partial<Record<MgmPluginName, CaseModule>> = {
+  "community-management": COMMUNITY_MANAGEMENT_CASES,
   billing: BILLING_CASES,
   payments: PAYMENTS_CASES,
 };

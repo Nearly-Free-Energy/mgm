@@ -21,7 +21,6 @@ import ts from "typescript";
 import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
 import {
   BILLING_PLUGIN_NAME,
-  COMMUNITY_MANAGEMENT_PLUGIN_NAME,
   METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
@@ -113,8 +112,6 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
  * under it.
  */
 export const DESCRIBING_ISSUES = {
-  /** ACM B4: describe community management's actions. */
-  "#278": [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
   /** ACM B5: describe metering's actions. */
   "#279": [METERING_PLUGIN_NAME],
   /** ACM B6: describe the remaining billing and payments routes. */
@@ -178,19 +175,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
     reason:
       "The scheduled worker that retries stored provider notifications, authenticated by its header secret with no session. Wrong once a signed-in person can run it.",
   },
-
-  // ── Not yet described: #278 (ACM B4), community management ──
-  "POST /api/communities": { kind: "not-yet-described", issue: "#278" },
-  "PATCH /api/communities/[id]": { kind: "not-yet-described", issue: "#278" },
-  "DELETE /api/communities/[id]": { kind: "not-yet-described", issue: "#278" },
-  "POST /api/microgrids": { kind: "not-yet-described", issue: "#278" },
-  "PATCH /api/microgrids/[id]": { kind: "not-yet-described", issue: "#278" },
-  "DELETE /api/microgrids/[id]": { kind: "not-yet-described", issue: "#278" },
-  "PATCH /api/tenants/[id]": { kind: "not-yet-described", issue: "#278" },
-  "DELETE /api/tenants/[id]": { kind: "not-yet-described", issue: "#278" },
-  "POST /api/tenants/[id]/access": { kind: "not-yet-described", issue: "#278" },
-  "DELETE /api/tenants/[id]/access/[id]": { kind: "not-yet-described", issue: "#278" },
-  "POST /api/tenants/with-meter": { kind: "not-yet-described", issue: "#278" },
 
   // ── Not yet described: #279 (ACM B5), metering ──
   // Two of these routes cannot become actions as they stand.
