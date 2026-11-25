@@ -30,6 +30,10 @@ const MICROGRID_ID = "aaaaaaaa-aaaa-4000-8000-000000000001";
 const PERIOD_ID = "aaaaaaaa-aaaa-4000-8006-000000000001";
 const HH_UNMETERED = "aaaaaaaa-aaaa-4000-8005-000000000001";
 
+/** The engine's bill writes: a bill as it was read, or a first bill. */
+const BILL_WRITES = ["fn_regenerate_bill_with_audit", "fn_record_first_line_item_with_audit"];
+const billWrites = (rpc: ReturnType<typeof vi.fn>) => rpc.mock.calls.filter(([name]) => BILL_WRITES.includes(name as string));
+
 /**
  * Minimal chainable + thenable Supabase query stub. Chain methods return the
  * same builder; the terminal `.single()` / `.maybeSingle()` and `await`
@@ -65,6 +69,8 @@ function makeSupabase(
         },
         error: null,
       },
+      // A guarded run reads the status again before writing.
+      maybeSingle: { data: { status: "draft" }, error: null },
       // Prior-period lookup is skipped for un-metered tenants (no device),
       // but provide an empty list defensively.
       list: { data: [], error: null },
@@ -205,7 +211,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     expect(getReadings).toHaveBeenCalledWith(
       expect.objectContaining({ devices: [expect.objectContaining({ id: OLD_DEVICE_ID })] })
     );
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    expect(billWrites(rpc)).toEqual([]);
   });
 
   it("selects the assignment that covers a whole period after a replacement", async () => {
@@ -218,7 +224,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     expect(getReadings).toHaveBeenCalledWith(
       expect.objectContaining({ devices: [expect.objectContaining({ id: NEW_DEVICE_ID })] })
     );
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    expect(billWrites(rpc)).toEqual([]);
   });
 
   it("MGM bills measured period usage without inventing an opening register", async () => {
@@ -253,7 +259,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     }]);
   });
 
-  it("writes measured usage with null dial readings", async () => {
+  it("writes measured usage with null dial readings on a whole-period run", async () => {
     const { supabase, rpc } = makeSupabase([replacementHistory[0]], {
       startDate: "2026-08-01",
       endDate: "2026-08-31",
@@ -262,6 +268,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       supabase,
       periodId: PERIOD_ID,
       mode: "write",
+      guardExistingBills: true,
       actorUserId: null,
       requireEffectiveDatedAssignments: true,
       allowUsageOnlyReadings: true,
@@ -275,7 +282,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       },
     });
     expect(rpc).toHaveBeenCalledWith(
-      "fn_record_line_item_with_audit",
+      "fn_record_first_line_item_with_audit",
       expect.objectContaining({
         _start_kwh: null,
         _end_kwh: null,
@@ -348,7 +355,7 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       { kind: "error", code: "meter_assignment_continuity", tenantId: HH_UNMETERED },
     ]);
     expect(getReadings).not.toHaveBeenCalled();
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    expect(billWrites(rpc)).toEqual([]);
   });
 
   it("records the end-of-period meter on a manual replacement reconciliation", async () => {
@@ -356,17 +363,20 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       startDate: "2026-09-01",
       endDate: "2026-09-30",
     });
+    // A first bill from readings typed by hand (bill-from-readings).
     const out = await runGenerationFor({
       supabase,
       periodId: PERIOD_ID,
       mode: "write",
+      newBillOnly: true,
+      tenantIds: [HH_UNMETERED],
       actorUserId: null,
       requireEffectiveDatedAssignments: true,
       manualReadings: [{ tenantId: HH_UNMETERED, startKwh: 100, endKwh: 110 }],
     });
     expect(isRunGenerationFatal(out)).toBe(false);
     expect(rpc).toHaveBeenCalledWith(
-      "fn_record_line_item_with_audit",
+      "fn_record_first_line_item_with_audit",
       expect.objectContaining({ _device_id: NEW_DEVICE_ID })
     );
   });
@@ -398,18 +408,20 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       code: "meter_assignment_continuity",
       tenantId: HH_UNMETERED,
     }]);
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    expect(billWrites(rpc)).toEqual([]);
   });
 
   it("write mode, tenantIds undefined, un-metered tenant → skips with unmetered_no_manual and writes NO row", async () => {
     const { supabase, rpc } = makeSupabase();
 
+    // Every tenant, as the one write over a whole period runs (guardExistingBills).
     const out = await runGenerationFor({
       supabase,
       periodId: PERIOD_ID,
       // Pull-mode: no tenantIds, no manualReadings.
       tenantIds: undefined,
       mode: "write",
+      guardExistingBills: true,
       actorUserId: null,
       actorKind: "system",
       actorRef: "cron",
@@ -431,9 +443,9 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
       expect(entry.code).toBe("unmetered_no_manual");
     }
 
-    // The critical regression: NO placeholder row is written. The write path
-    // is `supabase.rpc("fn_record_line_item_with_audit", …)`.
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    // The critical regression: NO placeholder row is written, by either of
+    // the engine's writes.
+    expect(billWrites(rpc)).toEqual([]);
 
     // No 'written' result of any kind.
     expect(results.some((r) => r.kind === "written")).toBe(false);
@@ -464,6 +476,6 @@ describe("runGenerationFor: pull-mode un-metered skip (#293)", () => {
     }
     // Preview may refresh an empty draft's tariff pin, but writes no bill.
     expect(results.some((r) => r.kind === "preview")).toBe(false);
-    expect(rpc).not.toHaveBeenCalledWith("fn_record_line_item_with_audit", expect.anything());
+    expect(billWrites(rpc)).toEqual([]);
   });
 });

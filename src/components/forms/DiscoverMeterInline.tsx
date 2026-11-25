@@ -11,6 +11,8 @@
  *     the wizard via `onDevicePersisted` so the parent can append it to
  *     `availableMeters` and auto-select it
  *   - errors are owned + rendered inline (no `onError` callback)
+ *   - components the route skipped because MGM cannot store their id
+ *     (`skipped` in the response) are named in a note, as in `<DiscoverDevices>`
  *   - both fetches are guarded by a single AbortController so that an
  *     in-flight request doesn't leak results into a re-mounted instance
  *     (the wizard re-mounts on `state.no_meter` toggle via `key={…}`)
@@ -34,7 +36,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { DiscoveredDevice, EdgeDiscoveryResponse } from "@/lib/openems/types";
+import type {
+  DiscoveredDevice,
+  EdgeDiscoveryResponse,
+  SkippedComponent,
+} from "@/lib/openems/types";
 import { humanReadable } from "@/lib/openems/device-descriptions";
 import type { AvailableMeter } from "@/components/forms/TenantWizard";
 
@@ -94,6 +100,7 @@ export function DiscoverMeterInline({
   );
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [discovered, setDiscovered] = React.useState<DiscoveredDevice[]>([]);
+  const [skipped, setSkipped] = React.useState<SkippedComponent[]>([]);
   const [edgeOnline, setEdgeOnline] = React.useState<boolean>(true);
   const [pickedComponentId, setPickedComponentId] = React.useState<string>("");
   const [editedName, setEditedName] = React.useState<string>("");
@@ -135,6 +142,7 @@ export function DiscoverMeterInline({
     setDiscoverError(null);
     setSaveError(null);
     setDiscovered([]);
+    setSkipped([]);
     setPickedComponentId("");
     setEditedName("");
     setEdgeOnline(true);
@@ -155,6 +163,7 @@ export function DiscoverMeterInline({
       const data = (await res.json()) as EdgeDiscoveryResponse;
       setEdgeOnline(data.online);
       setDiscovered(data.devices ?? []);
+      setSkipped(data.skipped ?? []);
       setPhase("ready");
     } catch (err) {
       if ((err as { name?: string } | undefined)?.name === "AbortError") return;
@@ -300,6 +309,7 @@ export function DiscoverMeterInline({
             onValueChange={(v) => {
               setPickedEdgeId(v);
               setDiscovered([]);
+              setSkipped([]);
               setPickedComponentId("");
               setEditedName("");
               setDiscoverError(null);
@@ -351,6 +361,18 @@ export function DiscoverMeterInline({
         </div>
       )}
 
+      {showResults && edgeOnline && skipped.length > 0 && (
+        <p className="rounded-md border border-border bg-muted p-3 text-caption text-muted-foreground">
+          Not listed: {skipped.length} component
+          {skipped.length !== 1 ? "s" : ""} whose OpenEMS id MGM cannot store
+          (ids are 1 to 64 letters, digits, &apos;_&apos;, &apos;.&apos;,
+          &apos;:&apos; or &apos;-&apos;):{" "}
+          <span className="font-mono break-all">
+            {skipped.map((s) => s.componentId).join(", ")}
+          </span>
+        </p>
+      )}
+
       {/* Two distinct states, previously collapsed into one message (#335).
           `discovered.length === 0` is genuinely "nothing found" and the
           original copy is correct for it. `discovered.length > 0` with no
@@ -360,12 +382,15 @@ export function DiscoverMeterInline({
           already true in that branch (it is guarded by `edgeOnline`, and
           discovery returned devices). That sent a pilot operator to rename his
           meter to contain a keyword, when the device-type control has existed
-          since #151. */}
+          since #151. When discovery skipped components (the note above), the
+          edge is reachable and configured, so the first branch leaves that
+          hint out too. */}
       {showResults && edgeOnline && candidates.length === 0 && (
         discovered.length === 0 ? (
           <p className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-            No new consumption meters on this edge. Make sure the edge is online
-            and has components configured.
+            No new consumption meters on this edge.
+            {skipped.length === 0 &&
+              " Make sure the edge is online and has components configured."}
           </p>
         ) : (
           <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">

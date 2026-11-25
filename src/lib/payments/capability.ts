@@ -23,7 +23,7 @@ import type {
   ProviderFactory,
   RepositoryError,
 } from "./repository";
-import { ATTEMPT_NOT_OPEN, MAX_ATTENTION_ATTEMPTS } from "./repository";
+import { ATTEMPT_NOT_OPEN, CHECKOUT_NOT_SUBMITTED, MAX_ATTENTION_ATTEMPTS } from "./repository";
 import { checkoutWasNotSubmitted, snapshotToAttemptOutcome } from "./providers/types";
 import type { CheckoutResult } from "./providers/types";
 import { stablePaymentLinkPath } from "./payment-link";
@@ -37,23 +37,33 @@ export const READINESS_UNREADABLE = "Could not check whether online payments are
 
 /**
  * Failure codes this class writes for its own bookkeeping, which listAttention
- * leaves out: a checkout replaced by a newer one before it reached the
- * provider (ensureCheckout), and one the provider never accepted, which the
- * customer is told to retry (ensureCheckout). No money moved in either, and a
- * manager has nothing to do about the bill. If either code starts meaning a
- * payment the customer made, or another bookkeeping code is written, revisit.
+ * leaves out of failures: a checkout replaced by a newer one before it
+ * reached the provider (ensureCheckout), and one the provider never
+ * accepted, which the customer is told to retry (ensureCheckout). No money
+ * moved in either, and a manager has nothing to do about the bill. If either
+ * code starts meaning a payment the customer made, or another bookkeeping
+ * code is written, revisit.
+ *
+ * Only CHECKOUT_NOT_SUBMITTED can be asked for on its own (`failureCode`):
+ * one says nothing, but several in a day point at the payment account, which
+ * the `payments.not-submitted` watcher reports
+ * (./surface/attention-signals.ts).
  */
-const BOOKKEEPING_FAILURES = ["checkout_superseded", "checkout_not_submitted"] as const;
+const BOOKKEEPING_FAILURES = ["checkout_superseded", CHECKOUT_NOT_SUBMITTED] as const;
+
+type AttentionQuery = { status: AttentionAttempt["status"]; since?: string; failureCode?: typeof CHECKOUT_NOT_SUBMITTED };
 
 /** listAttention's input, or null when it is not one. */
-function attentionQuery(input: unknown): { status: AttentionAttempt["status"]; since?: string } | null {
+function attentionQuery(input: unknown): AttentionQuery | null {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
-  const { status, since, ...rest } = input as Record<string, unknown>;
+  const { status, since, failureCode, ...rest } = input as Record<string, unknown>;
   if (Object.keys(rest).length > 0) return null;
-  if (status === "needs_reconciliation") return since === undefined ? { status } : null;
+  if (status === "needs_reconciliation") return since === undefined && failureCode === undefined ? { status } : null;
   if (status !== "failed" || typeof since !== "string" || since.length > 40) return null;
+  if (failureCode !== undefined && failureCode !== CHECKOUT_NOT_SUBMITTED) return null;
   const at = Date.parse(since);
-  return Number.isNaN(at) ? null : { status, since: new Date(at).toISOString() };
+  if (Number.isNaN(at)) return null;
+  return { status, since: new Date(at).toISOString(), ...(failureCode === undefined ? {} : { failureCode }) };
 }
 
 function splitName(full: string): { first: string; last: string } {
@@ -482,7 +492,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         await this.repo.markAttemptStatus({
           attemptId,
           status: "failed",
-          failureCode: "checkout_not_submitted",
+          failureCode: CHECKOUT_NOT_SUBMITTED,
           failureMessage: message.slice(0, 500),
         });
         return {
@@ -908,7 +918,7 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
         ok: false as const,
         status: 400 as const,
         code: "payments_invalid_attention_query",
-        message: "Ask for attempts needing reconciliation, or failed attempts since an instant.",
+        message: "Ask for attempts needing reconciliation, or failed attempts since an instant, optionally only checkouts never submitted.",
       };
     }
     // Reads stay available while plugins are disabled — only scope applies.
@@ -916,7 +926,11 @@ export class PaymentsCapability implements PaymentsCapabilityContract {
       orgId: this.scope.organizationId,
       status: query.status,
       ...(query.since === undefined ? {} : { since: query.since }),
-      ...(query.status === "failed" ? { exceptFailureCodes: BOOKKEEPING_FAILURES } : {}),
+      ...(query.failureCode !== undefined
+        ? { onlyFailureCode: query.failureCode }
+        : query.status === "failed"
+          ? { exceptFailureCodes: BOOKKEEPING_FAILURES }
+          : {}),
       limit: MAX_ATTENTION_ATTEMPTS + 1,
     });
     const attempts = rows.slice(0, MAX_ATTENTION_ATTEMPTS);

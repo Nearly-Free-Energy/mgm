@@ -790,8 +790,9 @@ export class BillingCapability implements BillingCapabilityContract {
   }
 
   async generateBills(input: unknown, options: { expectedBill: ExpectedBill }) {
-    // The type requires the bill, but a cast could still omit it, and the
-    // engine would then run unguarded, over any bill in any period.
+    // The type requires the bill, but a cast could still omit it. The engine
+    // refuses a write with no guard too (unguarded_write, generate.ts step
+    // 0); this refuses first, in the capability's own code.
     if (!options?.expectedBill) {
       return {
         ok: false as const,

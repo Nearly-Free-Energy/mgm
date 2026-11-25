@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { checkRateLimit } from "@/lib/rate-limit/in-memory";
+import { secretMatches } from "@/lib/security/constant-time";
 import {
   COMMUNITY_MANAGEMENT_PLUGIN_VERSION,
   ORGANIZATION_DIRECTORY_PLUGIN_VERSION,
@@ -18,10 +18,7 @@ function readOptionalString(value: unknown): string | null {
 function tokenMatches(provided: string): boolean {
   const expected = process.env.MGM_BOOTSTRAP_TOKEN ?? "";
   if (!expected || !provided) return false;
-  const expectedBuf = Buffer.from(expected, "utf8");
-  const providedBuf = Buffer.from(provided, "utf8");
-  if (expectedBuf.length !== providedBuf.length) return false;
-  return timingSafeEqual(expectedBuf, providedBuf);
+  return secretMatches(expected, provided);
 }
 
 /**

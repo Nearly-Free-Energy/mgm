@@ -24,7 +24,7 @@ import { rolesIncludeSuperAdmin } from "@/lib/auth/access";
 import { ALLOWED_MANUAL_TRANSITIONS, type PaymentStatus } from "@/lib/payments/state";
 import { tenantNames } from "../close";
 import type { PrimaryMeterLink } from "../meter-coverage";
-import { GENERATE_FROM_METERS_COPY, REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY } from "../schemas";
+import { GENERATE_FROM_METERS_COPY, REGENERATE_PAID_ACKNOWLEDGEMENT, REGENERATE_REFUSAL_COPY, USAGE_REFUSAL_COPY } from "../schemas";
 import { pageAfter, readAllPages, readAllPagesInOrder } from "./pages";
 import {
   buildPeriodReviewModel,
@@ -82,14 +82,16 @@ export const GENERATE_REFUSALS = {
 } as const satisfies Record<string, Refusal>;
 
 /**
- * record-usage's reasons: the usage route's own copy
- * (src/app/api/billing-line-items/[lineItemId]/usage/route.ts).
+ * record-usage's refusals: the usage route's own copy (USAGE_REFUSAL_COPY),
+ * each a 409 as the route answers it.
  */
-export const USAGE_REASONS = {
-  closed: "Cannot edit a closed period",
-  metered: "Use Refresh Readings for metered tenants",
-  noStart: "A starting register reading is required before correcting this bill.",
-} as const;
+export const USAGE_REFUSALS = {
+  closed: { ok: false, status: 409, message: USAGE_REFUSAL_COPY.closed },
+  invoiced: { ok: false, status: 409, message: USAGE_REFUSAL_COPY.invoiced },
+  refunded: { ok: false, status: 409, message: USAGE_REFUSAL_COPY.refunded },
+  metered: { ok: false, status: 409, message: USAGE_REFUSAL_COPY.metered },
+  noStart: { ok: false, status: 409, message: USAGE_REFUSAL_COPY.noStart },
+} as const satisfies Record<string, Refusal>;
 
 type PrimaryLink = {
   effective_from: string;
@@ -298,15 +300,49 @@ export async function regenerateBillAvailable(req: SurfaceRequest, ids: string[]
   );
 }
 
+type AssignmentDates = { effective_from: string; effective_to: string | null };
+
 /**
- * record-usage: where the usage route accepts a correction. These mirror
- * its checks, in its order (src/app/api/billing-line-items/[lineItemId]/usage/route.ts);
- * if the route's checks change, revisit.
+ * Why the usage route would refuse a correction of this bill, in its order
+ * (src/app/api/billing-line-items/[lineItemId]/usage/route.ts), or null.
+ * `links` are the tenant's primary meter assignments, any period. The
+ * paid-bill acknowledgement is not a refusal: prepare asks for it. If the
+ * route's checks change, revisit.
  */
+function usageRefusal(
+  bill: { device_id: string | null; start_kwh: number | string | null; payment_status: string; invoice_number: string | null },
+  period: { status: string; start_date: string; end_date: string },
+  links: readonly AssignmentDates[],
+): Refusal | null {
+  if (period.status !== "draft") return USAGE_REFUSALS.closed;
+  if (bill.invoice_number !== null) return USAGE_REFUSALS.invoiced;
+  if (bill.payment_status === "refunded") return USAGE_REFUSALS.refunded;
+  if (bill.device_id !== null || links.some((l) => overlaps(l, period.start_date, period.end_date))) return USAGE_REFUSALS.metered;
+  if (bill.start_kwh === null) return USAGE_REFUSALS.noStart;
+  return null;
+}
+
+/** The tenants' primary meter assignments, as the usage route reads them, or null when they cannot be read. */
+async function primaryAssignments(req: SurfaceRequest, tenantIds: string[]): Promise<Map<string, AssignmentDates[]> | null> {
+  const byTenant = new Map<string, AssignmentDates[]>();
+  if (tenantIds.length === 0) return byTenant;
+  const { data, error } = await req.supabase
+    .from("tenant_devices")
+    .select("tenant_id, effective_from, effective_to")
+    .in("tenant_id", tenantIds)
+    .eq("role", "primary_consumption_meter");
+  if (error) return null;
+  for (const l of (data ?? []) as ({ tenant_id: string } & AssignmentDates)[]) {
+    byTenant.set(l.tenant_id, [...(byTenant.get(l.tenant_id) ?? []), l]);
+  }
+  return byTenant;
+}
+
+/** record-usage: where the usage route accepts a correction (usageRefusal). */
 export async function recordUsageAvailable(req: SurfaceRequest, ids: string[]): Promise<Record<string, true | string>> {
   const { data, error } = await req.supabase
     .from("billing_line_items")
-    .select("id, tenant_id, device_id, start_kwh, billing_periods(status, start_date, end_date)")
+    .select("id, tenant_id, device_id, start_kwh, payment_status, invoice_number, billing_periods(status, start_date, end_date)")
     .in("id", ids);
   if (error) throw new Error("billing.record-usage: availability not read");
   type Row = {
@@ -314,34 +350,21 @@ export async function recordUsageAvailable(req: SurfaceRequest, ids: string[]): 
     tenant_id: string;
     device_id: string | null;
     start_kwh: number | string | null;
+    payment_status: string;
+    invoice_number: string | null;
     billing_periods: { status: string; start_date: string; end_date: string } | { status: string; start_date: string; end_date: string }[] | null;
   };
   const items = (data ?? []) as Row[];
-  const tenantIds = [...new Set(items.map((b) => b.tenant_id))];
-  const linksByTenant = new Map<string, { effective_from: string; effective_to: string | null }[]>();
-  if (tenantIds.length > 0) {
-    const links = await req.supabase
-      .from("tenant_devices")
-      .select("tenant_id, effective_from, effective_to")
-      .in("tenant_id", tenantIds)
-      .eq("role", "primary_consumption_meter");
-    if (links.error) throw new Error("billing.record-usage: availability not read");
-    for (const l of (links.data ?? []) as { tenant_id: string; effective_from: string; effective_to: string | null }[]) {
-      linksByTenant.set(l.tenant_id, [...(linksByTenant.get(l.tenant_id) ?? []), l]);
-    }
-  }
+  const linksByTenant = await primaryAssignments(req, [...new Set(items.map((b) => b.tenant_id))]);
+  if (!linksByTenant) throw new Error("billing.record-usage: availability not read");
   const byId = new Map(items.map((b) => [b.id, b]));
   return Object.fromEntries(
     ids.map((id): [string, true | string] => {
       const bill = byId.get(id);
       const period = one(bill?.billing_periods);
       if (!bill || !period) return [id, BILL_REFUSALS.notFound.message];
-      if (period.status === "closed") return [id, USAGE_REASONS.closed];
-      const metered =
-        bill.device_id !== null || (linksByTenant.get(bill.tenant_id) ?? []).some((l) => overlaps(l, period.start_date, period.end_date));
-      if (metered) return [id, USAGE_REASONS.metered];
-      if (bill.start_kwh === null) return [id, USAGE_REASONS.noStart];
-      return [id, true];
+      const bare = { ...bill, invoice_number: bill.invoice_number ?? null };
+      return [id, usageRefusal(bare, period, linksByTenant.get(bill.tenant_id) ?? [])?.message ?? true];
     }),
   );
 }
@@ -361,9 +384,9 @@ type BillForPrepare = {
     | null;
 };
 
-/** The bill's tenant, period and currency, or a refusal. */
-async function readBill(req: SurfaceRequest, lineItemId: string, columns: string) {
-  const { data, error } = await req.supabase.from("billing_line_items").select(columns).eq("id", lineItemId).maybeSingle<BillForPrepare>();
+/** The bill's tenant, period and currency, or a refusal. `B` names the further columns read. */
+async function readBill<B extends BillForPrepare = BillForPrepare>(req: SurfaceRequest, lineItemId: string, columns: string) {
+  const { data, error } = await req.supabase.from("billing_line_items").select(columns).eq("id", lineItemId).maybeSingle<B>();
   if (error) return BILL_REFUSALS.unavailable;
   const period = one(data?.billing_periods);
   if (!data || !period) return BILL_REFUSALS.notFound;
@@ -544,6 +567,65 @@ export async function prepareRegenerateBill(
       statement: "Regenerate this bill from meter data or the readings you enter.",
       facts: [
         ...facts,
+        { label: "Current total", value: req.fmt.money(Number(bill.total_amount), currency) },
+        { label: "Payment", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
+      ],
+      warnings: [],
+      acknowledgements,
+    },
+  };
+}
+
+/** The paid bill's acknowledgement on a usage correction: regenerate-bill's, in this action's words. */
+export const RECORD_USAGE_PAID_LABEL =
+  "The bill is currently marked paid. Correcting its usage recalculates its readings and total; it stays marked paid, with its payment history.";
+
+/**
+ * billing.record-usage's confirmation (#247): whose bill, its current usage,
+ * total and payment status, and for a paid bill an acknowledgement to tick,
+ * which the usage route requires (REGENERATE_PAID_ACKNOWLEDGEMENT, the one
+ * regenerate-bill asks for). A bill the route would refuse is refused with
+ * its copy (usageRefusal). It shows no new total, as regenerate-bill shows
+ * none: computing one pins a draft period's tariff, which a prepare must
+ * not do. The route answers with the bill as written.
+ */
+export async function prepareRecordUsage(
+  req: SurfaceRequest,
+  input: { params: Record<string, string>; body?: unknown },
+): Promise<Loaded<Ceremony>> {
+  type UsageBill = BillForPrepare & {
+    tenant_id: string;
+    device_id: string | null;
+    start_kwh: number | string | null;
+    usage_kwh: number | string | null;
+  };
+  const read = await readBill<UsageBill>(
+    req,
+    input.params.lineItemId,
+    "id, tenant_id, device_id, start_kwh, usage_kwh, total_amount, payment_status, invoice_number, tenants(display_name), billing_periods(start_date, end_date, status, microgrids(currency))",
+  );
+  if (!read.ok) return read;
+  const { bill, period, currency, facts } = read;
+  const links = await primaryAssignments(req, [bill.tenant_id]);
+  if (!links) return BILL_REFUSALS.unavailable;
+  const refused = usageRefusal(
+    { ...bill, invoice_number: bill.invoice_number ?? null },
+    { ...period, status: period.status ?? "" },
+    links.get(bill.tenant_id) ?? [],
+  );
+  if (refused) return refused;
+  const acknowledgements = bill.payment_status === "paid" ? [{ id: REGENERATE_PAID_ACKNOWLEDGEMENT, label: RECORD_USAGE_PAID_LABEL }] : [];
+  return {
+    ok: true,
+    model: {
+      type: "ceremony",
+      statement: "Correct this bill's usage with the reading you enter.",
+      facts: [
+        ...facts,
+        {
+          label: "Current usage",
+          value: (bill.usage_kwh ?? null) === null ? req.fmt.empty() : req.fmt.energy(Number(bill.usage_kwh) * 1000, { digits: 3 }),
+        },
         { label: "Current total", value: req.fmt.money(Number(bill.total_amount), currency) },
         { label: "Payment", value: req.fmt.status("billingLineItemPaymentStatus", bill.payment_status) },
       ],

@@ -89,6 +89,11 @@ describe("FixtureMeteringProvider.getSiteSamples", () => {
     expect(samples.timestamps).toHaveLength(2 * 288);
   });
 
+  it("does not count unreadable timestamps: it generates its own instants", async () => {
+    const samples = await generating.getSiteSamples(siteRequest());
+    expect(samples).not.toHaveProperty("unreadableTimestamps");
+  });
+
   it.each([
     ["the battery", { battery: { id: "battery", edgeOpenemsId: "edge0", componentId: "ess0" } }],
     ["the grid meter", { gridMeter: { id: "grid", edgeOpenemsId: "synthetic-edge-1", componentId: "meter0" } }],

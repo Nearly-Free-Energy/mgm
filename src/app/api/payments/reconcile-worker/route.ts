@@ -3,12 +3,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { composePaymentsPublic } from "@/lib/payments/compose";
+import { secretMatches } from "@/lib/security/constant-time";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const secret = (process.env.PAYMENTS_WORKER_SECRET ?? "").trim();
   if (!secret) return NextResponse.json({ error: "Worker is not configured" }, { status: 503 });
-  const provided = request.headers.get("x-payments-worker-secret") ?? "";
-  if (provided !== secret) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const provided = request.headers.get("x-payments-worker-secret");
+  if (!secretMatches(secret, provided)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const supabase = createServiceClient();
   const { data: pending } = await supabase.from("payment_attempts").select("org_id, provider_tracking_id, merchant_reference").in("status", ["pending", "confirmation_pending"]).not("provider_tracking_id", "is", null).limit(50);

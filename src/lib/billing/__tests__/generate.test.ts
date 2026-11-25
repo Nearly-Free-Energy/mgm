@@ -129,9 +129,11 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     // accepts the dust-bearing values from the caller; the rounding
     // happens internally inside runGenerationFor before the RPC.
     const { runGenerationFor } = await import("@/lib/billing/generate");
+    // The tenant's first bill in the period, from readings typed by hand.
     const out = await runGenerationFor({
       supabase: alejandroSuperAdmin.client,
       periodId: FIXTURE.periodP,
+      newBillOnly: true,
       tenantIds: [FIXTURE.hhP],
       manualReadings: [
         {
@@ -241,7 +243,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     expect(Number.isInteger(preview!.tierBreakdown[0].amount)).toBe(true);
   });
 
-  it("regenerates a closed period at its original tariff after a new version is added", async () => {
+  it("computes a closed period at its original tariff after a new version is added, and rewrites none of its bills", async () => {
     const { runGenerationFor } = await import("@/lib/billing/generate");
     const svc = await serviceClient();
     const { error: periodError } = await svc.from("billing_periods").insert({
@@ -267,10 +269,11 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       actorUserId: alejandroSuperAdmin.userId,
     };
 
-    const first = await runGenerationFor(input);
+    // The tenant's first bill in the period.
+    const first = await runGenerationFor({ ...input, newBillOnly: true });
     expect("kind" in first && first.kind === "fatal").toBe(false);
     const { data: initial } = await svc.from("billing_line_items")
-      .select("total_amount")
+      .select("id, payment_status, total_amount, usage_kwh, start_kwh, end_kwh, reading_source, device_id, tier_breakdown, entered_by_user_id, manual_reason")
       .eq("billing_period_id", FIXTURE.periodP3)
       .eq("tenant_id", FIXTURE.hhP)
       .single();
@@ -288,8 +291,39 @@ desc("runGenerationFor: precision rounding (#227)", () => {
     });
     expect(newTariffError).toBeNull();
 
-    const regenerated = await runGenerationFor(input);
-    expect("kind" in regenerated && regenerated.kind === "fatal").toBe(false);
+    // A preview of the closed period keeps its pinned tariff.
+    const preview = await runGenerationFor({ ...input, mode: "preview" });
+    if ("kind" in preview && preview.kind === "fatal") throw new Error(preview.body.error);
+    expect((preview as { results: { kind: string; totalAmount?: number }[] }).results).toEqual([
+      expect.objectContaining({ kind: "preview", totalAmount: 1000 }),
+    ]);
+
+    // No write changes a closed period's bill: a per-bill regeneration of it
+    // with new readings is refused under its write's lock
+    // (fn_regenerate_bill_with_audit). With the same readings it would find
+    // nothing to write.
+    const regenerated = await runGenerationFor({
+      ...input,
+      manualReadings: [{ tenantId: FIXTURE.hhP, startKwh: 10, endKwh: 30, reason: "Pinned tariff regression" }],
+      expectedBill: {
+        lineItemId: initial!.id,
+        tenantId: FIXTURE.hhP,
+        paymentStatus: initial!.payment_status,
+        totalAmount: Number(initial!.total_amount),
+        usageKwh: Number(initial!.usage_kwh),
+        startKwh: Number(initial!.start_kwh),
+        endKwh: Number(initial!.end_kwh),
+        readingSource: initial!.reading_source,
+        deviceId: initial!.device_id,
+        tierBreakdown: initial!.tier_breakdown,
+        enteredByUserId: initial!.entered_by_user_id,
+        manualReason: initial!.manual_reason,
+      },
+    });
+    if ("kind" in regenerated && regenerated.kind === "fatal") throw new Error(regenerated.body.error);
+    expect((regenerated as { results: { kind: string; code?: string }[] }).results).toEqual([
+      expect.objectContaining({ kind: "error", code: "period_closed" }),
+    ]);
     const { data: historical } = await svc.from("billing_line_items")
       .select("total_amount")
       .eq("billing_period_id", FIXTURE.periodP3)
@@ -366,7 +400,7 @@ desc("runGenerationFor: precision rounding (#227)", () => {
       .eq("billing_period_id", FIXTURE.periodP4);
     expect(staleBillCount).toBe(0);
 
-    const written = await runGenerationFor({ ...input, mode: "write" });
+    const written = await runGenerationFor({ ...input, mode: "write", newBillOnly: true });
     expect(isRunGenerationFatal(written)).toBe(false);
     const { data: lineItem } = await svc.from("billing_line_items")
       .select("total_amount").eq("billing_period_id", FIXTURE.periodP4)

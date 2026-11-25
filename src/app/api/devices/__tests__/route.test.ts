@@ -9,6 +9,8 @@
  *   (c) Valid UUID + devices not an array → 400 "devices must be a non-empty array"
  *   (d) Valid UUID + empty devices array → 400 "devices must be a non-empty array"
  *   (e) Valid UUID + valid device row → 200 { saved: [...] }
+ *   (g) componentId format: trimmed and stored; outside the pattern → 400
+ *       `invalid_component_id`
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -162,5 +164,49 @@ describe("POST /api/devices", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toEqual({ saved: [savedRow] });
+  });
+
+  describe("(g) componentId format", () => {
+    it("stores the trimmed componentId", async () => {
+      mockSelect.mockResolvedValueOnce({ data: [], error: null });
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          edgeId: VALID_UUID,
+          devices: [{ ...VALID_DEVICE, componentId: "  meter0  ", name: " " }],
+        })
+      );
+      expect(res.status).toBe(200);
+      expect(mockUpsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            openems_component_id: "meter0",
+            name: "meter0",
+          }),
+        ],
+        expect.anything()
+      );
+    });
+
+    it.each([
+      ["empty", ""],
+      ["only spaces", "   "],
+      ["a space inside", "meter 0"],
+      ["a slash", "meter0/ActivePower"],
+      ["a parenthesis", "meter0)"],
+      ["65 characters", "m".repeat(65)],
+    ])("refuses a componentId that is %s with 400 invalid_component_id", async (_label, componentId) => {
+      const { POST } = await import("../route");
+      const res = await POST(
+        makeRequest({
+          edgeId: VALID_UUID,
+          devices: [VALID_DEVICE, { ...VALID_DEVICE, componentId }],
+        })
+      );
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.reason).toBe("invalid_component_id");
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
   });
 });

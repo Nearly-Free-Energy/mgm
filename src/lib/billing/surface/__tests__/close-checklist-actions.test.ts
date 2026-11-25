@@ -115,6 +115,7 @@ describe("billing.close-period", () => {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       // The route's 409 for totals that changed (totalsChanged in ../../capability.ts).
       prepareAgainOn: ["billing_period_totals_changed"],

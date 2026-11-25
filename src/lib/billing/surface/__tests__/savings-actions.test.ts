@@ -96,6 +96,7 @@ describe("billing's savings actions", () => {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(SETTINGS.input).toBe(SaveSavingsSettingsBody);
@@ -108,6 +109,7 @@ describe("billing's savings actions", () => {
       risk: "write",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(TARIFF.input).toBe(AddGridTariffBody);
