@@ -3,7 +3,7 @@
  * it is sent to its route, and the snapshot that shows whether a send wrote.
  *
  * Each plugin with "safe" actions has a case module beside this file
- * (./billing.ts, ./payments.ts). A module seeds its own organization under
+ * (./billing.ts, ./payments.ts, ./community-management.ts). A module seeds its own organization under
  * its own UUID prefix and lists one or more cases for each of its "safe"
  * actions. A case names no route: it is sent to the handler its action's own
  * method and path name (handlerFor). A plugin that contributes its first
@@ -15,6 +15,7 @@ import type { Id } from "@/lib/gui/contract";
 import type { ActionDef } from "@/lib/gui/surface";
 import type { MgmRuntime } from "@/lib/runtime/root";
 import { serviceClient, type TestUser } from "@/lib/supabase/__tests__/rls.helpers";
+import { MICROGRID_PUBLIC_COLUMNS } from "@/lib/types/microgrid-columns";
 
 /**
  * A route handler as Next.js calls it. Its params are typed `never` so that
@@ -122,6 +123,11 @@ export type Snapshot = Record<string, Row[]>;
 
 /** Each table the snapshot reads, with its primary key. */
 const KEYS: Readonly<Record<string, readonly string[]>> = {
+  communities: ["id"],
+  microgrids: ["id"],
+  tenants: ["id"],
+  tenant_devices: ["id"],
+  user_roles: ["id"],
   billing_periods: ["id"],
   rate_schedules: ["id"],
   grid_tariffs: ["id"],
@@ -134,6 +140,14 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   payment_notifications: ["id"],
 };
 
+/**
+ * The columns read of each table: every column, but for microgrids only
+ * MICROGRID_PUBLIC_COLUMNS, which leaves out the stored credentials. No
+ * action's route writes a credential column (they are service-role writes,
+ * fn_microgrids_guard_ems_config); if one comes to, read those too.
+ */
+const COLUMNS: Readonly<Record<string, string>> = { microgrids: MICROGRID_PUBLIC_COLUMNS };
+
 async function rows(
   svc: SupabaseClient,
   table: string,
@@ -142,28 +156,32 @@ async function rows(
   const found = new Map<string, Row>();
   for (const [column, values] of where) {
     if (values.length === 0) continue;
-    const { data, error } = await svc.from(table).select("*").in(column, [...values]);
+    const columns: string = COLUMNS[table] ?? "*";
+    const { data, error } = await svc.from(table).select(columns).in(column, [...values]);
     if (error) throw new Error(`[repeat] ${table}: ${error.message}`);
-    for (const row of (data ?? []) as Row[]) found.set(JSON.stringify(KEYS[table].map((k) => row[k])), row);
+    for (const row of (data ?? []) as unknown as Row[]) found.set(JSON.stringify(KEYS[table].map((k) => row[k])), row);
   }
   return [...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, row]) => row);
 }
 
 /**
- * Every row of the organization's in each table a billing or payments write
- * route reaches, read with the service role. A new "safe" action whose route
- * writes another table adds that table here, or the test cannot see its
- * writes.
+ * Every row of the organization's in each table a community management,
+ * billing or payments write route reaches, read with the service role: its
+ * communities, microgrids, tenants, their meter links, the role rows scoped
+ * to it or to its tenants, and its billing and payments rows. A new "safe"
+ * action whose route writes another table adds that table here, or the
+ * test cannot see its writes.
  */
 export async function snapshot(orgId: string): Promise<Snapshot> {
   const svc = await serviceClient();
   const ids = (list: Row[], column = "id") => list.map((r) => String(r[column]));
-  const communities = await svc.from("communities").select("id").eq("org_id", orgId);
-  if (communities.error) throw new Error(`[repeat] communities: ${communities.error.message}`);
-  const microgrids = await svc.from("microgrids").select("id").in("community_id", ids(communities.data ?? []));
-  if (microgrids.error) throw new Error(`[repeat] microgrids: ${microgrids.error.message}`);
-  const mg = ids(microgrids.data ?? []);
   const out: Snapshot = {};
+  out.communities = await rows(svc, "communities", [["org_id", [orgId]]]);
+  out.microgrids = await rows(svc, "microgrids", [["community_id", ids(out.communities)]]);
+  const mg = ids(out.microgrids);
+  out.tenants = await rows(svc, "tenants", [["microgrid_id", mg]]);
+  out.tenant_devices = await rows(svc, "tenant_devices", [["tenant_id", ids(out.tenants)]]);
+  out.user_roles = await rows(svc, "user_roles", [["scope_id", [orgId, ...ids(out.tenants)]]]);
   for (const table of ["billing_periods", "rate_schedules", "grid_tariffs", "microgrid_savings_settings"]) {
     out[table] = await rows(svc, table, [["microgrid_id", mg]]);
   }
