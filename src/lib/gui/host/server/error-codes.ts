@@ -2,11 +2,12 @@ import "server-only";
 
 /**
  * The error codes of the described API (RFC #259 § 3), in one place, with
- * what each means and the HTTP statuses it comes with. Every MGM route
- * refuses in the `{ error, code }` shape; a client reads `code`, which is
- * stable, and shows `error`. The OpenAPI document (./openapi.ts) lists these
- * under `x-mgm-error-codes`, and names on each operation the ones its route
- * answers.
+ * what each means and the HTTP statuses it comes with. Each comes in a
+ * refusal's `code`, which is stable, beside text to show a person: `error`
+ * from the host, the gate and parseJsonBody, and `message` where billing's
+ * composer or capability refuses. The OpenAPI document (./openapi.ts) lists
+ * these under `x-mgm-error-codes`, and names on each operation the ones its
+ * route answers.
  *
  * - HOST_CODES: what the GUI host's routes (src/app/api/gui/) refuse with,
  *   in a HostFailureBody (../../contract.ts), and the reasons the action
@@ -22,9 +23,11 @@ import "server-only";
  *   check 2).
  *
  * An action route's other refusals are its own, such as
- * `billing_period_not_found`, in the same shape. They are not listed here:
- * no field of an action says which codes its route answers. If ActionDef
- * (../../surface.ts) comes to declare them, list them from there.
+ * `billing_period_not_found`, and not all alike: some carry `code`, many a
+ * `reason` instead, some only `error` (ActionRefusal in ./openapi.ts). They
+ * are not listed here: no field of an action says which codes its route
+ * answers. If ActionDef (../../surface.ts) comes to declare them, list them
+ * from there.
  *
  * Codes the kit makes on the client for an interface (`cancelled`,
  * `gui_bad_action`, `gui_bad_href`) are never an HTTP answer, so they are not

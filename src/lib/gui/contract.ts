@@ -621,8 +621,8 @@ export interface ActionCatalog {
 /**
  * What every GUI host route (src/app/api/gui/) answers a refusal with:
  * ActionResult's failure, with `error` carrying the same text as `message`,
- * so it also has the `{ error, code }` shape the plugin gate and the action
- * routes answer with. A client reads `code`, which is stable, and shows
+ * so it also has the `{ error, code }` shape the plugin gate and the body
+ * parser answer with. A client reads `code`, which is stable, and shows
  * `error`. The kit reads this body and gives a GUI an ActionResult without
  * `error` (failureOf in host/client/invoke.ts, loadView in
  * host/client/kit-runtime.tsx); if the kit comes to pass the body on as it
