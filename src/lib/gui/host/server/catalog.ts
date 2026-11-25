@@ -181,15 +181,18 @@ async function draftOf(
   return { registered, params, reasons, unchecked, ...(unchecked.has("state") ? {} : { ask: id }) };
 }
 
-/** The entry of one action, or null when its input cannot be described (a host bug: the contribution check refuses such an input). */
-function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Draft): CatalogEntry | null {
-  let input: CatalogEntry["input"];
-  try {
-    input = describeInput(def);
-  } catch {
-    console.error(`[gui] catalog: action ${def.id}: input has no JSON Schema form`);
-    return null;
-  }
+/** What the catalog says of an action whoever asks: its entry without `params` and `availability`. */
+export type DescribedAction = Omit<CatalogEntry, "params" | "availability">;
+
+/**
+ * An action as every catalog entry describes it, whatever the entities
+ * asked about and whoever asks. Throws when its input has no JSON Schema
+ * form (describeInput in ./input-spec.ts), which the contribution check
+ * refuses at registration. The OpenAPI document (./openapi.ts) lists each
+ * action as this describes it, so the document and the catalog cannot
+ * describe an action differently.
+ */
+export function describeAction({ plugin, def }: RegisteredAction): DescribedAction {
   return {
     id: def.id,
     title: def.title,
@@ -198,8 +201,7 @@ function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Dr
     method: def.method,
     path: def.path,
     bind: { path: { ...(def.bind.path ?? {}) }, body: { ...(def.bind.body ?? {}) } },
-    ...(params ? { params } : {}),
-    input,
+    input: describeInput(def),
     inputVersion: def.inputVersion,
     risk: def.risk,
     confirm: def.confirm,
@@ -207,6 +209,21 @@ function entryOf({ registered: { plugin, def }, params, reasons, unchecked }: Dr
     targeted: def.targeted !== false,
     prepareAgainOn: [...(def.prepareAgainOn ?? [])],
     repeat: def.repeat,
+  };
+}
+
+/** The entry of one action, or null when its input cannot be described (a host bug: the contribution check refuses such an input). */
+function entryOf({ registered, params, reasons, unchecked }: Draft): CatalogEntry | null {
+  let described: DescribedAction;
+  try {
+    described = describeAction(registered);
+  } catch {
+    console.error(`[gui] catalog: action ${registered.def.id}: input has no JSON Schema form`);
+    return null;
+  }
+  return {
+    ...described,
+    ...(params ? { params } : {}),
     availability: {
       available: reasons.length === 0,
       reasons,

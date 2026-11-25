@@ -2,7 +2,8 @@ import "server-only";
 
 /**
  * The JSON Schema of an action's input, as the host serves it: in the
- * prepared action's spec (./prepare.ts), which a form is built from.
+ * prepared action's spec (./prepare.ts), which a form is built from, and in
+ * the OpenAPI document (./openapi.ts), as the body the action's route parses.
  *
  * Built on each call from the action's zod schema, with zod's default
  * `unrepresentable: "throw"`, so an input JSON Schema cannot describe throws
@@ -17,13 +18,22 @@ import type { Json } from "../../contract";
 import type { ActionDef } from "../../surface";
 
 /**
+ * The JSON Schema of the whole body the action's route parses: every field
+ * of its input, bound fields and `confirmation` included. describeInput is
+ * this with those fields removed.
+ */
+export function describeBody(def: Pick<ActionDef, "input">): Json {
+  // Through JSON, so only JSON is kept: zod adds a non-enumerable "~standard" property.
+  return JSON.parse(JSON.stringify(z.toJSONSchema(def.input, { io: "input" }))) as Json;
+}
+
+/**
  * The JSON Schema of the fields a person enters: the input's, with bound
  * fields and `confirmation` (sent by the host's confirmation step) removed.
  * writeOnly marks stay, so a form never prefills or shows a secret.
  */
 export function describeInput(def: Pick<ActionDef, "input" | "bind">): Json {
-  // Through JSON, so only JSON is kept: zod adds a non-enumerable "~standard" property.
-  const schema = JSON.parse(JSON.stringify(z.toJSONSchema(def.input, { io: "input" }))) as Record<string, unknown>;
+  const schema = describeBody(def) as Record<string, unknown>;
   const hidden = new Set([...Object.keys(def.bind.path ?? {}), ...Object.keys(def.bind.body ?? {}), "confirmation"]);
   if (schema.properties !== null && typeof schema.properties === "object") {
     schema.properties = Object.fromEntries(Object.entries(schema.properties).filter(([k]) => !hidden.has(k)));

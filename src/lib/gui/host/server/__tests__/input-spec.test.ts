@@ -1,13 +1,41 @@
 /**
- * describeInput, the input schema prepare and the catalog serve, and
+ * describeInput, the input schema prepare and the catalog serve;
+ * describeBody, the route body the OpenAPI document describes; and
  * unconstrainedNodes, which the contribution check refuses inputs with
  * (contribution-schema.test.ts holds the refusals).
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeInput, unconstrainedNodes } from "../input-spec";
+import { describeBody, describeInput, unconstrainedNodes } from "../input-spec";
 
 const nodes = (schema: z.ZodType) => unconstrainedNodes(z.toJSONSchema(schema, { io: "input" }));
+
+describe("describeBody", () => {
+  const input = z.strictObject({
+    microgrid_id: z.uuid(),
+    url: z.string().max(200),
+    confirmation: z.strictObject({ typed: z.string() }).optional(),
+  });
+  const bind = { body: { microgrid_id: "microgrid" as const } };
+
+  it("keeps bound fields and the host's confirmation, which the route reads", () => {
+    const body = describeBody({ input });
+    expect(body).toMatchObject({ type: "object", required: ["microgrid_id", "url"], additionalProperties: false });
+    expect(Object.keys((body as { properties: object }).properties)).toEqual(["microgrid_id", "url", "confirmation"]);
+  });
+
+  it("is describeInput's schema before the fields a person does not enter are removed", () => {
+    const body = describeBody({ input }) as { properties: Record<string, unknown>; required: string[] };
+    const entered = Object.fromEntries(Object.entries(body.properties).filter(([k]) => k === "url"));
+    expect(describeInput({ input, bind })).toEqual({ ...body, properties: entered, required: ["url"] });
+  });
+
+  it("is plain JSON, and throws for an input JSON Schema cannot describe", () => {
+    const body = describeBody({ input: z.strictObject({ n: z.number() }) });
+    expect(Object.getOwnPropertyNames(body)).not.toContain("~standard");
+    expect(() => describeBody({ input: z.strictObject({ at: z.date() }) })).toThrow();
+  });
+});
 
 describe("describeInput", () => {
   it("leaves out bound fields and the host's confirmation, and keeps writeOnly marks", () => {
