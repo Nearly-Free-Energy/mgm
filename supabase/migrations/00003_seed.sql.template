@@ -5,31 +5,31 @@
 -- (http://127.0.0.1:54324), or Mailpit (http://localhost:8025) in docker mode.
 --
 -- Seeds:
---   1 NFE organization (Kampala, Uganda) with address
---   1 Kisakye community with address
---   1 microgrid ("Kisakye") with address + lat/lng
+--   1 organization ("Example Energy Cooperative", Kampala, Uganda) with address
+--   1 community ("Demo Village") with address
+--   1 microgrid ("Demo Microgrid") with address + lat/lng
 --   1 OpenEMS edge ("Metering Pi")
 --   10 consumption_meter devices on that edge
 --   10 households (5x Block A + 5x Block B, no real PII)
 --   10 household_devices rows (role='primary_consumption_meter')
---   1 rate_schedule (Aaron's real UGX tariffs — non-monotonic by design)
---   2 auth users (super_admin admin@eiot.energy, org_manager aaron@kisakye.ug) + user_roles
+--   1 rate_schedule (sample UGX tariffs — non-monotonic by design)
+--   2 auth users (super_admin admin@example.org, org_manager manager@example.org) + user_roles
 --   household_users is seeded EMPTY (pattern deferred pending API user pattern decision)
 
--- ── Organization: NFE ───────────────────────────────────────────────────
+-- ── Organization: Example Energy Cooperative ────────────────────────────
 INSERT INTO organizations (
   id, name,
   address_line1, address_city, address_region, address_country
 ) VALUES (
   'a0000000-0000-0000-0000-000000000001',
-  'New Frontiers Energy (NFE)',
-  'Plot 42, Kampala Rd',
+  'Example Energy Cooperative',
+  'Plot 1, Demo Road',
   'Kampala',
   'Central Region',
   'Uganda'
 );
 
--- ── Community: Kisakye ──────────────────────────────────────────────────
+-- ── Community: Demo Village ─────────────────────────────────────────────
 INSERT INTO communities (
   id, org_id, name,
   address_city, address_region, address_country,
@@ -37,14 +37,14 @@ INSERT INTO communities (
 ) VALUES (
   'c0000000-0000-0000-0000-000000000001',
   'a0000000-0000-0000-0000-000000000001',
-  'Kisakye',
-  'Kisakye',
+  'Demo Village',
+  'Demo Village',
   'Central Region',
   'Uganda',
-  'Multi-block community; single transformer as of 2026'
+  'Fictional multi-block community; single transformer'
 );
 
--- ── Microgrid: Kisakye Microgrid ────────────────────────────────────────
+-- ── Microgrid: Demo Microgrid ───────────────────────────────────────────
 INSERT INTO microgrids (
   id, community_id, name, currency,
   address_city, address_region, address_country,
@@ -52,9 +52,9 @@ INSERT INTO microgrids (
 ) VALUES (
   'b0000000-0000-0000-0000-000000000001',
   'c0000000-0000-0000-0000-000000000001',
-  'Kisakye',
+  'Demo Microgrid',
   'UGX',
-  'Kisakye',
+  'Demo Village',
   'Central Region',
   'Uganda',
   0.3476,
@@ -120,18 +120,18 @@ INSERT INTO household_devices (household_id, device_id, role) VALUES
   ('f0000000-0000-0000-0000-000000000010', 'd0000000-0000-0000-0000-000000000010', 'primary_consumption_meter');
 
 -- ── Rate schedule ───────────────────────────────────────────────────────
--- Aaron's real Kisakye tariffs as of 2026 — non-monotonic by design
+-- Sample tariffs in UGX — non-monotonic by design
 -- (tier 3 reflects subsidized middle band).
 INSERT INTO rate_schedules (microgrid_id, tiers, service_charge, tax_rate) VALUES
   ('b0000000-0000-0000-0000-000000000001',
    '[{"label": "1st Tier", "min_kwh": 1, "max_kwh": 15, "rate_per_kwh": 250.0}, {"label": "2nd Tier", "min_kwh": 16, "max_kwh": 80, "rate_per_kwh": 756.2}, {"label": "3rd Tier", "min_kwh": 81, "max_kwh": 150, "rate_per_kwh": 412.0}, {"label": "4th Tier", "min_kwh": 151, "max_kwh": null, "rate_per_kwh": 756.2}]',
    5320, 0.18);
 
--- ── Auth users: admin (super_admin) + aaron (org_manager) ───────────────
+-- ── Auth users: admin (super_admin) + manager (org_manager) ───────────────
 -- No password (encrypted_password is empty): they sign in by email link.
 -- Deterministic UUIDs so local tooling can reliably reference them.
 
--- admin@eiot.energy
+-- admin@example.org
 INSERT INTO auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, last_sign_in_at,
@@ -142,7 +142,7 @@ INSERT INTO auth.users (
   '00000000-0000-0000-0000-000000000000',
   'a1111111-1111-1111-1111-111111111111',
   'authenticated', 'authenticated',
-  'admin@eiot.energy',
+  'admin@example.org',
   '',
   now(), now(),
   '{"provider":"email","providers":["email"]}', '{}',
@@ -156,11 +156,11 @@ INSERT INTO auth.identities (
   'a1111111-1111-1111-1111-111111111111',
   'a1111111-1111-1111-1111-111111111111',
   'a1111111-1111-1111-1111-111111111111',
-  jsonb_build_object('sub', 'a1111111-1111-1111-1111-111111111111', 'email', 'admin@eiot.energy'),
+  jsonb_build_object('sub', 'a1111111-1111-1111-1111-111111111111', 'email', 'admin@example.org'),
   'email', now(), now(), now()
 );
 
--- aaron@kisakye.ug
+-- manager@example.org
 INSERT INTO auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, last_sign_in_at,
@@ -171,7 +171,7 @@ INSERT INTO auth.users (
   '00000000-0000-0000-0000-000000000000',
   'a2222222-2222-2222-2222-222222222222',
   'authenticated', 'authenticated',
-  'aaron@kisakye.ug',
+  'manager@example.org',
   '',
   now(), now(),
   '{"provider":"email","providers":["email"]}', '{}',
@@ -185,7 +185,7 @@ INSERT INTO auth.identities (
   'a2222222-2222-2222-2222-222222222222',
   'a2222222-2222-2222-2222-222222222222',
   'a2222222-2222-2222-2222-222222222222',
-  jsonb_build_object('sub', 'a2222222-2222-2222-2222-222222222222', 'email', 'aaron@kisakye.ug'),
+  jsonb_build_object('sub', 'a2222222-2222-2222-2222-222222222222', 'email', 'manager@example.org'),
   'email', now(), now(), now()
 );
 
@@ -194,9 +194,9 @@ INSERT INTO auth.identities (
 INSERT INTO user_roles (user_id, role, scope_type, scope_id) VALUES
   ('a1111111-1111-1111-1111-111111111111', 'super_admin', 'org', NULL);
 
--- org_manager for Aaron, scoped to NFE. Note: ticket summary mentioned community_admin,
--- but the entity-model MVP ships only super_admin + org_manager — community_admin is
--- deferred. Aaron correctly sees his org's full hierarchy as org_manager.
+-- org_manager for manager@example.org, scoped to Example Energy Cooperative. Note: ticket
+-- summary mentioned community_admin, but the entity-model MVP ships only super_admin +
+-- org_manager — community_admin is deferred. The manager sees the org's full hierarchy.
 INSERT INTO user_roles (user_id, role, scope_type, scope_id) VALUES
   ('a2222222-2222-2222-2222-222222222222', 'org_manager', 'org', 'a0000000-0000-0000-0000-000000000001');
 

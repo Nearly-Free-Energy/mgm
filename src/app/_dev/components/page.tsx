@@ -127,8 +127,8 @@ export default function ComponentsDevPage() {
           <ConfirmDialog
             open={confirmTypedOpen}
             onOpenChange={setConfirmTypedOpen}
-            title="Delete microgrid “Kisakye Main”?"
-            description={`This cannot be undone. Type “Kisakye Main” to confirm.`}
+            title="Delete microgrid “Demo Microgrid”?"
+            description={`This cannot be undone. Type “Demo Microgrid” to confirm.`}
             body={
               <ul className="my-2 list-disc space-y-0.5 pl-5">
                 <li>1 edge</li>
@@ -143,7 +143,7 @@ export default function ComponentsDevPage() {
             tone="destructive"
             requireTypedConfirmation={{
               label: "Type microgrid name to confirm",
-              expected: "Kisakye Main",
+              expected: "Demo Microgrid",
             }}
             onConfirm={() => new Promise((res) => setTimeout(res, 800))}
           />
@@ -172,9 +172,9 @@ export default function ComponentsDevPage() {
         <Section title="HierarchyNav — single org">
           <HierarchyNav
             levels={[
-              { kind: "Organization", label: "Kisakye Energy", count: 1, href: "/orgs/kisakye" },
-              { kind: "Community",    label: "Kisakye Village", count: 1, href: "/orgs/kisakye/communities/kisakye-village" },
-              { kind: "Microgrid",    label: "Grid Alpha", count: 1, href: "/orgs/kisakye/microgrids/grid-alpha", active: true },
+              { kind: "Organization", label: "Example Energy", count: 1, href: "/orgs/example" },
+              { kind: "Community",    label: "Demo Village", count: 1, href: "/orgs/example/communities/demo-village" },
+              { kind: "Microgrid",    label: "Grid Alpha", count: 1, href: "/orgs/example/microgrids/grid-alpha", active: true },
             ]}
           />
         </Section>
@@ -185,32 +185,32 @@ export default function ComponentsDevPage() {
             levels={[
               {
                 kind: "Organization",
-                label: "Kisakye Energy",
+                label: "Example Energy",
                 count: 3,
-                href: "/orgs/kisakye",
+                href: "/orgs/example",
                 active: false,
                 siblings: [
-                  { label: "Kisakye Energy", href: "/orgs/kisakye" },
+                  { label: "Example Energy", href: "/orgs/example" },
                   { label: "Luwero Solar",   href: "/orgs/luwero" },
                   { label: "Masaka Grid",    href: "/orgs/masaka" },
                 ],
               },
               {
                 kind: "Community",
-                label: "Kisakye Village",
+                label: "Demo Village",
                 count: 2,
-                href: "/orgs/kisakye/communities/kisakye-village",
+                href: "/orgs/example/communities/demo-village",
                 active: false,
                 siblings: [
-                  { label: "Kisakye Village", href: "/orgs/kisakye/communities/kisakye-village" },
-                  { label: "Kasana Town",     href: "/orgs/kisakye/communities/kasana-town" },
+                  { label: "Demo Village", href: "/orgs/example/communities/demo-village" },
+                  { label: "Kasana Town",     href: "/orgs/example/communities/kasana-town" },
                 ],
               },
               {
                 kind: "Microgrid",
                 label: "Grid Alpha",
                 count: 1,
-                href: "/orgs/kisakye/microgrids/grid-alpha",
+                href: "/orgs/example/microgrids/grid-alpha",
                 active: true,
               },
             ]}

@@ -26,7 +26,7 @@ cd mgm
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
-passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+passwords (RFC #186): enter `admin@example.org`, choose **Email me a sign-in
 link**, then open the email in Mailpit at
 [http://localhost:8025](http://localhost:8025) and follow its link.
 
@@ -46,6 +46,11 @@ link**, then open the email in Mailpit at
 # or manually:
 docker compose down -v && docker compose up --build -d
 ```
+
+If you set up before the seed changed, your database still has the old
+sample admin address, so `admin@example.org` gets no link. Run
+`./setup.sh --docker --force`: it copies the seed template again before it
+starts the stack. The manual commands do not copy it.
 
 ### Limitations
 
@@ -75,11 +80,27 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and sign in. MGM has no
-passwords (RFC #186): enter `admin@eiot.energy`, choose **Email me a sign-in
+passwords (RFC #186): enter `admin@example.org`, choose **Email me a sign-in
 link**, then open the email in the local mail catcher at
 [http://127.0.0.1:54324](http://127.0.0.1:54324) and follow its link. This
 needs `MGM_SMTP_URL` and `MGM_MAIL_FROM` in `.env.local`, which
 `.env.local.example` sets for the catcher.
+
+**Already set up before the seed changed?** Your copied
+`supabase/migrations/00003_seed.sql` and your database still have the old
+sample admin address, so `admin@example.org` gets no link. Copy the template
+again and reset the local database, which deletes its data:
+
+```bash
+cp supabase/migrations/00003_seed.sql.template supabase/migrations/00003_seed.sql
+MGM_ALLOW_DEV_CREDENTIAL_KEY=1 supabase db reset
+```
+
+`./setup.sh --force` also does both, but it rewrites `.env.local` as well,
+with only the Supabase keys, `MGM_APP_URL` and the OpenEMS defaults. That
+drops `MGM_SMTP_URL` and `MGM_MAIL_FROM`, which sign-in needs, and
+`SUPABASE_JWT_SECRET`, which the RLS tests need, so add them back after it.
+On the Docker path, see *Reset to fresh state* above.
 
 `npm run dev` builds the interface's stylesheet once before it starts. While
 you change classes under `src/gui/` or the tokens in `src/styles/tokens.css`,
