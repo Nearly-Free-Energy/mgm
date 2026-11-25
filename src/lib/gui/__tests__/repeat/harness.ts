@@ -3,7 +3,7 @@
  * it is sent to its route, and the snapshot that shows whether a send wrote.
  *
  * Each plugin with "safe" actions has a case module beside this file
- * (./billing.ts, ./payments.ts). A module seeds its own organization under
+ * (./billing.ts, ./payments.ts, ./metering.ts). A module seeds its own organization under
  * its own UUID prefix and lists one or more cases for each of its "safe"
  * actions. A case names no route: it is sent to the handler its action's own
  * method and path name (handlerFor). A plugin that contributes its first
@@ -132,6 +132,10 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   payment_attempts: ["id"],
   payment_receipts: ["id"],
   payment_notifications: ["id"],
+  edges: ["id"],
+  devices: ["id"],
+  meter_readings: ["id"],
+  tenant_devices: ["id"],
 };
 
 async function rows(
@@ -150,10 +154,10 @@ async function rows(
 }
 
 /**
- * Every row of the organization's in each table a billing or payments write
- * route reaches, read with the service role. A new "safe" action whose route
- * writes another table adds that table here, or the test cannot see its
- * writes.
+ * Every row of the organization's in each table a billing, payments or
+ * metering write route reaches, read with the service role. A new "safe"
+ * action whose route writes another table adds that table here, or the test
+ * cannot see its writes.
  */
 export async function snapshot(orgId: string): Promise<Snapshot> {
   const svc = await serviceClient();
@@ -174,6 +178,10 @@ export async function snapshot(orgId: string): Promise<Snapshot> {
   for (const table of ["payment_attempts", "payment_receipts", "payment_notifications"]) {
     out[table] = await rows(svc, table, [["org_id", [orgId]]]);
   }
+  out.edges = await rows(svc, "edges", [["microgrid_id", mg]]);
+  out.devices = await rows(svc, "devices", [["edge_id", ids(out.edges)]]);
+  out.meter_readings = await rows(svc, "meter_readings", [["device_id", ids(out.devices)]]);
+  out.tenant_devices = await rows(svc, "tenant_devices", [["device_id", ids(out.devices)]]);
   return out;
 }
 

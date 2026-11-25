@@ -34,6 +34,9 @@ vi.mock("@/lib/supabase/server", () => ({
     return session.caller.client;
   },
 }));
+// Metering's routes refresh the pages they change, which needs the Next.js
+// request this test does not run in; refreshing writes no row.
+vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
 import type { MgmPluginName } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
@@ -45,12 +48,14 @@ import {
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
 import { absentIgnores, handlerFor, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
+import { METERING_CASES } from "./repeat/metering";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
 const MODULES: Partial<Record<MgmPluginName, CaseModule>> = {
   billing: BILLING_CASES,
   payments: PAYMENTS_CASES,
+  metering: METERING_CASES,
 };
 
 const modules = Object.entries(MODULES) as [MgmPluginName, CaseModule][];

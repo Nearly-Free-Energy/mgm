@@ -114,6 +114,12 @@ export type CanaryIds = {
    */
   paymentAttemptId: string;
   /**
+   * The Basic path's microgrid's edge and that edge's house meter, so each
+   * action on an edge or a device (metering's) has a row to be prepared for.
+   */
+  edgeId: string;
+  deviceId: string;
+  /**
    * One tenant unit per seeded microgrid, in canaryMicrogrids order: tenant
    * views are dispatched as a tenant holding every one of them. Each unit
    * has that microgrid's house meter (TENANT_METER_COMPONENT, on its first
@@ -147,7 +153,8 @@ export const canaryMicrogrids = (ids: CanaryIds): string[] => [
  * Each microgrid has an edge with a battery and a grid meter, so a view that
  * reads the site reaches its metering source: the edges of the synthetic
  * microgrid carry the reserved `SYNTHETIC-EDGE-` id, the others a real-looking
- * one, and the mixed microgrid has one edge of each. The Basic path's
+ * one, and the mixed microgrid has one edge of each. The Basic path's edge
+ * and its house meter take `edgeId` and `deviceId`. The Basic path's
  * microgrid also gets a tariff, a tenant with no meter and a draft billing
  * period pinned to that tariff: a draft with one unpaid bill and no recorded
  * payment, so delete's available() and prepare run, and every bill action
@@ -197,13 +204,13 @@ export async function seedCanaries(svc: SupabaseClient, ids: CanaryIds): Promise
     const row = { id, community_id: ids.communityId, name: `GUI Canary Microgrid ${name}`, currency: "UGX", timezone: "Africa/Kampala", ems_backend_url: NOWHERE, ...config };
     rows.push(["microgrids", { ...row, ...(await secret("microgrids", field, id)) }]);
     for (const edgePrefix of edgePrefixes) {
-      const edge = randomUUID();
+      const edge = id === ids.microgridIds.basic ? ids.edgeId : randomUUID();
       site.push(["edges", { id: edge, microgrid_id: id, name: `Canary edge ${edgePrefix}`, openems_edge_id: `${edgePrefix}${id}` }]);
       for (const [type, component] of [["battery", "ess0"], ["grid_meter", "meter0"]]) {
         site.push(["devices", { edge_id: edge, name: `Canary ${type}`, device_type: type, openems_component_id: component }]);
       }
       if (!houseMeters.has(id)) {
-        const meter = randomUUID();
+        const meter = id === ids.microgridIds.basic ? ids.deviceId : randomUUID();
         houseMeters.set(id, meter);
         site.push(["devices", { id: meter, edge_id: edge, name: "Canary house meter", device_type: "consumption_meter", openems_component_id: TENANT_METER_COMPONENT }]);
       }
@@ -383,6 +390,8 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     lineItem: [ids.lineItemId],
     tenant: [ids.tenantId],
     paymentAttempt: [ids.paymentAttemptId],
+    edge: [ids.edgeId],
+    device: [ids.deviceId],
   };
   /** Each seeded row's parent, by the parent's kind. */
   const parentOf: Record<string, { kind: EntityKind; id: string }> = {
@@ -390,6 +399,8 @@ function seededParams(ids: CanaryIds, kinds: Record<string, EntityKind>, what: s
     [ids.lineItemId]: { kind: "billingPeriod", id: ids.billingPeriodId },
     [ids.paymentAttemptId]: { kind: "lineItem", id: ids.lineItemId },
     [ids.tenantId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.edgeId]: { kind: "microgrid", id: ids.microgridIds.basic },
+    [ids.deviceId]: { kind: "edge", id: ids.edgeId },
   };
   let combos: Record<string, string>[] = [{}];
   for (const [name, kind] of Object.entries(kinds)) {

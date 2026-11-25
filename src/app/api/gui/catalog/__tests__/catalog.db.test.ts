@@ -70,6 +70,14 @@ const ACTION_IDS = [
   "billing.record-usage",
   "billing.regenerate-bill",
   "billing.savings-settings",
+  "metering.check-connection",
+  "metering.delete-edge",
+  "metering.edit-device",
+  "metering.edit-edge",
+  "metering.record-opening-register",
+  "metering.register-edges",
+  "metering.save-connection",
+  "metering.save-devices",
   "payments.accept-receipts",
   "payments.record-adjustment",
   "payments.refresh-attempt",
@@ -201,6 +209,18 @@ describe.skipIf(shouldSkip())("GET /api/gui/catalog against the database", () =>
       expect(a.input, a.id).toMatchObject({ type: "object" });
       expect(a.availability, a.id).toEqual({ available: true, reasons: [], unchecked: ["configured", "authorized", "state"] });
     }
+  });
+
+  it("describes the OpenEMS connection's credentials as write-only, a schema with no value", async () => {
+    caller = manager;
+    const save = byId((await answer(`?org=${ORG}`)).body).get("metering.save-connection");
+    const properties = (save?.input as { properties: Record<string, Record<string, unknown>> }).properties;
+    for (const key of ["secretAccessKey", "basicAuthPassword", "bearerToken", "keycloakClientSecret"]) {
+      expect(properties[key], key).toEqual({ type: "string", title: expect.any(String), writeOnly: true });
+    }
+    // The host sends the ceremony's confirmation itself, so no form asks for it.
+    expect(Object.keys(properties)).not.toContain("confirmation");
+    expect(save).toMatchObject({ method: "PUT", confirm: "ceremony", humanOnly: true, repeat: "unsafe", bind: { path: { id: "microgrid" }, body: {} } });
   });
 
   it("lists billing's actions unavailable with the gate's code and copy while billing is off", async () => {

@@ -87,6 +87,8 @@ const IDS: CanaryIds = {
   lineItemId: "e7400000-0000-4000-8005-000000000001",
   paymentAttemptId: "e7400000-0000-4000-8008-000000000001",
   rateScheduleId: "e7400000-0000-4000-8006-000000000001",
+  edgeId: "e7400000-0000-4000-800a-000000000001",
+  deviceId: "e7400000-0000-4000-800b-000000000001",
   unitIds: [1, 2, 3, 4, 5, 6].map((n) => `e7400000-0000-4000-8003-00000000000${n}`),
 };
 const MICROGRIDS = canaryMicrogrids(IDS);
@@ -518,8 +520,8 @@ describe.skipIf(shouldSkip())("credential canary", () => {
     });
 
     it("refuses a view whose path names a kind with no seeded row", async () => {
-      const fixture = surface([view("acme.house", "/devices/[id]", { id: "device" }, () => ok("Battery"))]);
-      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "device"');
+      const fixture = surface([view("acme.tariff", "/tariffs/[id]", { id: "rateSchedule" }, () => ok("Battery"))]);
+      await expect(dispatchEveryView(ctx(), fixture, IDS, serve)).rejects.toThrow('no canary row for entity kind "rateSchedule"');
     });
 
     it("refuses a view whose loader did not run", async () => {

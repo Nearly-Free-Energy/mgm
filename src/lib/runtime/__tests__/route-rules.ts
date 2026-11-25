@@ -22,7 +22,6 @@ import type { PaymentsCapabilityContract } from "@/lib/payments/repository";
 import {
   BILLING_PLUGIN_NAME,
   COMMUNITY_MANAGEMENT_PLUGIN_NAME,
-  METERING_PLUGIN_NAME,
   ORGANIZATION_DIRECTORY_PLUGIN_NAME,
   PAYMENTS_PLUGIN_NAME,
   PESAPAL_PLUGIN_NAME,
@@ -115,8 +114,6 @@ export const UNGATED_WRITES: Record<string, string | PaymentExemption> = {
 export const DESCRIBING_ISSUES = {
   /** ACM B4: describe community management's actions. */
   "#278": [COMMUNITY_MANAGEMENT_PLUGIN_NAME],
-  /** ACM B5: describe metering's actions. */
-  "#279": [METERING_PLUGIN_NAME],
   /** ACM B6: describe the remaining billing and payments routes. */
   "#280": [BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME],
   /** ACM B7: describe the organization directory's and users' actions. */
@@ -125,8 +122,10 @@ export const DESCRIBING_ISSUES = {
 
 /**
  * Why no action names a write route. `permanent`: the route is not a
- * person's action, and its reason says why and what would make that wrong
- * ("Wrong once …", which described-writes.test.ts requires).
+ * person's action (no person sends it, or it writes nothing: an action is a
+ * write a person confirms, and RFC #259 § 3 serves reads as views), and its
+ * reason says why and what would make that wrong ("Wrong once …", which
+ * described-writes.test.ts requires).
  * `not-yet-described`: the issue that will describe it.
  */
 export type UndescribedWrite =
@@ -153,20 +152,43 @@ export type UndescribedWrite =
  */
 export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   // ── Permanent: not a person's action ──
+  // A POST that writes nothing is here rather than an action: what it
+  // answers is a read, and the twice-sent test (repeat.db.test.ts) can show
+  // no action "safe" whose first send writes nothing.
   "POST /api/auth/sign-in-link": {
     kind: "permanent",
     reason:
       "Emails a sign-in link to someone who has no session yet (RFC #186), while an action is offered to a signed-in person. Wrong once it reads the caller's session.",
+  },
+  "POST /api/edges": {
+    kind: "permanent",
+    reason:
+      "Retired (#101): always answers 410 pointing at Discover and edge registration, which are metering.check-connection and metering.register-edges, and touches no data. Wrong once it does anything but refuse.",
   },
   "POST /api/gui/prepare": {
     kind: "permanent",
     reason:
       "The GUI host's own step: builds an action's form and confirmation and writes nothing, and the action's write goes to the action's own route. Wrong once prepare writes.",
   },
+  "POST /api/metering/readings": {
+    kind: "permanent",
+    reason:
+      "A read: each meter's consumption over a date range, from the vendor system through the metering capability, sent as a POST for its body of ids. It writes nothing and no page calls it. Wrong once it writes a row.",
+  },
   "POST /api/mgm/bootstrap": {
     kind: "permanent",
     reason:
       "First-run setup: creates the first organization for the holder of the deployment's bootstrap token, before any organization exists to offer an action in, and answers 409 after. Wrong once it acts after the first organization exists.",
+  },
+  "POST /api/microgrids/[id]/openems-backend/test": {
+    kind: "permanent",
+    reason:
+      "A read: tests a candidate connection against the vendor system and answers what it found, persisting nothing, sent as a POST so the credentials typed travel in its body. Saving (metering.save-connection) runs the same test before it writes. Wrong once it writes a row.",
+  },
+  "POST /api/openems/channels": {
+    kind: "permanent",
+    reason:
+      "A read: live channel values from the vendor system for the microgrid's saved connection. It writes nothing, no page calls it, and /api/openems/* is not released, so no action could name it (gui-surface.test.ts, check 4). Wrong once it writes a row.",
   },
   "POST /api/payments/ipn": {
     kind: "permanent",
@@ -191,30 +213,6 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/tenants/[id]/access": { kind: "not-yet-described", issue: "#278" },
   "DELETE /api/tenants/[id]/access/[id]": { kind: "not-yet-described", issue: "#278" },
   "POST /api/tenants/with-meter": { kind: "not-yet-described", issue: "#278" },
-
-  // ── Not yet described: #279 (ACM B5), metering ──
-  // Two of these routes cannot become actions as they stand.
-  // `POST /api/openems/channels` is not released: released-routes.ts does not
-  // open /api/openems/*, and gui-surface.test.ts refuses an action on an
-  // unreleased route (check 4), so describing it means releasing
-  // /api/openems/* first. It is listed so #279 decides it with the rest of
-  // metering's routes. `POST /api/edges` is retired (it always answers 410)
-  // and carries a plain-string gate exemption in UNGATED_WRITES above, and
-  // gui-surface.test.ts refuses an action on such a route (check 3). If
-  // released-routes.ts opens /api/openems/*, or check 3 or 4 changes, revisit
-  // this note.
-  "POST /api/devices": { kind: "not-yet-described", issue: "#279" },
-  "PATCH /api/devices/[id]": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/edges": { kind: "not-yet-described", issue: "#279" },
-  "PATCH /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
-  "DELETE /api/edges/[id]": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/meter-readings/opening": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/metering/readings": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/edges/register": { kind: "not-yet-described", issue: "#279" },
-  "PUT /api/microgrids/[id]/openems-backend": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/openems-backend/discover": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/microgrids/[id]/openems-backend/test": { kind: "not-yet-described", issue: "#279" },
-  "POST /api/openems/channels": { kind: "not-yet-described", issue: "#279" },
 
   // ── Not yet described: #280 (ACM B6), billing, payments and Pesapal ──
   // Five of these routes carry a plain-string gate exemption in UNGATED_WRITES
