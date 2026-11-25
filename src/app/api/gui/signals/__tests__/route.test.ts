@@ -64,7 +64,7 @@ describe("GET /api/gui/signals", () => {
     const res = await get(`?org=${ORG}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store, private");
-    expect(await res.json()).toEqual({ type: "signals", org: ORG, count: 0, top: [], checked: [], unchecked: [] });
+    expect(await res.json()).toEqual({ type: "signals", org: ORG, count: 0, attention: 0, top: [], checked: [], unchecked: [] });
   });
 
   it("collects for the organization ?org= names", async () => {

@@ -292,7 +292,15 @@ export type Signal = SignalOf<ActionRef>;
 export interface Signals {
   type: "signals";
   org: string;
+  /** Every signal, whatever its severity; `top` holds only the first MAX_TOP of them (host/server/signals.ts). */
   count: number;
+  /**
+   * How many of the `count` signals are `warn` or `critical`: what the
+   * installed app's badge shows, since info signals show in the tray and on
+   * Today but not on the icon (#230). Optional, added within 0.1 as a patch
+   * may add fields (ADR-006 decision 6): a GUI that finds none uses `count`.
+   */
+  attention?: number;
   top: Signal[];
   /** Sources that answered, so a GUI can tell "nothing needs you" from "nothing checked". */
   checked: Id[];

@@ -437,6 +437,7 @@ export const signalsSchema = z.strictObject({
   type: z.literal("signals"),
   org: z.string().min(1),
   count: z.int().nonnegative(),
+  attention: z.int().nonnegative().optional(),
   top: z.array(signalSchema),
   checked: z.array(idSchema),
   unchecked: z.array(idSchema),
