@@ -410,6 +410,19 @@ lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
 
+A route described after it shipped may keep the answers it gave bad bodies
+before: `parseJsonBody` (`src/lib/validation/parse-body.ts`) takes the
+route's own refusals (`BodyRefusals`), which replace its generic 400 for
+each issue the route answered itself. Community management's routes do
+(the `*_REFUSALS` in `src/lib/community-management/schemas.ts`, which its
+`schemas.test.ts` holds to the capability's own answers); a new route
+answers the generic 400. A path segment that names a plugin's own entity
+kind resolves through the `organizationOf` the plugin contributes.
+Community management's `community.tenant-access`, a tenant's access to its
+unit, is the first: an org manager cannot read the role row it names, so
+it resolves only beside the tenant whose access list holds it
+(`tenantAccessOrganization`).
+
 The reverse direction is checked by
 `src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
 under `src/app/api` on a released path is named by an action, or listed in
