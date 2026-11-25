@@ -6,7 +6,12 @@ import { createOpenEmsClient, OpenEmsError } from "@/lib/openems";
 import { getMicrogridEmsConfig } from "@/lib/openems/config";
 import { classifyDeviceType } from "@/lib/openems/classify";
 import { channelAddressFor } from "@/lib/openems/channel-address";
-import type { DiscoveredDevice, EdgeDiscoveryResponse } from "@/lib/openems/types";
+import { parseOpenEmsId } from "@/lib/openems/ids";
+import type {
+  DiscoveredDevice,
+  EdgeDiscoveryResponse,
+  SkippedComponent,
+} from "@/lib/openems/types";
 
 /**
  * OpenEMS nature IDs whose components Discover lists. These are the Java
@@ -45,6 +50,11 @@ const UUID_RE =
  *
  * Edge lookup precedes permission check (matches delete-preview/route.ts pattern)
  * so a non-existent edge yields 404, not 403 — avoids existence leak.
+ *
+ * Components whose id does not fit OPENEMS_ID_PATTERN (`@/lib/openems/ids`)
+ * exactly as OpenEMS sent it are left out of `devices` and listed in
+ * `skipped`: POST /api/devices and the database would refuse to store them,
+ * and a trimmed copy would name a component OpenEMS does not have.
  *
  * Error handling split:
  *   - getEdgesStatus: not wrapped in catch — errors surface as 503
@@ -249,6 +259,7 @@ export async function GET(
 
   // Classify components whose factory exposes a supported nature.
   const discovered: DiscoveredDevice[] = [];
+  const skipped: SkippedComponent[] = [];
 
   for (const [componentId, component] of Object.entries(config.components)) {
     const factory = config.factories[component.factoryId];
@@ -258,6 +269,14 @@ export async function GET(
       SUPPORTED_NATURE_IDS.includes(n)
     );
     if (!matchedNature) continue;
+
+    if (parseOpenEmsId(componentId) !== componentId) {
+      skipped.push({
+        componentId: componentId.slice(0, 100),
+        reason: "invalid_component_id",
+      });
+      continue;
+    }
 
     const suggestedDeviceType = classifyDeviceType(
       component.factoryId,
@@ -309,6 +328,7 @@ export async function GET(
       online,
       status: "success",
       device_count: discovered.length,
+      skipped_count: skipped.length,
       duration_ms: Date.now() - startedAt,
       at: new Date().toISOString(),
     })
@@ -318,6 +338,7 @@ export async function GET(
     edgeId: openemsEdgeId,
     online,
     devices: discovered,
+    skipped,
   };
   return NextResponse.json(response);
 }

@@ -974,6 +974,53 @@ describe("TenantWizard", () => {
       );
     });
 
+    it("discovery that skipped a component names it and leaves out the online hint", async () => {
+      const { impl } = makeUrlDispatcher({
+        discover: [
+          {
+            ok: true,
+            status: 200,
+            jsonBody: {
+              edgeId: "edge1",
+              online: true,
+              devices: [],
+              skipped: [
+                { componentId: "meter 1", reason: "invalid_component_id" },
+              ],
+            },
+          },
+        ],
+        devices: [],
+        tenant: [],
+      });
+      fetchMock.mockImplementation(impl as never);
+
+      renderWizard({
+        availableMeters: [],
+        edges: [EDGE_1],
+        edgeIdsWithoutConsumptionMeter: [EDGE_1.id],
+      });
+      fillDisplayName("HH");
+      fillPhone("+256");
+      fireEvent.click(screen.getByRole("button", { name: /^Next$/ }));
+      await waitFor(() =>
+        expect(screen.getByLabelText(/Address line 1/i)).toBeDefined()
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^Next$/ }));
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: /Discover meters/i })
+      );
+      await waitFor(() =>
+        expect(screen.getByText(/Not listed: 1 component/)).toBeDefined()
+      );
+      expect(screen.getByText("meter 1")).toBeDefined();
+      expect(
+        screen.getByText(/No new consumption meters on this edge/i)
+      ).toBeDefined();
+      expect(screen.queryByText(/Make sure the edge is online/i)).toBeNull();
+    });
+
     it("offline edge response renders the offline notice", async () => {
       const { impl } = makeUrlDispatcher({
         discover: [discoveryResponse([], false)],
