@@ -192,8 +192,16 @@ export const UNDESCRIBED_WRITES: Readonly<Record<string, UndescribedWrite>> = {
   "POST /api/tenants/with-meter": { kind: "not-yet-described", issue: "#278" },
 
   // ── Not yet described: #279 (ACM B5), metering ──
-  // `POST /api/openems/channels` is not released yet; it is listed so #279
-  // decides it with the rest of metering's routes.
+  // Two of these routes cannot become actions as they stand.
+  // `POST /api/openems/channels` is not released: released-routes.ts does not
+  // open /api/openems/*, and gui-surface.test.ts refuses an action on an
+  // unreleased route (check 4), so describing it means releasing
+  // /api/openems/* first. It is listed so #279 decides it with the rest of
+  // metering's routes. `POST /api/edges` is retired (it always answers 410)
+  // and carries a plain-string gate exemption in UNGATED_WRITES above, and
+  // gui-surface.test.ts refuses an action on such a route (check 3). If
+  // released-routes.ts opens /api/openems/*, or check 3 or 4 changes, revisit
+  // this note.
   "POST /api/devices": { kind: "not-yet-described", issue: "#279" },
   "PATCH /api/devices/[id]": { kind: "not-yet-described", issue: "#279" },
   "POST /api/edges": { kind: "not-yet-described", issue: "#279" },
