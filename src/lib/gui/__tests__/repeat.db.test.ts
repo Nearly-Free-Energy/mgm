@@ -4,9 +4,9 @@
  * person it is offered to. The first send must write. The second, an
  * identical request, must leave every row the snapshot reads
  * (./repeat/harness.ts) as the first left it, apart from the columns its
- * case lists in `ignore`, each with why. It may answer unlike the first. This
- * is the evidence for each "safe" declaration: where a case fails, the
- * action is not "safe".
+ * case lists in `ignore`, each of one row and with why. It may answer unlike
+ * the first. This is the evidence for each "safe" declaration: where a case
+ * fails, the action is not "safe".
  *
  * The sends are one after the other, so this shows nothing about two copies
  * sent at once: those rest on each route's own locks. Outside state is held
@@ -43,7 +43,7 @@ import {
   shouldSkip,
 } from "@/lib/supabase/__tests__/rls.helpers";
 import { BILLING_CASES } from "./repeat/billing";
-import { absentColumns, routeKey, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
+import { absentIgnores, routeKey, send, snapshot, without, type CaseModule, type Fixture } from "./repeat/harness";
 import { PAYMENTS_CASES } from "./repeat/payments";
 
 /** One module per plugin with "safe" actions. A plugin's first "safe" action adds its module here. */
@@ -93,6 +93,28 @@ describe("the twice-sent cases", () => {
       return out;
     });
     expect(problems).toEqual([]);
+  });
+
+  it("drop an ignored column from the row it names only, and refuse one no row has", () => {
+    const s = {
+      payment_attempts: [
+        { id: "a", status: "confirmation_pending", updated_at: "t1" },
+        { id: "b", status: "needs_reconciliation", updated_at: "t1" },
+      ],
+    };
+    const ignore = { column: "payment_attempts.updated_at", row: { id: "a" }, reason: "fixture" };
+    expect(without(s, [ignore])).toEqual({
+      payment_attempts: [
+        { id: "a", status: "confirmation_pending" },
+        { id: "b", status: "needs_reconciliation", updated_at: "t1" },
+      ],
+    });
+    expect(absentIgnores(s, [ignore])).toEqual([]);
+    expect(absentIgnores(s, [{ ...ignore, row: { id: "c" } }])).toEqual(['payment_attempts.updated_at of {"id":"c"}']);
+    expect(absentIgnores(s, [{ ...ignore, column: "payment_attempts.paid_at" }])).toEqual(['payment_attempts.paid_at of {"id":"a"}']);
+    // A row is named by its table's whole primary key and nothing else.
+    expect(absentIgnores(s, [{ ...ignore, row: { status: "confirmation_pending" } }])).toHaveLength(1);
+    expect(absentIgnores(s, [{ ...ignore, row: { id: "a", status: "confirmation_pending" } }])).toHaveLength(1);
   });
 });
 
@@ -148,7 +170,7 @@ describe.skipIf(shouldSkip())("each safe action sent twice (live database)", () 
     const second = await send(handler, def, c.params, body);
     expect(second.status, second.text).toBe(c.second);
     const twice = await snapshot(fixture.orgId);
-    expect(absentColumns(twice, c.ignore), "each ignored column must be one the snapshot reads").toEqual([]);
+    expect(absentIgnores(twice, c.ignore), "each ignored column must be one of a row the snapshot reads").toEqual([]);
     expect(without(twice, c.ignore), "the second send changed a row").toEqual(without(once, c.ignore));
   }, 60_000);
 

@@ -91,15 +91,16 @@ export const PAYMENTS_CASES: CaseModule = {
         body: () => ({}),
         first: 200,
         second: 200,
-        ignore: {
-          // The refresh rewrites a pending attempt with the same status and
+        ignore: [
+          // The refresh rewrites this pending attempt with the same status and
           // failure fields, and trg_payment_attempts_updated_at stamps every
           // update. Read only for failed and held attempts (listAttention and
-          // the attention signals), never this one's. If it comes to be read
-          // for a pending attempt, remove this, and make the refresh skip an
-          // attempt already in that state instead.
-          "payment_attempts.updated_at": "stamped on every update, not read for a pending attempt",
-        },
+          // the attention signals), never this one's; the other attempts' are
+          // still compared. If it comes to be read for a pending attempt,
+          // remove this, and make the refresh skip an attempt already in that
+          // state instead.
+          { column: "payment_attempts.updated_at", row: { id: WAITING }, reason: "stamped on every update, not read for a pending attempt" },
+        ],
       },
     ],
     // The attempt no longer needs reconciliation: 409.

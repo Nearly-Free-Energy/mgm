@@ -38,12 +38,23 @@ export interface Case {
   /** The status the second, identical send answers; it must leave the snapshot as the first left it. */
   second: number;
   /**
-   * Columns, as "table.column", that this case's second send may rewrite
-   * with a new value of the same meaning, each with why that is not a
-   * change. Removed from both snapshots before they are compared. Each must
-   * name a column the snapshot reads, or the case fails.
+   * Columns of single rows that this case's second send may rewrite with a
+   * new value of the same meaning, each with why that is not a change.
+   * Removed from that row alone in each snapshot before they are compared,
+   * so the same column of every other row is still compared. Each must name
+   * a column of a row the snapshot reads, or the case fails.
    */
-  ignore?: Readonly<Record<string, string>>;
+  ignore?: readonly Ignored[];
+}
+
+/** One column of one row that a case's second send may move. */
+export interface Ignored {
+  /** As "table.column". */
+  column: string;
+  /** The row, by every column of its table's primary key (KEYS below), as strings. */
+  row: Readonly<Record<string, string>>;
+  /** Why a new value there is not a change. */
+  reason: string;
 }
 
 export interface Fixture {
@@ -153,21 +164,41 @@ export async function snapshot(orgId: string): Promise<Snapshot> {
   return out;
 }
 
-/** The snapshot without the listed "table.column"s. */
-export function without(s: Snapshot, ignore: Readonly<Record<string, string>> = {}): Snapshot {
-  const drop = Object.keys(ignore).map((tc) => tc.split(".") as [string, string]);
+/** Whether `row` of `table` is the one `key` names by its table's whole primary key. */
+function isRow(table: string, row: Row, key: Readonly<Record<string, string>>): boolean {
+  const primary = KEYS[table] ?? [];
+  return (
+    primary.length > 0 &&
+    primary.length === Object.keys(key).length &&
+    primary.every((k) => Object.hasOwn(key, k) && String(row[k]) === key[k])
+  );
+}
+
+const split = (column: string) => column.split(".") as [table: string, column: string];
+
+/** The snapshot without each listed column, in its own row only. */
+export function without(s: Snapshot, ignore: readonly Ignored[] = []): Snapshot {
   return Object.fromEntries(
     Object.entries(s).map(([table, list]) => {
-      const columns = drop.filter(([t]) => t === table).map(([, c]) => c);
-      return [table, columns.length ? list.map((row) => Object.fromEntries(Object.entries(row).filter(([c]) => !columns.includes(c)))) : list];
+      const mine = ignore.filter((i) => split(i.column)[0] === table);
+      if (mine.length === 0) return [table, list];
+      return [
+        table,
+        list.map((row) => {
+          const columns = mine.filter((i) => isRow(table, row, i.row)).map((i) => split(i.column)[1]);
+          return columns.length ? Object.fromEntries(Object.entries(row).filter(([c]) => !columns.includes(c))) : row;
+        }),
+      ];
     }),
   );
 }
 
-/** The listed "table.column"s that no row of the snapshot has. */
-export function absentColumns(s: Snapshot, ignore: Readonly<Record<string, string>> = {}): string[] {
-  return Object.keys(ignore).filter((tc) => {
-    const [table, column] = tc.split(".");
-    return !(s[table] ?? []).some((row) => Object.hasOwn(row, column));
-  });
+/** The listed columns that no row of the snapshot has, in the row named. */
+export function absentIgnores(s: Snapshot, ignore: readonly Ignored[] = []): string[] {
+  return ignore
+    .filter((i) => {
+      const [table, column] = split(i.column);
+      return !(s[table] ?? []).some((row) => isRow(table, row, i.row) && Object.hasOwn(row, column));
+    })
+    .map((i) => `${i.column} of ${JSON.stringify(i.row)}`);
 }

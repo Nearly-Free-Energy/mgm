@@ -132,14 +132,14 @@ export const BILLING_CASES: CaseModule = {
         body: () => ({ solar_savings_from: "2026-01-01", arbitrage_from: null, round_trip_efficiency: 0.9 }),
         first: 200,
         second: 200,
-        ignore: {
+        ignore: [
           // The route stamps the upsert with the time of the request, so a
           // second save of the same values moves only this. No reader shows
           // or compares it (the Rates page selects it and shows no date). If
           // anything comes to show or compare it, remove this, and make the
           // route skip an unchanged row instead.
-          "microgrid_savings_settings.updated_at": "stamped on every save, read by nothing",
-        },
+          { column: "microgrid_savings_settings.updated_at", row: { microgrid_id: MG }, reason: "stamped on every save, read by nothing" },
+        ],
       },
     ],
     // A version already starts that day: 409.
