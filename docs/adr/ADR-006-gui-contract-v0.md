@@ -226,7 +226,7 @@ read a stored credential, or to send data to another origin.
      the second. Safety is judged right after the first send, with outside
      state (meter data, a provider's answer) unchanged. A timestamp a route
      stamps on every write and nothing reads may move; the test lists each
-     such column with its case and its reason.
+     such column with its case, the one row it may move in, and its reason.
    - `"keyed"`: the route takes a repeat key and answers a repeat with the
      first result. No route takes one yet, and where a key's record is kept
      is open on #259, so the twice-sent test refuses `"keyed"` until a
