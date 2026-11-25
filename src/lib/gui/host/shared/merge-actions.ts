@@ -46,7 +46,8 @@ export type DropReason = "unknown" | "params" | "unbound" | "unreleased" | "disa
 /** An action left out of the model, or (for "prefill") left without its prefill. Ids only, never values. */
 export type Dropped = { action: string; reason: DropReason };
 
-const catalogIndex = (plugin: MgmPluginName) => {
+/** A plugin's position in the catalog (MGM_BUNDLED_PLUGINS), which orders other plugins' actions. */
+export const catalogIndex = (plugin: MgmPluginName) => {
   const i = MGM_BUNDLED_PLUGINS.findIndex((p) => p.name === plugin);
   return i < 0 ? MGM_BUNDLED_PLUGINS.length : i;
 };

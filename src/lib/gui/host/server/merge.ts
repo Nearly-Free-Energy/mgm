@@ -189,16 +189,66 @@ export function resolveOwnAndTargeted(
 }
 
 /** The id `available()` is asked about: the bound field of the action's target kind. */
-function targetId(def: ActionDef, params: Record<string, string>): string | undefined {
+export function targetId(def: Pick<ActionDef, "bind" | "target">, params: Record<string, string>): string | undefined {
   const name = bindings(def).find(([, kind]) => kind === def.target)?.[0];
   return name === undefined ? undefined : params[name];
 }
 
 /**
+ * What available() answered about one id: available, the reason it is not
+ * (as given, cut to 300 characters), or not checked, because the call
+ * missed the budget, threw, answered malformed, left the id out or gave a
+ * blank reason. A tagged value, so no reason a contribution writes
+ * can be read as "not checked".
+ */
+export type AvailabilityAnswer = { kind: "ok" } | { kind: "refused"; reason: string } | { kind: "unchecked" };
+
+/**
+ * Asks each action in `targets` its available() once, with every id listed
+ * for it, each call on its own request and client from `request`. All calls
+ * share one budget. An answer per action and id; nothing of an error is
+ * kept, and a call that is not checked is logged by action id only.
+ */
+export async function askAvailability(
+  actions: ReadonlyMap<Id, RegisteredAction>,
+  targets: ReadonlyMap<Id, ReadonlySet<string>>,
+  request: () => Promise<SurfaceRequest>,
+  budgetMs = AVAILABILITY_BUDGET_MS,
+): Promise<Map<Id, Map<string, AvailabilityAnswer>>> {
+  const out = new Map<Id, Map<string, AvailabilityAnswer>>();
+  if (targets.size === 0) return out;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), budgetMs);
+  });
+  await Promise.all(
+    [...targets].map(async ([action, ids]) => {
+      const available = actions.get(action)?.def.available;
+      if (!available) return;
+      const call = (async () => available(await request(), [...ids]))().then(
+        (answer) => (answer !== null && typeof answer === "object" ? answer : "malformed"),
+        () => "threw" as const,
+      );
+      const answer: Record<string, unknown> | string = await Promise.race([call, expired]);
+      if (typeof answer === "string") console.warn(`[gui] ${action}: availability not checked (${answer})`);
+      const each = new Map<string, AvailabilityAnswer>();
+      for (const id of ids) {
+        const one = typeof answer === "string" || !Object.hasOwn(answer, id) ? undefined : answer[id];
+        if (one === true) each.set(id, { kind: "ok" });
+        else if (typeof one === "string" && one.trim()) each.set(id, { kind: "refused", reason: one.slice(0, MAX_REASON) });
+        else each.set(id, { kind: "unchecked" });
+      }
+      out.set(action, each);
+    }),
+  );
+  clearTimeout(timer);
+  return out;
+}
+
+/**
  * Asks each action's available() once, with every target id the model
- * offers it on, each call on its own request and client. All calls share
- * one budget; an action whose call misses it, throws or answers malformed is
- * shown disabled with UNCHECKED_REASON, and nothing of the error is sent.
+ * offers it on (askAvailability). An action not available is shown disabled
+ * with its reason, and one not checked with UNCHECKED_REASON.
  */
 export async function checkAvailability<M extends ActionSlots<ActionRef>>(
   model: M,
@@ -218,36 +268,17 @@ export async function checkAvailability<M extends ActionSlots<ActionRef>>(
     return ref;
   });
 
-  const answers = new Map<Id, Record<string, unknown>>();
-  const request = o.request;
-  if (request && ids.size > 0) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), o.budgetMs ?? AVAILABILITY_BUDGET_MS);
-    });
-    await Promise.all(
-      [...ids].map(async ([action, targets]) => {
-        const available = o.actions.get(action)!.def.available!;
-        const call = (async () => available(await request(), [...targets]))().then(
-          (answer) => (answer !== null && typeof answer === "object" ? answer : "malformed"),
-          () => "threw" as const,
-        );
-        const answer = await Promise.race([call, expired]);
-        if (typeof answer === "string") console.warn(`[gui] ${action}: availability not checked (${answer})`);
-        else answers.set(action, answer);
-      }),
-    );
-    clearTimeout(timer);
-  }
+  const answers = o.request
+    ? await askAvailability(o.actions, ids, o.request, o.budgetMs)
+    : new Map<Id, Map<string, AvailabilityAnswer>>();
 
   return mapActionSlots(model, (ref) => {
     const def = o.actions.get(ref.action)?.def;
     if (!ref.enabled || !def?.available) return ref;
     const id = targetId(def, ref.params);
-    const answer = id === undefined ? undefined : answers.get(ref.action)?.[id];
-    if (answer === true) return ref;
-    const reason = typeof answer === "string" && answer.trim() ? answer.slice(0, MAX_REASON) : UNCHECKED_REASON;
-    return { ...ref, enabled: false, reason };
+    const answer = id === undefined ? undefined : answers.get(ref.action)?.get(id);
+    if (answer?.kind === "ok") return ref;
+    return { ...ref, enabled: false, reason: answer?.kind === "refused" ? answer.reason : UNCHECKED_REASON };
   }) as M;
 }
 

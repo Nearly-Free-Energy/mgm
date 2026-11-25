@@ -11,7 +11,9 @@ import type { RegisteredAction, SurfaceSnapshot } from "../surface-registry";
 
 const checkGate = vi.fn();
 const resolveTargetOrganization = vi.fn();
-vi.mock("@/lib/runtime/gate", () => ({
+vi.mock("@/lib/runtime/gate", async (importOriginal) => ({
+  // The gate's own code prefix, which a gate that throws is refused with.
+  codePrefix: (await importOriginal<typeof import("@/lib/runtime/gate")>()).codePrefix,
   checkGate: (...args: unknown[]) => checkGate(...args),
   resolveTargetOrganization: (...args: unknown[]) => resolveTargetOrganization(...args),
 }));
