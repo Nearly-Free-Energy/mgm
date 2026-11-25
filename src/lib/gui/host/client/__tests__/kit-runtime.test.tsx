@@ -82,6 +82,12 @@ describe("loadView", () => {
     await expect(loadView("/microgrids/a")).resolves.toMatchObject({ type: "view", title: "Operations" });
   });
 
+  it("returns the host's own code and copy for a refusal", async () => {
+    const refusal = { type: "result", ok: false, status: 404, code: "gui_not_found", message: "This page could not be found." };
+    mount(async () => Response.json({ ...refusal, error: refusal.message }, { status: 404 }));
+    await expect(loadView("/microgrids/a")).resolves.toEqual(refusal);
+  });
+
   it.each([
     ["a failed response", () => Response.json(model(), { status: 500 })],
     ["a body that is not a view or result", () => Response.json({ type: "manifest" })],

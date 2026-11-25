@@ -45,7 +45,10 @@ beforeEach(() => {
 async function expectFailure(res: Response, status: number, code: string) {
   expect(res.status).toBe(status);
   expect(res.headers.get("cache-control")).toBe("no-store, private");
-  expect(await res.json()).toMatchObject({ type: "result", ok: false, status, code });
+  const body = await res.json();
+  expect(body).toMatchObject({ type: "result", ok: false, status, code });
+  // The { error, code } shape of MGM's other routes, beside ActionResult's.
+  expect(body.error).toBe(body.message);
 }
 
 describe("GET /api/gui/manifest", () => {

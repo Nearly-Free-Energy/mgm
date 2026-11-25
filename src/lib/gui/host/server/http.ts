@@ -27,9 +27,21 @@ export function hostJson(body: unknown, status = 200): NextResponse {
   return NextResponse.json(body, { status, headers: { "Cache-Control": NO_STORE } });
 }
 
-/** A refusal in ActionResult's failure shape, which the kit already reads. */
+/** What every GUI host route answers a refusal with. */
+export type HostFailureBody = Extract<ActionResult, { ok: false }> & { error: string };
+
+/**
+ * A refusal in ActionResult's failure shape, which the kit already reads,
+ * with `error` beside `message`, carrying the same text, so every host
+ * failure also has the `{ error, code }` shape the plugin gate and the
+ * action routes answer with (gateResponse in src/lib/runtime/gate.ts), and
+ * a client other than a GUI reads one shape across MGM's routes (#275). The
+ * kit reads `error` first (failureOf in ../client/invoke.ts, loadView in
+ * ../client/kit-runtime.tsx); if the two keys could ever differ, revisit
+ * which one each reads.
+ */
 export function hostFailure(status: number, code: string, message: string): NextResponse {
-  const body: ActionResult = { type: "result", ok: false, status, code, message };
+  const body: HostFailureBody = { type: "result", ok: false, status, code, message, error: message };
   return hostJson(body, status);
 }
 
