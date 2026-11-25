@@ -76,8 +76,11 @@ read a stored credential, or to send data to another origin.
    amount and is sent in integer minor units.
 5. **Import boundaries follow where code runs.**
    `src/lib/gui/__tests__/gui-boundary.test.ts` enforces them:
-   - `contract.ts` imports only types, from `react` and
-     `@/lib/plugins/bundled`.
+   - `contract.ts` imports only types, and only from
+     `@/lib/plugins/bundled`, and reaches no `react`, `react-dom` or `next`
+     module even as types, so a client that is not an interface type-checks
+     it without React. `contract-react.ts` holds `GuiKit`, `GuiPlugin` and
+     the kit's props, and imports only types, from `react` and `contract.ts`.
    - `surface.ts`, `fmt.ts` and everything under `src/lib/gui/host/server/`
      start with `import "server-only"`.
    - Everything under `src/lib/gui/host/client/` starts with `"use client"`.

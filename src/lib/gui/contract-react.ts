@@ -5,8 +5,9 @@
  * such a client type-checks it without @types/react (A1-5 on #133).
  *
  * Client-safe, like ./contract.ts: it imports only types, and only from react
- * and ./contract. It re-exports nothing from ./contract, so each name has one
- * home. GUI_CONTRACT in ./contract.ts versions these types too.
+ * and ./contract (src/lib/gui/__tests__/gui-boundary.test.ts, rule
+ * "contract-react"). It re-exports nothing from ./contract, so each name has
+ * one home. GUI_CONTRACT in ./contract.ts versions these types too.
  */
 import type { ComponentType, ReactNode } from "react";
 import type {

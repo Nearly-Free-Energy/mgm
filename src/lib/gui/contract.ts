@@ -8,8 +8,10 @@
  * navigation, signals and search. A GUI plugin presents what it is given,
  * through the types in this file and the kit (GuiKit). This file is
  * client-safe: it imports only types, and only from the plugin catalog, so a
- * client that is not a GUI type-checks it without React. The kit and
- * GUI-plugin types, which name React types, are in ./contract-react.ts.
+ * client that is not a GUI type-checks it without React
+ * (src/lib/gui/__tests__/gui-boundary.test.ts, "the contract reaches no
+ * React"). The kit and GUI-plugin types, which name React types, are in
+ * ./contract-react.ts.
  *
  * Nothing here is a rule the server trusts. The middleware, the routes and the
  * database keep enforcing released routes, the plugin gate, roles and
