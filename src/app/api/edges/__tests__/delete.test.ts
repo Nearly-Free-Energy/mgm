@@ -227,6 +227,19 @@ describe("DELETE /api/edges/[id]", () => {
       expect(mockRpcImpl).not.toHaveBeenCalled();
     });
 
+    // Only a request with no body at all, the Edges page's, deletes without one.
+    it("answers 428 and deletes nothing when a body carries no confirmation", async () => {
+      configureEdgeLookup({ data: { id: VALID_UUID, name: "Edge-1", microgrid_id: "mg-1" }, error: null });
+      const { DELETE } = await import("../[id]/route");
+      const res = await DELETE(sent({}), { params: Promise.resolve({ id: VALID_UUID }) });
+      expect(res.status).toBe(428);
+      expect(await res.json()).toEqual({
+        error: "Type the edge's name, Edge-1, to delete it.",
+        code: "metering_edge_confirmation_required",
+      });
+      expect(mockRpcImpl).not.toHaveBeenCalled();
+    });
+
     it("answers 400 invalid_body for a body DeleteEdgeBody does not take", async () => {
       const { DELETE } = await import("../[id]/route");
       const res = await DELETE(sent({ name: "Edge-1" }), { params: Promise.resolve({ id: VALID_UUID }) });

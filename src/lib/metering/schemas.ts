@@ -189,8 +189,9 @@ export const EDIT_EDGE_BODY_VERSION = 1;
 
 /**
  * DELETE /api/edges/[id]. The edge comes from the path. `confirmation` is
- * the host's for a typed action: the edge's name, typed. The Edges page
- * confirms in the browser and sends no body, which the route reads as {}.
+ * the host's for a typed action: the edge's name, typed. The route requires
+ * it of every request that sends a body; the Edges page confirms in the
+ * browser and sends none, which the route reads as {} and lets through.
  */
 export const DeleteEdgeBody = z.strictObject({ confirmation: typedConfirmation }, { error: bodyError });
 export const DELETE_EDGE_BODY_VERSION = 1;

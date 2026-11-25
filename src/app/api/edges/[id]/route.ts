@@ -163,12 +163,18 @@ export async function PATCH(
  * DELETE /api/edges/[id] — delete an edge (#89).
  *
  * The body is `DeleteEdgeBody` (`@/lib/metering/schemas`), the
- * `metering.delete-edge` action's input. The Edges page confirms in the
- * browser and sends no body, which is read as `{}` and deletes as before. A
- * `confirmation`, as the GUI host sends for the typed step, must carry the
- * edge's name typed, or the answer is 428 `metering_edge_name_mismatch` and
- * nothing is deleted. Once the Edges page sends its delete through the host,
- * require the confirmation, as DELETE /api/billing-periods/[periodId] does.
+ * `metering.delete-edge` action's input. A request that sends a body must
+ * carry the `confirmation` the GUI host sends for the typed step, with the
+ * edge's name typed: with none the answer is 428
+ * `metering_edge_confirmation_required`, with another name 428
+ * `metering_edge_name_mismatch`, and nothing is deleted.
+ *
+ * A request with no body at all deletes as it always did: that is what the
+ * Edges page sends after its own dialog (DeleteEntityButton), and
+ * parseJsonBody's `empty` tells it from a body of `{}`. If that page starts
+ * sending a body, it gets the 428. Once the Edges page sends its delete
+ * through the host, require the confirmation of every request, as DELETE
+ * /api/billing-periods/[periodId] does.
  */
 export async function DELETE(
   request: NextRequest,
@@ -223,6 +229,15 @@ export async function DELETE(
     );
   }
 
+  if (!confirmation && !parsed.empty) {
+    return NextResponse.json(
+      {
+        ...errorBody(`Type the edge's name, ${edge.name.trim()}, to delete it.`),
+        code: "metering_edge_confirmation_required",
+      },
+      { status: 428 }
+    );
+  }
   if (confirmation && confirmation.typed?.trim() !== edge.name.trim()) {
     return NextResponse.json(
       { ...errorBody("The name typed does not match this edge's name."), code: "metering_edge_name_mismatch" },
