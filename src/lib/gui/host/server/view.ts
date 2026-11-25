@@ -18,7 +18,7 @@ import "server-only";
  */
 import { rolesIncludeStaff } from "@/lib/auth/access";
 import { CORE_ENTITY_KINDS, type CoreEntityKind } from "@/lib/plugins/bundled";
-import type { GateDecision } from "@/lib/runtime/gate";
+import { codePrefix, type GateDecision } from "@/lib/runtime/gate";
 import type { EntityKind, Href, ModelBase, Signals, ViewKind, ViewModel } from "../../contract";
 import type { Loaded, LoadedModel, ViewDef } from "../../surface";
 import { fillPath } from "../shared/merge-actions";
@@ -163,10 +163,16 @@ function checkLoaded(def: ViewDef, loaded: unknown): HostOutcome<LoadedModel<Vie
   return model.ok ? model : OUTPUT_INVALID;
 }
 
+/** The gate's decision for `plugin`; a gate that throws refuses as its own 503 would, with its code (codePrefix in src/lib/runtime/gate.ts). */
 async function decide(gate: PluginGate | null, plugin: RegisteredView["plugin"]): Promise<GateDecision> {
   if (!gate) return { ok: true, organizationId: null };
   return gate(plugin).catch(
-    (): GateDecision => ({ ok: false, status: 503, code: `${plugin}_gate_unavailable`, message: "Could not check whether this part of MGM is enabled." }),
+    (): GateDecision => ({
+      ok: false,
+      status: 503,
+      code: `${codePrefix(plugin)}_gate_unavailable`,
+      message: "Could not check whether this part of MGM is enabled.",
+    }),
   );
 }
 
