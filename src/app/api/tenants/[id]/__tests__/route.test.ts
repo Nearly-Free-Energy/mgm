@@ -711,6 +711,15 @@ describe("DELETE /api/tenants/[id] with the GUI host's typed confirmation", () =
     expect(mockTenantsDeleteSingle).not.toHaveBeenCalled();
   });
 
+  it("409: refuses a typed confirmation for a tenant with no name to type", async () => {
+    mockTenantsFetchSingle.mockResolvedValue({ data: { id: HH_UUID, display_name: "  ", microgrid_id: MG_UUID }, error: null });
+    const { DELETE } = await import("../route");
+    const res = await DELETE(confirmed("  "), { params: Promise.resolve({ id: HH_UUID }) });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "Unnamed entity cannot be typed-to-confirm.", code: "tenant_unnamed" });
+    expect(mockTenantsDeleteSingle).not.toHaveBeenCalled();
+  });
+
   it("403: still refuses a caller with no role before reading the confirmation", async () => {
     roleRows = [];
     const { DELETE } = await import("../route");

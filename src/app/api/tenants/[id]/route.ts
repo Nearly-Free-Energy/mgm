@@ -147,7 +147,7 @@ export async function DELETE(
     .from("tenants")
     .select("id, microgrid_id, display_name")
     .eq("id", id)
-    .maybeSingle<{ id: string; microgrid_id: string; display_name: string }>();
+    .maybeSingle<{ id: string; microgrid_id: string; display_name: string | null }>();
   if (!tenant) {
     return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
   }
@@ -178,15 +178,26 @@ export async function DELETE(
 
   try {
     const { confirmation } = parsed.data;
-    if (confirmation && !typedNameMatches(confirmation.typed, tenant.display_name ?? "")) {
-      return NextResponse.json(
-        {
-          error: `Type the tenant's name, ${tenant.display_name}, to delete it.`,
-          code: "tenant_delete_name_mismatch",
-          field: "confirmation",
-        },
-        { status: 428 }
-      );
+    if (confirmation) {
+      // A typed confirmation needs a name to type: the delete prepare
+      // refuses a tenant without one with this copy too.
+      const name = tenant.display_name?.trim() ? tenant.display_name : null;
+      if (name === null) {
+        return NextResponse.json(
+          { error: "Unnamed entity cannot be typed-to-confirm.", code: "tenant_unnamed" },
+          { status: 409 }
+        );
+      }
+      if (!typedNameMatches(confirmation.typed, name)) {
+        return NextResponse.json(
+          {
+            error: `Type the tenant's name, ${name}, to delete it.`,
+            code: "tenant_delete_name_mismatch",
+            field: "confirmation",
+          },
+          { status: 428 }
+        );
+      }
     }
     const result =
       await composed.data.communityManagement.deleteTenant(id);
