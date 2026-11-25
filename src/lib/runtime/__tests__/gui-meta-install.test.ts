@@ -9,7 +9,7 @@ const META: GuiMeta = {
   name: "probe",
   title: "Probe",
   version: "0.1.0",
-  contract: "^0.1",
+  contract: "^0.2",
   styles: "./styles.css",
   dependencies: [],
 };

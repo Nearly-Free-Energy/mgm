@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Signals } from "../../../contract";
 import {
+  badgeCount,
   fetchSignals,
   SIGNALS_MAX_BACKOFF_MS,
   SIGNALS_MIN_GAP_MS,
@@ -114,6 +115,37 @@ describe("useSignalsFeed", () => {
     } finally {
       delete (document as { readyState?: unknown }).readyState;
     }
+  });
+
+  it("sets the badge to the warn and critical signals (attention) when the answer gives them, while the tray keeps every signal's count", async () => {
+    const mixed: Signals = { ...signals(30), attention: 23 };
+    render(<Probe org={ORG} fetch={fetchOf({ body: mixed })} />);
+    await settle();
+    expect(feed().signals?.count).toBe(30);
+    expect(badge.set).toHaveBeenCalledWith(23);
+  });
+
+  it("clears the badge when every signal is info, and still holds them for the tray", async () => {
+    render(<Probe org={ORG} fetch={fetchOf({ body: { ...signals(4), attention: 0 } })} />);
+    await settle();
+    expect(feed().signals?.count).toBe(4);
+    expect(badge.clear).toHaveBeenCalledOnce();
+    expect(badge.set).not.toHaveBeenCalled();
+  });
+
+  it("uses attention from seeded signals too", async () => {
+    render(<Probe org={ORG} fetch={fetchOf({ body: signals(9) })} />);
+    act(() => feed().seed({ ...signals(5), attention: 2 }));
+    expect(badge.set).toHaveBeenCalledWith(2);
+  });
+
+  it("falls back to count when attention is missing or not a count", async () => {
+    expect(badgeCount(signals(7))).toBe(7);
+    expect(badgeCount({ ...signals(7), attention: 3 })).toBe(3);
+    expect(badgeCount({ ...signals(7), attention: 0 })).toBe(0);
+    expect(badgeCount({ ...signals(7), attention: -1 })).toBe(7);
+    expect(badgeCount({ ...signals(7), attention: Number.NaN })).toBe(7);
+    expect(badgeCount({ ...signals(7), attention: "3" as unknown as number })).toBe(7);
   });
 
   it("clears the badge at zero", async () => {

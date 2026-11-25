@@ -32,6 +32,9 @@
  * a Payments or Pesapal watcher, and every Payments capability method its
  * surface module may call (LOADER_READS) runs while the plugin is off, as
  * check 9 holds a view's attach.whilePluginOff.
+ * Actions again: 12. a billing, payments or Pesapal action does not declare
+ * repeat "unsafe" unless REPEAT_KEY_PENDING (./repeat/exemptions.ts) names
+ * the issue building its repeat key.
  *
  * Each check is a function over its inputs and the self-tests feed it
  * violating fixtures, so the guard is shown to fail on kinds of entry the
@@ -48,7 +51,15 @@ import { DATA_KEYS, schemaNames, strictParseModel } from "@/lib/gui/host/server/
 import { SurfaceRegistry, type SurfaceSnapshot } from "@/lib/gui/host/server/surface-registry";
 import { isOutHref } from "@/lib/gui/host/shared/href";
 import { isReleasedRoute } from "@/lib/mgm/released-routes";
-import { MGM_BUNDLED_PLUGINS, getRouteOwner, matchCatalogPage, type MgmPluginName } from "@/lib/plugins/bundled";
+import {
+  BILLING_PLUGIN_NAME,
+  MGM_BUNDLED_PLUGINS,
+  PAYMENTS_PLUGIN_NAME,
+  PESAPAL_PLUGIN_NAME,
+  getRouteOwner,
+  matchCatalogPage,
+  type MgmPluginName,
+} from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
 import {
   PAYMENT_EXEMPTION_OWNERS,
@@ -58,6 +69,7 @@ import {
   paymentsGating,
 } from "@/lib/runtime/__tests__/route-rules";
 import { BILLING_SURFACE } from "./fixtures/billing-surface";
+import { REPEAT_KEY_PENDING, type RepeatKeyPending } from "./repeat/exemptions";
 
 const REPO = path.resolve(__dirname, "../../../..");
 const APP = path.join(REPO, "src/app");
@@ -95,6 +107,17 @@ const SECRET_WORDS = new Set([
 const SECRET_LIKE_EXEMPTIONS: Readonly<Record<string, string>> = {};
 
 /**
+ * Plugins whose actions move money or change what a tenant is billed, so a
+ * repeat that writes twice is never acceptable (RFC #259 § 3). Pesapal
+ * contributes no action today; it is listed because its one route, the
+ * payment notification (/api/payments/ipn in its catalog entry), records a
+ * provider's notice and, once Payments verifies it, settles the bill. If
+ * Pesapal comes to own a route that neither moves money nor changes a bill,
+ * revisit.
+ */
+const NO_UNSAFE_REPEAT: ReadonlySet<MgmPluginName> = new Set([BILLING_PLUGIN_NAME, PAYMENTS_PLUGIN_NAME, PESAPAL_PLUGIN_NAME]);
+
+/**
  * The capability methods code a contribution runs may use: each only reads.
  * Every other member of a *CapabilityContract interface, or of
  * a class implementing one, is refused, so a new method is refused until it is
@@ -125,6 +148,8 @@ interface Facts {
   reads?: Readonly<Record<string, readonly string[]>>;
   /** Whether a string literal is written in a non-test source file under src/lib; libWrites unless given. */
   writes?: (literal: string) => boolean;
+  /** The actions allowed to be "unsafe" while their key is built; REPEAT_KEY_PENDING unless given. */
+  repeatKeyPending?: Readonly<Record<string, RepeatKeyPending>>;
 }
 
 /** The capability whose gating decides what runs while Payments or Pesapal is off. */
@@ -234,6 +259,15 @@ function actionProblems(plugin: MgmPluginName, a: ActionDef, facts: Facts): Prob
     if (!withoutPrepareAgainOn(text ?? "").includes(literal) && !(facts.writes ?? libWrites)(literal)) {
       problems.push(`lists "${code}" in prepareAgainOn, which neither its route nor src/lib writes`);
     }
+  }
+  // Check 12. `plugin` is the contributing plugin the registry stored with
+  // the action, and registration holds an action's path to its own plugin's
+  // routes (contribution-schema.ts), so an action on a billing route is a
+  // billing action. If registration stops checking route ownership, revisit.
+  if (a.repeat === "unsafe" && NO_UNSAFE_REPEAT.has(plugin) && !Object.hasOwn(facts.repeatKeyPending ?? REPEAT_KEY_PENDING, a.id)) {
+    problems.push(
+      `declares repeat "unsafe", which a ${plugin} action may not: make a second send write nothing, or list it in REPEAT_KEY_PENDING with the issue building its key`,
+    );
   }
   return problems.map((p) => `${a.id} (${a.method} ${a.path}): ${p}`);
 }
@@ -781,6 +815,26 @@ describe("the GUI surface guard", () => {
     expect(check("payments", RECONCILE, { gating: refusing })).toEqual(["declares whilePluginOff, but reconcile refuses while the plugin is off"]);
     // Without the field, an exempt route needs nothing more.
     expect(actionProblems("billing", { ...createPeriod, path: "/api/billing-periods" } as ActionDef, facts).filter((p) => p.includes("whilePluginOff"))).toEqual([]);
+  });
+
+  it("refuses repeat \"unsafe\" on a billing, payments or Pesapal action unless REPEAT_KEY_PENDING lists it", () => {
+    const check = (plugin: MgmPluginName, a: ActionDef, pending: Readonly<Record<string, RepeatKeyPending>> = {}) =>
+      actionProblems(plugin, a, { ...facts, repeatKeyPending: pending })
+        .filter((p) => p.includes("declares repeat"))
+        .map((p) => p.replace(/^.*?\): /, ""));
+    const unsafe = { ...createPeriod, repeat: "unsafe" } as ActionDef;
+    const refusal = (plugin: string) =>
+      `declares repeat "unsafe", which a ${plugin} action may not: make a second send write nothing, or list it in REPEAT_KEY_PENDING with the issue building its key`;
+
+    for (const plugin of ["billing", "payments", "pesapal"] as const) expect(check(plugin, unsafe), plugin).toEqual([refusal(plugin)]);
+    // Another plugin may declare it: a repeat there writes twice, and says so.
+    expect(check("metering", unsafe)).toEqual([]);
+    // Listed with the issue building its key, while that key is built.
+    expect(check("billing", unsafe, { [unsafe.id]: { reason: "inserts a row on each send", key: "#999" } })).toEqual([]);
+    expect(check("billing", unsafe, { "billing.other": { reason: "inserts a row on each send", key: "#999" } })).toEqual([refusal("billing")]);
+    // "safe" and "keyed" need no entry.
+    expect(check("billing", createPeriod)).toEqual([]);
+    expect(check("billing", { ...createPeriod, repeat: "keyed" } as ActionDef)).toEqual([]);
   });
 
   it("refuses a prepareAgainOn code that neither the action's route nor src/lib writes", () => {

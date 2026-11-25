@@ -26,6 +26,7 @@ import type {
   Manifest,
   ModelOf,
   OutHref,
+  Repeat,
   Rich,
   Signal,
   Signals,
@@ -58,6 +59,7 @@ import {
   modelSchema,
   modelSchemas,
   outHrefSchema,
+  repeatSchema,
   richSchema,
   signalSchema,
   signalOutSchema,
@@ -89,6 +91,7 @@ describe("model schemas match the contract types", () => {
     expectTypeOf<Same<Out<typeof hrefSchema>, Href>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof outHrefSchema>, OutHref>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof jsonSchema>, Json>>().toEqualTypeOf<true>();
+    expectTypeOf<Same<Out<typeof repeatSchema>, Repeat>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof valueSchema>, Value>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof inlineSchema>, Inline>>().toEqualTypeOf<true>();
     expectTypeOf<Same<Out<typeof richSchema>, Rich>>().toEqualTypeOf<true>();

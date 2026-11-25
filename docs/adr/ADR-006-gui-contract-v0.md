@@ -84,6 +84,8 @@ read a stored credential, or to send data to another origin.
    - Through 0.x a minor version may change shapes, and a patch only adds
      optional fields, kinds or values. Every compiled-in interface is
      checked against a change in the same pull request.
+   - 0.2.0 added the required `repeat` on every action (decision 11), the
+     first change of shape since 0.1.0.
    - Each view kind records the version it arrived in (`GUI_KINDS_SINCE`),
      so a kind newer than an interface's range can be shown by a generic
      fallback.
@@ -148,6 +150,24 @@ read a stored credential, or to send data to another origin.
      schema, repeats an id, links anywhere but a released page, or leads
      (`href`) anywhere but a page its own plugin owns, or when it holds
      more than 50 signals. It sends each id prefixed with the watcher's.
+   - The answer carries the first 20 signals, most severe first (`top`),
+     how many there were (`count`), and how many of them are `warn` or
+     `critical` (`attention`, optional since it was added within 0.1),
+     both counted over every signal, not only `top`.
+   - A watcher sets each signal's severity by fixed rules, decided on #230:
+     a billing period with bills not closed is a warning from the day after
+     its last day and critical seven days after it, in the period's own
+     zone, and one with no bills stays a warning (`billing.period-due`); a
+     microgrid with metered tenants last month and no period for it is a
+     warning from the 2nd of the month in its zone
+     (`billing.period-missing`); attempts held for reconciliation are
+     critical only when one reached Pesapal (a tracking id or a receipt),
+     otherwise a warning (`payments.reconcile`); failures on bills still
+     unpaid in the last week are a warning (`payments.failed`), and so are
+     three or more checkouts in a community that never reached Pesapal in
+     the last 24 hours (`payments.not-submitted`), which say something about
+     the payment account rather than a bill. A metering connection check
+     that failed is a warning (`metering.connection`).
    - A watcher reads through the person's own client or a capability's
      reads, filters by the organization itself and throws when a read
      fails. It reads the database only, since every load of the signals
@@ -176,8 +196,10 @@ read a stored credential, or to send data to another origin.
      `signals: true`. A view that takes signals carries them in its model
      (`signals`), and the shell takes those instead of fetching again.
      `useSignals()` returns them, and the installed app's badge shows their
-     `count`, every signal as Today lists every signal, where the browser
-     supports the Badging API. A 401 clears both and stops fetching; a 403
+     `attention`, the warn and critical signals, where the browser supports
+     the Badging API (or `count` from an answer without it). Info signals
+     still show in the tray, whose number is `count`, and on Today, but put
+     no number on the icon (#230). A 401 clears both and stops fetching; a 403
      clears both; any other failure keeps what was shown and doubles the
      wait, up to 30 minutes. A tenant's manifest fetches nothing, and the
      badge is cleared for it, when the organization changes, on sign-out
@@ -213,6 +235,36 @@ read a stored credential, or to send data to another origin.
      again. The codes are declared per action, not inferred from the
      status: the plugin gate's own 409 must never prepare again. The route
      stays the authority and checks the confirmation again on every write.
+
+11. **What a repeat does.** Each action declares `repeat` (RFC #259 § 3),
+   so a client that lost an answer knows whether it may send the write
+   again.
+   - `"safe"`: a second identical send writes nothing. Its answer may
+     differ from the first's (a 404 once a delete has run, a 409 once a
+     create has, a 400 `no_op`, a 200 that says nothing changed), so a
+     client that lost the first answer reads the view rather than trusting
+     the second. Safety is judged right after the first send, with outside
+     state (meter data, a provider's answer) unchanged. A timestamp a route
+     stamps on every write and nothing reads may move; the test lists each
+     such column with its case, the one row it may move in, and its reason.
+   - `"keyed"`: the route takes a repeat key and answers a repeat with the
+     first result. No route takes one yet, and where a key's record is kept
+     is open on #259, so the twice-sent test refuses `"keyed"` until a
+     route takes a key and a case can send it.
+   - `"unsafe"`: a repeat may write twice.
+   - The field is required: `tsc` refuses an action without it, and so does
+     registration. `src/lib/gui/__tests__/repeat.db.test.ts` sends every
+     `"safe"` action twice to its route against a database, as the person
+     it is offered to, and fails if the second send changes a row it reads.
+     A new `"safe"` action gets a case in its plugin's module there.
+   - `gui-surface.test.ts` (check 12) refuses `"unsafe"` on a billing,
+     payments or Pesapal action, unless `REPEAT_KEY_PENDING`
+     (`src/lib/gui/__tests__/repeat/exemptions.ts`) lists it with the issue
+     building its repeat key: an action that failed the twice-sent test
+     declares `"unsafe"` until that key lands.
+   - The field informs a client and changes nothing the host does: the kit
+     never sends a write on its own (decision 10), and the routes decide
+     what each send writes.
 
 ## Consequences
 
@@ -250,12 +302,16 @@ Worse, or to watch:
   a helper module that asks it is caught for the reconcile route by its
   database test, which posts with Payments off, and for the other exempt
   routes by review.
-- That each `prepareAgainOn` code is one its route answers (decision 9) is
+- That each `prepareAgainOn` code is one its route answers (decision 10) is
   checked in CI by `gui-surface.test.ts`, which looks for the code written
   in the route file or in a source file under `src/lib`, not when a
   contribution is registered. A code that slipped past CI could only leave
   the host showing the old step again with the route's message, as it does
   for any other refusal.
+- The twice-sent test (decision 11) sends one copy after another and sees
+  only the tables its snapshot reads. Two copies sent at once rest on each
+  route's own locks, and a route that starts writing another table escapes
+  the test until the snapshot reads that table.
 - When this was recorded, the repository held the two contract files and
   their tests, and nothing imported them. The run-time checks in decision 3
   arrive with the code that reads contributions, each with its own tests.
@@ -274,7 +330,9 @@ Worse, or to watch:
 
 - `src/lib/gui/contract.ts`, `src/lib/gui/surface.ts`
 - `src/lib/gui/host/client/action-host.tsx`,
-  `src/lib/gui/host/server/prepare.ts` (decision 9)
+  `src/lib/gui/host/server/prepare.ts` (decision 10)
+- `src/lib/gui/__tests__/repeat.db.test.ts`, `src/lib/gui/__tests__/repeat/`
+  (decision 11)
 - `src/lib/gui/__tests__/contract-types.test.ts`,
   `src/lib/gui/__tests__/gui-boundary.test.ts`
 - `docs/cordis-runtime.md`; CLAUDE.md, "Cordis runtime"

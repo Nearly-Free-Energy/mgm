@@ -322,6 +322,7 @@ describe("loadSavings", () => {
     ["mixed synthetic and real edges", { ok: false, status: 409, code: "METERING_CONFIGURATION", message: UPSTREAM }],
     ["no usable OpenEMS connection", { ok: false, status: 503, code: "METERING_CONFIGURATION", message: UPSTREAM }],
     ["OpenEMS rejecting the stored settings", { ok: false, status: 401, code: "METERING_UNAUTHORIZED", message: UPSTREAM }],
+    ["a metering source that does not read site samples", { ok: false, status: 503, code: "metering_site_samples_unsupported", message: UPSTREAM }],
   ])("draws nothing for %s, which the day above explains, and disposes", async (_name, failure) => {
     getSiteDays.mockResolvedValue(failure);
     const out = await loadSavings(request());

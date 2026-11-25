@@ -17,6 +17,11 @@ vi.mock("@/lib/supabase/service", () => ({
   }),
 }));
 
+vi.mock("@/lib/security/constant-time", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/security/constant-time")>();
+  return { ...actual, secretMatches: vi.fn(actual.secretMatches) };
+});
+
 const mockRevalidate = vi.fn();
 vi.mock("next/cache", () => ({ revalidatePath: mockRevalidate }));
 
@@ -64,6 +69,26 @@ describe("POST /api/mgm/bootstrap", () => {
     );
     expect(res.status).toBe(403);
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("403 on a token of the same length that differs", async () => {
+    const { POST } = await import("../route");
+    const res = await POST(
+      makePost({ ...VALID_BODY, bootstrap_token: "test-bootstrap-tokeN" })
+    );
+    expect(res.status).toBe(403);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("checks the token with the constant-time comparison", async () => {
+    const { secretMatches } = await import("@/lib/security/constant-time");
+    const { POST } = await import("../route");
+    await POST(makePost({ ...VALID_BODY, bootstrap_token: "test-bootstrap-token-and-more" }));
+    expect(vi.mocked(secretMatches)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(secretMatches)).toHaveBeenCalledWith(
+      "test-bootstrap-token",
+      "test-bootstrap-token-and-more"
+    );
   });
 
   it("422 when the organization name is missing", async () => {

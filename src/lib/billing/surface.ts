@@ -23,9 +23,14 @@ import "server-only";
  * period as the `billing.current-periods` view, a tile on Today (org.today)
  * and a page of its own at /billing, which the catalog serves by the view
  * (`servedBy: "view"`). A page that moves to a view
- * keeps its nav id. The watcher, `billing.period-due`, reports each draft
- * period whose last day has passed, leading to its close checklist, or to
- * its review while it has no bills.
+ * keeps its nav id. Two watchers report what needs a manager in billing:
+ * `billing.period-due`, each draft period whose last day has passed,
+ * leading to its close checklist (critical a week after its last day), or
+ * to its review while it has no bills; and `billing.period-missing`, each
+ * microgrid with metered tenants last month and no period for that month,
+ * from the 2nd, leading to its billing periods. They are separate watchers
+ * so that each has its own budget and a failed read in one leaves the other
+ * checked.
  *
  * `billing.periods`, `billing.period-review` and `billing.period-history`
  * have the Billing pages' own paths. The catalog serves all three paths by
@@ -80,6 +85,7 @@ import {
   prepareMarkRefunded,
   prepareMarkUnpaid,
   prepareRegenerateBill,
+  prepareRecordUsage,
   recordUsageAvailable,
   regenerateBillAvailable,
 } from "./surface/period-review";
@@ -89,6 +95,9 @@ import { BILL_FROM_READINGS_ACTION, NOT_BILLED_KEYS, NOT_BILLED_VIEW } from "./s
 import { loadPeriodDue } from "./surface/period-due";
 import { PERIOD_DUE_EXAMPLES } from "./surface/period-due-examples";
 import { PERIOD_DUE_SIGNAL } from "./surface/period-due-model";
+import { loadPeriodMissing } from "./surface/period-missing";
+import { PERIOD_MISSING_EXAMPLES } from "./surface/period-missing-examples";
+import { PERIOD_MISSING_SIGNAL } from "./surface/period-missing-model";
 import { loadPeriodHistory } from "./surface/period-history";
 import { PERIOD_HISTORY_EXAMPLES } from "./surface/period-history-examples";
 import { PERIOD_HISTORY_KEYS } from "./surface/period-history-model";
@@ -117,6 +126,9 @@ import { CREATE_PERIOD_ACTION, DELETE_PERIOD_ACTION, PERIODS_KEYS } from "./surf
 import { loadSavings } from "./surface/savings";
 import { SavingsExt } from "./surface/savings-ext";
 import { GRID_TARIFF_ADD_ACTION, SAVINGS_EXT_SCHEMA, SAVINGS_KEYS, SAVINGS_SETTINGS_ACTION } from "./surface/savings-model";
+
+/** `billing.period-missing`'s budget: up to three reads in sequence, the last a few at a time. */
+const PERIOD_MISSING_BUDGET_MS = 3_000;
 
 export const BILLING_SURFACE: Contribution = {
   plugin: BILLING_PLUGIN_NAME,
@@ -316,6 +328,8 @@ export const BILLING_SURFACE: Contribution = {
   // PUT replaces the whole row, so saving would clear both stored dates. If
   // the host's prepare comes to supply starting values, or the route stops
   // replacing the row, revisit.
+  // Every action here is repeat "safe": src/lib/gui/__tests__/repeat.db.test.ts
+  // sends each twice to its route. If it fails for one, that one is not safe.
   actions: [
     // Human-only, as no assistant proposes a period yet (#201).
     // `targeted: false`: offered only by billing.periods, which the host now
@@ -335,6 +349,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
     // A DELETE: typed confirmation, the period's name, from prepare.
@@ -349,6 +364,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "destructive",
       confirm: "typed",
       humanOnly: true,
+      repeat: "safe",
       prepare: prepareDeletePeriod,
       available: deletePeriodAvailable,
     },
@@ -375,6 +391,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareClosePeriod,
       available: closePeriodAvailable,
@@ -418,6 +435,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareGenerateFromMeters,
       available: generateFromMetersAvailable,
@@ -447,6 +465,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
       prepare: prepareBillFromReadings,
       available: billFromReadingsAvailable,
@@ -471,11 +490,17 @@ export const BILLING_SURFACE: Contribution = {
       risk: "money",
       confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       prepare: prepareRegenerateBill,
       available: regenerateBillAvailable,
     },
-    // A usage correction on an unmetered draft bill. `targeted: false`: the
-    // review offers it only on the bills the usage route accepts.
+    // A usage correction on an unmetered draft bill: a per-bill
+    // regeneration from manual readings (#247). `targeted: false`: the
+    // review offers it only on the bills the usage route accepts. A
+    // ceremony, as regenerate-bill is, so the host sends the acknowledgement
+    // a paid bill's prepare asks for and the route requires (only typed and
+    // ceremony actions are sent a confirmation, invoke.ts); its tone is
+    // neutral for the same reasons as regenerate-bill's.
     {
       ...RECORD_USAGE_ACTION,
       target: "lineItem",
@@ -485,9 +510,11 @@ export const BILLING_SURFACE: Contribution = {
       path: "/api/billing-line-items/[lineItemId]/usage",
       bind: { path: { lineItemId: "lineItem" } },
       risk: "money",
-      confirm: "none",
+      confirm: "ceremony",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
+      prepare: prepareRecordUsage,
       available: recordUsageAvailable,
     },
     // The payment-status transitions, all on one route. Each is offered only
@@ -523,6 +550,7 @@ export const BILLING_SURFACE: Contribution = {
         risk: "money",
         confirm,
         humanOnly: true,
+        repeat: "safe",
         targeted: false,
         prepare,
       }),
@@ -538,6 +566,7 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
     {
@@ -551,8 +580,12 @@ export const BILLING_SURFACE: Contribution = {
       risk: "write",
       confirm: "confirm",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     },
   ],
-  signals: [{ id: PERIOD_DUE_SIGNAL, load: loadPeriodDue, examples: PERIOD_DUE_EXAMPLES }],
+  signals: [
+    { id: PERIOD_DUE_SIGNAL, load: loadPeriodDue, examples: PERIOD_DUE_EXAMPLES },
+    { id: PERIOD_MISSING_SIGNAL, budgetMs: PERIOD_MISSING_BUDGET_MS, load: loadPeriodMissing, examples: PERIOD_MISSING_EXAMPLES },
+  ],
 };

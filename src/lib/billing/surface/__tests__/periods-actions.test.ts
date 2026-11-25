@@ -102,6 +102,7 @@ describe("billing's period actions", () => {
       risk: "write",
       confirm: "none",
       humanOnly: true,
+      repeat: "safe",
       targeted: false,
     });
     expect(CREATE.input).toBe(CreatePeriodBody);
@@ -116,6 +117,7 @@ describe("billing's period actions", () => {
       risk: "destructive",
       confirm: "typed",
       humanOnly: true,
+      repeat: "safe",
     });
     expect(DELETE.input).toBe(DeletePeriodBody);
     expect(DELETE.inputVersion).toBe(DELETE_PERIOD_BODY_VERSION);

@@ -3,15 +3,25 @@ import "server-only";
 /**
  * The signals of the payments watchers (./attention-signals.ts), built from
  * rows already read: `payments.reconcile`, attempts held for a manager to
- * reconcile, and `payments.failed`, recent failures on bills still unpaid.
- * One signal per billing period, leading to the period's payments, or
- * straight to the bill when only one is concerned.
+ * reconcile, and `payments.failed`, recent failures on bills still unpaid,
+ * one signal per billing period, leading to the period's payments, or
+ * straight to the bill when only one is concerned; and
+ * `payments.not-submitted`, one signal per community where several
+ * checkouts never reached the provider in a day, leading to the community's
+ * payment setup.
+ *
+ * Severities (decided on #230): reconciliation is critical only when money
+ * may have reached Pesapal, that is when an attempt held in the period
+ * reached the provider (a tracking id or a receipt, AttentionAttempt's
+ * `reachedProvider`); otherwise, as for a checkout flagged by a draft
+ * correction before anyone opened it, it is a warning. Failures and
+ * checkouts never submitted are warnings.
  *
  * No clock and no I/O. Fixed copy: the
- * microgrid's name, a count and the period's name, as the close ceremony
- * names it (periodName in @/lib/billing/close.ts). No tenant, amount,
- * reference or provider detail reaches a signal, since an assistant may
- * read signals (#133's data boundary).
+ * microgrid's or community's name, a count and the period's name, as the
+ * close ceremony names it (periodName in @/lib/billing/close.ts). No
+ * tenant, amount, reference or provider detail reaches a signal, since an
+ * assistant may read signals (#133's data boundary).
  */
 import { periodName } from "@/lib/billing/close";
 import { periodLabel } from "@/lib/billing/surface/period-label";
@@ -22,8 +32,13 @@ import { BILL_PARAM } from "./bill-attempts-model";
 
 export const RECONCILE_SIGNAL = "payments.reconcile";
 export const FAILED_SIGNAL = "payments.failed";
+export const NOT_SUBMITTED_SIGNAL = "payments.not-submitted";
 /** How far back `payments.failed` looks: a failure older than this is no longer news. */
 export const FAILED_WINDOW_DAYS = 7;
+/** How far back `payments.not-submitted` looks. */
+export const NOT_SUBMITTED_WINDOW_HOURS = 24;
+/** How many checkouts never submitted, in one community within the window, make a signal; fewer are a passing provider error. */
+export const NOT_SUBMITTED_THRESHOLD = 3;
 
 /** A bill as the watchers read it: its payment status and its period on its microgrid. */
 export type AttentionBill = {
@@ -60,6 +75,7 @@ function byPeriod(attempts: readonly AttentionAttempt[], bills: ReadonlyMap<stri
 }
 
 const payments = (n: number) => (n === 1 ? "1 payment" : `${n} payments`);
+const checkouts = (n: number) => (n === 1 ? "1 checkout" : `${n} checkouts`);
 
 function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (name: string, n: number) => string }): SignalOut {
   const { bill } = g;
@@ -79,10 +95,18 @@ function signal(fmt: Fmt, g: Group, o: { severity: "warn" | "critical"; title: (
   };
 }
 
-/** One critical signal per period with attempts held for reconciliation, newest first. */
+/**
+ * One signal per period with attempts held for reconciliation, newest first:
+ * critical when any of them reached the provider ("payments … need
+ * reconciliation"), a warning when none did ("checkouts … need
+ * reconciliation"), since then no money can have moved.
+ */
 export function buildReconcileSignals(fmt: Fmt, attempts: readonly AttentionAttempt[], bills: ReadonlyMap<string, AttentionBill>): SignalOut[] {
+  const need = (n: number) => (n === 1 ? "needs" : "need");
   return byPeriod(attempts, bills).map((g) =>
-    signal(fmt, g, { severity: "critical", title: (name, n) => `${payments(n)} in ${name} ${n === 1 ? "needs" : "need"} reconciliation` }),
+    g.attempts.some((a) => a.reachedProvider)
+      ? signal(fmt, g, { severity: "critical", title: (name, n) => `${payments(n)} in ${name} ${need(n)} reconciliation` })
+      : signal(fmt, g, { severity: "warn", title: (name, n) => `${checkouts(n)} in ${name} ${need(n)} reconciliation` }),
   );
 }
 
@@ -104,4 +128,37 @@ export function buildFailedSignals(
     return bill !== undefined && !SETTLED.has(bill.paymentStatus) && !reconciling.has(a.lineItemId);
   });
   return byPeriod(open, bills).map((g) => signal(fmt, g, { severity: "warn", title: (name, n) => `${payments(n)} failed in ${name}` }));
+}
+
+/**
+ * One warning per community with NOT_SUBMITTED_THRESHOLD or more checkouts
+ * the provider never accepted, newest first. `attempts` are such checkouts
+ * from the last NOT_SUBMITTED_WINDOW_HOURS; `communities` names the
+ * communities the person's client returned, and an attempt for any other,
+ * or with no community, is left out.
+ */
+export function buildNotSubmittedSignals(fmt: Fmt, attempts: readonly AttentionAttempt[], communities: ReadonlyMap<string, string>): SignalOut[] {
+  const groups = new Map<string, AttentionAttempt[]>();
+  for (const attempt of attempts) {
+    if (attempt.communityId === null || !communities.has(attempt.communityId)) continue;
+    groups.set(attempt.communityId, [...(groups.get(attempt.communityId) ?? []), attempt]);
+  }
+  const newest = (list: readonly AttentionAttempt[]) => Math.max(...list.map((a) => Date.parse(a.updatedAt)));
+  return [...groups.entries()]
+    .filter(([, list]) => list.length >= NOT_SUBMITTED_THRESHOLD)
+    .sort(([a, x], [b, y]) => newest(y) - newest(x) || a.localeCompare(b))
+    .slice(0, MAX_SIGNALS_PER_SOURCE)
+    .map(([id, list]): SignalOut => {
+      const name = communities.get(id) ?? "";
+      return {
+        id,
+        kind: "your-move",
+        severity: "warn",
+        title: `${name}: ${list.length} checkouts did not reach Pesapal in the last ${NOT_SUBMITTED_WINDOW_HOURS} hours`,
+        facts: [fmt.text("Check the payment account")],
+        entity: { kind: "community", id, label: name },
+        href: `/communities/${id}/payment`,
+        at: new Date(newest(list)).toISOString(),
+      };
+    });
 }

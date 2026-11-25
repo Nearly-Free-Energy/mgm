@@ -3,9 +3,11 @@
  * listAttention after composePayments, the bills through the person's own
  * client; one signal per period with fixed copy and no tenant, amount,
  * reference or provider detail; a link to the bill when only one is
- * concerned; settled bills and bills held for reconciliation left out of
- * failures; any refusal or failed read throws; the composition is always
- * disposed.
+ * concerned; reconciliation critical only when an attempt in the period
+ * reached the provider; settled bills and bills held for reconciliation left
+ * out of failures; checkouts never submitted reported per community from
+ * three in a day, and a truncated listing of them throws; any refusal or
+ * failed read throws; the composition is always disposed.
  */
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,26 +20,45 @@ const composePayments = vi.fn();
 vi.mock("@/lib/payments/compose", () => ({ composePayments: (...args: unknown[]) => composePayments(...args) }));
 
 import type { AttentionAttempt } from "../../repository";
-import { loadFailedSignals, loadReconcileSignals } from "../attention-signals";
-import { FAILED_EXAMPLES, RECONCILE_EXAMPLES } from "../attention-signals-examples";
-import { buildFailedSignals, buildReconcileSignals, type AttentionBill } from "../attention-signals-model";
+import { loadFailedSignals, loadNotSubmittedSignals, loadReconcileSignals } from "../attention-signals";
+import { FAILED_EXAMPLES, NOT_SUBMITTED_EXAMPLES, RECONCILE_EXAMPLES } from "../attention-signals-examples";
+import {
+  buildFailedSignals,
+  buildNotSubmittedSignals,
+  buildReconcileSignals,
+  NOT_SUBMITTED_THRESHOLD,
+  type AttentionBill,
+} from "../attention-signals-model";
 
 const ORG = "e7f30000-0000-4000-8000-000000000001";
 const MG = "e7f30000-0000-4000-8000-0000000000a1";
 const OCT = "e7f30000-0000-4000-8000-0000000000b1";
 const NOV = "e7f30000-0000-4000-8000-0000000000b2";
+const COMMUNITY = "e7f30000-0000-4000-8000-0000000000f1";
+const OTHER_COMMUNITY = "e7f30000-0000-4000-8000-0000000000f2";
 const bill = (n: number) => `e7f30000-0000-4000-8000-0000000000c${n}`;
 const NOW = new Date("2026-11-20T09:00:00Z");
 const SECRET = "permission denied for table billing_line_items";
 const fmt = createFmt({ locale: "en-GB" });
 
-const attempt = (n: number, billN: number, status: AttentionAttempt["status"], updatedAt = "2026-11-19T08:00:00Z"): AttentionAttempt => ({
+const attempt = (
+  n: number,
+  billN: number,
+  status: AttentionAttempt["status"],
+  updatedAt = "2026-11-19T08:00:00Z",
+  o: Partial<AttentionAttempt> = {},
+): AttentionAttempt => ({
   id: `e7f30000-0000-4000-8000-0000000000d${n}`,
   lineItemId: bill(billN),
   status,
   failureCode: "balance_mismatch",
   updatedAt,
+  communityId: COMMUNITY,
+  reachedProvider: true,
+  ...o,
 });
+const notSubmitted = (n: number, communityId: string | null, updatedAt = "2026-11-20T08:00:00Z") =>
+  attempt(n, 1, "failed", updatedAt, { failureCode: "checkout_not_submitted", communityId, reachedProvider: false });
 const billRow = (n: number, period: string, o: { status?: string; start?: string; end?: string } = {}) => ({
   id: bill(n),
   payment_status: o.status ?? "unpaid",
@@ -47,10 +68,11 @@ const billRow = (n: number, period: string, o: { status?: string; start?: string
 
 let listAttention: ReturnType<typeof vi.fn>;
 let dispose: ReturnType<typeof vi.fn>;
-function composeWith(answers: Record<string, AttentionAttempt[] | { ok: false; status: number }>) {
-  listAttention = vi.fn(async (q: { status: string }) => {
-    const a = answers[q.status] ?? [];
-    return Array.isArray(a) ? { ok: true, data: { attempts: a, truncated: false } } : { ...a, code: "x", message: SECRET };
+/** Answers by status, or by failure code when the query names one; `truncated` says so for every listing. */
+function composeWith(answers: Record<string, AttentionAttempt[] | { ok: false; status: number }>, truncated = false) {
+  listAttention = vi.fn(async (q: { status: string; failureCode?: string }) => {
+    const a = answers[q.failureCode ?? q.status] ?? [];
+    return Array.isArray(a) ? { ok: true, data: { attempts: a, truncated } } : { ...a, code: "x", message: SECRET };
   });
   dispose = vi.fn(async () => {});
   composePayments.mockResolvedValue({ ok: true, data: { payments: { listAttention }, dispose } });
@@ -138,6 +160,20 @@ describe("loadReconcileSignals", () => {
     await expect(failed).rejects.not.toThrow(SECRET);
   });
 
+  it("makes it a warning when no held attempt in the period reached the provider, and critical when any did", async () => {
+    const neither = [attempt(1, 1, "needs_reconciliation", undefined, { failureCode: "bill_revised", reachedProvider: false }), attempt(2, 2, "needs_reconciliation", undefined, { reachedProvider: false })];
+    composeWith({ needs_reconciliation: neither });
+    const { client } = tableClient({ billing_line_items: { data: [billRow(1, OCT), billRow(2, OCT)] } });
+    expect((await loadReconcileSignals(req(client))).map((s) => [s.severity, s.title])).toEqual([
+      ["warn", "North site: 2 checkouts in October 2026 need reconciliation"],
+    ]);
+
+    composeWith({ needs_reconciliation: [neither[0], { ...neither[1], reachedProvider: true }] });
+    expect((await loadReconcileSignals(req(client))).map((s) => [s.severity, s.title])).toEqual([
+      ["critical", "North site: 2 payments in October 2026 need reconciliation"],
+    ]);
+  });
+
   it("reads the bills in chunks of 100", async () => {
     composeWith({ needs_reconciliation: Array.from({ length: 250 }, (_, i) => ({ ...attempt(1, 1, "needs_reconciliation"), id: `a${i}`, lineItemId: `b${i}` })) });
     const { client, calls } = tableClient({ billing_line_items: { data: [] } });
@@ -157,6 +193,74 @@ describe("loadFailedSignals", () => {
     expect(out.map((s) => [s.severity, s.title, s.href])).toEqual([
       ["warn", "North site: 1 payment failed in November 2026", `/microgrids/${MG}/billing/${NOV}/payments?bill=${bill(3)}`],
     ]);
+  });
+});
+
+describe("loadNotSubmittedSignals", () => {
+  it("lists the last day's checkouts never submitted, reads the communities that reach three through the person's client, and disposes", async () => {
+    composeWith({
+      checkout_not_submitted: [
+        notSubmitted(1, COMMUNITY, "2026-11-20T08:30:00Z"),
+        notSubmitted(2, COMMUNITY),
+        notSubmitted(3, COMMUNITY),
+        notSubmitted(4, OTHER_COMMUNITY),
+        notSubmitted(5, OTHER_COMMUNITY),
+      ],
+    });
+    const { client, calls } = tableClient({ communities: { data: [{ id: COMMUNITY, name: "North village" }] } });
+    const out = await loadNotSubmittedSignals(req(client));
+    expect(composePayments).toHaveBeenCalledWith({ supabase: client, organizationId: ORG });
+    expect(listAttention.mock.calls).toEqual([[{ status: "failed", since: "2026-11-19T09:00:00.000Z", failureCode: "checkout_not_submitted" }]]);
+    expect(dispose).toHaveBeenCalledOnce();
+    // Only the community with three or more is read.
+    expect(calls).toEqual([
+      {
+        table: "communities",
+        ops: [
+          ["select", ["id, name"]],
+          ["eq", ["org_id", ORG]],
+          ["in", ["id", [COMMUNITY]]],
+        ],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        id: COMMUNITY,
+        kind: "your-move",
+        severity: "warn",
+        title: "North village: 3 checkouts did not reach Pesapal in the last 24 hours",
+        facts: [{ t: "text", text: "Check the payment account" }],
+        entity: { kind: "community", id: COMMUNITY, label: "North village" },
+        href: `/communities/${COMMUNITY}/payment`,
+        at: "2026-11-20T08:30:00.000Z",
+      },
+    ]);
+  });
+
+  it("reads nothing more when no community reaches three", async () => {
+    composeWith({ checkout_not_submitted: [notSubmitted(1, COMMUNITY), notSubmitted(2, COMMUNITY), notSubmitted(3, null)] });
+    const { client, calls } = tableClient({});
+    expect(await loadNotSubmittedSignals(req(client))).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("throws when the listing is truncated, so the watcher is listed as unchecked rather than undercounting", async () => {
+    composeWith({ checkout_not_submitted: [notSubmitted(1, COMMUNITY)] }, true);
+    const { client } = tableClient({});
+    await expect(loadNotSubmittedSignals(req(client))).rejects.toThrow("payments.not-submitted: more checkouts than one read returns");
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("throws on a refused listing or a failed communities read, without their messages", async () => {
+    composeWith({ checkout_not_submitted: { ok: false, status: 400 } });
+    const { client } = tableClient({});
+    await expect(loadNotSubmittedSignals(req(client))).rejects.toThrow("payments watcher: listAttention refused (400)");
+
+    composeWith({ checkout_not_submitted: [1, 2, 3].map((n) => notSubmitted(n, COMMUNITY)) });
+    const failing = tableClient({ communities: { data: null, error: { message: SECRET } } });
+    const read = loadNotSubmittedSignals(req(failing.client));
+    await expect(read).rejects.toThrow("payments.not-submitted: the communities could not be read");
+    await expect(read).rejects.not.toThrow(SECRET);
   });
 });
 
@@ -193,11 +297,40 @@ describe("the payments signal models", () => {
     expect(out[0].id).toBe(`p${MAX_SIGNALS_PER_SOURCE + 1}`);
   });
 
-  it("returns signals a watcher may send, as the examples are", () => {
-    for (const s of [...RECONCILE_EXAMPLES, ...FAILED_EXAMPLES]) expect(signalOutSchema.safeParse(s).success).toBe(true);
-    expect([...RECONCILE_EXAMPLES, ...FAILED_EXAMPLES].map((s) => s.title)).toEqual([
-      "Kiwumu: 2 payments in October 2026 need reconciliation",
-      "Kiwumu: 1 payment failed in November 2026",
+  it("counts a period with any held attempt that reached the provider as critical, mixed or not", () => {
+    const held = (n: number, billN: number, reachedProvider: boolean) => attempt(n, billN, "needs_reconciliation", undefined, { reachedProvider });
+    const out = buildReconcileSignals(fmt, [held(1, 1, false), held(2, 1, true), held(3, 4, false)], bills);
+    expect(out.map((s) => [s.id, s.severity])).toEqual([
+      [OCT, "critical"],
+      [NOV, "warn"],
     ]);
+  });
+
+  it(`reports a community from ${NOT_SUBMITTED_THRESHOLD} checkouts never submitted, leaving out unknown and unseen communities`, () => {
+    const names = new Map([
+      [COMMUNITY, "North village"],
+      [OTHER_COMMUNITY, "South village"],
+    ]);
+    const two = [notSubmitted(1, OTHER_COMMUNITY), notSubmitted(2, OTHER_COMMUNITY)];
+    const unseen = [1, 2, 3].map((n) => notSubmitted(10 + n, "e7f30000-0000-4000-8000-0000000000f9"));
+    const unknown = [1, 2, 3].map((n) => notSubmitted(20 + n, null));
+    const three = [1, 2, 3].map((n) => notSubmitted(30 + n, COMMUNITY));
+    expect(buildNotSubmittedSignals(fmt, [...two, ...unseen, ...unknown, ...three], names).map((s) => s.id)).toEqual([COMMUNITY]);
+    expect(buildNotSubmittedSignals(fmt, [...two, notSubmitted(3, OTHER_COMMUNITY, "2026-11-20T09:00:00Z"), ...three], names).map((s) => s.id)).toEqual([
+      OTHER_COMMUNITY,
+      COMMUNITY,
+    ]);
+  });
+
+  it("returns signals a watcher may send, as the examples are", () => {
+    const examples = [...RECONCILE_EXAMPLES, ...FAILED_EXAMPLES, ...NOT_SUBMITTED_EXAMPLES];
+    for (const s of examples) expect(signalOutSchema.safeParse(s).success).toBe(true);
+    expect(examples.map((s) => [s.severity, s.title])).toEqual([
+      ["critical", "Kiwumu: 2 payments in October 2026 need reconciliation"],
+      ["warn", "Kiwumu: 1 checkout in November 2026 needs reconciliation"],
+      ["warn", "Kiwumu: 1 payment failed in November 2026"],
+      ["warn", "Kiwumu village: 4 checkouts did not reach Pesapal in the last 24 hours"],
+    ]);
+    expect(JSON.stringify(examples)).not.toMatch(/trk|tracking/i);
   });
 });

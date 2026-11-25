@@ -214,12 +214,21 @@ function rowActions(bill: ReviewBill, tenant: ReviewTenant, i: PeriodReviewInput
     }
   }
   // Only where the usage route accepts a correction (its checks, in order):
-  // a draft, an unmetered bill with no meter assigned in the period, and a
-  // starting reading. No prefill: the form opens empty, where the legacy
-  // cell starts at the bill's usage. The host would take one, checked
-  // against LineItemUsageBody's fields (cleanPrefill in
+  // a draft, a bill with no invoice number that is not refunded, an
+  // unmetered bill with no meter assigned in the period, and a starting
+  // reading. A paid bill is offered: the correction asks for the paid
+  // acknowledgement (prepareRecordUsage). No prefill: the form opens empty,
+  // where the legacy cell starts at the bill's usage. The host would take
+  // one, checked against LineItemUsageBody's fields (cleanPrefill in
   // src/lib/gui/host/server/merge.ts).
-  if (i.period.status === "draft" && bill.device_id === null && !tenant.meterLinkInPeriod && bill.start_kwh !== null) {
+  if (
+    i.period.status === "draft" &&
+    bill.invoice_number === null &&
+    bill.payment_status !== "refunded" &&
+    bill.device_id === null &&
+    !tenant.meterLinkInPeriod &&
+    bill.start_kwh !== null
+  ) {
     out.push({ action: RECORD_USAGE_ACTION.id, params });
   }
   for (const { action, to } of paymentActionsFor(bill.payment_status, i.superAdmin)) {

@@ -220,8 +220,8 @@ describe("the contributed actions", () => {
     expect(cleanPrefill(def("payments.accept-receipts"), { action: "accept_exact" })).toEqual({ action: "accept_exact" });
   });
 
-  it("are human-only and offered only where the view links them", () => {
-    for (const a of PAYMENTS_SURFACE.actions!) expect([a.humanOnly, a.targeted]).toEqual([true, false]);
+  it("are human-only, offered only where the view links them, and safe to send twice", () => {
+    for (const a of PAYMENTS_SURFACE.actions!) expect([a.humanOnly, a.targeted, a.repeat]).toEqual([true, false, "safe"]);
   });
 
   it("stay enabled while Payments is off, as their routes accept them then, and the view's tab stays listed", () => {

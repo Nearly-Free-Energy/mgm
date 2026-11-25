@@ -33,6 +33,7 @@ import type {
   ModelBase,
   ModelOf,
   NavGroup,
+  Repeat,
   SignalOf,
   Signals,
   StatusItemOf,
@@ -163,7 +164,13 @@ interface ViewDefBase<K extends ViewKind> {
   };
   /** "vendor": the loader calls an outside system, so it is gated like a write and polled sparingly. */
   cost: "db" | "vendor";
-  /** Deny by default: only this lets an assistant read the view. */
+  /**
+   * Deny by default: only this lets an assistant read the view, and what an
+   * assistant reads is decided by ADR-007, through the host. The view must be
+   * on the code-owned list in ./assistant-reads.ts, and contribution-schema.ts
+   * refuses the mark, listed or not, where #133's data boundary keeps the
+   * view from an assistant (ASSISTANT_READING there).
+   */
   agent?: "read";
   /**
    * true: before the loader runs, the host collects the organization's
@@ -219,6 +226,19 @@ type ActionBase = {
   /** The zod schema the route parses its body with. */
   input: ZodType;
   inputVersion: number;
+  /**
+   * What a second identical send does (Repeat in ./contract). Required, so
+   * every action says.
+   *
+   * Each "safe" action has a case in src/lib/gui/__tests__/repeat.db.test.ts,
+   * which sends it twice to its route against a database and fails if the
+   * second send changes a row. A billing, payments or Pesapal action is
+   * never "unsafe" (gui-surface.test.ts, check 12) unless
+   * src/lib/gui/__tests__/repeat/exemptions.ts names the issue building its
+   * repeat key. No route takes a repeat key yet, so the twice-sent test
+   * refuses "keyed". If either test stops checking this, revisit.
+   */
+  repeat: Repeat;
   /** An existing route.ts exporting `method`, owned by this plugin and released. */
   path: string;
   /** Filled from the entity and hidden in forms. */
@@ -357,6 +377,18 @@ export type SignalDef = {
    * (docs/payments-rollout.md), remove it from `payments.reconcile`.
    */
   whilePluginOff?: "checked";
+  /**
+   * Deny by default, as on a view: only this lets an assistant read the
+   * watcher's signals, and what an assistant reads is decided by ADR-007,
+   * through the host. The watcher must be on the code-owned list in
+   * ./assistant-reads.ts, and contribution-schema.ts refuses the mark on a
+   * watcher of a plugin whose reading it refuses (ASSISTANT_READING there),
+   * billing's and payments' included. Nothing but that check reads this
+   * mark yet, because nothing gives signals to an assistant; once the
+   * host's read interface (ADR-007 A1) does, it must pass on only marked
+   * watchers' signals, and this comment changes with it.
+   */
+  agent?: "read";
 };
 
 export interface Contribution {

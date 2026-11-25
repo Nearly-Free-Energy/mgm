@@ -303,7 +303,8 @@ capabilities, and a call made through it cannot be followed by import, so
 every file that names it is tracked.
 
 A watcher (`signals` in a contribution) reports what needs someone in one
-organization: a period not closed, a payment held for reconciliation. The
+organization: a period not closed, a month with no period, a payment held for
+reconciliation, checkouts that never reached the provider. The
 host runs it only for a person with a staff role in that organization (a
 person whose rows are all tenant rows gets a 403 and no watcher runs), on a
 request of its own, so it reads through the person's own client or a
@@ -319,7 +320,10 @@ watcher's (`<watcher id>:<id>`). Watchers run on every load of the signals,
 which an interface may poll, so they read the database only: a watcher that
 would need a vendor call needs a cached read first. Each declares examples,
 which `contribute()` parses and `gui-surface.test.ts` holds to the plugin's
-own released pages.
+own released pages. Severities follow fixed rules, listed in ADR-006
+decision 9; the installed app's badge counts only the `warn` and `critical`
+signals (`attention` in the answer), while the tray and Today show every
+one.
 
 What a contribution names is checked in CI by
 `src/lib/gui/__tests__/gui-surface.test.ts`, against the snapshot of the root
@@ -332,6 +336,16 @@ capability method outside its `LOADER_READS`, so a new contributing plugin
 lists the module that exports its contribution in `SURFACE_MODULES` there,
 as an `@/` specifier. That module's exports must reach every function the
 plugin registered.
+
+The reverse direction is checked by
+`src/lib/runtime/__tests__/described-writes.test.ts`: every write handler
+under `src/app/api` on a released path is named by an action, or listed in
+`UNDESCRIBED_WRITES` (`src/lib/runtime/__tests__/route-rules.ts`), either as
+permanent, with the reason the route is not a person's action, or as not yet
+described, with the issue in `DESCRIBING_ISSUES` that will describe it.
+Unlike the gate rule (§ "The gate"), it covers core plugins. It finds
+handlers with the TypeScript AST and checks that the gate rule's handler
+finder sees each of them.
 
 While a plugin is off for an organization (the gate's 409, asked as a write
 by `pluginGate` in `src/lib/gui/host/server/gate-state.ts`), the host still
@@ -358,6 +372,21 @@ a Payments or Pesapal view or watcher, while every Payments method in
 helpers it reads for this (`paymentsGating`, `PAYMENT_EXEMPTION_OWNERS`) are
 in `src/lib/runtime/__tests__/route-rules.ts`, shared with
 `route-surface.test.ts`.
+
+Every action declares `repeat`, what a second identical send does (ADR-006
+decision 11): `"safe"` (it writes nothing, though it may answer unlike the
+first), `"keyed"` (the route takes a repeat key) or `"unsafe"` (it may write
+twice). Registration requires the field. `gui-surface.test.ts` (check 12)
+refuses `"unsafe"` on a billing, payments or Pesapal action unless
+`REPEAT_KEY_PENDING` (`src/lib/gui/__tests__/repeat/exemptions.ts`) names the
+issue building its repeat key. `src/lib/gui/__tests__/repeat.db.test.ts` is
+the evidence for each `"safe"`: it sends the action twice to its route
+against a database, as the person it is offered to, and fails if the second
+send changes a row of the tables its snapshot reads, apart from a timestamp
+column of one named row that a case lists with its reason. Every `"safe"`
+action has a case there, in its plugin's module under
+`src/lib/gui/__tests__/repeat/`, and the test refuses `"keyed"` until a route
+takes a key.
 
 A view is about an organization's records unless it says otherwise:
 `scope: "installation"` serves an installation-wide view (no organization),
@@ -607,8 +636,12 @@ the HTTP method is `GET`.
 
 `/api/openems/*` is still outside the released-route allowlist
 (`src/lib/mgm/released-routes.ts`), so middleware answers 404 until a release
-opens it. It is on the runtime already, so opening it is an allowlist change
-only.
+opens it. It is on the runtime already, so opening it is an allowlist change,
+provided each of its write handlers is named by an action or listed in
+`UNDESCRIBED_WRITES`, as `described-writes.test.ts` requires of every
+released write handler (§ "GUI surface"). Its one write handler today,
+`POST /api/openems/channels`, is listed already; if a handler is added there,
+or that entry goes, revisit this.
 
 ## Catalog pages
 
