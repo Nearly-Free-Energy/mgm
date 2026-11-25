@@ -1034,7 +1034,8 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
+          "description": "The route reads an empty body as `{}`.",
           "content": {
             "application/json": {
               "schema": {

@@ -25,10 +25,18 @@ import { GUI_CONTRACT, type Json } from "@/lib/gui/contract";
 import type { ActionDef } from "@/lib/gui/surface";
 import { MGM_BUNDLED_PLUGINS } from "@/lib/plugins/bundled";
 import { getMgmRuntime, resetMgmRuntimeForTests } from "@/lib/runtime/root";
-import { UNGATED_WRITES, apiRouteFiles, exemptionKey } from "@/lib/runtime/__tests__/route-rules";
+import { UNGATED_WRITES, apiRouteFiles, exemptionKey, handlerSources } from "@/lib/runtime/__tests__/route-rules";
 import { describeAction } from "../catalog";
 import { HOST_CODES, listedCodes } from "../error-codes";
-import { HOST_ROUTES, HOST_SCHEMAS, openApiDocument, renderOpenApi, type DescribedSurface, type OpenApiDocument } from "../openapi";
+import {
+  EMPTY_BODY_ROUTES,
+  HOST_ROUTES,
+  HOST_SCHEMAS,
+  openApiDocument,
+  renderOpenApi,
+  type DescribedSurface,
+  type OpenApiDocument,
+} from "../openapi";
 import type { RegisteredAction } from "../surface-registry";
 
 const REPO = path.resolve(__dirname, "../../../../../..");
@@ -143,6 +151,23 @@ describe("the OpenAPI document", () => {
     }
     const ids = operations(doc).map(({ op }) => op.operationId);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("lets a request carry no body exactly where the route's handler reads an empty one as {}", () => {
+    // How the billing period delete reads it: (await request.clone().text()).trim() === "".
+    const readsEmpty = /\.text\(\)\)\.trim\(\)\s*===\s*(?:""|'')/;
+    const routes = new Map([...surface.actions.values()].map(({ def }) => [`${def.method} ${def.path}`, def] as const));
+    const reading = [...routes].flatMap(([key, def]) => {
+      const text = readFileSync(path.join(REPO, "src/app", def.path, "route.ts"), "utf8");
+      return readsEmpty.test(handlerSources(text).get(def.method) ?? "") ? [key] : [];
+    });
+    expect([...EMPTY_BODY_ROUTES].sort()).toEqual(reading.sort());
+    for (const { method, op } of operations(doc)) {
+      const actions = op["x-mgm-actions"];
+      if (!actions) continue;
+      const key = `${method.toUpperCase()} ${actions[0].path as string}`;
+      expect((op.requestBody as Obj).required, key).toBe(!EMPTY_BODY_ROUTES.has(key));
+    }
   });
 
   it("names the gate's codes on exactly the action routes UNGATED_WRITES does not exempt", () => {

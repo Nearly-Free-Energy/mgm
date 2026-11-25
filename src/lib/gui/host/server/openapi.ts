@@ -494,6 +494,18 @@ function hostOperation(route: HostRoute, surface: DescribedSurface, gated: GateL
 
 // ── The actions' routes ─────────────────────────────────────────────────────
 
+/**
+ * The action routes, as `METHOD /path/[segment]`, that read an empty body
+ * as `{}`, so a request to them may carry none. Every other action route
+ * parses its body with parseJsonBody (gui-surface.test.ts, check 2), which
+ * refuses an empty one, so its body is required. The billing period delete
+ * reads nothing as a request for the name to type
+ * (src/app/api/billing-periods/[periodId]/route.ts; its delete-route.test.ts
+ * pins it). openapi.test.ts fails while this list and the action route
+ * handlers that read an empty body disagree.
+ */
+export const EMPTY_BODY_ROUTES: ReadonlySet<string> = new Set(["DELETE /api/billing-periods/[periodId]"]);
+
 /** The body of the actions sent to one route: the same for all of them, since the route parses one schema. */
 function routeBody(actions: readonly RegisteredAction[]): JsonObject {
   const bodies = actions.map(({ def }) => {
@@ -571,7 +583,9 @@ function actionOperation(method: string, pattern: string, group: readonly Regist
       ...(isReleased ? [] : [NOT_RELEASED]),
     ].join("\n\n"),
     ...(segments(pattern).length > 0 ? { parameters: pathParameters(pattern, actions) } : {}),
-    requestBody: { required: true, content: { "application/json": { schema: routeBody(actions) } } },
+    requestBody: EMPTY_BODY_ROUTES.has(`${method} ${pattern}`)
+      ? { required: false, description: "The route reads an empty body as `{}`.", content: { "application/json": { schema: routeBody(actions) } } }
+      : { required: true, content: { "application/json": { schema: routeBody(actions) } } },
     responses: responses(
       ["2XX", { description: "The route did the write." }],
       refused,

@@ -561,7 +561,8 @@ generated from the runtime root's surface snapshot by `openApiDocument`
 - one operation per action route, however many actions are sent to it:
   its path parameters, each of the kind its actions bind; the whole body
   the route parses (`describeBody`, bound fields and `confirmation`
-  included); the codes it refuses with, `invalid_body`, the gate's two
+  included), required unless the route reads an empty body as `{}`
+  (`EMPTY_BODY_ROUTES`); the codes it refuses with, `invalid_body`, the gate's two
   unless its actions declare `whilePluginOff`, and its `prepareAgainOn`
   codes; and under `x-mgm-actions` each action as the catalog describes it
   (`describeAction`), so the two cannot disagree. Each of its refusal
