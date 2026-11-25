@@ -393,8 +393,10 @@ export const HOST_ROUTES: readonly HostRoute[] = [
       "gui_unauthenticated",
       "gui_unavailable",
     ],
-    // The gate is asked as a write, as the action's route asks it. An action
-    // declaring whilePluginOff passes its 409 (gateRefusal in ./availability.ts).
+    // The gate is asked as a write, as the action's route asks it, for each
+    // non-core plugin's action. An action declaring whilePluginOff passes its
+    // 409 (gateRefusal in ./availability.ts). If prepare stops asking the
+    // gate, or gateRefusal stops passing that 409, revisit these codes.
     *gate(surface) {
       for (const { plugin, def } of surface.actions.values()) {
         if (!NON_CORE.has(plugin)) continue;
@@ -459,7 +461,9 @@ export const HOST_ROUTES: readonly HostRoute[] = [
     ],
     // A view that calls an outside system is refused while its plugin is off
     // or its state cannot be read (dispatchView in ./view.ts); any other view
-    // loads with a notice. A tenant view asks no gate.
+    // loads with a notice. A tenant view asks no gate, and an installation
+    // view has no organization to ask it for. If dispatchView changes which
+    // views the gate refuses, revisit these codes.
     *gate(surface) {
       for (const { plugin, def } of surface.views) {
         if (def.cost !== "vendor" || def.scope === "tenant" || def.scope === "installation" || !NON_CORE.has(plugin)) continue;
