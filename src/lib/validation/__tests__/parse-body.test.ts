@@ -55,6 +55,37 @@ describe("parseJsonBody", () => {
     });
   });
 
+  it("reads a request with no body as whenEmpty, and only when it is given", async () => {
+    const Empty = z.strictObject({ confirmation: z.strictObject({ typed: z.string() }).optional() });
+    const bare = () => new Request("http://localhost/api/thing", { method: "DELETE" });
+    expect(await parseJsonBody(bare(), Empty, { whenEmpty: {} })).toEqual({ ok: true, data: {} });
+    // Without the option, as before: no body is not JSON.
+    const refused = await parseJsonBody(bare(), Empty);
+    if (refused.ok) throw new Error("expected a failure");
+    expect(await refused.response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
+    // A body that is sent is parsed as usual, and whitespace is not an empty body.
+    const typed = await parseJsonBody(request(JSON.stringify({ confirmation: { typed: "x" } })), Empty, { whenEmpty: {} });
+    expect(typed).toEqual({ ok: true, data: { confirmation: { typed: "x" } } });
+    for (const body of [" ", "{not json"]) {
+      const result = await parseJsonBody(request(body), Empty, { whenEmpty: {} });
+      if (result.ok) throw new Error(`expected a failure for ${JSON.stringify(body)}`);
+      expect(await result.response.json()).toEqual({ error: "Invalid JSON body", code: "invalid_body" });
+    }
+    // whenEmpty is parsed with the schema too.
+    expect((await parseJsonBody(bare(), Empty, { whenEmpty: { other: 1 } })).ok).toBe(false);
+  });
+
+  it("adds what refusal gives for the refusing issue, and keeps its own keys", async () => {
+    const refusal = (issue: z.core.$ZodIssue) =>
+      issue.path[0] === "name" ? { reason: "name_required", error: "not this", code: "nor this" } : undefined;
+    const named = await parseJsonBody(request(JSON.stringify({ name: 1 })), Body, { refusal });
+    if (named.ok) throw new Error("expected a failure");
+    expect(await named.response.json()).toEqual({ reason: "name_required", error: "name must be text", field: "name", code: "invalid_body" });
+    const other = await parseJsonBody(request(JSON.stringify({ name: "a", tags: [1] })), Body, { refusal });
+    if (other.ok) throw new Error("expected a failure");
+    expect(await other.response.json()).toEqual({ error: "each tag must be text", field: "tags", code: "invalid_body" });
+  });
+
   it("gives no field for a failure of the body itself", async () => {
     for (const body of [JSON.stringify([]), JSON.stringify({ name: "a", extra: 1 }), "null"]) {
       const result = await parseJsonBody(request(body), Body);
