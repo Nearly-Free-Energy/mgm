@@ -348,8 +348,14 @@ Every host route answers a refusal in `ActionResult`'s failure shape with
 `error` beside `message`, carrying the same text (`HostFailureBody` in
 `src/lib/gui/contract.ts`, sent by `hostFailure` in
 `src/lib/gui/host/server/http.ts`), so it also has the `{ error, code }`
-shape of the gate and the action routes. A client reads `code`, which is
-stable, and shows `error`.
+shape the gate and `parseJsonBody` answer. A client reads `code`, which is
+stable, and shows `error`. An action route's own refusals were written
+before the described API and are not all alike: some carry `code`, many a
+`reason` instead, some only `error`, and those billing's composer and
+capability build carry `message` in place of `error`. The GUI kit reads
+`code` when there is one, and `error`, else `message` (`failureOf` in
+`src/lib/gui/host/client/invoke.ts`); the OpenAPI document describes them
+the same way (`ActionRefusal`).
 
 The described API's error codes are listed in one place,
 `src/lib/gui/host/server/error-codes.ts`, each with what it means and the
@@ -558,8 +564,11 @@ generated from the runtime root's surface snapshot by `openApiDocument`
   included); the codes it refuses with, `invalid_body`, the gate's two
   unless its actions declare `whilePluginOff`, and its `prepareAgainOn`
   codes; and under `x-mgm-actions` each action as the catalog describes it
-  (`describeAction`), so the two cannot disagree. A write's answer and
-  the route's own codes are not described yet;
+  (`describeAction`), so the two cannot disagree. Each of its refusal
+  responses says its list is partial (`x-mgm-codes-complete: false`), and
+  its 401 is middleware's or the route's own, for a session Supabase Auth
+  refuses. A write's answer and the route's own codes are not described
+  yet;
 - one operation per host route (`HOST_ROUTES` in the same file), its
   answer described by the strict schema the host parses it with, and the
   codes it refuses with;

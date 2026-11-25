@@ -157,6 +157,21 @@ describe("the OpenAPI document", () => {
     }
   });
 
+  it("says on every action route's refusal that its codes are partial, and on no host route's", () => {
+    for (const { path: p, method, op } of operations(doc)) {
+      const action = op["x-mgm-actions"] !== undefined;
+      for (const [status, response] of Object.entries(op.responses)) {
+        if (status.startsWith("2") || status === "default" || "$ref" in response) continue;
+        const json = (response.content as Obj | undefined)?.["application/json"];
+        if (!json) continue;
+        expect(response["x-mgm-codes-complete"], `${method} ${p} ${status}`).toBe(action ? false : undefined);
+        const schema = JSON.stringify((json as Obj).schema);
+        expect(schema.includes(action ? "ActionRefusal" : "HostFailureBody"), `${method} ${p} ${status}`).toBe(true);
+      }
+      if (action) expect(op.responses["401"]["x-mgm-codes-complete"], `${method} ${p}`).toBe(false);
+    }
+  });
+
   it("names only listed codes on the host's routes, and every host code a route answers", () => {
     const plugins = MGM_BUNDLED_PLUGINS.filter((p) => !p.core).map((p) => p.name);
     const listed = new Set(listedCodes(plugins.flatMap((p) => [[p, "disabled"] as const, [p, "unavailable"] as const])).map((c) => c.code));
@@ -224,7 +239,12 @@ describe("openApiDocument, on actions the registry does not hold yet", () => {
     expect(op.responses["400"]["x-mgm-codes"]).toEqual(["invalid_body"]);
     expect(op.responses["409"]["x-mgm-codes"]).toEqual(["billing_disabled", "zz_changed"]);
     expect(op.responses["503"]["x-mgm-codes"]).toEqual(["billing_gate_unavailable"]);
-    expect(op.responses["401"]).toEqual({ $ref: "#/components/responses/SessionRequired" });
+    // The route answers 401 too, when Supabase Auth refuses a session middleware let through.
+    expect(op.responses["401"]).toMatchObject({
+      content: { "application/json": { schema: { anyOf: [{ $ref: "#/components/schemas/ActionRefusal" }, { $ref: "#/components/schemas/SessionRequired" }] } } },
+      "x-mgm-codes": [],
+      "x-mgm-codes-complete": false,
+    });
     // A JSON object lists integer-like keys first, whatever the order they were added in.
     expect(Object.keys(op.responses)).toEqual(["400", "401", "409", "503", "2XX", "default"]);
   });

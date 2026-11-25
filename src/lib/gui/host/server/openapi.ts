@@ -14,9 +14,13 @@ import "server-only";
  * - Each host route is one operation, from HOST_ROUTES below. Its answer is
  *   described by the strict schema the host parses that answer with
  *   (./model-schema.ts), named after its type in ../../contract.ts.
- * - Every refusal is in the `{ error, code }` shape. Each operation names
- *   the codes its route answers, from ./error-codes.ts, and the document
- *   lists that module's codes whole under `x-mgm-error-codes`.
+ * - The host's routes refuse in the `{ error, code }` shape
+ *   (HostFailureBody). An action's route refuses as ActionRefusal below
+ *   says: the codes this document names come in `code`, but the route's own
+ *   refusals are not all alike. Each operation names the codes its route is
+ *   known to answer, from ./error-codes.ts; an action route's list is
+ *   partial and says so. The document lists that module's codes whole under
+ *   `x-mgm-error-codes`.
  *
  * Deterministic: paths, operations, actions, schemas and codes are sorted,
  * and nothing reads the clock, the environment or the database, so one
@@ -95,14 +99,35 @@ export const HOST_SCHEMAS: Readonly<Record<string, z.ZodType>> = {
   ViewModel: model.viewModelSchema,
 };
 
-/** Schemas the document writes itself: the shapes of refusals no host schema parses. */
+/**
+ * Schemas the document writes itself: the shapes of refusals no host schema
+ * parses.
+ *
+ * ActionRefusal is what an action's route answers today, read as the GUI
+ * kit reads it (failureOf in ../client/invoke.ts: `code` when there is one,
+ * and `error`, else `message`). The codes the document names on an action
+ * route come in `code`: parseJsonBody's and gateRoute's `{ error, code }`,
+ * and the `{ code, message }` billing's composer and capability answer.
+ * The routes' own refusals were written before the described API: some
+ * carry `code`, many a `reason` instead, some only `error`. If the action
+ * routes come to refuse in one shape, a route answers a named code in
+ * another field, or failureOf reads another field, revisit it.
+ */
 const OWN_SCHEMAS: Readonly<Record<string, JsonObject>> = {
-  Refusal: {
+  ActionRefusal: {
     type: "object",
-    description:
-      "How every MGM route refuses: `error`, text to show a person, and `code`, which is stable. A route may add fields of its own, such as `field`, the body field a problem is in.",
-    properties: { error: { type: "string" }, code: { type: "string", minLength: 1 }, field: { type: "string" } },
-    required: ["error", "code"],
+    description: [
+      "How an action's route refuses. A code this document names for the route comes in `code`, which is stable. The route's own refusals were written before the described API and are not all alike: one may carry `code`, a `reason` instead, or only text. The text to show a person is `error`, or `message` where there is no `error`.",
+      "Read it as MGM's GUI kit does: `code` when there is one, and `error`, else `message`. A route may add fields of its own, such as `field`, the body field a problem is in.",
+    ].join("\n\n"),
+    properties: {
+      error: { type: "string" },
+      message: { type: "string" },
+      code: { type: "string", minLength: 1 },
+      reason: { type: "string" },
+      field: { type: "string" },
+    },
+    anyOf: [{ required: ["error"] }, { required: ["message"] }],
   },
   SessionRequired: {
     type: "object",
@@ -184,8 +209,15 @@ const gateCoded = (plugin: MgmPluginName, refusal: GateRefusal): Coded => ({
 });
 const BODY_REFUSAL: Coded = { code: "invalid_body", ...BODY_CODES.invalid_body };
 
-/** One response per status, each naming its codes in `x-mgm-codes` and its description. */
-function refusalResponses(coded: readonly Coded[], schema: JsonObject): Map<number, JsonObject> {
+/** What a partial code list says of the codes it leaves out. */
+const ROUTE_OWN = "And refusals of the route's own, which this document does not list yet.";
+
+/**
+ * One response per status, each naming its codes in `x-mgm-codes` and its
+ * description. A `partial` list, an action route's, says so in its
+ * description and with `x-mgm-codes-complete: false`.
+ */
+function refusalResponses(coded: readonly Coded[], schema: JsonObject, o: { partial: boolean }): Map<number, JsonObject> {
   const byStatus = new Map<number, Map<string, Coded>>();
   for (const c of coded) {
     for (const status of c.status) byStatus.set(status, (byStatus.get(status) ?? new Map()).set(c.code, c));
@@ -193,10 +225,12 @@ function refusalResponses(coded: readonly Coded[], schema: JsonObject): Map<numb
   const out = new Map<number, JsonObject>();
   for (const [status, codes] of byStatus) {
     const sorted = [...codes.values()].sort((a, b) => byText(a.code, b.code));
+    const listed = sorted.map((c) => `- \`${c.code}\`: ${c.meaning}`).join("\n");
     out.set(status, {
-      description: sorted.map((c) => `- \`${c.code}\`: ${c.meaning}`).join("\n"),
+      description: o.partial ? `${listed}\n\n${ROUTE_OWN}` : listed,
       content: { "application/json": { schema } },
       "x-mgm-codes": sorted.map((c) => c.code),
+      ...(o.partial ? { "x-mgm-codes-complete": false } : {}),
     });
   }
   return out;
@@ -210,6 +244,24 @@ function refusalResponses(coded: readonly Coded[], schema: JsonObject): Map<numb
 const NOT_RELEASED =
   "This route is not part of this release: middleware answers every request to it 404, with a plain-text body and no code, before the route runs.";
 const SESSION_REQUIRED = "Middleware answers a request with no session `{ error }`, with no code, before the route runs.";
+/**
+ * An action route's own 401: middleware checks only the token's signature
+ * and expiry, so a session signed out elsewhere reaches the route, whose
+ * Supabase Auth check refuses it (CLAUDE.md § "Session checks before
+ * privilege"). The routes answer it in their own shapes, some with a code
+ * (composeBilling's `billing_unauthenticated`), some without. If every
+ * action route comes to answer it with one code, list that code instead.
+ */
+const ROUTE_SESSION_CHECK: JsonObject = {
+  description:
+    "The route's own, when Supabase Auth refuses a session middleware let through, such as one signed out on another device. Some routes answer it with a code, some with a `reason` or only text.",
+  "x-mgm-codes": [],
+  "x-mgm-codes-complete": false,
+};
+
+/** A response's `x-` fields, such as its codes, to carry over when it is merged with middleware's. */
+const extensions = (response: JsonObject): JsonObject =>
+  Object.fromEntries(Object.entries(response).filter(([key]) => key.startsWith("x-")));
 
 /**
  * The responses of an operation: its answer, each refusal by status, then
@@ -229,9 +281,9 @@ function responses(
     401,
     own401
       ? {
-          ...own401,
           description: `${SESSION_REQUIRED}\n\n${own401.description as string}`,
           content: { "application/json": { schema: { anyOf: [o.routeSchema, schemaRef("SessionRequired")] } } },
+          ...extensions(own401),
         }
       : { $ref: "#/components/responses/SessionRequired" },
   );
@@ -240,7 +292,7 @@ function responses(
     byStatus.set(404, {
       description: own404 ? `${NOT_RELEASED}\n\n${own404.description as string}` : NOT_RELEASED,
       content: { ...((own404?.content as JsonObject | undefined) ?? {}), "text/plain": { schema: { type: "string" } } },
-      ...(own404 ? { "x-mgm-codes": own404["x-mgm-codes"] } : {}),
+      ...(own404 ? extensions(own404) : {}),
     });
   }
   return Object.fromEntries([
@@ -432,7 +484,7 @@ function hostOperation(route: HostRoute, surface: DescribedSurface, gated: GateL
     ...(route.body ? { requestBody: { required: true, content: { "application/json": { schema: schemaRef(route.body) } } } } : {}),
     responses: responses(
       ["200", { description: route.answer.description, content: { "application/json": { schema: route.answer.schema } } }],
-      refusalResponses(coded, schemaRef("HostFailureBody")),
+      refusalResponses(coded, schemaRef("HostFailureBody"), { partial: false }),
       { released: isReleased, routeSchema: schemaRef("HostFailureBody") },
     ),
     "x-mgm-released": isReleased,
@@ -507,26 +559,28 @@ function actionOperation(method: string, pattern: string, group: readonly Regist
   ];
   const isReleased = released(pattern);
   const titles = actions.map(({ def }) => def.title);
+  const refused = refusalResponses(coded, schemaRef("ActionRefusal"), { partial: true });
+  refused.set(401, ROUTE_SESSION_CHECK);
   const operation: JsonObject = {
     operationId: operationId(method, pattern),
     tags: [plugin],
     summary: titles.join("; "),
     description: [
       `The route of ${actions.length === 1 ? "one action" : `${actions.length} actions`}, listed under \`x-mgm-actions\` as the action catalog (GET /api/gui/catalog) describes each. Prepare an action first (POST /api/gui/prepare): it answers the confirmation step its route checks.`,
-      "The answer to a write is the route's own and is not described here yet, nor are the route's own refusal codes.",
+      "The answer to a write is the route's own and is not described here yet. Nor are the route's own refusals: each response names the codes this document knows the route answers, and says with `x-mgm-codes-complete: false` that there may be others (ActionRefusal).",
       ...(isReleased ? [] : [NOT_RELEASED]),
     ].join("\n\n"),
     ...(segments(pattern).length > 0 ? { parameters: pathParameters(pattern, actions) } : {}),
     requestBody: { required: true, content: { "application/json": { schema: routeBody(actions) } } },
     responses: responses(
       ["2XX", { description: "The route did the write." }],
-      refusalResponses(coded, schemaRef("Refusal")),
+      refused,
       {
         released: isReleased,
-        routeSchema: schemaRef("Refusal"),
+        routeSchema: schemaRef("ActionRefusal"),
         fallback: {
-          description: "Any other refusal, with a code of the route's own.",
-          content: { "application/json": { schema: schemaRef("Refusal") } },
+          description: "Any other refusal: the route's own, at a status not described above.",
+          content: { "application/json": { schema: schemaRef("ActionRefusal") } },
         },
       },
     ),
@@ -596,7 +650,7 @@ export function openApiDocument(surface: DescribedSurface): OpenApiDocument {
       description: [
         stable.text,
         "MGM's API is the routes it already has: the GUI host's routes under /api/gui/, which describe MGM and read it, and the route of each action a plugin contributes, the only way to write. Each operation needs a signed-in person, and acts with what that person may do in a browser.",
-        "Every refusal carries `{ error, code }`: read `code`, which is stable, and show `error`. Each operation names the codes its route answers, in each response's `x-mgm-codes`, and `x-mgm-error-codes` lists them all with what each means. Middleware answers two requests itself, before any route, and with no code: a request with no session (401, `{ error }`), and one to a path this release does not serve (404, plain text; such an operation says `x-mgm-released: false`).",
+        "The GUI host's routes refuse with `{ error, code }` (HostFailureBody): read `code`, which is stable, and show `error`. An action's route answers the codes this document names for it in `code` too, but its own refusals were written before the described API and are not all alike (ActionRefusal says how to read them). Each operation names the codes its route is known to answer, in each response's `x-mgm-codes`, and `x-mgm-error-codes` lists them all with what each means. On an action's route that list is partial, and each response says so with `x-mgm-codes-complete: false`. Middleware answers two requests itself, before any route, and with no code: a request with no session (401, `{ error }`), and one to a path this release does not serve (404, plain text; such an operation says `x-mgm-released: false`).",
         "An action's route is listed with its actions under `x-mgm-actions`, as GET /api/gui/catalog describes them; the catalog also says which the person may send now. An action is prepared with POST /api/gui/prepare, then sent to its own route.",
         "Generated from MGM's action registry by `npm run api:openapi`; do not edit it by hand.",
       ].join("\n\n"),
